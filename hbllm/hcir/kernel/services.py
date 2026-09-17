@@ -68,3 +68,13 @@ class KernelServices:
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create_default(cls, workspace: HCIRWorkspaceState) -> KernelServices:
+        """Create a default KernelServices instance for in-memory simulation and planning."""
+        return cls(
+            workspace=workspace,
+            transaction_manager=TransactionManager(workspace),
+            capability_resolver=CapabilityResolver(),
+            scheduler=KernelInstructionScheduler(),
+        )

@@ -22,6 +22,8 @@ Supports both greedy multi-step beam search and Monte Carlo Tree Search (MCTS) w
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import logging
 import math
 import uuid
@@ -302,6 +304,42 @@ class CounterfactualPlanner:
                 self._workspace.drop_branch(r.branch_name)
 
         return best_candidate
+
+    def evaluate_and_select_sync(
+        self,
+        goal: GoalNode,
+        candidate_actions: list[ActionNode],
+        horizon: int = 1,
+        beam_width: int = 2,
+        author: str = "counterfactual_planner",
+        use_mcts: bool | None = None,
+        mcts_config: MCTSConfig | None = None,
+    ) -> CandidatePlanResult:
+        """Synchronous wrapper for evaluate_and_select.
+
+        Safely handles existing event loops (e.g. within async tests or runners)
+        by offloading to an isolated thread executor if an active loop is running.
+        """
+        coro = self.evaluate_and_select(
+            goal=goal,
+            candidate_actions=candidate_actions,
+            horizon=horizon,
+            beam_width=beam_width,
+            author=author,
+            use_mcts=use_mcts,
+            mcts_config=mcts_config,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(lambda: asyncio.run(coro))
+                return future.result()
+        else:
+            return asyncio.run(coro)
 
     async def mcts_evaluate_and_select(
         self,

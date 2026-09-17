@@ -22,8 +22,10 @@ Independence Level: L1 (100% deterministic, 0 LLM tokens).
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
+import uuid
 from collections.abc import Callable
 from typing import Any, ClassVar
 
@@ -39,9 +41,11 @@ from hbllm.brain.reasoning.operators.base import (
 )
 from hbllm.hcir.graph import (
     ActionNode,
+    BeliefNode,
     GoalNode,
     HCIREdgeType,
     HCIRNodeType,
+    PhysicalEntityNode,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +55,31 @@ PredicateHandler = Callable[[list[str], FrozenGraphView, dict[str, Any]], bool]
 
 # Regex pattern for condition strings: predicate(arg1, arg2, ...)
 _COND_PATTERN = re.compile(r"^([a-zA-Z0-9_]+)(?:\((.*)\))?$")
+
+
+def split_args_respecting_parentheses(s: str) -> list[str]:
+    """Split comma-separated arguments while respecting nested parentheses."""
+    args: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in s:
+        if char == "(":
+            depth += 1
+            current.append(char)
+        elif char == ")":
+            depth -= 1
+            current.append(char)
+        elif char == "," and depth == 0:
+            token = "".join(current).strip()
+            if token:
+                args.append(token)
+            current = []
+        else:
+            current.append(char)
+    token = "".join(current).strip()
+    if token:
+        args.append(token)
+    return args
 
 
 def parse_condition(cond: str) -> tuple[str, list[str]]:
@@ -63,7 +92,7 @@ def parse_condition(cond: str) -> tuple[str, list[str]]:
     args_str = match.group(2)
     if not args_str:
         return pred, []
-    args = [a.strip() for a in args_str.split(",") if a.strip()]
+    args = split_args_respecting_parentheses(args_str)
     return pred, args
 
 
@@ -98,10 +127,12 @@ class EmbodiedCausalOperator:
         default_reach_distance: float = 1.6,
         max_recursion_depth: int = 10,
         custom_predicates: dict[str, PredicateHandler] | None = None,
+        enable_counterfactual_simulation: bool = True,
     ) -> None:
         self.default_reach_distance = default_reach_distance
         self.max_recursion_depth = max_recursion_depth
         self.instance_predicates: dict[str, PredicateHandler] = custom_predicates or {}
+        self.enable_counterfactual_simulation = enable_counterfactual_simulation
 
     @property
     def operator_id(self) -> str:
@@ -245,6 +276,18 @@ class EmbodiedCausalOperator:
                     edges_read=view.edge_count,
                 ),
             )
+
+        if selected_action is None and self.enable_counterfactual_simulation and candidate_actions:
+            # Fallback: if candidate_actions exist, evaluate them counterfactually against unsatisfied conditions
+            target_desc = unsatisfied_conditions[0] if unsatisfied_conditions else "advance_goal"
+            cf_action = self._evaluate_candidates_counterfactually(
+                candidate_actions,
+                target_desc,
+                view,
+                provenance_steps,
+            )
+            if cf_action is not None:
+                selected_action = cf_action
 
         if selected_action is None:
             return CognitiveResult(
@@ -392,7 +435,9 @@ class EmbodiedCausalOperator:
             return None, unsatisfied
 
         # 4. Evaluate producing action requirements
-        best_candidate: ActionNode | None = None
+        immediately_executable: list[ActionNode] = []
+        unexecutable: list[tuple[ActionNode, list[str]]] = []
+
         for act in producing_actions:
             provenance_steps.append(
                 f"[Depth {depth}] Evaluating candidate action '{act.intent}' (requires {act.requirements})"
@@ -406,13 +451,39 @@ class EmbodiedCausalOperator:
             )
 
             if not act_unsatisfied_reqs:
-                # All requirements are satisfied! This action is immediately executable!
+                immediately_executable.append(act)
+            else:
+                unexecutable.append((act, act_unsatisfied_reqs))
+
+        # If we have immediately executable actions:
+        if immediately_executable:
+            if len(immediately_executable) == 1 and not self._has_simulation_cues(
+                immediately_executable[0], view
+            ):
+                act = immediately_executable[0]
                 provenance_steps.append(
                     f"[Depth {depth}] All requirements satisfied for '{act.intent}' -> SELECTING ACTION"
                 )
                 return act, unsatisfied
 
-            # Action has unsatisfied requirements -> Recurse on requirements
+            if self.enable_counterfactual_simulation:
+                best_act = self._evaluate_candidates_counterfactually(
+                    immediately_executable,
+                    target_cond,
+                    view,
+                    provenance_steps,
+                )
+                if best_act is not None:
+                    return best_act, unsatisfied
+
+            act = immediately_executable[0]
+            provenance_steps.append(
+                f"[Depth {depth}] All requirements satisfied for '{act.intent}' -> SELECTING ACTION"
+            )
+            return act, unsatisfied
+
+        # Action has unsatisfied requirements -> Recurse on requirements
+        for act, act_unsatisfied_reqs in unexecutable:
             provenance_steps.append(
                 f"[Depth {depth}] Action '{act.intent}' has unsatisfied requirements: {act_unsatisfied_reqs}"
             )
@@ -427,7 +498,76 @@ class EmbodiedCausalOperator:
             if sub_action is not None:
                 return sub_action, unsatisfied
 
-        return best_candidate, unsatisfied
+        return None, unsatisfied
+
+    def _has_simulation_cues(self, action: ActionNode, view: FrozenGraphView) -> bool:
+        """Detect whether action evaluation should leverage predictive simulation / MCTS."""
+        if "predicted_state" in action.properties:
+            return True
+
+        entities = view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)
+        has_movable = any(
+            isinstance(e, PhysicalEntityNode)
+            and not e.properties.get("is_avatar", False)
+            and (
+                e.properties.get("movable", False)
+                or "PUSHABLE" in e.properties.get("affordances", [])
+            )
+            for e in entities
+        )
+        has_obstacles = any(
+            isinstance(e, PhysicalEntityNode)
+            and not e.properties.get("is_avatar", False)
+            and not e.properties.get("passable", True)
+            for e in entities
+        )
+        if has_movable and has_obstacles:
+            return True
+
+        if any(
+            isinstance(n, BeliefNode) and n.properties.get("is_latent", False)
+            for n in view.nodes_by_type(HCIRNodeType.BELIEF)
+        ):
+            return True
+
+        return False
+
+    def _evaluate_candidates_counterfactually(
+        self,
+        candidates: list[ActionNode],
+        target_cond: str,
+        view: FrozenGraphView,
+        provenance_steps: list[str],
+    ) -> ActionNode | None:
+        """Simulate candidate actions via CounterfactualPlanner and select the branch with highest utility."""
+        if not candidates:
+            return None
+
+        try:
+            from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+            from hbllm.hcir.kernel.services import KernelServices
+
+            ws = view.to_workspace()
+            services = KernelServices.create_default(ws)
+            planner = CounterfactualPlanner(ws, services)
+            goal_node = GoalNode(
+                id=f"g_causal_{uuid.uuid4().hex[:6]}",
+                description=f"Resolve condition '{target_cond}'",
+            )
+            result = planner.evaluate_and_select_sync(
+                goal=goal_node,
+                candidate_actions=candidates,
+                horizon=2,
+            )
+            matched = next((c for c in candidates if c.id == result.candidate_id), result.action)
+            provenance_steps.append(
+                f"Counterfactual simulation selected '{matched.intent}' "
+                f"(utility={result.utility_score:.3f}, branch='{result.branch_name}')"
+            )
+            return matched
+        except Exception as exc:
+            logger.debug("Counterfactual simulation fallback: %s", exc)
+            return None
 
     # ── Condition Evaluation Against HCIR Graph ───────────────────────
 
@@ -435,11 +575,83 @@ class EmbodiedCausalOperator:
         """Evaluate whether a semantic predicate is satisfied in the current FrozenGraphView."""
         pred, args = parse_condition(cond)
         agent = view.get_node("agent")
-        agent_props = agent.properties if agent and hasattr(agent, "properties") else {}
+        agent_props: dict[str, Any] = (
+            agent.properties if agent and hasattr(agent, "properties") else {}
+        )
 
         reach = float(agent_props.get("reach_distance", self.default_reach_distance))
 
-        if pred == "holds":
+        # ── Composite Logic Operators ────────────────────────────────
+        if pred in ("AND", "and"):
+            return all(self.is_condition_satisfied(arg, view) for arg in args)
+
+        elif pred in ("OR", "or"):
+            return any(self.is_condition_satisfied(arg, view) for arg in args)
+
+        elif pred in ("NOT", "not"):
+            return not self.is_condition_satisfied(args[0], view) if args else True
+
+        # ── Relational Containment & Adjacency ────────────────────────
+        elif pred == "adjacent_to":
+            if len(args) < 2:
+                return False
+            node_a = view.get_node(args[0])
+            node_b = view.get_node(args[1])
+            if (
+                node_a
+                and node_b
+                and hasattr(node_a, "properties")
+                and hasattr(node_b, "properties")
+            ):
+                pos_a = node_a.properties.get("position")
+                pos_b = node_b.properties.get("position")
+                if (
+                    isinstance(pos_a, (tuple, list))
+                    and isinstance(pos_b, (tuple, list))
+                    and len(pos_a) >= 2
+                    and len(pos_b) >= 2
+                ):
+                    dr = abs(pos_a[0] - pos_b[0])
+                    dc = abs(pos_a[1] - pos_b[1])
+                    return max(dr, dc) <= 1
+                dist = float(node_b.properties.get("distance", float("inf")))
+                return dist <= reach
+            return False
+
+        elif pred == "contained_in":
+            if len(args) < 2:
+                return False
+            obj_id, rec_id = args[0], args[1]
+            obj = view.get_node(obj_id)
+            if not obj or not hasattr(obj, "properties"):
+                return False
+            parent_recs = obj.properties.get("parent_receptacles", [])
+            if rec_id in parent_recs:
+                return True
+            for edge in view.edges_from(obj_id):
+                if (
+                    edge
+                    and rec_id in edge.targets
+                    and edge.edge_type in (HCIREdgeType.PART_OF, HCIREdgeType.DEPENDS_ON)
+                ):
+                    return True
+            return False
+
+        # ── POMDP Latent Belief State ─────────────────────────────────
+        elif pred in ("latent_belief", "latent_state"):
+            if not args:
+                return False
+            subj = args[0]
+            expected_val = args[1] if len(args) > 1 else None
+            for node in view.nodes_by_type(HCIRNodeType.BELIEF):
+                if isinstance(node, BeliefNode) and node.properties.get("is_latent", False):
+                    if node.properties.get("subject") == subj:
+                        if expected_val is None:
+                            return True
+                        return str(node.properties.get("value")) == str(expected_val)
+            return False
+
+        elif pred == "holds":
             if not args:
                 return False
             target_id = args[0]
@@ -469,7 +681,12 @@ class EmbodiedCausalOperator:
                 candidates = [
                     n
                     for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)
-                    if n.entity_name == target_id or n.entity_type == target_id or target_id in n.id
+                    if isinstance(n, PhysicalEntityNode)
+                    and (
+                        n.entity_name == target_id
+                        or n.entity_type == target_id
+                        or target_id in n.id
+                    )
                 ]
                 if candidates:
                     return any(
@@ -480,7 +697,22 @@ class EmbodiedCausalOperator:
                 return False
             if not hasattr(obj, "properties"):
                 return False
-            dist = float(obj.properties.get("distance", float("inf")))
+            if "distance" in obj.properties:
+                dist = float(obj.properties["distance"])
+            elif "position" in obj.properties and "position" in agent_props:
+                p_agent = agent_props["position"]
+                p_obj = obj.properties["position"]
+                if (
+                    isinstance(p_agent, (tuple, list))
+                    and isinstance(p_obj, (tuple, list))
+                    and len(p_agent) >= 2
+                    and len(p_obj) >= 2
+                ):
+                    dist = math.hypot(p_agent[0] - p_obj[0], p_agent[1] - p_obj[1])
+                else:
+                    dist = float("inf")
+            else:
+                dist = float("inf")
             return dist <= reach
 
         elif pred == "is_opened":
@@ -576,11 +808,11 @@ class EmbodiedCausalOperator:
 
             # 3. Check agent carrying / held item
             held_id = agent_props.get("held_object_id")
-            if held_id:
+            if isinstance(held_id, str) and held_id:
                 if held_id == item_name or item_name in held_id:
                     return True
                 held_node = view.get_node(held_id)
-                if held_node and (
+                if isinstance(held_node, PhysicalEntityNode) and (
                     held_node.entity_name == item_name or held_node.entity_type == item_name
                 ):
                     return True
@@ -604,7 +836,9 @@ class EmbodiedCausalOperator:
             if not target:
                 # Search by entity_name or entity_type
                 for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
-                    if n.entity_name == target_id or n.entity_type == target_id:
+                    if isinstance(n, PhysicalEntityNode) and (
+                        n.entity_name == target_id or n.entity_type == target_id
+                    ):
                         target = n
                         break
             if not target or not hasattr(target, "properties"):
@@ -626,7 +860,9 @@ class EmbodiedCausalOperator:
             target = view.get_node(target_id)
             if not target:
                 for n in view.iter_nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
-                    if n.entity_name == target_id or n.entity_type == target_id:
+                    if isinstance(n, PhysicalEntityNode) and (
+                        n.entity_name == target_id or n.entity_type == target_id
+                    ):
                         target = n
                         break
             if not target or not hasattr(target, "properties"):
@@ -709,6 +945,17 @@ class EmbodiedCausalOperator:
                 if conditions:
                     break
 
+        if conditions:
+            return conditions
+
+        # 4. Fallback: Problem description directly
+        if problem.description:
+            desc = problem.description.strip()
+            if "(" in desc and desc.endswith(")"):
+                conditions.append(desc)
+            elif desc and " " not in desc:
+                conditions.append(desc)
+
         return conditions
 
     @staticmethod
@@ -754,13 +1001,19 @@ class EmbodiedCausalOperator:
         elif target_obj and not target_rec:
             conditions.append(f"holds({target_obj})")
 
-        # Check description if matches a predicate pattern
-        if goal.description and "(" in goal.description and goal.description.endswith(")"):
-            conditions.append(goal.description.strip())
+        # Check description if matches a predicate pattern or single-token condition
+        if goal.description:
+            desc = goal.description.strip()
+            if "(" in desc and desc.endswith(")"):
+                conditions.append(desc)
+            elif desc and " " not in desc:
+                conditions.append(desc)
 
         # Check tags
         for tag in getattr(goal, "tags", []):
             if "(" in tag and tag.endswith(")"):
+                conditions.append(tag.strip())
+            elif tag and " " not in tag:
                 conditions.append(tag.strip())
 
         return conditions
