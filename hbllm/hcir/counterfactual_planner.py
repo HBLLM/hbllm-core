@@ -332,6 +332,13 @@ class CounterfactualPlanner:
                     if isinstance(predicted_state, dict)
                     else None
                 )
+                if getattr(action, "properties", None):
+                    act_pred = action.properties.get("predicted_state", {})
+                    if isinstance(act_pred, dict) and "spatial_outcome" in act_pred:
+                        spatial_outcome = act_pred["spatial_outcome"]
+                    elif "spatial_outcome" in action.properties:
+                        spatial_outcome = action.properties["spatial_outcome"]
+
                 is_deadlock = step_utility <= 0.005 or (
                     isinstance(spatial_outcome, dict) and spatial_outcome.get("deadlock", False)
                 )
@@ -478,15 +485,30 @@ class CounterfactualPlanner:
         elif modality == ActionModality.TARGETING and action.properties.get("target_in_range"):
             base_utility += 1.2
 
+        # Check action properties for explicit mock / override first
+        act_spatial = None
+        if getattr(action, "properties", None):
+            act_pred = action.properties.get("predicted_state", {})
+            if isinstance(act_pred, dict) and "spatial_outcome" in act_pred:
+                act_spatial = act_pred["spatial_outcome"]
+            elif "spatial_outcome" in action.properties:
+                act_spatial = action.properties["spatial_outcome"]
+
         pred_props = getattr(prediction, "properties", {}) or {}
         predicted_state = pred_props.get("predicted_state") or {}
-        spatial_outcome = (
-            predicted_state.get("spatial_outcome") if isinstance(predicted_state, dict) else None
-        )
-        if spatial_outcome is None and getattr(action, "properties", None):
-            act_pred_state = action.properties.get("predicted_state", {})
-            if isinstance(act_pred_state, dict):
-                spatial_outcome = act_pred_state.get("spatial_outcome")
+        spatial_outcome = None
+        if isinstance(predicted_state, dict):
+            spatial_outcome = predicted_state.get("spatial_outcome")
+            if (
+                spatial_outcome is None
+                and "predicted_state" in predicted_state
+                and isinstance(predicted_state["predicted_state"], dict)
+            ):
+                spatial_outcome = predicted_state["predicted_state"].get("spatial_outcome")
+
+        # Prefer explicit action-specified spatial outcome if present
+        if act_spatial is not None:
+            spatial_outcome = act_spatial
 
         if spatial_outcome and isinstance(spatial_outcome, dict):
             deadlock = spatial_outcome.get("deadlock", False)

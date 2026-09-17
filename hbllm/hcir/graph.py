@@ -320,6 +320,7 @@ class HCIRNode(BaseModel):
     attention: Attention = Field(default_factory=Attention)
     scope: Scope = Field(default_factory=Scope)
     tags: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Directive Nodes ──────────────────────────────────────────────────────

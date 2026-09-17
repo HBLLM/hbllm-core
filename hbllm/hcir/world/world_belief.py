@@ -23,11 +23,37 @@ class WorldBeliefNode:
 
     belief_id: str
     subject: str
-    predicate: str
-    value: Any
+    predicate: str = "has_state"
+    value: Any = None
     confidence: float = 0.9
     evidence_sources: list[str] = field(default_factory=list)
     last_updated: float = field(default_factory=time.time)
+    is_latent: bool = False
+    distribution: dict[str, float] = field(default_factory=dict)
+
+    def update_distribution(self, likelihoods: dict[str, float]) -> dict[str, float]:
+        """Perform normalized Bayesian posterior update on discrete state distribution."""
+        if not self.distribution:
+            self.distribution = {str(k): float(v) for k, v in likelihoods.items()}
+            total = sum(self.distribution.values())
+            if total > 0.0:
+                self.distribution = {k: v / total for k, v in self.distribution.items()}
+            return self.distribution
+
+        unnormalized = {}
+        for state, prior in self.distribution.items():
+            lh = likelihoods.get(state, 1.0)
+            unnormalized[state] = prior * lh
+
+        total = sum(unnormalized.values())
+        if total > 0.0:
+            self.distribution = {k: v / total for k, v in unnormalized.items()}
+            # Update value to maximum a posteriori (MAP) state
+            map_state = max(self.distribution.items(), key=lambda x: x[1])
+            self.value = map_state[0]
+            self.confidence = map_state[1]
+        self.last_updated = time.time()
+        return self.distribution
 
 
 class WorldBeliefGraph:
@@ -81,6 +107,10 @@ class WorldBeliefGraph:
     def get_beliefs_for_subject(self, subject: str) -> list[WorldBeliefNode]:
         """Retrieve all beliefs targeting a specific subject."""
         return [b for b in self._beliefs.values() if b.subject == subject]
+
+    def get_latent_beliefs(self) -> list[WorldBeliefNode]:
+        """Retrieve all active latent variable beliefs."""
+        return [b for b in self._beliefs.values() if b.is_latent]
 
     def all_beliefs(self) -> list[WorldBeliefNode]:
         """Retrieve all beliefs in the graph."""
