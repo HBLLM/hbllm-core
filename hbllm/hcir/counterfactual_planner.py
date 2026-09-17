@@ -29,7 +29,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.graph import ActionModality, ActionNode, GoalNode
+from hbllm.hcir.graph import (
+    ActionModality,
+    ActionNode,
+    GoalNode,
+    HCIRNodeType,
+    PhysicalEntityNode,
+)
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.receipt import ExecutionReceipt
@@ -123,6 +129,44 @@ class CounterfactualPlanner:
         self._world_kernel = WorldKernel(workspace)
         self._interpreter = HCIRInterpreter(workspace, services)
 
+    def _should_auto_use_mcts(
+        self,
+        goal: GoalNode,
+        candidate_actions: list[ActionNode],
+        horizon: int,
+    ) -> bool:
+        """Inspect environmental complexity and autonomously decide whether to activate MCTS."""
+        # 1. Movable hazards / pushable entities with non-passable obstacles (e.g. Sokoban/box deadlock risk)
+        # Exclude the avatar itself; check for external movable objects (boxes, boulders) and obstacles
+        entities = self._workspace.graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)
+        has_movable_objects = any(
+            isinstance(e, PhysicalEntityNode)
+            and not e.properties.get("is_avatar", False)
+            and (
+                e.properties.get("movable", False)
+                or "PUSHABLE" in e.properties.get("affordances", [])
+            )
+            for e in entities
+        )
+        has_obstacles = any(
+            isinstance(e, PhysicalEntityNode)
+            and not e.properties.get("is_avatar", False)
+            and not e.properties.get("passable", True)
+            for e in entities
+        )
+        if has_movable_objects and has_obstacles:
+            return True
+
+        # 2. Active POMDP latent variables (requires belief distribution rollouts)
+        if self._world_kernel.belief_graph.get_latent_beliefs():
+            return True
+
+        # 3. High combinatorial branching depth
+        if horizon >= 3 or (horizon >= 2 and len(candidate_actions) >= 4):
+            return True
+
+        return False
+
     async def evaluate_and_select(
         self,
         goal: GoalNode,
@@ -130,17 +174,24 @@ class CounterfactualPlanner:
         horizon: int = 1,
         beam_width: int = 2,
         author: str = "counterfactual_planner",
-        use_mcts: bool = False,
+        use_mcts: bool | None = None,
         mcts_config: MCTSConfig | None = None,
     ) -> CandidatePlanResult:
         """Run counterfactual simulation for candidate actions and merge the best branch.
 
-        Supports single-step, multi-step (horizon > 1) beam search, or Monte Carlo Tree Search (use_mcts=True).
+        Supports single-step, multi-step (horizon > 1) beam search, or Monte Carlo Tree Search.
+        If use_mcts is None (default), autonomously selects MCTS when environmental complexity warrants it.
         """
         if not candidate_actions:
             raise ValueError("Candidate actions list cannot be empty")
 
-        if use_mcts:
+        should_mcts = (
+            self._should_auto_use_mcts(goal, candidate_actions, horizon)
+            if use_mcts is None
+            else use_mcts
+        )
+
+        if should_mcts:
             cfg = mcts_config or MCTSConfig(max_depth=max(1, horizon))
             return await self.mcts_evaluate_and_select(
                 goal=goal,
@@ -428,7 +479,7 @@ class CounterfactualPlanner:
         horizon: int = 1,
         beam_width: int = 2,
         author: str = "counterfactual_planner",
-        use_mcts: bool = False,
+        use_mcts: bool | None = None,
         mcts_config: MCTSConfig | None = None,
     ) -> CandidatePlanResult:
         """Evaluate actions across multiple effector modalities (LOCOMOTION, MANIPULATION, TARGETING).

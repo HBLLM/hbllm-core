@@ -225,3 +225,94 @@ async def test_evaluate_and_select_dual_mode_with_mcts(
     )
     assert res_mcts.candidate_id == "act_1"
     assert res_mcts.utility_score > 0.0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_and_select_auto_mode_selects_mcts_on_hazards(
+    hcir_setup: tuple[HCIRWorkspaceState, KernelServices],
+) -> None:
+    """Verify that evaluate_and_select without use_mcts autonomously triggers MCTS when hazards exist."""
+    ws, services = hcir_setup
+
+    ws.upsert_node(
+        PhysicalEntityNode(
+            id="avatar",
+            entity_name="avatar",
+            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
+        )
+    )
+    ws.upsert_node(
+        PhysicalEntityNode(
+            id="box",
+            entity_name="box",
+            properties={"position": [4, 5], "movable": True, "passable": False},
+        )
+    )
+    ws.upsert_node(
+        PhysicalEntityNode(
+            id="wall_corner",
+            entity_name="wall",
+            properties={"position": [4, 6], "movable": False, "passable": False},
+        )
+    )
+
+    planner = CounterfactualPlanner(ws, services)
+    goal = GoalNode(id="g_escape", description="Avoid deadlocks")
+
+    candidates = [
+        ActionNode(
+            id="act_push_corner",
+            intent="PUSH_INTO_CORNER",
+            properties={
+                "predicted_state": {"spatial_outcome": {"deadlock": True, "progress": -1.0}}
+            },
+        ),
+        ActionNode(
+            id="act_step_open",
+            intent="MOVE_OPEN_PATH",
+            properties={
+                "predicted_state": {"spatial_outcome": {"deadlock": False, "progress": 1.0}}
+            },
+        ),
+    ]
+
+    # Note: use_mcts is omitted (defaults to None / AUTO)
+    result = await planner.evaluate_and_select(
+        goal=goal,
+        candidate_actions=candidates,
+        horizon=2,
+    )
+
+    assert result.candidate_id == "act_step_open"
+    assert result.utility_score > 0.5
+
+
+@pytest.mark.asyncio
+async def test_evaluate_and_select_auto_mode_fast_on_simple_navigation(
+    hcir_setup: tuple[HCIRWorkspaceState, KernelServices],
+) -> None:
+    """Verify evaluate_and_select auto-selects fast beam search when no hazards exist."""
+    ws, services = hcir_setup
+    planner = CounterfactualPlanner(ws, services)
+    goal = GoalNode(id="g_nav", description="Navigate safely")
+
+    candidates = [
+        ActionNode(
+            id="act_slow",
+            intent="SLOW_STEP",
+            estimated_cost=50,
+        ),
+        ActionNode(
+            id="act_fast",
+            intent="FAST_STEP",
+            estimated_cost=0,
+        ),
+    ]
+
+    # Simple 1-hop without hazards -> auto-selects fast beam
+    result = await planner.evaluate_and_select(
+        goal=goal,
+        candidate_actions=candidates,
+        horizon=1,
+    )
+    assert result.candidate_id == "act_fast"

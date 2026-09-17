@@ -23,14 +23,23 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
-from hbllm.hcir.graph import ActionNode, GoalNode, PhysicalEntityNode, WorldVariableNode
+from hbllm.hcir.graph import (
+    ActionNode,
+    BeliefNode,
+    GoalNode,
+    PhysicalEntityNode,
+    PredictionNode,
+    WorldVariableNode,
+)
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
+from hbllm.hcir.types import UncertaintyVector
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+from hbllm.hcir.world_kernel import WorldKernel
 
 from .arc_agi_runner import ARCGrid, GridTopologyExtractor
 
@@ -263,6 +272,7 @@ class ARC3InteractiveAgent:
         self.pushable_colors: set[int] = set()
         self.decomposer: HierarchicalGoalDecomposer = HierarchicalGoalDecomposer()
         self.workspace: HCIRWorkspaceState = HCIRWorkspaceState()
+        self.world_kernel: WorldKernel = WorldKernel(self.workspace)
         self.visited_positions: list[tuple[int, int]] = []
         self.holding_item: bool = False
         self.walkable_colors: set[int] = set()
@@ -298,6 +308,17 @@ class ARC3InteractiveAgent:
         self.pushable_colors.clear()
         self.decomposer = HierarchicalGoalDecomposer()
         self.workspace = HCIRWorkspaceState()
+        if not retain_dynamics:
+            self.world_kernel = WorldKernel(self.workspace)
+        else:
+            old_latents = (
+                self.world_kernel.belief_graph.get_latent_beliefs()
+                if hasattr(self, "world_kernel") and self.world_kernel
+                else []
+            )
+            self.world_kernel = WorldKernel(self.workspace)
+            for lb in old_latents:
+                self.world_kernel.belief_graph.add_belief(lb)
         self.visited_positions.clear()
         self.holding_item = False
         self.walkable_colors.clear()
@@ -466,6 +487,26 @@ class ARC3InteractiveAgent:
                         )
                     else:
                         m = self.action_models[action_id]
+                        if (
+                            self.world_kernel
+                            and m.confidence >= 0.8
+                            and (m.delta_r != dr or m.delta_c != dc)
+                        ):
+                            self.world_kernel.observe_and_update(
+                                action=ActionNode(
+                                    id=f"act_{action_id}", intent=f"ACTION{action_id}"
+                                ),
+                                actual_state={"delta_r": dr, "delta_c": dc},
+                                prediction=PredictionNode(
+                                    properties={
+                                        "predicted_state": {
+                                            "delta_r": m.delta_r,
+                                            "delta_c": m.delta_c,
+                                        }
+                                    }
+                                ),
+                                prediction_source="arc3_motor",
+                            )
                         m.delta_r = dr
                         m.delta_c = dc
                         m.confidence = min(0.99, m.confidence + 0.1)
@@ -479,6 +520,22 @@ class ARC3InteractiveAgent:
                         m = self.action_models[action_id]
                         m.probes_tested += 1
                         if m.delta_r != 0 or m.delta_c != 0:
+                            if self.world_kernel and m.confidence >= 0.8:
+                                self.world_kernel.observe_and_update(
+                                    action=ActionNode(
+                                        id=f"act_{action_id}", intent=f"ACTION{action_id}"
+                                    ),
+                                    actual_state={"delta_r": 0, "delta_c": 0},
+                                    prediction=PredictionNode(
+                                        properties={
+                                            "predicted_state": {
+                                                "delta_r": m.delta_r,
+                                                "delta_c": m.delta_c,
+                                            }
+                                        }
+                                    ),
+                                    prediction_source="arc3_motor",
+                                )
                             # Mark the blocked destination cell as barrier with step footprint
                             dest_r = int(round(old_r + m.delta_r))
                             dest_c = int(round(old_c + m.delta_c))
@@ -695,6 +752,24 @@ class ARC3InteractiveAgent:
                     },
                 )
                 candidate_actions.append(act_node)
+
+        # 6. Sync active latent beliefs into the scene graph
+        if getattr(self, "world_kernel", None):
+            for lb in self.world_kernel.belief_graph.get_latent_beliefs():
+                ws.upsert_node(
+                    BeliefNode(
+                        id=lb.belief_id,
+                        claim=f"Latent confounder for {lb.subject}",
+                        belief_type="causal",
+                        uncertainty=UncertaintyVector(confidence=lb.confidence),
+                        properties={
+                            "subject": lb.subject,
+                            "value": lb.value,
+                            "is_latent": True,
+                            "distribution": dict(lb.distribution),
+                        },
+                    )
+                )
 
         return ws, goal_node, candidate_actions
 
