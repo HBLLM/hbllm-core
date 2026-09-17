@@ -236,6 +236,20 @@ class EmbodiedCausalOperator:
 
         # 4. Resolve Goal via Causal Backward Chaining
         provenance_steps: list[str] = []
+        protected_invariants: set[str] = set()
+        for c in goal_conditions:
+            if self.is_condition_satisfied(c, view):
+                protected_invariants.add(c)
+        if hasattr(problem, "parameters") and problem.parameters:
+            params_dict = (
+                dict(problem.parameters)
+                if isinstance(problem.parameters, tuple)
+                else problem.parameters
+            )
+            if isinstance(params_dict, dict):
+                for inv in params_dict.get("protected_invariants", []):
+                    protected_invariants.add(inv)
+
         selected_action, unsatisfied_conditions = self._resolve_backward(
             goal_conditions=goal_conditions,
             candidate_actions=candidate_actions,
@@ -243,6 +257,7 @@ class EmbodiedCausalOperator:
             depth=0,
             visited_conditions=set(),
             provenance_steps=provenance_steps,
+            protected_invariants=protected_invariants,
         )
 
         elapsed_ms = (time.time() - start_time) * 1000
@@ -348,6 +363,61 @@ class EmbodiedCausalOperator:
             ),
         )
 
+    # ── Invariant Guard & Anti-Sussman Protection ────────────────────
+
+    def violates_invariant(
+        self,
+        action: ActionNode,
+        protected_invariants: set[str],
+        view: FrozenGraphView,
+    ) -> tuple[bool, str | None]:
+        """Check whether candidate action violates any protected invariant (Anti-Sussman guard)."""
+        if not protected_invariants:
+            return False, None
+
+        props = action.properties if hasattr(action, "properties") else {}
+        explicit_negates = set(props.get("negates", []) + props.get("deletes", []))
+
+        for inv in protected_invariants:
+            if inv in explicit_negates:
+                return True, f"Action explicitly negates protected invariant '{inv}'"
+
+            i_pred, i_args = parse_condition(inv)
+            # Mutually exclusive holds: agent holding X cannot hold Y != X without losing X
+            if i_pred in ("holds", "holding", "has_object") and i_args:
+                inv_obj = i_args[0]
+                for prod in action.produces:
+                    p_pred, p_args = parse_condition(prod)
+                    if p_pred in ("holds", "holding", "has_object") and p_args:
+                        prod_obj = p_args[0]
+                        if prod_obj != inv_obj:
+                            return (
+                                True,
+                                f"Action drops protected held object '{inv_obj}' to hold '{prod_obj}'",
+                            )
+
+            # Explicit drop of held object
+            if i_pred in ("holds", "holding") and i_args:
+                inv_obj = i_args[0]
+                drops = props.get("drops")
+                if drops == inv_obj or (isinstance(drops, list) and inv_obj in drops):
+                    return True, f"Action drops protected held object '{inv_obj}'"
+
+            # Inverted container states
+            if i_pred == "is_opened" and i_args:
+                for prod in action.produces:
+                    p_pred, p_args = parse_condition(prod)
+                    if p_pred == "is_closed" and p_args == i_args:
+                        return True, f"Action closes protected open container '{i_args[0]}'"
+
+            if i_pred == "is_closed" and i_args:
+                for prod in action.produces:
+                    p_pred, p_args = parse_condition(prod)
+                    if p_pred == "is_opened" and p_args == i_args:
+                        return True, f"Action opens protected closed container '{i_args[0]}'"
+
+        return False, None
+
     # ── Causal Backward Chaining ─────────────────────────────────────
 
     def _resolve_backward(
@@ -358,8 +428,12 @@ class EmbodiedCausalOperator:
         depth: int,
         visited_conditions: set[str],
         provenance_steps: list[str],
+        protected_invariants: set[str] | None = None,
     ) -> tuple[ActionNode | None, list[str]]:
         """Recursively resolve preconditions until an immediately executable action is found."""
+        if protected_invariants is None:
+            protected_invariants = set()
+
         if depth > self.max_recursion_depth:
             provenance_steps.append(
                 f"Depth limit ({self.max_recursion_depth}) exceeded in causal recursion"
@@ -372,7 +446,10 @@ class EmbodiedCausalOperator:
             if not self.is_condition_satisfied(cond, view):
                 unsatisfied.append(cond)
             else:
-                provenance_steps.append(f"Condition '{cond}' is SATISFIED in current state")
+                protected_invariants.add(cond)
+                provenance_steps.append(
+                    f"Condition '{cond}' is SATISFIED in current state (Locked as Invariant)"
+                )
 
         if not unsatisfied:
             return None, []
@@ -432,16 +509,30 @@ class EmbodiedCausalOperator:
                                     depth=depth + 1,
                                     visited_conditions=visited_conditions,
                                     provenance_steps=provenance_steps,
+                                    protected_invariants=protected_invariants,
                                 )
 
             provenance_steps.append(f"No candidate action produces condition '{target_cond}'")
             return None, unsatisfied
 
+        # Filter producing actions through Invariant Lock (Anti-Sussman guard)
+        valid_producing_actions = []
+        for act in producing_actions:
+            violates, reason = self.violates_invariant(act, protected_invariants, view)
+            if violates:
+                provenance_steps.append(
+                    f"[Depth {depth}] [Invariant Lock] Pruned action '{act.intent}': {reason}"
+                )
+                continue
+            valid_producing_actions.append(act)
+
+        eval_actions = valid_producing_actions if valid_producing_actions else producing_actions
+
         # 4. Evaluate producing action requirements
         immediately_executable: list[ActionNode] = []
         unexecutable: list[tuple[ActionNode, list[str]]] = []
 
-        for act in producing_actions:
+        for act in eval_actions:
             provenance_steps.append(
                 f"[Depth {depth}] Evaluating candidate action '{act.intent}' (requires {act.requirements})"
             )
@@ -497,6 +588,7 @@ class EmbodiedCausalOperator:
                 depth=depth + 1,
                 visited_conditions=visited_conditions,
                 provenance_steps=provenance_steps,
+                protected_invariants=protected_invariants,
             )
             if sub_action is not None:
                 return sub_action, unsatisfied

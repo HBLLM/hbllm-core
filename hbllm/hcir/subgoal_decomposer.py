@@ -37,8 +37,13 @@ class EpistemicFrontierDetector:
         barrier_cells: set[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
+        known_walls: set[tuple[int, int]] | None = None,
+        deadlock_cells: set[tuple[int, int]] | None = None,
     ) -> list[tuple[tuple[int, int], float]]:
-        """Identify reachable cells bordering unobserved space, ranked by information gain.
+        """Identify reachable cells bordering unobserved space, ranked by barrier-aware information gain.
+
+        Filters out unobserved cells that are known solid barriers and ensures candidate frontiers
+        have accessible orthogonal exposure to unobserved regions without corner occlusion.
 
         Returns a list of ((r, c), info_score) tuples sorted descending by score.
         """
@@ -46,25 +51,49 @@ class EpistemicFrontierDetector:
         if not np.any(unobserved_mask):
             return []
 
+        all_barriers = set(barrier_cells)
+        if known_walls:
+            all_barriers.update(known_walls)
+        deadlocks = set(deadlock_cells) if deadlock_cells else set()
+
         candidates: list[tuple[tuple[int, int], float]] = []
         visited = {avatar_pos}
         queue = [avatar_pos]
 
         frontier_cells: list[tuple[int, int]] = []
 
-        # BFS from avatar to find reachable cells
+        # BFS from avatar to find physically reachable cells
         while queue:
             curr_r, curr_c = queue.pop(0)
 
-            # Check if (curr_r, curr_c) borders unobserved space
-            adjacent_unobserved = 0
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            # Check direct orthogonal adjacency to valid (non-barrier) unobserved cells
+            cardinal_unobserved = 0
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr, nc = curr_r + dr, curr_c + dc
                 if 0 <= nr < H and 0 <= nc < W:
-                    if unobserved_mask[nr, nc]:
-                        adjacent_unobserved += 1
+                    if unobserved_mask[nr, nc] and (nr, nc) not in all_barriers:
+                        cardinal_unobserved += 1
 
-            if adjacent_unobserved > 0 and (curr_r, curr_c) != avatar_pos:
+            # Check diagonal adjacency only if not blocked by adjacent cardinal walls
+            diagonal_unobserved = 0
+            for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                nr, nc = curr_r + dr, curr_c + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    if unobserved_mask[nr, nc] and (nr, nc) not in all_barriers:
+                        # Ensure both cardinal projections are not solid walls (corner pinch)
+                        if (curr_r + dr, curr_c) not in all_barriers or (
+                            curr_r,
+                            curr_c + dc,
+                        ) not in all_barriers:
+                            diagonal_unobserved += 1
+
+            total_open_unobserved = cardinal_unobserved + diagonal_unobserved
+            if (
+                total_open_unobserved > 0
+                and cardinal_unobserved > 0
+                and (curr_r, curr_c) != avatar_pos
+                and (curr_r, curr_c) not in deadlocks
+            ):
                 frontier_cells.append((curr_r, curr_c))
 
             # Expand neighbors
@@ -73,21 +102,32 @@ class EpistemicFrontierDetector:
                 if 0 <= nr < H and 0 <= nc < W:
                     if (
                         (nr, nc) not in visited
-                        and (nr, nc) not in barrier_cells
+                        and (nr, nc) not in all_barriers
                         and not unobserved_mask[nr, nc]
                     ):
                         visited.add((nr, nc))
                         queue.append((nr, nc))
 
-        # Rank frontiers by info gain: proximity to avatar, high adjacent unobserved cells
+        # Rank frontiers by info gain: proximity to avatar, high adjacent traversable unobserved cells
         for fr, fc in frontier_cells:
             dist = math.hypot(fr - avatar_pos[0], fc - avatar_pos[1])
             rad = max(2, step_size * 2)
             r_min, r_max = max(0, fr - rad), min(H, fr + rad + 1)
             c_min, c_max = max(0, fc - rad), min(W, fc + rad + 1)
-            local_unobserved = int(np.sum(unobserved_mask[r_min:r_max, c_min:c_max]))
 
-            info_score = float(local_unobserved) / (1.0 + dist * 0.1)
+            # Count unobserved cells in window that are NOT known solid barriers
+            traversable_unobserved = 0
+            for r in range(r_min, r_max):
+                for c in range(c_min, c_max):
+                    if unobserved_mask[r, c] and (r, c) not in all_barriers:
+                        traversable_unobserved += 1
+
+            # Deadlock proximity penalty
+            deadlock_penalty = 1.0
+            if any(math.hypot(fr - dr, fc - dc) <= 1.0 for dr, dc in deadlocks):
+                deadlock_penalty = 0.2
+
+            info_score = (float(traversable_unobserved) * deadlock_penalty) / (1.0 + dist * 0.1)
             candidates.append(((fr, fc), info_score))
 
         candidates.sort(key=lambda x: x[1], reverse=True)

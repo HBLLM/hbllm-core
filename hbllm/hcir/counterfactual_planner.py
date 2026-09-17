@@ -67,6 +67,7 @@ class MCTSConfig:
     max_depth: int = 3  # Maximum tree depth per rollout trajectory
     discount_factor: float = 0.85  # Discount factor for future expected utilities
     enable_subgoals: bool = True  # Prioritize goal-directed candidate actions
+    causal_pruning: bool = True  # Prioritize actions advancing unsatisfied causal conditions
 
 
 @dataclass
@@ -357,10 +358,14 @@ class CounterfactualPlanner:
         self._workspace.fork_branch(root_branch)
         all_created_branches: list[str] = [root_branch]
 
+        root_actions = self._rank_and_filter_causal_actions(
+            candidate_actions, goal, cfg.causal_pruning
+        )
+
         root = MCTSNode(
             node_id="root",
             state_branch=root_branch,
-            unexpanded_actions=list(candidate_actions),
+            unexpanded_actions=root_actions,
             depth=0,
         )
 
@@ -411,7 +416,9 @@ class CounterfactualPlanner:
                     confidence=0.85 if res.success else 0.2,
                     author=author,
                 )
-                step_utility = self._compute_action_utility(action, prediction, res.success)
+                step_utility = self._compute_action_utility(
+                    action, prediction, res.success, goal=goal
+                )
 
                 # Check if outcome is terminal
                 pred_props = getattr(prediction, "properties", {}) or {}
@@ -436,12 +443,19 @@ class CounterfactualPlanner:
                 )
                 is_terminal = is_deadlock or goal_reached or ((curr.depth + 1) >= cfg.max_depth)
 
+                child_actions = (
+                    self._rank_and_filter_causal_actions(
+                        candidate_actions, goal, cfg.causal_pruning
+                    )
+                    if not is_terminal
+                    else []
+                )
                 child_node = MCTSNode(
                     node_id=f"mcts_{uuid.uuid4().hex[:6]}",
                     state_branch=child_branch,
                     action=action,
                     parent=curr,
-                    unexpanded_actions=list(candidate_actions) if not is_terminal else [],
+                    unexpanded_actions=child_actions,
                     depth=curr.depth + 1,
                     is_terminal=is_terminal,
                     step_utility=step_utility,
@@ -559,8 +573,57 @@ class CounterfactualPlanner:
         )
 
     @staticmethod
-    def _compute_action_utility(action: ActionNode, prediction: Any, success: bool) -> float:
-        """Compute utility score from action cost, prediction confidence, spatial outcomes, and modality."""
+    def _rank_and_filter_causal_actions(
+        candidate_actions: list[ActionNode],
+        goal: GoalNode | None,
+        causal_pruning: bool = True,
+    ) -> list[ActionNode]:
+        """Prioritize actions advancing unsatisfied causal conditions in MCTS tree nodes.
+
+        Ranks actions matching target conditions or active subgoals first,
+        suppressing motor noise and pruning the branching factor.
+        """
+        if not causal_pruning or not candidate_actions or goal is None:
+            return list(candidate_actions)
+
+        target_conditions: list[str] = []
+        if hasattr(goal, "properties") and goal.properties:
+            tc = goal.properties.get("target_conditions", [])
+            if isinstance(tc, list):
+                target_conditions.extend([str(c).strip() for c in tc])
+            elif isinstance(tc, str):
+                target_conditions.append(tc.strip())
+        if hasattr(goal, "description") and goal.description:
+            target_conditions.append(goal.description.strip())
+
+        causal_actions: list[ActionNode] = []
+        regular_actions: list[ActionNode] = []
+
+        for act in candidate_actions:
+            is_causal = False
+            for p in getattr(act, "produces", []):
+                p_clean = p.strip()
+                if any(p_clean in tc or tc in p_clean for tc in target_conditions):
+                    is_causal = True
+                    break
+            if not is_causal and any(act.intent in tc for tc in target_conditions):
+                is_causal = True
+
+            if is_causal:
+                causal_actions.append(act)
+            else:
+                regular_actions.append(act)
+
+        return causal_actions + regular_actions
+
+    @staticmethod
+    def _compute_action_utility(
+        action: ActionNode,
+        prediction: Any,
+        success: bool,
+        goal: GoalNode | None = None,
+    ) -> float:
+        """Compute utility score from action cost, prediction confidence, spatial outcomes, modality, and causal progress."""
         base_utility = (
             prediction.uncertainty.confidence
             * (1.0 if success else 0.0)
@@ -573,6 +636,18 @@ class CounterfactualPlanner:
             base_utility += 1.5
         elif modality == ActionModality.TARGETING and action.properties.get("target_in_range"):
             base_utility += 1.2
+
+        # Causal condition alignment bonus
+        if goal is not None and getattr(action, "produces", None):
+            goal_desc = getattr(goal, "description", "")
+            goal_props = getattr(goal, "properties", {}) or {}
+            target_conds = goal_props.get("target_conditions", [])
+            if isinstance(target_conds, str):
+                target_conds = [target_conds]
+            for p in action.produces:
+                if (p and p in goal_desc) or any(p in tc for tc in target_conds):
+                    base_utility += 2.0
+                    break
 
         # Check action properties for explicit mock / override first
         act_spatial = None
