@@ -88,6 +88,35 @@ class NativeNetHackWrapper:
 
         self.reset(seed=seed)
 
+    def _env_reset(self, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        if self._is_gymnasium:
+            res: Any = self.env.reset(seed=seed) if seed is not None else self.env.reset()
+        else:
+            if seed is not None and hasattr(self.env, "seed"):
+                getattr(self.env, "seed")(seed)
+            res = self.env.reset()
+
+        if isinstance(res, tuple) and len(res) == 2:
+            raw_obs, info = res
+            return raw_obs, dict(info) if isinstance(info, dict) else {}
+        return res, {}
+
+    def _env_step(self, action_idx: int) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        step_result: Any = self.env.step(action_idx)
+        if isinstance(step_result, tuple) and len(step_result) == 5:
+            obs, r, term, trunc, inf = step_result
+            return (
+                obs,
+                float(r),
+                bool(term),
+                bool(trunc),
+                dict(inf) if isinstance(inf, dict) else {},
+            )
+        elif isinstance(step_result, tuple) and len(step_result) == 4:
+            obs, r, done, inf = step_result
+            return obs, float(r), bool(done), False, dict(inf) if isinstance(inf, dict) else {}
+        return step_result, 0.0, False, False, {}
+
     def reset(self, seed: int | None = None) -> tuple[NetHackObservation, dict[str, Any]]:
         if seed is not None:
             self.seed = seed
@@ -95,11 +124,7 @@ class NativeNetHackWrapper:
         self.dungeon_level = 1
         self.known_glyphs = []
         self.known_chars = []
-        if self._is_gymnasium:
-            raw_obs, info = self.env.reset(seed=seed) if seed is not None else self.env.reset()
-        else:
-            raw_obs = self.env.reset()
-            info = {}
+        raw_obs, info = self._env_reset(seed=seed)
         obs = self._build_obs(raw_obs)
         return obs, info
 
@@ -125,8 +150,9 @@ class NativeNetHackWrapper:
             (-1, -1): "NW",
         }
 
-        # Handle door interactions (modal OPEN/KICK if supported, or step-into-door)
+        # Check if modal action (e.g. open door, kick, search)
         if act_enum in (NetHackAction.OPEN_DOOR, NetHackAction.KICK):
+            # Find closed door near player
             px, py = self.player_pos
             dir_name = "E"
             for (dx, dy), name in dir_to_name.items():
@@ -139,46 +165,26 @@ class NativeNetHackWrapper:
             if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
                 open_idx = self._action_name_to_idx["OPEN"]
                 dir_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    _, r1, term1, trunc1, i1 = self.env.step(open_idx)
-                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = term1 or term2
-                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                    info = {**i1, **i2}
-                else:
-                    _, r1, d1, i1 = self.env.step(open_idx)
-                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = d1 or d2
-                    truncated = self.step_count >= self.max_steps
-                    info = {**i1, **i2}
+                _, r1, term1, trunc1, i1 = self._env_step(open_idx)
+                raw_obs, r2, term2, trunc2, i2 = self._env_step(dir_idx)
+                reward = r1 + r2
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
             elif act_enum == NetHackAction.KICK and "KICK" in self._action_name_to_idx:
                 kick_idx = self._action_name_to_idx["KICK"]
                 dir_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    _, r1, term1, trunc1, i1 = self.env.step(kick_idx)
-                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = term1 or term2
-                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                    info = {**i1, **i2}
-                else:
-                    _, r1, d1, i1 = self.env.step(kick_idx)
-                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = d1 or d2
-                    truncated = self.step_count >= self.max_steps
-                    info = {**i1, **i2}
+                _, r1, term1, trunc1, i1 = self._env_step(kick_idx)
+                raw_obs, r2, term2, trunc2, i2 = self._env_step(dir_idx)
+                reward = r1 + r2
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
             else:
                 # In standard MiniHack environments, stepping into the closed door opens it!
                 act_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    raw_obs, reward, terminated, truncated, info = self.env.step(act_idx)
-                else:
-                    raw_obs, reward, terminated, info = self.env.step(act_idx)
-                reward = float(reward)
-                truncated = truncated or (self.step_count >= self.max_steps)
+                raw_obs, reward, terminated, trunc_env, info = self._env_step(act_idx)
+                truncated = trunc_env or (self.step_count >= self.max_steps)
 
         else:
             name_map = {
@@ -199,16 +205,8 @@ class NativeNetHackWrapper:
             if act_idx >= action_space_size:
                 act_idx = act_idx % action_space_size
 
-            if self._is_gymnasium:
-                raw_obs, reward_env, term_env, trunc_env, info = self.env.step(act_idx)
-                reward = float(reward_env)
-                terminated = term_env
-                truncated = trunc_env or (self.step_count >= self.max_steps)
-            else:
-                raw_obs, reward_env, done_env, info = self.env.step(act_idx)
-                reward = float(reward_env)
-                terminated = done_env
-                truncated = self.step_count >= self.max_steps
+            raw_obs, reward, terminated, trunc_env, info = self._env_step(act_idx)
+            truncated = trunc_env or (self.step_count >= self.max_steps)
 
         if reward >= 1.0:
             self.dungeon_level = 2

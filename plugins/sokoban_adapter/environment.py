@@ -85,10 +85,15 @@ class NativeSokobanWrapper:
             self.seed = seed
         self.step_count = 0
         try:
-            self.native_env.seed(self.seed)
-        except Exception:
-            pass
-        _raw_obs = self.native_env.reset()
+            self.native_env.reset(seed=self.seed)
+        except (TypeError, Exception):
+            seed_fn = getattr(self.native_env, "seed", None)
+            if callable(seed_fn):
+                try:
+                    seed_fn(self.seed)
+                except Exception:
+                    pass
+            self.native_env.reset()
         return self._extract_obs(done=False, won=False)
 
     def step(
@@ -97,7 +102,14 @@ class NativeSokobanWrapper:
         self.step_count += 1
         # In gym-sokoban: 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT
         gym_act = int(action) + 1
-        _raw_obs, reward, done, info = self.native_env.step(gym_act)
+        step_result: Any = self.native_env.step(gym_act)
+
+        # Handle both Gym >=0.26 / Gymnasium (5-tuple) and legacy Gym (4-tuple)
+        if len(step_result) == 5:
+            _raw_obs, reward, terminated, truncated, info = step_result
+            done = bool(terminated or truncated)
+        else:
+            _raw_obs, reward, done, info = step_result
 
         room = getattr(self.native_env, "room_state", None)
         won = False
@@ -106,12 +118,13 @@ class NativeSokobanWrapper:
             won = not has_unsolved_boxes and (3 in room)
 
         is_done = bool(done or won or self.step_count >= self.max_steps)
+        info_dict: dict[str, Any] = dict(info) if isinstance(info, dict) else {}
         obs = self._extract_obs(
             done=is_done,
             won=won,
-            info=info or {},
+            info=info_dict,
         )
-        return obs, float(reward), is_done, info or {}
+        return obs, float(reward), is_done, info_dict
 
     def _extract_obs(
         self,
