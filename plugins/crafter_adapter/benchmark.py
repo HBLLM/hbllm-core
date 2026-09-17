@@ -146,8 +146,6 @@ def run_crafter_benchmark(
     cohort_name: str,
     episodes_per_target: int = 3,
     base_seed: int = 1000,
-    prefer_native: bool = True,
-    require_native: bool = True,
 ) -> dict[str, Any]:
     """Execute Crafter benchmark across 5 tech tiers."""
     canonical_cohort = resolve_cohort(cohort_name)
@@ -171,11 +169,7 @@ def run_crafter_benchmark(
                 seed = current_seed
                 current_seed += 1
 
-                env = make_crafter_env(seed=seed, prefer_native=prefer_native)
-                if require_native and not getattr(env, "is_native", False):
-                    raise RuntimeError(
-                        "Native 'crafter' upstream package is strictly required; standalone fallback is disabled."
-                    )
+                env = make_crafter_env(seed=seed)
                 obs, _ = env.reset(seed=seed)
 
                 if canonical_cohort == "pure-hcir":
@@ -276,34 +270,12 @@ def main() -> None:
         default=None,
         help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
     )
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        default=True,
-        help="Run against upstream native crafter package (default: True)",
-    )
-    parser.add_argument(
-        "--standalone",
-        action="store_true",
-        default=False,
-        help="Run against standalone procedural simulator without external dependencies",
-    )
-    parser.add_argument(
-        "--require-native",
-        action="store_true",
-        default=False,
-        help="Strictly require upstream native crafter package, failing if unavailable",
-    )
     args = parser.parse_args()
-
-    prefer_native = False if args.standalone else args.prefer_native
-    require_native = args.require_native or prefer_native
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(
-        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native Upstream)\n{'=' * 85}"
     )
 
     for cohort in cohorts_to_run:
@@ -311,8 +283,6 @@ def main() -> None:
             cohort,
             episodes_per_target=args.episodes_per_target,
             base_seed=args.seed,
-            prefer_native=prefer_native,
-            require_native=require_native,
         )
         print(
             f"\n--- Cohort: {data['cohort'].upper()} (Crafter Score: {data['crafter_score']}%) ---"

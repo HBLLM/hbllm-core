@@ -67,8 +67,6 @@ def run_sokoban_tier(
     tier: SokobanTier | str,
     episodes: int = 5,
     seed: int = 42,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation on a single Sokoban tier."""
     agent = PureHCIRSokobanAgent()
@@ -80,11 +78,7 @@ def run_sokoban_tier(
 
     for ep in range(episodes):
         agent.reset_episode()
-        env = make_sokoban_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
-        if require_native and not getattr(env, "is_native", False):
-            raise RuntimeError(
-                "Native 'gym_sokoban' package is strictly required; standalone fallback is disabled."
-            )
+        env = make_sokoban_env(tier=tier_enum, seed=seed + ep)
         obs = env.reset()
 
         done = False
@@ -118,8 +112,6 @@ def run_sokoban_benchmark(
     episodes_per_tier: int = 5,
     seed: int = 42,
     episodes: int | None = None,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run full-spectrum 5-tier Sokoban benchmark."""
     if episodes is not None:
@@ -135,8 +127,6 @@ def run_sokoban_benchmark(
             tier,
             episodes=episodes_per_tier,
             seed=seed,
-            prefer_native=prefer_native,
-            require_native=require_native,
         )
         tiers_results[tier.value] = res
         total_successes += res["successes"]
@@ -166,36 +156,14 @@ def main() -> None:
         "--episodes-per-tier", type=int, default=5, help="Episodes per Boxoban difficulty tier"
     )
     parser.add_argument("--seed", type=int, default=42, help="Base random seed")
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        default=True,
-        help="Run against upstream native gym_sokoban package",
-    )
-    parser.add_argument(
-        "--standalone",
-        action="store_true",
-        default=False,
-        help="Run against standalone fast procedural generator without gym dependency",
-    )
-    parser.add_argument(
-        "--require-native",
-        action="store_true",
-        default=False,
-        help="Strictly require upstream native package, failing if unavailable",
-    )
     args = parser.parse_args()
 
-    prefer_native = False if args.standalone else args.prefer_native
     print(
-        f"\n{'=' * 85}\nRunning Sokoban Multi-Tier Benchmark (5 Tiers, Native={prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Sokoban Multi-Tier Benchmark (5 Tiers, Native Upstream)\n{'=' * 85}"
     )
     data = run_sokoban_benchmark(
         episodes_per_tier=args.episodes_per_tier,
         seed=args.seed,
-        prefer_native=prefer_native,
-        require_native=args.require_native,
     )
     print(
         f"Overall Success Rate: {data['overall_success_rate'] * 100:.1f}% | 95% Wilson CI: {data['ci_95']} | Total Episodes: {data['total_episodes']}"

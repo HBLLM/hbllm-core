@@ -110,7 +110,7 @@ def test_crafter_constants_byte_verification() -> None:
 
 def test_native_crafter_wrapper_lifecycle_and_vitals() -> None:
     """Verify NativeCrafterWrapper initializes correctly and live-tracks engine vitals."""
-    env = make_crafter_env(seed=42, prefer_native=True)
+    env = make_crafter_env(seed=42)
     assert isinstance(env, NativeCrafterWrapper)
     assert env.is_native is True
 
@@ -164,7 +164,7 @@ def test_crafter_perception_adapter_raw_dict_ingest() -> None:
 
 def test_native_crafter_wood_and_table_milestones() -> None:
     """Execute PureHCIRCrafterAgent directly on real upstream crafter.Env."""
-    env = make_crafter_env(seed=100, prefer_native=True)
+    env = make_crafter_env(seed=100)
     obs, _ = env.reset(seed=100)
     agent = PureHCIRCrafterAgent()
     goal = CrafterGoal(target_achievement=CrafterAchievement.PLACE_TABLE)
