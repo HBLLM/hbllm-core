@@ -441,3 +441,124 @@ class HierarchicalGoalDecomposer:
             d = math.hypot(t_pos[0] - avatar_pos[0], t_pos[1] - avatar_pos[1])
             return d <= tolerance
         return False
+
+    def decompose_pattern_alignment_into_subgoals(
+        self,
+        workspace: HCIRWorkspaceState,
+        primary_goal: GoalNode,
+        canvas_matrix: np.ndarray,
+        target_template: np.ndarray,
+        available_tools: list[dict[str, Any]],
+        current_tool_id: Any | None = None,
+        current_palette_color: int | None = None,
+        palette_swatches: list[dict[str, Any]] | None = None,
+    ) -> GoalNode | None:
+        """Decompose a pattern alignment goal into tool selection, color selection, and application subgoals.
+
+        Finds the tool and color that maximize visual Hamming distance reduction between the
+        editable canvas and the reference template.
+        """
+        if canvas_matrix.shape != target_template.shape:
+            return None
+
+        diff_mask = canvas_matrix != target_template
+        if not np.any(diff_mask):
+            return None
+
+        best_tool: dict[str, Any] | None = None
+        best_target_color: int | None = None
+        best_net_gain: int = -999999
+
+        for tool in available_tools:
+            mask = tool.get("mask")
+            if mask is None or mask.shape != canvas_matrix.shape:
+                continue
+
+            # Check mismatched pixels within this tool's application sector
+            sector_diff = mask & diff_mask
+            if not np.any(sector_diff):
+                continue
+
+            # Candidate color: most frequent color in target template within the sector
+            target_colors = target_template[sector_diff]
+            if len(target_colors) == 0:
+                continue
+            cand_color = int(np.bincount(target_colors).argmax())
+
+            # Evaluate net improvement if we stamp with cand_color
+            corrects = int(
+                np.sum((canvas_matrix != cand_color) & (target_template == cand_color) & mask)
+            )
+            corrupts = int(
+                np.sum((canvas_matrix == cand_color) & (target_template != cand_color) & mask)
+            )
+            net_gain = corrects - corrupts
+
+            if net_gain > best_net_gain:
+                best_net_gain = net_gain
+                best_tool = tool
+                best_target_color = cand_color
+
+        if best_tool is None or best_target_color is None or best_net_gain <= 0:
+            return None
+
+        tool_id = best_tool.get("tool_id")
+        # Step 1: Precondition - Palette color match
+        if current_palette_color is not None and current_palette_color != best_target_color:
+            swatch_coord = None
+            if palette_swatches:
+                for sw in palette_swatches:
+                    if sw.get("color") == best_target_color:
+                        swatch_coord = sw.get("coord")
+                        break
+
+            subgoal_id = f"subgoal_select_color_{best_target_color}"
+            color_subgoal = GoalNode(
+                id=subgoal_id,
+                description=f"Select palette color {best_target_color} for pattern alignment",
+                priority=min(1.0, max(0.0, float(primary_goal.priority))),
+                resolved=False,
+                properties={
+                    "affordance": "SELECT_COLOR",
+                    "target_color": best_target_color,
+                    "target_position": swatch_coord,
+                    "parent_goal_id": primary_goal.id,
+                },
+            )
+            workspace.upsert_node(color_subgoal)
+            return color_subgoal
+
+        # Step 2: Precondition - Tool alignment match
+        if current_tool_id is not None and current_tool_id != tool_id:
+            subgoal_id = f"subgoal_align_tool_{tool_id}"
+            tool_subgoal = GoalNode(
+                id=subgoal_id,
+                description=f"Align tool selector to sector {tool_id}",
+                priority=min(1.0, max(0.0, float(primary_goal.priority))),
+                resolved=False,
+                properties={
+                    "affordance": "ALIGN_TOOL",
+                    "target_tool": tool_id,
+                    "nav_position": best_tool.get("nav_position"),
+                    "parent_goal_id": primary_goal.id,
+                },
+            )
+            workspace.upsert_node(tool_subgoal)
+            return tool_subgoal
+
+        # Step 3: Application - Apply stamp
+        subgoal_id = f"subgoal_apply_stamp_{tool_id}"
+        stamp_subgoal = GoalNode(
+            id=subgoal_id,
+            description=f"Apply tool stamp for sector {tool_id}",
+            priority=min(1.0, max(0.0, float(primary_goal.priority))),
+            resolved=False,
+            properties={
+                "affordance": "APPLY_STAMP",
+                "target_tool": tool_id,
+                "action_id": best_tool.get("application_action", 5),
+                "parent_goal_id": primary_goal.id,
+            },
+        )
+        workspace.upsert_node(stamp_subgoal)
+        return stamp_subgoal

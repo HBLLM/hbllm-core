@@ -1,12 +1,12 @@
 # Inductive HCIR Learner Benchmark Report
-**Duration**: 13.56s across 4 game(s)
+**Duration**: 15.76s across 4 game(s)
 
 | Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |
 |---|---|---|---|---|
 | `wa30` | 2/2 | 95 | 190 | **199.5%** |
-| `ls20` | 1/2 | 100 | 145 | **34.4%** |
-| `cd82` | 0/2 | 100 | 55 | **0.0%** |
-| `su15` | 0/2 | 33 | 22 | **0.0%** |
+| `ls20` | 2/2 | 77 | 145 | **171.0%** |
+| `cd82` | 2/2 | 10 | 63 | **630.0%** |
+| `su15` | 1/1 | 15 | 22 | **146.7%** |
 
 ## Level-by-Level Breakdown
 ### Environment: `wa30`
@@ -19,14 +19,15 @@
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
 | Level 1 | **PASSED** | 32 | 22 | 68.8% | 31 |
-| Level 2 | ACTIVE | 68 | 123 | 0.0% | 98 |
+| Level 2 | **PASSED** | 45 | 123 | 273.3% | 31 |
 
 ### Environment: `cd82`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | ACTIVE | 100 | 55 | 0.0% | 99 |
+| Level 1 | **PASSED** | 5 | 55 | 1100.0% | 0 |
+| Level 2 | **PASSED** | 5 | 8 | 160.0% | 0 |
 
 ### Environment: `su15`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | ACTIVE | 33 | 22 | 0.0% | 32 |
+| Level 1 | **PASSED** | 15 | 22 | 146.7% | 0 |

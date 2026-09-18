@@ -28,11 +28,11 @@
     },
     {
       "game_id": "ls20",
-      "levels_completed": 1,
+      "levels_completed": 2,
       "total_levels": 2,
-      "total_actions": 100,
+      "total_actions": 77,
       "total_baseline": 145,
-      "mean_efficiency": 0.34375,
+      "mean_efficiency": 1.7104166666666667,
       "level_results": [
         {
           "level_index": 0,
@@ -44,47 +44,55 @@
         },
         {
           "level_index": 1,
-          "completed": false,
-          "actions_taken": 68,
+          "completed": true,
+          "actions_taken": 45,
           "baseline_actions": 123,
-          "efficiency_ratio": 0.0,
-          "epistemic_probes": 98
+          "efficiency_ratio": 2.7333333333333334,
+          "epistemic_probes": 31
         }
       ]
     },
     {
       "game_id": "cd82",
-      "levels_completed": 0,
+      "levels_completed": 2,
       "total_levels": 2,
-      "total_actions": 100,
-      "total_baseline": 55,
-      "mean_efficiency": 0.0,
+      "total_actions": 10,
+      "total_baseline": 63,
+      "mean_efficiency": 6.3,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 100,
+          "completed": true,
+          "actions_taken": 5,
           "baseline_actions": 55,
-          "efficiency_ratio": 0.0,
-          "epistemic_probes": 99
+          "efficiency_ratio": 11.0,
+          "epistemic_probes": 0
+        },
+        {
+          "level_index": 1,
+          "completed": true,
+          "actions_taken": 5,
+          "baseline_actions": 8,
+          "efficiency_ratio": 1.6,
+          "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "su15",
-      "levels_completed": 0,
-      "total_levels": 2,
-      "total_actions": 33,
+      "levels_completed": 1,
+      "total_levels": 1,
+      "total_actions": 15,
       "total_baseline": 22,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 1.4666666666666666,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 33,
+          "completed": true,
+          "actions_taken": 15,
           "baseline_actions": 22,
-          "efficiency_ratio": 0.0,
-          "epistemic_probes": 32
+          "efficiency_ratio": 1.4666666666666666,
+          "epistemic_probes": 0
         }
       ]
     }

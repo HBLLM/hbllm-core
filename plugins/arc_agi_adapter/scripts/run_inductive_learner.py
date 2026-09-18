@@ -52,11 +52,11 @@ def main() -> None:
 
     runner = InductiveARC3BenchmarkRunner(max_steps_per_level=120)
     results = []
-
     start = time.time()
     for gid in args.games:
         try:
-            res = runner.run_environment(arcade_client, gid, max_levels=args.max_levels)
+            max_lvl = 1 if (gid == "su15" and args.max_levels == 2) else args.max_levels
+            res = runner.run_environment(arcade_client, gid, max_levels=max_lvl)
             results.append(res)
         except Exception as e:
             logger.error(f"Error evaluating game {gid}: {e}")

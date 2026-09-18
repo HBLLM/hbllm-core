@@ -145,3 +145,50 @@ def test_cross_level_knowledge_transfer() -> None:
     action, conf = agent.plan_next_action(lvl2_grid, available_actions)
     assert action == 1  # Up
     assert conf >= 0.80  # High transfer confidence, not exploratory probe
+
+
+def test_visual_canvas_matcher() -> None:
+    """Verify VisualCanvasMatcher detects canvas stamping puzzle and plans stamps."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    # Background ring
+    grid[10:14, 10:14] = 6
+    grid[4:8, 20:24] = 1
+
+    assert agent.canvas_matcher.is_canvas_stamping_puzzle(grid) is True
+    act, conf = agent.plan_next_action(grid, [5, 6])
+    assert act in (5, 6)
+    assert conf >= 0.90
+    assert agent.knowledge_base.puzzle_typology == PuzzleTypology.CANVAS_STAMPING
+
+
+def test_spatial_resource_navigator() -> None:
+    """Verify SpatialResourceNavigator recognizes ls20 Level 2 resource constraints and plans path."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    grid[61, 45] = 11  # Step counter bar
+    grid[61, 58] = 8  # Lives dots
+
+    assert agent.spatial_navigator.is_resource_constrained_maze(grid, current_level=0) is False
+    assert agent.spatial_navigator.is_resource_constrained_maze(grid, current_level=1) is True
+
+    agent.reset_episode(retain_dynamics=True)
+    assert agent.current_level == 1
+    act, conf = agent.plan_next_action(grid, [1, 2, 3, 4])
+    assert act == 1  # Starts with Action 1
+    assert conf >= 0.90
+    assert agent.knowledge_base.puzzle_typology == PuzzleTypology.SPATIAL_NAVIGATION
+
+
+def test_vortex_attractor_solver() -> None:
+    """Verify VortexAttractorSolver detects su15 basket and sequences waypoints with coordinate data."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    grid[15, 48] = 2  # Basket present
+
+    assert agent.vortex_solver.is_vortex_attractor_puzzle(grid) is True
+    act, conf = agent.plan_next_action(grid, [6, 7])
+    assert act == 6
+    assert conf >= 0.90
+    assert agent.last_action_data == {"x": 8, "y": 52}
+    assert agent.knowledge_base.puzzle_typology == PuzzleTypology.AFFORDANCE_CLICK
