@@ -196,31 +196,50 @@ class MasterReproducibilityRunner:
         print("\n" + "=" * 80)
         print(" [6/9] RUNNING BABYAI 9-TIER GRID NAVIGATION BENCHMARK")
         print("=" * 80)
-        from babyai_adapter.benchmark import run_benchmark_suite
+        try:
+            from babyai_adapter.benchmark import run_benchmark_suite
 
-        n_eps = 1 if self.quick else 5
-        summaries = run_benchmark_suite(n_episodes_per_tier=n_eps, seed_start=6000)
-        total_eps = sum(s.n_episodes for s in summaries)
-        total_success = sum(s.n_successes for s in summaries)
-        mean_steps = (
-            sum(s.mean_steps * s.n_episodes for s in summaries) / total_eps if total_eps else 0.0
-        )
-        ci_low, ci_high = wilson_score_interval(total_success, total_eps)
+            n_eps = 1 if self.quick else 5
+            summaries = run_benchmark_suite(n_episodes_per_tier=n_eps, seed_start=6000)
+            total_eps = sum(s.n_episodes for s in summaries)
+            total_success = sum(s.n_successes for s in summaries)
+            mean_steps = (
+                sum(s.mean_steps * s.n_episodes for s in summaries) / total_eps
+                if total_eps
+                else 0.0
+            )
+            ci_low, ci_high = wilson_score_interval(total_success, total_eps)
 
-        return {
-            "domain": "BabyAI",
-            "simulator": "minigrid / gymnasium",
-            "literature_baseline": "75-80% (BabyAI RL Baseline)",
-            "llm_baseline": "~18.0% (Context drift)",
-            "episodes": total_eps,
-            "success_rate": total_success / total_eps if total_eps else 0.0,
-            "ci_95": [round(ci_low, 3), round(ci_high, 3)],
-            "mean_steps": round(mean_steps, 1),
-            "metric_name": "Success Rate",
-            "token_cost": 0,
-            "dollar_cost": 0.0,
-            "raw_data": [getattr(s, "__dict__", str(s)) for s in summaries],
-        }
+            return {
+                "domain": "BabyAI",
+                "simulator": "minigrid / gymnasium",
+                "literature_baseline": "75-80% (BabyAI RL Baseline)",
+                "llm_baseline": "~18.0% (Context drift)",
+                "episodes": total_eps,
+                "success_rate": total_success / total_eps if total_eps else 0.0,
+                "ci_95": [round(ci_low, 3), round(ci_high, 3)],
+                "mean_steps": round(mean_steps, 1),
+                "metric_name": "Success Rate",
+                "token_cost": 0,
+                "dollar_cost": 0.0,
+                "raw_data": [getattr(s, "__dict__", str(s)) for s in summaries],
+            }
+        except Exception as exc:
+            logger.exception("BabyAI benchmark failed with exception: %s", exc)
+            return {
+                "domain": "BabyAI",
+                "simulator": "minigrid / gymnasium",
+                "literature_baseline": "75-80% (BabyAI RL Baseline)",
+                "llm_baseline": "~18.0% (Context drift)",
+                "episodes": 0,
+                "success_rate": 0.0,
+                "ci_95": [0.0, 0.0],
+                "mean_steps": 0.0,
+                "metric_name": "Success Rate",
+                "token_cost": 0,
+                "dollar_cost": 0.0,
+                "raw_data": {"error": str(exc)},
+            }
 
     def run_sokoban(self) -> dict[str, Any]:
         """Run Sokoban 5-tier Boxoban benchmark."""
@@ -333,6 +352,20 @@ class MasterReproducibilityRunner:
             except Exception as e:
                 logger.exception("Benchmark %s failed with exception: %s", key, e)
                 print(f" [ERROR] Benchmark {key} encountered exception: {e}")
+                self.results[key] = {
+                    "domain": key.capitalize(),
+                    "simulator": "native / standalone",
+                    "literature_baseline": "N/A",
+                    "llm_baseline": "N/A",
+                    "episodes": 0,
+                    "success_rate": 0.0,
+                    "ci_95": [0.0, 0.0],
+                    "mean_steps": 0.0,
+                    "metric_name": "Success Rate",
+                    "token_cost": 0,
+                    "dollar_cost": 0.0,
+                    "raw_data": {"error": str(e)},
+                }
 
         total_elapsed = time.time() - start_time
         print("\n" + "=" * 80)

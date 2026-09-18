@@ -154,97 +154,146 @@ def run_single_episode(
 ) -> EpisodeResult:
     """Execute a single closed-loop BabyAI episode using pure HCIR."""
     t_start = time.perf_counter()
-    env = make_gym_babyai_level(env_name)
-    obs, info = env.reset(seed=seed)
-
-    adapter = BabyAIPerceptionAdapter()
-    planner = BabyAIActionAdapter(room_size=room_size)
-    parser = BabyAIMissionParser()
-
-    mission = obs.get("mission", "")
+    env = None
+    steps = 0
+    mission = ""
     try:
-        goal = parser.parse(mission)
-    except Exception as e:
-        env.close()
+        env = make_gym_babyai_level(env_name)
+        reset_res = env.reset(seed=seed)
+        if isinstance(reset_res, tuple):
+            obs, info = reset_res
+        else:
+            obs = reset_res
+            info = {}
+
+        effective_room_size: int | tuple[int, int] = room_size
+        if hasattr(env, "width") and hasattr(env, "height"):
+            effective_room_size = (env.width, env.height)
+
+        adapter = BabyAIPerceptionAdapter()
+        planner = BabyAIActionAdapter(room_size=effective_room_size)
+        parser = BabyAIMissionParser()
+
+        mission = obs.get("mission", "") if hasattr(obs, "get") else getattr(obs, "mission", "")
+        try:
+            goal = parser.parse(mission)
+        except Exception as e:
+            t_end = time.perf_counter()
+            return EpisodeResult(
+                tier_id=tier_id,
+                env_name=env_name,
+                seed=seed,
+                mission=mission,
+                success=False,
+                steps=0,
+                reward=0.0,
+                duration_ms=(t_end - t_start) * 1000.0,
+                failure_reason=f"Mission parse error: {e}",
+            )
+
+        max_steps = (
+            max_steps_override
+            if max_steps_override is not None
+            else getattr(getattr(env, "unwrapped", env), "max_steps", 256)
+        )
+
+        success = False
+        reward = 0.0
+        failure_reason = ""
+
+        # Phase 0: 360-degree initial visual orientation scan
+        for _ in range(4):
+            unwrapped_env = getattr(env, "unwrapped", env)
+            adapter.ingest_observation(
+                obs,
+                known_agent_pos=getattr(unwrapped_env, "agent_pos", None),
+                known_carrying=getattr(unwrapped_env, "carrying", None),
+            )
+            step_res = env.step(int(MiniGridAction.LEFT))
+            if len(step_res) == 5:
+                obs, r, term, trunc, info = step_res
+            else:
+                obs, r, term, trunc = step_res[:4]
+                info = step_res[4] if len(step_res) > 4 else {}
+            steps += 1
+            if term and (r > 0.0 or info.get("goal_achieved")):
+                success = True
+                reward = float(r) if r > 0.0 else 1.0
+                break
+
+        # Phase 1: Closed-loop HCIR execution
+        if not success:
+            while steps < max_steps:
+                unwrapped_env = getattr(env, "unwrapped", env)
+                adapter.ingest_observation(
+                    obs,
+                    known_agent_pos=getattr(unwrapped_env, "agent_pos", None),
+                    known_carrying=getattr(unwrapped_env, "carrying", None),
+                )
+                act = planner.plan_next_action(adapter.graph, goal)
+                step_res = env.step(int(act))
+                if len(step_res) == 5:
+                    obs, r, term, trunc, info = step_res
+                else:
+                    obs, r, term, trunc = step_res[:4]
+                    info = step_res[4] if len(step_res) > 4 else {}
+                steps += 1
+                if term and (r > 0.0 or info.get("goal_achieved")):
+                    success = True
+                    reward = float(r) if r > 0.0 else 1.0
+                    break
+                if term:
+                    failure_reason = "Premature termination (term=True, r=0)"
+                    break
+                if trunc:
+                    failure_reason = "Environment truncated"
+                    break
+
+        if not success and not failure_reason:
+            failure_reason = f"Step budget exhausted ({steps}/{max_steps})"
+
         t_end = time.perf_counter()
+        duration_ms = (t_end - t_start) * 1000.0
+
+        return EpisodeResult(
+            tier_id=tier_id,
+            env_name=env_name,
+            seed=seed,
+            mission=mission,
+            success=success,
+            steps=steps,
+            reward=reward,
+            duration_ms=duration_ms,
+            llm_tokens=0,
+            failure_reason=failure_reason if not success else "",
+        )
+    except Exception as exc:
+        t_end = time.perf_counter()
+        logger.warning(
+            "Episode failed with unexpected error in %s (seed=%s): %s",
+            env_name,
+            seed,
+            exc,
+            exc_info=True,
+        )
         return EpisodeResult(
             tier_id=tier_id,
             env_name=env_name,
             seed=seed,
             mission=mission,
             success=False,
-            steps=0,
+            steps=steps,
             reward=0.0,
             duration_ms=(t_end - t_start) * 1000.0,
-            failure_reason=f"Mission parse error: {e}",
+            llm_tokens=0,
+            failure_reason=f"Runtime error: {exc}",
         )
-
-    max_steps = (
-        max_steps_override
-        if max_steps_override is not None
-        else getattr(env.unwrapped, "max_steps", 256)
-    )
-
-    steps = 0
-    success = False
-    reward = 0.0
-    failure_reason = ""
-
-    # Phase 0: 360-degree initial visual orientation scan
-    for _ in range(4):
-        adapter.ingest_observation(
-            obs,
-            known_agent_pos=getattr(env.unwrapped, "agent_pos", None),
-            known_carrying=getattr(env.unwrapped, "carrying", None),
-        )
-        obs, r, term, trunc, info = env.step(int(MiniGridAction.LEFT))
-        steps += 1
-        if term and r > 0.0:
-            success = True
-            reward = float(r)
-            break
-
-    # Phase 1: Closed-loop HCIR execution
-    if not success:
-        while steps < max_steps:
-            adapter.ingest_observation(
-                obs,
-                known_agent_pos=getattr(env.unwrapped, "agent_pos", None),
-                known_carrying=getattr(env.unwrapped, "carrying", None),
-            )
-            act = planner.plan_next_action(adapter.graph, goal)
-            obs, r, term, trunc, info = env.step(int(act))
-            steps += 1
-            if term and r > 0.0:
-                success = True
-                reward = float(r)
-                break
-            if term:
-                failure_reason = "Premature termination (term=True, r=0)"
-                break
-            if trunc:
-                failure_reason = "Environment truncated"
-                break
-
-    if not success and not failure_reason:
-        failure_reason = f"Step budget exhausted ({steps}/{max_steps})"
-
-    env.close()
-    t_end = time.perf_counter()
-    duration_ms = (t_end - t_start) * 1000.0
-
-    return EpisodeResult(
-        tier_id=tier_id,
-        env_name=env_name,
-        seed=seed,
-        mission=mission,
-        success=success,
-        steps=steps,
-        reward=reward,
-        duration_ms=duration_ms,
-        llm_tokens=0,
-        failure_reason=failure_reason if not success else "",
-    )
+    finally:
+        if env is not None:
+            try:
+                env.close()
+            except Exception:
+                pass
 
 
 def evaluate_tier(
@@ -257,13 +306,29 @@ def evaluate_tier(
     results: list[EpisodeResult] = []
     for i in range(n_episodes):
         seed = seed_start + i
-        res = run_single_episode(
-            env_name=cfg.env_name,
-            tier_id=cfg.tier_id,
-            seed=seed,
-            room_size=cfg.room_size,
-            max_steps_override=cfg.max_steps_override,
-        )
+        try:
+            res = run_single_episode(
+                env_name=cfg.env_name,
+                tier_id=cfg.tier_id,
+                seed=seed,
+                room_size=cfg.room_size,
+                max_steps_override=cfg.max_steps_override,
+            )
+        except Exception as exc:
+            logger.error(
+                "evaluate_tier encountered error for %s seed %d: %s", cfg.tier_id, seed, exc
+            )
+            res = EpisodeResult(
+                tier_id=cfg.tier_id,
+                env_name=cfg.env_name,
+                seed=seed,
+                mission="",
+                success=False,
+                steps=0,
+                reward=0.0,
+                duration_ms=0.0,
+                failure_reason=f"Tier evaluation error: {exc}",
+            )
         results.append(res)
 
     successes = sum(1 for r in results if r.success)
@@ -367,7 +432,28 @@ def run_benchmark_suite(
     t_suite_start = time.perf_counter()
     summaries: list[TierBenchmarkSummary] = []
     for cfg in configs:
-        summary = evaluate_tier(cfg, n_episodes=n_episodes_per_tier, seed_start=seed_start)
+        try:
+            summary = evaluate_tier(cfg, n_episodes=n_episodes_per_tier, seed_start=seed_start)
+        except Exception as exc:
+            logger.error("Failed to evaluate tier %s: %s", cfg.tier_id, exc)
+            summary = TierBenchmarkSummary(
+                tier_id=cfg.tier_id,
+                env_name=cfg.env_name,
+                description=cfg.description,
+                n_episodes=n_episodes_per_tier,
+                n_successes=0,
+                success_rate=0.0,
+                ci_95_low=0.0,
+                ci_95_high=0.0,
+                mean_steps=0.0,
+                std_steps=0.0,
+                median_steps=0.0,
+                mean_reward=0.0,
+                std_reward=0.0,
+                mean_duration_ms=0.0,
+                total_llm_tokens=0,
+                failure_reasons={f"Tier crash: {exc}": n_episodes_per_tier},
+            )
         summaries.append(summary)
 
     t_suite_end = time.perf_counter()
