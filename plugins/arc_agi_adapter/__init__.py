@@ -25,6 +25,15 @@ from .arc_agi_runner import (
     GridTopologyExtractor,
 )
 from .config import ARC3BenchmarkConfig
+from .control_mode import (
+    ActionObservation,
+    ControlContext,
+    ControllableEntity,
+    EntityId,
+    ModeConditionedDynamics,
+    ModeSwitchDetector,
+    SwitchMode,
+)
 
 __all__ = [
     # ARC-1 / 2 Static Grids
@@ -44,4 +53,12 @@ __all__ = [
     "ARC3InteractiveAgent",
     "ARC3BenchmarkRunner",
     "ARC3BenchmarkConfig",
+    # Control-Mode Primitive
+    "EntityId",
+    "ControllableEntity",
+    "ControlContext",
+    "ActionObservation",
+    "ModeSwitchDetector",
+    "ModeConditionedDynamics",
+    "SwitchMode",
 ]
