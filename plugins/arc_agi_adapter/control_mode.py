@@ -82,6 +82,16 @@ class ControlContext:
         self.active_entity = entity_id
         self.mode_history.append(entity_id)
 
+    def update_position(self, entity_id: EntityId, centroid: tuple[float, float]) -> None:
+        """Update the spatial centroid of an entity."""
+        if entity_id in self.entities:
+            self.entities[entity_id].centroid = centroid
+
+    def update_color(self, entity_id: EntityId, color: int) -> None:
+        """Update the visual color marker of an entity."""
+        if entity_id in self.entities:
+            self.entities[entity_id].color = color
+
     @property
     def mode_key(self) -> EntityId | None:
         """Current mode key for ModeConditionedDynamics lookup."""
@@ -213,36 +223,103 @@ class ModeSwitchDetector:
 class ModeConditionedDynamics:
     """Mode-conditioned replacement for global dict[int, ActionDynamicsModel].
 
-    Falls back to a single implicit mode for environments that never switch
-    control, maintaining 100% backward compatibility with single-avatar games.
+    Supports standard dict interface (keyed by action_id under the active mode)
+    while storing and retrieving mode-isolated models. Falls back to a single
+    implicit mode for environments that never switch control, maintaining 100%
+    backward compatibility with single-avatar games.
     """
 
     _IMPLICIT_MODE = EntityId("__implicit__")
 
-    def __init__(self) -> None:
+    def __init__(self, active_mode: EntityId | None = None) -> None:
         self._models: dict[tuple[int, EntityId], Any] = {}
+        self.active_mode: EntityId | None = active_mode
+
+    def set_active_mode(self, mode: EntityId | None) -> None:
+        """Set current active control mode for unconditioned dict access."""
+        self.active_mode = mode
 
     def set(self, action: int, mode: EntityId | None, model: Any) -> None:
         """Register an ActionDynamicsModel for a specific action and control mode."""
         self._models[(action, mode or self._IMPLICIT_MODE)] = model
 
-    def get(self, action: int, mode: EntityId | None) -> Any | None:
-        """Retrieve the dynamics model for an action in the given mode.
+    def get(self, action: int, mode_or_default: Any = None, default: Any = None) -> Any:
+        """Retrieve the dynamics model for an action.
 
-        Falls back to implicit mode if explicit mode is not found.
+        Supports:
+        - get(action, mode=EntityId)
+        - get(action, default=...)
+        - get(action)
         """
+        if isinstance(mode_or_default, EntityId):
+            mode = mode_or_default
+            d = default
+        else:
+            mode = self.active_mode
+            d = mode_or_default
+
         key = (action, mode or self._IMPLICIT_MODE)
         if key in self._models:
             return self._models[key]
-        # Fallback to implicit mode if mode-specific hasn't diverged
-        return self._models.get((action, self._IMPLICIT_MODE))
+        if (action, self._IMPLICIT_MODE) in self._models:
+            return self._models[(action, self._IMPLICIT_MODE)]
+        return d
+
+    def __getitem__(self, key: int | tuple[int, EntityId | None]) -> Any:
+        if isinstance(key, tuple):
+            action, mode = key
+        else:
+            action, mode = key, self.active_mode
+        m = self.get(action, mode)
+        if m is None:
+            raise KeyError(f"No dynamics model for action {action} in mode {mode}")
+        return m
+
+    def __setitem__(self, key: int | tuple[int, EntityId | None], model: Any) -> None:
+        if isinstance(key, tuple):
+            action, mode = key
+        else:
+            action, mode = key, self.active_mode
+        self.set(action, mode, model)
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, tuple):
+            action, mode = key
+            return (action, mode or self._IMPLICIT_MODE) in self._models
+        elif isinstance(key, int):
+            return self.get(key, self.active_mode) is not None
+        return False
+
+    def __iter__(self):
+        return iter(self.get_actions_for_mode(self.active_mode))
+
+    def __len__(self) -> int:
+        return len(self.get_actions_for_mode(self.active_mode))
+
+    def items(self) -> Any:
+        """Yield (action, model) for current active mode (with implicit fallback)."""
+        mode = self.active_mode or self._IMPLICIT_MODE
+        result: dict[int, Any] = {}
+        for (a, m), model in self._models.items():
+            if m == self._IMPLICIT_MODE:
+                result[a] = model
+        if mode != self._IMPLICIT_MODE:
+            for (a, m), model in self._models.items():
+                if m == mode:
+                    result[a] = model
+        return result.items()
+
+    def values(self) -> list[Any]:
+        return [v for _, v in self.items()]
+
+    def keys(self) -> list[int]:
+        return [k for k, _ in self.items()]
 
     def get_actions_for_mode(self, mode: EntityId | None) -> list[int]:
         """List all actions with dynamics defined under the specified mode."""
         target_mode = mode or self._IMPLICIT_MODE
         actions = [a for (a, m) in self._models if m == target_mode]
         if not actions and target_mode != self._IMPLICIT_MODE:
-            # Fall back to implicit
             actions = [a for (a, m) in self._models if m == self._IMPLICIT_MODE]
         return sorted(set(actions))
 

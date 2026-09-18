@@ -43,6 +43,13 @@ from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world_kernel import WorldKernel
 
 from .arc_agi_runner import ARCGrid, GridTopologyExtractor
+from .control_mode import (
+    ActionObservation,
+    ControlContext,
+    EntityId,
+    ModeConditionedDynamics,
+    ModeSwitchDetector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +265,9 @@ class ARC3InteractiveAgent:
     """
 
     def __init__(self) -> None:
-        self.action_models: dict[int, ActionDynamicsModel] = {}
+        self.control_context: ControlContext = ControlContext()
+        self.mode_switch_detector: ModeSwitchDetector = ModeSwitchDetector()
+        self.action_models: ModeConditionedDynamics = ModeConditionedDynamics()
         self.state_mutations: list[StateMutationModel] = []
         self.avatar_centroid: tuple[float, float] | None = None
         self.avatar_color: int | None = None
@@ -297,6 +306,8 @@ class ARC3InteractiveAgent:
         """Reset internal agent hypothesis state for a new level/episode."""
         if not retain_dynamics:
             self.action_models.clear()
+            self.control_context = ControlContext()
+            self.mode_switch_detector = ModeSwitchDetector()
             self.state_mutations.clear()
             self.step_size = 1
             self.avatar_color = None
@@ -414,6 +425,64 @@ class ARC3InteractiveAgent:
                 m.confidence = 0.99
                 m.probes_tested += 1
 
+            # Detect other entities moving or changing state (e.g. piece switch or character handoff)
+            other_entities_moved: list[EntityId] = []
+            for col in np.unique(prev_grid):
+                if col == 0 or (self.avatar_color is not None and col == self.avatar_color):
+                    continue
+                p_p = np.where(prev_grid == col)
+                p_c = np.where(curr_grid == col)
+                if len(p_p[0]) > 0 and len(p_c[0]) > 0 and abs(len(p_p[0]) - len(p_c[0])) <= 2:
+                    dr_other = float(np.mean(p_c[0]) - np.mean(p_p[0]))
+                    dc_other = float(np.mean(p_c[1]) - np.mean(p_p[1]))
+                    if abs(dr_other) > 0.5 or abs(dc_other) > 0.5:
+                        other_eid = EntityId(f"entity_{col}")
+                        other_entities_moved.append(other_eid)
+                        if other_eid not in self.control_context.entities:
+                            self.control_context.register_entity(
+                                other_eid,
+                                (float(np.mean(p_c[0])), float(np.mean(p_c[1]))),
+                                int(col),
+                                controllable=True,
+                            )
+
+            pre_pos = self.avatar_centroid or (0.0, 0.0)
+            active_eid = self.control_context.active_entity or EntityId(
+                f"entity_{self.avatar_color}" if self.avatar_color is not None else "avatar_0"
+            )
+            self.mode_switch_detector.record(
+                ActionObservation(
+                    action=action_id,
+                    pre_active_entity=active_eid,
+                    pre_centroid=pre_pos,
+                    post_centroid=pre_pos,
+                    other_entities_moved=other_entities_moved,
+                    action_data=self.last_action_data,
+                )
+            )
+
+            # If confirmed as a candidate mode switch, transition active control focus
+            if action_id in self.mode_switch_detector.candidate_mode_switches():
+                target_eid = other_entities_moved[0] if other_entities_moved else None
+                if not target_eid:
+                    available_eids = [
+                        eid for eid in self.control_context.entities if eid != active_eid
+                    ]
+                    if available_eids:
+                        target_eid = available_eids[0]
+
+                if target_eid and target_eid in self.control_context.entities:
+                    self.control_context.switch_to(target_eid)
+                    self.action_models.set_active_mode(target_eid)
+                    target_ent = self.control_context.entities[target_eid]
+                    self.avatar_centroid = target_ent.centroid
+                    self.avatar_color = target_ent.color
+                    logger.info(
+                        "ARC-3 ModeSwitch: Switched active control to %s (color=%d)",
+                        target_eid.label,
+                        target_ent.color,
+                    )
+
             # Pure click environments have no translating avatar
             if action_id == 6 and not any(a in [1, 2, 3, 4] for a in self.available_actions):
                 if self.last_click_target is not None:
@@ -488,9 +557,17 @@ class ARC3InteractiveAgent:
                     ):
                         # Spurious displacement / teleport: update centroid but do not corrupt motor dynamics
                         self.avatar_centroid = (new_r, new_c)
+                        if self.control_context.active_entity:
+                            self.control_context.update_position(
+                                self.control_context.active_entity, (new_r, new_c)
+                            )
                         return
 
                 self.avatar_centroid = (new_r, new_c)
+                if self.control_context.active_entity:
+                    self.control_context.update_position(
+                        self.control_context.active_entity, (new_r, new_c)
+                    )
                 self.visited_positions.append((int(round(new_r)), int(round(new_c))))
                 if len(self.visited_positions) > 30:
                     self.visited_positions.pop(0)
@@ -682,6 +759,22 @@ class ARC3InteractiveAgent:
             )
             self.blocked_actions.discard(action_id)
             self.stuck_counter = 0
+
+            # Register/update controllable entity in control context
+            best_eid = EntityId(f"entity_{best_col}")
+            if best_eid not in self.control_context.entities:
+                self.control_context.register_entity(
+                    best_eid,
+                    best_pos,
+                    int(best_col),
+                    controllable=True,
+                    set_active=True,
+                )
+            else:
+                self.control_context.update_position(best_eid, best_pos)
+                if self.control_context.active_entity is None:
+                    self.control_context.switch_to(best_eid)
+            self.action_models.set_active_mode(best_eid)
         else:
             if action_id not in self.action_models:
                 self.action_models[action_id] = ActionDynamicsModel(
@@ -703,6 +796,11 @@ class ARC3InteractiveAgent:
         # 1. Controllable Avatar PhysicalEntityNode
         if self.avatar_centroid is not None:
             ar, ac = int(round(self.avatar_centroid[0])), int(round(self.avatar_centroid[1]))
+            active_eid = (
+                self.control_context.active_entity.label
+                if self.control_context.active_entity
+                else "avatar"
+            )
             ws.upsert_node(
                 PhysicalEntityNode(
                     id="avatar",
@@ -715,6 +813,7 @@ class ARC3InteractiveAgent:
                         "is_avatar": True,
                         "movable": True,
                         "passable": False,
+                        "controlled_entity_id": active_eid,
                     },
                 )
             )
@@ -790,6 +889,13 @@ class ARC3InteractiveAgent:
                 id="var_target_positions",
                 variable_name="target_positions",
                 value=target_positions,
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_control_context",
+                variable_name="control_context",
+                value=self.control_context.to_dict(),
             )
         )
 
