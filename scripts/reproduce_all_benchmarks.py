@@ -354,7 +354,7 @@ class MasterReproducibilityRunner:
                 print(f" [ERROR] Benchmark {key} encountered exception: {e}")
                 self.results[key] = {
                     "domain": key.capitalize(),
-                    "simulator": "native / standalone",
+                    "simulator": "native upstream",
                     "literature_baseline": "N/A",
                     "llm_baseline": "N/A",
                     "episodes": 0,
