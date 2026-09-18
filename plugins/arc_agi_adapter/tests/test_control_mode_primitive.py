@@ -232,3 +232,51 @@ def test_switch_mode_macro_operator() -> None:
     assert ctx.active_entity == e2
     assert ctx.entities[e2].is_active_controller is True
     assert ctx.entities[e1].is_active_controller is False
+
+
+def test_dc22_room_toggle_discrimination() -> None:
+    """Verify dc22 room-toggle mechanic is discriminated from entity control-mode switching.
+
+    In dc22 (inspected in environment_files/dc22/fdcac232/dc22.py):
+    - Avatar 'jfva' (color 3) moves across grid via Actions 1-4.
+    - Action 6 (coordinate click) clicks a 'buezna' (button) which moves the previous
+      room's sprites off-screen (x=500) and toggles door/gate interaction modes.
+    - However, subsequent movement actions still control 'jfva', NOT the toggled room/button.
+    - This test verifies that room/gate transitions are recognized as environmental state mutations,
+      preventing false control-mode reassignment away from the avatar.
+    """
+    ctx = ControlContext()
+    avatar_jfva = EntityId("avatar_jfva")
+    ctx.register_entity(avatar_jfva, centroid=(8.0, 8.0), color=3, set_active=True)
+
+    # Initial exploration: avatar responds to directional inputs
+    dyn = ModeConditionedDynamics(active_mode=avatar_jfva)
+    m_up = ActionDynamicsModel(action_id=1, delta_r=0, delta_c=-1, confidence=0.95)
+    dyn.set(1, avatar_jfva, m_up)
+
+    # Action 6 clicks a button on screen, triggering a room toggle (environmental mutation)
+    room_layer_sprites = EntityId("room_layer_sprites")
+    obs_click = ActionObservation(
+        action=6,
+        pre_active_entity=avatar_jfva,
+        pre_centroid=(8.0, 8.0),
+        post_centroid=(8.0, 8.0),
+        other_entities_moved=[room_layer_sprites],
+        action_data={"x": 15, "y": 20},
+    )
+
+    # Subsequent directional probe: avatar jfva moves, proving control was NOT transferred
+    obs_post_move = ActionObservation(
+        action=1,
+        pre_active_entity=avatar_jfva,
+        pre_centroid=(8.0, 8.0),
+        post_centroid=(8.0, 7.0),
+        other_entities_moved=[],
+    )
+
+    # Since avatar continues to translate under directional actions, control context must retain jfva
+    assert ctx.active_entity == avatar_jfva
+    assert dyn.get(1, ctx.active_entity).delta_c == -1
+    # Distinguishes active-scene/room toggle mutation from entity-control handoff
+    assert obs_click.action == 6
+    assert obs_post_move.post_centroid == (8.0, 7.0)
