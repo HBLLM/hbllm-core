@@ -1005,10 +1005,16 @@ class ARC3InteractiveAgent:
                 and not (o.min_c == W - 1 and o.max_c == W - 1)
             ]
 
-            # Prioritize: larger area first, rarer colors first (distinct control buttons over repeated tiles)
+            # Prioritize: larger area first, rarer colors first, then deterministic spatial coordinate tie-breaker
             color_counts = {c: int(np.sum(curr_grid == c)) for c in np.unique(curr_grid)}
             sorted_objs = sorted(
-                valid_objs, key=lambda o: (-o.area, color_counts.get(o.color, 9999))
+                valid_objs,
+                key=lambda o: (
+                    -o.area,
+                    color_counts.get(o.color, 9999),
+                    int(round(o.centroid[0])),
+                    int(round(o.centroid[1])),
+                ),
             )
 
             for o in sorted_objs:
