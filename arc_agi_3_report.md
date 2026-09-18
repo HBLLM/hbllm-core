@@ -1,10 +1,10 @@
 # Official ARC-AGI-3 Interactive Reasoning Benchmark Report
-**Evaluation Date**: 2026-09-18 13:59:51
+**Evaluation Date**: 2026-09-18 14:18:16
 **Overall Level Completion Rate**: **3/8 (37.5%)**
 **Mean Fluid Action Efficiency**: **60.6%** (vs Human Baseline)
 **Mean Epistemic Brier Uncertainty**: **0.4646**
 **Total Actions Executed**: 456 across 4 environment(s)
-**Total Evaluation Time**: 18.23s
+**Total Evaluation Time**: 21.52s
 
 ## 1. Environment Performance Breakdown
 | Environment | Levels Completed | Win Rate | Actions Taken | Human Baseline | Efficiency | Brier Error |
