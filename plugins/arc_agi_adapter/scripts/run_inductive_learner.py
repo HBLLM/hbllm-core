@@ -1,8 +1,10 @@
 """CLI Runner for the Inductive HCIR Learner on ARC-AGI-3 environments."""
 
 import argparse
+import json
 import logging
 import time
+from pathlib import Path
 
 from plugins.arc_agi_adapter.inductive_learner import (
     InductiveARC3BenchmarkRunner,
@@ -70,6 +72,63 @@ def main() -> None:
                 f"  Level {lvl.level_index + 1}: Passed={lvl.completed}, Actions={lvl.actions_taken}, "
                 f"Baseline={lvl.baseline_actions}, Eff={lvl.efficiency_ratio * 100:.1f}%, Probes={lvl.epistemic_probes}"
             )
+
+    # Format Markdown report
+    report_lines = [
+        "# Inductive HCIR Learner Benchmark Report",
+        f"**Duration**: {duration:.2f}s across {len(results)} game(s)",
+        "",
+        "| Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |",
+        "|---|---|---|---|---|",
+    ]
+    for r in results:
+        report_lines.append(
+            f"| `{r.game_id}` | {r.levels_completed}/{r.total_levels} | {r.total_actions} | {r.total_baseline} | **{r.mean_efficiency * 100:.1f}%** |"
+        )
+    report_lines.append("")
+    report_lines.append("## Level-by-Level Breakdown")
+    for r in results:
+        report_lines.append(f"### Environment: `{r.game_id}`")
+        report_lines.append(
+            "| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |"
+        )
+        report_lines.append("|---|---|---|---|---|---|")
+        for lvl in r.level_results:
+            status = "**PASSED**" if lvl.completed else "ACTIVE"
+            report_lines.append(
+                f"| Level {lvl.level_index + 1} | {status} | {lvl.actions_taken} | {lvl.baseline_actions} | {lvl.efficiency_ratio * 100:.1f}% | {lvl.epistemic_probes} |"
+            )
+        report_lines.append("")
+
+    report_md = "\n".join(report_lines)
+    Path(args.output_report).write_text(report_md, encoding="utf-8")
+
+    scorecard_data = {
+        "games": [
+            {
+                "game_id": r.game_id,
+                "levels_completed": r.levels_completed,
+                "total_levels": r.total_levels,
+                "total_actions": r.total_actions,
+                "total_baseline": r.total_baseline,
+                "mean_efficiency": r.mean_efficiency,
+                "level_results": [
+                    {
+                        "level_index": lvl.level_index,
+                        "completed": lvl.completed,
+                        "actions_taken": lvl.actions_taken,
+                        "baseline_actions": lvl.baseline_actions,
+                        "efficiency_ratio": lvl.efficiency_ratio,
+                        "epistemic_probes": lvl.epistemic_probes,
+                    }
+                    for lvl in r.level_results
+                ],
+            }
+            for r in results
+        ]
+    }
+    Path(args.output_json).write_text(json.dumps(scorecard_data, indent=2), encoding="utf-8")
+    print("\n" + report_md + "\n")
 
 
 if __name__ == "__main__":

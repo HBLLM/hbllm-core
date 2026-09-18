@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 import numpy as np
 
-from .arc_agi_runner import ARCGrid, GridTopologyExtractor
+from .arc_agi_3_runner import (
+    ActionDynamicsModel,
+    ARC3InteractiveAgent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,32 +131,43 @@ class FrameDiffAnalyzer:
         old_colors = {(r, c): int(prev_grid[r, c]) for r, c in mutated_coords}
         new_colors = {(r, c): int(curr_grid[r, c]) for r, c in mutated_coords}
 
-        # Check if an identifiable object translated
-        arc_prev = ARCGrid.from_list(prev_grid.tolist())
-        arc_curr = ARCGrid.from_list(curr_grid.tolist())
-        prev_objs = GridTopologyExtractor.extract_objects(arc_prev)
-        curr_objs = GridTopologyExtractor.extract_objects(arc_curr)
-
-        for p_obj in prev_objs:
-            if p_obj.area < 1 or p_obj.area > total_pixels * 0.25:
+        # Check if an identifiable object translated via rigid cluster centroid shift
+        bg_color = int(np.bincount(prev_grid.flatten()).argmax())
+        candidates = []
+        for col in np.unique(prev_grid):
+            if col == 0 or col == bg_color:
                 continue
-            for c_obj in curr_objs:
-                if c_obj.color == p_obj.color and c_obj.area == p_obj.area:
-                    dr = int(round(c_obj.centroid[0] - p_obj.centroid[0]))
-                    dc = int(round(c_obj.centroid[1] - p_obj.centroid[1]))
-                    if (dr != 0 or dc != 0) and abs(dr) <= 10 and abs(dc) <= 10:
-                        # Verified translation of object
-                        return FrameDiff(
-                            diff_type=DiffType.TRANSLATION,
-                            changed_pixel_count=changed_count,
-                            bounding_box=bbox,
-                            translation_delta=(dr, dc),
-                            mutated_coords=mutated_coords,
-                            old_colors=old_colors,
-                            new_colors=new_colors,
-                            moved_object_color=p_obj.color,
-                            moved_object_size=p_obj.area,
-                        )
+            prev_pts = np.where(prev_grid == col)
+            curr_pts = np.where(curr_grid == col)
+            np_p, np_c = len(prev_pts[0]), len(curr_pts[0])
+            if (
+                0 < np_p < int(total_pixels * 0.25)
+                and 0 < np_c < int(total_pixels * 0.25)
+                and abs(np_p - np_c) <= 2
+            ):
+                if np.any(diff_mask[prev_pts]) or np.any(diff_mask[curr_pts]):
+                    dr_f = float(np.mean(curr_pts[0]) - np.mean(prev_pts[0]))
+                    dc_f = float(np.mean(curr_pts[1]) - np.mean(prev_pts[1]))
+                    if abs(dr_f) > 0.5 or abs(dc_f) > 0.5:
+                        dr = int(round(dr_f))
+                        dc = int(round(dc_f))
+                        if abs(dr) <= 12 and abs(dc) <= 12:
+                            candidates.append((int(col), np_c, dr, dc))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[1])
+            best_col, best_size, dr, dc = candidates[0]
+            return FrameDiff(
+                diff_type=DiffType.TRANSLATION,
+                changed_pixel_count=changed_count,
+                bounding_box=bbox,
+                translation_delta=(dr, dc),
+                mutated_coords=mutated_coords,
+                old_colors=old_colors,
+                new_colors=new_colors,
+                moved_object_color=best_col,
+                moved_object_size=best_size,
+            )
 
         # Check for discrete index cycle / cursor displacement
         if changed_count <= 8:
@@ -262,6 +275,16 @@ class CrossLevelKnowledgeBase:
                 self.controllable_signature.color = diff.moved_object_color
                 self.controllable_signature.area = diff.moved_object_size
 
+            # Learn walkable floor colors from vacated and newly entered pixels
+            if self.controllable_signature.color is not None:
+                for r, c in diff.mutated_coords:
+                    old_c = diff.old_colors.get((r, c))
+                    new_c = diff.new_colors.get((r, c))
+                    if old_c == self.controllable_signature.color and new_c is not None:
+                        self.walkable_colors.add(new_c)
+                    elif new_c == self.controllable_signature.color and old_c is not None:
+                        self.walkable_colors.add(old_c)
+
         elif diff.diff_type == DiffType.INDEX_CYCLE:
             aff.is_cycler = True
             aff.confidence = min(1.0, aff.confidence + 0.3)
@@ -334,11 +357,11 @@ class InductiveHCIRAgent:
 
     def __init__(self) -> None:
         self.knowledge_base: CrossLevelKnowledgeBase = CrossLevelKnowledgeBase()
+        self.hcir_agent: ARC3InteractiveAgent = ARC3InteractiveAgent()
         self.prev_grid: np.ndarray | None = None
         self.last_action: int | None = None
-        self.exploration_budget: int = 25
-        self.step_counter: int = 0
         self.current_level: int = 0
+        self.last_action_data: dict[str, int] | None = None
         self.current_actor_pos: tuple[int, int] | None = None
         self.current_target_pos: tuple[int, int] | None = None
 
@@ -346,12 +369,29 @@ class InductiveHCIRAgent:
         """Reset internal step state while preserving cross-level knowledge."""
         self.prev_grid = None
         self.last_action = None
-        self.step_counter = 0
+        self.last_action_data = None
         if not retain_dynamics:
             self.knowledge_base = CrossLevelKnowledgeBase()
+            self.hcir_agent.reset_episode(retain_dynamics=False)
             self.current_level = 0
         else:
             self.current_level += 1
+            self.hcir_agent.reset_episode(retain_dynamics=True)
+            # Retain and transfer cross-level knowledge zero-shot
+            if self.knowledge_base.controllable_signature.color is not None:
+                self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
+            elif self.hcir_agent.avatar_color is not None:
+                self.knowledge_base.controllable_signature.color = self.hcir_agent.avatar_color
+
+            for a, aff in self.knowledge_base.action_affordances.items():
+                if aff.confidence >= 0.4 and a not in self.hcir_agent.action_models:
+                    self.hcir_agent.action_models[a] = ActionDynamicsModel(
+                        action_id=a,
+                        delta_r=aff.delta_r,
+                        delta_c=aff.delta_c,
+                        confidence=aff.confidence,
+                        probes_tested=aff.times_tested,
+                    )
 
     def plan_next_action(
         self,
@@ -359,220 +399,48 @@ class InductiveHCIRAgent:
         available_actions: list[int],
     ) -> tuple[int, float]:
         """Select action via trial-and-error induction or goal-directed transfer planning."""
-        self.step_counter += 1
-
         # 1. Assimilate feedback from previous action if available
         if self.prev_grid is not None and self.last_action is not None:
             diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
             self.knowledge_base.register_observation(
                 self.prev_grid, self.last_action, curr_grid, diff
             )
+            self.hcir_agent.update_causal_dynamics(self.last_action, self.prev_grid, curr_grid)
 
-        # 2. Determine operational mode: Epistemic Probing vs Goal Exploitation
-        is_grounded = self.knowledge_base.is_world_model_grounded(available_actions)
-        is_level_transfer = self.current_level > 0 and is_grounded
+        # Synchronize controllable signature and affordances
+        if (
+            self.hcir_agent.avatar_color is None
+            and self.knowledge_base.controllable_signature.color is not None
+        ):
+            self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
 
-        action: int
-        confidence: float
+        for a, aff in self.knowledge_base.action_affordances.items():
+            if a not in self.hcir_agent.action_models and aff.confidence >= 0.4:
+                self.hcir_agent.action_models[a] = ActionDynamicsModel(
+                    action_id=a,
+                    delta_r=aff.delta_r,
+                    delta_c=aff.delta_c,
+                    confidence=aff.confidence,
+                    probes_tested=aff.times_tested,
+                )
 
-        if is_level_transfer:
-            # Transfer Mode: Leverage already-learned dynamics directly
-            action, confidence = self._plan_transfer_action(curr_grid, available_actions)
-        elif not is_grounded or self.step_counter <= self.exploration_budget:
-            # Exploration Mode: Probe actions to discover state typology and transitions
-            action, confidence = self._plan_exploratory_action(available_actions)
-        else:
-            # Exploitation Mode on Level 1 once grounded
-            action, confidence = self._plan_transfer_action(curr_grid, available_actions)
+        # 2. Plan next action using HCIR engine
+        action, conf = self.hcir_agent.plan_next_action(curr_grid, available_actions)
+        self.last_action_data = self.hcir_agent.last_action_data
+
+        if self.hcir_agent.avatar_centroid:
+            self.current_actor_pos = (
+                int(self.hcir_agent.avatar_centroid[0]),
+                int(self.hcir_agent.avatar_centroid[1]),
+            )
+        if self.hcir_agent.primary_goal_node:
+            tp = self.hcir_agent.primary_goal_node.properties.get("target_position")
+            if tp:
+                self.current_target_pos = (int(tp[0]), int(tp[1]))
 
         self.prev_grid = curr_grid.copy()
         self.last_action = action
-        return action, confidence
-
-    def _plan_exploratory_action(self, available_actions: list[int]) -> tuple[int, float]:
-        """Select exploratory action to maximize causal information gain."""
-        # Prioritize least-tested actions first
-        untested = [a for a in available_actions if a not in self.knowledge_base.action_affordances]
-        if untested:
-            return untested[0], 0.35
-
-        # Prioritize actions with low confidence
-        scored = sorted(
-            available_actions,
-            key=lambda a: self.knowledge_base.action_affordances[a].times_tested,
-        )
-        return scored[0], 0.50
-
-    def _plan_transfer_action(
-        self,
-        curr_grid: np.ndarray,
-        available_actions: list[int],
-    ) -> tuple[int, float]:
-        """Execute goal-directed planning using accumulated cross-level knowledge."""
-        typology = self.knowledge_base.puzzle_typology
-
-        if typology == PuzzleTypology.SPATIAL_NAVIGATION:
-            return self._plan_spatial_transfer_step(curr_grid, available_actions)
-        elif typology == PuzzleTypology.DISCRETE_PERMUTATION:
-            return self._plan_permutation_step(available_actions)
-        elif typology == PuzzleTypology.CANVAS_STAMPING:
-            return self._plan_stamping_step(available_actions)
-
-        # Fallback to least-tested action
-        return self._plan_exploratory_action(available_actions)
-
-    def _plan_spatial_transfer_step(
-        self,
-        curr_grid: np.ndarray,
-        available_actions: list[int],
-    ) -> tuple[int, float]:
-        """Plan navigation step using learned directional affordances and BFS search."""
-        H, W = curr_grid.shape
-        actor_color = self.knowledge_base.controllable_signature.color
-        if actor_color is None:
-            return self._plan_exploratory_action(available_actions)
-
-        actor_pts = np.argwhere(curr_grid == actor_color)
-        if len(actor_pts) == 0:
-            return available_actions[0], 0.40
-
-        actor_r = int(round(float(np.mean(actor_pts[:, 0]))))
-        actor_c = int(round(float(np.mean(actor_pts[:, 1]))))
-        self.current_actor_pos = (actor_r, actor_c)
-
-        bg_color = int(np.bincount(curr_grid.flatten()).argmax())
-        arc_grid = ARCGrid.from_list(curr_grid.tolist())
-        objs = GridTopologyExtractor.extract_objects(arc_grid, background_color=bg_color)
-
-        # Candidate goals: non-background, non-actor objects of reasonable size
-        candidate_goals = [
-            o
-            for o in objs
-            if o.color != actor_color
-            and 2 <= o.area <= int(H * W * 0.25)
-            and not (o.min_r == 0 and o.max_r == H - 1)
-            and not (o.min_c == 0 and o.max_c == W - 1)
-        ]
-
-        target_r: int
-        target_c: int
-
-        if candidate_goals:
-            # Pick the most distinct or closest goal candidate
-            target_obj = min(
-                candidate_goals,
-                key=lambda o: (
-                    o.area,
-                    abs(o.centroid[0] - actor_r) + abs(o.centroid[1] - actor_c),
-                ),
-            )
-            target_r = int(round(target_obj.centroid[0]))
-            target_c = int(round(target_obj.centroid[1]))
-        else:
-            # Fallback to any non-background non-actor coordinate
-            target_pts = np.argwhere((curr_grid != bg_color) & (curr_grid != actor_color))
-            if len(target_pts) == 0:
-                return available_actions[0], 0.40
-            target_r = int(np.mean(target_pts[:, 0]))
-            target_c = int(np.mean(target_pts[:, 1]))
-
-        # Run BFS from (actor_r, actor_c) to target area using grounded directional actions
-        directional_affs = [
-            aff
-            for a, aff in self.knowledge_base.action_affordances.items()
-            if a in available_actions
-            and (aff.delta_r != 0 or aff.delta_c != 0)
-            and aff.confidence >= 0.4
-        ]
-
-        if directional_affs:
-            step_size = max(
-                max(abs(aff.delta_r) for aff in directional_affs),
-                max(abs(aff.delta_c) for aff in directional_affs),
-                1,
-            )
-            dist_threshold = max(2, step_size)
-
-            queue = deque([(actor_r, actor_c, [])])
-            visited = {(actor_r, actor_c)}
-
-            while queue:
-                cr, cc, path = queue.popleft()
-                if abs(cr - target_r) <= dist_threshold and abs(cc - target_c) <= dist_threshold:
-                    if path:
-                        return path[0], 0.90
-
-                if len(path) >= 60:
-                    continue
-
-                for aff in directional_affs:
-                    nr = cr + aff.delta_r
-                    nc = cc + aff.delta_c
-                    if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
-                        # Avoid known impassable obstacle colors (e.g. walls)
-                        cell_color = int(curr_grid[nr, nc])
-                        is_target = (
-                            abs(nr - target_r) <= dist_threshold
-                            and abs(nc - target_c) <= dist_threshold
-                        )
-                        if (
-                            cell_color == bg_color
-                            or cell_color == actor_color
-                            or is_target
-                            or cell_color not in self.knowledge_base.barrier_colors
-                        ):
-                            visited.add((nr, nc))
-                            queue.append((nr, nc, path + [aff.action_id]))
-
-        # Greedy directional fallback
-        dr_needed = target_r - actor_r
-        dc_needed = target_c - actor_c
-        best_action = available_actions[0]
-        best_progress = -999.0
-
-        for a in available_actions:
-            aff = self.knowledge_base.action_affordances.get(a)
-            if not aff or aff.confidence < 0.3:
-                continue
-            prog = 0.0
-            if dr_needed != 0 and np.sign(aff.delta_r) == np.sign(dr_needed):
-                prog += abs(aff.delta_r)
-            if dc_needed != 0 and np.sign(aff.delta_c) == np.sign(dc_needed):
-                prog += abs(aff.delta_c)
-            if prog > best_progress:
-                best_progress = prog
-                best_action = a
-
-        conf = 0.85 if best_progress > 0 else 0.50
-        return best_action, conf
-
-    def _plan_permutation_step(self, available_actions: list[int]) -> tuple[int, float]:
-        """Plan combination wheel / selector step using learned cyclic affordances."""
-        cyclers = [
-            a
-            for a in available_actions
-            if self.knowledge_base.action_affordances.get(a, ActionAffordance(a)).is_cycler
-        ]
-        if cyclers:
-            # Alternately cycle and modify values
-            act = cyclers[self.step_counter % len(cyclers)]
-            return act, 0.75
-        return available_actions[0], 0.45
-
-    def _plan_stamping_step(self, available_actions: list[int]) -> tuple[int, float]:
-        """Plan canvas stamp step using learned perimeter rotation and stamp trigger."""
-        stamps = [
-            a
-            for a in available_actions
-            if self.knowledge_base.action_affordances.get(a, ActionAffordance(a)).is_commit_or_stamp
-        ]
-        rotators = [a for a in available_actions if a not in stamps and a in (1, 2, 3, 4)]
-        # Rotate then stamp
-        if stamps and self.step_counter % 3 == 0:
-            return stamps[0], 0.80
-        elif rotators:
-            return rotators[self.step_counter % len(rotators)], 0.70
-        return available_actions[0], 0.50
+        return action, conf
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -624,6 +492,12 @@ class InductiveARC3BenchmarkRunner:
         baseline_list = [50] * total_levels
         if hasattr(env, "baseline_actions") and env.baseline_actions:
             baseline_list = list(env.baseline_actions)[:total_levels]
+        elif (
+            hasattr(env, "info")
+            and hasattr(env.info, "baseline_actions")
+            and env.info.baseline_actions
+        ):
+            baseline_list = list(env.info.baseline_actions)[:total_levels]
 
         level_results: list[InductiveLevelResult] = []
         levels_completed = 0
@@ -650,8 +524,15 @@ class InductiveARC3BenchmarkRunner:
                 action_int, _ = self.agent.plan_next_action(curr_grid, available_actions)
                 game_act = getattr(ARCGameAction, f"ACTION{action_int}", ARCGameAction.ACTION1)
 
+                action_data = self.agent.last_action_data
                 prev_grid = curr_grid
-                frame_data = env.step(game_act)
+                if action_data:
+                    try:
+                        frame_data = env.step(game_act, data=action_data)
+                    except TypeError:
+                        frame_data = env.step(game_act)
+                else:
+                    frame_data = env.step(game_act)
                 curr_grid = frame_data.frame[0] if frame_data and frame_data.frame else prev_grid
                 lvl_actions += 1
 
