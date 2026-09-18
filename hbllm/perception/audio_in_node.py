@@ -617,7 +617,7 @@ class AudioInputNode(Node):
             "NVIDIA_ASR_URL", "https://integrate.api.nvidia.com/v1/audio/transcriptions"
         )
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
                 headers = {"Authorization": f"Bearer {api_key}"}
                 with open(file_path, "rb") as f:
                     files = {"file": (os.path.basename(file_path), f, "audio/wav")}

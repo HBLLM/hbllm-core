@@ -30,7 +30,7 @@ from collections.abc import Iterator
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from hbllm.hcir.proposition import (
     Proposition,
@@ -57,8 +57,76 @@ from hbllm.hcir.types import (
     ResearchStrategyType,
     Scope,
     TimeDuration,
+    Timestamp,
     UncertaintyVector,
 )
+
+__all__ = [
+    # Enums
+    "ActionModality",
+    "CognitiveCategory",
+    "EntityLifecycle",
+    "GoalLifecycle",
+    "HCIREdgeType",
+    "HCIRNodeType",
+    "HypothesisLifecycle",
+    "NodeLifecycle",
+    # Base classes & mixins
+    "EvidenceIntegrationMixin",
+    "HCIREdge",
+    "HCIRNode",
+    "has_evidence_integration",
+    # Directive nodes
+    "ConstraintNode",
+    "GoalNode",
+    "IntentNode",
+    # Epistemology & discovery nodes
+    "ClaimNode",
+    "ContradictionNode",
+    "EvidenceNode",
+    "ExperimentNode",
+    "FactNode",
+    "HypothesisNode",
+    "ObservationNode",
+    "PerceptualEvidenceNode",
+    "PredictionErrorNode",
+    "PredictionNode",
+    "ResearchObjectiveNode",
+    "ResearchProgramNode",
+    "UnknownNode",
+    # Belief & reasoning nodes
+    "BeliefNode",
+    "BeliefTransitionNode",
+    # Execution nodes
+    "ActionNode",
+    "CapabilityNode",
+    "EventNode",
+    "ResourceNode",
+    # Memory nodes
+    "ConceptNode",
+    "EpisodeNode",
+    "ExternalKnowledgeNode",
+    "ProcedureNode",
+    "SkillNode",
+    "ValueNode",
+    # Perception nodes
+    "AcousticConceptNode",
+    "AudioObservationNode",
+    "VisualConceptNode",
+    "VisualObservationNode",
+    # Learning & adaptation nodes
+    "AdaptationEventNode",
+    "GroundedConceptNode",
+    "LearnedRuleNode",
+    "PredictiveModelNode",
+    # World model nodes
+    "EnvironmentStateNode",
+    "PhysicalEntityNode",
+    "WorldVariableNode",
+    # Registry & Graph
+    "CognitiveGraph",
+    "NODE_TYPE_REGISTRY",
+]
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Enumerations
@@ -311,6 +379,8 @@ class HCIRNode(BaseModel):
     scope, and lifecycle — shared by every cognitive entity.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(default_factory=lambda: _new_id("n"))
     node_type: HCIRNodeType
     category: CognitiveCategory
@@ -321,6 +391,11 @@ class HCIRNode(BaseModel):
     scope: Scope = Field(default_factory=Scope)
     tags: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
+    confidence: float | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.confidence is not None:
+            self.uncertainty.confidence = self.confidence
 
 
 # ── Directive Nodes ──────────────────────────────────────────────────────
@@ -354,7 +429,19 @@ class ConstraintNode(HCIRNode):
     category: CognitiveCategory = CognitiveCategory.REASONING
     name: str = ""
     expression: str = ""
+    description: str = ""
+    constraint_type: str = ""
+    target: str = ""
     enforcement: str = "HARD"  # "HARD" | "SOFT"
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.description and self.target:
+            self.description = self.target
+        elif not self.target and self.description:
+            self.target = self.description
+        if not self.expression and self.description:
+            self.expression = self.description
 
 
 # ── Epistemology Hierarchy ───────────────────────────────────────────────
@@ -365,9 +452,12 @@ class ObservationNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.OBSERVATION
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    description: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
     sensor_source: str = ""
     modality: str = ""  # "audio", "visual", "iot", etc.
+    sensor_modality: str = ""
     temporal_span: dict[str, float] = Field(
         default_factory=dict
     )  # {"start_time": ..., "end_time": ...}
@@ -378,6 +468,17 @@ class ObservationNode(HCIRNode):
         None  # {"provider": ..., "model": ..., "version": ...}
     )
     raw_reference: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.modality and self.sensor_modality:
+            self.modality = self.sensor_modality
+        elif not self.sensor_modality and self.modality:
+            self.sensor_modality = self.modality
+        if not self.payload and self.raw_payload:
+            self.payload = self.raw_payload
+        elif not self.raw_payload and self.payload:
+            self.raw_payload = self.payload
 
 
 class VisualObservationNode(ObservationNode):
@@ -401,7 +502,17 @@ class VisualObservationNode(ObservationNode):
     embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
     image_hash: str = ""  # SHA-256 for dedup
     caption: str = ""  # Optional text description
+    label: str = ""
     regions: list[dict[str, Any]] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.caption and self.label:
+            self.caption = self.label
+        elif not self.label and self.caption:
+            self.label = self.caption
+        if not self.description and self.caption:
+            self.description = self.caption
 
 
 class FactNode(HCIRNode):
@@ -410,6 +521,17 @@ class FactNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.FACT
     category: CognitiveCategory = CognitiveCategory.REASONING
     claim: str = ""
+    statement: str = ""
+    certainty: float | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+        if self.certainty is not None:
+            self.uncertainty.confidence = self.certainty
 
 
 class BeliefNode(HCIRNode):
@@ -427,8 +549,19 @@ class BeliefNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.BELIEF
     category: CognitiveCategory = CognitiveCategory.REASONING
     claim: str = ""
+    statement: str = ""
+    epistemic_confidence: float | None = None
     belief_type: str = "factual"  # factual, causal, procedural, strategic
     evidence_sources: list[str] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+        if self.epistemic_confidence is not None:
+            self.uncertainty.confidence = self.epistemic_confidence
 
     # ── Epistemic extensions ────────────────────────────────────────
     counter_evidence: list[str] = Field(default_factory=list)
@@ -485,6 +618,15 @@ class HypothesisNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.HYPOTHESIS
     category: CognitiveCategory = CognitiveCategory.REASONING
     claim: str = ""
+    statement: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+
     supporting_evidence: list[str] = Field(default_factory=list)
     counter_evidence: list[str] = Field(default_factory=list)
 
@@ -526,7 +668,7 @@ class PredictionNode(HCIRNode):
     hypothesis_id: str = ""  # Which hypothesis generated this prediction?
     observed_outcome: str = ""  # What actually happened?
     verified: bool = False  # Has this prediction been checked?
-    verification_timestamp: float = 0.0
+    verification_timestamp: Timestamp = 0.0
     prediction_correct: bool | None = None  # None = unverified, True/False = result
 
 
@@ -565,12 +707,23 @@ class ActionNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.ACTION
     category: CognitiveCategory = CognitiveCategory.EXECUTION
     intent: str = ""
+    action_type: str = ""
     modality: ActionModality = ActionModality.COGNITIVE
     requirements: list[str] = Field(default_factory=list)
     produces: list[str] = Field(default_factory=list)
     estimated_cost: CostMetric = 0
+    risk_factor: float = 0.0
     permissions: list[str] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
     properties: dict[str, Any] = Field(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.intent and self.action_type:
+            self.intent = self.action_type
+        elif not self.action_type and self.intent:
+            self.action_type = self.intent
 
 
 class EventNode(HCIRNode):
@@ -583,7 +736,7 @@ class EventNode(HCIRNode):
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
     event_kind: str = ""
     event_data: dict[str, Any] = Field(default_factory=dict)
-    event_timestamp: float = Field(default_factory=time.time)
+    event_timestamp: Timestamp = Field(default_factory=time.time)
 
 
 class ResourceNode(HCIRNode):
@@ -614,8 +767,8 @@ class CapabilityNode(HCIRNode):
     output_schema: dict[str, Any] = Field(default_factory=dict)
 
     # ── Declarative metadata for market-based selection ──
-    estimated_cost: int = 0  # Token cost estimate
-    latency_ms: int = 0  # Expected latency in ms
+    estimated_cost: CostMetric = 0  # Token cost estimate
+    latency_ms: TimeDuration = 0  # Expected latency in ms
     cooldown_seconds: float = 0.0  # Minimum interval between invocations
     requires_approval: bool = False  # Needs governance approval
     max_concurrent: int = 0  # 0 = unlimited
@@ -668,7 +821,7 @@ class VisualConceptNode(ConceptNode):
     observation_count: int = 0
     exemplar_refs: list[str] = Field(default_factory=list)  # EmbeddingRef IDs
     aliases: list[str] = Field(default_factory=list)
-    last_seen: float = 0.0
+    last_seen: Timestamp = 0.0
     contexts: list[str] = Field(default_factory=list)
 
 
@@ -695,8 +848,8 @@ class AudioObservationNode(ObservationNode):
     audio_hash: str = ""  # SHA-256 for dedup
     event_type: str = ""  # e.g. "speech", "doorbell", "silence"
     event_id: str = ""  # Groups related observations
-    start_time: float = 0.0
-    end_time: float = 0.0
+    start_time: Timestamp = 0.0
+    end_time: Timestamp = 0.0
     duration: float = 0.0
     transcript: str = ""  # If speech
     speaker_ref: str = ""  # Speaker embedding ref
@@ -725,7 +878,7 @@ class AcousticConceptNode(ConceptNode):
     embedding_model: str = ""
     observation_count: int = 0
     exemplar_refs: list[str] = Field(default_factory=list)
-    last_heard: float = 0.0
+    last_heard: Timestamp = 0.0
     sound_type: str = ""  # e.g. "event", "ambient", "speech_pattern"
     contexts: list[str] = Field(default_factory=list)
 
@@ -741,8 +894,10 @@ class SkillNode(HCIRNode):
     preconditions: list[str] = Field(default_factory=list)
     postconditions: list[str] = Field(default_factory=list)
     success_rate: Confidence = 0.5
+    invocation_count: int = 0
 
     def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
         if not self.skill_name and self.name:
             self.skill_name = self.name
         elif not self.name and self.skill_name:
@@ -754,8 +909,18 @@ class ProcedureNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.PROCEDURE
     category: CognitiveCategory = CognitiveCategory.MEMORY
+    name: str = ""
+    procedure_name: str = ""
+    description: str = ""
     steps: list[str] = Field(default_factory=list)
     is_atomic: bool = False
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.name and self.procedure_name:
+            self.name = self.procedure_name
+        elif not self.procedure_name and self.name:
+            self.procedure_name = self.name
 
 
 # ── A14: Prediction-Error-Centered Learning Nodes ────────────────────────
@@ -807,8 +972,8 @@ class PredictiveModelNode(HCIRNode):
     adaptation_count: int = 0
     learning_rate: float = 0.01
     prediction_count: int = 0
-    created_at: float = 0.0
-    last_adapted_at: float = 0.0
+    created_at: Timestamp = 0.0
+    last_adapted_at: Timestamp = 0.0
 
 
 class AdaptationEventNode(HCIRNode):
@@ -895,7 +1060,8 @@ class ExternalKnowledgeNode(HCIRNode):
 # ── Evidence Integration Mixin ───────────────────────────────────────────
 
 
-class EvidenceIntegrationMixin:
+class EvidenceIntegrationMixin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     """Shared epistemic integration fields for all evidence types.
 
     This mixin provides the fields that the belief revision pipeline
@@ -945,7 +1111,7 @@ class EvidenceIntegrationMixin:
     )
     novelty_score: float = 1.0  # Composite multidimensional novelty [0.0, 1.0]
     temporal_pattern: str = "unknown"  # persistent | transition | transient | periodic | unknown
-    last_incorporated_at: float = 0.0  # Timestamp of most recent incorporation
+    last_incorporated_at: Timestamp = 0.0  # Timestamp of most recent incorporation
 
 
 def has_evidence_integration(node: Any) -> bool:
@@ -1058,7 +1224,7 @@ class ClaimNode(HCIRNode):
     statement: str = ""  # The claim text
     source_uri: str = ""  # Where this claim came from
     source_type: str = ""  # "paper", "observation", "simulation", "expert", "inference"
-    extracted_at: float = 0.0
+    extracted_at: Timestamp = 0.0
     supporting_evidence_ids: list[str] = Field(default_factory=list)
     contradicting_evidence_ids: list[str] = Field(default_factory=list)
     domain: str = ""  # Knowledge domain
@@ -1106,6 +1272,7 @@ class ContradictionNode(HCIRNode):
 
     node_type: HCIRNodeType = HCIRNodeType.CONTRADICTION
     category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    description: str = ""
     claim_a_id: str = ""  # First conflicting claim/evidence/observation
     claim_b_id: str = ""  # Second conflicting claim/evidence/observation
     contradiction_type: str = ""  # "direct", "statistical", "methodological", "contextual"
@@ -1189,7 +1356,7 @@ class ResearchProgramNode(HCIRNode):
     objective_ids: list[str] = Field(default_factory=list)  # Research objectives
     overall_confidence: Confidence = 0.0  # How confident are we in conclusions?
     current_strategy: ResearchStrategyType = ResearchStrategyType.EXPLORATION
-    started_at: float = Field(default_factory=time.time)
+    started_at: Timestamp = Field(default_factory=time.time)
     cognitive_mode: CognitiveMode = CognitiveMode.DISCOVERY
 
 
@@ -1257,14 +1424,31 @@ class PhysicalEntityNode(HCIRNode):
     node_type: HCIRNodeType = HCIRNodeType.PHYSICAL_ENTITY
     category: CognitiveCategory = CognitiveCategory.PERCEPTION
     entity_name: str = ""
+    name: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.entity_name and self.name:
+            self.entity_name = self.name
+        elif not self.name and self.entity_name:
+            self.name = self.entity_name
+        if not self.properties and self.observed_properties:
+            self.properties = self.observed_properties
+        elif not self.observed_properties and self.properties:
+            self.observed_properties = self.properties
+        if self.mass is not None and "mass" not in self.properties:
+            self.properties["mass"] = self.mass
+
     entity_type: str = ""
     status: str = "operational"
+    mass: float | None = None
     properties: dict[str, Any] = Field(default_factory=dict)
+    observed_properties: dict[str, Any] = Field(default_factory=dict)
 
     # A13 extensions — lifecycle and temporal tracking
     entity_lifecycle: EntityLifecycle = EntityLifecycle.DISCOVERED
-    last_observed_at: float | None = None  # Timestamp of last confirmed observation
-    first_observed_at: float | None = None  # Timestamp of first discovery
+    last_observed_at: Timestamp | None = None  # Timestamp of last confirmed observation
+    first_observed_at: Timestamp | None = None  # Timestamp of first discovery
 
 
 class EnvironmentStateNode(HCIRNode):
@@ -1500,6 +1684,42 @@ class CognitiveGraph:
             if eid in self._edges
         ]
 
+    def edges_between(self, node_a: str, node_b: str, directed: bool = False) -> list[HCIREdge]:
+        """Find edges connecting two specific nodes.
+
+        If directed=True, returns edges where node_a is a source and node_b is a target.
+        If directed=False, returns edges connecting them in either direction.
+        """
+        out_a = self._edges_by_source.get(node_a, set())
+        in_b = self._edges_by_target.get(node_b, set())
+        matched = out_a & in_b
+        if not directed:
+            out_b = self._edges_by_source.get(node_b, set())
+            in_a = self._edges_by_target.get(node_a, set())
+            matched = matched | (out_b & in_a)
+        return [self._edges[eid] for eid in matched if eid in self._edges]
+
+    def neighbors(self, node_id: str, direction: str = "both") -> list[str]:
+        """Get all directly connected node IDs.
+
+        Args:
+            node_id: Center node ID.
+            direction: "out" (targets), "in" (sources), or "both" (default).
+        """
+        result: set[str] = set()
+        if direction in ("out", "both"):
+            for eid in self._edges_by_source.get(node_id, set()):
+                edge = self._edges.get(eid)
+                if edge:
+                    result.update(edge.targets)
+        if direction in ("in", "both"):
+            for eid in self._edges_by_target.get(node_id, set()):
+                edge = self._edges.get(eid)
+                if edge:
+                    result.update(edge.sources)
+        result.discard(node_id)
+        return sorted(result)
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
@@ -1615,3 +1835,68 @@ class CognitiveGraph:
             tag_set = self._idx_by_tag.get(tag)
             if tag_set:
                 tag_set.discard(node.id)
+
+    # ── Bulk & Graph Utilities ───────────────────────────────────────
+
+    def node_count_by_type(self, include_empty: bool = False) -> dict[HCIRNodeType, int]:
+        """Summary stats of node counts grouped by node type."""
+        if include_empty:
+            return {t: len(self._idx_by_type.get(t, set())) for t in HCIRNodeType}
+        return {t: len(ids) for t, ids in self._idx_by_type.items() if ids}
+
+    def clear(self) -> None:
+        """Reset the graph to an empty state."""
+        self._nodes.clear()
+        self._edges.clear()
+        for s in self._idx_by_type.values():
+            s.clear()
+        for s in self._idx_by_category.values():
+            s.clear()
+        for s in self._idx_by_lifecycle.values():
+            s.clear()
+        self._idx_by_scope.clear()
+        self._idx_by_tag.clear()
+        self._edges_by_source.clear()
+        self._edges_by_target.clear()
+
+    def subgraph(self, node_ids: set[str] | list[str] | Iterator[str]) -> CognitiveGraph:
+        """Extract an induced subgraph containing only specified nodes and edges between them."""
+        sub = CognitiveGraph()
+        target_ids = set(node_ids)
+        for nid in target_ids:
+            node = self._nodes.get(nid)
+            if node is not None:
+                sub.add_node(node)
+        for edge in self._edges.values():
+            if all(s in target_ids for s in edge.sources) and all(
+                t in target_ids for t in edge.targets
+            ):
+                sub.add_edge(edge)
+        return sub
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the entire graph into a dictionary."""
+        return {
+            "nodes": [node.model_dump() for node in self._nodes.values()],
+            "edges": [edge.model_dump() for edge in self._edges.values()],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CognitiveGraph:
+        """Reconstruct a CognitiveGraph from serialized dictionary data."""
+        graph = cls()
+        for ndata in data.get("nodes", []):
+            ntype_raw = ndata.get("node_type")
+            node_cls: type[HCIRNode] = HCIRNode
+            if ntype_raw:
+                try:
+                    ntype = HCIRNodeType(ntype_raw)
+                    node_cls = NODE_TYPE_REGISTRY.get(ntype, HCIRNode)
+                except ValueError:
+                    pass
+            node = node_cls.model_validate(ndata)
+            graph.add_node(node)
+        for edata in data.get("edges", []):
+            edge = HCIREdge.model_validate(edata)
+            graph.add_edge(edge)
+        return graph

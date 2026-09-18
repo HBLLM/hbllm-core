@@ -182,6 +182,11 @@ disable_error_code = [
     "operator", "valid-type", "union-attr"
 ]
 
+[[tool.mypy.overrides]]
+module = "hbllm.hcir.*"
+enable_error_code = ["attr-defined", "call-arg"]
+
+
 [tool.bandit]
 exclude_dirs = ["tests", "plugins"]
 skips = [
