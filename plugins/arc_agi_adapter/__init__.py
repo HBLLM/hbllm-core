@@ -34,6 +34,15 @@ from .control_mode import (
     ModeSwitchDetector,
     SwitchMode,
 )
+from .inductive_learner import (
+    CrossLevelKnowledgeBase,
+    DiffType,
+    FrameDiff,
+    FrameDiffAnalyzer,
+    InductiveARC3BenchmarkRunner,
+    InductiveHCIRAgent,
+    PuzzleTypology,
+)
 
 __all__ = [
     # ARC-1 / 2 Static Grids
@@ -61,4 +70,12 @@ __all__ = [
     "ModeSwitchDetector",
     "ModeConditionedDynamics",
     "SwitchMode",
+    # Inductive HCIR Learner
+    "DiffType",
+    "FrameDiff",
+    "FrameDiffAnalyzer",
+    "PuzzleTypology",
+    "CrossLevelKnowledgeBase",
+    "InductiveHCIRAgent",
+    "InductiveARC3BenchmarkRunner",
 ]
