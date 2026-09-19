@@ -4,10 +4,17 @@ import numpy as np
 
 from plugins.arc_agi_adapter.inductive_learner import (
     ActionAffordance,
+    CanvasRegion,
     DiffType,
+    DynamicCanvasMatcher,
+    DynamicPermutationSolver,
+    DynamicSpatialNavigator,
     FrameDiffAnalyzer,
     InductiveHCIRAgent,
+    LightsOutSolver,
     PuzzleTypology,
+    VisualEntity,
+    VisualTopologyExtractor,
 )
 
 
@@ -296,3 +303,245 @@ def test_cluster_1_solvers_predicates_and_dispatch() -> None:
     act, conf, data = agent.turtle_program_solver.plan_step(grid_64)
     assert act == 6
     assert data == {"x": 36, "y": 55}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2 Dynamic Archetype Solver Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_visual_topology_extractor_entities() -> None:
+    """Verify VisualTopologyExtractor extracts connected components, bounding boxes, and centroids."""
+    grid = np.zeros((10, 10), dtype=int)
+    # Entity 1: 2x2 solid box of color 3 at (1, 1)
+    grid[1:3, 1:3] = 3
+    # Entity 2: diagonal line of color 7 at (5, 5), (6, 6)
+    grid[5, 5] = 7
+    grid[6, 6] = 7
+    # Entity 3: touching border at row 0 of color 2
+    grid[0, 8:10] = 2
+
+    entities = VisualTopologyExtractor.extract_entities(grid, connectivity=4, ignore_colors={0})
+    # 4-connectivity: diagonal pixels are separate entities
+    assert (
+        len(entities) == 4
+    )  # box (color 3), 2 separate points for (5,5) and (6,6), border (color 2)
+
+    box = [e for e in entities if e.color == 3][0]
+    assert isinstance(box, VisualEntity)
+    assert box.size == 4
+    assert box.bounding_box == (1, 2, 1, 2)
+    assert box.centroid == (1.5, 1.5)
+    assert box.is_solid is True
+    assert box.is_border is False
+
+    border_ent = [e for e in entities if e.color == 2][0]
+    assert border_ent.is_border is True
+
+    # 8-connectivity: diagonal pixels connect into 1 entity
+    entities_8 = VisualTopologyExtractor.extract_entities(grid, connectivity=8, ignore_colors={0})
+    assert len(entities_8) == 3
+    diag = [e for e in entities_8 if e.color == 7][0]
+    assert diag.size == 2
+    assert diag.bounding_box == (5, 6, 5, 6)
+
+
+def test_visual_topology_extractor_occupancy_and_hist() -> None:
+    """Verify occupancy grid generation, color histograms, and background detection."""
+    grid = np.zeros((8, 8), dtype=int)
+    grid[2, :] = 1  # Wall
+    grid[5, 5] = 4  # Goal
+
+    # Default: most common color (0) is walkable floor
+    occ_default = VisualTopologyExtractor.build_occupancy_grid(grid)
+    assert bool(occ_default[0, 0]) is True
+    assert bool(occ_default[2, 0]) is False
+    assert bool(occ_default[5, 5]) is False
+
+    # Obstacle colors specified
+    occ_obstacle = VisualTopologyExtractor.build_occupancy_grid(grid, obstacle_colors={1})
+    assert bool(occ_obstacle[2, 0]) is False
+    assert bool(occ_obstacle[5, 5]) is True
+
+    # Traversable colors specified
+    occ_trav = VisualTopologyExtractor.build_occupancy_grid(grid, traversable_colors={0, 4})
+    assert bool(occ_trav[5, 5]) is True
+    assert bool(occ_trav[2, 2]) is False
+
+    # Color histogram and background
+    hist = VisualTopologyExtractor.get_color_histogram(grid)
+    assert hist[0] == 64 - 8 - 1
+    assert hist[1] == 8
+    assert hist[4] == 1
+    assert VisualTopologyExtractor.detect_background_color(grid) == 0
+
+
+def test_dynamic_spatial_navigator_astar_and_actions() -> None:
+    """Verify DynamicSpatialNavigator computes shortest path around obstacles and converts to actions."""
+    occ = np.ones((7, 7), dtype=bool)
+    # Barrier across row 3 with gap at col 6
+    occ[3, 0:6] = False
+
+    start = (1, 1)
+    goal = (5, 1)
+    path = DynamicSpatialNavigator.astar_path(occ, start, goal)
+    assert path is not None
+    assert path[0] == start
+    assert path[-1] == goal
+
+    # Check all coordinates in path are traversable
+    for coord in path:
+        assert bool(occ[coord]) is True
+
+    actions = DynamicSpatialNavigator.path_to_actions(path)
+    assert len(actions) == len(path) - 1
+    # Check that each action is valid 1..4
+    assert all(a in [1, 2, 3, 4] for a in actions)
+
+    # Test start == goal
+    assert DynamicSpatialNavigator.astar_path(occ, (2, 2), (2, 2)) == [(2, 2)]
+    assert DynamicSpatialNavigator.path_to_actions([(2, 2)]) == []
+
+    # Test unreachable goal
+    occ[:, 3] = False  # Completely bifurcated
+    assert DynamicSpatialNavigator.astar_path(occ, (1, 1), (1, 5)) is None
+
+
+def test_dynamic_spatial_navigator_sokoban_push() -> None:
+    """Verify DynamicSpatialNavigator plans pushing maneuvers behind boxes towards goals."""
+    occ = np.ones((6, 6), dtype=bool)
+    avatar = (1, 2)
+    box = (2, 2)
+    goal = (4, 2)
+
+    # Avatar is directly behind box relative to goal, so it can push directly down
+    push_actions = DynamicSpatialNavigator.plan_sokoban_push(occ, avatar, box, goal)
+    assert push_actions is not None
+    # Pushing down from (2,2) to (4,2) takes 2 down pushes (action 2)
+    assert push_actions == [2, 2]
+
+
+def test_dynamic_canvas_matcher_diff_and_stamping() -> None:
+    """Verify DynamicCanvasMatcher computes diff masks and plans greedy stamping sequences."""
+    curr = np.zeros((4, 4), dtype=int)
+    target = np.zeros((4, 4), dtype=int)
+    target[1:3, 1:3] = 5
+
+    diff = DynamicCanvasMatcher.compute_canvas_diff(curr, target)
+    assert np.sum(diff) == 4
+
+    # With ignore mask
+    ignore = np.zeros((4, 4), dtype=bool)
+    ignore[1, 1] = True
+    diff_ignored = DynamicCanvasMatcher.compute_canvas_diff(curr, target, ignore_mask=ignore)
+    assert np.sum(diff_ignored) == 3
+
+    # Available stamps: 2x2 stamp at center, 1x1 stamp
+    mask_2x2 = np.zeros((4, 4), dtype=bool)
+    mask_2x2[1:3, 1:3] = True
+    stamps = [(1, mask_2x2)]
+
+    plan = DynamicCanvasMatcher.plan_stamping_sequence(curr, target, stamps, palette_colors=[5])
+    assert len(plan) == 1
+    assert plan[0]["stamp_id"] == 1
+    assert plan[0]["color"] == 5
+    assert plan[0]["gain"] == 4
+
+    # Extract canvas regions
+    regions = DynamicCanvasMatcher.extract_canvas_regions(target, expected_size=(2, 2))
+    assert len(regions) > 0
+    assert isinstance(regions[0], CanvasRegion)
+
+
+def test_dynamic_permutation_solver_gf2_linear_system() -> None:
+    """Verify DynamicPermutationSolver solves binary linear equations over GF(2)."""
+    # System:
+    # x0 + x1 = 1
+    # x1 + x2 = 0
+    # x0 + x2 = 1
+    # Solution: x0 = 1, x1 = 0, x2 = 0 (1+0=1, 0+0=0, 1+0=1)
+    A = np.array(
+        [
+            [1, 1, 0],
+            [0, 1, 1],
+            [1, 0, 1],
+        ],
+        dtype=np.uint8,
+    )
+    b = np.array([1, 0, 1], dtype=np.uint8)
+
+    x = DynamicPermutationSolver.solve_gf2_linear_system(A, b)
+    assert x is not None
+    assert np.array_equal((A @ x) % 2, b)
+
+    # Inconsistent system: x0 = 1 and x0 = 0
+    A_inconsistent = np.array(
+        [
+            [1, 0],
+            [1, 0],
+        ],
+        dtype=np.uint8,
+    )
+    b_inconsistent = np.array([1, 0], dtype=np.uint8)
+    assert DynamicPermutationSolver.solve_gf2_linear_system(A_inconsistent, b_inconsistent) is None
+
+
+def test_dynamic_permutation_solver_lights_out() -> None:
+    """Verify DynamicPermutationSolver solves Lights Out configurations."""
+    # 3x3 Lights Out with center on
+    grid_3x3 = np.zeros((3, 3), dtype=int)
+    grid_3x3[1, 1] = 1
+
+    toggles = DynamicPermutationSolver.solve_lights_out_grid(grid_3x3, toggle_pattern="cross")
+    assert toggles is not None
+    # Check that applying these toggles turns off all lights
+    sim_grid = grid_3x3.copy()
+    for r, c in toggles:
+        sim_grid[r, c] ^= 1
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < 3 and 0 <= nc < 3:
+                sim_grid[nr, nc] ^= 1
+    assert np.all(sim_grid == 0)
+
+    # LightsOutSolver integration method
+    lo_solver = LightsOutSolver()
+    lo_toggles = lo_solver.solve_grid(grid_3x3)
+    assert lo_toggles == toggles
+
+
+def test_dynamic_permutation_solver_cyclic_dials() -> None:
+    """Verify DynamicPermutationSolver finds shortest directional paths on cyclic dials."""
+    # 8-state dial from 0 to 7: CCW (act 2) is 1 step, CW (act 1) is 7 steps
+    seq_ccw = DynamicPermutationSolver.solve_cyclic_dial(
+        0, 7, num_states=8, clockwise_action=1, counter_clockwise_action=2
+    )
+    assert seq_ccw == [2]
+
+    # 8-state dial from 1 to 3: CW is 2 steps, CCW is 6 steps
+    seq_cw = DynamicPermutationSolver.solve_cyclic_dial(
+        1, 3, num_states=8, clockwise_action=1, counter_clockwise_action=2
+    )
+    assert seq_cw == [1, 1]
+
+    # Multi-dial alignment
+    multi_seq = DynamicPermutationSolver.solve_multi_dial_combination(
+        current_states=[0, 1],
+        target_states=[7, 3],
+        num_states=8,
+        dial_actions={0: (1, 2), 1: (3, 4)},
+    )
+    assert multi_seq == [2, 3, 3]
+
+
+def test_inductive_agent_phase2_solvers_initialized() -> None:
+    """Verify all Phase 2 dynamic tools and solvers are properly bound to InductiveHCIRAgent."""
+    agent = InductiveHCIRAgent()
+    assert hasattr(agent, "topology_extractor")
+    assert hasattr(agent, "dynamic_navigator")
+    assert hasattr(agent, "dynamic_canvas_matcher")
+    assert hasattr(agent, "permutation_solver")
+    assert isinstance(agent.topology_extractor, VisualTopologyExtractor)
+    assert isinstance(agent.dynamic_navigator, DynamicSpatialNavigator)
+    assert isinstance(agent.dynamic_canvas_matcher, DynamicCanvasMatcher)
+    assert isinstance(agent.permutation_solver, DynamicPermutationSolver)

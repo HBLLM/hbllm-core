@@ -12,6 +12,7 @@ or few-shot transfer to subsequent levels with new findings.
 
 from __future__ import annotations
 
+import heapq
 import logging
 import time
 from collections import deque
@@ -345,6 +346,501 @@ class CrossLevelKnowledgeBase:
             f"GroundedActions={len(self.action_affordances)}"
         )
         return bindings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2b. Generalized Dynamic Archetype Solvers (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class VisualEntity:
+    """Represents a spatially coherent connected visual object or component."""
+
+    entity_id: int
+    color: int
+    coords: list[tuple[int, int]]  # [(r, c), ...]
+    bounding_box: tuple[int, int, int, int]  # (min_r, max_r, min_c, max_c)
+    centroid: tuple[float, float]  # (mean_r, mean_c)
+    size: int
+    is_solid: bool = True
+    is_border: bool = False
+
+
+class VisualTopologyExtractor:
+    """Extracts connected components, color maps, and topological occupancy graphs from 2D pixel grids."""
+
+    @staticmethod
+    def extract_entities(
+        grid: np.ndarray,
+        connectivity: int = 4,
+        ignore_colors: set[int] | None = None,
+    ) -> list[VisualEntity]:
+        """Connected components labeling (pure numpy/python, 4 or 8 connectivity)."""
+        H, W = grid.shape
+        visited = np.zeros((H, W), dtype=bool)
+        entities: list[VisualEntity] = []
+        ignored = ignore_colors or set()
+        entity_counter = 0
+
+        deltas = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        if connectivity == 8:
+            deltas += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+        for r in range(H):
+            for c in range(W):
+                if visited[r, c] or int(grid[r, c]) in ignored:
+                    continue
+                col = int(grid[r, c])
+                coords: list[tuple[int, int]] = []
+                queue = deque([(r, c)])
+                visited[r, c] = True
+
+                min_r, max_r = r, r
+                min_c, max_c = c, c
+                is_border = False
+
+                while queue:
+                    cr, cc = queue.popleft()
+                    coords.append((cr, cc))
+                    if cr < min_r:
+                        min_r = cr
+                    if cr > max_r:
+                        max_r = cr
+                    if cc < min_c:
+                        min_c = cc
+                    if cc > max_c:
+                        max_c = cc
+                    if cr == 0 or cr == H - 1 or cc == 0 or cc == W - 1:
+                        is_border = True
+
+                    for dr, dc in deltas:
+                        nr, nc = cr + dr, cc + dc
+                        if (
+                            0 <= nr < H
+                            and 0 <= nc < W
+                            and not visited[nr, nc]
+                            and grid[nr, nc] == col
+                        ):
+                            visited[nr, nc] = True
+                            queue.append((nr, nc))
+
+                size = len(coords)
+                mean_r = sum(p[0] for p in coords) / size
+                mean_c = sum(p[1] for p in coords) / size
+
+                bb_area = (max_r - min_r + 1) * (max_c - min_c + 1)
+                is_solid = bb_area == size
+
+                entity_counter += 1
+                entities.append(
+                    VisualEntity(
+                        entity_id=entity_counter,
+                        color=col,
+                        coords=coords,
+                        bounding_box=(min_r, max_r, min_c, max_c),
+                        centroid=(round(mean_r, 2), round(mean_c, 2)),
+                        size=size,
+                        is_solid=is_solid,
+                        is_border=is_border,
+                    )
+                )
+        return entities
+
+    @staticmethod
+    def build_occupancy_grid(
+        grid: np.ndarray,
+        traversable_colors: set[int] | None = None,
+        obstacle_colors: set[int] | None = None,
+        background_color: int | None = None,
+    ) -> np.ndarray:
+        """Constructs a 2D boolean occupancy grid where True = traversable and False = obstacle."""
+        H, W = grid.shape
+        if traversable_colors is not None:
+            return np.isin(grid, list(traversable_colors))
+        elif obstacle_colors is not None:
+            return ~np.isin(grid, list(obstacle_colors))
+        elif background_color is not None:
+            return grid == background_color
+        else:
+            vals, counts = np.unique(grid, return_counts=True)
+            bg = vals[np.argmax(counts)]
+            return grid == bg
+
+    @staticmethod
+    def get_color_histogram(grid: np.ndarray) -> dict[int, int]:
+        """Returns pixel frequency counts keyed by color ID."""
+        vals, counts = np.unique(grid, return_counts=True)
+        return {int(v): int(c) for v, c in zip(vals, counts)}
+
+    @staticmethod
+    def detect_background_color(grid: np.ndarray) -> int:
+        """Infers the most prominent background color by frequency."""
+        vals, counts = np.unique(grid, return_counts=True)
+        return int(vals[np.argmax(counts)])
+
+    @staticmethod
+    def find_entities_by_color(entities: list[VisualEntity], color: int) -> list[VisualEntity]:
+        """Filters visual entities by specific color."""
+        return [e for e in entities if e.color == color]
+
+
+class DynamicSpatialNavigator:
+    """General 2D grid pathfinder and spatial navigation planner using A* search."""
+
+    ACTION_MAP: dict[tuple[int, int], int] = {
+        (-1, 0): 1,  # UP
+        (1, 0): 2,  # DOWN
+        (0, -1): 3,  # LEFT
+        (0, 1): 4,  # RIGHT
+    }
+    REVERSE_ACTION_MAP: dict[int, tuple[int, int]] = {
+        1: (-1, 0),
+        2: (1, 0),
+        3: (0, -1),
+        4: (0, 1),
+    }
+
+    @staticmethod
+    def astar_path(
+        occupancy_grid: np.ndarray,
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        heuristic: str = "manhattan",
+    ) -> list[tuple[int, int]] | None:
+        """Finds optimal coordinate path from start to goal via A* search."""
+        H, W = occupancy_grid.shape
+        sr, sc = start
+        gr, gc = goal
+        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
+            return None
+        if start == goal:
+            return [start]
+        if not occupancy_grid[sr, sc] or not occupancy_grid[gr, gc]:
+            return None
+
+        def h(r: int, c: int) -> float:
+            if heuristic == "euclidean":
+                return ((r - gr) ** 2 + (c - gc) ** 2) ** 0.5
+            return float(abs(r - gr) + abs(c - gc))
+
+        open_set: list[tuple[float, float, int, int]] = []
+        heapq.heappush(open_set, (h(sr, sc), h(sr, sc), sr, sc))
+        came_from: dict[tuple[int, int], tuple[int, int]] = {}
+        g_score: dict[tuple[int, int], float] = {start: 0.0}
+
+        while open_set:
+            _, _, cr, cc = heapq.heappop(open_set)
+            if (cr, cc) == goal:
+                curr = goal
+                path = [curr]
+                while curr in came_from:
+                    curr = came_from[curr]
+                    path.append(curr)
+                path.reverse()
+                return path
+
+            current_g = g_score.get((cr, cc), float("inf"))
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < H and 0 <= nc < W and occupancy_grid[nr, nc]:
+                    tentative_g = current_g + 1.0
+                    if tentative_g < g_score.get((nr, nc), float("inf")):
+                        came_from[(nr, nc)] = (cr, cc)
+                        g_score[(nr, nc)] = tentative_g
+                        f_val = tentative_g + h(nr, nc)
+                        heapq.heappush(open_set, (f_val, h(nr, nc), nr, nc))
+        return None
+
+    @staticmethod
+    def path_to_actions(path: list[tuple[int, int]]) -> list[int]:
+        """Converts a coordinate path [(r0, c0), (r1, c1), ...] into action sequence 1..4."""
+        actions: list[int] = []
+        for (r1, c1), (r2, c2) in zip(path[:-1], path[1:]):
+            dr, dc = r2 - r1, c2 - c1
+            act = DynamicSpatialNavigator.ACTION_MAP.get((dr, dc))
+            if act is not None:
+                actions.append(act)
+        return actions
+
+    @staticmethod
+    def plan_sokoban_push(
+        occupancy_grid: np.ndarray,
+        avatar_pos: tuple[int, int],
+        box_pos: tuple[int, int],
+        goal_pos: tuple[int, int],
+    ) -> list[int] | None:
+        """Plans action sequence for avatar to maneuver behind a box and push it to a goal position."""
+        # Step 1: Find path for the box to reach goal (treating box as moving agent, obstacles blocked)
+        box_grid = occupancy_grid.copy()
+        box_grid[box_pos] = True  # box is at start
+        box_path = DynamicSpatialNavigator.astar_path(box_grid, box_pos, goal_pos)
+        if not box_path or len(box_path) < 2:
+            return None
+
+        total_actions: list[int] = []
+        curr_avatar = avatar_pos
+        curr_box = box_pos
+
+        # Step 2: For each step in box path, move avatar behind box and push
+        for next_box in box_path[1:]:
+            dr, dc = next_box[0] - curr_box[0], next_box[1] - curr_box[1]
+            push_pos = (curr_box[0] - dr, curr_box[1] - dc)
+
+            # Check if push position is valid and traversable
+            H, W = occupancy_grid.shape
+            if not (0 <= push_pos[0] < H and 0 <= push_pos[1] < W and occupancy_grid[push_pos]):
+                return None
+
+            # Avatar path to push position (without walking through box)
+            nav_grid = occupancy_grid.copy()
+            nav_grid[curr_box] = False  # Box is an obstacle for avatar
+            avatar_path = DynamicSpatialNavigator.astar_path(nav_grid, curr_avatar, push_pos)
+            if avatar_path is None:
+                return None
+
+            total_actions.extend(DynamicSpatialNavigator.path_to_actions(avatar_path))
+
+            # Push action
+            push_act = DynamicSpatialNavigator.ACTION_MAP.get((dr, dc))
+            if push_act is None:
+                return None
+            total_actions.append(push_act)
+
+            curr_avatar = curr_box
+            curr_box = next_box
+
+        return total_actions
+
+
+@dataclass
+class CanvasRegion:
+    """Represents a detected bounded canvas subregion."""
+
+    min_r: int
+    max_r: int
+    min_c: int
+    max_c: int
+    grid_slice: np.ndarray
+
+
+class DynamicCanvasMatcher:
+    """General dynamic canvas matching, diff stamping, and pattern reconstruction."""
+
+    @staticmethod
+    def extract_canvas_regions(
+        grid: np.ndarray,
+        expected_size: tuple[int, int] | None = None,
+    ) -> list[CanvasRegion]:
+        """Detect rectangular canvas regions bounded by borders or distinct color regions."""
+        H, W = grid.shape
+        regions: list[CanvasRegion] = []
+        if expected_size is not None:
+            eh, ew = expected_size
+            for r in range(0, H - eh + 1):
+                for c in range(0, W - ew + 1):
+                    sub = grid[r : r + eh, c : c + ew]
+                    if len(np.unique(sub)) >= 2:
+                        regions.append(
+                            CanvasRegion(
+                                min_r=r,
+                                max_r=r + eh - 1,
+                                min_c=c,
+                                max_c=c + ew - 1,
+                                grid_slice=sub,
+                            )
+                        )
+        return regions
+
+    @staticmethod
+    def compute_canvas_diff(
+        current_canvas: np.ndarray,
+        target_canvas: np.ndarray,
+        ignore_mask: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Returns boolean mask where current_canvas != target_canvas."""
+        diff = current_canvas != target_canvas
+        if ignore_mask is not None:
+            diff = diff & (~ignore_mask)
+        return diff
+
+    @staticmethod
+    def plan_stamping_sequence(
+        current_canvas: np.ndarray,
+        target_canvas: np.ndarray,
+        available_stamps: list[tuple[int, np.ndarray]],  # list of (stamp_id, mask)
+        palette_colors: list[int] | None = None,
+        max_steps: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Greedy synthesis of stamping actions to iteratively minimize pixel difference."""
+        working = current_canvas.copy()
+        plan: list[dict[str, Any]] = []
+        colors = palette_colors or list(np.unique(target_canvas))
+
+        for _ in range(max_steps):
+            diff = working != target_canvas
+            if not np.any(diff):
+                break
+
+            best_gain = 0
+            best_choice: dict[str, Any] | None = None
+            best_mask: np.ndarray | None = None
+            best_col: int = 0
+
+            for stamp_id, mask in available_stamps:
+                if mask.shape != working.shape:
+                    continue
+                for col in colors:
+                    new_matching = (working != col) & (target_canvas == col) & mask
+                    new_broken = (working == target_canvas) & (target_canvas != col) & mask
+                    gain = int(np.sum(new_matching)) - int(np.sum(new_broken))
+                    if gain > best_gain:
+                        best_gain = gain
+                        best_choice = {"stamp_id": stamp_id, "color": int(col), "gain": gain}
+                        best_mask = mask
+                        best_col = int(col)
+
+            if best_choice is None or best_gain <= 0 or best_mask is None:
+                break
+
+            working[best_mask] = best_col
+            plan.append(best_choice)
+
+        return plan
+
+
+class DynamicPermutationSolver:
+    """Solves discrete combinatorial puzzles, permutation locks, and cellular toggles.
+
+    Includes Galois Field 2 (GF(2)) Gaussian Elimination for Lights-Out puzzles
+    and cyclic permutation planners for multi-dial combination locks.
+    """
+
+    @staticmethod
+    def solve_gf2_linear_system(
+        A: np.ndarray,  # M x N binary matrix (0 or 1)
+        b: np.ndarray,  # M-dim binary vector (0 or 1)
+    ) -> np.ndarray | None:
+        """Solves A * x = b (mod 2) via Gauss-Jordan elimination over GF(2).
+
+        Returns binary vector x if a solution exists, else None.
+        """
+        M, N = A.shape
+        if len(b) != M:
+            raise ValueError(f"b length {len(b)} does not match A rows {M}")
+
+        aug = np.hstack([A.astype(np.uint8) & 1, b.astype(np.uint8).reshape(-1, 1) & 1])
+
+        pivot_row = 0
+        pivot_cols: list[int] = []
+
+        for c in range(N):
+            if pivot_row >= M:
+                break
+
+            row_indices = np.where(aug[pivot_row:, c] == 1)[0]
+            if len(row_indices) == 0:
+                continue
+            r = pivot_row + int(row_indices[0])
+
+            if r != pivot_row:
+                aug[[pivot_row, r]] = aug[[r, pivot_row]]
+
+            for i in range(M):
+                if i != pivot_row and aug[i, c] == 1:
+                    aug[i] ^= aug[pivot_row]
+
+            pivot_cols.append(c)
+            pivot_row += 1
+
+        # Check for inconsistency: row with all 0s in A but 1 in b
+        for i in range(pivot_row, M):
+            if aug[i, N] == 1:
+                return None
+
+        # Extract solution x
+        x = np.zeros(N, dtype=np.uint8)
+        for i, c in enumerate(pivot_cols):
+            x[c] = aug[i, N]
+
+        # Verify A @ x == b (mod 2)
+        if not np.array_equal((A.astype(np.uint8) @ x) % 2, b.astype(np.uint8) % 2):
+            return None
+
+        return x
+
+    @staticmethod
+    def solve_lights_out_grid(
+        grid: np.ndarray,  # H x W binary array: 1 = ON, 0 = OFF
+        toggle_pattern: str = "cross",
+    ) -> list[tuple[int, int]] | None:
+        """Computes list of (r, c) cell coordinates to toggle to turn OFF all lights."""
+        H, W = grid.shape
+        N = H * W
+        A = np.zeros((N, N), dtype=np.uint8)
+
+        deltas = [(0, 0)]
+        if toggle_pattern == "cross":
+            deltas += [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        elif toggle_pattern == "full3x3":
+            deltas += [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+        for r in range(H):
+            for c in range(W):
+                col_idx = r * W + c
+                for dr, dc in deltas:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < H and 0 <= nc < W:
+                        row_idx = nr * W + nc
+                        A[row_idx, col_idx] = 1
+
+        b = (grid.flatten() != 0).astype(np.uint8)
+        x = DynamicPermutationSolver.solve_gf2_linear_system(A, b)
+        if x is None:
+            return None
+
+        toggles: list[tuple[int, int]] = []
+        for idx in range(N):
+            if x[idx] == 1:
+                toggles.append((idx // W, idx % W))
+        return toggles
+
+    @staticmethod
+    def solve_cyclic_dial(
+        current_val: int,
+        target_val: int,
+        num_states: int,
+        clockwise_action: int = 1,
+        counter_clockwise_action: int = 2,
+    ) -> list[int]:
+        """Finds shortest directional rotation action sequence between cyclic dial states."""
+        if current_val == target_val or num_states <= 1:
+            return []
+        cw_dist = (target_val - current_val) % num_states
+        ccw_dist = (current_val - target_val) % num_states
+
+        if cw_dist <= ccw_dist:
+            return [clockwise_action] * cw_dist
+        else:
+            return [counter_clockwise_action] * ccw_dist
+
+    @staticmethod
+    def solve_multi_dial_combination(
+        current_states: list[int],
+        target_states: list[int],
+        num_states: int,
+        dial_actions: dict[int, tuple[int, int]],  # dial_idx -> (cw_action, ccw_action)
+    ) -> list[int]:
+        """Plans complete action sequence to align all dials to target states."""
+        actions: list[int] = []
+        for i, (cur, tgt) in enumerate(zip(current_states, target_states)):
+            cw_act, ccw_act = dial_actions.get(i, (1, 2))
+            actions.extend(
+                DynamicPermutationSolver.solve_cyclic_dial(
+                    cur, tgt, num_states, clockwise_action=cw_act, counter_clockwise_action=ccw_act
+                )
+            )
+        return actions
 
 
 class VisualCanvasMatcher:
@@ -806,9 +1302,18 @@ class LightsOutSolver:
 
     def __init__(self) -> None:
         self.action_queue: list[tuple[int, dict[str, int]]] = []
+        self.permutation_solver: DynamicPermutationSolver = DynamicPermutationSolver()
 
     def reset_episode(self) -> None:
         self.action_queue = []
+
+    def solve_grid(
+        self,
+        grid: np.ndarray,
+        toggle_pattern: str = "cross",
+    ) -> list[tuple[int, int]] | None:
+        """Solves a Lights Out binary grid dynamically using GF(2) Gaussian elimination."""
+        return self.permutation_solver.solve_lights_out_grid(grid, toggle_pattern=toggle_pattern)
 
     LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
         0: [
@@ -1785,6 +2290,10 @@ class InductiveHCIRAgent:
         self.piston_crane_solver: PistonSlidingCraneSolver = PistonSlidingCraneSolver()
         self.laser_mirror_solver: LaserReflectionMirrorSolver = LaserReflectionMirrorSolver()
         self.wa30_solver: WarehouseLogisticBotSolver = WarehouseLogisticBotSolver()
+        self.topology_extractor: VisualTopologyExtractor = VisualTopologyExtractor()
+        self.dynamic_navigator: DynamicSpatialNavigator = DynamicSpatialNavigator()
+        self.dynamic_canvas_matcher: DynamicCanvasMatcher = DynamicCanvasMatcher()
+        self.permutation_solver: DynamicPermutationSolver = DynamicPermutationSolver()
         self.active_solver_name: str | None = None
         self.prev_grid: np.ndarray | None = None
         self.last_action: int | None = None
