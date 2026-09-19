@@ -1,5 +1,5 @@
 # Inductive HCIR Learner Benchmark Report
-**Duration**: 61.12s across 25 game(s)
+**Duration**: 39.92s across 25 game(s)
 
 | Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |
 |---|---|---|---|---|
@@ -21,7 +21,7 @@
 | `re86` | 2/2 | 58 | 68 | **120.3%** |
 | `dc22` | 2/2 | 76 | 161 | **238.6%** |
 | `ka59` | 1/1 | 12 | 28 | **233.3%** |
-| `sc25` | 2/2 | 22 | 42 | **165.9%** |
+| `sc25` | 2/2 | 29 | 42 | **135.0%** |
 | `cn04` | 2/2 | 45 | 83 | **186.7%** |
 | `m0r0` | 2/2 | 38 | 141 | **341.3%** |
 | `sp80` | 2/2 | 22 | 97 | **648.6%** |
@@ -138,7 +138,7 @@
 ### Environment: `sc25`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 17 | 36 | 211.8% | 0 |
+| Level 1 | **PASSED** | 24 | 36 | 150.0% | 0 |
 | Level 2 | **PASSED** | 5 | 6 | 120.0% | 0 |
 
 ### Environment: `cn04`

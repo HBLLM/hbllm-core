@@ -448,16 +448,16 @@
       "game_id": "sc25",
       "levels_completed": 2,
       "total_levels": 2,
-      "total_actions": 22,
+      "total_actions": 29,
       "total_baseline": 42,
-      "mean_efficiency": 1.6588235294117646,
+      "mean_efficiency": 1.35,
       "level_results": [
         {
           "level_index": 0,
           "completed": true,
-          "actions_taken": 17,
+          "actions_taken": 24,
           "baseline_actions": 36,
-          "efficiency_ratio": 2.1176470588235294,
+          "efficiency_ratio": 1.5,
           "epistemic_probes": 0
         },
         {

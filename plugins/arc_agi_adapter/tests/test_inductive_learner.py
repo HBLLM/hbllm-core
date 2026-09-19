@@ -210,7 +210,8 @@ def test_peg_solitaire_solver() -> None:
     agent = InductiveHCIRAgent()
     grid = np.zeros((64, 64), dtype=int)
     grid[10:15, 10:15] = 14
-    grid[20:25, 20:25] = 5
+    grid[20:25, 20:25] = 10
+    grid[30:35, 30:35] = 5
 
     assert agent.peg_solver.is_peg_solitaire(grid, [1, 2, 3, 4, 6]) is True
     # If actions 1..4 are missing (e.g. sb26 with [5, 6, 7]), should be False
@@ -230,7 +231,8 @@ def test_track_maze_navigator() -> None:
     """Verify TrackMazeNavigator recognizes tu93 track features."""
     agent = InductiveHCIRAgent()
     grid = np.zeros((64, 64), dtype=int)
-    grid[10:20, 10:20] = 2  # Track
+    grid[10:20, 10:20] = 6  # Track color 6
+    grid[20:30, 20:30] = 14  # Track color 14
     grid[0, 0] = 0  # Border
 
     assert agent.track_navigator.is_track_maze(grid, [1, 2, 3, 4]) is True
@@ -251,41 +253,28 @@ def test_cluster_1_solvers_predicates_and_dispatch() -> None:
     assert agent.liquid_gravity_solver.is_liquid_gravity_puzzle(grid_64, [1, 2, 6]) is False
     assert agent.turtle_program_solver.is_turtle_program_puzzle(grid_64, [6, 7]) is False
 
-    # Mock game objects to test positive predicate detection
-    class MockGameR11l:
-        kacotwgjcyq = {}
-        current_level_index = 0
+    # Pure visual arrays matching the solver signatures
+    grid_r11l = np.zeros((64, 64), dtype=int)
+    grid_r11l[0, 0] = 15
+    grid_r11l[0, 1] = 6
+    grid_r11l[0, 2] = 1
+    assert agent.center_of_mass_solver.is_center_of_mass_puzzle(grid_r11l, [6]) is True
 
-    class MockGameS5i5:
-        pigtralzpb = {}
-        uricqfoplr = {}
-        current_level_index = 0
+    grid_s5i5 = np.ones((64, 64), dtype=int)  # 0 not in colors
+    grid_s5i5[0, 0] = 13
+    grid_s5i5[0, 1] = 14
+    assert agent.block_pushing_solver.is_block_pushing_puzzle(grid_s5i5, [6]) is True
 
-    class MockGameVc33:
-        wrcxjliglr = {}
-        dwwmpxqsza = {}
-        current_level_index = 0
+    grid_vc33 = np.zeros((64, 64), dtype=int)
+    grid_vc33.ravel()[:2880] = 7
+    assert agent.liquid_gravity_solver.is_liquid_gravity_puzzle(grid_vc33, [6]) is True
 
-    class MockBz:
-        pass
-
-    class MockFd:
-        bzirenxmrg = MockBz()
-
-    class MockGameTn36:
-        fdksqlmpki = MockFd()
-        current_level_index = 0
-
-    assert (
-        agent.center_of_mass_solver.is_center_of_mass_puzzle(grid_64, [6], MockGameR11l()) is True
-    )
-    assert agent.block_pushing_solver.is_block_pushing_puzzle(grid_64, [6], MockGameS5i5()) is True
-    assert (
-        agent.liquid_gravity_solver.is_liquid_gravity_puzzle(grid_64, [6], MockGameVc33()) is True
-    )
-    assert (
-        agent.turtle_program_solver.is_turtle_program_puzzle(grid_64, [6], MockGameTn36()) is True
-    )
+    grid_tn36 = np.zeros((64, 64), dtype=int)
+    grid_tn36.ravel()[:3743] = 1
+    grid_tn36[0, 0] = 4
+    grid_tn36[0, 1] = 9
+    grid_tn36[0, 2] = 11
+    assert agent.turtle_program_solver.is_turtle_program_puzzle(grid_tn36, [6]) is True
 
     # Test solver plan_step execution with mock queue
     agent.center_of_mass_solver.action_queue = [(6, {"x": 10, "y": 20})]
