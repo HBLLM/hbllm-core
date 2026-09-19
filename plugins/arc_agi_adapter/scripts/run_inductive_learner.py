@@ -3,8 +3,16 @@
 import argparse
 import json
 import logging
+import os
 import time
 from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
 
 from plugins.arc_agi_adapter.inductive_learner import (
     InductiveARC3BenchmarkRunner,
@@ -29,6 +37,12 @@ def main() -> None:
         help="Maximum levels per game to evaluate (default: 2).",
     )
     parser.add_argument(
+        "--api-key",
+        type=str,
+        default=os.getenv("ARC_API_KEY", ""),
+        help="ARC-AGI API key (defaults to ARC_API_KEY env var).",
+    )
+    parser.add_argument(
         "--output-report",
         type=str,
         default="arc_agi_3_inductive_report.md",
@@ -45,7 +59,7 @@ def main() -> None:
     try:
         from arc_agi import Arcade
 
-        arcade_client = Arcade()
+        arcade_client = Arcade(arc_api_key=args.api_key) if args.api_key else Arcade()
     except Exception as e:
         logger.error(f"Failed to initialize ARC Arcade client: {e}")
         return
