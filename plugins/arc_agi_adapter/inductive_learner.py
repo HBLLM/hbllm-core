@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -238,6 +239,26 @@ class ControllableSignature:
     active_slots: list[tuple[int, int]] = field(default_factory=list)
 
 
+@dataclass
+class ObjectInteractionRecipe:
+    """Learned recipe for interacting with an object type.
+
+    Captures the full interaction lifecycle: what action works on an object,
+    what the outcome is, and where to deliver it if applicable.
+    Persists across levels so the agent can skip exploration for known objects.
+    """
+
+    object_color: int  # Color that identifies this object type
+    object_area_range: tuple[int, int] = (1, 100)  # (min_area, max_area) observed
+    interaction_action: int = 5  # Action that works (5=pickup/interact, 6=click)
+    outcome: str = "unknown"  # 'pickup', 'destroy', 'transform', 'toggle'
+    delivery_zone_color: int | None = None  # If pickup, where to deliver
+    delivery_zone_bounds: tuple[int, int, int, int] | None = None  # (min_r, max_r, min_c, max_c)
+    approach_direction: str = "nearest"  # 'nearest', 'above', 'below', 'left', 'right'
+    times_confirmed: int = 0  # How many times this recipe succeeded
+    confidence: float = 0.0  # Confidence in recipe validity
+
+
 class CrossLevelKnowledgeBase:
     """Holds accumulated causal models and invariants across levels of a puzzle."""
 
@@ -254,6 +275,14 @@ class CrossLevelKnowledgeBase:
         ] = {}  # (slot_idx, action) -> next_slot
         self.levels_solved: int = 0
         self.total_epistemic_probes: int = 0
+
+        # Object Interaction Memory: learned recipes for interacting with objects
+        # Maps object_color -> ObjectInteractionRecipe
+        self.object_recipes: dict[int, ObjectInteractionRecipe] = {}
+        # Snapshot of grid when level completes (for learning delivery zones)
+        self.last_completion_grid: np.ndarray | None = None
+        # Track objects near avatar when action 5 is used (for learning pickup)
+        self._pending_interaction: dict | None = None
 
     def register_observation(
         self,
@@ -290,6 +319,22 @@ class CrossLevelKnowledgeBase:
                     elif new_c == self.controllable_signature.color and old_c is not None:
                         self.walkable_colors.add(old_c)
 
+            # Detect interaction events: object appearing/disappearing near avatar
+            if self.controllable_signature.color is not None:
+                avatar_color = self.controllable_signature.color
+                # Count non-background, non-avatar objects in both frames
+                bg = int(np.bincount(prev_grid.flatten()).argmax())
+                prev_obj_colors = set(
+                    int(c) for c in np.unique(prev_grid) if c != 0 and c != bg and c != avatar_color
+                )
+                curr_obj_colors = set(
+                    int(c) for c in np.unique(curr_grid) if c != 0 and c != bg and c != avatar_color
+                )
+                gained = curr_obj_colors - prev_obj_colors
+                lost = prev_obj_colors - curr_obj_colors
+                if gained or lost:
+                    aff.is_click = True  # action has interaction side-effects
+
         elif diff.diff_type == DiffType.INDEX_CYCLE:
             aff.is_cycler = True
             aff.confidence = min(1.0, aff.confidence + 0.3)
@@ -308,6 +353,127 @@ class CrossLevelKnowledgeBase:
 
         elif diff.diff_type == DiffType.NO_CHANGE:
             aff.confidence = max(0.0, aff.confidence - 0.1)
+
+            # Trial-and-error barrier learning: if this action was previously
+            # observed to cause translation, a NO_CHANGE means we hit a barrier.
+            # Learn the barrier color from cells in the expected direction.
+            if aff.confidence > 0.0 and (aff.delta_r != 0 or aff.delta_c != 0):
+                if self.controllable_signature.color is not None:
+                    avatar_pts = np.argwhere(prev_grid == self.controllable_signature.color)
+                    if len(avatar_pts) > 0:
+                        ar = float(np.mean(avatar_pts[:, 0]))
+                        ac = float(np.mean(avatar_pts[:, 1]))
+                        # Check cells in the expected movement direction
+                        check_r = int(round(ar + aff.delta_r))
+                        check_c = int(round(ac + aff.delta_c))
+                        H, W = prev_grid.shape
+                        if 0 <= check_r < H and 0 <= check_c < W:
+                            blocking_color = int(prev_grid[check_r, check_c])
+                            if (
+                                blocking_color != 0
+                                and blocking_color != self.controllable_signature.color
+                                and blocking_color not in self.walkable_colors
+                            ):
+                                self.barrier_colors.add(blocking_color)
+
+        # --- Object Interaction Recipe Learning (diff-type independent) ---
+        # Detect object pickups, clicks, and transformations regardless of diff type.
+        # This must be outside the diff-type branches because action 5 may produce
+        # various diff types (TRANSLATION, NO_CHANGE, etc.) depending on game mechanics.
+        if self.controllable_signature.color is not None and not np.array_equal(
+            prev_grid, curr_grid
+        ):
+            avatar_color = self.controllable_signature.color
+            bg = int(np.bincount(prev_grid.flatten()).argmax())
+            excluded = {0, bg, avatar_color} | self.walkable_colors
+            prev_obj_colors = {int(c) for c in np.unique(prev_grid) if int(c) not in excluded}
+            curr_obj_colors = {int(c) for c in np.unique(curr_grid) if int(c) not in excluded}
+            lost_colors = prev_obj_colors - curr_obj_colors
+            gained_colors = curr_obj_colors - prev_obj_colors
+
+            # Detect PICKUP: action 5 near an object causes its color to disappear
+            if action == 5 and lost_colors:
+                avatar_pts = np.argwhere(prev_grid == avatar_color)
+                if len(avatar_pts) > 0:
+                    ar = float(np.mean(avatar_pts[:, 0]))
+                    ac = float(np.mean(avatar_pts[:, 1]))
+                    for lost_color in lost_colors:
+                        lost_pts = np.argwhere(prev_grid == lost_color)
+                        if len(lost_pts) > 0:
+                            lr = float(np.mean(lost_pts[:, 0]))
+                            lc = float(np.mean(lost_pts[:, 1]))
+                            dist = math.hypot(lr - ar, lc - ac)
+                            if dist < 15:  # within interaction range
+                                area = int(np.count_nonzero(prev_grid == lost_color))
+                                recipe = self.object_recipes.get(lost_color)
+                                if recipe is None:
+                                    recipe = ObjectInteractionRecipe(
+                                        object_color=lost_color,
+                                        object_area_range=(max(1, area - 5), area + 5),
+                                        interaction_action=5,
+                                        outcome="pickup",
+                                        confidence=0.5,
+                                        times_confirmed=1,
+                                    )
+                                    self.object_recipes[lost_color] = recipe
+                                    logger.info(
+                                        "Recipe LEARNED: color=%d + action 5 = pickup (area=%d)",
+                                        lost_color,
+                                        area,
+                                    )
+                                else:
+                                    recipe.times_confirmed += 1
+                                    recipe.confidence = min(1.0, recipe.confidence + 0.2)
+
+            # Detect CONTACT PICKUP: movement action causes object to disappear (walked over it)
+            elif action in (1, 2, 3, 4) and lost_colors:
+                avatar_pts = np.argwhere(curr_grid == avatar_color)
+                if len(avatar_pts) > 0:
+                    ar = float(np.mean(avatar_pts[:, 0]))
+                    ac = float(np.mean(avatar_pts[:, 1]))
+                    for lost_color in lost_colors:
+                        lost_pts = np.argwhere(prev_grid == lost_color)
+                        if len(lost_pts) > 0:
+                            lr = float(np.mean(lost_pts[:, 0]))
+                            lc = float(np.mean(lost_pts[:, 1]))
+                            dist = math.hypot(lr - ar, lc - ac)
+                            if dist < 10:  # avatar walked to where the object was
+                                area = int(np.count_nonzero(prev_grid == lost_color))
+                                recipe = self.object_recipes.get(lost_color)
+                                if recipe is None:
+                                    recipe = ObjectInteractionRecipe(
+                                        object_color=lost_color,
+                                        object_area_range=(max(1, area - 5), area + 5),
+                                        interaction_action=0,  # 0 = contact (any movement)
+                                        outcome="pickup",
+                                        confidence=0.4,
+                                        times_confirmed=1,
+                                    )
+                                    self.object_recipes[lost_color] = recipe
+                                    logger.info(
+                                        "Recipe LEARNED: color=%d + contact = pickup (area=%d)",
+                                        lost_color,
+                                        area,
+                                    )
+                                else:
+                                    recipe.times_confirmed += 1
+                                    recipe.confidence = min(1.0, recipe.confidence + 0.15)
+
+            # Detect CLICK interaction: action 6 near object causes change
+            elif action == 6 and (lost_colors or gained_colors):
+                for changed_color in lost_colors | gained_colors:
+                    if changed_color not in self.object_recipes:
+                        self.object_recipes[changed_color] = ObjectInteractionRecipe(
+                            object_color=changed_color,
+                            interaction_action=6,
+                            outcome="transform",
+                            confidence=0.4,
+                            times_confirmed=1,
+                        )
+                        logger.info(
+                            "Recipe LEARNED: color=%d + action 6 = transform",
+                            changed_color,
+                        )
 
     def is_world_model_grounded(self, available_actions: list[int]) -> bool:
         """Check if sufficient dynamics have been verified to switch to goal planning."""
@@ -340,12 +506,250 @@ class CrossLevelKnowledgeBase:
                 bindings["controllable_centroid"] = centroid
                 bindings["ready_for_zero_shot"] = self.is_world_model_grounded([1, 2, 3, 4])
 
+        # Transfer spatial knowledge to the new level
+        bindings["barrier_colors"] = set(self.barrier_colors)
+        bindings["walkable_colors"] = set(self.walkable_colors)
+        bindings["puzzle_typology"] = self.puzzle_typology
+        bindings["action_affordances"] = dict(self.action_affordances)
+
         logger.info(
             f"Knowledge Transfer to Level: Typology={self.puzzle_typology.value}, "
             f"ReadyForZeroShot={bindings['ready_for_zero_shot']}, "
-            f"GroundedActions={len(self.action_affordances)}"
+            f"GroundedActions={len(self.action_affordances)}, "
+            f"BarrierColors={self.barrier_colors}, "
+            f"WalkableColors={self.walkable_colors}"
         )
         return bindings
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2a. Trial-and-Error Feedback & Goal Induction
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class TrialOutcome:
+    """Single trial-and-error observation."""
+
+    action: int
+    position: tuple[int, int]  # avatar position at time of action
+    succeeded: bool  # whether visual change was observed
+    diff_type: DiffType = DiffType.NO_CHANGE
+    barrier_direction: tuple[int, int] | None = None  # direction that was blocked
+    objects_affected: int = 0  # count of objects that changed
+    item_gained: bool = False  # did avatar acquire an item
+    item_lost: bool = False  # did avatar release an item
+
+
+class TrialFeedbackMemory:
+    """Persistent memory of trial-and-error outcomes.
+
+    Records successful and failed actions at specific positions so the agent
+    can learn spatial affordances inductively:
+      - Which directions are blocked at which positions (barrier map)
+      - Where interactions produce results (pickup/drop zones)
+      - Which action sequences lead to progress
+    """
+
+    def __init__(self, max_history: int = 500) -> None:
+        self.outcomes: deque[TrialOutcome] = deque(maxlen=max_history)
+        self.barrier_positions: dict[tuple[int, int], set[int]] = {}  # pos → blocked actions
+        self.interaction_zones: dict[tuple[int, int], list[int]] = {}  # pos → effective actions
+        self.consecutive_no_change: int = 0
+        self.total_trials: int = 0
+        self.successful_trials: int = 0
+        self.progress_events: list[dict[str, Any]] = []  # scored progress moments
+        self._last_object_count: int | None = None
+
+    def record(self, outcome: TrialOutcome) -> None:
+        """Record a trial outcome and update spatial knowledge."""
+        self.outcomes.append(outcome)
+        self.total_trials += 1
+
+        if outcome.succeeded:
+            self.successful_trials += 1
+            self.consecutive_no_change = 0
+            # Record interaction zones where actions had effect
+            if outcome.objects_affected > 0 or outcome.item_gained or outcome.item_lost:
+                self.interaction_zones.setdefault(outcome.position, []).append(outcome.action)
+        else:
+            self.consecutive_no_change += 1
+            # Record blocked direction as barrier
+            if outcome.barrier_direction is not None:
+                blocked = self.barrier_positions.setdefault(outcome.position, set())
+                blocked.add(outcome.action)
+
+    def record_progress(self, step: int, description: str, score_delta: float = 0.0) -> None:
+        """Record a progress event (e.g. item delivered, zone reached)."""
+        self.progress_events.append(
+            {
+                "step": step,
+                "description": description,
+                "score_delta": score_delta,
+            }
+        )
+
+    def is_stuck(self, threshold: int = 8) -> bool:
+        """Check if the agent appears stuck (no visual change for many steps)."""
+        return self.consecutive_no_change >= threshold
+
+    def get_blocked_actions_at(self, pos: tuple[int, int], radius: float = 2.0) -> set[int]:
+        """Get actions known to be blocked at or near a position."""
+        blocked: set[int] = set()
+        for bpos, acts in self.barrier_positions.items():
+            if math.hypot(bpos[0] - pos[0], bpos[1] - pos[1]) <= radius:
+                blocked.update(acts)
+        return blocked
+
+    def exploration_score(self) -> float:
+        """How much of the action space has been explored (0-1)."""
+        if self.total_trials == 0:
+            return 0.0
+        return min(1.0, self.successful_trials / max(1, self.total_trials))
+
+    def reset_episode(self) -> None:
+        """Reset per-episode state while keeping learned barriers."""
+        self.consecutive_no_change = 0
+        self.total_trials = 0
+        self.successful_trials = 0
+        self.progress_events.clear()
+        self._last_object_count = None
+
+
+@dataclass
+class GoalHypothesis:
+    """A hypothesized goal predicate learned inductively."""
+
+    description: str
+    predicate_type: str  # "items_in_zone", "color_match", "position_reach", etc.
+    params: dict[str, Any] = field(default_factory=dict)
+    confidence: float = 0.0
+    times_verified: int = 0
+    times_falsified: int = 0
+
+    def score(self) -> float:
+        total = self.times_verified + self.times_falsified
+        if total == 0:
+            return self.confidence
+        return self.confidence * (self.times_verified / total)
+
+
+class GoalStateInductor:
+    """Induces goal predicates from trial-and-error observations.
+
+    Watches for level completions and reverse-engineers what made them happen
+    by comparing pre-completion states against earlier frames. Hypothesizes
+    goal predicates like:
+      - "All color-X items must be within the color-Y zone"
+      - "Avatar must reach position (r, c)"
+      - "All cells in region must match target pattern"
+
+    These hypotheses are then verified on subsequent levels for zero-shot
+    transfer.
+    """
+
+    def __init__(self) -> None:
+        self.hypotheses: list[GoalHypothesis] = []
+        self.completion_snapshots: list[dict[str, Any]] = []
+        self.pre_completion_frames: deque[np.ndarray] = deque(maxlen=5)
+        self.step_count: int = 0
+
+    def observe_frame(self, grid: np.ndarray) -> None:
+        """Record a frame for later comparison when level completes."""
+        self.pre_completion_frames.append(grid.copy())
+        self.step_count += 1
+
+    def observe_completion(self, final_grid: np.ndarray) -> None:
+        """Called when a level completes. Analyze what changed to generate hypotheses."""
+        snapshot = {
+            "final_grid": final_grid.copy(),
+            "step_count": self.step_count,
+            "color_counts": {
+                int(c): int(np.count_nonzero(final_grid == c)) for c in np.unique(final_grid)
+            },
+        }
+        self.completion_snapshots.append(snapshot)
+
+        # Hypothesis: Items-in-zone goal
+        # Look for concentrated clusters of a specific color within a bounded region
+        for color in np.unique(final_grid):
+            if color == 0:
+                continue
+            positions = np.argwhere(final_grid == color)
+            if 10 <= len(positions) <= 200:
+                r_range = positions[:, 0].max() - positions[:, 0].min()
+                c_range = positions[:, 1].max() - positions[:, 1].min()
+                if 4 <= r_range <= 20 and 4 <= c_range <= 20:
+                    # Could be a target zone with items
+                    hyp = GoalHypothesis(
+                        description=f"Items concentrated in color-{color} zone",
+                        predicate_type="items_in_zone",
+                        params={
+                            "zone_color": int(color),
+                            "r_min": int(positions[:, 0].min()),
+                            "r_max": int(positions[:, 0].max()),
+                            "c_min": int(positions[:, 1].min()),
+                            "c_max": int(positions[:, 1].max()),
+                        },
+                        confidence=0.5,
+                        times_verified=1,
+                    )
+                    # Don't add duplicate hypotheses
+                    if not any(
+                        h.predicate_type == hyp.predicate_type
+                        and h.params.get("zone_color") == hyp.params["zone_color"]
+                        for h in self.hypotheses
+                    ):
+                        self.hypotheses.append(hyp)
+
+        # Compare first and final frames to find what changed
+        if self.pre_completion_frames:
+            initial = self.pre_completion_frames[0]
+            if initial.shape == final_grid.shape:
+                diff_mask = initial != final_grid
+                changed = int(np.sum(diff_mask))
+                if 0 < changed < initial.size * 0.3:
+                    # Focused changes suggest a goal region
+                    rows, cols = np.where(diff_mask)
+                    hyp = GoalHypothesis(
+                        description="Changes concentrated in goal region",
+                        predicate_type="region_change",
+                        params={
+                            "r_min": int(rows.min()),
+                            "r_max": int(rows.max()),
+                            "c_min": int(cols.min()),
+                            "c_max": int(cols.max()),
+                            "changed_count": changed,
+                        },
+                        confidence=0.4,
+                        times_verified=1,
+                    )
+                    self.hypotheses.append(hyp)
+
+    def verify_hypothesis(self, grid: np.ndarray, completed: bool) -> None:
+        """Verify hypotheses against a new level's outcome."""
+        for hyp in self.hypotheses:
+            if hyp.predicate_type == "items_in_zone":
+                zone_color = hyp.params["zone_color"]
+                positions = np.argwhere(grid == zone_color)
+                has_zone = len(positions) >= 10
+                if completed and has_zone:
+                    hyp.times_verified += 1
+                    hyp.confidence = min(1.0, hyp.confidence + 0.2)
+                elif not completed and has_zone:
+                    hyp.times_falsified += 1
+                    hyp.confidence = max(0.0, hyp.confidence - 0.1)
+
+    def get_best_hypothesis(self) -> GoalHypothesis | None:
+        """Return the highest-scoring goal hypothesis."""
+        if not self.hypotheses:
+            return None
+        return max(self.hypotheses, key=lambda h: h.score())
+
+    def reset_episode(self) -> None:
+        """Reset per-episode state, keep hypotheses."""
+        self.pre_completion_frames.clear()
+        self.step_count = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -825,6 +1229,105 @@ class DynamicPermutationSolver:
             return [counter_clockwise_action] * ccw_dist
 
     @staticmethod
+    def mod_inverse(a: int, m: int) -> int | None:
+        """Compute the modular multiplicative inverse of a modulo m using Extended Euclidean Algorithm."""
+        a = a % m
+        if a == 0:
+            return None
+        t, new_t = 0, 1
+        r, new_r = m, a
+        while new_r != 0:
+            quotient = r // new_r
+            t, new_t = new_t, t - quotient * new_t
+            r, new_r = new_r, r - quotient * new_r
+        if r > 1:
+            return None
+        return (t + m) % m
+
+    @staticmethod
+    def solve_modular_linear_system(
+        A: np.ndarray,  # M x N matrix
+        b: np.ndarray,  # M vector
+        modulus: int,
+    ) -> np.ndarray | None:
+        """Solves A * x = b (mod modulus) via Gauss-Jordan elimination over Z_m.
+
+        Returns integer vector x in [0, modulus-1] if solution exists, else None.
+        """
+        if modulus == 2:
+            return DynamicPermutationSolver.solve_gf2_linear_system(A, b)
+
+        M, N = A.shape
+        m = modulus
+        aug = np.hstack([A.astype(int) % m, b.astype(int).reshape(-1, 1) % m])
+
+        pivot_row = 0
+        pivot_cols: list[int] = []
+
+        for c in range(N):
+            if pivot_row >= M:
+                break
+
+            best_r = None
+            for r in range(pivot_row, M):
+                val = aug[r, c] % m
+                if val != 0 and math.gcd(val, m) == 1:
+                    best_r = r
+                    break
+
+            if best_r is None:
+                for r in range(pivot_row, M):
+                    if aug[r, c] % m != 0:
+                        best_r = r
+                        break
+
+            if best_r is None:
+                continue
+
+            if best_r != pivot_row:
+                aug[[pivot_row, best_r]] = aug[[best_r, pivot_row]]
+
+            pivot_val = int(aug[pivot_row, c] % m)
+            inv = DynamicPermutationSolver.mod_inverse(pivot_val, m)
+            if inv is not None:
+                aug[pivot_row] = (aug[pivot_row] * inv) % m
+                for i in range(M):
+                    if i != pivot_row and aug[i, c] % m != 0:
+                        factor = aug[i, c] % m
+                        aug[i] = (aug[i] - factor * aug[pivot_row]) % m
+                pivot_cols.append(c)
+                pivot_row += 1
+
+        x = np.zeros(N, dtype=int)
+        for i, c in reversed(list(enumerate(pivot_cols))):
+            val = int(aug[i, N] % m)
+            for j in range(c + 1, N):
+                val = (val - int(aug[i, j] % m) * int(x[j])) % m
+            p_val = int(aug[i, c] % m)
+            inv = DynamicPermutationSolver.mod_inverse(p_val, m)
+            if inv is not None:
+                x[c] = (val * inv) % m
+            else:
+                for candidate in range(m):
+                    if (candidate * p_val) % m == val % m:
+                        x[c] = candidate
+                        break
+
+        if np.array_equal((A.astype(int) @ x) % m, b.astype(int) % m):
+            return x
+
+        # Bounded lattice search fallback for small composite systems
+        if N <= 6 and (m**N) <= 65536:
+            import itertools
+
+            for cand in itertools.product(range(m), repeat=N):
+                c_arr = np.array(cand, dtype=int)
+                if np.array_equal((A.astype(int) @ c_arr) % m, b.astype(int) % m):
+                    return c_arr
+
+        return None
+
+    @staticmethod
     def solve_multi_dial_combination(
         current_states: list[int],
         target_states: list[int],
@@ -841,6 +1344,49 @@ class DynamicPermutationSolver:
                 )
             )
         return actions
+
+
+class CoupledMIMOIdentifier:
+    """Universal MIMO (Multi-Input Multi-Output) state-space identifier and solver.
+
+    Discovers transition matrices for coupled dials, Lights-Out permutations,
+    and cellular automata through empirical impulse response probing.
+    """
+
+    def __init__(self, num_variables: int, modulus: int) -> None:
+        self.num_variables = num_variables
+        self.modulus = modulus
+        self.impulse_responses: dict[int, np.ndarray] = {}
+        self.action_plan: list[int] = []
+
+    def register_transition(
+        self, action: int, pre_state: np.ndarray, post_state: np.ndarray
+    ) -> None:
+        """Record an empirical transition and update the system transition matrix."""
+        delta = (post_state.astype(int) - pre_state.astype(int)) % self.modulus
+        self.impulse_responses[action] = delta
+
+    def solve_plan(
+        self, current_state: np.ndarray, target_state: np.ndarray, available_actions: list[int]
+    ) -> list[int]:
+        """Compute the optimal sequence of actions to reach target_state from current_state."""
+        b = (target_state.astype(int) - current_state.astype(int)) % self.modulus
+        if np.all(b == 0):
+            return []
+
+        actions_with_model = [a for a in available_actions if a in self.impulse_responses]
+        if not actions_with_model:
+            return []
+
+        A = np.column_stack([self.impulse_responses[a] for a in actions_with_model])
+        x = DynamicPermutationSolver.solve_modular_linear_system(A, b, self.modulus)
+        if x is None:
+            return []
+
+        plan: list[int] = []
+        for a, count in zip(actions_with_model, x):
+            plan.extend([a] * int(count))
+        return plan
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2651,53 +3197,6 @@ class WarehouseLogisticBotSolver:
     def reset_episode(self) -> None:
         self.action_queue = []
 
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [
-            1,
-            2,
-            3,
-            4,
-            1,
-            1,
-            5,
-            1,
-            1,
-            5,
-            1,
-            4,
-            4,
-            1,
-            1,
-            4,
-            5,
-            3,
-            3,
-            2,
-            3,
-            3,
-            2,
-            5,
-            3,
-            5,
-            4,
-            4,
-            1,
-            4,
-            4,
-            2,
-            4,
-            4,
-            2,
-            5,
-        ],
-        1: (
-            [4, 4, 4, 4, 4, 4, 4, 2, 2, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5]
-            + [4, 4, 4, 4, 4, 4, 4, 4, 5]
-            + [3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5, 1, 1]
-            + [5] * 20
-        ),
-    }
-
     def is_warehouse_logistics(self, grid: np.ndarray, available_actions: list[int]) -> bool:
         if available_actions != [1, 2, 3, 4, 5]:
             return False
@@ -2710,8 +3209,6 @@ class WarehouseLogisticBotSolver:
         )
 
     def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
         if self.action_queue:
             return self.action_queue.pop(0), 0.99
         return 5, 0.99
@@ -2777,10 +3274,23 @@ class InductiveHCIRAgent:
         self.last_action_data: dict[str, int] | None = None
         self.current_actor_pos: tuple[int, int] | None = None
         self.current_target_pos: tuple[int, int] | None = None
+        # Trial-and-error components
+        self.trial_memory: TrialFeedbackMemory = TrialFeedbackMemory()
+        self.goal_inductor: GoalStateInductor = GoalStateInductor()
+        self.step_counter: int = 0
+        self.epistemic_probe_budget: int = 6  # initial exploration steps
+        # Loop detection: track recent positions to detect navigation circles
+        self.visited_positions: deque[tuple[int, int]] = deque(maxlen=30)
+        self.visit_counts: dict[tuple[int, int], int] = {}
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal step state while preserving cross-level knowledge."""
         self.prev_grid = None
+        self.step_counter = 0
+        self.trial_memory.reset_episode()
+        self.goal_inductor.reset_episode()
+        self.visited_positions.clear()
+        self.visit_counts.clear()
         self.last_action = None
         self.last_action_data = None
         self.canvas_matcher.reset_episode()
@@ -2812,13 +3322,22 @@ class InductiveHCIRAgent:
         self.causal_engine.reset_episode()
         if not retain_dynamics:
             self.active_solver_name = None
+            # Preserve goal hypotheses as universal knowledge across games
+            preserved_hypotheses = list(self.goal_inductor.hypotheses)
             self.knowledge_base = CrossLevelKnowledgeBase()
             self.hcir_agent.reset_episode(retain_dynamics=False)
             self.current_level = 0
+            # Restore high-confidence goal hypotheses from prior games
+            for hyp in preserved_hypotheses:
+                if hyp.score() >= 0.3:
+                    self.goal_inductor.hypotheses.append(hyp)
         else:
             self.current_level += 1
             self.hcir_agent.reset_episode(retain_dynamics=True)
-            # Retain and transfer cross-level knowledge zero-shot
+            if self.current_level >= 2:
+                self.active_solver_name = None
+
+            # Transfer cross-level knowledge zero-shot
             if self.knowledge_base.controllable_signature.color is not None:
                 self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
             elif self.hcir_agent.avatar_color is not None:
@@ -2833,6 +3352,31 @@ class InductiveHCIRAgent:
                         confidence=aff.confidence,
                         probes_tested=aff.times_tested,
                     )
+
+            # Transfer learned barrier colors from knowledge base to HCIR
+            if self.knowledge_base.barrier_colors:
+                logger.info(
+                    f"Transferring {len(self.knowledge_base.barrier_colors)} barrier colors "
+                    f"to level {self.current_level}: {self.knowledge_base.barrier_colors}"
+                )
+
+            # Transfer trial memory barriers (spatial patterns survive level change)
+            if self.trial_memory.barrier_positions:
+                logger.info(
+                    f"Carrying {len(self.trial_memory.barrier_positions)} barrier positions "
+                    f"from trial memory to level {self.current_level}"
+                )
+
+            # Transfer goal hypotheses (verified on prior levels)
+            best_hyp = self.goal_inductor.get_best_hypothesis()
+            if best_hyp:
+                logger.info(
+                    f"Goal hypothesis for level {self.current_level}: "
+                    f"{best_hyp.description} (score={best_hyp.score():.2f})"
+                )
+
+            # Reduce exploration budget on later levels (we already know the dynamics)
+            self.epistemic_probe_budget = max(2, 6 - self.current_level * 2)
 
     def _dispatch_active_solver(
         self, curr_grid: np.ndarray, available_actions: list[int]
@@ -2947,154 +3491,13 @@ class InductiveHCIRAgent:
         self.last_action = action
         return action, conf
 
-    def plan_next_action(
-        self,
-        curr_grid: np.ndarray,
-        available_actions: list[int],
+    def _plan_hcir_step(
+        self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
-        """Select action via trial-and-error induction or goal-directed transfer planning."""
-        # If a solver is already active for this episode, continue executing its plan
-        if self.active_solver_name is not None:
-            return self._dispatch_active_solver(curr_grid, available_actions)
+        """Execute autonomous cognitive reasoning via the HCIR Engine."""
+        self.step_counter += 1
 
-        # 1. Canvas Stamping / Pattern Matching Branch (cd82)
-        if (
-            5 in available_actions
-            and 6 in available_actions
-            and 7 not in available_actions
-            and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
-        ):
-            self.active_solver_name = "canvas_stamping"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 2. Spatial Resource Navigation Branch
-        if all(
-            a in available_actions for a in [1, 2, 3, 4]
-        ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
-            self.active_solver_name = "spatial_navigation"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 3. Vortex Attractor Shockwave Branch
-        if (
-            6 in available_actions
-            and 7 in available_actions
-            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid)
-        ):
-            self.active_solver_name = "vortex"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 4. Tumbler Permutation Dial Lock Branch (tr87)
-        if self.tumbler_solver.is_tumbler_lock(curr_grid, available_actions):
-            self.active_solver_name = "tumbler"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 5. Peg Solitaire Branch (lf52)
-        if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-            self.active_solver_name = "peg"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 6. Permutation Slider Branch (sb26)
-        if self.slider_solver.is_permutation_slider(curr_grid, available_actions):
-            self.active_solver_name = "slider"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 7. Track Maze Navigation Branch (tu93)
-        if self.track_navigator.is_track_maze(curr_grid, available_actions):
-            self.active_solver_name = "track"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 8. Lights Out Stencil Branch (ft09)
-        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "lights_out"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 9. Permutation Button Ring Slider Branch (lp85)
-        if self.btn_slider_solver.is_permutation_button_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "btn_slider"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 10. Center of Mass Fitting Branch (r11l)
-        if self.center_of_mass_solver.is_center_of_mass_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "center_of_mass"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 11. Articulated Block Pushing Branch (s5i5)
-        if self.block_pushing_solver.is_block_pushing_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "block_pushing"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 12. Liquid Gravity Transfer Branch (vc33)
-        if self.liquid_gravity_solver.is_liquid_gravity_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "liquid_gravity"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 13. Turtle Program Synthesis Branch (tn36)
-        if self.turtle_program_solver.is_turtle_program_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "turtle_program"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 14. Kinematic Grid Rewind Branch (g50t)
-        if self.grid_rewind_solver.is_grid_rewind_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "grid_rewind"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 15. Polyomino Cross Assembly Branch (re86)
-        if self.polyomino_solver.is_polyomino_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "polyomino"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 16. Barrier Click Maze Navigation Branch (dc22)
-        if self.barrier_maze_solver.is_barrier_maze(curr_grid, available_actions):
-            self.active_solver_name = "barrier_maze"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 17. Keypad Dial Sequencer Branch (sc25)
-        if self.keypad_dialer_solver.is_keypad_dialer(curr_grid, available_actions):
-            self.active_solver_name = "keypad_dialer"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 18. Target Affordance Aligner Branch (ka59)
-        if self.affordance_aligner_solver.is_affordance_aligner(curr_grid, available_actions):
-            self.active_solver_name = "affordance_aligner"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 19. Jigsaw Connector Matching Branch (cn04)
-        if self.jigsaw_solver.is_connector_assembly(curr_grid, available_actions):
-            self.active_solver_name = "jigsaw"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 20. Mirrored Convergence Branch (m0r0)
-        if self.mirrored_convergence_solver.is_mirrored_convergence(curr_grid, available_actions):
-            self.active_solver_name = "mirrored_convergence"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 21. Gravity Spilling Platform Branch (sp80)
-        if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-            self.active_solver_name = "gravity_spill"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 22. Upward Gravity Platformer Branch (bp35)
-        if self.platformer_solver.is_upward_gravity_platformer(curr_grid, available_actions):
-            self.active_solver_name = "platformer"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 23. Piston Sliding Crane Branch (sk48)
-        if self.piston_crane_solver.is_piston_sliding_crane(curr_grid, available_actions):
-            self.active_solver_name = "piston_crane"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 24. Laser Reflection Mirror Branch (ar25)
-        if self.laser_mirror_solver.is_laser_reflection(curr_grid, available_actions):
-            self.active_solver_name = "laser_mirror"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 25. Warehouse Logistics Bot Branch (wa30)
-        if self.wa30_solver.is_warehouse_logistics(curr_grid, available_actions):
-            self.active_solver_name = "wa30"
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 2. Assimilate feedback from previous action if available
+        # 1. Assimilate feedback from previous action if available
         if self.prev_grid is not None and self.last_action is not None:
             diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
             self.knowledge_base.register_observation(
@@ -3102,11 +3505,40 @@ class InductiveHCIRAgent:
             )
             self.hcir_agent.update_causal_dynamics(self.last_action, self.prev_grid, curr_grid)
 
-        # Synchronize controllable signature and affordances
-        if (
-            self.hcir_agent.avatar_color is None
-            and self.knowledge_base.controllable_signature.color is not None
-        ):
+            # Record trial-and-error outcome
+            pos = self.current_actor_pos or (0, 0)
+            barrier_dir = None
+            if diff.diff_type == DiffType.NO_CHANGE:
+                # Infer blocked direction from the action's expected delta
+                aff = self.knowledge_base.action_affordances.get(self.last_action)
+                if aff and (aff.delta_r != 0 or aff.delta_c != 0):
+                    barrier_dir = (aff.delta_r, aff.delta_c)
+
+            outcome = TrialOutcome(
+                action=self.last_action,
+                position=pos,
+                succeeded=(diff.diff_type != DiffType.NO_CHANGE),
+                diff_type=diff.diff_type,
+                barrier_direction=barrier_dir,
+                objects_affected=diff.changed_pixel_count,
+                item_gained=(
+                    diff.diff_type == DiffType.TRANSLATION
+                    and diff.moved_object_size > 0
+                    and diff.changed_pixel_count > diff.moved_object_size * 2
+                ),
+                item_lost=(
+                    diff.diff_type == DiffType.TRANSLATION
+                    and diff.moved_object_size > 0
+                    and diff.changed_pixel_count > diff.moved_object_size * 3
+                ),
+            )
+            self.trial_memory.record(outcome)
+
+        # Feed frame to goal inductor for future hypothesis generation
+        self.goal_inductor.observe_frame(curr_grid)
+
+        # 2. Synchronize controllable signature, barrier colors, and affordances
+        if self.knowledge_base.controllable_signature.color is not None:
             self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
 
         for a, aff in self.knowledge_base.action_affordances.items():
@@ -3119,7 +3551,183 @@ class InductiveHCIRAgent:
                     probes_tested=aff.times_tested,
                 )
 
-        # 3. Plan next action using HCIR engine
+        # Transfer learned barrier colors to HCIR agent
+        if self.knowledge_base.barrier_colors and self.hcir_agent.known_barriers is not None:
+            for color in self.knowledge_base.barrier_colors:
+                barrier_pts = np.argwhere(curr_grid == color)
+                for r, c in barrier_pts:
+                    if (
+                        0 <= r < self.hcir_agent.known_barriers.shape[0]
+                        and 0 <= c < self.hcir_agent.known_barriers.shape[1]
+                    ):
+                        self.hcir_agent.known_barriers[r, c] = True
+
+        # 3. Systematic exploration phase — discover ALL available actions
+        # On Level 1 (or when world model isn't grounded), systematically try
+        # each available action at least once so we learn what 5/6/7 do.
+        if self.current_level == 0 or not self.knowledge_base.is_world_model_grounded(
+            available_actions
+        ):
+            untested_actions = [
+                a
+                for a in available_actions
+                if a not in self.knowledge_base.action_affordances
+                or self.knowledge_base.action_affordances[a].times_tested == 0
+            ]
+            if untested_actions and self.step_counter <= self.epistemic_probe_budget + len(
+                available_actions
+            ):
+                # Prioritize non-movement actions (5,6,7) since movements (1-4)
+                # are typically discovered first by the HCIR engine
+                non_movement = [a for a in untested_actions if a > 4]
+                probe_action = non_movement[0] if non_movement else untested_actions[0]
+                logger.debug(
+                    f"Exploration phase (step {self.step_counter}): "
+                    f"testing action {probe_action}, untested={untested_actions}"
+                )
+                self.prev_grid = curr_grid.copy()
+                self.last_action = probe_action
+
+                # For click-type actions (6, 7), provide action_data with
+                # click coordinates at avatar position or grid center
+                if probe_action >= 6:
+                    if self.current_actor_pos:
+                        self.last_action_data = {
+                            "x": self.current_actor_pos[1],
+                            "y": self.current_actor_pos[0],
+                        }
+                    else:
+                        H, W = curr_grid.shape
+                        self.last_action_data = {"x": W // 2, "y": H // 2}
+                else:
+                    self.last_action_data = None
+
+                return probe_action, 0.4
+
+        # 4. Loop detection — detect and break navigation circles
+        # Only trigger when: no active goal target AND position visited 6+ times
+        # This avoids breaking back-and-forth delivery patterns (wa30, ls20)
+        if self.current_actor_pos:
+            pos = self.current_actor_pos
+            self.visited_positions.append(pos)
+            self.visit_counts[pos] = self.visit_counts.get(pos, 0) + 1
+
+            no_active_target = self.current_target_pos is None
+            if no_active_target and self.visit_counts[pos] >= 6 and self.step_counter > 20:
+                # Find movement affordances and pick the least-visited direction
+                movement_actions = []
+                for a, aff in self.knowledge_base.action_affordances.items():
+                    if (
+                        a in available_actions
+                        and (aff.delta_r != 0 or aff.delta_c != 0)
+                        and aff.confidence >= 0.3
+                    ):
+                        target_pos = (pos[0] + aff.delta_r, pos[1] + aff.delta_c)
+                        visits = self.visit_counts.get(target_pos, 0)
+                        movement_actions.append((a, target_pos, visits))
+
+                if movement_actions:
+                    movement_actions.sort(key=lambda x: x[2])
+                    best_action = movement_actions[0][0]
+                    logger.debug(
+                        f"Loop break at {pos} (visited {self.visit_counts[pos]}x): "
+                        f"choosing action {best_action} toward {movement_actions[0][1]}"
+                    )
+                    self.prev_grid = curr_grid.copy()
+                    self.last_action = best_action
+                    self.last_action_data = None
+                    return best_action, 0.35
+
+        # 5. Stuck detection — epistemic probing fallback
+        if self.trial_memory.is_stuck(threshold=8):
+            if self.current_actor_pos:
+                blocked = self.trial_memory.get_blocked_actions_at(self.current_actor_pos)
+                unblocked = [a for a in available_actions if a not in blocked]
+                if unblocked:
+                    import random
+
+                    # Prefer action 5 (interact) if untested — many games need it
+                    if (
+                        5 in unblocked
+                        and self.knowledge_base.action_affordances.get(
+                            5, ActionAffordance(5)
+                        ).times_tested
+                        < 3
+                    ):
+                        probe_action = 5
+                    else:
+                        probe_action = random.choice(unblocked)
+                    self.prev_grid = curr_grid.copy()
+                    self.last_action = probe_action
+                    self.last_action_data = None
+                    self.trial_memory.consecutive_no_change = 0
+                    logger.debug(
+                        f"Epistemic probe: stuck at {self.current_actor_pos}, "
+                        f"trying action {probe_action}"
+                    )
+                    return probe_action, 0.3
+
+        # 6. Recipe-guided action — use learned interaction recipes from previous levels
+        # If we have high-confidence recipes, check if any matching objects are visible
+        if (
+            self.knowledge_base.object_recipes
+            and self.knowledge_base.levels_solved > 0
+            and self.current_actor_pos
+        ):
+            avatar_r, avatar_c = self.current_actor_pos
+            pickup_recipes = [
+                r
+                for r in self.knowledge_base.object_recipes.values()
+                if r.outcome == "pickup" and r.confidence >= 0.4
+            ]
+            if pickup_recipes:
+                # Find the nearest object matching a known recipe
+                for recipe in pickup_recipes:
+                    obj_pts = np.argwhere(curr_grid == recipe.object_color)
+                    if len(obj_pts) == 0:
+                        continue
+                    obj_r = float(np.mean(obj_pts[:, 0]))
+                    obj_c = float(np.mean(obj_pts[:, 1]))
+                    dist = math.hypot(obj_r - avatar_r, obj_c - avatar_c)
+
+                    # Contact pickup (action=0): avatar walks TO object — let HCIR navigate
+                    # but give it a hint by logging the target. No action override needed.
+                    if recipe.interaction_action == 0:
+                        logger.debug(
+                            "Recipe HINT (contact): color=%d at (%.0f,%.0f), dist=%.1f — HCIR navigates",
+                            recipe.object_color,
+                            obj_r,
+                            obj_c,
+                            dist,
+                        )
+                        # Let HCIR handle navigation naturally
+                        continue
+
+                    # Action-5 pickup: if close enough to interact, use the learned action
+                    if recipe.interaction_action == 5 and 5 in available_actions:
+                        interact_range = max(5.0, getattr(self.hcir_agent, "step_size", 3) * 1.5)
+                        if dist < interact_range:
+                            logger.info(
+                                "Recipe REPLAY: color=%d nearby (dist=%.1f), using action %d",
+                                recipe.object_color,
+                                dist,
+                                recipe.interaction_action,
+                            )
+                            self.prev_grid = curr_grid.copy()
+                            self.last_action = recipe.interaction_action
+                            self.last_action_data = None
+                            return recipe.interaction_action, 0.9
+
+                    # If far, let HCIR navigate toward it
+                    logger.debug(
+                        "Recipe HINT: color=%d at (%.0f,%.0f), dist=%.1f — navigating",
+                        recipe.object_color,
+                        obj_r,
+                        obj_c,
+                        dist,
+                    )
+
+        # 7. Plan next action using HCIR engine
         action, conf = self.hcir_agent.plan_next_action(curr_grid, available_actions)
         self.last_action_data = self.hcir_agent.last_action_data
 
@@ -3128,6 +3736,7 @@ class InductiveHCIRAgent:
                 int(self.hcir_agent.avatar_centroid[0]),
                 int(self.hcir_agent.avatar_centroid[1]),
             )
+
         if self.hcir_agent.primary_goal_node:
             tp = self.hcir_agent.primary_goal_node.properties.get("target_position")
             if tp:
@@ -3136,6 +3745,59 @@ class InductiveHCIRAgent:
         self.prev_grid = curr_grid.copy()
         self.last_action = action
         return action, conf
+
+    def plan_next_action(
+        self,
+        curr_grid: np.ndarray,
+        available_actions: list[int],
+    ) -> tuple[int, float]:
+        """Select action via trial-and-error induction or goal-directed transfer planning."""
+        # 1. Specialized maze/resource constraint predicate check
+        if all(
+            a in available_actions for a in [1, 2, 3, 4]
+        ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
+            self.active_solver_name = "spatial_navigation"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 2. Unified Spatial Navigation & Manipulation via HCIR across all levels (0, 1, 2, ...)
+        if self.knowledge_base.puzzle_typology == PuzzleTypology.SPATIAL_NAVIGATION or (
+            all(a in available_actions for a in [1, 2, 3, 4]) and 6 not in available_actions
+        ):
+            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
+            self.active_solver_name = None
+            return self._plan_hcir_step(curr_grid, available_actions)
+
+        # 3. Canvas Stamping / Pattern Matching Branch (diff minimization)
+        if (
+            5 in available_actions
+            and 6 in available_actions
+            and 7 not in available_actions
+            and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
+        ):
+            self.active_solver_name = "canvas_stamping"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 4. Vortex Attractor Shockwave Branch
+        if (
+            6 in available_actions
+            and 7 in available_actions
+            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
+            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid)
+        ):
+            self.active_solver_name = "vortex"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 5. Discrete Permutation & Linear System Solvers (e.g. Lights Out via GF(2))
+        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
+            self.active_solver_name = "lights_out"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 6. If a solver is already active for this episode, continue executing its plan
+        if self.active_solver_name is not None:
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 7. Universal Fallback: HCIR Epistemic Cognitive Engine
+        return self._plan_hcir_step(curr_grid, available_actions)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3245,6 +3907,28 @@ class InductiveARC3BenchmarkRunner:
 
             if completed:
                 levels_completed += 1
+                # Notify goal inductor about successful completion
+                self.agent.goal_inductor.observe_completion(curr_grid)
+                self.agent.knowledge_base.levels_solved += 1
+
+                # Learn delivery zone from successful completion
+                # If the HCIR agent has a target zone, store it in pickup recipes
+                hcir = self.agent.hcir_agent
+                if hcir.target_zone_bounds:
+                    tz_bounds = hcir.target_zone_bounds
+                    tz_colors = getattr(hcir, "target_zone_base_colors", set())
+                    tz_color = next(iter(tz_colors)) if tz_colors else None
+                    for recipe in self.agent.knowledge_base.object_recipes.values():
+                        if recipe.outcome == "pickup":
+                            recipe.delivery_zone_bounds = tz_bounds
+                            recipe.delivery_zone_color = tz_color
+                            recipe.confidence = min(1.0, recipe.confidence + 0.3)
+                            logger.info(
+                                "Recipe CONFIRMED: color=%d → deliver to zone %s (conf=%.2f)",
+                                recipe.object_color,
+                                tz_bounds,
+                                recipe.confidence,
+                            )
                 if (
                     lvl_idx + 1 < total_levels
                     and getattr(frame_data, "levels_completed", 0) <= lvl_idx
@@ -3276,6 +3960,15 @@ class InductiveARC3BenchmarkRunner:
             level_results.append(lvl_res)
 
             if not completed or getattr(frame_data, "state", None) == ARCGameState.WIN:
+                # Verify goal hypotheses on the failed/final level
+                self.agent.goal_inductor.verify_hypothesis(curr_grid, completed)
+                logger.info(
+                    f"Level {lvl_idx} {'PASSED' if completed else 'FAILED'} | "
+                    f"Knowledge: {len(self.agent.knowledge_base.action_affordances)} affordances, "
+                    f"{len(self.agent.knowledge_base.barrier_colors)} barrier colors, "
+                    f"{len(self.agent.goal_inductor.hypotheses)} goal hypotheses, "
+                    f"{self.agent.trial_memory.total_trials} trials recorded"
+                )
                 # If level failed or whole game won, stop further levels
                 break
 
