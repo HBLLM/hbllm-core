@@ -3760,8 +3760,11 @@ class InductiveHCIRAgent:
             return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 2. Unified Spatial Navigation & Manipulation via HCIR across all levels (0, 1, 2, ...)
-        if self.knowledge_base.puzzle_typology == PuzzleTypology.SPATIAL_NAVIGATION or (
-            all(a in available_actions for a in [1, 2, 3, 4]) and 6 not in available_actions
+        # Guard: only route to spatial nav if movement actions (1-4) exist
+        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
+        if has_movement and (
+            self.knowledge_base.puzzle_typology == PuzzleTypology.SPATIAL_NAVIGATION
+            or (all(a in available_actions for a in [1, 2, 3, 4]) and 6 not in available_actions)
         ):
             self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
             self.active_solver_name = None
@@ -3796,8 +3799,93 @@ class InductiveHCIRAgent:
         if self.active_solver_name is not None:
             return self._dispatch_active_solver(curr_grid, available_actions)
 
+        # 6b. Click-only affordance fallback: for action-6-only games that don't
+        # match any specialized solver (lights_out, etc.)
+        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
+        if (
+            not has_movement
+            and 6 in available_actions
+            and 5 not in available_actions
+            and 7 not in available_actions
+        ):
+            # Don't set puzzle_typology — it may change on later levels
+            return self._plan_click_affordance(curr_grid, available_actions)
+
         # 7. Universal Fallback: HCIR Epistemic Cognitive Engine
         return self._plan_hcir_step(curr_grid, available_actions)
+
+    def _plan_click_affordance(
+        self, curr_grid: np.ndarray, available_actions: list[int]
+    ) -> tuple[int, float]:
+        """Handle click-only games by systematically clicking on distinct objects."""
+        self.step_counter += 1
+
+        if not hasattr(self, "_click_targets"):
+            self._click_targets: list[tuple[int, int]] = []
+            self._click_index: int = 0
+            self._clicked_positions: set[tuple[int, int]] = set()
+            self._effective_colors: set[int] = set()
+
+        # Learn from previous click
+        if self.prev_grid is not None and self.last_action is not None:
+            diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
+            self.knowledge_base.register_observation(
+                self.prev_grid, self.last_action, curr_grid, diff
+            )
+            if diff.diff_type != DiffType.NO_CHANGE and self.last_action_data:
+                cx = self.last_action_data.get("x", 0)
+                cy = self.last_action_data.get("y", 0)
+                H, W = self.prev_grid.shape
+                if 0 <= cy < H and 0 <= cx < W:
+                    self._effective_colors.add(int(self.prev_grid[cy, cx]))
+
+        H, W = curr_grid.shape
+        bg = int(np.bincount(curr_grid.flatten()).argmax())
+        unique_colors = [int(c) for c in np.unique(curr_grid) if c != bg and c != 0]
+
+        targets: list[tuple[int, int, int]] = []
+        for color in unique_colors:
+            pts = np.argwhere(curr_grid == color)
+            if len(pts) == 0:
+                continue
+            cr, cc = int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1]))
+            targets.append((cr, cc, color))
+            if len(pts) > 20:
+                step_r = max(8, H // 4)
+                step_c = max(8, W // 4)
+                for qr in range(0, H, step_r):
+                    for qc in range(0, W, step_c):
+                        mask = (
+                            (pts[:, 0] >= qr)
+                            & (pts[:, 0] < qr + step_r)
+                            & (pts[:, 1] >= qc)
+                            & (pts[:, 1] < qc + step_c)
+                        )
+                        rp = pts[mask]
+                        if len(rp) >= 3:
+                            rr, rc = int(np.mean(rp[:, 0])), int(np.mean(rp[:, 1]))
+                            if (rr, rc) not in self._clicked_positions:
+                                targets.append((rr, rc, color))
+
+        unclicked = [(r, c, col) for r, c, col in targets if (r, c) not in self._clicked_positions]
+        eff_unclicked = [(r, c, col) for r, c, col in unclicked if col in self._effective_colors]
+
+        if eff_unclicked:
+            target = eff_unclicked[0]
+        elif unclicked:
+            target = unclicked[0]
+        elif targets:
+            target = targets[self.step_counter % len(targets)]
+        else:
+            target = (H // 2, W // 2, 0)
+
+        click_r, click_c, _ = target
+        self._clicked_positions.add((click_r, click_c))
+        action_data = {"x": click_c, "y": click_r}
+        self.last_action_data = action_data
+        self.prev_grid = curr_grid.copy()
+        self.last_action = 6
+        return 6, 0.5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
