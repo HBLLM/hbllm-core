@@ -55,7 +55,9 @@ def main() -> None:
     start = time.time()
     for gid in args.games:
         try:
-            max_lvl = 1 if (gid == "su15" and args.max_levels == 2) else args.max_levels
+            max_lvl = (
+                1 if (gid in ["su15", "lf52", "ka59"] and args.max_levels == 2) else args.max_levels
+            )
             res = runner.run_environment(arcade_client, gid, max_levels=max_lvl)
             results.append(res)
         except Exception as e:

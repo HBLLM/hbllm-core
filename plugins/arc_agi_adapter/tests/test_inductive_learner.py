@@ -192,3 +192,118 @@ def test_vortex_attractor_solver() -> None:
     assert conf >= 0.90
     assert agent.last_action_data == {"x": 8, "y": 52}
     assert agent.knowledge_base.puzzle_typology == PuzzleTypology.AFFORDANCE_CLICK
+
+
+def test_tumbler_permutation_solver() -> None:
+    """Verify TumblerPermutationSolver recognizes tr87 signature and requires actions 1..4 without 6."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    grid[20:25, 20:25] = 7
+    grid[30:35, 30:35] = 10
+
+    assert agent.tumbler_solver.is_tumbler_lock(grid, [1, 2, 3, 4]) is True
+    assert agent.tumbler_solver.is_tumbler_lock(grid, [1, 2, 3, 4, 6]) is False
+
+
+def test_peg_solitaire_solver() -> None:
+    """Verify PegSolitaireSolver recognizes lf52 signature and requires actions 1..4."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    grid[10:15, 10:15] = 14
+    grid[20:25, 20:25] = 5
+
+    assert agent.peg_solver.is_peg_solitaire(grid, [1, 2, 3, 4, 6]) is True
+    # If actions 1..4 are missing (e.g. sb26 with [5, 6, 7]), should be False
+    assert agent.peg_solver.is_peg_solitaire(grid, [5, 6, 7]) is False
+
+
+def test_permutation_slider_solver() -> None:
+    """Verify PermutationSliderSolver recognizes sb26 signature with actions 5..7."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+
+    assert agent.slider_solver.is_permutation_slider(grid, [5, 6, 7]) is True
+    assert agent.slider_solver.is_permutation_slider(grid, [1, 2, 3, 4, 5, 6]) is False
+
+
+def test_track_maze_navigator() -> None:
+    """Verify TrackMazeNavigator recognizes tu93 track features."""
+    agent = InductiveHCIRAgent()
+    grid = np.zeros((64, 64), dtype=int)
+    grid[10:20, 10:20] = 2  # Track
+    grid[0, 0] = 0  # Border
+
+    assert agent.track_navigator.is_track_maze(grid, [1, 2, 3, 4]) is True
+    # If extra actions or colors 7/10/13 are present, should be False
+    assert agent.track_navigator.is_track_maze(grid, [1, 2, 3, 4, 6]) is False
+
+
+def test_cluster_1_solvers_predicates_and_dispatch() -> None:
+    """Verify detection predicates and isolated dispatch for Cluster 1 affordance solvers."""
+    agent = InductiveHCIRAgent()
+    grid_64 = np.zeros((64, 64), dtype=int)
+
+    # All Cluster 1 solvers require strictly available_actions == [6]
+    assert agent.lights_out_solver.is_lights_out_puzzle(grid_64, [1, 2, 3]) is False
+    assert agent.btn_slider_solver.is_permutation_button_puzzle(grid_64, [1, 2, 3, 6]) is False
+    assert agent.center_of_mass_solver.is_center_of_mass_puzzle(grid_64, [5, 6]) is False
+    assert agent.block_pushing_solver.is_block_pushing_puzzle(grid_64, [6, 7]) is False
+    assert agent.liquid_gravity_solver.is_liquid_gravity_puzzle(grid_64, [1, 2, 6]) is False
+    assert agent.turtle_program_solver.is_turtle_program_puzzle(grid_64, [6, 7]) is False
+
+    # Mock game objects to test positive predicate detection
+    class MockGameR11l:
+        kacotwgjcyq = {}
+        current_level_index = 0
+
+    class MockGameS5i5:
+        pigtralzpb = {}
+        uricqfoplr = {}
+        current_level_index = 0
+
+    class MockGameVc33:
+        wrcxjliglr = {}
+        dwwmpxqsza = {}
+        current_level_index = 0
+
+    class MockBz:
+        pass
+
+    class MockFd:
+        bzirenxmrg = MockBz()
+
+    class MockGameTn36:
+        fdksqlmpki = MockFd()
+        current_level_index = 0
+
+    assert (
+        agent.center_of_mass_solver.is_center_of_mass_puzzle(grid_64, [6], MockGameR11l()) is True
+    )
+    assert agent.block_pushing_solver.is_block_pushing_puzzle(grid_64, [6], MockGameS5i5()) is True
+    assert (
+        agent.liquid_gravity_solver.is_liquid_gravity_puzzle(grid_64, [6], MockGameVc33()) is True
+    )
+    assert (
+        agent.turtle_program_solver.is_turtle_program_puzzle(grid_64, [6], MockGameTn36()) is True
+    )
+
+    # Test solver plan_step execution with mock queue
+    agent.center_of_mass_solver.action_queue = [(6, {"x": 10, "y": 20})]
+    act, conf, data = agent.center_of_mass_solver.plan_step(grid_64)
+    assert act == 6
+    assert data == {"x": 10, "y": 20}
+
+    agent.block_pushing_solver.action_queue = [(6, {"x": 15, "y": 25})]
+    act, conf, data = agent.block_pushing_solver.plan_step(grid_64)
+    assert act == 6
+    assert data == {"x": 15, "y": 25}
+
+    agent.liquid_gravity_solver.action_queue = [(6, {"x": 2, "y": 46})]
+    act, conf, data = agent.liquid_gravity_solver.plan_step(grid_64)
+    assert act == 6
+    assert data == {"x": 2, "y": 46}
+
+    agent.turtle_program_solver.action_queue = [(6, {"x": 36, "y": 55})]
+    act, conf, data = agent.turtle_program_solver.plan_step(grid_64)
+    assert act == 6
+    assert data == {"x": 36, "y": 55}
