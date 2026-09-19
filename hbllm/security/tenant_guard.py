@@ -177,6 +177,10 @@ class SystemContext:
     Bypasses normal tenant check when executing maintenance tasks.
     """
 
+    capabilities: frozenset[str]
+    _tokens: list[Any]
+    _entered: bool
+
     def __init__(self, capabilities: set[str] | list[str] | None = None):
         caps = frozenset(capabilities) if capabilities is not None else frozenset(["*"])
         super().__setattr__("capabilities", caps)

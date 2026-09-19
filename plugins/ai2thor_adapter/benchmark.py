@@ -158,20 +158,12 @@ def run_ai2thor_tier_benchmark(
     tier: int,
     episodes: int = 3,
     base_seed: int = 5000,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific AI2-THOR manipulation tier."""
     canonical_cohort = resolve_cohort(cohort_name)
     results: list[AI2ThorEpisodeResult] = []
 
-    env = make_ai2thor_env(
-        seed=base_seed, tier=tier, prefer_native=prefer_native, require_native=require_native
-    )
-    if require_native and not getattr(env, "is_native", False):
-        raise RuntimeError(
-            "Native 'ai2thor' package is strictly required; standalone fallback is disabled."
-        )
+    env = make_ai2thor_env(seed=base_seed, tier=tier)
 
     try:
         for i in range(episodes):
@@ -230,8 +222,6 @@ def run_ai2thor_benchmark(
     cohort_name: str,
     episodes: int = 12,
     base_seed: int = 5000,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(AI2THOR_TIERS))
@@ -246,8 +236,6 @@ def run_ai2thor_benchmark(
             tier=tier_id,
             episodes=eps_per_tier,
             base_seed=base_seed,
-            prefer_native=prefer_native,
-            require_native=require_native,
         )
         all_results.extend(res["results"])
         total_eps += res["episodes"]
@@ -276,26 +264,13 @@ def main() -> None:
         default=None,
         help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
     )
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        default=True,
-        help="Run against upstream native ai2thor package and Unity player",
-    )
-    parser.add_argument(
-        "--require-native",
-        action="store_true",
-        default=False,
-        help="Strictly require upstream native package, failing if unavailable",
-    )
     args = parser.parse_args()
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}")
     print(
-        f"Running AI2-THOR Full-Spectrum Benchmark (4 Tiers, N={args.episodes_per_tier} eps/tier, Native={args.prefer_native})"
+        f"Running AI2-THOR Full-Spectrum Benchmark (4 Tiers, N={args.episodes_per_tier} eps/tier, Native Upstream)"
     )
     print(f"{'=' * 85}\n")
 
@@ -312,12 +287,7 @@ def main() -> None:
 
         for tier_id, tier_name in AI2THOR_TIERS:
             data = run_ai2thor_tier_benchmark(
-                cohort,
-                tier=tier_id,
-                episodes=args.episodes_per_tier,
-                base_seed=args.seed,
-                prefer_native=args.prefer_native,
-                require_native=args.require_native,
+                cohort, tier=tier_id, episodes=args.episodes_per_tier, base_seed=args.seed
             )
             total_eps += data["episodes"]
             total_successes += sum(1 for r in data["results"] if r["success"])

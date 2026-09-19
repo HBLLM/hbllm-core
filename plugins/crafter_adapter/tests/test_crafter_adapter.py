@@ -16,20 +16,38 @@ for p in [str(_core_root), str(_plugins_root)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import json
+
 from crafter_adapter import (
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
     CrafterAchievement,
     CrafterAction,
     CrafterActionAdapter,
     CrafterObject,
     CrafterPerceptionAdapter,
+    NativeCrafterWrapper,
     PureHCIRCrafterAgent,
     make_crafter_env,
     run_crafter_benchmark,
 )
 
 
+def test_plugin_manifest() -> None:
+    manifest_path = Path(__file__).resolve().parent.parent / "plugin.json"
+    assert manifest_path.exists(), "plugin.json must exist"
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["name"] == PLUGIN_NAME
+    assert data["version"] == PLUGIN_VERSION
+    assert "crafter_plan_recipe" in data["capabilities"]
+    assert data.get("supports_native_execution") is True
+    assert "supports_standalone_fallback" not in data
+
+
 def test_crafter_environment_lifecycle() -> None:
     env = make_crafter_env(seed=42)
+    assert isinstance(env, NativeCrafterWrapper)
     obs, info = env.reset(seed=42)
 
     assert obs.player_pos is not None

@@ -16,7 +16,7 @@ from .benchmark import (
     run_overcooked_benchmark,
     run_overcooked_tier,
 )
-from .environment import NativeOvercookedWrapper, StandaloneOvercookedEnv, make_overcooked_env
+from .environment import NativeOvercookedWrapper, make_overcooked_env
 from .perception import OvercookedPerceptionAdapter
 from .types import (
     AgentState,
@@ -69,7 +69,6 @@ __all__ = [
     "PotState",
     "PotStatus",
     "PureHCIROvercookedAgent",
-    "StandaloneOvercookedEnv",
     "make_overcooked_env",
     "register",
     "run_overcooked_benchmark",

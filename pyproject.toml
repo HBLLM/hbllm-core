@@ -124,6 +124,8 @@ dev = [
     "mkdocstrings-python>=1.8.0",
     "tiktoken>=0.6.0",
     "hypothesis>=6.0.0",
+    "gymnasium>=0.28.1",
+    "minigrid>=3.0.0",
 ]
 ros = [
     "rclpy",
@@ -171,12 +173,21 @@ filterwarnings = [
 python_version = "3.11"
 ignore_missing_imports = true
 explicit_package_bases = true
-exclude = ["plugins/(?!developmental_adapter)"]
+exclude = [
+    "^plugins/(?!developmental_adapter)",
+    "^experiments/",
+    "^scratch/",
+]
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 
     "operator", "valid-type", "union-attr"
 ]
+
+[[tool.mypy.overrides]]
+module = "hbllm.hcir.*"
+enable_error_code = ["attr-defined", "call-arg"]
+
 
 [tool.bandit]
 exclude_dirs = ["tests", "plugins"]

@@ -111,7 +111,7 @@ class HCIRMemoryBackend:
         elif workspace is not None:
             # Wrap bare HCIRWorkspaceState → TieredWorkspace
             tw = TieredWorkspace()
-            tw._persistent = workspace
+            tw.persistent = workspace
             self._workspace = tw
         else:
             self._workspace = TieredWorkspace()

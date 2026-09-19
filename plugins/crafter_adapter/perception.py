@@ -158,6 +158,28 @@ class CrafterPerceptionAdapter:
 
         px, py = obs.player_pos
 
+        # Build achievements list with physical object aliases
+        achs_list = [a.value for a in obs.achievements]
+        if CrafterAchievement.PLACE_TABLE in obs.achievements or any(
+            CrafterObject.CRAFTING_TABLE in row for row in obs.semantic_grid
+        ):
+            if "table" not in achs_list:
+                achs_list.extend(["table", "crafting_table"])
+        if CrafterAchievement.PLACE_FURNACE in obs.achievements or any(
+            CrafterObject.FURNACE in row for row in obs.semantic_grid
+        ):
+            if "furnace" not in achs_list:
+                achs_list.append("furnace")
+        if CrafterAchievement.MAKE_WOOD_PICKAXE in obs.achievements:
+            if "wood_pickaxe" not in achs_list:
+                achs_list.append("wood_pickaxe")
+        if CrafterAchievement.MAKE_STONE_PICKAXE in obs.achievements:
+            if "stone_pickaxe" not in achs_list:
+                achs_list.append("stone_pickaxe")
+        if CrafterAchievement.MAKE_IRON_PICKAXE in obs.achievements:
+            if "iron_pickaxe" not in achs_list:
+                achs_list.append("iron_pickaxe")
+
         # Update Agent Node
         agent_node = PhysicalEntityNode(
             id="agent",
@@ -167,12 +189,13 @@ class CrafterPerceptionAdapter:
                 "x": px,
                 "y": py,
                 "facing": obs.player_facing,
+                "reach_distance": 1.6,
                 "health": obs.vitals.health,
                 "food": obs.vitals.food,
                 "drink": obs.vitals.drink,
                 "energy": obs.vitals.energy,
                 "inventory": obs.inventory.to_dict(),
-                "achievements": [a.value for a in obs.achievements],
+                "achievements": achs_list,
                 "step_count": obs.step_count,
             },
             entity_lifecycle=EntityLifecycle.TRACKED,
@@ -259,75 +282,139 @@ class CrafterPerceptionAdapter:
         best_pos = None
         best_dist = float("inf")
 
-        radius = 24
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                x, y = px + dx, py + dy
-                if 0 <= x < width and 0 <= y < height:
-                    if obs.semantic_grid[y][x] == target_type:
-                        dist = abs(px - x) + abs(py - y)
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_pos = (x, y)
+        for y in range(height):
+            for x in range(width):
+                if obs.semantic_grid[y][x] == target_type:
+                    dist = abs(px - x) + abs(py - y)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_pos = (x, y)
 
         return best_pos
 
     def ingest_goal(self, goal: CrafterGoal | None, obs: CrafterObservation) -> GoalNode:
         """Translate CrafterGoal (or progressive tech-tree roadmap) into an active GoalNode."""
         target_conditions: list[str] = []
+        achs = obs.achievements
+        inv = obs.inventory
 
         # 1. Vital Survival Interrupts
-        if obs.vitals.energy <= 2:
+        if obs.vitals.energy <= 1:
             target_conditions.append("vitals_safe(energy, 9)")
             ach = CrafterAchievement.WAKE_UP
-        elif obs.vitals.drink <= 4:
+        elif obs.vitals.drink <= 1:
             target_conditions.append("vitals_safe(drink, 5)")
             ach = CrafterAchievement.COLLECT_DRINK
-        elif obs.vitals.food <= 4:
+        elif obs.vitals.food <= 1:
             target_conditions.append("vitals_safe(food, 5)")
             ach = CrafterAchievement.EAT_COW
         else:
             ach = goal.target_achievement if goal else None
             if ach is None:
-                # Progressive roadmap
-                achs = obs.achievements
-                inv = obs.inventory
-                if CrafterAchievement.COLLECT_WOOD not in achs or inv.wood < 2:
+                # Comprehensive progressive roadmap for unconstrained Hafner benchmark
+                if CrafterAchievement.COLLECT_WOOD not in achs or (
+                    inv.wood < 2 and CrafterAchievement.PLACE_TABLE not in achs
+                ):
                     ach = CrafterAchievement.COLLECT_WOOD
                 elif CrafterAchievement.PLACE_TABLE not in achs:
                     ach = CrafterAchievement.PLACE_TABLE
                 elif CrafterAchievement.MAKE_WOOD_PICKAXE not in achs and inv.wood_pickaxe == 0:
-                    ach = CrafterAchievement.MAKE_WOOD_PICKAXE
+                    ach = (
+                        CrafterAchievement.COLLECT_WOOD
+                        if inv.wood < 1
+                        else CrafterAchievement.MAKE_WOOD_PICKAXE
+                    )
+                elif CrafterAchievement.MAKE_WOOD_SWORD not in achs and inv.wood_sword == 0:
+                    ach = (
+                        CrafterAchievement.COLLECT_WOOD
+                        if inv.wood < 1
+                        else CrafterAchievement.MAKE_WOOD_SWORD
+                    )
                 elif CrafterAchievement.COLLECT_STONE not in achs or inv.stone < 1:
                     ach = CrafterAchievement.COLLECT_STONE
                 elif CrafterAchievement.MAKE_STONE_PICKAXE not in achs and inv.stone_pickaxe == 0:
-                    ach = CrafterAchievement.MAKE_STONE_PICKAXE
+                    ach = (
+                        CrafterAchievement.COLLECT_WOOD
+                        if inv.wood < 1
+                        else CrafterAchievement.MAKE_STONE_PICKAXE
+                    )
+                elif CrafterAchievement.MAKE_STONE_SWORD not in achs and inv.stone_sword == 0:
+                    if inv.wood < 1:
+                        ach = CrafterAchievement.COLLECT_WOOD
+                    elif inv.stone < 1:
+                        ach = CrafterAchievement.COLLECT_STONE
+                    else:
+                        ach = CrafterAchievement.MAKE_STONE_SWORD
+                elif CrafterAchievement.PLACE_STONE not in achs and inv.stone >= 2:
+                    ach = CrafterAchievement.PLACE_STONE
                 elif CrafterAchievement.COLLECT_COAL not in achs or inv.coal < 1:
                     ach = CrafterAchievement.COLLECT_COAL
                 elif CrafterAchievement.COLLECT_IRON not in achs or inv.iron < 1:
                     ach = CrafterAchievement.COLLECT_IRON
-                elif CrafterAchievement.PLACE_FURNACE not in achs and inv.stone >= 4:
-                    ach = CrafterAchievement.PLACE_FURNACE
+                elif CrafterAchievement.PLACE_FURNACE not in achs:
+                    ach = (
+                        CrafterAchievement.COLLECT_STONE
+                        if inv.stone < 4
+                        else CrafterAchievement.PLACE_FURNACE
+                    )
                 elif CrafterAchievement.MAKE_IRON_PICKAXE not in achs and inv.iron_pickaxe == 0:
-                    ach = CrafterAchievement.MAKE_IRON_PICKAXE
+                    if inv.wood < 1:
+                        ach = CrafterAchievement.COLLECT_WOOD
+                    elif inv.coal < 1:
+                        ach = CrafterAchievement.COLLECT_COAL
+                    elif inv.iron < 1:
+                        ach = CrafterAchievement.COLLECT_IRON
+                    else:
+                        ach = CrafterAchievement.MAKE_IRON_PICKAXE
+                elif CrafterAchievement.MAKE_IRON_SWORD not in achs and inv.iron_sword == 0:
+                    if inv.wood < 1:
+                        ach = CrafterAchievement.COLLECT_WOOD
+                    elif inv.coal < 1:
+                        ach = CrafterAchievement.COLLECT_COAL
+                    elif inv.iron < 1:
+                        ach = CrafterAchievement.COLLECT_IRON
+                    else:
+                        ach = CrafterAchievement.MAKE_IRON_SWORD
                 elif CrafterAchievement.COLLECT_DIAMOND not in achs:
                     ach = CrafterAchievement.COLLECT_DIAMOND
+                elif CrafterAchievement.PLACE_PLANT not in achs and inv.sapling >= 1:
+                    ach = CrafterAchievement.PLACE_PLANT
                 else:
                     ach = CrafterAchievement.SURVIVE
 
+            wood_cond = (
+                "has(wood, 2)"
+                if (inv.wood < 2 and CrafterAchievement.PLACE_TABLE not in achs)
+                else "has(wood, 1)"
+            )
+            stone_cond = (
+                "has(stone, 4)"
+                if (
+                    inv.stone < 4
+                    and CrafterAchievement.PLACE_FURNACE not in achs
+                    and CrafterAchievement.MAKE_STONE_PICKAXE in achs
+                )
+                else "has(stone, 1)"
+            )
             cond_map = {
-                CrafterAchievement.COLLECT_WOOD: ["has(wood, 1)"],
+                CrafterAchievement.COLLECT_WOOD: [wood_cond],
                 CrafterAchievement.PLACE_TABLE: ["has(table)"],
                 CrafterAchievement.MAKE_WOOD_PICKAXE: ["has(wood_pickaxe)"],
-                CrafterAchievement.COLLECT_STONE: ["has(stone, 1)"],
+                CrafterAchievement.MAKE_WOOD_SWORD: ["has(wood_sword)"],
+                CrafterAchievement.COLLECT_STONE: [stone_cond],
                 CrafterAchievement.MAKE_STONE_PICKAXE: ["has(stone_pickaxe)"],
+                CrafterAchievement.MAKE_STONE_SWORD: ["has(stone_sword)"],
+                CrafterAchievement.PLACE_STONE: ["has(place_stone)"],
+                CrafterAchievement.PLACE_PLANT: ["has(place_plant)"],
                 CrafterAchievement.COLLECT_COAL: ["has(coal, 1)"],
                 CrafterAchievement.COLLECT_IRON: ["has(iron, 1)"],
                 CrafterAchievement.PLACE_FURNACE: ["has(furnace)"],
                 CrafterAchievement.MAKE_IRON_PICKAXE: ["has(iron_pickaxe)"],
+                CrafterAchievement.MAKE_IRON_SWORD: ["has(iron_sword)"],
                 CrafterAchievement.COLLECT_DIAMOND: ["has(diamond)"],
                 CrafterAchievement.COLLECT_DRINK: ["has(collect_drink)"],
                 CrafterAchievement.EAT_COW: ["has(eat_cow)"],
+                CrafterAchievement.WAKE_UP: ["vitals_safe(energy, 9)"],
                 CrafterAchievement.SURVIVE: ["vitals_safe(health, 5)"],
             }
             target_conditions.extend(cond_map.get(ach, ["vitals_safe(health, 5)"]))
