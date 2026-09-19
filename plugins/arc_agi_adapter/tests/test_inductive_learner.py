@@ -5,6 +5,8 @@ import numpy as np
 from plugins.arc_agi_adapter.inductive_learner import (
     ActionAffordance,
     CanvasRegion,
+    CausalAffordanceEngine,
+    CausalHypothesis,
     DiffType,
     DynamicCanvasMatcher,
     DynamicPermutationSolver,
@@ -13,7 +15,12 @@ from plugins.arc_agi_adapter.inductive_learner import (
     InductiveHCIRAgent,
     LightsOutSolver,
     PuzzleTypology,
+    RoomDoor,
+    RoomTopologyExtractor,
+    SpatiotemporalNavigator,
+    TemporalHazardTracker,
     VisualEntity,
+    VisualSymmetryAnalyzer,
     VisualTopologyExtractor,
 )
 
@@ -545,3 +552,186 @@ def test_inductive_agent_phase2_solvers_initialized() -> None:
     assert isinstance(agent.dynamic_navigator, DynamicSpatialNavigator)
     assert isinstance(agent.dynamic_canvas_matcher, DynamicCanvasMatcher)
     assert isinstance(agent.permutation_solver, DynamicPermutationSolver)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 3 Neuro-Symbolic & Multimodal Vision Guidance Tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_visual_symmetry_analyzer() -> None:
+    """Verify VisualSymmetryAnalyzer computes symmetry scores and predicts symmetric completions."""
+    # Vertically symmetric 6x6 grid
+    v_grid = np.zeros((6, 6), dtype=int)
+    v_grid[:, 1] = 3
+    v_grid[:, 4] = 3
+
+    scores = VisualSymmetryAnalyzer.compute_symmetry_scores(v_grid)
+    assert scores["vertical"] == 1.0
+    assert scores["horizontal"] == 1.0
+
+    dom_sym, dom_score = VisualSymmetryAnalyzer.find_dominant_symmetry(v_grid)
+    assert dom_score == 1.0
+    assert dom_sym in ["vertical", "horizontal"]
+
+    # Incomplete vertical pattern (only left side has content)
+    half_grid = np.zeros((6, 6), dtype=int)
+    half_grid[1:3, 1] = 4
+    half_grid[3:5, 2] = 7
+
+    completed = VisualSymmetryAnalyzer.predict_symmetric_completion(
+        half_grid, symmetry_type="vertical", background_color=0
+    )
+    assert bool(np.all(completed[1:3, 4] == 4)) is True
+    assert bool(np.all(completed[3:5, 3] == 7)) is True
+
+    # Horizontal reflection completion
+    h_half = np.zeros((6, 6), dtype=int)
+    h_half[1, 2:4] = 5
+    h_completed = VisualSymmetryAnalyzer.predict_symmetric_completion(
+        h_half, symmetry_type="horizontal", background_color=0
+    )
+    assert bool(np.all(h_completed[4, 2:4] == 5)) is True
+
+
+def test_temporal_hazard_tracker() -> None:
+    """Verify TemporalHazardTracker discovers repeating hazard cycles and predicts safe frames."""
+    tracker = TemporalHazardTracker()
+
+    # Hazard alternating between (2, 2) and (3, 3) on period T=2
+    for step in range(8):
+        hazards = {(2, 2)} if step % 2 == 0 else {(3, 3)}
+        tracker.record_hazard_coords(hazards, t=step)
+
+    period = tracker.detect_periodicity(min_period=2, max_period=4)
+    assert period == 2
+
+    # Step 10 (even phase): (2, 2) is hazard, (3, 3) is safe
+    assert tracker.is_safe_at(2, 2, t=10) is False
+    assert tracker.is_safe_at(3, 3, t=10) is True
+
+    # Step 11 (odd phase): (3, 3) is hazard, (2, 2) is safe
+    assert tracker.is_safe_at(2, 2, t=11) is True
+    assert tracker.is_safe_at(3, 3, t=11) is False
+
+    # Safe mask
+    mask_even = tracker.get_safe_mask((6, 6), t=10)
+    assert bool(mask_even[2, 2]) is False
+    assert bool(mask_even[3, 3]) is True
+    assert bool(mask_even[0, 0]) is True
+
+
+def test_room_topology_extractor() -> None:
+    """Verify RoomTopologyExtractor partitions space into rooms and detects connecting doorways."""
+    occ = np.ones((7, 7), dtype=bool)
+    # Wall running down column 3 with a 1-pixel door at (3, 3)
+    occ[:, 3] = False
+    occ[3, 3] = True
+
+    rooms, doors = RoomTopologyExtractor.extract_rooms_and_doors(occ, min_room_size=4)
+    assert len(rooms) == 2
+    assert len(doors) == 1
+    assert isinstance(doors[0], RoomDoor)
+    assert doors[0].door_coord == (3, 3)
+
+    adj = RoomTopologyExtractor.build_adjacency_graph(rooms, doors)
+    ra, rb = doors[0].connects_rooms
+    assert rb in adj[ra]
+    assert ra in adj[rb]
+
+
+def test_spatiotemporal_navigator_hazard_avoidance() -> None:
+    """Verify SpatiotemporalNavigator plans paths that wait and time crossing dynamic hazard zones."""
+    occ = np.ones((5, 5), dtype=bool)
+    tracker = TemporalHazardTracker()
+
+    # Hazard at (2, 2) active on even steps
+    for step in range(12):
+        hazards = {(2, 2)} if step % 2 == 0 else set()
+        tracker.record_hazard_coords(hazards, t=step)
+    tracker.detect_periodicity(min_period=2, max_period=4)
+
+    start = (2, 0)
+    goal = (2, 4)
+
+    path = SpatiotemporalNavigator.plan_path_with_hazards(
+        occ, tracker, start, goal, start_time=0, max_time=30
+    )
+    assert path is not None
+    assert path[0] == (2, 0, 0)
+    assert path[-1][:2] == goal
+
+    # Verify every step along the path is strictly safe at time t
+    for r, c, t in path:
+        assert tracker.is_safe_at(r, c, t) is True
+
+    actions = SpatiotemporalNavigator.path_to_spatiotemporal_actions(path, wait_action=5)
+    # The path should include a wait action (5) to let the hazard deactivate before crossing (2, 2)
+    assert 5 in actions
+    assert all(a in [1, 2, 3, 4, 5] for a in actions)
+
+
+def test_causal_affordance_engine() -> None:
+    """Verify CausalAffordanceEngine ranks action hypotheses from transition observations."""
+    engine = CausalAffordanceEngine()
+
+    # Create simulated transitions
+    # Action 1: Translation UP (dr = -1)
+    # Action 6: In-place mutation (click)
+    # Action 5: No change (no-op)
+    transitions: list[tuple[np.ndarray, int, np.ndarray]] = []
+
+    for _ in range(4):
+        prev = np.zeros((8, 8), dtype=int)
+        prev[4, 4] = 3
+        curr = np.zeros((8, 8), dtype=int)
+        curr[3, 4] = 3
+        transitions.append((prev, 1, curr))
+
+    for _ in range(4):
+        prev = np.zeros((8, 8), dtype=int)
+        prev[2, 2] = 1
+        curr = prev.copy()
+        curr[2, 2] = 2
+        transitions.append((prev, 6, curr))
+
+    for _ in range(4):
+        prev = np.zeros((8, 8), dtype=int)
+        transitions.append((prev, 5, prev.copy()))
+
+    hypotheses = engine.hypothesize_from_transitions(transitions)
+    assert 1 in hypotheses
+    assert 6 in hypotheses
+    assert 5 in hypotheses
+
+    assert isinstance(hypotheses[1], CausalHypothesis)
+    assert hypotheses[1].typology == "TRANSLATION"
+    assert hypotheses[1].delta == (-1, 0)
+    assert hypotheses[1].suggested_solver == "spatial_navigation"
+
+    assert hypotheses[6].typology == "TOGGLE_CLICK"
+    assert hypotheses[6].suggested_solver == "lights_out"
+
+    assert hypotheses[5].typology == "NO_OP"
+
+
+def test_inductive_agent_phase3_tools_initialized() -> None:
+    """Verify all Phase 3 tools are properly initialized and reset on InductiveHCIRAgent."""
+    agent = InductiveHCIRAgent()
+    assert hasattr(agent, "symmetry_analyzer")
+    assert hasattr(agent, "hazard_tracker")
+    assert hasattr(agent, "room_extractor")
+    assert hasattr(agent, "spatiotemporal_navigator")
+    assert hasattr(agent, "causal_engine")
+
+    assert isinstance(agent.symmetry_analyzer, VisualSymmetryAnalyzer)
+    assert isinstance(agent.hazard_tracker, TemporalHazardTracker)
+    assert isinstance(agent.room_extractor, RoomTopologyExtractor)
+    assert isinstance(agent.spatiotemporal_navigator, SpatiotemporalNavigator)
+    assert isinstance(agent.causal_engine, CausalAffordanceEngine)
+
+    # Test reset behavior
+    agent.hazard_tracker.record_hazard_coords({(1, 1)}, t=0)
+    assert len(agent.hazard_tracker.hazard_history) == 1
+    agent.reset_episode()
+    assert len(agent.hazard_tracker.hazard_history) == 0

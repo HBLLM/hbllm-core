@@ -843,6 +843,477 @@ class DynamicPermutationSolver:
         return actions
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 2c. Neuro-Symbolic & Multimodal Vision Guidance (Phase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class VisualSymmetryAnalyzer:
+    """Analyzes geometric symmetries (reflectional, rotational, diagonal) across visual grids."""
+
+    @staticmethod
+    def compute_symmetry_scores(grid: np.ndarray) -> dict[str, float]:
+        """Calculates matching ratio (0.0 to 1.0) for horizontal, vertical, diagonal, and rotational symmetries."""
+        H, W = grid.shape
+        scores: dict[str, float] = {}
+
+        # Horizontal symmetry (reflection across horizontal midline)
+        h_flipped = np.flipud(grid)
+        scores["horizontal"] = float(np.mean(grid == h_flipped))
+
+        # Vertical symmetry (reflection across vertical midline)
+        v_flipped = np.fliplr(grid)
+        scores["vertical"] = float(np.mean(grid == v_flipped))
+
+        # Diagonal and rotational symmetries (square grids)
+        if H == W:
+            scores["main_diagonal"] = float(np.mean(grid == grid.T))
+            scores["anti_diagonal"] = float(np.mean(grid == np.flipud(np.fliplr(grid.T))))
+            scores["rotational_90"] = float(np.mean(grid == np.rot90(grid, 1)))
+            scores["rotational_180"] = float(np.mean(grid == np.rot90(grid, 2)))
+        else:
+            scores["main_diagonal"] = 0.0
+            scores["anti_diagonal"] = 0.0
+            scores["rotational_90"] = 0.0
+            scores["rotational_180"] = float(np.mean(grid == np.flipud(np.fliplr(grid))))
+
+        return scores
+
+    @staticmethod
+    def find_dominant_symmetry(grid: np.ndarray) -> tuple[str, float]:
+        """Identifies the symmetry axis with the highest matching score."""
+        scores = VisualSymmetryAnalyzer.compute_symmetry_scores(grid)
+        return max(scores.items(), key=lambda item: item[1])
+
+    @staticmethod
+    def predict_symmetric_completion(
+        grid: np.ndarray,
+        symmetry_type: str = "vertical",
+        background_color: int = 0,
+    ) -> np.ndarray:
+        """Completes an incomplete or asymmetric pattern by reflecting the non-empty half."""
+        completed = grid.copy()
+        H, W = grid.shape
+
+        if symmetry_type == "vertical":
+            mid = W // 2
+            left_half = grid[:, :mid]
+            right_half = grid[:, mid + (1 if W % 2 != 0 else 0) :]
+            left_density = int(np.sum(left_half != background_color))
+            right_density = int(np.sum(right_half != background_color))
+
+            if left_density >= right_density:
+                mirrored = np.fliplr(left_half)
+                completed[:, W - mid :] = mirrored
+            else:
+                mirrored = np.fliplr(right_half)
+                completed[:, :mid] = mirrored
+
+        elif symmetry_type == "horizontal":
+            mid = H // 2
+            top_half = grid[:mid, :]
+            bottom_half = grid[mid + (1 if H % 2 != 0 else 0) :, :]
+            top_density = int(np.sum(top_half != background_color))
+            bottom_density = int(np.sum(bottom_half != background_color))
+
+            if top_density >= bottom_density:
+                mirrored = np.flipud(top_half)
+                completed[H - mid :, :] = mirrored
+            else:
+                mirrored = np.flipud(bottom_half)
+                completed[:mid, :] = mirrored
+
+        return completed
+
+
+class TemporalHazardTracker:
+    """Discovers and tracks periodic hazard oscillations across temporal frames."""
+
+    def __init__(self) -> None:
+        self.hazard_history: dict[int, set[tuple[int, int]]] = {}
+        self.inferred_period: int | None = None
+        self.phase_hazard_sets: dict[int, set[tuple[int, int]]] = {}
+
+    def reset_episode(self) -> None:
+        """Clear recorded frames and inferred phases."""
+        self.hazard_history.clear()
+        self.inferred_period = None
+        self.phase_hazard_sets.clear()
+
+    def observe_frame(
+        self,
+        grid: np.ndarray,
+        t: int,
+        hazard_colors: set[int] | None = None,
+    ) -> None:
+        """Record hazard coordinates present at time step t."""
+        if hazard_colors is not None:
+            hazard_mask = np.isin(grid, list(hazard_colors))
+            coords = set((int(r), int(c)) for r, c in np.argwhere(hazard_mask))
+            self.hazard_history[t] = coords
+
+    def record_hazard_coords(self, coords: set[tuple[int, int]], t: int) -> None:
+        """Explicitly record known hazard coordinates at time step t."""
+        self.hazard_history[t] = set(coords)
+
+    def detect_periodicity(self, min_period: int = 2, max_period: int = 8) -> int | None:
+        """Determines if recorded hazard occurrences exhibit a repeating period T."""
+        if len(self.hazard_history) < 4:
+            return None
+
+        times = sorted(self.hazard_history.keys())
+        for T in range(min_period, max_period + 1):
+            is_valid = True
+            phases: dict[int, set[tuple[int, int]]] = {}
+
+            for t in times:
+                phi = t % T
+                hazards = self.hazard_history[t]
+                if phi not in phases:
+                    phases[phi] = hazards
+                else:
+                    if phases[phi] != hazards:
+                        is_valid = False
+                        break
+
+            if is_valid and len(phases) == T:
+                self.inferred_period = T
+                self.phase_hazard_sets = phases
+                return T
+
+        return None
+
+    def is_safe_at(self, r: int, c: int, t: int) -> bool:
+        """Checks if coordinate (r, c) is predicted to be safe at step t."""
+        if self.inferred_period is not None:
+            phi = t % self.inferred_period
+            return (r, c) not in self.phase_hazard_sets.get(phi, set())
+        return (r, c) not in self.hazard_history.get(t, set())
+
+    def get_safe_mask(self, shape: tuple[int, int], t: int) -> np.ndarray:
+        """Returns 2D boolean mask where True = safe at time step t."""
+        H, W = shape
+        mask = np.ones((H, W), dtype=bool)
+        if self.inferred_period is not None:
+            phi = t % self.inferred_period
+            for r, c in self.phase_hazard_sets.get(phi, set()):
+                if 0 <= r < H and 0 <= c < W:
+                    mask[r, c] = False
+        else:
+            for r, c in self.hazard_history.get(t, set()):
+                if 0 <= r < H and 0 <= c < W:
+                    mask[r, c] = False
+        return mask
+
+
+@dataclass
+class RoomDoor:
+    """Represents a doorway or chokepoint aperture connecting rooms."""
+
+    door_coord: tuple[int, int]
+    connects_rooms: tuple[int, int]
+
+
+class RoomTopologyExtractor:
+    """Decomposes walkable space into chambers/rooms and detects connecting doorways."""
+
+    @staticmethod
+    def extract_rooms_and_doors(
+        occupancy_grid: np.ndarray,
+        min_room_size: int = 4,
+    ) -> tuple[dict[int, list[tuple[int, int]]], list[RoomDoor]]:
+        """Partitions occupancy grid into rooms separated by walls and identifies connecting doorways."""
+        H, W = occupancy_grid.shape
+        door_coords: set[tuple[int, int]] = set()
+
+        for r in range(1, H - 1):
+            for c in range(1, W - 1):
+                if not occupancy_grid[r, c]:
+                    continue
+                h_door = (
+                    not occupancy_grid[r - 1, c]
+                    and not occupancy_grid[r + 1, c]
+                    and occupancy_grid[r, c - 1]
+                    and occupancy_grid[r, c + 1]
+                )
+                v_door = (
+                    not occupancy_grid[r, c - 1]
+                    and not occupancy_grid[r, c + 1]
+                    and occupancy_grid[r - 1, c]
+                    and occupancy_grid[r + 1, c]
+                )
+                if h_door or v_door:
+                    door_coords.add((r, c))
+
+        room_grid = occupancy_grid.copy()
+        for dr, dc in door_coords:
+            room_grid[dr, dc] = False
+
+        visited = np.zeros((H, W), dtype=bool)
+        rooms: dict[int, list[tuple[int, int]]] = {}
+        room_id_map: dict[tuple[int, int], int] = {}
+        room_counter = 0
+
+        for r in range(H):
+            for c in range(W):
+                if not room_grid[r, c] or visited[r, c]:
+                    continue
+                room_counter += 1
+                queue = deque([(r, c)])
+                visited[r, c] = True
+                coords: list[tuple[int, int]] = []
+
+                while queue:
+                    cr, cc = queue.popleft()
+                    coords.append((cr, cc))
+                    room_id_map[(cr, cc)] = room_counter
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = cr + dr, cc + dc
+                        if (
+                            0 <= nr < H
+                            and 0 <= nc < W
+                            and room_grid[nr, nc]
+                            and not visited[nr, nc]
+                        ):
+                            visited[nr, nc] = True
+                            queue.append((nr, nc))
+
+                if len(coords) >= min_room_size or room_counter not in rooms:
+                    rooms[room_counter] = coords
+
+        doors: list[RoomDoor] = []
+        for dr, dc in door_coords:
+            adjacent_rooms: set[int] = set()
+            for off_r, off_c in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = dr + off_r, dc + off_c
+                if (nr, nc) in room_id_map:
+                    adjacent_rooms.add(room_id_map[(nr, nc)])
+            if len(adjacent_rooms) == 2:
+                r_list = sorted(list(adjacent_rooms))
+                doors.append(RoomDoor(door_coord=(dr, dc), connects_rooms=(r_list[0], r_list[1])))
+
+        return rooms, doors
+
+    @staticmethod
+    def build_adjacency_graph(
+        rooms: dict[int, list[tuple[int, int]]],
+        doors: list[RoomDoor],
+    ) -> dict[int, list[int]]:
+        """Builds topological graph of room adjacencies."""
+        adj: dict[int, set[int]] = {r: set() for r in rooms}
+        for door in doors:
+            ra, rb = door.connects_rooms
+            if ra in adj and rb in adj:
+                adj[ra].add(rb)
+                adj[rb].add(ra)
+        return {r: sorted(list(neighbors)) for r, neighbors in adj.items()}
+
+
+class SpatiotemporalNavigator:
+    """Time-augmented A* pathfinder for navigation through dynamic, periodic hazards."""
+
+    ACTION_MAP: dict[tuple[int, int], int] = {
+        (-1, 0): 1,  # UP
+        (1, 0): 2,  # DOWN
+        (0, -1): 3,  # LEFT
+        (0, 1): 4,  # RIGHT
+        (0, 0): 5,  # WAIT
+    }
+
+    @staticmethod
+    def plan_path_with_hazards(
+        occupancy_grid: np.ndarray,
+        hazard_tracker: TemporalHazardTracker,
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        start_time: int = 0,
+        max_time: int = 150,
+    ) -> list[tuple[int, int, int]] | None:
+        """Finds optimal spatiotemporal path (r, c, t) avoiding static obstacles and dynamic hazards."""
+        H, W = occupancy_grid.shape
+        sr, sc = start
+        gr, gc = goal
+
+        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
+            return None
+        if not occupancy_grid[sr, sc] or not occupancy_grid[gr, gc]:
+            return None
+        if not hazard_tracker.is_safe_at(sr, sc, start_time):
+            return None
+
+        def h(r: int, c: int) -> float:
+            return float(abs(r - gr) + abs(c - gc))
+
+        open_set: list[tuple[float, int, int, int]] = []
+        heapq.heappush(open_set, (h(sr, sc), start_time, sr, sc))
+
+        came_from: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+        g_score: dict[tuple[int, int, int], float] = {(sr, sc, start_time): 0.0}
+
+        T = hazard_tracker.inferred_period or 1
+        visited_states: set[tuple[int, int, int]] = set()
+
+        while open_set:
+            _, t, cr, cc = heapq.heappop(open_set)
+
+            if (cr, cc) == goal and hazard_tracker.is_safe_at(cr, cc, t):
+                curr = (cr, cc, t)
+                path = [curr]
+                while curr in came_from:
+                    curr = came_from[curr]
+                    path.append(curr)
+                path.reverse()
+                return path
+
+            state_key = (cr, cc, t % T if hazard_tracker.inferred_period else t)
+            if state_key in visited_states:
+                continue
+            visited_states.add(state_key)
+
+            if t >= start_time + max_time:
+                continue
+
+            current_g = g_score.get((cr, cc, t), float("inf"))
+
+            transitions = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+            for dr, dc in transitions:
+                nr, nc = cr + dr, cc + dc
+                nt = t + 1
+                if 0 <= nr < H and 0 <= nc < W and occupancy_grid[nr, nc]:
+                    if hazard_tracker.is_safe_at(nr, nc, nt):
+                        tentative_g = current_g + (1.0 if (dr != 0 or dc != 0) else 1.2)
+                        neighbor_key = (nr, nc, nt)
+                        if tentative_g < g_score.get(neighbor_key, float("inf")):
+                            came_from[neighbor_key] = (cr, cc, t)
+                            g_score[neighbor_key] = tentative_g
+                            f_val = tentative_g + h(nr, nc)
+                            heapq.heappush(open_set, (f_val, nt, nr, nc))
+
+        return None
+
+    @staticmethod
+    def path_to_spatiotemporal_actions(
+        path: list[tuple[int, int, int]],
+        wait_action: int = 5,
+    ) -> list[int]:
+        """Converts spatiotemporal coordinate path into action sequence (1..4 or wait_action)."""
+        actions: list[int] = []
+        for p1, p2 in zip(path[:-1], path[1:]):
+            dr, dc = p2[0] - p1[0], p2[1] - p1[1]
+            if (dr, dc) == (0, 0):
+                actions.append(wait_action)
+            else:
+                act = SpatiotemporalNavigator.ACTION_MAP.get((dr, dc))
+                if act is not None:
+                    actions.append(act)
+        return actions
+
+
+@dataclass
+class CausalHypothesis:
+    """A causal hypothesis explaining the functional effect of an action."""
+
+    action_id: int
+    typology: str  # "TRANSLATION", "TOGGLE_CLICK", "INDEX_CYCLE", "CANVAS_MUTATION", "NO_OP"
+    delta: tuple[int, int] | None = None  # (dr, dc) for translation
+    confidence: float = 0.0
+    evidence_count: int = 0
+    suggested_solver: str | None = None
+
+
+class CausalAffordanceEngine:
+    """Inductively generates and ranks causal action hypotheses from visual state transitions."""
+
+    def __init__(self) -> None:
+        self.hypotheses: dict[int, CausalHypothesis] = {}
+
+    def reset_episode(self) -> None:
+        """Clear active hypotheses."""
+        self.hypotheses.clear()
+
+    def hypothesize_from_transitions(
+        self,
+        transitions: list[tuple[np.ndarray, int, np.ndarray]],
+    ) -> dict[int, CausalHypothesis]:
+        """Analyzes a series of exploratory transitions and outputs the top-ranked hypothesis per action."""
+        action_diffs: dict[int, list[FrameDiff]] = {}
+        for prev, act, curr in transitions:
+            diff = FrameDiffAnalyzer.analyze(prev, act, curr)
+            action_diffs.setdefault(act, []).append(diff)
+
+        best_hypotheses: dict[int, CausalHypothesis] = {}
+
+        for act, diffs in action_diffs.items():
+            total = len(diffs)
+            if total == 0:
+                continue
+
+            trans_counts: dict[tuple[int, int], int] = {}
+            cycle_count = 0
+            click_count = 0
+            canvas_count = 0
+            noop_count = 0
+
+            for d in diffs:
+                if d.diff_type == DiffType.TRANSLATION and d.translation_delta:
+                    trans_counts[d.translation_delta] = trans_counts.get(d.translation_delta, 0) + 1
+                elif d.diff_type == DiffType.INDEX_CYCLE:
+                    cycle_count += 1
+                elif d.diff_type == DiffType.IN_PLACE_MUTATION:
+                    click_count += 1
+                elif d.diff_type == DiffType.CANVAS_TRANSFORMATION:
+                    canvas_count += 1
+                elif d.diff_type == DiffType.NO_CHANGE:
+                    noop_count += 1
+
+            if trans_counts:
+                best_delta, count = max(trans_counts.items(), key=lambda item: item[1])
+                conf = count / total
+                best_hypotheses[act] = CausalHypothesis(
+                    action_id=act,
+                    typology="TRANSLATION",
+                    delta=best_delta,
+                    confidence=conf,
+                    evidence_count=count,
+                    suggested_solver="spatial_navigation",
+                )
+            elif click_count > total * 0.4 or (cycle_count > total * 0.4 and act == 6):
+                best_hypotheses[act] = CausalHypothesis(
+                    action_id=act,
+                    typology="TOGGLE_CLICK",
+                    confidence=max(click_count, cycle_count) / total,
+                    evidence_count=max(click_count, cycle_count),
+                    suggested_solver="lights_out",
+                )
+            elif cycle_count > total * 0.4:
+                best_hypotheses[act] = CausalHypothesis(
+                    action_id=act,
+                    typology="INDEX_CYCLE",
+                    confidence=cycle_count / total,
+                    evidence_count=cycle_count,
+                    suggested_solver="tumbler",
+                )
+            elif canvas_count > total * 0.4:
+                best_hypotheses[act] = CausalHypothesis(
+                    action_id=act,
+                    typology="CANVAS_MUTATION",
+                    confidence=canvas_count / total,
+                    evidence_count=canvas_count,
+                    suggested_solver="canvas_stamping",
+                )
+            else:
+                best_hypotheses[act] = CausalHypothesis(
+                    action_id=act,
+                    typology="NO_OP",
+                    confidence=noop_count / total,
+                    evidence_count=noop_count,
+                    suggested_solver=None,
+                )
+
+        self.hypotheses = best_hypotheses
+        return best_hypotheses
+
+
 class VisualCanvasMatcher:
     """Detects reference template vs editable canvas and synthesizes pattern alignment actions."""
 
@@ -2294,6 +2765,11 @@ class InductiveHCIRAgent:
         self.dynamic_navigator: DynamicSpatialNavigator = DynamicSpatialNavigator()
         self.dynamic_canvas_matcher: DynamicCanvasMatcher = DynamicCanvasMatcher()
         self.permutation_solver: DynamicPermutationSolver = DynamicPermutationSolver()
+        self.symmetry_analyzer: VisualSymmetryAnalyzer = VisualSymmetryAnalyzer()
+        self.hazard_tracker: TemporalHazardTracker = TemporalHazardTracker()
+        self.room_extractor: RoomTopologyExtractor = RoomTopologyExtractor()
+        self.spatiotemporal_navigator: SpatiotemporalNavigator = SpatiotemporalNavigator()
+        self.causal_engine: CausalAffordanceEngine = CausalAffordanceEngine()
         self.active_solver_name: str | None = None
         self.prev_grid: np.ndarray | None = None
         self.last_action: int | None = None
@@ -2332,6 +2808,8 @@ class InductiveHCIRAgent:
         self.piston_crane_solver.reset_episode()
         self.laser_mirror_solver.reset_episode()
         self.wa30_solver.reset_episode()
+        self.hazard_tracker.reset_episode()
+        self.causal_engine.reset_episode()
         if not retain_dynamics:
             self.active_solver_name = None
             self.knowledge_base = CrossLevelKnowledgeBase()

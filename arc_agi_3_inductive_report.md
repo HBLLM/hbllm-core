@@ -1,5 +1,5 @@
 # Inductive HCIR Learner Benchmark Report
-**Duration**: 47.94s across 25 game(s)
+**Duration**: 34.78s across 25 game(s)
 
 | Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |
 |---|---|---|---|---|
