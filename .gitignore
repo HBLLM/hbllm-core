@@ -58,6 +58,7 @@ wheels/
 *.safetensors
 *.onnx
 *.gguf
+*.zip
 /hbllm/__pycache__
 
 # Runtime workspace artifacts
