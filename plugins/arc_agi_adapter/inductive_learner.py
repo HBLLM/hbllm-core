@@ -2714,15 +2714,9 @@ class InductiveHCIRAgent:
         if not retain_dynamics:
             self.active_solver_name = None
             self._effective_colors.clear()
-            # Preserve goal hypotheses as universal knowledge across games
-            preserved_hypotheses = list(self.goal_inductor.hypotheses)
             self.knowledge_base = CrossLevelKnowledgeBase()
             self.hcir_agent.reset_episode(retain_dynamics=False)
             self.current_level = 0
-            # Restore high-confidence goal hypotheses from prior games
-            for hyp in preserved_hypotheses:
-                if hyp.score() >= 0.3:
-                    self.goal_inductor.hypotheses.append(hyp)
         else:
             self.current_level += 1
             self.hcir_agent.reset_episode(retain_dynamics=True)
@@ -3367,6 +3361,7 @@ class InductiveARC3BenchmarkRunner:
     ) -> InductiveEnvironmentResult:
         """Evaluate the inductive learner on an environment with cross-level transfer."""
         logger.info(f"Starting Inductive HCIR evaluation on game: {game_id}...")
+        self.agent = InductiveHCIRAgent()
         env = arcade_client.make(game_id, render_mode=None)
         frame_data = env.reset()
 
