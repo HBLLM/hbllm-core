@@ -193,3 +193,46 @@ def test_compute_geodesic_path() -> None:
     assert path[-1] == (2, 4)
     for p in path:
         assert p not in barrier_cells
+
+
+def test_find_solitaire_jump_sequence() -> None:
+    """Verify solitaire jump sequence reduces pegs to target count."""
+    pegs = {(0, 0), (0, 1), (0, 2)}
+    holes = {(0, 0), (0, 1), (0, 2), (0, 3)}
+    jumps = PhysicsPredictor.find_solitaire_jump_sequence(
+        pegs=pegs,
+        valid_holes=holes,
+        step_delta=1,
+        target_peg_count=2,
+    )
+    assert jumps is not None
+    assert len(jumps) == 1
+    assert jumps[0] == ((0, 1), (0, 2), (0, 3))
+
+
+def test_simulate_telescopic_step() -> None:
+    """Verify simulate_telescopic_step extends, retracts, and translates along rails."""
+    base = (5, 5)
+    axis = (0, 1)
+
+    # Extension
+    new_base, new_len = PhysicsPredictor.simulate_telescopic_step(
+        base_pos=base, length=2, axis=axis, action_dir=(0, 1), max_length=5
+    )
+    assert new_base == base
+    assert new_len == 3
+
+    # Retraction
+    new_base, new_len = PhysicsPredictor.simulate_telescopic_step(
+        base_pos=base, length=3, axis=axis, action_dir=(0, -1), min_length=1
+    )
+    assert new_base == base
+    assert new_len == 2
+
+    # Translation along rails
+    rails = {(4, 5), (5, 5), (6, 5)}
+    new_base, new_len = PhysicsPredictor.simulate_telescopic_step(
+        base_pos=base, length=2, axis=axis, action_dir=(1, 0), rails=rails
+    )
+    assert new_base == (6, 5)
+    assert new_len == 2

@@ -531,3 +531,118 @@ class PhysicsPredictor:
                         queue.append((nr, nc, path + [(nr, nc)]))
 
         return best_partial_path
+
+    @staticmethod
+    def find_solitaire_jump_sequence(
+        pegs: set[tuple[int, int]],
+        valid_holes: set[tuple[int, int]],
+        step_delta: int = 1,
+        target_peg_count: int = 1,
+        target_final_pos: tuple[int, int] | None = None,
+        max_states: int = 50000,
+    ) -> list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] | None:
+        """Finds a sequence of jumps to reduce solitaire board pegs via graph search.
+
+        A jump is valid if:
+        - peg at from_pos (r, c)
+        - peg at mid_pos (r + dr*step_delta, c + dc*step_delta)
+        - empty hole at to_pos (r + 2*dr*step_delta, c + 2*dc*step_delta) in valid_holes
+        Returns a list of (from_pos, mid_pos, to_pos) jumps, or None if no sequence found.
+        """
+        initial_state = frozenset(pegs)
+        visited: set[frozenset[tuple[int, int]]] = set()
+        states_explored = 0
+
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+        def dfs(
+            current_state: frozenset[tuple[int, int]],
+            path: list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]],
+        ) -> list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] | None:
+            nonlocal states_explored
+            states_explored += 1
+            if states_explored > max_states:
+                return None
+
+            if len(current_state) <= target_peg_count:
+                if target_final_pos is None or target_final_pos in current_state:
+                    return path
+
+            if current_state in visited:
+                return None
+            visited.add(current_state)
+
+            # Generate all legal jumps from current_state
+            candidate_jumps = []
+            for p in current_state:
+                r, c = p
+                for dr, dc in directions:
+                    mid = (r + dr * step_delta, c + dc * step_delta)
+                    dest = (r + 2 * dr * step_delta, c + 2 * dc * step_delta)
+                    if mid in current_state and dest in valid_holes and dest not in current_state:
+                        candidate_jumps.append((p, mid, dest))
+
+            # Heuristic sort: prefer jumps that clear peripheral pegs or converge toward center
+            if target_final_pos is not None:
+                tr, tc = target_final_pos
+                candidate_jumps.sort(key=lambda j: math.hypot(j[2][0] - tr, j[2][1] - tc))
+
+            for jump in candidate_jumps:
+                frm, mid, to_pos = jump
+                next_state = (current_state - {frm, mid}) | {to_pos}
+                res = dfs(next_state, path + [jump])
+                if res is not None:
+                    return res
+
+            return None
+
+        return dfs(initial_state, [])
+
+    @staticmethod
+    def simulate_telescopic_step(
+        base_pos: tuple[int, int],
+        length: int,
+        axis: tuple[int, int],
+        action_dir: tuple[int, int],
+        min_length: int = 1,
+        max_length: int = 10,
+        rails: set[tuple[int, int]] | None = None,
+        barriers: set[tuple[int, int]] | None = None,
+    ) -> tuple[tuple[int, int], int]:
+        """Simulate telescopic piston extension/retraction or rail translation.
+
+        - If action_dir == axis: extend length by 1 (if within bounds and unblocked).
+        - If action_dir == (-axis[0], -axis[1]): retract length by 1 (if >= min_length).
+        - If action_dir is orthogonal to axis: translate base_pos along rails if supported.
+        Returns: (new_base_pos, new_length).
+        """
+        all_barriers = barriers or set()
+
+        if action_dir == axis:
+            # Extension along axis
+            new_tip = (
+                base_pos[0] + (length + 1) * axis[0],
+                base_pos[1] + (length + 1) * axis[1],
+            )
+            if length < max_length and new_tip not in all_barriers:
+                return base_pos, length + 1
+            return base_pos, length
+
+        if action_dir == (-axis[0], -axis[1]):
+            # Retraction
+            if length > min_length:
+                return base_pos, length - 1
+            return base_pos, length
+
+        # Orthogonal movement: check rail support across full piston body
+        new_base = (base_pos[0] + action_dir[0], base_pos[1] + action_dir[1])
+        if rails is not None and new_base not in rails:
+            return base_pos, length
+
+        # Check that translating the entire body does not collide with barriers
+        for i in range(length + 1):
+            cell = (new_base[0] + i * axis[0], new_base[1] + i * axis[1])
+            if cell in all_barriers:
+                return base_pos, length
+
+        return new_base, length

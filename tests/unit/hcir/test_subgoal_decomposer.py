@@ -105,3 +105,49 @@ def test_decomposer_resolving_subgoal_advances_to_primary_goal() -> None:
         grid_shape=(8, 8),
     )
     assert next_goal.id == "g_exit"
+
+
+def test_decomposer_with_skills() -> None:
+    """Verify that decompose_with_skills synthesizes dependent subgoals from learned skills."""
+    from hbllm.hcir.subgoal_decomposer import HCIRSkill
+
+    ws = HCIRWorkspaceState()
+    primary_goal = GoalNode(
+        id="g_main",
+        description="Solve overarching puzzle",
+        priority=1.0,
+    )
+    ws.upsert_node(primary_goal)
+
+    skills = [
+        HCIRSkill(
+            skill_id="pickup_key",
+            action_sequence=[1, 5],
+            expected_effect={"has_key": True},
+            confidence=0.9,
+        ),
+        HCIRSkill(
+            skill_id="unlock_gate",
+            preconditions={"has_key": True},
+            action_sequence=[4, 4, 5],
+            expected_effect={"gate_open": True},
+            confidence=0.85,
+        ),
+    ]
+
+    current_state = {"has_key": False, "gate_open": False}
+    subgoals = HierarchicalGoalDecomposer.decompose_with_skills(
+        workspace=ws,
+        primary_goal=primary_goal,
+        skills=skills,
+        current_state=current_state,
+    )
+
+    assert len(subgoals) == 2
+    assert subgoals[0].id == "subgoal_skill_pickup_key"
+    assert subgoals[1].id == "subgoal_skill_unlock_gate"
+    assert subgoals[0].properties["action_sequence"] == [1, 5]
+    edges = ws.graph.edges_from(subgoals[1].id)
+    dep_edges = [e for e in edges if e.edge_type == HCIREdgeType.DEPENDS_ON]
+    assert len(dep_edges) == 1
+    assert subgoals[0].id in dep_edges[0].targets

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -581,3 +582,75 @@ class HierarchicalGoalDecomposer:
         )
         workspace.upsert_node(stamp_subgoal)
         return stamp_subgoal
+
+    @staticmethod
+    def decompose_with_skills(
+        workspace: HCIRWorkspaceState,
+        primary_goal: GoalNode,
+        skills: list[HCIRSkill],
+        current_state: dict[str, Any],
+    ) -> list[GoalNode]:
+        """Synthesize an ordered sequence of subgoals matching available skills against unmet preconditions.
+
+        Builds a dependency graph of subgoals in the HCIR workspace where each subgoal represents
+        an executable skill step, linked via HCIREdgeType.DEPENDS_ON edges.
+        """
+        subgoals: list[GoalNode] = []
+        prev_subgoal: GoalNode | None = None
+
+        for skill in skills:
+            # Check if skill effect is already satisfied in current_state
+            is_satisfied = True
+            for k, expected_v in skill.expected_effect.items():
+                if current_state.get(k) != expected_v:
+                    is_satisfied = False
+                    break
+
+            if is_satisfied:
+                continue
+
+            subgoal_id = f"subgoal_skill_{skill.skill_id}"
+            node = GoalNode(
+                id=subgoal_id,
+                description=f"Execute skill {skill.skill_id} to satisfy {skill.expected_effect}",
+                priority=min(1.0, max(0.0, float(primary_goal.priority) * skill.confidence)),
+                resolved=False,
+                properties={
+                    "skill_id": skill.skill_id,
+                    "action_sequence": list(skill.action_sequence),
+                    "action_data_sequence": list(skill.action_data_sequence),
+                    "expected_effect": dict(skill.expected_effect),
+                    "preconditions": dict(skill.preconditions),
+                    "parent_goal_id": primary_goal.id,
+                },
+            )
+            workspace.upsert_node(node)
+            subgoals.append(node)
+
+            if prev_subgoal is not None:
+                # Link sequential dependency: node depends on prev_subgoal
+                dep_edge = HCIREdge(
+                    edge_type=HCIREdgeType.DEPENDS_ON,
+                    sources=[node.id],
+                    targets=[prev_subgoal.id],
+                    weight=1.0,
+                )
+                workspace.graph.add_edge(dep_edge)
+
+            prev_subgoal = node
+
+        return subgoals
+
+
+@dataclass
+class HCIRSkill:
+    """A learned procedural skill representing an executable action policy for achieving a sub-state."""
+
+    skill_id: str
+    preconditions: dict[str, Any] = field(default_factory=dict)
+    action_sequence: list[int] = field(default_factory=list)
+    action_data_sequence: list[dict[str, Any] | None] = field(default_factory=list)
+    expected_effect: dict[str, Any] = field(default_factory=dict)
+    confidence: float = 1.0
+    times_executed: int = 0
+    times_succeeded: int = 0

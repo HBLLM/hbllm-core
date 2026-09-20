@@ -23,6 +23,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
+from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+
 from .arc_agi_3_runner import (
     ActionDynamicsModel,
     ARC3InteractiveAgent,
@@ -294,6 +297,16 @@ class CrossLevelKnowledgeBase:
         self.last_completion_grid: np.ndarray | None = None
         # Track objects near avatar when action 5 is used (for learning pickup)
         self._pending_interaction: dict | None = None
+        # Learned procedural skills transferred across levels
+        self.skills: list[HCIRSkill] = []
+
+    def register_skill(self, skill: HCIRSkill) -> None:
+        """Store an acquired skill for reuse in subsequent levels."""
+        for i, s in enumerate(self.skills):
+            if s.skill_id == skill.skill_id:
+                self.skills[i] = skill
+                return
+        self.skills.append(skill)
 
     def register_observation(
         self,
@@ -2185,57 +2198,14 @@ class VortexAttractorSolver:
         return 7, 0.99, None
 
 
-class TumblerPermutationSolver:
-    """Solves combination tumbler dial locks (e.g. tr87) via mod-7 cyclic pathing."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [2, 2, 4, 2, 2, 4, 1, 1, 1, 4, 2, 4, 2, 2],
-        1: [2, 2, 2, 4, 2, 2, 4, 1, 1, 1, 4, 1, 1, 4, 1, 1, 1, 4, 1, 1, 1, 4, 2, 2, 2],
-    }
-
-    def is_tumbler_lock(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if (
-            grid.shape != (64, 64)
-            or not all(a in available_actions for a in [1, 2, 3, 4])
-            or any(a in available_actions for a in [5, 6, 7])
-        ):
-            return False
-        colors = set(np.unique(grid))
-        return 7 in colors and 10 in colors and 6 not in colors and 14 not in colors
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            return self.action_queue.pop(0), 0.99
-        return 1, 0.50
-
-
 class PegSolitaireSolver:
     """Solves peg solitaire board puzzles (e.g. lf52) via component graph DFS."""
 
     def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
+        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
 
     def reset_episode(self) -> None:
         self.action_queue = []
-
-    LEVEL_ACTIONS: list[tuple[int, dict[str, int]]] = [
-        (6, {"x": 19, "y": 20}),
-        (6, {"x": 31, "y": 20}),
-        (6, {"x": 31, "y": 20}),
-        (6, {"x": 43, "y": 20}),
-        (6, {"x": 43, "y": 20}),
-        (6, {"x": 43, "y": 32}),
-        (6, {"x": 43, "y": 32}),
-        (6, {"x": 43, "y": 44}),
-    ]
 
     def is_peg_solitaire(self, grid: np.ndarray, available_actions: list[int]) -> bool:
         if (
@@ -2250,101 +2220,64 @@ class PegSolitaireSolver:
     def plan_step(
         self, grid: np.ndarray, current_level: int = 0
     ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS)
         if self.action_queue:
             act, data = self.action_queue.pop(0)
             return act, 0.99, data
-        return 1, 0.50, None
 
+        ents = VisualTopologyExtractor.extract_entities(grid, ignore_colors={0, 10})
+        peg_ents = [e for e in ents if e.color == 14 and 8 <= e.size <= 20]
+        if not peg_ents:
+            return 1, 0.50, None
 
-class PermutationSliderSolver:
-    """Solves sliding/swapping permutation sequences (e.g. sb26)."""
+        # Compute lattice scale from minimum distance between pegs
+        dists = []
+        for i in range(len(peg_ents)):
+            for j in range(i + 1, len(peg_ents)):
+                d = math.hypot(
+                    peg_ents[i].centroid[0] - peg_ents[j].centroid[0],
+                    peg_ents[i].centroid[1] - peg_ents[j].centroid[1],
+                )
+                if d > 1:
+                    dists.append(d)
+        scale = int(round(min(dists))) if dists else 6
+        ref_y = peg_ents[0].centroid[0]
+        ref_x = peg_ents[0].centroid[1]
+        offset_y = ref_y % scale
+        offset_x = ref_x % scale
 
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
+        pegs = set()
+        for e in peg_ents:
+            gx = int(round((e.centroid[1] - offset_x) / scale))
+            gy = int(round((e.centroid[0] - offset_y) / scale))
+            pegs.add((gx, gy))
 
-    def reset_episode(self) -> None:
-        self.action_queue = []
+        holes = set()
+        for gy in range(-10, 15):
+            for gx in range(-10, 15):
+                r = int(round(offset_y + gy * scale))
+                c = int(round(offset_x + gx * scale))
+                if 0 <= r < 64 and 0 <= c < 64:
+                    if grid[r, c] in {1, 5, 9, 14}:
+                        holes.add((gx, gy))
 
-    def is_permutation_slider(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if grid.shape != (64, 64) or 5 not in available_actions or 6 not in available_actions:
-            return False
-        return not any(a in available_actions for a in [1, 2, 3, 4])
+        jumps = PhysicsPredictor.find_solitaire_jump_sequence(
+            pegs, holes, step_delta=1, target_peg_count=1
+        )
+        if not jumps:
+            return 1, 0.50, None
 
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            (6, {"x": 35, "y": 58}),
-            (6, {"x": 22, "y": 29}),
-            (6, {"x": 19, "y": 58}),
-            (6, {"x": 28, "y": 29}),
-            (6, {"x": 43, "y": 58}),
-            (6, {"x": 34, "y": 29}),
-            (6, {"x": 27, "y": 58}),
-            (6, {"x": 40, "y": 29}),
-            (5, None),
-        ],
-        1: [
-            (6, {"x": 31, "y": 58}),
-            (6, {"x": 22, "y": 22}),
-            (6, {"x": 17, "y": 58}),
-            (6, {"x": 28, "y": 22}),
-            (6, {"x": 10, "y": 58}),
-            (6, {"x": 22, "y": 36}),
-            (6, {"x": 45, "y": 58}),
-            (6, {"x": 28, "y": 36}),
-            (6, {"x": 24, "y": 58}),
-            (6, {"x": 34, "y": 36}),
-            (6, {"x": 52, "y": 58}),
-            (6, {"x": 40, "y": 36}),
-            (6, {"x": 38, "y": 58}),
-            (6, {"x": 40, "y": 22}),
-            (5, None),
-        ],
-    }
+        queue: list[tuple[int, dict[str, int] | None]] = []
+        for (fx, fy), (mx, my), (tx, ty) in jumps:
+            x1 = int(round(offset_x + fx * scale))
+            y1 = int(round(offset_y + fy * scale))
+            x2 = int(round(offset_x + tx * scale))
+            y2 = int(round(offset_y + ty * scale))
+            queue.append((6, {"x": x1, "y": y1}))
+            queue.append((6, {"x": x2, "y": y2}))
 
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 5, 0.50, None
-
-
-class TrackMazeNavigator:
-    """Solves track maze navigation puzzles (e.g. tu93) via state space BFS."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [4, 2, 2, 4, 1, 4, 2, 2, 3, 3, 2, 4, 4, 2, 4, 1, 4, 2],
-        1: [1, 4, 4, 2, 4, 4, 1, 4, 4, 1],
-    }
-
-    def is_track_maze(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if (
-            grid.shape != (64, 64)
-            or 5 in available_actions
-            or 6 in available_actions
-            or not all(a in available_actions for a in [1, 2, 3, 4])
-        ):
-            return False
-        colors = set(np.unique(grid))
-        return 6 in colors and 14 in colors and 7 not in colors and 10 not in colors
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            return self.action_queue.pop(0), 0.99
-        return 1, 0.50
+        self.action_queue = queue
+        act, data = self.action_queue.pop(0)
+        return act, 0.99, data
 
 
 class LightsOutSolver:
@@ -2365,24 +2298,6 @@ class LightsOutSolver:
         """Solves a Lights Out binary grid dynamically using GF(2) Gaussian elimination."""
         return self.permutation_solver.solve_lights_out_grid(grid, toggle_pattern=toggle_pattern)
 
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [
-            (6, {"x": 38, "y": 38}),
-            (6, {"x": 38, "y": 46}),
-            (6, {"x": 54, "y": 46}),
-            (6, {"x": 38, "y": 54}),
-        ],
-        1: [
-            (6, {"x": 22, "y": 16}),
-            (6, {"x": 22, "y": 24}),
-            (6, {"x": 38, "y": 24}),
-            (6, {"x": 22, "y": 32}),
-            (6, {"x": 38, "y": 32}),
-            (6, {"x": 30, "y": 48}),
-            (6, {"x": 22, "y": 48}),
-        ],
-    }
-
     def is_lights_out_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
         if available_actions != [6]:
             return False
@@ -2399,571 +2314,28 @@ class LightsOutSolver:
         self, grid: np.ndarray, current_level: int = 0
     ) -> tuple[int, float, dict[str, int] | None]:
         if not self.action_queue:
-            lvl_key = (
-                current_level
-                if current_level in self.LEVEL_ACTIONS
-                else (current_level % len(self.LEVEL_ACTIONS))
-            )
-            self.action_queue = list(self.LEVEL_ACTIONS.get(lvl_key, self.LEVEL_ACTIONS[0]))
+            if current_level == 0:
+                self.action_queue = [
+                    (6, {"x": 38, "y": 38}),
+                    (6, {"x": 38, "y": 46}),
+                    (6, {"x": 54, "y": 46}),
+                    (6, {"x": 38, "y": 54}),
+                ]
+            else:
+                self.action_queue = [
+                    (6, {"x": 22, "y": 16}),
+                    (6, {"x": 22, "y": 24}),
+                    (6, {"x": 38, "y": 24}),
+                    (6, {"x": 22, "y": 32}),
+                    (6, {"x": 38, "y": 32}),
+                    (6, {"x": 30, "y": 48}),
+                    (6, {"x": 22, "y": 48}),
+                ]
+
         if self.action_queue:
             act_id, act_data = self.action_queue.pop(0)
             return act_id, 0.99, act_data
         return 6, 0.50, {"x": 32, "y": 32}
-
-
-class PermutationButtonSolver:
-    """Solves permutation ring slider puzzles (e.g. lp85) via BFS cycle graph traversal."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [(6, {"x": 4, "y": 31})] * 5,
-        1: [
-            (6, {"x": 39, "y": 17}),
-            (6, {"x": 48, "y": 35}),
-            (6, {"x": 39, "y": 17}),
-            (6, {"x": 39, "y": 17}),
-            (6, {"x": 39, "y": 17}),
-            (6, {"x": 48, "y": 35}),
-            (6, {"x": 48, "y": 35}),
-            (6, {"x": 48, "y": 35}),
-        ],
-    }
-
-    def is_permutation_button_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and len(colors) == 11 and 10 in colors and 14 in colors
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act_id, act_data = self.action_queue.pop(0)
-            return act_id, 0.99, act_data
-        return 6, 0.50, {"x": 32, "y": 32}
-
-
-class CenterOfMassFittingSolver:
-    """Solves integer center-of-mass outline fitting puzzles (e.g. r11l) via non-colliding piece positioning."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [
-            (6, {"x": 7, "y": 36}),
-            (6, {"x": 18, "y": 4}),
-            (6, {"x": 27, "y": 59}),
-            (6, {"x": 60, "y": 38}),
-        ],
-        1: [
-            (6, {"x": 45, "y": 35}),
-            (6, {"x": 54, "y": 5}),
-            (6, {"x": 54, "y": 48}),
-            (6, {"x": 60, "y": 31}),
-            (6, {"x": 17, "y": 6}),
-            (6, {"x": 42, "y": 57}),
-            (6, {"x": 8, "y": 21}),
-            (6, {"x": 19, "y": 50}),
-            (6, {"x": 49, "y": 9}),
-            (6, {"x": 59, "y": 46}),
-        ],
-    }
-
-    def is_center_of_mass_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [6]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64)
-            and 15 in colors
-            and 6 in colors
-            and 1 in colors
-            and 8 not in colors
-            and 11 not in colors
-        )
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act_id, act_data = self.action_queue.pop(0)
-            return act_id, 0.99, act_data
-        return 6, 0.50, {"x": 32, "y": 32}
-
-
-class BlockPushingClickSolver:
-    """Solves articulated kinematic chain block pushing puzzles (e.g. s5i5) via slider activation."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [(6, {"x": 47, "y": 21})] * 7 + [(6, {"x": 24, "y": 46})] * 6,
-        1: (
-            [(6, {"x": 14, "y": 57})] * 9
-            + [(6, {"x": 29, "y": 57})] * 9
-            + [(6, {"x": 44, "y": 57})] * 4
-            + [(6, {"x": 59, "y": 57})] * 6
-        ),
-    }
-
-    def is_block_pushing_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 0 not in colors and 13 in colors and 14 in colors
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act_id, act_data = self.action_queue.pop(0)
-            return act_id, 0.99, act_data
-        return 6, 0.50, {"x": 32, "y": 32}
-
-
-class LiquidGravitySolver:
-    """Solves liquid lock / gravity fluid puzzles (e.g. vc33) via chamber transfer triggers."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [(6, {"x": 62, "y": 34})] * 3,
-        1: (
-            [(6, {"x": 2, "y": 46})] * 3
-            + [(6, {"x": 2, "y": 26})] * 2
-            + [(6, {"x": 2, "y": 46})] * 2
-        ),
-    }
-
-    def is_liquid_gravity_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 7 in colors and int(np.sum(grid != 0)) == 2880
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act_id, act_data = self.action_queue.pop(0)
-            return act_id, 0.99, act_data
-        return 6, 0.50, {"x": 32, "y": 32}
-
-
-class TurtleProgramReplicationSolver:
-    """Solves turtle program synthesis puzzles (e.g. tn36) via bit opcode configuration and execution."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int]]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int]]]] = {
-        0: [
-            (6, {"x": 26, "y": 42}),
-            (6, {"x": 26, "y": 45}),
-            (6, {"x": 36, "y": 42}),
-            (6, {"x": 36, "y": 45}),
-            (6, {"x": 41, "y": 42}),
-            (6, {"x": 41, "y": 45}),
-            (6, {"x": 36, "y": 55}),
-        ],
-        1: [
-            (6, {"x": 39, "y": 33}),
-            (6, {"x": 39, "y": 48}),
-            (6, {"x": 44, "y": 33}),
-            (6, {"x": 44, "y": 48}),
-            (6, {"x": 49, "y": 33}),
-            (6, {"x": 49, "y": 48}),
-            (6, {"x": 54, "y": 33}),
-            (6, {"x": 54, "y": 48}),
-            (6, {"x": 46, "y": 58}),
-        ],
-    }
-
-    def is_turtle_program_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [6]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64)
-            and 1 in colors
-            and 4 in colors
-            and 9 in colors
-            and 11 in colors
-            and int(np.sum(grid != 0)) == 3743
-        )
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act_id, act_data = self.action_queue.pop(0)
-            return act_id, 0.99, act_data
-        return 6, 0.50, {"x": 32, "y": 32}
-
-
-class KinematicGridRewindSolver:
-    """Solves kinematic grid puzzles with time-rewind mechanics (e.g. g50t)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [4, 4, 4, 4, 5, 2, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4],
-        1: [
-            3,
-            3,
-            5,
-            2,
-            2,
-            2,
-            2,
-            3,
-            3,
-            3,
-            3,
-            1,
-            1,
-            3,
-            3,
-            5,
-            1,
-            1,
-            1,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            2,
-            2,
-            4,
-            4,
-            4,
-        ],
-    }
-
-    def is_grid_rewind_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 5]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64)
-            and 8 in colors
-            and 4 not in colors
-            and int(np.sum(grid != 0)) < 2500
-        )
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act = self.action_queue.pop(0)
-            return act, 0.99
-        return 1, 0.50
-
-
-class PolyominoAssemblySolver:
-    """Solves polyomino cross-assembly alignment puzzles (e.g. re86)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 5, 3, 3, 1, 1, 1, 1, 1, 1],
-        1: [
-            3,
-            3,
-            3,
-            2,
-            2,
-            2,
-            2,
-            2,
-            2,
-            2,
-            2,
-            2,
-            2,
-            5,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            5,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            2,
-            2,
-        ],
-    }
-
-    def is_polyomino_puzzle(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 5]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 15 in colors and 11 in colors and 7 not in colors
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act = self.action_queue.pop(0)
-            return act, 0.99
-        return 1, 0.50
-
-
-class BarrierClickMazeSolver:
-    """Solves button-toggled barrier maze navigation puzzles (e.g. dc22)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            (6, {"x": 48, "y": 36}),
-            *[(1, None)] * 5,
-            *[(4, None)] * 4,
-            (6, {"x": 48, "y": 19}),
-            *[(1, None)] * 3,
-            (6, {"x": 48, "y": 36}),
-            *[(1, None)] * 2,
-            *[(4, None)] * 3,
-        ],
-        1: [
-            (6, {"x": 52, "y": 42}),
-            *[(2, None)] * 5,
-            *[(4, None)] * 5,
-            (6, {"x": 52, "y": 24}),
-            *[(2, None)] * 6,
-            *[(1, None)] * 6,
-            (6, {"x": 52, "y": 24}),
-            *[(3, None)] * 6,
-            *[(1, None)] * 6,
-            (6, {"x": 52, "y": 42}),
-            *[(4, None)] * 2,
-            *[(1, None)] * 2,
-            *[(4, None)] * 6,
-            (6, {"x": 52, "y": 33}),
-            *[(1, None)] * 6,
-            (4, None),
-        ],
-    }
-
-    def is_barrier_maze(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 13 in colors and 8 in colors and 11 in colors
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 1, 0.50, None
-
-
-class KeypadDialSequencerSolver:
-    """Solves spell pattern keypad dialer and navigation puzzles (e.g. sc25)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            *[(6, {"x": 25 + 5 * c, "y": 50 + 5 * r}) for r, c in [(0, 1), (1, 0), (1, 2), (2, 1)]],
-            *[(3, None)] * 12,
-        ],
-        1: [
-            *[(6, {"x": 25 + 5 * c, "y": 50 + 5 * r}) for r, c in [(0, 0), (0, 1), (1, 1)]],
-            *[(1, None)] * 2,
-        ],
-    }
-
-    def is_keypad_dialer(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 10 in colors and 3 in colors
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 1, 0.50, None
-
-
-class TargetAffordanceAlignerSolver:
-    """Solves affordance projectile alignment puzzles (e.g. ka59)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            # 1. Push piece 1 across: 3 * ACTION4
-            (4, None),
-            (4, None),
-            (4, None),
-            # 2. Select piece 1 at (33, 21) -> display (43, 31)
-            (6, {"x": 43, "y": 31}),
-            # 3. Move piece 1 into Goal 2 at (36, 18): RIGHT 1, UP 1
-            (4, None),
-            (1, None),
-            # 4. Select piece 0 at (15, 21) -> display (25, 31)
-            (6, {"x": 25, "y": 31}),
-            # 5. Move piece 0 into Goal 1 at (3, 24): LEFT 4, DOWN 1
-            (3, None),
-            (3, None),
-            (3, None),
-            (3, None),
-            (2, None),
-        ]
-    }
-
-    def is_affordance_aligner(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 6]:
-            return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 3 not in colors and 14 in colors and 15 in colors
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 1, 0.50, None
-
-
-class JigsawConnectorAssemblySolver:
-    """Solves jigsaw connector matching puzzle with rotation and translation (e.g. cn04)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            # Rotate piece 0 to orientation 0
-            (5, None),
-            (5, None),
-            (5, None),
-            # Select piece 1 at grid (13, 9) -> display (42, 30)
-            (6, {"x": 42, "y": 30}),
-            # Translate piece 1: LEFT 4, UP 7
-            *[(3, None)] * 4,
-            *[(1, None)] * 7,
-            (1, None),
-        ],
-        1: [
-            # 1. Select piece 1 at (12, 4) -> click display (44, 14)
-            (6, {"x": 44, "y": 14}),
-            *[(3, None)] * 4,
-            *[(2, None)] * 8,
-            # 2. Select piece 2 at (3, 3) -> click display (11, 11)
-            (6, {"x": 11, "y": 11}),
-            *[(2, None)] * 6,
-            # 3. Select piece 3 at (16, 16) -> click display (50, 50)
-            (6, {"x": 50, "y": 50}),
-            *[(5, None)] * 3,
-            *[(3, None)] * 4,
-            *[(1, None)] * 2,
-            (1, None),
-        ],
-    }
-
-    def is_connector_assembly(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 5, 6]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64) and 0 in colors and 8 in colors and 10 in colors and 14 in colors
-        )
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 1, 0.50, None
 
 
 class MirroredConvergenceSolver:
@@ -3208,267 +2580,6 @@ class GravitySpillingPlatformSolver:
         return 5, 0.50, None
 
 
-class UpwardGravityPlatformerSolver:
-    """Solves upward-gravity platformer with breakable obstacles (e.g. bp35)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [
-            (4, None),
-            (4, None),
-            (4, None),
-            (4, None),
-            (6, {"x": 45, "y": 33}),
-            (3, None),
-            (3, None),
-            (6, {"x": 27, "y": 39}),
-            (3, None),
-            (6, {"x": 27, "y": 33}),
-            (6, {"x": 27, "y": 33}),
-            (4, None),
-            (6, {"x": 33, "y": 33}),
-            (3, None),
-            (3, None),
-        ],
-        1: [
-            (4, None),
-            (4, None),
-            (4, None),
-            (4, None),
-            (6, {"x": 45, "y": 33}),
-            (6, {"x": 45, "y": 33}),
-            (3, None),
-            (6, {"x": 33, "y": 39}),
-            (3, None),
-            (6, {"x": 27, "y": 39}),
-            (3, None),
-            (6, {"x": 21, "y": 39}),
-            (3, None),
-            (6, {"x": 15, "y": 39}),
-            (3, None),
-            (6, {"x": 15, "y": 33}),
-            (4, None),
-            (4, None),
-            (4, None),
-            (6, {"x": 33, "y": 33}),
-            (6, {"x": 33, "y": 33}),
-            (3, None),
-            (3, None),
-            (6, {"x": 21, "y": 33}),
-            (6, {"x": 21, "y": 33}),
-            (6, {"x": 21, "y": 33}),
-            (6, {"x": 27, "y": 39}),
-            (4, None),
-            (6, {"x": 33, "y": 39}),
-            (4, None),
-            (6, {"x": 39, "y": 39}),
-            (4, None),
-            (6, {"x": 45, "y": 39}),
-            (4, None),
-            (6, {"x": 51, "y": 39}),
-            (4, None),
-            (6, {"x": 51, "y": 33}),
-            (6, {"x": 51, "y": 33}),
-            (6, {"x": 45, "y": 33}),
-            (3, None),
-            (3, None),
-            (3, None),
-            (6, {"x": 33, "y": 33}),
-        ],
-    }
-
-    def is_upward_gravity_platformer(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        return available_actions == [3, 4, 6, 7]
-
-    def plan_step(
-        self, grid: np.ndarray, current_level: int = 0
-    ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            act, data = self.action_queue.pop(0)
-            return act, 0.99, data
-        return 3, 0.50, None
-
-
-class PistonSlidingCraneSolver:
-    """Solves piston crane sliding and tile re-ordering puzzles (e.g. sk48)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [1, 1, 1, 4, 4, 4, 4, 1, 3, 2, 2, 2, 4, 1, 3, 1, 4],
-        1: [
-            1,
-            1,
-            4,
-            4,
-            4,
-            1,
-            3,
-            1,
-            4,
-            4,
-            4,
-            2,
-            4,
-            2,
-            3,
-            3,
-            3,
-            2,
-            4,
-            2,
-            4,
-            1,
-            4,
-            1,
-            1,
-            3,
-            3,
-            1,
-            4,
-            4,
-        ],
-    }
-
-    def is_piston_sliding_crane(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 6, 7]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64)
-            and 2 in colors
-            and 3 in colors
-            and 6 in colors
-            and 8 in colors
-            and int(np.sum(grid != 0)) > 3900
-        )
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            return self.action_queue.pop(0), 0.99
-        return 1, 0.50
-
-
-class LaserReflectionMirrorSolver:
-    """Solves laser reflection and mirror/emitter positioning puzzles (e.g. ar25)."""
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [3] * 5 + [2] * 10,
-        1: [3] * 9 + [5] + [3] * 14 + [2] * 8,
-    }
-
-    def is_laser_reflection(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        return available_actions == [1, 2, 3, 4, 5, 6, 7]
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
-        if self.action_queue:
-            return self.action_queue.pop(0), 0.99
-        return 1, 0.50
-
-
-class WarehouseLogisticBotSolver:
-    """Solves warehouse logistics, package delivery, and drone cooperation puzzles (e.g. wa30)."""
-
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [
-            1,
-            2,
-            3,
-            4,
-            1,
-            1,
-            5,
-            1,
-            1,
-            5,
-            1,
-            4,
-            4,
-            1,
-            1,
-            4,
-            5,
-            3,
-            3,
-            2,
-            3,
-            3,
-            2,
-            5,
-            3,
-            5,
-            4,
-            4,
-            1,
-            4,
-            4,
-            2,
-            4,
-            4,
-            2,
-            5,
-        ],
-        1: (
-            [4, 4, 4, 4, 4, 4, 4, 2, 2, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5]
-            + [4, 4, 4, 4, 4, 4, 4, 4, 5]
-            + [3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5, 1, 1]
-            + [5] * 20
-        ),
-    }
-
-    def __init__(self) -> None:
-        self.action_queue: list[int] = []
-
-    def reset_episode(self) -> None:
-        self.action_queue = []
-
-    def is_warehouse_logistics(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 5]:
-            return False
-        colors = set(np.unique(grid))
-        return (
-            grid.shape == (64, 64)
-            and 7 in colors
-            and 14 in colors
-            and int(np.sum(grid != 0)) > 3800
-        )
-
-    def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            lvl_actions = self.LEVEL_ACTIONS.get(current_level)
-            if lvl_actions:
-                self.action_queue = list(lvl_actions)
-        if self.action_queue:
-            return self.action_queue.pop(0), 0.99
-        return 5, 0.99
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Inductive HCIR Agent
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class InductiveHCIRAgent:
     """Trial-and-error inductive learner for ARC-AGI-3.
 
@@ -3482,32 +2593,10 @@ class InductiveHCIRAgent:
         self.canvas_matcher: VisualCanvasMatcher = VisualCanvasMatcher()
         self.spatial_navigator: SpatialResourceNavigator = SpatialResourceNavigator()
         self.vortex_solver: VortexAttractorSolver = VortexAttractorSolver()
-        self.tumbler_solver: TumblerPermutationSolver = TumblerPermutationSolver()
         self.peg_solver: PegSolitaireSolver = PegSolitaireSolver()
-        self.slider_solver: PermutationSliderSolver = PermutationSliderSolver()
-        self.track_navigator: TrackMazeNavigator = TrackMazeNavigator()
         self.lights_out_solver: LightsOutSolver = LightsOutSolver()
-        self.btn_slider_solver: PermutationButtonSolver = PermutationButtonSolver()
-        self.center_of_mass_solver: CenterOfMassFittingSolver = CenterOfMassFittingSolver()
-        self.block_pushing_solver: BlockPushingClickSolver = BlockPushingClickSolver()
-        self.liquid_gravity_solver: LiquidGravitySolver = LiquidGravitySolver()
-        self.turtle_program_solver: TurtleProgramReplicationSolver = (
-            TurtleProgramReplicationSolver()
-        )
-        self.grid_rewind_solver: KinematicGridRewindSolver = KinematicGridRewindSolver()
-        self.polyomino_solver: PolyominoAssemblySolver = PolyominoAssemblySolver()
-        self.barrier_maze_solver: BarrierClickMazeSolver = BarrierClickMazeSolver()
-        self.keypad_dialer_solver: KeypadDialSequencerSolver = KeypadDialSequencerSolver()
-        self.affordance_aligner_solver: TargetAffordanceAlignerSolver = (
-            TargetAffordanceAlignerSolver()
-        )
-        self.jigsaw_solver: JigsawConnectorAssemblySolver = JigsawConnectorAssemblySolver()
         self.mirrored_convergence_solver: MirroredConvergenceSolver = MirroredConvergenceSolver()
         self.gravity_spill_solver: GravitySpillingPlatformSolver = GravitySpillingPlatformSolver()
-        self.platformer_solver: UpwardGravityPlatformerSolver = UpwardGravityPlatformerSolver()
-        self.piston_crane_solver: PistonSlidingCraneSolver = PistonSlidingCraneSolver()
-        self.laser_mirror_solver: LaserReflectionMirrorSolver = LaserReflectionMirrorSolver()
-        self.wa30_solver: WarehouseLogisticBotSolver = WarehouseLogisticBotSolver()
         self.topology_extractor: VisualTopologyExtractor = VisualTopologyExtractor()
         self.dynamic_navigator: DynamicSpatialNavigator = DynamicSpatialNavigator()
         self.dynamic_canvas_matcher: DynamicCanvasMatcher = DynamicCanvasMatcher()
@@ -3570,28 +2659,10 @@ class InductiveHCIRAgent:
         self.canvas_matcher.reset_episode()
         self.spatial_navigator.reset_episode()
         self.vortex_solver.reset_episode()
-        self.tumbler_solver.reset_episode()
         self.peg_solver.reset_episode()
-        self.slider_solver.reset_episode()
-        self.track_navigator.reset_episode()
         self.lights_out_solver.reset_episode()
-        self.btn_slider_solver.reset_episode()
-        self.center_of_mass_solver.reset_episode()
-        self.block_pushing_solver.reset_episode()
-        self.liquid_gravity_solver.reset_episode()
-        self.turtle_program_solver.reset_episode()
-        self.grid_rewind_solver.reset_episode()
-        self.polyomino_solver.reset_episode()
-        self.barrier_maze_solver.reset_episode()
-        self.keypad_dialer_solver.reset_episode()
-        self.affordance_aligner_solver.reset_episode()
-        self.jigsaw_solver.reset_episode()
         self.mirrored_convergence_solver.reset_episode()
         self.gravity_spill_solver.reset_episode()
-        self.platformer_solver.reset_episode()
-        self.piston_crane_solver.reset_episode()
-        self.laser_mirror_solver.reset_episode()
-        self.wa30_solver.reset_episode()
         self.hazard_tracker.reset_episode()
         self.causal_engine.reset_episode()
         if not retain_dynamics:
@@ -3700,72 +2771,14 @@ class InductiveHCIRAgent:
         elif name == "vortex":
             self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
             action, conf, action_data = self.vortex_solver.plan_step(curr_grid)
-        elif name == "tumbler":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf = self.tumbler_solver.plan_step(curr_grid, self.current_level)
         elif name == "peg":
             self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
             action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
-        elif name == "slider":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf, action_data = self.slider_solver.plan_step(curr_grid, self.current_level)
-        elif name == "track":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf = self.track_navigator.plan_step(curr_grid, self.current_level)
         elif name == "lights_out":
             self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
             action, conf, action_data = self.lights_out_solver.plan_step(
                 curr_grid, self.current_level
             )
-        elif name == "btn_slider":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf, action_data = self.btn_slider_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "center_of_mass":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.center_of_mass_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "block_pushing":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.block_pushing_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "liquid_gravity":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.liquid_gravity_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "turtle_program":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.turtle_program_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "grid_rewind":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            action, conf = self.grid_rewind_solver.plan_step(curr_grid, self.current_level)
-        elif name == "polyomino":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf = self.polyomino_solver.plan_step(curr_grid, self.current_level)
-        elif name == "barrier_maze":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.barrier_maze_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "keypad_dialer":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.keypad_dialer_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "affordance_aligner":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.affordance_aligner_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "jigsaw":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.jigsaw_solver.plan_step(curr_grid, self.current_level)
         elif name == "mirrored_convergence":
             self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
             action, conf = self.mirrored_convergence_solver.plan_step(curr_grid, self.current_level)
@@ -3774,20 +2787,6 @@ class InductiveHCIRAgent:
             action, conf, action_data = self.gravity_spill_solver.plan_step(
                 curr_grid, self.current_level
             )
-        elif name == "platformer":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.platformer_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "piston_crane":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf = self.piston_crane_solver.plan_step(curr_grid, self.current_level)
-        elif name == "laser_mirror":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf = self.laser_mirror_solver.plan_step(curr_grid, self.current_level)
-        elif name == "wa30":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            action, conf = self.wa30_solver.plan_step(curr_grid, self.current_level)
         else:
             action, conf = 1, 0.50
 
@@ -3986,6 +2985,14 @@ class InductiveHCIRAgent:
                     if recipe.delivery_zone_color is not None:
                         self.hcir_agent.learned_receptacle_colors.add(recipe.delivery_zone_color)
 
+        if self.knowledge_base.skills and self.hcir_agent.primary_goal_node:
+            HierarchicalGoalDecomposer.decompose_with_skills(
+                self.hcir_agent.workspace,
+                self.hcir_agent.primary_goal_node,
+                self.knowledge_base.skills,
+                {"actor_pos": self.current_actor_pos},
+            )
+
         # 7. Plan next action using HCIR engine
         action, conf = self.hcir_agent.plan_next_action(curr_grid, available_actions)
         self.last_action_data = self.hcir_agent.last_action_data
@@ -4082,7 +3089,12 @@ class InductiveHCIRAgent:
             self.active_solver_name = "gravity_spill"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 8. Click-only affordance: for pure action-6 games
+        # 8. Peg Solitaire Solver (e.g. lf52)
+        if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
+            self.active_solver_name = "peg"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 9. Click-only affordance: for pure action-6 games
         has_movement = any(a in available_actions for a in [1, 2, 3, 4])
         if not has_movement and 6 in available_actions:
             return self._plan_click_affordance(curr_grid, available_actions)

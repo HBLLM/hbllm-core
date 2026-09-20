@@ -112,3 +112,21 @@ def test_record_spatial_schema() -> None:
     assert len(store) == 1
     assert event.event_type == BeliefTransitionType.SPATIAL_SCHEMA_INDUCED
     assert event.posterior_confidence == 1.0
+
+
+def test_solve_silhouette_packing() -> None:
+    """Verify solve_silhouette_packing finds valid non-overlapping placements."""
+    silhouette = {(0, 0), (0, 1), (1, 0), (1, 1)}
+    domino = {(0, 0), (0, 1)}
+    pieces = [domino, domino]
+
+    offsets = BaseSpatialContainmentEngine.solve_silhouette_packing(silhouette, pieces)
+    assert offsets is not None
+    assert len(offsets) == 2
+    covered = set()
+    for shape, (dr, dc) in zip(pieces, offsets):
+        placed = {(r + dr, c + dc) for r, c in shape}
+        assert placed.issubset(silhouette)
+        assert placed.isdisjoint(covered)
+        covered.update(placed)
+    assert covered == silhouette

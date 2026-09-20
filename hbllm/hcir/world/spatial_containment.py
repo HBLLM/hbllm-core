@@ -165,3 +165,65 @@ class BaseSpatialContainmentEngine:
             container_id,
         )
         return event
+
+    @staticmethod
+    def solve_silhouette_packing(
+        silhouette_cells: set[tuple[int, int]],
+        piece_shapes: list[set[tuple[int, int]]],
+        allow_rotations: bool = False,
+    ) -> list[tuple[int, int]] | None:
+        """Find non-overlapping placement offsets for piece_shapes to exactly cover silhouette_cells.
+
+        Given a target silhouette (set of 2D cell coordinates) and a list of piece shapes (each a set of
+        relative 2D cell coordinates normalized to min_r=0, min_c=0), finds the translation offset (dr, dc)
+        for each piece such that the pieces are mutually disjoint and their union exactly covers the silhouette.
+
+        Returns:
+            A list of (dr, dc) offsets for each piece, or None if no valid packing exists.
+        """
+        if not piece_shapes or not silhouette_cells:
+            return None
+
+        total_piece_cells = sum(len(p) for p in piece_shapes)
+        if total_piece_cells != len(silhouette_cells):
+            return None
+
+        # Sort pieces by size descending for efficient pruning
+        indexed_pieces = sorted(enumerate(piece_shapes), key=lambda x: len(x[1]), reverse=True)
+
+        n = len(piece_shapes)
+        assignments: list[tuple[int, int] | None] = [None] * n
+
+        def backtrack(
+            piece_idx: int, covered: set[tuple[int, int]]
+        ) -> list[tuple[int, int]] | None:
+            if piece_idx == n:
+                if covered == silhouette_cells:
+                    return [assignments[i] for i in range(n)]  # type: ignore[misc]
+                return None
+
+            orig_idx, shape = indexed_pieces[piece_idx]
+            first_uncovered = next(
+                (cell for cell in sorted(silhouette_cells) if cell not in covered), None
+            )
+            if first_uncovered is None:
+                return None
+
+            # Generate candidate offsets for this piece
+            # The piece must cover first_uncovered with one of its cells, or fit anywhere in silhouette
+            # For each cell in shape, try aligning it with first_uncovered
+            fur, fuc = first_uncovered
+            for pr, pc in shape:
+                dr = fur - pr
+                dc = fuc - pc
+                translated = {(r + dr, c + dc) for r, c in shape}
+                if translated.issubset(silhouette_cells) and translated.isdisjoint(covered):
+                    assignments[orig_idx] = (dr, dc)
+                    res = backtrack(piece_idx + 1, covered | translated)
+                    if res is not None:
+                        return res
+                    assignments[orig_idx] = None
+
+            return None
+
+        return backtrack(0, set())
