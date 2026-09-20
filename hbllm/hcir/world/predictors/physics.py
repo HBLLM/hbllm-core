@@ -473,8 +473,9 @@ class PhysicsPredictor:
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
+        footprint_offsets: list[tuple[int, int]] | set[tuple[int, int]] | None = None,
     ) -> list[tuple[int, int]]:
-        """Breadth-first search for shortest obstacle-clearing geodesic path."""
+        """Breadth-first search for shortest obstacle-clearing geodesic path, accounting for composite footprints."""
         H, W = grid_shape
         start_r, start_c = start
         goal_r, goal_c = goal
@@ -482,11 +483,21 @@ class PhysicsPredictor:
         if start == goal:
             return [start]
 
-        if (goal_r, goal_c) in barrier_cells:
-            if isinstance(barrier_cells, set):
-                barrier_cells = barrier_cells - {(goal_r, goal_c)}
-            else:
-                barrier_cells = set(barrier_cells) - {(goal_r, goal_c)}
+        effective_barriers = set(barrier_cells)
+        if (goal_r, goal_c) in effective_barriers:
+            effective_barriers.remove((goal_r, goal_c))
+
+        offsets: list[tuple[int, int]] = list(footprint_offsets) if footprint_offsets else [(0, 0)]
+
+        def is_footprint_valid(r: int, c: int) -> bool:
+            for off_r, off_c in offsets:
+                fr = r + off_r
+                fc = c + off_c
+                if not (0 <= fr < H and 0 <= fc < W):
+                    return False
+                if (fr, fc) in effective_barriers:
+                    return False
+            return True
 
         queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
             [(start_r, start_c, [(start_r, start_c)])]
@@ -509,15 +520,14 @@ class PhysicsPredictor:
                 best_partial_path = path
 
             if math.hypot(goal_r - r, goal_c - c) <= (step_size * 0.9):
-                if (goal_r, goal_c) not in barrier_cells:
+                if is_footprint_valid(goal_r, goal_c):
                     return path + [(goal_r, goal_c)]
 
             for dr, dc in delta:
                 nr, nc = r + dr, c + dc
-                if 0 <= nr < H and 0 <= nc < W:
-                    if (nr, nc) not in visited:
-                        visited.add((nr, nc))
-                        if (nr, nc) not in barrier_cells:
-                            queue.append((nr, nc, path + [(nr, nc)]))
+                if (nr, nc) not in visited:
+                    visited.add((nr, nc))
+                    if is_footprint_valid(nr, nc):
+                        queue.append((nr, nc, path + [(nr, nc)]))
 
         return best_partial_path

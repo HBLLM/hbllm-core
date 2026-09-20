@@ -128,10 +128,21 @@ class FrameDiffAnalyzer:
                 changed_pixel_count=changed_count,
             )
 
+        H, W = prev_grid.shape
         rows, cols = np.where(diff_mask)
         min_r, max_r = int(np.min(rows)), int(np.max(rows))
         min_c, max_c = int(np.min(cols)), int(np.max(cols))
         bbox = (min_r, max_r, min_c, max_c)
+
+        # Ignore peripheral margin-only changes (step counter, HUD timer, outer frame)
+        is_all_margin = all(
+            (r <= 1 or r >= H - 2 or c <= 1 or c >= W - 2) for r, c in zip(rows, cols)
+        )
+        if is_all_margin and changed_count <= 4:
+            return FrameDiff(
+                diff_type=DiffType.NO_CHANGE,
+                changed_pixel_count=0,
+            )
 
         mutated_coords = [(int(r), int(c)) for r, c in zip(rows, cols)]
         old_colors = {(r, c): int(prev_grid[r, c]) for r, c in mutated_coords}
@@ -377,8 +388,17 @@ class CrossLevelKnowledgeBase:
                                 blocking_color != 0
                                 and blocking_color != self.controllable_signature.color
                                 and blocking_color not in self.walkable_colors
+                                and blocking_color not in self.object_recipes
                             ):
-                                self.barrier_colors.add(blocking_color)
+                                # Only treat as global barrier if it is structural terrain
+                                # (e.g. maze wall, boundary), not a small movable item or crate
+                                b_pts = np.argwhere(prev_grid == blocking_color)
+                                color_count = len(b_pts)
+                                if color_count >= 50:
+                                    span_r = int(b_pts[:, 0].max() - b_pts[:, 0].min())
+                                    span_c = int(b_pts[:, 1].max() - b_pts[:, 1].min())
+                                    if span_r >= int(H * 0.35) or span_c >= int(W * 0.35):
+                                        self.barrier_colors.add(blocking_color)
 
         # --- Object Interaction Recipe Learning (diff-type independent) ---
         # Detect object pickups, clicks, and transformations regardless of diff type.
@@ -2955,23 +2975,145 @@ class MirroredConvergenceSolver:
     def reset_episode(self) -> None:
         self.action_queue = []
 
-    LEVEL_ACTIONS: dict[int, list[int]] = {
-        0: [1, 1, 3, 1, 3, 1, 1, 1, 1, 1, 4, 1, 4, 4, 4],
-        1: [2, 3, 3, 3, 2, 2, 2, 4, 4, 1, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 1, 3],
-    }
-
     def is_mirrored_convergence(self, grid: np.ndarray, available_actions: list[int]) -> bool:
-        if available_actions != [1, 2, 3, 4, 5, 6]:
+        if not all(a in available_actions for a in [1, 2, 3, 4]):
             return False
-        colors = set(np.unique(grid))
-        return grid.shape == (64, 64) and 0 not in colors and colors == {5, 10, 11, 12}
+        if 6 not in available_actions:
+            return False
+        bg_counts = np.bincount(grid.flatten())
+        top_colors = set(np.argsort(bg_counts)[-3:])
+        entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
+        for col in set(e.color for e in entities):
+            col_ents = [e for e in entities if e.color == col]
+            if len(col_ents) in (2, 4) and all(9 <= e.size <= 36 for e in col_ents):
+                c_sum = sum(e.centroid[1] for e in col_ents) / len(col_ents)
+                if abs(c_sum - (grid.shape[1] - 1) / 2.0) <= 2.0:
+                    return True
+        return False
 
     def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
         if self.action_queue:
-            act = self.action_queue.pop(0)
-            return act, 0.99
+            return self.action_queue.pop(0), 0.99
+
+        # Perceptually lift grid, avatars, scale, offset, and obstacles
+        bg_counts = np.bincount(grid.flatten())
+        top_colors = set(np.argsort(bg_counts)[-3:])
+        entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
+
+        avatar_entities = []
+        for col in set(e.color for e in entities):
+            col_ents = [e for e in entities if e.color == col]
+            if len(col_ents) in (2, 4) and all(9 <= e.size <= 36 for e in col_ents):
+                avatar_entities = col_ents
+                break
+
+        if not avatar_entities or len(avatar_entities) <= 1:
+            return 1, 0.50
+
+        scale = int(round(np.sqrt(avatar_entities[0].size)))
+        first_e = avatar_entities[0]
+        min_r, _, min_c, _ = first_e.bounding_box
+        offset_c = min_c % scale
+        offset_r = min_r % scale
+
+        grid_w = (grid.shape[1] - offset_c) // scale
+        grid_h = (grid.shape[0] - offset_r) // scale
+
+        inferred_grid_w = int(round(64 / scale))
+        if inferred_grid_w % 2 == 0 and inferred_grid_w > 11:
+            inferred_grid_w = 13
+        centered_offset_c = (64 - inferred_grid_w * scale) // 2
+        centered_offset_r = (64 - inferred_grid_w * scale) // 2
+
+        if (min_c - centered_offset_c) % scale == 0:
+            offset_c = centered_offset_c
+            offset_r = centered_offset_r
+            grid_w = inferred_grid_w
+            grid_h = inferred_grid_w
+
+        avatars = []
+        for e in sorted(avatar_entities, key=lambda x: x.centroid[1]):
+            min_r_e, _, min_c_e, _ = e.bounding_box
+            gx = (min_c_e - offset_c) // scale
+            gy = (min_r_e - offset_r) // scale
+            avatars.append((gx, gy))
+
+        walls = set()
+        spikes = set()
+        for gy in range(grid_h):
+            for gx in range(grid_w):
+                cell = grid[
+                    offset_r + gy * scale : offset_r + (gy + 1) * scale,
+                    offset_c + gx * scale : offset_c + (gx + 1) * scale,
+                ]
+                if np.any(cell == 8):
+                    spikes.add((gx, gy))
+                elif not np.all(np.isin(cell, [5, avatar_entities[0].color])):
+                    walls.add((gx, gy))
+
+        actions = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
+        start_state = tuple(avatars)
+        queue = deque([(start_state, [])])
+        visited = {start_state}
+
+        mults = [(1, 1), (-1, 1)] if len(avatars) == 2 else [(1, 1), (-1, 1), (1, -1), (-1, -1)]
+        found_path: list[int] | None = None
+        while queue:
+            state, path = queue.popleft()
+            if len(state) <= 1:
+                found_path = path
+                break
+
+            for act, (dx, dy) in actions.items():
+                new_pos = []
+                fatal = False
+                for i, (ax, ay) in enumerate(state):
+                    mx, my = mults[i]
+                    nx = ax + dx * mx
+                    ny = ay + dy * my
+                    if nx < 0 or nx >= grid_w or ny < 0 or ny >= grid_h or (nx, ny) in walls:
+                        final_pos = (ax, ay)
+                    else:
+                        final_pos = (nx, ny)
+
+                    if final_pos in spikes:
+                        fatal = True
+                        break
+                    new_pos.append(final_pos)
+
+                if fatal:
+                    continue
+
+                merged = list(new_pos)
+                for i in range(len(state)):
+                    for j in range(i + 1, len(state)):
+                        if (new_pos[i], new_pos[j]) == (state[j], state[i]):
+                            avg_x = (new_pos[i][0] + new_pos[j][0]) // 2
+                            avg_y = (new_pos[i][1] + new_pos[j][1]) // 2
+                            merged[i] = (avg_x, avg_y)
+                            merged[j] = (avg_x, avg_y)
+
+                unique_pos = []
+                for p in merged:
+                    if p not in unique_pos:
+                        unique_pos.append(p)
+                new_state = tuple(unique_pos)
+
+                if len(new_state) <= 1:
+                    found_path = path + [act]
+                    break
+
+                if new_state not in visited:
+                    visited.add(new_state)
+                    queue.append((new_state, path + [act]))
+
+            if found_path:
+                break
+
+        if found_path:
+            self.action_queue = list(found_path)
+            return self.action_queue.pop(0), 0.99
+
         return 1, 0.50
 
 
@@ -2984,47 +3126,86 @@ class GravitySpillingPlatformSolver:
     def reset_episode(self) -> None:
         self.action_queue = []
 
-    LEVEL_ACTIONS: dict[int, list[tuple[int, dict[str, int] | None]]] = {
-        0: [(4, None), (4, None), (4, None), (5, None)],
-        1: [
-            # 1. Plat 2 (width 5): move left 2, up 2
-            (4, None),
-            (4, None),
-            (2, None),
-            (2, None),
-            # 2. Select Plat 0 at (6, 9) -> click (37, 25)
-            (6, {"x": 37, "y": 25}),
-            # Move Plat 0: right 2, up 2
-            (3, None),
-            (3, None),
-            (2, None),
-            (2, None),
-            # 3. Select Plat 1 at (11, 11) -> click (17, 17)
-            (6, {"x": 17, "y": 17}),
-            # Move Plat 1: up 7
-            *[(2, None)] * 7,
-            # 4. Spill!
-            (5, None),
-        ],
-    }
-
     def is_gravity_spill(self, grid: np.ndarray, available_actions: list[int]) -> bool:
         if available_actions != [1, 2, 3, 4, 5, 6]:
             return False
         colors = set(np.unique(grid))
         return (
-            grid.shape == (64, 64) and 1 in colors and 6 in colors and 12 in colors and 9 in colors
+            grid.shape == (64, 64)
+            and 1 in colors
+            and 6 in colors
+            and 12 in colors
+            and (9 in colors or 8 in colors)
         )
 
     def plan_step(
         self, grid: np.ndarray, current_level: int = 0
     ) -> tuple[int, float, dict[str, int] | None]:
-        if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
         if self.action_queue:
             act, data = self.action_queue.pop(0)
             return act, 0.99, data
-        return 1, 0.50, None
+
+        source_pts = np.argwhere(grid == 4)
+        drop_pts = np.argwhere(grid == 6)
+        drop_x = (
+            int(round(np.mean(drop_pts[:, 1])))
+            if len(drop_pts) > 0
+            else (int(round(np.mean(source_pts[:, 1]))) if len(source_pts) > 0 else 36)
+        )
+
+        plat_pts = np.argwhere(grid == 9)
+        if len(plat_pts) == 0:
+            plat_pts = np.argwhere(grid == 8)
+
+        rep_pts = np.argwhere(grid == 11)
+        scale = 4
+
+        if len(plat_pts) > 0 and len(rep_pts) > 0:
+            plat_min_c = int(plat_pts[:, 1].min())
+            plat_max_c = int(plat_pts[:, 1].max())
+            plat_w = (plat_max_c - plat_min_c + 1) // scale
+
+            rep_cols = sorted(list(set(rep_pts[:, 1])))
+            clusters: list[list[int]] = []
+            curr_c: list[int] = []
+            for c in rep_cols:
+                if not curr_c or c - curr_c[-1] <= scale:
+                    curr_c.append(int(c))
+                else:
+                    clusters.append(curr_c)
+                    curr_c = [int(c)]
+            if curr_c:
+                clusters.append(curr_c)
+
+            if len(clusters) >= 2 and plat_w == 5:
+                c1_min = min(clusters[0])
+                c1_max = max(clusters[0])
+                c2_min = min(clusters[1])
+                c2_max = max(clusters[1])
+
+                valid_targets = [
+                    t
+                    for t in range(c1_min, c1_max + 1, scale)
+                    if c2_min <= t + (plat_w - 1) * scale <= c2_max
+                    and t <= drop_x <= t + (plat_w - 1) * scale
+                ]
+                target_c = valid_targets[0] if valid_targets else c1_min
+                dx_pixels = target_c - plat_min_c
+                num_moves = dx_pixels // scale
+
+                plan: list[tuple[int, dict[str, int] | None]] = []
+                move_act = 4 if num_moves > 0 else 3
+                for _ in range(abs(num_moves)):
+                    plan.append((move_act, None))
+                plan.append((5, None))
+                for _ in range(15):
+                    plan.append((5, None))
+
+                self.action_queue = plan
+                act, data = self.action_queue.pop(0)
+                return act, 0.99, data
+
+        return 5, 0.50, None
 
 
 class UpwardGravityPlatformerSolver:
@@ -3348,6 +3529,14 @@ class InductiveHCIRAgent:
         self._click_index: int = 0
         self._clicked_positions: set[tuple[int, int]] = set()
         self._effective_colors: set[int] = set()
+        self._quiescent_targets: set[tuple[int, int]] = set()
+        self._completed_controls: set[tuple[int, int]] = set()
+        self._target_usage: dict[tuple[int, int], int] = {}
+        self._entity_usage: dict[int, int] = {}
+        self._click_visited_states: set[bytes] = set()
+        self._last_click_target: tuple[int, int, int, int] | None = None
+        self._consecutive_effective_clicks: int = 0
+        self._prev_min_dist: dict[int, int] = {}
         # Trial-and-error components
         self.trial_memory: TrialFeedbackMemory = TrialFeedbackMemory()
         self.goal_inductor: GoalStateInductor = GoalStateInductor()
@@ -3370,6 +3559,14 @@ class InductiveHCIRAgent:
         self._click_targets = []
         self._click_index = 0
         self._clicked_positions.clear()
+        self._quiescent_targets.clear()
+        self._completed_controls.clear()
+        self._target_usage.clear()
+        self._entity_usage.clear()
+        self._click_visited_states.clear()
+        self._last_click_target = None
+        self._consecutive_effective_clicks = 0
+        self._prev_min_dist.clear()
         self.canvas_matcher.reset_episode()
         self.spatial_navigator.reset_episode()
         self.vortex_solver.reset_episode()
@@ -3681,10 +3878,12 @@ class InductiveHCIRAgent:
             if untested_actions and self.step_counter <= self.epistemic_probe_budget + len(
                 available_actions
             ):
-                # Prioritize non-movement actions (5,6,7) since movements (1-4)
-                # are typically discovered first by the HCIR engine
-                non_movement = [a for a in untested_actions if a > 4]
-                probe_action = non_movement[0] if non_movement else untested_actions[0]
+                # Prioritize directional movement actions (1-4) first so the avatar
+                # position, color, and motor models are grounded before non-movement probing
+                directional_untested = [a for a in untested_actions if a in [1, 2, 3, 4]]
+                probe_action = (
+                    directional_untested[0] if directional_untested else untested_actions[0]
+                )
                 logger.debug(
                     f"Exploration phase (step {self.step_counter}): "
                     f"testing action {probe_action}, untested={untested_actions}"
@@ -3797,10 +3996,17 @@ class InductiveHCIRAgent:
                 int(self.hcir_agent.avatar_centroid[1]),
             )
 
-        if self.hcir_agent.primary_goal_node:
+        if self.hcir_agent.goal_centroid:
+            self.current_target_pos = (
+                int(round(self.hcir_agent.goal_centroid[0])),
+                int(round(self.hcir_agent.goal_centroid[1])),
+            )
+        elif self.hcir_agent.primary_goal_node:
             tp = self.hcir_agent.primary_goal_node.properties.get("target_position")
             if tp:
                 self.current_target_pos = (int(tp[0]), int(tp[1]))
+        else:
+            self.current_target_pos = None
 
         self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
         self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
@@ -3866,7 +4072,17 @@ class InductiveHCIRAgent:
             self.active_solver_name = "lights_out"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 6. Click-only affordance: for pure action-6 games
+        # 6. Mirrored Convergence Solver (e.g. m0r0)
+        if self.mirrored_convergence_solver.is_mirrored_convergence(curr_grid, available_actions):
+            self.active_solver_name = "mirrored_convergence"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 7. Gravity Spill Platform Solver (e.g. sp80)
+        if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
+            self.active_solver_name = "gravity_spill"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 8. Click-only affordance: for pure action-6 games
         has_movement = any(a in available_actions for a in [1, 2, 3, 4])
         if not has_movement and 6 in available_actions:
             return self._plan_click_affordance(curr_grid, available_actions)
@@ -3882,66 +4098,165 @@ class InductiveHCIRAgent:
     def _plan_click_affordance(
         self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
-        """Handle click-only games by systematically clicking on distinct objects."""
+        """Handle click-only games by systematically clicking on distinct objects with causal momentum and loop avoidance."""
         self.step_counter += 1
+        self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
 
-        if not hasattr(self, "_click_targets"):
-            self._click_targets = []
-            self._click_index = 0
-            self._clicked_positions = set()
-            self._effective_colors = set()
-
-        # Learn from previous click
-        if self.prev_grid is not None and self.last_action is not None:
-            diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
-            self.knowledge_base.register_observation(
-                self.prev_grid, self.last_action, curr_grid, diff
-            )
-            if diff.diff_type != DiffType.NO_CHANGE and self.last_action_data:
-                cx = self.last_action_data.get("x", 0)
-                cy = self.last_action_data.get("y", 0)
-                H, W = self.prev_grid.shape
-                if 0 <= cy < H and 0 <= cx < W:
-                    self._effective_colors.add(int(self.prev_grid[cy, cx]))
+        if not hasattr(self, "_quiescent_targets"):
+            self._quiescent_targets = set()
+            self._completed_controls = set()
+            self._target_usage = {}
+            self._entity_usage = {}
+            self._click_visited_states = set()
+            self._last_click_target = None
+            self._consecutive_effective_clicks = 0
+            self._prev_min_dist = {}
 
         H, W = curr_grid.shape
         bg = int(np.bincount(curr_grid.flatten()).argmax())
+        grid_bytes = curr_grid.tobytes()
+        is_revisit = grid_bytes in self._click_visited_states
+        self._click_visited_states.add(grid_bytes)
+
+        # Learn from previous click and evaluate causal momentum
+        if (
+            self.prev_grid is not None
+            and self.last_action == 6
+            and self._last_click_target is not None
+        ):
+            diff = FrameDiffAnalyzer.analyze(self.prev_grid, 6, curr_grid)
+            self.knowledge_base.register_observation(self.prev_grid, 6, curr_grid, diff)
+            cr, cc, col, eid = self._last_click_target
+            if diff.diff_type != DiffType.NO_CHANGE:
+                self._effective_colors.add(col)
+                self._consecutive_effective_clicks += 1
+
+                # Check teleological progress of remote payload entities (size <= 9)
+                diff_mask = self.prev_grid != curr_grid
+                internal_mask = diff_mask.copy()
+                internal_mask[0:2, :] = False
+                internal_mask[H - 2 : H, :] = False
+                internal_mask[:, 0:2] = False
+                internal_mask[:, W - 2 : W] = False
+
+                stopped = False
+                for c in np.unique(curr_grid[internal_mask]):
+                    if c == 0 or c == bg:
+                        continue
+                    chg_pts = np.argwhere((curr_grid == c) & internal_mask)
+                    stat_pts = np.argwhere((curr_grid == c) & (~internal_mask))
+                    if 1 <= len(chg_pts) <= 9 and len(stat_pts) >= 1:
+                        dists = [np.min(np.sum(np.abs(stat_pts - pt), axis=1)) for pt in chg_pts]
+                        cur_d = min(dists)
+                        prev_d = self._prev_min_dist.get(c, None)
+                        if prev_d is not None:
+                            if cur_d <= 1 and prev_d > 1:
+                                stopped = True
+                            elif cur_d > prev_d:
+                                stopped = True
+                        self._prev_min_dist[c] = cur_d
+
+                if stopped:
+                    self._completed_controls.add((cr, cc))
+                    self._consecutive_effective_clicks = 0
+                    self._prev_min_dist = {}
+                elif not is_revisit and self._consecutive_effective_clicks < 12:
+                    self.prev_grid = curr_grid.copy()
+                    self.last_action = 6
+                    self.last_action_data = {"x": cc, "y": cr}
+                    return 6, 0.75
+            else:
+                self._quiescent_targets.add((cr, cc))
+                self._consecutive_effective_clicks = 0
+                self._prev_min_dist = {}
+
         entities = VisualTopologyExtractor.extract_entities(curr_grid, ignore_colors={bg, 0})
 
-        targets: list[tuple[int, int, int]] = []
-        for e in entities:
+        def is_border_or_frame(e: Any) -> bool:
+            min_r, max_r, min_c, max_c = getattr(e, "bounding_box", (0, 0, 0, 0))
+            spans_h = max_r - min_r >= H - 3
+            spans_w = max_c - min_c >= W - 3
+            if spans_h and spans_w:
+                return True
+            if (min_r <= 1 and max_r <= 1 and spans_w) or (
+                min_r >= H - 2 and max_r >= H - 2 and spans_w
+            ):
+                return True
+            if (min_c <= 1 and max_c <= 1 and spans_h) or (
+                min_c >= W - 2 and max_c >= W - 2 and spans_h
+            ):
+                return True
+            # Filter 1-pixel thin bars (step counters, health bars, borders)
+            if (max_r - min_r == 0 and max_c - min_c > 8) or (
+                max_c - min_c == 0 and max_r - min_r > 8
+            ):
+                return True
+            return False
+
+        usable_entities = [e for e in entities if not is_border_or_frame(e)]
+
+        candidates: list[tuple[int, int, int, int, Any]] = []
+        for i, e in enumerate(usable_entities):
             cr, cc = int(round(e.centroid[0])), int(round(e.centroid[1]))
             coords_list = getattr(e, "coords", getattr(e, "pixels", []))
             if coords_list and (cr, cc) not in coords_list:
                 cr, cc = coords_list[len(coords_list) // 2]
-            targets.append((cr, cc, e.color))
+            candidates.append((cr, cc, e.color, i, e))
+            min_r, max_r, min_c, max_c = getattr(e, "bounding_box", (0, 0, 0, 0))
+            if max_r - min_r >= 4:
+                p1_r = min_r + (max_r - min_r) // 4
+                p2_r = max_r - (max_r - min_r) // 4
+                candidates.append((p1_r, cc, e.color, i, e))
+                candidates.append((p2_r, cc, e.color, i, e))
+            if max_c - min_c >= 4:
+                p1_c = min_c + (max_c - min_c) // 4
+                p2_c = max_c - (max_c - min_c) // 4
+                candidates.append((cr, p1_c, e.color, i, e))
+                candidates.append((cr, p2_c, e.color, i, e))
 
-        if not targets:
+        if not candidates:
             unique_colors = [int(c) for c in np.unique(curr_grid) if c != bg and c != 0]
             for color in unique_colors:
                 pts = np.argwhere(curr_grid == color)
                 if len(pts) > 0:
-                    targets.append((int(pts[0, 0]), int(pts[0, 1]), color))
+                    candidates.append((int(pts[0, 0]), int(pts[0, 1]), color, 0, None))
 
-        unclicked = [(r, c, col) for r, c, col in targets if (r, c) not in self._clicked_positions]
-        eff_unclicked = [(r, c, col) for r, c, col in unclicked if col in self._effective_colors]
+        def score(item: tuple[int, int, int, int, Any]) -> float:
+            cr, cc, col, eid, e = item
+            is_eff = 150.0 if col in self._effective_colors else 0.0
+            not_q = -500.0 if (cr, cc) in self._quiescent_targets else 0.0
+            not_comp = -600.0 if (cr, cc) in self._completed_controls else 0.0
+            is_2d = 0.0
+            is_btn_sz = 0.0
+            if e is not None:
+                bbox = getattr(e, "bounding_box", (0, 0, 0, 0))
+                if bbox[1] - bbox[0] >= 1 and bbox[3] - bbox[2] >= 1:
+                    is_2d = 30.0
+                sz = len(getattr(e, "coords", []))
+                if 4 <= sz <= 300:
+                    is_btn_sz = 30.0
+            usage = self._target_usage.get((cr, cc), 0)
+            target_pen = -float(usage) * 10.0
+            ent_usage = self._entity_usage.get(eid, 0)
+            ent_pen = -float(ent_usage) * 25.0
+            return is_eff + not_q + not_comp + is_2d + is_btn_sz + target_pen + ent_pen
 
-        if eff_unclicked:
-            target = eff_unclicked[0]
-        elif unclicked:
-            target = unclicked[0]
-        elif targets:
-            target = targets[self.step_counter % len(targets)]
+        candidates.sort(key=score, reverse=True)
+        if candidates:
+            best = candidates[0]
+            cr, cc, col, eid, _ = best
         else:
-            target = (H // 2, W // 2, 0)
+            cr, cc, col, eid = H // 2, W // 2, 0, 0
 
-        click_r, click_c, _ = target
-        self._clicked_positions.add((click_r, click_c))
-        action_data = {"x": click_c, "y": click_r}
-        self.last_action_data = action_data
+        self._last_click_target = (cr, cc, col, eid)
+        self._target_usage[(cr, cc)] = self._target_usage.get((cr, cc), 0) + 1
+        self._entity_usage[eid] = self._entity_usage.get(eid, 0) + 1
+        self._consecutive_effective_clicks = 0
+        self._prev_min_dist = {}
         self.prev_grid = curr_grid.copy()
         self.last_action = 6
-        return 6, 0.5
+        self.last_action_data = {"x": cc, "y": cr}
+        return 6, 0.75
 
 
 # ─────────────────────────────────────────────────────────────────────────────
