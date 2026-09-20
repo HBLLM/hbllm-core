@@ -15,6 +15,8 @@ import re
 from collections import deque
 from typing import Any
 
+import numpy as np
+
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
@@ -646,3 +648,52 @@ class PhysicsPredictor:
                 return base_pos, length
 
         return new_base, length
+
+    @staticmethod
+    def find_lattice_track_path(
+        grid: np.ndarray,
+        start_pos: tuple[int, int],
+        goal_pos: tuple[int, int],
+        track_color: int = 2,
+        stride: int = 6,
+        patch_size: int = 3,
+    ) -> list[int] | None:
+        """Find optimal action sequence to navigate a rail/track network on a discrete 2D lattice.
+
+        Performs breadth-first search across lattice intersections spaced by `stride`,
+        verifying that intermediate conduit/rail segments contain `track_color`.
+
+        Args:
+            grid: 2D numpy array representing the environment visual frame.
+            start_pos: (start_r, start_c) coordinates on the grid.
+            goal_pos: (goal_r, goal_c) target coordinates on the grid.
+            track_color: Pixel color identifying valid track/conduit bridges.
+            stride: Distance in pixels between adjacent lattice intersections (default 6).
+            patch_size: Spatial dimensions of the conduit patch (default 3).
+
+        Returns:
+            List of action integers (1=UP, 2=DOWN, 3=LEFT, 4=RIGHT) or None if unreachable.
+        """
+        H, W = grid.shape
+        queue = deque([(start_pos[0], start_pos[1], [])])
+        visited = {(start_pos[0], start_pos[1])}
+        moves = [
+            (-stride, 0, -stride // 2, 0, 1),  # UP
+            (stride, 0, stride // 2, 0, 2),  # DOWN
+            (0, -stride, 0, -stride // 2, 3),  # LEFT
+            (0, stride, 0, stride // 2, 4),  # RIGHT
+        ]
+        while queue:
+            cr, cc, path = queue.popleft()
+            if (cr, cc) == (goal_pos[0], goal_pos[1]):
+                return path
+            for dr, dc, br_dr, br_dc, act in moves:
+                nr, nc = cr + dr, cc + dc
+                br_r, br_c = cr + br_dr, cc + br_dc
+                if 0 <= br_r < H and 0 <= br_c < W:
+                    patch = grid[br_r : br_r + patch_size, br_c : br_c + patch_size]
+                    if np.any(patch == track_color):
+                        if (nr, nc) not in visited:
+                            visited.add((nr, nc))
+                            queue.append((nr, nc, path + [act]))
+        return None

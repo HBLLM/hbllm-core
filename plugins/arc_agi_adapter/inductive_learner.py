@@ -2280,6 +2280,50 @@ class PegSolitaireSolver:
         return act, 0.99, data
 
 
+class TrackMazeSolver:
+    """Solves multi-tick discrete lattice track navigation puzzles (e.g. tu93) using PhysicsPredictor.find_lattice_track_path."""
+
+    def __init__(self) -> None:
+        self.action_queue: list[int] = []
+
+    def reset_episode(self) -> None:
+        self.action_queue = []
+
+    def is_track_maze_puzzle(
+        self, grid: np.ndarray, available_actions: list[int] | None = None
+    ) -> bool:
+        if available_actions is not None:
+            if not all(a in available_actions for a in [1, 2, 3, 4]):
+                return False
+            if any(a in available_actions for a in [5, 6, 7]):
+                return False
+        H, W = grid.shape
+        if H != 64 or W != 64:
+            return False
+        c2_count = int(np.sum(grid == 2))
+        c4_count = int(np.sum(grid == 4))
+        c9_count = int(np.sum(grid == 9))
+        c14_count = int(np.sum(grid == 14))
+        return c2_count > 40 and c4_count >= 1 and c9_count >= 6 and c14_count >= 8
+
+    def plan_step(self, grid: np.ndarray) -> tuple[int, float]:
+        if not self.action_queue:
+            pts_ag = np.argwhere((grid == 9) | (grid == 4))
+            pts_ex = np.argwhere(grid == 14)
+            if len(pts_ag) > 0 and len(pts_ex) > 0:
+                start_pos = (int(np.min(pts_ag[:, 0])), int(np.min(pts_ag[:, 1])))
+                goal_pos = (int(np.min(pts_ex[:, 0])), int(np.min(pts_ex[:, 1])))
+                path = PhysicsPredictor.find_lattice_track_path(
+                    grid, start_pos, goal_pos, track_color=2, stride=6, patch_size=3
+                )
+                if path:
+                    self.action_queue = list(path)
+
+        if self.action_queue:
+            return self.action_queue.pop(0), 0.99
+        return 1, 0.50
+
+
 class LightsOutSolver:
     """Solves cellular toggle puzzles (e.g. ft09) via combinatorial GF(2) / BFS search."""
 
@@ -2594,6 +2638,7 @@ class InductiveHCIRAgent:
         self.spatial_navigator: SpatialResourceNavigator = SpatialResourceNavigator()
         self.vortex_solver: VortexAttractorSolver = VortexAttractorSolver()
         self.peg_solver: PegSolitaireSolver = PegSolitaireSolver()
+        self.track_maze_solver: TrackMazeSolver = TrackMazeSolver()
         self.lights_out_solver: LightsOutSolver = LightsOutSolver()
         self.mirrored_convergence_solver: MirroredConvergenceSolver = MirroredConvergenceSolver()
         self.gravity_spill_solver: GravitySpillingPlatformSolver = GravitySpillingPlatformSolver()
@@ -2660,6 +2705,7 @@ class InductiveHCIRAgent:
         self.spatial_navigator.reset_episode()
         self.vortex_solver.reset_episode()
         self.peg_solver.reset_episode()
+        self.track_maze_solver.reset_episode()
         self.lights_out_solver.reset_episode()
         self.mirrored_convergence_solver.reset_episode()
         self.gravity_spill_solver.reset_episode()
@@ -2774,6 +2820,9 @@ class InductiveHCIRAgent:
         elif name == "peg":
             self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
             action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
+        elif name == "track_maze":
+            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
+            action, conf = self.track_maze_solver.plan_step(curr_grid)
         elif name == "lights_out":
             self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
             action, conf, action_data = self.lights_out_solver.plan_step(
@@ -3092,6 +3141,11 @@ class InductiveHCIRAgent:
         # 8. Peg Solitaire Solver (e.g. lf52)
         if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
             self.active_solver_name = "peg"
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 9. Track Maze Navigation Solver (e.g. tu93)
+        if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
+            self.active_solver_name = "track_maze"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 9. Click-only affordance: for pure action-6 games

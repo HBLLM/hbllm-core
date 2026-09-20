@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
@@ -236,3 +238,40 @@ def test_simulate_telescopic_step() -> None:
     )
     assert new_base == (6, 5)
     assert new_len == 2
+
+
+def test_find_lattice_track_path() -> None:
+    """Verify PhysicsPredictor.find_lattice_track_path navigates discrete 2D conduit lattices."""
+    grid = np.zeros((30, 30), dtype=int)
+    # Build track connecting (6, 6) -> (6, 12) -> (12, 12)
+    # Bridge at (6, 9) (patch_size 3: rows 6..8, cols 9..11)
+    grid[6:9, 9:12] = 2
+    # Bridge at (9, 12) (patch_size 3: rows 9..11, cols 12..14)
+    grid[9:12, 12:15] = 2
+
+    start = (6, 6)
+    goal = (12, 12)
+
+    path = PhysicsPredictor.find_lattice_track_path(
+        grid=grid,
+        start_pos=start,
+        goal_pos=goal,
+        track_color=2,
+        stride=6,
+        patch_size=3,
+    )
+    assert path is not None
+    # Expected: RIGHT (4) then DOWN (2)
+    assert path == [4, 2]
+
+    # Test unreachable goal
+    unreachable_goal = (24, 24)
+    fail_path = PhysicsPredictor.find_lattice_track_path(
+        grid=grid,
+        start_pos=start,
+        goal_pos=unreachable_goal,
+        track_color=2,
+        stride=6,
+        patch_size=3,
+    )
+    assert fail_path is None
