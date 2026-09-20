@@ -20,6 +20,7 @@ from hbllm.hcir.graph import (
     GoalNode,
     HCIREdge,
     HCIREdgeType,
+    WorldVariableNode,
 )
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
@@ -242,7 +243,22 @@ class HierarchicalGoalDecomposer:
                     reachable_candidates.append((len(c_path), cand))
 
             if reachable_candidates:
-                reachable_candidates.sort(key=lambda item: item[0])
+                # Prioritize candidates matching learned item colors from HCIR workspace
+                learned_item_vars = workspace.graph.get_node("var_learned_item_colors")
+                learned_colors = (
+                    set(learned_item_vars.value)
+                    if isinstance(learned_item_vars, WorldVariableNode)
+                    and isinstance(learned_item_vars.value, list)
+                    else set()
+                )
+
+                def candidate_priority(item_tuple: tuple[int, dict[str, Any]]) -> tuple[int, int]:
+                    path_len, cand_dict = item_tuple
+                    c_col = cand_dict.get("color")
+                    is_known = 0 if (c_col is not None and c_col in learned_colors) else 1
+                    return (is_known, path_len)
+
+                reachable_candidates.sort(key=candidate_priority)
                 best_cand = reachable_candidates[0][1]
                 cand_pos = (int(best_cand["position"][0]), int(best_cand["position"][1]))
                 cand_id = str(best_cand.get("id", f"{cand_pos[0]}_{cand_pos[1]}"))
@@ -257,6 +273,9 @@ class HierarchicalGoalDecomposer:
                     resolved=False,
                     properties={
                         "target_position": cand_pos,
+                        "item_position": best_cand.get("item_position", cand_pos),
+                        "item_color": best_cand.get("color"),
+                        "item_area": best_cand.get("area"),
                         "target_entity": cand_id,
                         "parent_goal_id": primary_goal.id,
                         "affordance": best_cand.get("affordance", "INTERACTION"),

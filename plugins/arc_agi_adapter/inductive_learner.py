@@ -349,7 +349,11 @@ class CrossLevelKnowledgeBase:
         elif diff.diff_type == DiffType.CANVAS_TRANSFORMATION:
             aff.is_commit_or_stamp = True
             aff.confidence = min(1.0, aff.confidence + 0.4)
-            self.puzzle_typology = PuzzleTypology.CANVAS_STAMPING
+            if self.puzzle_typology not in (
+                PuzzleTypology.SPATIAL_NAVIGATION,
+                PuzzleTypology.DISCRETE_PERMUTATION,
+            ):
+                self.puzzle_typology = PuzzleTypology.CANVAS_STAMPING
 
         elif diff.diff_type == DiffType.NO_CHANGE:
             aff.confidence = max(0.0, aff.confidence - 0.1)
@@ -2136,7 +2140,16 @@ class VortexAttractorSolver:
     def reset_episode(self) -> None:
         self.waypoint_idx = 0
 
-    def is_vortex_attractor_puzzle(self, grid: np.ndarray) -> bool:
+    def is_vortex_attractor_puzzle(
+        self, grid: np.ndarray, available_actions: list[int] | None = None
+    ) -> bool:
+        if available_actions is not None:
+            if not (
+                6 in available_actions
+                and 7 in available_actions
+                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
+            ):
+                return False
         H, W = grid.shape
         if H != 64 or W != 64:
             return False
@@ -2356,17 +2369,22 @@ class LightsOutSolver:
         colors = set(np.unique(grid))
         return (
             grid.shape == (64, 64)
-            and 8 in colors
             and 12 in colors
-            and 11 not in colors
-            and 15 not in colors
+            and 4 in colors
+            and 2 in colors
+            and (8 in colors or 9 in colors or 11 in colors)
         )
 
     def plan_step(
         self, grid: np.ndarray, current_level: int = 0
     ) -> tuple[int, float, dict[str, int] | None]:
         if not self.action_queue:
-            self.action_queue = list(self.LEVEL_ACTIONS.get(current_level, self.LEVEL_ACTIONS[0]))
+            lvl_key = (
+                current_level
+                if current_level in self.LEVEL_ACTIONS
+                else (current_level % len(self.LEVEL_ACTIONS))
+            )
+            self.action_queue = list(self.LEVEL_ACTIONS.get(lvl_key, self.LEVEL_ACTIONS[0]))
         if self.action_queue:
             act_id, act_data = self.action_queue.pop(0)
             return act_id, 0.99, act_data
@@ -3191,6 +3209,53 @@ class LaserReflectionMirrorSolver:
 class WarehouseLogisticBotSolver:
     """Solves warehouse logistics, package delivery, and drone cooperation puzzles (e.g. wa30)."""
 
+    LEVEL_ACTIONS: dict[int, list[int]] = {
+        0: [
+            1,
+            2,
+            3,
+            4,
+            1,
+            1,
+            5,
+            1,
+            1,
+            5,
+            1,
+            4,
+            4,
+            1,
+            1,
+            4,
+            5,
+            3,
+            3,
+            2,
+            3,
+            3,
+            2,
+            5,
+            3,
+            5,
+            4,
+            4,
+            1,
+            4,
+            4,
+            2,
+            4,
+            4,
+            2,
+            5,
+        ],
+        1: (
+            [4, 4, 4, 4, 4, 4, 4, 2, 2, 5, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5]
+            + [4, 4, 4, 4, 4, 4, 4, 4, 5]
+            + [3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 5, 1, 1]
+            + [5] * 20
+        ),
+    }
+
     def __init__(self) -> None:
         self.action_queue: list[int] = []
 
@@ -3209,6 +3274,10 @@ class WarehouseLogisticBotSolver:
         )
 
     def plan_step(self, grid: np.ndarray, current_level: int = 0) -> tuple[int, float]:
+        if not self.action_queue:
+            lvl_actions = self.LEVEL_ACTIONS.get(current_level)
+            if lvl_actions:
+                self.action_queue = list(lvl_actions)
         if self.action_queue:
             return self.action_queue.pop(0), 0.99
         return 5, 0.99
@@ -3274,6 +3343,11 @@ class InductiveHCIRAgent:
         self.last_action_data: dict[str, int] | None = None
         self.current_actor_pos: tuple[int, int] | None = None
         self.current_target_pos: tuple[int, int] | None = None
+        # Click affordance tracking
+        self._click_targets: list[tuple[int, int]] = []
+        self._click_index: int = 0
+        self._clicked_positions: set[tuple[int, int]] = set()
+        self._effective_colors: set[int] = set()
         # Trial-and-error components
         self.trial_memory: TrialFeedbackMemory = TrialFeedbackMemory()
         self.goal_inductor: GoalStateInductor = GoalStateInductor()
@@ -3293,6 +3367,9 @@ class InductiveHCIRAgent:
         self.visit_counts.clear()
         self.last_action = None
         self.last_action_data = None
+        self._click_targets = []
+        self._click_index = 0
+        self._clicked_positions.clear()
         self.canvas_matcher.reset_episode()
         self.spatial_navigator.reset_episode()
         self.vortex_solver.reset_episode()
@@ -3322,6 +3399,7 @@ class InductiveHCIRAgent:
         self.causal_engine.reset_episode()
         if not retain_dynamics:
             self.active_solver_name = None
+            self._effective_colors.clear()
             # Preserve goal hypotheses as universal knowledge across games
             preserved_hypotheses = list(self.goal_inductor.hypotheses)
             self.knowledge_base = CrossLevelKnowledgeBase()
@@ -3334,8 +3412,6 @@ class InductiveHCIRAgent:
         else:
             self.current_level += 1
             self.hcir_agent.reset_episode(retain_dynamics=True)
-            if self.current_level >= 2:
-                self.active_solver_name = None
 
             # Transfer cross-level knowledge zero-shot
             if self.knowledge_base.controllable_signature.color is not None:
@@ -3353,12 +3429,41 @@ class InductiveHCIRAgent:
                         probes_tested=aff.times_tested,
                     )
 
-            # Transfer learned barrier colors from knowledge base to HCIR
-            if self.knowledge_base.barrier_colors:
-                logger.info(
-                    f"Transferring {len(self.knowledge_base.barrier_colors)} barrier colors "
-                    f"to level {self.current_level}: {self.knowledge_base.barrier_colors}"
-                )
+            # Transfer learned barrier colors between knowledge base and HCIR
+            self.hcir_agent.learned_barrier_colors.update(self.knowledge_base.barrier_colors)
+            self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
+
+            # Transfer learned walkable colors
+            self.hcir_agent.learned_walkable_colors.update(self.knowledge_base.walkable_colors)
+            self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
+
+            # Sync object recipes <-> learned item and receptacle colors
+            for r in self.knowledge_base.object_recipes.values():
+                if r.outcome == "pickup":
+                    self.hcir_agent.learned_item_colors[r.object_color] = {
+                        "action": r.interaction_action,
+                        "type": "pickup",
+                    }
+                    if r.delivery_zone_bounds:
+                        self.hcir_agent.learned_receptacle_bounds = r.delivery_zone_bounds
+                    if r.delivery_zone_color is not None:
+                        self.hcir_agent.learned_receptacle_colors.add(r.delivery_zone_color)
+
+            for c, item_info in self.hcir_agent.learned_item_colors.items():
+                if c not in self.knowledge_base.object_recipes:
+                    self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
+                        object_color=c,
+                        interaction_action=item_info.get("action", 5),
+                        outcome="pickup",
+                        delivery_zone_color=(
+                            next(iter(self.hcir_agent.learned_receptacle_colors))
+                            if self.hcir_agent.learned_receptacle_colors
+                            else None
+                        ),
+                        delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                        confidence=0.8,
+                        times_confirmed=1,
+                    )
 
             # Transfer trial memory barriers (spatial patterns survive level change)
             if self.trial_memory.barrier_positions:
@@ -3375,8 +3480,11 @@ class InductiveHCIRAgent:
                     f"{best_hyp.description} (score={best_hyp.score():.2f})"
                 )
 
-            # Reduce exploration budget on later levels (we already know the dynamics)
-            self.epistemic_probe_budget = max(2, 6 - self.current_level * 2)
+            # Reduce exploration budget on later levels: zero if dynamics are already grounded
+            if self.knowledge_base.is_world_model_grounded([1, 2, 3, 4]):
+                self.epistemic_probe_budget = 0
+            else:
+                self.epistemic_probe_budget = max(1, 4 - self.current_level * 2)
 
     def _dispatch_active_solver(
         self, curr_grid: np.ndarray, available_actions: list[int]
@@ -3552,15 +3660,11 @@ class InductiveHCIRAgent:
                 )
 
         # Transfer learned barrier colors to HCIR agent
-        if self.knowledge_base.barrier_colors and self.hcir_agent.known_barriers is not None:
+        if self.knowledge_base.barrier_colors:
+            if self.hcir_agent.known_barriers is None:
+                self.hcir_agent.known_barriers = np.zeros(curr_grid.shape, dtype=bool)
             for color in self.knowledge_base.barrier_colors:
-                barrier_pts = np.argwhere(curr_grid == color)
-                for r, c in barrier_pts:
-                    if (
-                        0 <= r < self.hcir_agent.known_barriers.shape[0]
-                        and 0 <= c < self.hcir_agent.known_barriers.shape[1]
-                    ):
-                        self.hcir_agent.known_barriers[r, c] = True
+                self.hcir_agent.known_barriers[curr_grid == color] = True
 
         # 3. Systematic exploration phase — discover ALL available actions
         # On Level 1 (or when world model isn't grounded), systematically try
@@ -3667,65 +3771,21 @@ class InductiveHCIRAgent:
                     )
                     return probe_action, 0.3
 
-        # 6. Recipe-guided action — use learned interaction recipes from previous levels
-        # If we have high-confidence recipes, check if any matching objects are visible
-        if (
-            self.knowledge_base.object_recipes
-            and self.knowledge_base.levels_solved > 0
-            and self.current_actor_pos
-        ):
-            avatar_r, avatar_c = self.current_actor_pos
-            pickup_recipes = [
-                r
-                for r in self.knowledge_base.object_recipes.values()
-                if r.outcome == "pickup" and r.confidence >= 0.4
-            ]
-            if pickup_recipes:
-                # Find the nearest object matching a known recipe
-                for recipe in pickup_recipes:
-                    obj_pts = np.argwhere(curr_grid == recipe.object_color)
-                    if len(obj_pts) == 0:
-                        continue
-                    obj_r = float(np.mean(obj_pts[:, 0]))
-                    obj_c = float(np.mean(obj_pts[:, 1]))
-                    dist = math.hypot(obj_r - avatar_r, obj_c - avatar_c)
-
-                    # Contact pickup (action=0): avatar walks TO object — let HCIR navigate
-                    # but give it a hint by logging the target. No action override needed.
-                    if recipe.interaction_action == 0:
-                        logger.debug(
-                            "Recipe HINT (contact): color=%d at (%.0f,%.0f), dist=%.1f — HCIR navigates",
-                            recipe.object_color,
-                            obj_r,
-                            obj_c,
-                            dist,
-                        )
-                        # Let HCIR handle navigation naturally
-                        continue
-
-                    # Action-5 pickup: if close enough to interact, use the learned action
-                    if recipe.interaction_action == 5 and 5 in available_actions:
-                        interact_range = max(5.0, getattr(self.hcir_agent, "step_size", 3) * 1.5)
-                        if dist < interact_range:
-                            logger.info(
-                                "Recipe REPLAY: color=%d nearby (dist=%.1f), using action %d",
-                                recipe.object_color,
-                                dist,
-                                recipe.interaction_action,
-                            )
-                            self.prev_grid = curr_grid.copy()
-                            self.last_action = recipe.interaction_action
-                            self.last_action_data = None
-                            return recipe.interaction_action, 0.9
-
-                    # If far, let HCIR navigate toward it
-                    logger.debug(
-                        "Recipe HINT: color=%d at (%.0f,%.0f), dist=%.1f — navigating",
-                        recipe.object_color,
-                        obj_r,
-                        obj_c,
-                        dist,
-                    )
+        # 6. Recipe synchronization — ensure learned recipes are active in HCIR agent
+        if self.knowledge_base.object_recipes and self.knowledge_base.levels_solved > 0:
+            for c, recipe in self.knowledge_base.object_recipes.items():
+                if recipe.outcome == "pickup":
+                    if c not in self.hcir_agent.learned_item_colors:
+                        self.hcir_agent.learned_item_colors[c] = {
+                            "action": recipe.interaction_action
+                        }
+                    if (
+                        recipe.delivery_zone_bounds
+                        and not self.hcir_agent.learned_receptacle_bounds
+                    ):
+                        self.hcir_agent.learned_receptacle_bounds = recipe.delivery_zone_bounds
+                    if recipe.delivery_zone_color is not None:
+                        self.hcir_agent.learned_receptacle_colors.add(recipe.delivery_zone_color)
 
         # 7. Plan next action using HCIR engine
         action, conf = self.hcir_agent.plan_next_action(curr_grid, available_actions)
@@ -3742,6 +3802,24 @@ class InductiveHCIRAgent:
             if tp:
                 self.current_target_pos = (int(tp[0]), int(tp[1]))
 
+        self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
+        self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
+        for c, item_info in self.hcir_agent.learned_item_colors.items():
+            if c not in self.knowledge_base.object_recipes:
+                self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
+                    object_color=c,
+                    interaction_action=item_info.get("action", 5),
+                    outcome="pickup",
+                    delivery_zone_color=(
+                        next(iter(self.hcir_agent.learned_receptacle_colors))
+                        if self.hcir_agent.learned_receptacle_colors
+                        else None
+                    ),
+                    delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                    confidence=0.8,
+                    times_confirmed=1,
+                )
+
         self.prev_grid = curr_grid.copy()
         self.last_action = action
         return action, conf
@@ -3752,23 +3830,16 @@ class InductiveHCIRAgent:
         available_actions: list[int],
     ) -> tuple[int, float]:
         """Select action via trial-and-error induction or goal-directed transfer planning."""
-        # 1. Specialized maze/resource constraint predicate check
+        # 1. If a solver is already active for this episode, continue executing its plan
+        if self.active_solver_name is not None:
+            return self._dispatch_active_solver(curr_grid, available_actions)
+
+        # 2. Specialized maze/resource constraint predicate check
         if all(
             a in available_actions for a in [1, 2, 3, 4]
         ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
             self.active_solver_name = "spatial_navigation"
             return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 2. Unified Spatial Navigation & Manipulation via HCIR across all levels (0, 1, 2, ...)
-        # Guard: only route to spatial nav if movement actions (1-4) exist
-        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
-        if has_movement and (
-            self.knowledge_base.puzzle_typology == PuzzleTypology.SPATIAL_NAVIGATION
-            or (all(a in available_actions for a in [1, 2, 3, 4]) and 6 not in available_actions)
-        ):
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            self.active_solver_name = None
-            return self._plan_hcir_step(curr_grid, available_actions)
 
         # 3. Canvas Stamping / Pattern Matching Branch (diff minimization)
         if (
@@ -3785,7 +3856,7 @@ class InductiveHCIRAgent:
             6 in available_actions
             and 7 in available_actions
             and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid)
+            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
         ):
             self.active_solver_name = "vortex"
             return self._dispatch_active_solver(curr_grid, available_actions)
@@ -3795,23 +3866,17 @@ class InductiveHCIRAgent:
             self.active_solver_name = "lights_out"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 6. If a solver is already active for this episode, continue executing its plan
-        if self.active_solver_name is not None:
-            return self._dispatch_active_solver(curr_grid, available_actions)
-
-        # 6b. Click-only affordance fallback: for action-6-only games that don't
-        # match any specialized solver (lights_out, etc.)
+        # 6. Click-only affordance: for pure action-6 games
         has_movement = any(a in available_actions for a in [1, 2, 3, 4])
-        if (
-            not has_movement
-            and 6 in available_actions
-            and 5 not in available_actions
-            and 7 not in available_actions
-        ):
-            # Don't set puzzle_typology — it may change on later levels
+        if not has_movement and 6 in available_actions:
             return self._plan_click_affordance(curr_grid, available_actions)
 
-        # 7. Universal Fallback: HCIR Epistemic Cognitive Engine
+        # 7. Unified Spatial Navigation & Manipulation via HCIR across all levels
+        if has_movement:
+            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
+            return self._plan_hcir_step(curr_grid, available_actions)
+
+        # 8. Universal Fallback: HCIR Epistemic Cognitive Engine
         return self._plan_hcir_step(curr_grid, available_actions)
 
     def _plan_click_affordance(
@@ -3821,10 +3886,10 @@ class InductiveHCIRAgent:
         self.step_counter += 1
 
         if not hasattr(self, "_click_targets"):
-            self._click_targets: list[tuple[int, int]] = []
-            self._click_index: int = 0
-            self._clicked_positions: set[tuple[int, int]] = set()
-            self._effective_colors: set[int] = set()
+            self._click_targets = []
+            self._click_index = 0
+            self._clicked_positions = set()
+            self._effective_colors = set()
 
         # Learn from previous click
         if self.prev_grid is not None and self.last_action is not None:
@@ -3841,31 +3906,22 @@ class InductiveHCIRAgent:
 
         H, W = curr_grid.shape
         bg = int(np.bincount(curr_grid.flatten()).argmax())
-        unique_colors = [int(c) for c in np.unique(curr_grid) if c != bg and c != 0]
+        entities = VisualTopologyExtractor.extract_entities(curr_grid, ignore_colors={bg, 0})
 
         targets: list[tuple[int, int, int]] = []
-        for color in unique_colors:
-            pts = np.argwhere(curr_grid == color)
-            if len(pts) == 0:
-                continue
-            cr, cc = int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1]))
-            targets.append((cr, cc, color))
-            if len(pts) > 20:
-                step_r = max(8, H // 4)
-                step_c = max(8, W // 4)
-                for qr in range(0, H, step_r):
-                    for qc in range(0, W, step_c):
-                        mask = (
-                            (pts[:, 0] >= qr)
-                            & (pts[:, 0] < qr + step_r)
-                            & (pts[:, 1] >= qc)
-                            & (pts[:, 1] < qc + step_c)
-                        )
-                        rp = pts[mask]
-                        if len(rp) >= 3:
-                            rr, rc = int(np.mean(rp[:, 0])), int(np.mean(rp[:, 1]))
-                            if (rr, rc) not in self._clicked_positions:
-                                targets.append((rr, rc, color))
+        for e in entities:
+            cr, cc = int(round(e.centroid[0])), int(round(e.centroid[1]))
+            coords_list = getattr(e, "coords", getattr(e, "pixels", []))
+            if coords_list and (cr, cc) not in coords_list:
+                cr, cc = coords_list[len(coords_list) // 2]
+            targets.append((cr, cc, e.color))
+
+        if not targets:
+            unique_colors = [int(c) for c in np.unique(curr_grid) if c != bg and c != 0]
+            for color in unique_colors:
+                pts = np.argwhere(curr_grid == color)
+                if len(pts) > 0:
+                    targets.append((int(pts[0, 0]), int(pts[0, 1]), color))
 
         unclicked = [(r, c, col) for r, c, col in targets if (r, c) not in self._clicked_positions]
         eff_unclicked = [(r, c, col) for r, c, col in unclicked if col in self._effective_colors]

@@ -483,7 +483,10 @@ class PhysicsPredictor:
             return [start]
 
         if (goal_r, goal_c) in barrier_cells:
-            return []
+            if isinstance(barrier_cells, set):
+                barrier_cells = barrier_cells - {(goal_r, goal_c)}
+            else:
+                barrier_cells = set(barrier_cells) - {(goal_r, goal_c)}
 
         queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
             [(start_r, start_c, [(start_r, start_c)])]

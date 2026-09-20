@@ -304,6 +304,13 @@ class ARC3InteractiveAgent:
         self.interruption_stack: list[InterruptionCheckpoint] = []
         self.level_transition_pending: bool = False
         self.gate_target_cell: tuple[int, int] | None = None
+        self.gate_approach_cell: tuple[int, int] | None = None
+        # Cross-Level Object & Spatial Behavior Memory (retained across levels)
+        self.learned_barrier_colors: set[int] = set()
+        self.learned_walkable_colors: set[int] = set()
+        self.learned_item_colors: dict[int, dict[str, Any]] = {}
+        self.learned_receptacle_colors: set[int] = set()
+        self.learned_receptacle_bounds: tuple[int, int, int, int] | None = None
 
     def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal agent hypothesis state for a new level/episode."""
@@ -314,6 +321,11 @@ class ARC3InteractiveAgent:
             self.state_mutations.clear()
             self.step_size = 1
             self.avatar_color = None
+            self.learned_barrier_colors.clear()
+            self.learned_walkable_colors.clear()
+            self.learned_item_colors.clear()
+            self.learned_receptacle_colors.clear()
+            self.learned_receptacle_bounds = None
         self.level_transition_pending = retain_dynamics
         self.avatar_centroid = None
         self.goal_centroid = None
@@ -340,11 +352,11 @@ class ARC3InteractiveAgent:
                 self.world_kernel.belief_graph.add_belief(lb)
         self.visited_positions.clear()
         self.holding_item = False
-        self.walkable_colors.clear()
+        self.walkable_colors = set(self.learned_walkable_colors)
         self.primary_goal_node = None
         self.active_goal_node = None
         self.target_zone_bounds = None
-        self.target_zone_base_colors = set()
+        self.target_zone_base_colors = set(self.learned_receptacle_colors)
         self.delivered_positions.clear()
         self.picked_up_source_position = None
         self.carried_offset = (0.0, 0.0)
@@ -630,8 +642,9 @@ class ARC3InteractiveAgent:
                                 self.carried_offset = (0.0, 0.0)
                                 self.attempted_pickup_item_id = None
                         else:
-                            if getattr(self, "attempted_pickup_item_id", None):
-                                self._on_subgoal_resolved(self.attempted_pickup_item_id)
+                            attempted_id = getattr(self, "attempted_pickup_item_id", None)
+                            if attempted_id is not None:
+                                self._on_subgoal_resolved(str(attempted_id))
                                 self.attempted_pickup_item_id = None
 
                     if HierarchicalGoalDecomposer.check_subgoal_completion(
@@ -857,9 +870,14 @@ class ARC3InteractiveAgent:
         self,
         curr_grid: np.ndarray,
         chosen_goal: tuple[int, int] | None = None,
+        candidate_items: list[Any] | None = None,
     ) -> tuple[HCIRWorkspaceState, GoalNode, list[ActionNode]]:
         """Lift 2D visual sensory observation into native HCIR CognitiveGraph & Workspace."""
-        ws = HCIRWorkspaceState()
+        ws = (
+            self.workspace
+            if hasattr(self, "workspace") and self.workspace is not None
+            else HCIRWorkspaceState()
+        )
         H, W = curr_grid.shape
 
         # 1. Controllable Avatar PhysicalEntityNode
@@ -967,6 +985,58 @@ class ARC3InteractiveAgent:
                 value=self.control_context.to_dict(),
             )
         )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_learned_item_colors",
+                variable_name="learned_item_colors",
+                value=list(self.learned_item_colors.keys()),
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_learned_barrier_colors",
+                variable_name="learned_barrier_colors",
+                value=list(self.learned_barrier_colors),
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_learned_receptacle_colors",
+                variable_name="learned_receptacle_colors",
+                value=list(self.learned_receptacle_colors),
+            )
+        )
+        ws.upsert_node(
+            WorldVariableNode(
+                id="var_walkable_colors",
+                variable_name="walkable_colors",
+                value=list(self.walkable_colors),
+            )
+        )
+
+        # 4b. Collectible / Interactable items in HCIR Scene Graph
+        if candidate_items:
+            for itm in candidate_items:
+                i_col = getattr(itm, "color", -1)
+                i_pos = getattr(itm, "centroid", (0, 0))
+                ir, ic = int(round(i_pos[0])), int(round(i_pos[1]))
+                is_known = i_col in self.learned_item_colors
+                ws.upsert_node(
+                    PhysicalEntityNode(
+                        id=f"item_{i_col}_{ir}_{ic}",
+                        entity_name=f"item_c{i_col}",
+                        entity_type="collectible_item",
+                        status="active",
+                        properties={
+                            "position": (ir, ic),
+                            "color": int(i_col),
+                            "is_learned_target": is_known,
+                            "affordance": self.learned_item_colors.get(i_col, {}).get("action", 5),
+                            "movable": True,
+                            "passable": True,
+                        },
+                    )
+                )
 
         # 5. Build candidate ActionNodes from calibrated motor models
         candidate_actions: list[ActionNode] = []
@@ -1188,16 +1258,14 @@ class ARC3InteractiveAgent:
         # 4. Extract Objects & Decompose Hierarchical Subgoals
         H, W = curr_grid.shape
 
-        # Detect level-transition UI overlay frames.
-        # Transition frames have a color-1 dominated background with NO color-2
-        # target zone interior and very few non-background game objects.
-        # Actual game grids also have color 1 as floor but DO contain color 2.
-        color_1_frac = float(np.count_nonzero(curr_grid == 1)) / curr_grid.size
-        has_color_2 = bool(np.count_nonzero(curr_grid == 2) >= 4)
-        self._is_transition_frame = bool(color_1_frac > 0.80 and not has_color_2)
-
         arc_grid = ARCGrid.from_list(curr_grid.tolist())
         objs = GridTopologyExtractor.extract_objects(arc_grid)
+
+        # Detect level-transition UI overlay frames via general background uniformity
+        bg_counts = np.bincount(curr_grid.flatten())
+        dom_color = int(bg_counts.argmax())
+        dom_frac = float(bg_counts[dom_color]) / curr_grid.size
+        self._is_transition_frame = bool(dom_frac > 0.95 and len(objs) <= 1)
 
         candidate_goals = [
             o
@@ -1216,6 +1284,22 @@ class ARC3InteractiveAgent:
             act = unblocked[0] if unblocked else available_actions[0]
             self.last_action_data = None
             return act, 0.40
+
+        if self.avatar_color is not None and self.avatar_centroid is None:
+            p_avatar = np.where(curr_grid == self.avatar_color)
+            if len(p_avatar[0]) > 0:
+                self.avatar_centroid = (float(np.mean(p_avatar[0])), float(np.mean(p_avatar[1])))
+
+        if self.known_barriers is None:
+            self.known_barriers = np.zeros(curr_grid.shape, dtype=bool)
+            if self.learned_barrier_colors:
+                for b_col in self.learned_barrier_colors:
+                    if (
+                        b_col != 0
+                        and b_col != self.avatar_color
+                        and b_col not in self.walkable_colors
+                    ):
+                        self.known_barriers[curr_grid == b_col] = True
 
         barrier_cells: set[tuple[int, int]] = set()
         if self.known_barriers is not None:
@@ -1240,60 +1324,71 @@ class ARC3InteractiveAgent:
             barrier_cells = set(zip(*np.where(self.known_barriers)))
 
         # Augment barrier_cells with physical objects that obstruct spatial traversal
+        tz_base = getattr(self, "target_zone_base_colors", set()) | self.learned_receptacle_colors
         for o in objs:
             if (
                 o.color != self.avatar_color
                 and o.color != 0
                 and o.color not in self.walkable_colors
+                and o.color not in tz_base
             ):
-                if self.target_zone_bounds:
-                    tz_min_r, tz_max_r, tz_min_c, tz_max_c = self.target_zone_bounds
-                    if (
-                        tz_min_r - 1 <= o.centroid[0] <= tz_max_r + 1
-                        and tz_min_c - 1 <= o.centroid[1] <= tz_max_c + 1
-                    ):
-                        continue
                 if self.holding_item:
                     cur_off = getattr(self, "carried_offset", (0.0, 0.0))
                     c_ir = curr_r + cur_off[0]
                     c_ic = curr_c + cur_off[1]
-                    if math.hypot(o.centroid[0] - c_ir, o.centroid[1] - c_ic) < self.step_size:
-                        continue
-                elif self.active_goal_node:
-                    i_pos = self.active_goal_node.properties.get("item_position")
-                    t_pos = self.active_goal_node.properties.get("target_position")
-                    # Only allow entering item cells if target stand position is the item itself (contact affordance)
-                    if (
-                        t_pos
-                        and i_pos
-                        and math.hypot(t_pos[0] - i_pos[0], t_pos[1] - i_pos[1]) < 0.5
+                    if math.hypot(o.centroid[0] - c_ir, o.centroid[1] - c_ic) < max(
+                        self.step_size * 2.0, 6.0
                     ):
-                        if (
-                            math.hypot(o.centroid[0] - i_pos[0], o.centroid[1] - i_pos[1])
-                            < self.step_size
+                        continue
+                    if getattr(self, "picked_up_source_position", None):
+                        p_pos = self.picked_up_source_position
+                        if math.hypot(o.centroid[0] - p_pos[0], o.centroid[1] - p_pos[1]) < max(
+                            self.step_size * 1.5, 5.0
                         ):
                             continue
+                # Exempt goal targets (primary exit or active subgoals) from barrier_cells
+                if self.active_goal_node:
+                    t_pos = self.active_goal_node.properties.get("target_position")
+                    if t_pos and math.hypot(
+                        o.centroid[0] - t_pos[0], o.centroid[1] - t_pos[1]
+                    ) < max(2.5, self.step_size * 1.5):
+                        continue
+                    i_pos = self.active_goal_node.properties.get("item_position")
+                    if i_pos and math.hypot(
+                        o.centroid[0] - i_pos[0], o.centroid[1] - i_pos[1]
+                    ) < max(2.5, self.step_size * 1.5):
+                        continue
+                if self.primary_goal_node:
+                    pt_pos = self.primary_goal_node.properties.get("target_position")
+                    if pt_pos and math.hypot(
+                        o.centroid[0] - pt_pos[0], o.centroid[1] - pt_pos[1]
+                    ) < max(2.5, self.step_size * 1.5):
+                        continue
                 for cr, cc in o.coords:
                     barrier_cells.add((cr, cc))
 
-        # Identify primary destination: distinct target zone (color 2 / enclosed zone with area >= 24) or furthest target/exit
-        target_zones = [
-            o
-            for o in candidate_goals
-            if o.color == 2
-            and o.area >= 24
-            and not (
-                self.known_barriers is not None
-                and self.known_barriers[int(round(o.centroid[0])), int(round(o.centroid[1]))]
-            )
-        ]
+        # Identify primary destination: prioritized by learned receptacle colors, or distinct target zone
+        target_zones = []
+        if self.learned_receptacle_colors:
+            receptacle_objs = [
+                o
+                for o in candidate_goals
+                if o.color in self.learned_receptacle_colors
+                and not (
+                    self.known_barriers is not None
+                    and self.known_barriers[int(round(o.centroid[0])), int(round(o.centroid[1]))]
+                )
+            ]
+            if receptacle_objs:
+                target_zones = receptacle_objs
+
         if not target_zones:
             target_zones = [
                 o
                 for o in candidate_goals
-                if (getattr(o, "is_frame", False) and o.area > 20)
+                if (getattr(o, "is_frame", False) and o.area > 16)
                 or (
-                    20 <= o.area <= 120
+                    16 <= o.area <= 160
                     and (o.max_r - o.min_r >= 4)
                     and (o.max_c - o.min_c >= 4)
                     and o.color not in (self.avatar_color, 0)
@@ -1301,11 +1396,20 @@ class ARC3InteractiveAgent:
                 )
             ]
         if target_zones:
-            # Compute fresh bounds from currently visible target zones
-            fresh_tz_min_r = min(o.min_r for o in target_zones)
-            fresh_tz_max_r = max(o.max_r for o in target_zones)
-            fresh_tz_min_c = min(o.min_c for o in target_zones)
-            fresh_tz_max_c = max(o.max_c for o in target_zones)
+            # Pick the best distinct target zone entity (prefer learned receptacle colors, then enclosed frames, then area)
+            best_tz = max(
+                target_zones,
+                key=lambda o: (
+                    2
+                    if o.color in self.learned_receptacle_colors
+                    else (1 if getattr(o, "is_frame", False) else 0),
+                    o.area,
+                ),
+            )
+            fresh_tz_min_r = best_tz.min_r
+            fresh_tz_max_r = best_tz.max_r
+            fresh_tz_min_c = best_tz.min_c
+            fresh_tz_max_c = best_tz.max_c
             fresh_bounds = (fresh_tz_min_r, fresh_tz_max_r, fresh_tz_min_c, fresh_tz_max_c)
             fresh_area = (fresh_tz_max_r - fresh_tz_min_r + 1) * (
                 fresh_tz_max_c - fresh_tz_min_c + 1
@@ -1314,7 +1418,7 @@ class ARC3InteractiveAgent:
             # Update target_zone_bounds if:
             # - Not yet set
             # - Previous bounds were set during a transition frame (stale)
-            # - A genuine color-2 zone is found that is significantly different/larger
+            # - A genuine target zone is found that is significantly different/larger
             should_update = False
             if self.target_zone_bounds is None:
                 should_update = True
@@ -1322,14 +1426,22 @@ class ARC3InteractiveAgent:
                 old_area = (self.target_zone_bounds[1] - self.target_zone_bounds[0] + 1) * (
                     self.target_zone_bounds[3] - self.target_zone_bounds[2] + 1
                 )
-                # If there's a genuine color-2 zone and it's significantly larger or
-                # located far from the current bounds, re-detect
-                has_color2 = any(o.color == 2 and o.area >= 24 for o in target_zones)
+                # If a target zone is found that is significantly different or relocated, re-detect
+                has_receptacle = any(
+                    (
+                        o.color in self.learned_receptacle_colors
+                        or getattr(o, "is_frame", False)
+                        or o.area >= 24
+                    )
+                    for o in target_zones
+                )
                 bounds_differ = (
                     abs(fresh_bounds[0] - self.target_zone_bounds[0]) > self.step_size * 2
                     or abs(fresh_bounds[2] - self.target_zone_bounds[2]) > self.step_size * 2
                 )
-                if has_color2 and (bounds_differ or fresh_area > old_area * 1.5):
+                if (has_receptacle or self.learned_receptacle_colors) and (
+                    bounds_differ or fresh_area > old_area * 1.5
+                ):
                     should_update = True
 
             if should_update and not getattr(self, "_is_transition_frame", False):
@@ -1341,8 +1453,11 @@ class ARC3InteractiveAgent:
                     int(c)
                     for c in np.unique(tz_patch)
                     if c not in (0, self.avatar_color)
+                    and c not in self.walkable_colors
                     and np.count_nonzero(tz_patch == c) >= max(16, int(tz_patch.size * 0.20))
                 }
+                self.learned_receptacle_colors.update(self.target_zone_base_colors)
+                self.learned_receptacle_bounds = self.target_zone_bounds
 
             closest_tz = min(
                 target_zones,
@@ -1418,7 +1533,9 @@ class ARC3InteractiveAgent:
             return False
 
         # Filter candidate items: prioritize free uncarried, undelivered, and non-barrier items
-        item_excluded = {self.avatar_color, 12, 5} | tz_colors
+        item_excluded = (
+            {self.avatar_color} | tz_colors | self.learned_barrier_colors | self.walkable_colors
+        )
         uncarried_items = [
             o
             for o in candidate_goals
@@ -1427,10 +1544,18 @@ class ARC3InteractiveAgent:
             and o.area <= max_item_area
             and o.color not in item_excluded
         ]
+        # Prioritize objects matching learned item colors from earlier versions/levels
+        if self.learned_item_colors:
+            known_item_objs = [o for o in uncarried_items if o.color in self.learned_item_colors]
+            if known_item_objs:
+                uncarried_items = known_item_objs
+
         if uncarried_items:
             candidate_items = uncarried_items
         else:
-            fallback_excluded = {self.avatar_color, 12} | tz_colors
+            fallback_excluded = (
+                {self.avatar_color} | tz_colors | self.learned_barrier_colors | self.walkable_colors
+            )
             candidate_items = [
                 o
                 for o in candidate_goals
@@ -1439,6 +1564,10 @@ class ARC3InteractiveAgent:
                 and o.area <= max_item_area
                 and o.color not in fallback_excluded
             ]
+            if self.learned_item_colors:
+                known_fallback = [o for o in candidate_items if o.color in self.learned_item_colors]
+                if known_fallback:
+                    candidate_items = known_fallback
 
         # Gestalt grouping: unify concentric / co-located multi-color components into single composite entities
         deduped_items = []
@@ -1530,13 +1659,13 @@ class ARC3InteractiveAgent:
             item_c = curr_c + offset[1]
 
             # Find open delivery slot in target zone bounds
-            open_target = None
+            open_target: tuple[int, int] | None = None
             if tz_bounds:
                 tz_min_r, tz_max_r, tz_min_c, tz_max_c = tz_bounds
                 # Use finer-grained slot spacing to ensure enough unoccupied
                 # delivery slots for all packages in larger zones.
                 slot_step = max(1, (self.step_size + 1) // 2)
-                slots = []
+                slots: list[tuple[int, int]] = []
                 for sr in range(tz_min_r, tz_max_r + 1, slot_step):
                     for sc in range(tz_min_c, tz_max_c + 1, slot_step):
                         slots.append((sr, sc))
@@ -1558,39 +1687,71 @@ class ARC3InteractiveAgent:
                             return True
                     return False
 
-                unoccupied_slots = [s for s in slots if not is_slot_occupied(s[0], s[1])]
+                unoccupied_slots: list[tuple[int, int]] = [
+                    s for s in slots if not is_slot_occupied(s[0], s[1])
+                ]
 
                 # Prefer slots where the avatar's delivery position
                 # (slot - offset) is OUTSIDE the zone.  This lets the
                 # agent approach from the side without walking through
                 # previously delivered packages inside the zone.
-                def delivery_pos_outside_zone(slot):
+                def delivery_pos_outside_zone(slot: tuple[int, int]) -> bool:
                     dr = slot[0] - offset[0]
                     dc = slot[1] - offset[1]
                     return not (tz_min_r <= dr <= tz_max_r and tz_min_c <= dc <= tz_max_c)
 
                 candidates = unoccupied_slots if unoccupied_slots else slots
-                outside_slots = [s for s in candidates if delivery_pos_outside_zone(s)]
-                preferred = outside_slots if outside_slots else candidates
+                outside_slots: list[tuple[int, int]] = [
+                    s for s in candidates if delivery_pos_outside_zone(s)
+                ]
+                pref_delivery_slots: list[tuple[int, int]] = (
+                    outside_slots if outside_slots else candidates
+                )
 
-                if preferred:
-                    open_target = min(
-                        preferred,
-                        key=lambda s: math.hypot(
+                if pref_delivery_slots:
+
+                    def slot_geodesic_dist(s: tuple[int, int]) -> float:
+                        deliv_stand_r = max(0, min(H - 1, int(round(s[0] - offset[0]))))
+                        deliv_stand_c = max(0, min(W - 1, int(round(s[1] - offset[1]))))
+                        p = PhysicsPredictor.compute_geodesic_path(
+                            (int(round(curr_r)), int(round(curr_c))),
+                            (deliv_stand_r, deliv_stand_c),
+                            barrier_cells,
+                            (H, W),
+                            self.step_size,
+                        )
+                        if p:
+                            return float(len(p))
+                        return 9999.0 + math.hypot(
                             s[0] - offset[0] - curr_r, s[1] - offset[1] - curr_c
-                        ),
+                        )
+
+                    reachable_preferred = [
+                        s for s in pref_delivery_slots if slot_geodesic_dist(s) < 9000.0
+                    ]
+                    target_slots = (
+                        reachable_preferred if reachable_preferred else pref_delivery_slots
                     )
+                    open_target = min(target_slots, key=slot_geodesic_dist)
                 else:
                     open_target = ((tz_min_r + tz_max_r) // 2, (tz_min_c + tz_max_c) // 2)
             else:
-                open_target = target_pos
+                open_target = (int(target_pos[0]), int(target_pos[1]))
 
             # Topologically verify accessibility of delivery destination
             if getattr(self, "gate_target_cell", None) is not None:
-                open_target = getattr(self, "gate_approach_cell", self.gate_target_cell)
+                open_target = (
+                    self.gate_approach_cell
+                    if getattr(self, "gate_approach_cell", None) is not None
+                    else self.gate_target_cell
+                )
             elif open_target is not None:
                 cut_res = TopologicalCutSetAnalyzer.analyze_cut_set(
-                    (curr_r, curr_c), open_target, barrier_cells, (H, W), self.step_size
+                    (int(round(curr_r)), int(round(curr_c))),
+                    open_target,
+                    barrier_cells,
+                    (H, W),
+                    self.step_size,
                 )
                 if cut_res.is_partitioned and cut_res.approach_cell:
                     self.gate_target_cell = cut_res.best_gate_cell
@@ -1656,9 +1817,21 @@ class ARC3InteractiveAgent:
                     self.gate_target_cell = None
                     self.gate_approach_cell = None
                     self.delivered_positions.add((int(round(item_r)), int(round(item_c))))
-                    if getattr(self, "picked_up_source_position", None):
-                        self.delivered_positions.add(self.picked_up_source_position)
+                    if getattr(self, "picked_up_source_position", None) is not None:
+                        p_src = self.picked_up_source_position
+                        if p_src is not None:
+                            self.delivered_positions.add(
+                                (int(round(p_src[0])), int(round(p_src[1])))
+                            )
                         self.picked_up_source_position = None
+                    if getattr(self, "attempted_pickup_item_id", None) is not None:
+                        a_id = self.attempted_pickup_item_id
+                        if a_id is not None:
+                            self._on_subgoal_resolved(str(a_id))
+                        self.attempted_pickup_item_id = None
+                    if self.target_zone_base_colors:
+                        self.learned_receptacle_colors.update(self.target_zone_base_colors)
+                        self.learned_receptacle_bounds = self.target_zone_bounds
                     self.carried_offset = (0.0, 0.0)
                     self.blocked_actions.clear()
                     self.visited_positions.clear()
@@ -1684,6 +1857,9 @@ class ARC3InteractiveAgent:
                 goal_r, goal_c = deliv_r, deliv_c
         else:
             unobserved_mask = None
+
+            # Pre-lift scene & candidate entities to HCIR workspace before goal decomposition
+            self.lift_to_hcir(curr_grid, target_pos, candidate_items=candidate_items)
 
             force_subgoals = bool(5 in available_actions and candidate_subgoals)
             self.active_goal_node = self.decomposer.decompose_goal(
@@ -1737,13 +1913,18 @@ class ARC3InteractiveAgent:
                     self.carried_offset = (dr_off, dc_off)
                     self.picked_up_source_position = (item_r, item_c)
                     self.attempted_pickup_item_id = self.active_goal_node.id
+                    i_col = self.active_goal_node.properties.get("item_color")
+                    if i_col is not None:
+                        self.learned_item_colors[int(i_col)] = {"action": 5}
                     self.last_action_data = None
                     return 5, 0.99
 
         self.goal_centroid = (float(goal_r), float(goal_c))
 
         # 5. Native HCIR Scene Lifting & Topological Geodesic Search
-        _ws, _goal_node, _candidates = self.lift_to_hcir(curr_grid, (goal_r, goal_c))
+        _ws, _goal_node, _candidates = self.lift_to_hcir(
+            curr_grid, (goal_r, goal_c), candidate_items=candidate_items
+        )
 
         shortest_path = PhysicsPredictor.compute_geodesic_path(
             start=(curr_r, curr_c),
@@ -1824,7 +2005,13 @@ class ARC3InteractiveAgent:
                 )
             )
 
-            barrier_penalty = 20000.0 if (dest_ir, dest_ic) in barrier_cells else 0.0
+            # Barrier penalty: exempt if destination cell reaches the goal
+            is_dest_goal = (dest_ir, dest_ic) == (goal_r, goal_c) or math.hypot(
+                dest_r - goal_r, dest_c - goal_c
+            ) <= self.step_size * 0.95
+            barrier_penalty = (
+                0.0 if is_dest_goal else (20000.0 if (dest_ir, dest_ic) in barrier_cells else 0.0)
+            )
 
             score = float(alignment - penalty - deadlock_penalty - loop_penalty - barrier_penalty)
 
