@@ -1,0 +1,255 @@
+{
+  "total_levels_completed": 23,
+  "total_levels": 183,
+  "duration_seconds": 411.22,
+  "results": [
+    {
+      "game_id": "ar25",
+      "levels_completed": 0,
+      "total_levels": 8,
+      "level_results": [
+        false
+      ],
+      "duration": 12.96
+    },
+    {
+      "game_id": "bp35",
+      "levels_completed": 0,
+      "total_levels": 9,
+      "level_results": [
+        false
+      ],
+      "duration": 9.39
+    },
+    {
+      "game_id": "cd82",
+      "levels_completed": 2,
+      "total_levels": 6,
+      "level_results": [
+        true,
+        true,
+        false
+      ],
+      "duration": 4.72
+    },
+    {
+      "game_id": "cn04",
+      "levels_completed": 0,
+      "total_levels": 6,
+      "level_results": [
+        false
+      ],
+      "duration": 14.12
+    },
+    {
+      "game_id": "dc22",
+      "levels_completed": 0,
+      "total_levels": 6,
+      "level_results": [
+        false
+      ],
+      "duration": 20.31
+    },
+    {
+      "game_id": "ft09",
+      "levels_completed": 2,
+      "total_levels": 6,
+      "level_results": [
+        true,
+        true,
+        false
+      ],
+      "duration": 2.95
+    },
+    {
+      "game_id": "g50t",
+      "levels_completed": 3,
+      "total_levels": 7,
+      "level_results": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "duration": 11.23
+    },
+    {
+      "game_id": "ka59",
+      "levels_completed": 0,
+      "total_levels": 7,
+      "level_results": [
+        false
+      ],
+      "duration": 23.05
+    },
+    {
+      "game_id": "lf52",
+      "levels_completed": 1,
+      "total_levels": 10,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 8.58
+    },
+    {
+      "game_id": "lp85",
+      "levels_completed": 1,
+      "total_levels": 8,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 9.05
+    },
+    {
+      "game_id": "ls20",
+      "levels_completed": 3,
+      "total_levels": 7,
+      "level_results": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "duration": 8.88
+    },
+    {
+      "game_id": "m0r0",
+      "levels_completed": 2,
+      "total_levels": 6,
+      "level_results": [
+        true,
+        true,
+        false
+      ],
+      "duration": 12.91
+    },
+    {
+      "game_id": "r11l",
+      "levels_completed": 0,
+      "total_levels": 6,
+      "level_results": [
+        false
+      ],
+      "duration": 3.73
+    },
+    {
+      "game_id": "re86",
+      "levels_completed": 0,
+      "total_levels": 8,
+      "level_results": [
+        false
+      ],
+      "duration": 15.86
+    },
+    {
+      "game_id": "s5i5",
+      "levels_completed": 1,
+      "total_levels": 8,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 4.1
+    },
+    {
+      "game_id": "sb26",
+      "levels_completed": 0,
+      "total_levels": 8,
+      "level_results": [
+        false
+      ],
+      "duration": 5.45
+    },
+    {
+      "game_id": "sc25",
+      "levels_completed": 0,
+      "total_levels": 6,
+      "level_results": [
+        false
+      ],
+      "duration": 13.74
+    },
+    {
+      "game_id": "sk48",
+      "levels_completed": 0,
+      "total_levels": 8,
+      "level_results": [
+        false
+      ],
+      "duration": 24.67
+    },
+    {
+      "game_id": "sp80",
+      "levels_completed": 1,
+      "total_levels": 6,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 1.57
+    },
+    {
+      "game_id": "su15",
+      "levels_completed": 1,
+      "total_levels": 9,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 2.35
+    },
+    {
+      "game_id": "tn36",
+      "levels_completed": 0,
+      "total_levels": 7,
+      "level_results": [
+        false
+      ],
+      "duration": 3.36
+    },
+    {
+      "game_id": "tr87",
+      "levels_completed": 0,
+      "total_levels": 6,
+      "level_results": [
+        false
+      ],
+      "duration": 4.47
+    },
+    {
+      "game_id": "tu93",
+      "levels_completed": 1,
+      "total_levels": 9,
+      "level_results": [
+        true,
+        false
+      ],
+      "duration": 2.88
+    },
+    {
+      "game_id": "vc33",
+      "levels_completed": 2,
+      "total_levels": 7,
+      "level_results": [
+        true,
+        true,
+        false
+      ],
+      "duration": 7.77
+    },
+    {
+      "game_id": "wa30",
+      "levels_completed": 3,
+      "total_levels": 9,
+      "level_results": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "duration": 183.11
+    }
+  ]
+}
