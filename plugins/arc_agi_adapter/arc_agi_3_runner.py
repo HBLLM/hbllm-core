@@ -2378,7 +2378,7 @@ class ARC3BenchmarkRunner:
             completed = False
 
             curr_grid = (
-                frame_data.frame[0] if frame_data and frame_data.frame else np.zeros((16, 16))
+                frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
             )
 
             for step in range(self.max_steps):
@@ -2404,7 +2404,7 @@ class ARC3BenchmarkRunner:
                         frame_data = env.step(game_act)
                 else:
                     frame_data = env.step(game_act)
-                curr_grid = frame_data.frame[0] if frame_data and frame_data.frame else prev_grid
+                curr_grid = frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
                 lvl_actions += 1
 
                 # Update causal motor models

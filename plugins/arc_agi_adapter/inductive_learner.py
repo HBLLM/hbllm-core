@@ -3467,7 +3467,7 @@ class InductiveARC3BenchmarkRunner:
 
             baseline = baseline_list[lvl_idx] if lvl_idx < len(baseline_list) else 50
             curr_grid = (
-                frame_data.frame[0] if frame_data and frame_data.frame else np.zeros((16, 16))
+                frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
             )
 
             for _ in range(self.max_steps):
@@ -3487,7 +3487,7 @@ class InductiveARC3BenchmarkRunner:
                         frame_data = env.step(game_act)
                 else:
                     frame_data = env.step(game_act)
-                curr_grid = frame_data.frame[0] if frame_data and frame_data.frame else prev_grid
+                curr_grid = frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
                 lvl_actions += 1
 
                 curr_levels_done = getattr(frame_data, "levels_completed", 0)

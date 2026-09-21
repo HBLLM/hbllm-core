@@ -150,6 +150,17 @@ class SequencePlanStep:
     expected_energy_cost: int = 0
 
 
+@dataclass
+class TimelinePlanStep:
+    """A multi-timeline plan step for temporal clone cooperative execution."""
+
+    timeline_index: int
+    target_pos: tuple[int, int]
+    path: list[tuple[int, int]]
+    actions: list[int]
+    is_rewind: bool
+
+
 class HCIRSpatialEntityPlanner:
     """Universal cognitive spatial planning and constraint induction engine."""
 
@@ -164,6 +175,10 @@ class HCIRSpatialEntityPlanner:
         """Resets episode-specific spatial memory caches."""
         self._known_doorways.clear()
         self._failed_sequences.clear()
+
+    def record_collision_barrier(self, attempted_pos: tuple[int, int]) -> None:
+        """Records an empirically discovered impassable barrier from a blocked movement attempt."""
+        self._learned_barriers.add(attempted_pos)
 
     # ═══════════════════════════════════════════════════════════════════════
     # 1. TOPOLOGICAL ENTITY GRAPH CONSTRUCTION (DOMAIN-AGNOSTIC)
@@ -1002,3 +1017,320 @@ class HCIRSpatialEntityPlanner:
                             )
 
         return None
+
+    def find_nearest_unvisited_frontier(
+        self,
+        start_pos: tuple[int, int],
+        known_walkable: set[tuple[int, int]],
+        known_barriers: set[tuple[int, int]],
+        visited_cells: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int,
+        unexamined_entities: list[SpatialEntity] | None = None,
+    ) -> list[tuple[int, int]] | None:
+        """Finds the shortest collision-free geodesic path to the most promising unvisited frontier.
+
+        Prioritizes frontiers near unexamined interactive entities to foster child-like curiosity.
+        """
+        step = max(1, step_size)
+        start_r, start_c = start_pos
+
+        candidates: list[tuple[int, int]] = []
+        for r, c in known_walkable:
+            if (r, c) not in visited_cells and (r, c) not in known_barriers:
+                for dr, dc in [(-step, 0), (step, 0), (0, -step), (0, step)]:
+                    adj = (r + dr, c + dc)
+                    if adj in visited_cells or adj == start_pos:
+                        candidates.append((r, c))
+                        break
+
+        if not candidates:
+            candidates = [
+                c for c in known_walkable if c not in visited_cells and c not in known_barriers
+            ]
+
+        if not candidates:
+            return None
+
+        scored: list[tuple[float, tuple[int, int]]] = []
+        for cr, cc in candidates:
+            base_d = math.hypot(cr - start_r, cc - start_c)
+            entity_bonus = 0.0
+            if unexamined_entities:
+                for ent in unexamined_entities:
+                    er, ec = ent.grid_pos
+                    d_ent = math.hypot(cr - er, cc - ec)
+                    if d_ent <= step * 3:
+                        entity_bonus += 10.0 / (1.0 + d_ent)
+            scored.append((base_d - entity_bonus, (cr, cc)))
+
+        scored.sort(key=lambda item: item[0])
+
+        for _, target in scored[:10]:
+            path = self.compute_safe_path(
+                start=start_pos,
+                goal=target,
+                barrier_cells=known_barriers,
+                grid_shape=grid_shape,
+                step_size=step,
+            )
+            if path and len(path) > 1:
+                return path
+
+        return None
+
+    def plan_temporal_clone_sequence(
+        self,
+        start_pos: tuple[int, int],
+        goal_pos: tuple[int, int],
+        actuators: list[SpatialEntity],
+        portals: list[SpatialEntity],
+        actuator_to_portals: dict[str, set[str]],
+        latching_portals: set[str],
+        barriers: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int,
+        action_models: dict[int, Any],
+        max_clones: int = 3,
+        rewind_action: int = 5,
+        current_pos: tuple[int, int] | None = None,
+        initial_probe_actions: int = 0,
+    ) -> list[TimelinePlanStep] | None:
+        """Domain-agnostic multi-timeline temporal clone coordination planner.
+
+        Synthesizes a minimal sequence of switch activations and timeline rewinds
+        so that replaying clones hold required portals open for subsequent agents.
+        """
+        step = max(1, step_size)
+        portal_map = {p.id: p for p in portals}
+        actuator_map = {a.id: a for a in actuators}
+
+        # Helper to compute effective barriers when a subset of portals are open
+        def get_barriers_with_open(open_portal_ids: set[str]) -> set[tuple[int, int]]:
+            eff = set(barriers)
+            for p_id, p in portal_map.items():
+                if p_id not in open_portal_ids:
+                    # Portal is closed, add its grid footprint
+                    eff.add(p.grid_pos)
+                else:
+                    # Portal is open, remove its grid footprint
+                    eff.discard(p.grid_pos)
+            return eff
+
+        def path_reaches(p: list[tuple[int, int]] | None, target: tuple[int, int]) -> bool:
+            return bool(
+                p
+                and len(p) > 0
+                and math.hypot(p[-1][0] - target[0], p[-1][1] - target[1]) <= step * 0.9
+            )
+
+        def path_to_actions(p: list[tuple[int, int]]) -> list[int]:
+            acts = []
+            for i in range(len(p) - 1):
+                dr = p[i + 1][0] - p[i][0]
+                dc = p[i + 1][1] - p[i][1]
+                if dr == 0 and dc == 0:
+                    continue
+                act = self.get_action_for_delta(dr, dc, action_models)
+                if act is not None:
+                    acts.append(act)
+            return acts
+
+        # Search for a sequence of actuators to trigger
+        # State: (current_open_portals: frozenset[str], activated_actuators: tuple[str, ...])
+        queue: list[tuple[frozenset[str], tuple[str, ...]]] = [(frozenset(), ())]
+        visited: set[tuple[frozenset[str], tuple[str, ...]]] = set()
+
+        solution_actuator_seq: tuple[str, ...] | None = None
+
+        while queue:
+            open_ports, act_seq = queue.pop(0)
+
+            # Check if goal is reachable with currently open portals
+            eff_barriers = get_barriers_with_open(set(open_ports))
+            goal_path = self.compute_safe_path(
+                start=start_pos,
+                goal=goal_pos,
+                barrier_cells=eff_barriers,
+                grid_shape=grid_shape,
+                step_size=step,
+            )
+            if path_reaches(goal_path, goal_pos):
+                solution_actuator_seq = act_seq
+                break
+
+            if len(act_seq) >= max_clones:
+                continue
+
+            state_key = (open_ports, act_seq)
+            if state_key in visited:
+                continue
+            visited.add(state_key)
+
+            # Try activating any reachable actuator not yet activated
+            for a_id, a_ent in actuator_map.items():
+                if a_id in act_seq:
+                    continue
+                t0_start = current_pos if (not act_seq and current_pos is not None) else start_pos
+                a_path = self.compute_safe_path(
+                    start=t0_start,
+                    goal=a_ent.grid_pos,
+                    barrier_cells=eff_barriers,
+                    grid_shape=grid_shape,
+                    step_size=step,
+                )
+                if path_reaches(a_path, a_ent.grid_pos):
+                    # Actuator is reachable!
+                    new_open = set(open_ports)
+                    opened_by_a = actuator_to_portals.get(a_id, set())
+                    new_open.update(opened_by_a)
+                    for other_id, other_ent in actuator_map.items():
+                        if other_id != a_id and other_ent.grid_pos in a_path:
+                            other_opened = actuator_to_portals.get(other_id, set())
+                            if other_opened and other_opened.issubset(latching_portals):
+                                new_open.update(other_opened)
+                    queue.append((frozenset(new_open), act_seq + (a_id,)))
+
+        if solution_actuator_seq is None:
+            return None
+
+        # Prune redundant latching actuators if a later timeline traverses them
+        pruned_seq = list(solution_actuator_seq)
+        for a_id in list(pruned_seq):
+            opened = actuator_to_portals.get(a_id, set())
+            if opened and opened.issubset(latching_portals):
+                a_pos = actuator_map[a_id].grid_pos
+                for other_id in list(pruned_seq):
+                    if other_id != a_id:
+                        eff_b = get_barriers_with_open(set())
+                        p = self.compute_safe_path(
+                            start_pos, actuator_map[other_id].grid_pos, eff_b, grid_shape, step
+                        )
+                        if path_reaches(p, actuator_map[other_id].grid_pos) and a_pos in p:
+                            pruned_seq.remove(a_id)
+                            break
+        solution_actuator_seq = tuple(pruned_seq)
+
+        # Reconstruct timeline plans with temporal delay synchronization
+        timeline_steps: list[TimelinePlanStep] = []
+        accumulated_open: set[str] = set()
+        portal_trigger_time: dict[str, int] = {}
+        eff_probe = (
+            initial_probe_actions
+            if initial_probe_actions > 0
+            else (1 if (current_pos is not None and current_pos != start_pos) else 0)
+        )
+
+        def synchronize_path(raw_path: list[tuple[int, int]]) -> list[tuple[int, int]]:
+            if not raw_path:
+                return []
+            synced = [raw_path[0]]
+            step_idx = 0
+            for i in range(len(raw_path) - 1):
+                curr_cell = synced[-1]
+                next_cell = raw_path[i + 1]
+
+                matching_portal_id = None
+                for p_ent in portals:
+                    if (
+                        math.hypot(
+                            next_cell[0] - p_ent.grid_pos[0],
+                            next_cell[1] - p_ent.grid_pos[1],
+                        )
+                        <= step * 0.9
+                    ):
+                        matching_portal_id = p_ent.id
+                        break
+
+                if matching_portal_id and matching_portal_id in portal_trigger_time:
+                    t_trig = portal_trigger_time[matching_portal_id]
+                    if step_idx + 1 <= t_trig:
+                        delay = t_trig - (step_idx + 1) + 1
+                        num_oscillations = (delay + 1) // 2
+                        if len(synced) >= 2:
+                            prev_cell = synced[-2]
+                        else:
+                            prev_cell = curr_cell
+                            for dr, dc in [(-step, 0), (step, 0), (0, -step), (0, step)]:
+                                cand = (curr_cell[0] + dr, curr_cell[1] + dc)
+                                if (
+                                    0 <= cand[0] < grid_shape[0]
+                                    and 0 <= cand[1] < grid_shape[1]
+                                    and cand not in barriers
+                                    and cand != next_cell
+                                ):
+                                    prev_cell = cand
+                                    break
+                        for _ in range(num_oscillations):
+                            synced.append(prev_cell)
+                            synced.append(curr_cell)
+                            step_idx += 2
+
+                synced.append(next_cell)
+                step_idx += 1
+            return synced
+
+        for t_idx, a_id in enumerate(solution_actuator_seq):
+            eff_barriers = get_barriers_with_open(accumulated_open)
+            a_ent = actuator_map[a_id]
+            t_start = current_pos if (t_idx == 0 and current_pos is not None) else start_pos
+            raw_path = self.compute_safe_path(
+                start=t_start,
+                goal=a_ent.grid_pos,
+                barrier_cells=eff_barriers,
+                grid_shape=grid_shape,
+                step_size=step,
+            )
+            if not path_reaches(raw_path, a_ent.grid_pos):
+                return None
+            path = synchronize_path(raw_path)
+
+            num_clone_moves = len(path) - 1
+            if t_idx == 0:
+                num_clone_moves += eff_probe
+
+            for p_id in actuator_to_portals.get(a_id, set()):
+                portal_trigger_time[p_id] = num_clone_moves
+
+            acts = path_to_actions(path) + [rewind_action]
+            timeline_steps.append(
+                TimelinePlanStep(
+                    timeline_index=t_idx,
+                    target_pos=a_ent.grid_pos,
+                    path=path,
+                    actions=acts,
+                    is_rewind=True,
+                )
+            )
+            accumulated_open.update(actuator_to_portals.get(a_id, set()))
+            for other_id, other_ent in actuator_map.items():
+                if other_ent.grid_pos in path:
+                    other_opened = actuator_to_portals.get(other_id, set())
+                    if other_opened and other_opened.issubset(latching_portals):
+                        accumulated_open.update(other_opened)
+
+        # Final timeline: reach the goal
+        final_eff_barriers = get_barriers_with_open(accumulated_open)
+        final_raw_path = self.compute_safe_path(
+            start=start_pos,
+            goal=goal_pos,
+            barrier_cells=final_eff_barriers,
+            grid_shape=grid_shape,
+            step_size=step,
+        )
+        if not path_reaches(final_raw_path, goal_pos):
+            return None
+
+        final_path = synchronize_path(final_raw_path)
+        final_acts = path_to_actions(final_path)
+        timeline_steps.append(
+            TimelinePlanStep(
+                timeline_index=len(solution_actuator_seq),
+                target_pos=goal_pos,
+                path=final_path,
+                actions=final_acts,
+                is_rewind=False,
+            )
+        )
+
+        return timeline_steps
