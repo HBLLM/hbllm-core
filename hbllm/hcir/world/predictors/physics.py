@@ -206,47 +206,49 @@ class PhysicsPredictor:
             simulated_avatar_pos = (curr_r, curr_c)
         else:
             # Check if stepping into a pushable object
-            pushed_box_id: str | None = None
+            pushed_entity_id: str | None = None
             for p_id, p_pos in pushable_entities.items():
                 if p_pos == (next_r, next_c):
-                    pushed_box_id = p_id
+                    pushed_entity_id = p_id
                     break
 
-            if pushed_box_id is not None:
-                box_next_r = next_r + dr
-                box_next_c = next_c + dc
-                # Check if box destination is clear
-                box_blocked = False
-                if not (0 <= box_next_r < H and 0 <= box_next_c < W):
-                    box_blocked = True
-                elif (box_next_r, box_next_c) in barrier_cells:
-                    box_blocked = True
+            if pushed_entity_id is not None:
+                entity_next_r = next_r + dr
+                entity_next_c = next_c + dc
+                # Check if entity destination is clear
+                push_blocked = False
+                if not (0 <= entity_next_r < H and 0 <= entity_next_c < W):
+                    push_blocked = True
+                elif (entity_next_r, entity_next_c) in barrier_cells:
+                    push_blocked = True
                 elif any(
-                    other_pos == (box_next_r, box_next_c)
+                    other_pos == (entity_next_r, entity_next_c)
                     for other_id, other_pos in pushable_entities.items()
-                    if other_id != pushed_box_id
+                    if other_id != pushed_entity_id
                 ):
-                    box_blocked = True
+                    push_blocked = True
 
-                if box_blocked:
+                if push_blocked:
                     collision = True
                     collision_type = "PUSH_OBSTRUCTED"
                     simulated_avatar_pos = (curr_r, curr_c)
                 else:
                     # Successful tandem push
                     simulated_avatar_pos = (next_r, next_c)
-                    updated_entities[pushed_box_id] = {"position": (box_next_r, box_next_c)}
-                    pushed_entities.append(pushed_box_id)
+                    updated_entities[pushed_entity_id] = {
+                        "position": (entity_next_r, entity_next_c)
+                    }
+                    pushed_entities.append(pushed_entity_id)
 
                     # Check corner deadlock on pushed object
                     if cls.is_corner_deadlock(
-                        box_pos=(box_next_r, box_next_c),
+                        entity_pos=(entity_next_r, entity_next_c),
                         barrier_cells=barrier_cells,
                         target_positions=target_positions,
                         grid_shape=(H, W),
                     ):
                         deadlock = True
-                        deadlocked_entities.append(pushed_box_id)
+                        deadlocked_entities.append(pushed_entity_id)
             else:
                 # Clear translation
                 simulated_avatar_pos = (next_r, next_c)
@@ -319,17 +321,21 @@ class PhysicsPredictor:
     @classmethod
     def is_corner_deadlock(
         cls,
-        box_pos: tuple[int, int],
-        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
-        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        entity_pos: tuple[int, int] | None = None,
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
+        box_pos: tuple[int, int] | None = None,
     ) -> bool:
         """Detect if an object is trapped in an irreversible non-target corner."""
-        r, c = box_pos
+        pos = entity_pos if entity_pos is not None else box_pos
+        if pos is None:
+            return False
+        r, c = pos
         H, W = grid_shape
 
-        if box_pos in target_positions:
+        if pos in target_positions:
             return False
 
         blocked_up = (r - step_size < 0) or ((r - step_size, c) in barrier_cells)
@@ -348,11 +354,12 @@ class PhysicsPredictor:
     @classmethod
     def is_line_deadlock(
         cls,
-        box_pos: tuple[int, int],
-        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
-        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        entity_pos: tuple[int, int] | None = None,
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
+        box_pos: tuple[int, int] | None = None,
     ) -> bool:
         """Checks if a pushable entity is pressed against a continuous flat wall without targets.
 
@@ -360,11 +367,14 @@ class PhysicsPredictor:
         If there is no target along that continuous wall segment, and the ends of the segment
         are blocked by barriers/corners, the block is in an irreversible line deadlock.
         """
-        if box_pos in target_positions:
+        pos = entity_pos if entity_pos is not None else box_pos
+        if pos is None:
+            return False
+        if pos in target_positions:
             return False
 
         H, W = grid_shape
-        br, bc = box_pos
+        br, bc = pos
 
         walls: list[tuple[tuple[int, int], list[tuple[int, int]]]] = [
             ((-step_size, 0), [(0, -step_size), (0, step_size)]),
@@ -485,11 +495,11 @@ class PhysicsPredictor:
         if start == goal:
             return [start]
 
-        effective_barriers = set(barrier_cells)
-        if (goal_r, goal_c) in effective_barriers:
-            effective_barriers.remove((goal_r, goal_c))
-
         offsets: list[tuple[int, int]] = list(footprint_offsets) if footprint_offsets else [(0, 0)]
+        effective_barriers = set(barrier_cells)
+        effective_barriers.discard((goal_r, goal_c))
+        for off_r, off_c in offsets:
+            effective_barriers.discard((goal_r + off_r, goal_c + off_c))
 
         def is_footprint_valid(r: int, c: int) -> bool:
             for off_r, off_c in offsets:
@@ -654,26 +664,30 @@ class PhysicsPredictor:
         grid: np.ndarray,
         start_pos: tuple[int, int],
         goal_pos: tuple[int, int],
-        track_color: int = 2,
+        track_identifier: Any = None,
         stride: int = 6,
         patch_size: int = 3,
+        **kwargs: Any,
     ) -> list[int] | None:
-        """Find optimal action sequence to navigate a rail/track network on a discrete 2D lattice.
+        """Find optimal action sequence to navigate a conduit network on a discrete 2D lattice.
 
         Performs breadth-first search across lattice intersections spaced by `stride`,
-        verifying that intermediate conduit/rail segments contain `track_color`.
+        verifying that intermediate conduit/rail segments contain `track_identifier`.
 
         Args:
             grid: 2D numpy array representing the environment visual frame.
             start_pos: (start_r, start_c) coordinates on the grid.
             goal_pos: (goal_r, goal_c) target coordinates on the grid.
-            track_color: Pixel color identifying valid track/conduit bridges.
-            stride: Distance in pixels between adjacent lattice intersections (default 6).
+            track_identifier: Value or feature identifying valid conduit bridges.
+            stride: Distance in discrete units between adjacent lattice intersections (default 6).
             patch_size: Spatial dimensions of the conduit patch (default 3).
 
         Returns:
             List of action integers (1=UP, 2=DOWN, 3=LEFT, 4=RIGHT) or None if unreachable.
         """
+        track_val = (
+            track_identifier if track_identifier is not None else kwargs.get("track_color", 2)
+        )
         H, W = grid.shape
         queue = deque([(start_pos[0], start_pos[1], [])])
         visited = {(start_pos[0], start_pos[1])}
@@ -692,7 +706,7 @@ class PhysicsPredictor:
                 br_r, br_c = cr + br_dr, cc + br_dc
                 if 0 <= br_r < H and 0 <= br_c < W:
                     patch = grid[br_r : br_r + patch_size, br_c : br_c + patch_size]
-                    if np.any(patch == track_color):
+                    if np.any(patch == track_val):
                         if (nr, nc) not in visited:
                             visited.add((nr, nc))
                             queue.append((nr, nc, path + [act]))

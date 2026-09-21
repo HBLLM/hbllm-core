@@ -153,12 +153,14 @@ class HierarchicalGoalDecomposer:
         step_size: int = 1,
         force_subgoals: bool = False,
         unobserved_mask: np.ndarray | None = None,
+        resource_budget: int | None = None,
+        recharge_stations: list[dict[str, Any]] | None = None,
     ) -> GoalNode:
         """Analyze reachability of primary goal and return the active prerequisite GoalNode.
 
-        If the primary goal path is clear, returns the primary goal.
-        If the primary goal is obstructed (or force_subgoals is True), inspects candidate subgoals
-        (switches, keys, tiles, delivery items), generates an HCIR GoalNode linked via DEPENDS_ON,
+        If the primary goal path is clear and within budget, returns the primary goal.
+        If the primary goal is obstructed, exceeds resource budget, or force_subgoals is True,
+        inspects candidate subgoals / recharge stations, generates an HCIR GoalNode linked via DEPENDS_ON,
         and returns the active leaf subgoal.
         If no subgoals are reachable but unobserved_mask is provided, returns an epistemic exploration frontier.
         """
@@ -192,6 +194,11 @@ class HierarchicalGoalDecomposer:
             <= step_size * 0.95
         )
 
+        # Check resource constraint
+        if is_primary_reachable and resource_budget is not None and primary_path:
+            if len(primary_path) > resource_budget:
+                is_primary_reachable = False
+
         # Check existing registered subgoals for this primary goal
         active_prerequisites: list[GoalNode] = []
         for edge in workspace.graph.edges_from(primary_goal.id):
@@ -204,6 +211,53 @@ class HierarchicalGoalDecomposer:
         # If primary goal is reachable and all prerequisites are resolved, focus on primary goal
         if is_primary_reachable and not active_prerequisites and not force_subgoals:
             return primary_goal
+
+        # Resource budgeting: if primary goal exceeds budget, synthesize nearest reachable recharge subgoal
+        if (
+            not is_primary_reachable
+            and resource_budget is not None
+            and recharge_stations
+            and not active_prerequisites
+        ):
+            best_station: dict[str, Any] | None = None
+            best_s_path: list[tuple[int, int]] | None = None
+            min_s_len = float("inf")
+            for station in recharge_stations:
+                s_pos = station.get("position")
+                if not s_pos:
+                    continue
+                s_r, s_c = int(s_pos[0]), int(s_pos[1])
+                s_path = PhysicsPredictor.compute_geodesic_path(
+                    start=avatar_pos,
+                    goal=(s_r, s_c),
+                    barrier_cells=effective_barriers,
+                    grid_shape=grid_shape,
+                    step_size=step_size,
+                )
+                if s_path and len(s_path) <= resource_budget and len(s_path) < min_s_len:
+                    min_s_len = len(s_path)
+                    best_station = station
+                    best_s_path = s_path
+
+            if best_station and best_s_path:
+                st_pos = best_station["position"]
+                recharge_node = GoalNode(
+                    id=f"subgoal_recharge_{int(st_pos[0])}_{int(st_pos[1])}",
+                    description="Recharge resource budget at recharge station",
+                    properties={
+                        "target_position": (int(st_pos[0]), int(st_pos[1])),
+                        "is_recharge": True,
+                    },
+                )
+                workspace.upsert_node(recharge_node)
+                workspace.add_edge(
+                    HCIREdge(
+                        sources=[primary_goal.id],
+                        targets=[recharge_node.id],
+                        edge_type=HCIREdgeType.DEPENDS_ON,
+                    )
+                )
+                return recharge_node
 
         # If there are already active prerequisite subgoals, return the closest unresolved one
         if active_prerequisites:
@@ -244,25 +298,36 @@ class HierarchicalGoalDecomposer:
                     reachable_candidates.append((len(c_path), cand))
 
             if reachable_candidates:
-                # Prioritize candidates matching learned item colors from HCIR workspace
-                learned_item_vars = workspace.graph.get_node("var_learned_item_colors")
-                learned_colors = (
-                    set(learned_item_vars.value)
-                    if isinstance(learned_item_vars, WorldVariableNode)
-                    and isinstance(learned_item_vars.value, list)
+                # Prioritize candidates matching learned target features from HCIR workspace
+                target_feat_vars = workspace.graph.get_node(
+                    "var_target_entity_features"
+                ) or workspace.graph.get_node("var_learned_item_colors")
+                learned_features = (
+                    set(target_feat_vars.value)
+                    if isinstance(target_feat_vars, WorldVariableNode)
+                    and isinstance(target_feat_vars.value, list)
                     else set()
                 )
 
                 def candidate_priority(item_tuple: tuple[int, dict[str, Any]]) -> tuple[int, int]:
                     path_len, cand_dict = item_tuple
-                    c_col = cand_dict.get("color")
-                    is_known = 0 if (c_col is not None and c_col in learned_colors) else 1
+                    c_feat = (
+                        cand_dict.get("feature_id")
+                        or cand_dict.get("visual_id")
+                        or cand_dict.get("color")
+                    )
+                    is_known = 0 if (c_feat is not None and c_feat in learned_features) else 1
                     return (is_known, path_len)
 
                 reachable_candidates.sort(key=candidate_priority)
                 best_cand = reachable_candidates[0][1]
                 cand_pos = (int(best_cand["position"][0]), int(best_cand["position"][1]))
                 cand_id = str(best_cand.get("id", f"{cand_pos[0]}_{cand_pos[1]}"))
+                cand_feat = (
+                    best_cand.get("feature_id")
+                    or best_cand.get("visual_id")
+                    or best_cand.get("color")
+                )
 
                 subgoal_id = f"subgoal_{cand_id}"
                 subgoal = GoalNode(
@@ -275,7 +340,8 @@ class HierarchicalGoalDecomposer:
                     properties={
                         "target_position": cand_pos,
                         "item_position": best_cand.get("item_position", cand_pos),
-                        "item_color": best_cand.get("color"),
+                        "target_feature": cand_feat,
+                        "item_color": cand_feat,
                         "item_area": best_cand.get("area"),
                         "target_entity": cand_id,
                         "parent_goal_id": primary_goal.id,
@@ -640,6 +706,84 @@ class HierarchicalGoalDecomposer:
             prev_subgoal = node
 
         return subgoals
+
+    @staticmethod
+    def order_multibox_deliveries(
+        boxes: list[tuple[int, int]],
+        targets: list[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | None = None,
+        avatar_pos: tuple[int, int] | None = None,
+        bottleneck_cells: set[tuple[int, int]] | None = None,
+    ) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+        """Computes an optimal, deadlock-free matching and delivery order of boxes to targets.
+
+        1. Uses Hungarian matching (scipy.optimize.linear_sum_assignment) on Manhattan distance
+           between candidate boxes and targets to minimize total transportation displacement.
+        2. Orders matched pairs topologically to prevent corridor / target-room deadlocks:
+           - Boxes that sit in or obstruct bottlenecks/doorways are prioritized for first delivery.
+           - Targets positioned deeper in enclosed target zones (furthest from entrances/bottlenecks)
+             are filled first so subsequent deliveries are not obstructed.
+           - If depths are equal, prioritizes boxes closest to avatar.
+        """
+        if not boxes or not targets:
+            return []
+
+        try:
+            from scipy.optimize import linear_sum_assignment
+
+            has_scipy = True
+        except ImportError:
+            has_scipy = False
+
+        num_boxes = len(boxes)
+        num_targets = len(targets)
+        cost_matrix = np.zeros((num_boxes, num_targets), dtype=float)
+
+        for i, (br, bc) in enumerate(boxes):
+            for j, (tr, tc) in enumerate(targets):
+                cost_matrix[i, j] = abs(br - tr) + abs(bc - tc)
+
+        if has_scipy:
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+            matched_pairs = [(boxes[r], targets[c]) for r, c in zip(row_ind, col_ind)]
+        else:
+            matched_pairs = []
+            used_targets = set()
+            for r, b in enumerate(boxes):
+                best_c = -1
+                best_dist = float("inf")
+                for c, t in enumerate(targets):
+                    if c not in used_targets and cost_matrix[r, c] < best_dist:
+                        best_dist = cost_matrix[r, c]
+                        best_c = c
+                if best_c >= 0:
+                    used_targets.add(best_c)
+                    matched_pairs.append((b, targets[best_c]))
+
+        def pair_priority(
+            pair: tuple[tuple[int, int], tuple[int, int]],
+        ) -> tuple[int, float, float]:
+            box, target = pair
+            is_bottleneck_box = 0 if (bottleneck_cells and box in bottleneck_cells) else 1
+
+            if bottleneck_cells:
+                min_bottleneck_dist = min(
+                    math.hypot(target[0] - bnr, target[1] - bnc) for bnr, bnc in bottleneck_cells
+                )
+                target_depth_score = -min_bottleneck_dist
+            else:
+                target_depth_score = 0.0
+
+            avatar_dist = (
+                math.hypot(box[0] - avatar_pos[0], box[1] - avatar_pos[1])
+                if avatar_pos is not None
+                else 0.0
+            )
+
+            return (is_bottleneck_box, target_depth_score, avatar_dist)
+
+        matched_pairs.sort(key=pair_priority)
+        return matched_pairs
 
 
 @dataclass

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class CutSetResult:
     approach_cell: (
         tuple[int, int] | None
     )  # Accessible cell in start_component adjacent to best_gate_cell
+    all_gates: list[tuple[tuple[int, int], tuple[int, int]]] = field(default_factory=list)
 
 
 class TopologicalCutSetAnalyzer:
@@ -70,6 +71,8 @@ class TopologicalCutSetAnalyzer:
         barrier_cells: set[tuple[int, int]],
         grid_shape: tuple[int, int],
         step_size: int = 1,
+        movable_barriers: set[tuple[int, int]] | None = None,
+        occupied_cells: set[tuple[int, int]] | None = None,
     ) -> CutSetResult:
         """Analyze whether start and goal are in disjoint components and locate the barrier cut-set."""
         H, W = grid_shape
@@ -106,9 +109,23 @@ class TopologicalCutSetAnalyzer:
             for dr, dc in deltas:
                 nr, nc = r + dr, c + dc
                 if (nr, nc) in barrier_cells:
-                    cut_set.add((nr, nc))
-                    if (nr, nc) not in barrier_to_approach:
-                        barrier_to_approach[(nr, nc)] = (r, c)
+                    adj_to_goal = any(
+                        (nr + gdr, nc + gdc) in c_goal
+                        for gdr, gdc in [
+                            (-step_size, 0),
+                            (step_size, 0),
+                            (0, -step_size),
+                            (0, step_size),
+                            (-1, 0),
+                            (1, 0),
+                            (0, -1),
+                            (0, 1),
+                        ]
+                    )
+                    if adj_to_goal:
+                        cut_set.add((nr, nc))
+                        if (nr, nc) not in barrier_to_approach:
+                            barrier_to_approach[(nr, nc)] = (r, c)
 
         if not cut_set:
             return CutSetResult(
@@ -120,9 +137,21 @@ class TopologicalCutSetAnalyzer:
                 approach_cell=None,
             )
 
-        # Rank cut_set cells: prioritize those adjacent to c_goal, then those closest to goal
-        def gate_score(b_cell: tuple[int, int]) -> tuple[int, float]:
+        # Rank cut_set cells: prioritize unoccupied gates, movable barriers, adjacency to c_goal, grid alignment, proximity
+        def gate_score(b_cell: tuple[int, int]) -> tuple[int, int, int, int, float]:
             br, bc = b_cell
+            is_occ = (
+                1
+                if (
+                    occupied_cells
+                    and any(
+                        math.hypot(br - oc[0], bc - oc[1]) < max(2.5, step_size * 0.8)
+                        for oc in occupied_cells
+                    )
+                )
+                else 0
+            )
+            is_movable = 0 if (movable_barriers and b_cell in movable_barriers) else 1
             # Check if b_cell is adjacent to c_goal (direct separating barrier)
             adj_to_goal_comp = any(
                 (br + dr, bc + dc) in c_goal
@@ -137,14 +166,23 @@ class TopologicalCutSetAnalyzer:
                     (0, 1),
                 ]
             )
+            is_aligned = 0 if (br % step_size == 0 and bc % step_size == 0) else 1
             dist_start = math.hypot(br - start[0], bc - start[1])
             dist_goal = math.hypot(br - goal[0], bc - goal[1])
             total_dist = dist_start + dist_goal
-            # Rank: 0 if adjacent to goal component (better), then total interface distance
-            return (0 if adj_to_goal_comp else 1, total_dist)
+            return (0 if adj_to_goal_comp else 1, is_movable, is_occ, is_aligned, total_dist)
 
-        best_gate = min(cut_set, key=gate_score)
-        approach = barrier_to_approach.get(best_gate)
+        ranked_gates = []
+        for b_cell in cut_set:
+            if b_cell in barrier_to_approach:
+                appr = barrier_to_approach[b_cell]
+                score = gate_score(b_cell)
+                ranked_gates.append((score, b_cell, appr))
+        ranked_gates.sort(key=lambda x: x[0])
+
+        best_gate = ranked_gates[0][1] if ranked_gates else None
+        approach = ranked_gates[0][2] if ranked_gates else None
+        all_gates = [(gate, appr) for _, gate, appr in ranked_gates]
 
         return CutSetResult(
             is_partitioned=True,
@@ -153,4 +191,5 @@ class TopologicalCutSetAnalyzer:
             barrier_cut_set=cut_set,
             best_gate_cell=best_gate,
             approach_cell=approach,
+            all_gates=all_gates,
         )

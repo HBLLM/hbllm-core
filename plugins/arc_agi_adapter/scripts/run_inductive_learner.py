@@ -67,7 +67,14 @@ def main() -> None:
     runner = InductiveARC3BenchmarkRunner(max_steps_per_level=120)
     results = []
     start = time.time()
-    for gid in args.games:
+    game_list = args.games
+    if game_list == ["all"] or "all" in game_list:
+        envs = (
+            arcade_client.get_environments() if hasattr(arcade_client, "get_environments") else []
+        )
+        game_list = sorted([e.game_id.split("-")[0] for e in envs])
+
+    for gid in game_list:
         try:
             max_lvl = (
                 1 if (gid in ["su15", "lf52", "ka59"] and args.max_levels == 2) else args.max_levels
@@ -79,6 +86,11 @@ def main() -> None:
 
     duration = time.time() - start
     logger.info(f"Inductive evaluation completed in {duration:.2f}s across {len(results)} games.")
+    total_completed = sum(r.levels_completed for r in results)
+    total_levels = sum(r.total_levels for r in results)
+    logger.info(
+        f"OVERALL SCORE: {total_completed}/{total_levels} ({total_completed / total_levels * 100:.1f}%)"
+    )
     for r in results:
         logger.info(
             f"Game: {r.game_id} | Completed: {r.levels_completed}/{r.total_levels} | Actions: {r.total_actions}"
@@ -93,6 +105,7 @@ def main() -> None:
     report_lines = [
         "# Inductive HCIR Learner Benchmark Report",
         f"**Duration**: {duration:.2f}s across {len(results)} game(s)",
+        f"**Total Score**: **{total_completed}/{total_levels} ({total_completed / total_levels * 100:.1f}%)**",
         "",
         "| Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |",
         "|---|---|---|---|---|",

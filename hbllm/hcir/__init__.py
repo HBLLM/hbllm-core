@@ -22,6 +22,12 @@ Architecture layers (strict dependency order)::
     HCIR Data Model           (Typed graph, types, validation)
 """
 
+from hbllm.hcir.spatial_planner import (
+    EntityGraph,
+    EntityRole,
+    HCIRSpatialEntityPlanner,
+    SpatialEntity,
+)
 from hbllm.hcir.types import (
     Confidence,
     CostMetric,
@@ -39,6 +45,11 @@ __all__ = [
     "TimeDuration",
     "Timestamp",
     "UncertaintyVector",
+    # --- Spatial Entity Planning ---
+    "HCIRSpatialEntityPlanner",
+    "EntityGraph",
+    "SpatialEntity",
+    "EntityRole",
 ]
 
 __hcir_version__ = "1.0.0"

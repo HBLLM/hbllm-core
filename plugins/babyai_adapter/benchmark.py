@@ -31,6 +31,7 @@ from babyai_adapter import (
     MiniGridAction,
     make_gym_babyai_level,
 )
+
 from hbllm.experiment.statistics import ExperimentStatistics
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
