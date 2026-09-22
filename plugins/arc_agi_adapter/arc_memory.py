@@ -52,7 +52,7 @@ class HCIRCrossGameMemory:
 
     def transfer_to_agent(self, agent: Any) -> None:
         """Transfer accumulated knowledge zero-shot to a new or reset agent."""
-        from plugins.arc_agi_adapter.arc_spatial_agent import ActionDynamicsModel
+        from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
         if self.avatar_color is not None and agent.avatar_color is None:
             agent.avatar_color = self.avatar_color
@@ -88,7 +88,7 @@ class HCIRCrossGameMemory:
 
     def update_from_agent(self, agent: Any) -> None:
         """Harvest newly discovered concepts and affordances from agent."""
-        from plugins.arc_agi_adapter.arc_spatial_agent import ActionDynamicsModel
+        from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
         if agent.avatar_color is not None:
             self.avatar_color = agent.avatar_color
@@ -198,11 +198,8 @@ class HCIRCrossGameMemory:
     def import_dict(self, data: dict[str, Any]) -> None:
         """Import knowledge from serialized dictionary."""
         from hbllm.hcir.spatial_planner import EntityRole
-        from plugins.arc_agi_adapter.arc_spatial_agent import (
-            ActionDynamicsModel,
-            MorphologicalConcept,
-            ShapeArchetype,
-        )
+        from hbllm.hcir.world.morphology import MorphologicalConcept, ShapeArchetype
+        from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
         self.avatar_color = data.get("avatar_color", self.avatar_color)
         self.step_size = data.get("step_size", self.step_size)

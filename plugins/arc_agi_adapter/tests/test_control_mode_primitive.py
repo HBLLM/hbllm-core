@@ -25,8 +25,8 @@ for p in [str(_core_root), str(_plugins_root)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
-from plugins.arc_agi_adapter.arc_spatial_agent import ActionDynamicsModel
 from plugins.arc_agi_adapter.control_mode import (
     ActionObservation,
     ControlContext,

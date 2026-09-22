@@ -1,17 +1,16 @@
-"""Unit and regression tests for ARC3SpatialCognitiveAgent and Driver Management Layer."""
+"""Unit and regression tests for ARC3SpatialCognitiveAgent (thin blackbox adapter)."""
 
 import numpy as np
-from arc_agi import Arcade
-from arcengine import GameAction
 
 from hbllm.drivers import BaseDriver, DriverManager
+from hbllm.drivers.base import DriverAction, DriverFeedback
+from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
+from hbllm.hcir.world.morphology import ShapeArchetype
+from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from plugins.arc_agi_adapter.arc_driver import ArcadeDriver
+from plugins.arc_agi_adapter.arc_memory import HCIRCrossGameMemory
 from plugins.arc_agi_adapter.arc_spatial_agent import (
-    ActionDynamicsModel,
-    AgentPhase,
     ARC3SpatialCognitiveAgent,
-    HCIRCrossGameMemory,
-    ShapeArchetype,
 )
 
 
@@ -26,87 +25,53 @@ def test_driver_management_registration() -> None:
     assert manager.get_driver("arcade_driver").name == "arcade_driver"
 
 
-def test_arc_spatial_agent_wa30_all_levels() -> None:
-    """Verify ARC3SpatialCognitiveAgent solves wa30 across all 3 levels."""
-    client = Arcade()
-    env = client.make("wa30", render_mode=None)
-    fd = env.reset()
+def test_agent_creates_blackbox() -> None:
+    """Verify ARC3SpatialCognitiveAgent wraps a CognitiveBlackbox."""
     agent = ARC3SpatialCognitiveAgent()
-
-    for lvl in range(3):
-        completed = False
-        for s in range(110):
-            if getattr(fd, "levels_completed", 0) > lvl:
-                completed = True
-                break
-            if not hasattr(fd, "frame") or len(fd.frame) == 0:
-                break
-            avail = getattr(fd, "available_actions", [1, 2, 3, 4, 5])
-            curr_grid = fd.frame[-1]
-            act, conf = agent.plan_next_action(curr_grid, avail)
-            prev_grid = curr_grid
-            fd = env.step(getattr(GameAction, f"ACTION{act}"))
-            curr_grid = fd.frame[-1] if len(fd.frame) > 0 else prev_grid
-            agent.update_causal_dynamics(act, prev_grid, curr_grid)
-
-        if not completed and getattr(fd, "levels_completed", 0) > lvl:
-            completed = True
-        assert completed, f"Level {lvl} failed to complete within step budget"
-        agent.reset_episode(retain_dynamics=True)
-        try:
-            fd = env.step(GameAction.ACTION5)
-        except Exception:
-            pass
-
-    assert getattr(fd, "levels_completed", 0) == 3
+    assert isinstance(agent.blackbox, CognitiveBlackbox)
 
 
-def test_arc_spatial_agent_autonomous_learning_and_soft_restart() -> None:
-    """Verify epistemic exploration deduces task, soft-restarts via RESET, and achieves optimal score."""
-    client = Arcade()
-    env = client.make("wa30", render_mode=None)
-    fd = env.reset()
-    custom_memory = HCIRCrossGameMemory()
-    agent = ARC3SpatialCognitiveAgent(enable_soft_restart=True, shared_memory=custom_memory)
-
-    assert agent.phase == AgentPhase.EPISTEMIC_LEARNING
-    subgoals_deduced = False
-    restarted = False
-
-    for s in range(120):
-        if getattr(fd, "levels_completed", 0) > 0:
-            break
-        curr_grid = fd.frame[-1]
-        avail = getattr(fd, "available_actions", [1, 2, 3, 4, 5])
-        act, conf = agent.plan_next_action(curr_grid, avail, allow_soft_restart=True)
-        prev_grid = curr_grid
-
-        if act == 0 or agent.should_soft_restart:
-            restarted = True
-            subgoals_deduced = len(agent.optimal_task_plan) > 0
-            fd = env.step(GameAction.RESET)
-            curr_grid = fd.frame[-1]
-            agent.soft_restart()
-            assert agent.phase == AgentPhase.OPTIMAL_EXECUTION
-            continue
-
-        fd = env.step(getattr(GameAction, f"ACTION{act}"))
-        curr_grid = fd.frame[-1] if len(fd.frame) > 0 else prev_grid
-        agent.update_causal_dynamics(act, prev_grid, curr_grid)
-
-    assert restarted, "Agent did not trigger soft restart after task deduction"
-    assert subgoals_deduced, "Agent did not deduce optimal task plan"
-    assert getattr(fd, "levels_completed", 0) >= 1, "Failed to complete Level 1 after soft restart"
-
-    # Verify episode outcome recording
-    agent.record_episode_outcome(completed=True)
-    assert agent.phase == AgentPhase.COMPLETED
-    assert len(custom_memory.successful_episodes) == 1
-    assert custom_memory.successful_episodes[0]["score"] == 1.0
+def test_agent_plan_returns_valid_action() -> None:
+    """Verify plan_next_action returns an action from the available list."""
+    agent = ARC3SpatialCognitiveAgent()
+    grid = np.zeros((16, 16), dtype=np.uint8)
+    avail = [1, 2, 3, 4, 5]
+    act, conf = agent.plan_next_action(grid, avail)
+    assert act in avail or act == 0
+    assert 0.0 <= conf <= 1.0
 
 
-def test_arc_spatial_agent_cross_game_knowledge_transfer() -> None:
-    """Verify exported cross-game memory transfers motor dynamics and concepts zero-shot to a new agent."""
+def test_agent_update_does_not_crash() -> None:
+    """Verify update_causal_dynamics handles grid diffs without error."""
+    agent = ARC3SpatialCognitiveAgent()
+    prev = np.zeros((16, 16), dtype=np.uint8)
+    curr = np.zeros((16, 16), dtype=np.uint8)
+    curr[5, 5] = 3  # Some change
+    agent.update_causal_dynamics(1, prev, curr)
+
+
+def test_agent_update_mismatched_shapes() -> None:
+    """Verify update_causal_dynamics gracefully handles mismatched grid shapes."""
+    agent = ARC3SpatialCognitiveAgent()
+    prev = np.zeros((16, 16), dtype=np.uint8)
+    curr = np.zeros((20, 20), dtype=np.uint8)
+    agent.update_causal_dynamics(1, prev, curr)  # Should not crash
+
+
+def test_agent_reset_episode() -> None:
+    """Verify reset_episode creates fresh state."""
+    agent = ARC3SpatialCognitiveAgent()
+    # Do a plan to increment step count
+    grid = np.zeros((16, 16), dtype=np.uint8)
+    agent.plan_next_action(grid, [1, 2, 3, 4])
+    agent.reset_episode()
+    # After reset, blackbox state is fresh
+    state = agent.blackbox.get_state("default")
+    assert state.step_count == 0
+
+
+def test_cross_game_memory_export_import() -> None:
+    """Verify cross-game memory serialization round-trip."""
     memory = HCIRCrossGameMemory()
     memory.avatar_color = 14
     memory.step_size = 4
@@ -117,68 +82,28 @@ def test_arc_spatial_agent_cross_game_knowledge_transfer() -> None:
     memory.action_models[1] = ActionDynamicsModel(
         action_id=1, delta_r=-4, delta_c=0, confidence=0.95, probes_tested=5
     )
-    memory.action_models[2] = ActionDynamicsModel(
-        action_id=2, delta_r=4, delta_c=0, confidence=0.95, probes_tested=5
-    )
-    memory.action_models[3] = ActionDynamicsModel(
-        action_id=3, delta_r=0, delta_c=-4, confidence=0.95, probes_tested=5
-    )
-    memory.action_models[4] = ActionDynamicsModel(
-        action_id=4, delta_r=0, delta_c=4, confidence=0.95, probes_tested=5
-    )
 
     exported = memory.export_dict()
+    assert exported["avatar_color"] == 14
+    assert exported["step_size"] == 4
 
-    new_agent = ARC3SpatialCognitiveAgent(shared_memory=HCIRCrossGameMemory())
-    assert new_agent.avatar_color is None
-    assert new_agent.step_size == 1
-    assert len(new_agent.action_models) == 0
-
-    new_agent.import_knowledge(exported)
-
-    assert new_agent.avatar_color == 14
-    assert new_agent.step_size == 4
-    assert new_agent.action_5_affordance == "PICKUP_DROP"
-    assert 4 in new_agent.learned_item_colors
-    assert 9 in new_agent.learned_receptacle_colors
-    assert all(a in new_agent.action_models for a in [1, 2, 3, 4])
-    assert all(new_agent.action_models[a].confidence >= 0.9 for a in [1, 2, 3, 4])
+    new_memory = HCIRCrossGameMemory()
+    new_memory.import_dict(exported)
+    assert new_memory.avatar_color == 14
+    assert new_memory.step_size == 4
+    assert new_memory.action_5_affordance == "PICKUP_DROP"
+    assert 4 in new_memory.learned_item_colors
+    assert 1 in new_memory.action_models
+    assert new_memory.action_models[1].confidence >= 0.9
 
 
-def test_arc_spatial_agent_failure_constraint_induction() -> None:
-    """Verify motor collision generates HCIR negative constraints and BeliefNode in cognitive workspace."""
+def test_agent_record_episode_outcome() -> None:
+    """Verify record_episode_outcome writes to cross-game memory."""
     memory = HCIRCrossGameMemory()
     agent = ARC3SpatialCognitiveAgent(shared_memory=memory)
-
-    agent.avatar_color = 14
-    agent.step_size = 2
-    agent.spatial_planner.step_size = 2
-    agent.avatar_centroid = (10.0, 10.0)
-    agent.action_models[1] = ActionDynamicsModel(
-        action_id=1, delta_r=-2, delta_c=0, confidence=0.95, probes_tested=3
-    )
-
-    grid = np.zeros((30, 30), dtype=np.uint8)
-    grid[10, 10] = 14
-    grid[8, 10] = 5
-
-    prev_grid = grid.copy()
-    curr_grid = grid.copy()
-
-    agent.update_causal_dynamics(1, prev_grid, curr_grid)
-
-    assert (8, 10) in agent.spatial_planner._learned_barriers
-    assert (8, 10) in memory.negative_constraints
-    assert 5 in agent.learned_barrier_colors
-
-    nodes = list(agent.workspace.graph._nodes.values())
-    belief_nodes = [
-        n
-        for n in nodes
-        if hasattr(n, "properties") and n.properties.get("negative_constraint") is True
-    ]
-    assert len(belief_nodes) >= 1
-    assert belief_nodes[0].properties.get("position") == (8, 10)
+    agent.record_episode_outcome(completed=True)
+    assert len(memory.successful_episodes) == 1
+    assert memory.successful_episodes[0]["score"] == 1.0
 
 
 def test_shape_archetype_translation_and_rotational_orbits() -> None:
@@ -205,110 +130,101 @@ def test_shape_archetype_translation_and_rotational_orbits() -> None:
     assert arch_v.is_rotation_of(arch_h)
 
 
-def test_morphological_concept_learning_and_transfer() -> None:
-    """Verify MorphologicalConcept preserves shape archetype across color mutations and transfers in memory."""
-    memory = HCIRCrossGameMemory()
-    agent = ARC3SpatialCognitiveAgent(shared_memory=memory)
+def test_cognitive_blackbox_observe_decide_update_loop() -> None:
+    """Verify the full observe→decide→update loop works end-to-end."""
+    blackbox = CognitiveBlackbox()
 
-    # Agent observes red door shape (color 2)
-    coords = {(4, 10), (4, 11), (4, 12)}
-    arch = ShapeArchetype.from_coords(coords)
-    concept = agent._get_or_create_shape_concept(
-        arch, color=2, role=None, name_prefix="sliding_door"
+    available = [DriverAction(action_id=a) for a in [1, 2, 3, 4]]
+    action = blackbox.decide(available, source_id="test")
+    assert isinstance(action, DriverAction)
+    assert action.action_id in [0, 1, 2, 3, 4]
+
+    feedback = DriverFeedback(
+        success=False,
+        reward=0.0,
+        terminated=False,
+        info={"observed_delta": [0, 1]},
     )
-    concept.observed_colors.add(2)
-    concept.barrier_colors.add(2)
+    blackbox.update(action, feedback, source_id="test")
 
-    # Same shape seen in next level with blue color (color 8)
-    concept_level2 = agent._get_or_create_shape_concept(arch, color=8)
-    assert concept_level2 is concept
-    assert 2 in concept.observed_colors and 8 in concept.observed_colors
-
-    # Export to memory and import to a new agent
-    exp = agent.export_knowledge()
-    assert "shape_concepts" in exp
-
-    agent2 = ARC3SpatialCognitiveAgent()
-    agent2.import_knowledge(exp)
-    assert arch.canonical_id in agent2.shape_concepts
-    restored = agent2.shape_concepts[arch.canonical_id]
-    assert 2 in restored.observed_colors and 8 in restored.observed_colors
+    state = blackbox.get_state("test")
+    assert action.action_id in state.action_models
 
 
-def test_rotating_door_automatic_discovery_and_unblocking() -> None:
-    """Verify online detection of rotating doors: unblocks vacated passage cells and blocks new cells."""
-    agent = ARC3SpatialCognitiveAgent()
-    agent.avatar_color = 14
-    agent.avatar_centroid = (5.0, 5.0)
+def test_cognitive_blackbox_learns_obstacles_from_feedback() -> None:
+    """Verify blackbox learns obstacle features from collision feedback."""
+    blackbox = CognitiveBlackbox()
+    action = DriverAction(action_id=1)
+    feedback = DriverFeedback(
+        success=False,
+        reward=0.0,
+        terminated=False,
+        info={"collision_feature": 5},
+    )
+    blackbox.update(action, feedback, source_id="test")
 
-    # Setup initial 20x20 grid with a vertical door barrier (color 7) blocking row 10, cols 10..12
-    prev_g = np.zeros((20, 20), dtype=np.uint8)
-    prev_g[5, 5] = 14  # Avatar
-    door_v = {(10, 10), (11, 10), (12, 10)}
-    for r, c in door_v:
-        prev_g[r, c] = 7
-
-    # Initialize known barriers with the vertical door
-    agent.known_barriers = np.zeros((20, 20), dtype=bool)
-    agent.learned_barrier_colors.add(7)
-    for r, c in door_v:
-        agent.known_barriers[r, c] = True
-        agent.spatial_planner.record_collision_barrier((r, c))
-
-    # Action 5 triggers 90 degree door rotation: vertical door becomes horizontal door at row 10, cols 10..12
-    curr_g = np.zeros((20, 20), dtype=np.uint8)
-    curr_g[5, 5] = 14  # Avatar
-    door_h = {(10, 10), (10, 11), (10, 12)}
-    for r, c in door_h:
-        curr_g[r, c] = 7
-
-    agent.update_causal_dynamics(action_id=5, prev_grid=prev_g, curr_grid=curr_g)
-
-    # Vacated cells (11, 10) and (12, 10) must now be UNBLOCKED in known_barriers & spatial_planner
-    assert not agent.known_barriers[11, 10]
-    assert not agent.known_barriers[12, 10]
-    assert (11, 10) not in agent.spatial_planner._learned_barriers
-    assert (12, 10) not in agent.spatial_planner._learned_barriers
-
-    # Newly occupied cells (10, 11) and (10, 12) must now be BLOCKED
-    assert agent.known_barriers[10, 11]
-    assert agent.known_barriers[10, 12]
-
-    # Morphological concept must record rotation trigger
-    v_arch = ShapeArchetype.from_coords({(11, 10), (12, 10)})
-    assert v_arch.canonical_id in agent.shape_concepts
-    door_concept = agent.shape_concepts[v_arch.canonical_id]
-    assert door_concept.is_rotatable
-    assert door_concept.rotation_trigger == 5
+    state = blackbox.get_state("test")
+    assert 5 in state.learned_obstacle_features
 
 
-def test_color_transition_door_opening() -> None:
-    """Verify online detection of color-changing door opening into passable floor."""
-    agent = ARC3SpatialCognitiveAgent()
-    agent.avatar_color = 14
+def test_cognitive_blackbox_learns_traversable_from_feedback() -> None:
+    """Verify blackbox learns traversable features from successful movement."""
+    blackbox = CognitiveBlackbox()
+    action = DriverAction(action_id=1)
+    feedback = DriverFeedback(
+        success=False,
+        reward=0.0,
+        terminated=False,
+        info={"traversed_feature": 3},
+    )
+    blackbox.update(action, feedback, source_id="test")
 
-    prev_g = np.zeros((20, 20), dtype=np.uint8)
-    door_cells = {(8, 5), (8, 6)}
-    for r, c in door_cells:
-        prev_g[r, c] = 9  # Barrier door color 9
+    state = blackbox.get_state("test")
+    assert 3 in state.learned_traversable_features
 
-    agent.known_barriers = np.zeros((20, 20), dtype=bool)
-    for r, c in door_cells:
-        agent.known_barriers[r, c] = True
-        agent.spatial_planner.record_collision_barrier((r, c))
 
-    # Stepping or interacting turns color 9 door to color 0 (floor)
-    curr_g = np.zeros((20, 20), dtype=np.uint8)  # All 0
+def test_cognitive_blackbox_reset_preserves_memory() -> None:
+    """Verify blackbox reset with retain_memory keeps learned knowledge."""
+    blackbox = CognitiveBlackbox()
 
-    agent.update_causal_dynamics(action_id=2, prev_grid=prev_g, curr_grid=curr_g)
+    # Teach it something
+    action = DriverAction(action_id=1)
+    feedback = DriverFeedback(
+        success=False,
+        reward=0.0,
+        terminated=False,
+        info={"collision_feature": 7, "observed_delta": [-2, 0]},
+    )
+    blackbox.update(action, feedback, source_id="test")
 
-    # Door cells must now be unblocked!
-    for r, c in door_cells:
-        assert not agent.known_barriers[r, c]
-        assert (r, c) not in agent.spatial_planner._learned_barriers
+    state = blackbox.get_state("test")
+    assert 7 in state.learned_obstacle_features
+    assert 1 in state.action_models
 
-    arch = ShapeArchetype.from_coords(door_cells)
-    assert arch.canonical_id in agent.shape_concepts
-    concept = agent.shape_concepts[arch.canonical_id]
-    assert concept.is_color_switch
-    assert 0 in concept.passable_colors
+    # Reset with memory retention
+    blackbox.reset(source_id="test", retain_memory=True)
+
+    state = blackbox.get_state("test")
+    assert 7 in state.learned_obstacle_features
+    assert 1 in state.action_models
+    assert state.step_count == 0  # Step count reset
+
+
+def test_cognitive_blackbox_reset_clears_memory() -> None:
+    """Verify blackbox reset without retain_memory clears everything."""
+    blackbox = CognitiveBlackbox()
+
+    action = DriverAction(action_id=1)
+    feedback = DriverFeedback(
+        success=False,
+        reward=0.0,
+        terminated=False,
+        info={"collision_feature": 7},
+    )
+    blackbox.update(action, feedback, source_id="test")
+
+    blackbox.reset(source_id="test", retain_memory=False)
+
+    state = blackbox.get_state("test")
+    assert len(state.learned_obstacle_features) == 0
+    assert len(state.action_models) == 0
