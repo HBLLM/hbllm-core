@@ -17,11 +17,9 @@ import numpy as np
 
 from hbllm.drivers.base import DriverAction, DriverFeedback, DriverInput, DriverModality
 from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
-from hbllm.hcir.world.morphology import MorphologicalConcept, ShapeArchetype
-from hbllm.hcir.world.motor_calibration import ActionDynamicsModel, StateMutationModel
-
+from hbllm.hcir.world.morphology import MorphologicalConcept
+from hbllm.hcir.world.motor_calibration import StateMutationModel
 from plugins.arc_agi_adapter.arc_memory import AgentPhase, HCIRCrossGameMemory
-from plugins.arc_agi_adapter.arc_perception import ARCPerceptualLifter
 
 logger = logging.getLogger(__name__)
 

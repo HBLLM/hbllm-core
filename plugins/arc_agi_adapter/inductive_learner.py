@@ -24,9 +24,8 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
-from hbllm.hcir.world.predictors.physics import PhysicsPredictor
-
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
 from .arc_spatial_agent import (
     ARC3SpatialCognitiveAgent,
