@@ -1,14 +1,18 @@
-"""Base Driver abstractions and protocols for HBLLM device and environment management."""
+"""Base Driver abstractions and protocols for HBLLM device and environment management.
+
+Drivers are thin I/O adapters that connect external environments to the HBLLM core.
+They provide raw observations and accept action commands — nothing more.
+
+All cognition, learning, planning, and interpretation happens inside the core
+(CognitiveBlackbox). Drivers have ZERO knowledge of HCIR internals.
+"""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from hbllm.hcir.spatial_planner import SpatialEntity
+from typing import Any
 
 
 class DriverCapability(StrEnum):
@@ -24,6 +28,17 @@ class DriverCapability(StrEnum):
     STATE_RESTORATION = "state_restoration"
 
 
+class DriverModality(StrEnum):
+    """Sensory modality of the driver's observations."""
+
+    GRID_2D = "grid_2d"  # ARC-AGI, Sokoban, grid worlds
+    IMAGE = "image"  # Camera, screenshots
+    AUDIO = "audio"  # Microphone, voice
+    TEXT = "text"  # Terminal, chat
+    PROPRIOCEPTION = "proprioception"  # Robot joint states
+    STRUCTURED = "structured"  # JSON/API responses
+
+
 @dataclass
 class DriverInput:
     """Standardized representation of raw input signals from a connected device/environment."""
@@ -32,6 +47,8 @@ class DriverInput:
     timestamp: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
     state_id: str = ""
+    source_id: str = ""  # Which driver produced this observation
+    modality: DriverModality = DriverModality.STRUCTURED  # Sensory modality
 
 
 @dataclass
@@ -60,11 +77,15 @@ class DriverFeedback:
 class BaseDriver(ABC):
     """Abstract Base Driver interface for all external devices, environments, and runtimes.
 
-    Standardizes the canonical cycle:
-    1. Input: get_inputs() -> DriverInput
-    2. Sensory Lifting: lift_to_hcir() -> tuple[list[SpatialEntity], set[tuple[int, int]]]
+    Drivers are pure I/O adapters. They know HOW to talk to an environment
+    but have ZERO knowledge of HCIR internals (no SpatialEntity, no EntityRole,
+    no workspace state). All interpretation and learning happens inside core.
+
+    Canonical cycle (orchestrated by DriverManager):
+    1. Input: get_inputs() -> DriverInput (raw observations)
+    2. Perception: get_perception_data() -> dict (raw structured perception for blackbox)
     3. Action Vocabulary: get_action_list() -> list[DriverAction]
-    4. Output Dispatch: send_output() -> bool
+    4. Output Dispatch: send_output() -> Any
     5. Feedback Observation: process_feedback() -> DriverFeedback
     """
 
@@ -95,7 +116,7 @@ class BaseDriver(ABC):
         ...
 
     @abstractmethod
-    def send_output(self, action: DriverAction) -> bool:
+    def send_output(self, action: DriverAction) -> Any:
         """Dispatch a concrete action command to the connected device/environment."""
         ...
 
@@ -104,9 +125,13 @@ class BaseDriver(ABC):
         """Normalize raw device output/signals into standardized DriverFeedback."""
         ...
 
-    def lift_to_hcir(self, inputs: DriverInput) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
-        """Lift raw sensory inputs into domain-neutral HCIR entities and impassable barriers.
+    def get_perception_data(self, inputs: DriverInput) -> dict[str, Any]:
+        """Return raw structured perception data for the core to interpret.
 
-        Override in perceptual/sensory drivers. Default implementation returns empty sets.
+        This replaces lift_to_hcir(). Drivers return raw structured data
+        (e.g., segmented objects, grid topology) and the core blackbox
+        does all interpretation, entity classification, and learning.
+
+        Override in domain-specific drivers. Default returns empty dict.
         """
-        return [], set()
+        return {}

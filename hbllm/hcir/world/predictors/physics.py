@@ -495,7 +495,13 @@ class PhysicsPredictor:
         if start == goal:
             return [start]
 
-        offsets: list[tuple[int, int]] = list(footprint_offsets) if footprint_offsets else [(0, 0)]
+        offsets: list[tuple[int, int]] = [(0, 0)]
+        if footprint_offsets:
+            for o in footprint_offsets:
+                ir = int(round(o[0]))
+                ic = int(round(o[1]))
+                if (ir, ic) != (0, 0) and (ir, ic) not in offsets:
+                    offsets.append((ir, ic))
         effective_barriers = set(barrier_cells)
         effective_barriers.discard((goal_r, goal_c))
         for off_r, off_c in offsets:

@@ -23,6 +23,13 @@ Architecture layers (strict dependency order)::
 """
 
 from hbllm.hcir.spatial_planner import (
+    AVATAR,
+    BARRIER,
+    DOORWAY,
+    EXIT,
+    MOVABLE_ITEM,
+    REFILL,
+    SWITCH,
     EntityGraph,
     EntityRole,
     HCIRSpatialEntityPlanner,
@@ -50,6 +57,14 @@ __all__ = [
     "EntityGraph",
     "SpatialEntity",
     "EntityRole",
+    # --- Backward Compat Aliases (deprecated) ---
+    "AVATAR",
+    "BARRIER",
+    "MOVABLE_ITEM",
+    "DOORWAY",
+    "SWITCH",
+    "REFILL",
+    "EXIT",
 ]
 
-__hcir_version__ = "1.0.0"
+__hcir_version__ = "1.1.0"

@@ -294,7 +294,7 @@ class MasterReproducibilityRunner:
         print("\n" + "=" * 80)
         print(" [9/9] RUNNING OFFICIAL ARC-AGI-3 INTERACTIVE BENCHMARK")
         print("=" * 80)
-        from plugins.arc_agi_adapter.arc_agi_3_runner import ARC3BenchmarkRunner
+        from plugins.arc_agi_adapter.arc_spatial_agent import ARC3BenchmarkRunner
 
         runner = ARC3BenchmarkRunner(max_steps_per_level=70 if self.quick else 100)
         report = runner.run_benchmark(game_ids=["wa30", "ls20"], max_levels_per_game=2)

@@ -47,9 +47,7 @@ def test_partition_detection_and_cutsets() -> None:
     assert len(eg.cut_sets) == 1
     assert eg.cut_sets[0].is_partitioned
 
-    doorways = [
-        e for e in eg.entities.values() if e.role in (EntityRole.PORTAL, EntityRole.DOORWAY)
-    ]
+    doorways = [e for e in eg.entities.values() if e.role == EntityRole.PORTAL]
     assert len(doorways) == 1
     assert doorways[0].grid_pos == (2, 5)
 

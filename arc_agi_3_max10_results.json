@@ -1,7 +1,7 @@
 {
   "total_levels_completed": 23,
   "total_levels": 183,
-  "duration_seconds": 411.22,
+  "duration_seconds": 282.78,
   "results": [
     {
       "game_id": "ar25",
@@ -10,7 +10,10 @@
       "level_results": [
         false
       ],
-      "duration": 12.96
+      "level_attempts": [
+        3
+      ],
+      "duration": 8.28
     },
     {
       "game_id": "bp35",
@@ -19,7 +22,10 @@
       "level_results": [
         false
       ],
-      "duration": 9.39
+      "level_attempts": [
+        3
+      ],
+      "duration": 21.56
     },
     {
       "game_id": "cd82",
@@ -30,7 +36,12 @@
         true,
         false
       ],
-      "duration": 4.72
+      "level_attempts": [
+        1,
+        1,
+        3
+      ],
+      "duration": 12.32
     },
     {
       "game_id": "cn04",
@@ -39,7 +50,10 @@
       "level_results": [
         false
       ],
-      "duration": 14.12
+      "level_attempts": [
+        3
+      ],
+      "duration": 21.13
     },
     {
       "game_id": "dc22",
@@ -48,7 +62,10 @@
       "level_results": [
         false
       ],
-      "duration": 20.31
+      "level_attempts": [
+        3
+      ],
+      "duration": 12.73
     },
     {
       "game_id": "ft09",
@@ -59,7 +76,12 @@
         true,
         false
       ],
-      "duration": 2.95
+      "level_attempts": [
+        1,
+        1,
+        3
+      ],
+      "duration": 3.02
     },
     {
       "game_id": "g50t",
@@ -71,7 +93,13 @@
         true,
         false
       ],
-      "duration": 11.23
+      "level_attempts": [
+        1,
+        1,
+        1,
+        3
+      ],
+      "duration": 3.64
     },
     {
       "game_id": "ka59",
@@ -80,7 +108,10 @@
       "level_results": [
         false
       ],
-      "duration": 23.05
+      "level_attempts": [
+        3
+      ],
+      "duration": 18.07
     },
     {
       "game_id": "lf52",
@@ -90,7 +121,11 @@
         true,
         false
       ],
-      "duration": 8.58
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 5.94
     },
     {
       "game_id": "lp85",
@@ -100,7 +135,11 @@
         true,
         false
       ],
-      "duration": 9.05
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 13.62
     },
     {
       "game_id": "ls20",
@@ -112,7 +151,13 @@
         true,
         false
       ],
-      "duration": 8.88
+      "level_attempts": [
+        1,
+        1,
+        1,
+        3
+      ],
+      "duration": 7.93
     },
     {
       "game_id": "m0r0",
@@ -123,7 +168,12 @@
         true,
         false
       ],
-      "duration": 12.91
+      "level_attempts": [
+        1,
+        1,
+        3
+      ],
+      "duration": 7.43
     },
     {
       "game_id": "r11l",
@@ -132,7 +182,10 @@
       "level_results": [
         false
       ],
-      "duration": 3.73
+      "level_attempts": [
+        3
+      ],
+      "duration": 4.88
     },
     {
       "game_id": "re86",
@@ -141,7 +194,10 @@
       "level_results": [
         false
       ],
-      "duration": 15.86
+      "level_attempts": [
+        3
+      ],
+      "duration": 9.6
     },
     {
       "game_id": "s5i5",
@@ -151,7 +207,11 @@
         true,
         false
       ],
-      "duration": 4.1
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 11.33
     },
     {
       "game_id": "sb26",
@@ -160,7 +220,10 @@
       "level_results": [
         false
       ],
-      "duration": 5.45
+      "level_attempts": [
+        3
+      ],
+      "duration": 3.35
     },
     {
       "game_id": "sc25",
@@ -169,7 +232,10 @@
       "level_results": [
         false
       ],
-      "duration": 13.74
+      "level_attempts": [
+        3
+      ],
+      "duration": 9.98
     },
     {
       "game_id": "sk48",
@@ -178,7 +244,10 @@
       "level_results": [
         false
       ],
-      "duration": 24.67
+      "level_attempts": [
+        3
+      ],
+      "duration": 13.65
     },
     {
       "game_id": "sp80",
@@ -188,7 +257,11 @@
         true,
         false
       ],
-      "duration": 1.57
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 1.32
     },
     {
       "game_id": "su15",
@@ -198,7 +271,11 @@
         true,
         false
       ],
-      "duration": 2.35
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 2.5
     },
     {
       "game_id": "tn36",
@@ -207,7 +284,10 @@
       "level_results": [
         false
       ],
-      "duration": 3.36
+      "level_attempts": [
+        3
+      ],
+      "duration": 1.83
     },
     {
       "game_id": "tr87",
@@ -216,7 +296,10 @@
       "level_results": [
         false
       ],
-      "duration": 4.47
+      "level_attempts": [
+        3
+      ],
+      "duration": 2.86
     },
     {
       "game_id": "tu93",
@@ -226,7 +309,11 @@
         true,
         false
       ],
-      "duration": 2.88
+      "level_attempts": [
+        1,
+        3
+      ],
+      "duration": 1.15
     },
     {
       "game_id": "vc33",
@@ -237,7 +324,12 @@
         true,
         false
       ],
-      "duration": 7.77
+      "level_attempts": [
+        1,
+        1,
+        3
+      ],
+      "duration": 3.44
     },
     {
       "game_id": "wa30",
@@ -249,7 +341,13 @@
         true,
         false
       ],
-      "duration": 183.11
+      "level_attempts": [
+        1,
+        1,
+        1,
+        3
+      ],
+      "duration": 81.23
     }
   ]
 }

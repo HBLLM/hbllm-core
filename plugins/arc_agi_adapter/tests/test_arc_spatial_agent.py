@@ -7,9 +7,11 @@ from arcengine import GameAction
 from hbllm.drivers import BaseDriver, DriverManager
 from plugins.arc_agi_adapter.arc_driver import ArcadeDriver
 from plugins.arc_agi_adapter.arc_spatial_agent import (
+    ActionDynamicsModel,
     AgentPhase,
     ARC3SpatialCognitiveAgent,
     HCIRCrossGameMemory,
+    ShapeArchetype,
 )
 
 
@@ -105,8 +107,6 @@ def test_arc_spatial_agent_autonomous_learning_and_soft_restart() -> None:
 
 def test_arc_spatial_agent_cross_game_knowledge_transfer() -> None:
     """Verify exported cross-game memory transfers motor dynamics and concepts zero-shot to a new agent."""
-    from plugins.arc_agi_adapter.arc_agi_3_runner import ActionDynamicsModel
-
     memory = HCIRCrossGameMemory()
     memory.avatar_color = 14
     memory.step_size = 4
@@ -147,8 +147,6 @@ def test_arc_spatial_agent_cross_game_knowledge_transfer() -> None:
 
 def test_arc_spatial_agent_failure_constraint_induction() -> None:
     """Verify motor collision generates HCIR negative constraints and BeliefNode in cognitive workspace."""
-    from plugins.arc_agi_adapter.arc_agi_3_runner import ActionDynamicsModel
-
     memory = HCIRCrossGameMemory()
     agent = ARC3SpatialCognitiveAgent(shared_memory=memory)
 
@@ -181,3 +179,136 @@ def test_arc_spatial_agent_failure_constraint_induction() -> None:
     ]
     assert len(belief_nodes) >= 1
     assert belief_nodes[0].properties.get("position") == (8, 10)
+
+
+def test_shape_archetype_translation_and_rotational_orbits() -> None:
+    """Verify ShapeArchetype canonicalization and 90/180/270 degree rotation orbit matching."""
+    # Horizontal bar of 3 pixels at (5, 5), (5, 6), (5, 7)
+    h_bar_coords = {(5, 5), (5, 6), (5, 7)}
+    arch_h = ShapeArchetype.from_coords(h_bar_coords)
+    assert arch_h.height == 1
+    assert arch_h.width == 3
+    assert arch_h.area == 3
+    assert arch_h.canonical_id == ((0, 0), (0, 1), (0, 2))
+
+    # Translated horizontal bar at (20, 10), (20, 11), (20, 12)
+    h_bar_translated = {(20, 10), (20, 11), (20, 12)}
+    arch_h_trans = ShapeArchetype.from_coords(h_bar_translated)
+    assert arch_h == arch_h_trans  # Exactly equal canonical archetype
+
+    # Vertical bar of 3 pixels (90 degree rotation of horizontal bar)
+    v_bar_coords = {(8, 10), (9, 10), (10, 10)}
+    arch_v = ShapeArchetype.from_coords(v_bar_coords)
+    assert arch_v.height == 3
+    assert arch_v.width == 1
+    assert arch_h.is_rotation_of(arch_v)
+    assert arch_v.is_rotation_of(arch_h)
+
+
+def test_morphological_concept_learning_and_transfer() -> None:
+    """Verify MorphologicalConcept preserves shape archetype across color mutations and transfers in memory."""
+    memory = HCIRCrossGameMemory()
+    agent = ARC3SpatialCognitiveAgent(shared_memory=memory)
+
+    # Agent observes red door shape (color 2)
+    coords = {(4, 10), (4, 11), (4, 12)}
+    arch = ShapeArchetype.from_coords(coords)
+    concept = agent._get_or_create_shape_concept(
+        arch, color=2, role=None, name_prefix="sliding_door"
+    )
+    concept.observed_colors.add(2)
+    concept.barrier_colors.add(2)
+
+    # Same shape seen in next level with blue color (color 8)
+    concept_level2 = agent._get_or_create_shape_concept(arch, color=8)
+    assert concept_level2 is concept
+    assert 2 in concept.observed_colors and 8 in concept.observed_colors
+
+    # Export to memory and import to a new agent
+    exp = agent.export_knowledge()
+    assert "shape_concepts" in exp
+
+    agent2 = ARC3SpatialCognitiveAgent()
+    agent2.import_knowledge(exp)
+    assert arch.canonical_id in agent2.shape_concepts
+    restored = agent2.shape_concepts[arch.canonical_id]
+    assert 2 in restored.observed_colors and 8 in restored.observed_colors
+
+
+def test_rotating_door_automatic_discovery_and_unblocking() -> None:
+    """Verify online detection of rotating doors: unblocks vacated passage cells and blocks new cells."""
+    agent = ARC3SpatialCognitiveAgent()
+    agent.avatar_color = 14
+    agent.avatar_centroid = (5.0, 5.0)
+
+    # Setup initial 20x20 grid with a vertical door barrier (color 7) blocking row 10, cols 10..12
+    prev_g = np.zeros((20, 20), dtype=np.uint8)
+    prev_g[5, 5] = 14  # Avatar
+    door_v = {(10, 10), (11, 10), (12, 10)}
+    for r, c in door_v:
+        prev_g[r, c] = 7
+
+    # Initialize known barriers with the vertical door
+    agent.known_barriers = np.zeros((20, 20), dtype=bool)
+    agent.learned_barrier_colors.add(7)
+    for r, c in door_v:
+        agent.known_barriers[r, c] = True
+        agent.spatial_planner.record_collision_barrier((r, c))
+
+    # Action 5 triggers 90 degree door rotation: vertical door becomes horizontal door at row 10, cols 10..12
+    curr_g = np.zeros((20, 20), dtype=np.uint8)
+    curr_g[5, 5] = 14  # Avatar
+    door_h = {(10, 10), (10, 11), (10, 12)}
+    for r, c in door_h:
+        curr_g[r, c] = 7
+
+    agent.update_causal_dynamics(action_id=5, prev_grid=prev_g, curr_grid=curr_g)
+
+    # Vacated cells (11, 10) and (12, 10) must now be UNBLOCKED in known_barriers & spatial_planner
+    assert not agent.known_barriers[11, 10]
+    assert not agent.known_barriers[12, 10]
+    assert (11, 10) not in agent.spatial_planner._learned_barriers
+    assert (12, 10) not in agent.spatial_planner._learned_barriers
+
+    # Newly occupied cells (10, 11) and (10, 12) must now be BLOCKED
+    assert agent.known_barriers[10, 11]
+    assert agent.known_barriers[10, 12]
+
+    # Morphological concept must record rotation trigger
+    v_arch = ShapeArchetype.from_coords({(11, 10), (12, 10)})
+    assert v_arch.canonical_id in agent.shape_concepts
+    door_concept = agent.shape_concepts[v_arch.canonical_id]
+    assert door_concept.is_rotatable
+    assert door_concept.rotation_trigger == 5
+
+
+def test_color_transition_door_opening() -> None:
+    """Verify online detection of color-changing door opening into passable floor."""
+    agent = ARC3SpatialCognitiveAgent()
+    agent.avatar_color = 14
+
+    prev_g = np.zeros((20, 20), dtype=np.uint8)
+    door_cells = {(8, 5), (8, 6)}
+    for r, c in door_cells:
+        prev_g[r, c] = 9  # Barrier door color 9
+
+    agent.known_barriers = np.zeros((20, 20), dtype=bool)
+    for r, c in door_cells:
+        agent.known_barriers[r, c] = True
+        agent.spatial_planner.record_collision_barrier((r, c))
+
+    # Stepping or interacting turns color 9 door to color 0 (floor)
+    curr_g = np.zeros((20, 20), dtype=np.uint8)  # All 0
+
+    agent.update_causal_dynamics(action_id=2, prev_grid=prev_g, curr_grid=curr_g)
+
+    # Door cells must now be unblocked!
+    for r, c in door_cells:
+        assert not agent.known_barriers[r, c]
+        assert (r, c) not in agent.spatial_planner._learned_barriers
+
+    arch = ShapeArchetype.from_coords(door_cells)
+    assert arch.canonical_id in agent.shape_concepts
+    concept = agent.shape_concepts[arch.canonical_id]
+    assert concept.is_color_switch
+    assert 0 in concept.passable_colors

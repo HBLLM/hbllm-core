@@ -26,11 +26,10 @@ import numpy as np
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
-from .arc_agi_3_runner import (
+from .arc_spatial_agent import (
     ActionDynamicsModel,
-    ARC3InteractiveAgent,
+    ARC3SpatialCognitiveAgent,
 )
-from .arc_spatial_agent import ARC3SpatialCognitiveAgent
 
 logger = logging.getLogger(__name__)
 
@@ -2691,8 +2690,8 @@ class InductiveHCIRAgent:
 
     def __init__(self) -> None:
         self.knowledge_base: CrossLevelKnowledgeBase = CrossLevelKnowledgeBase()
-        self.hcir_agent: ARC3InteractiveAgent = ARC3InteractiveAgent()
         self.spatial_cognitive_agent: ARC3SpatialCognitiveAgent = ARC3SpatialCognitiveAgent()
+        self.hcir_agent: ARC3SpatialCognitiveAgent = self.spatial_cognitive_agent
         self.canvas_matcher: VisualCanvasMatcher = VisualCanvasMatcher()
         self.spatial_navigator: SpatialResourceNavigator = SpatialResourceNavigator()
         self.vortex_solver: VortexAttractorSolver = VortexAttractorSolver()
@@ -2739,7 +2738,7 @@ class InductiveHCIRAgent:
         self.visited_positions: deque[tuple[int, int]] = deque(maxlen=30)
         self.visit_counts: dict[tuple[int, int], int] = {}
 
-    def reset_episode(self, retain_dynamics: bool = False) -> None:
+    def reset_episode(self, retain_dynamics: bool = False, is_retry: bool = False) -> None:
         """Reset internal step state while preserving cross-level knowledge."""
         self.prev_grid = None
         self.step_counter = 0
@@ -2752,10 +2751,11 @@ class InductiveHCIRAgent:
         self._click_targets = []
         self._click_index = 0
         self._clicked_positions.clear()
-        self._quiescent_targets.clear()
+        if not is_retry:
+            self._quiescent_targets.clear()
+            self._target_usage.clear()
+            self._entity_usage.clear()
         self._completed_controls.clear()
-        self._target_usage.clear()
-        self._entity_usage.clear()
         self._click_visited_states.clear()
         self._last_click_target = None
         self._consecutive_effective_clicks = 0
@@ -2773,14 +2773,18 @@ class InductiveHCIRAgent:
         if not retain_dynamics:
             self.active_solver_name = None
             self._effective_colors.clear()
+            self._quiescent_targets.clear()
+            self._target_usage.clear()
+            self._entity_usage.clear()
             self.knowledge_base = CrossLevelKnowledgeBase()
-            self.hcir_agent.reset_episode(retain_dynamics=False)
-            self.spatial_cognitive_agent.reset_episode(retain_dynamics=False)
+            self.hcir_agent.reset_episode(retain_dynamics=False, is_retry=False)
+            self.spatial_cognitive_agent.reset_episode(retain_dynamics=False, is_retry=False)
             self.current_level = 0
         else:
-            self.current_level += 1
-            self.hcir_agent.reset_episode(retain_dynamics=True)
-            self.spatial_cognitive_agent.reset_episode(retain_dynamics=True)
+            if not is_retry:
+                self.current_level += 1
+            self.hcir_agent.reset_episode(retain_dynamics=True, is_retry=is_retry)
+            self.spatial_cognitive_agent.reset_episode(retain_dynamics=True, is_retry=is_retry)
 
             # Transfer cross-level knowledge zero-shot
             if self.knowledge_base.controllable_signature.color is not None:
@@ -2809,17 +2813,28 @@ class InductiveHCIRAgent:
             # Sync object recipes <-> learned item and receptacle colors
             for r in self.knowledge_base.object_recipes.values():
                 if r.outcome == "pickup":
-                    self.hcir_agent.learned_item_colors[r.object_color] = {
-                        "action": r.interaction_action,
-                        "type": "pickup",
-                    }
+                    if isinstance(self.hcir_agent.learned_item_colors, set):
+                        self.hcir_agent.learned_item_colors.add(r.object_color)
+                    else:
+                        self.hcir_agent.learned_item_colors[r.object_color] = {
+                            "action": r.interaction_action,
+                            "type": "pickup",
+                        }
                     if r.delivery_zone_bounds:
                         self.hcir_agent.learned_receptacle_bounds = r.delivery_zone_bounds
                     if r.delivery_zone_color is not None:
                         self.hcir_agent.learned_receptacle_colors.add(r.delivery_zone_color)
 
-            for c, item_info in self.hcir_agent.learned_item_colors.items():
+            if isinstance(self.hcir_agent.learned_item_colors, dict):
+                item_iter = self.hcir_agent.learned_item_colors.items()
+            else:
+                item_iter = [(c, {"action": 5}) for c in self.hcir_agent.learned_item_colors]
+
+            for c, item_info in item_iter:
                 if c not in self.knowledge_base.object_recipes:
+                    rec_bounds = getattr(
+                        self.hcir_agent, "learned_receptacle_bounds", None
+                    ) or getattr(self.hcir_agent, "target_zone_bounds", None)
                     self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
                         object_color=c,
                         interaction_action=item_info.get("action", 5),
@@ -2829,7 +2844,7 @@ class InductiveHCIRAgent:
                             if self.hcir_agent.learned_receptacle_colors
                             else None
                         ),
-                        delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                        delivery_zone_bounds=rec_bounds,
                         confidence=0.8,
                         times_confirmed=1,
                     )
@@ -2902,6 +2917,20 @@ class InductiveHCIRAgent:
             action, conf = self.spatial_cognitive_agent.plan_next_action(
                 curr_grid, available_actions
             )
+            action_data = getattr(self.spatial_cognitive_agent, "last_action_data", None)
+
+            if self.spatial_cognitive_agent.avatar_color is not None:
+                self.knowledge_base.controllable_signature.color = (
+                    self.spatial_cognitive_agent.avatar_color
+                )
+            for a_id, m in self.spatial_cognitive_agent.action_models.items():
+                self.knowledge_base.action_affordances[a_id] = ActionAffordance(
+                    action_id=a_id,
+                    delta_r=m.delta_r,
+                    delta_c=m.delta_c,
+                    confidence=m.confidence,
+                    times_tested=m.probes_tested,
+                )
         else:
             action, conf = 1, 0.50
 
@@ -3214,22 +3243,17 @@ class InductiveHCIRAgent:
             self.active_solver_name = "track_maze"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 10. Spatial Cooperative / Partitioned Cut-Set Handoff Solver (e.g. wa30)
-        if self.spatial_cognitive_agent.is_cooperative_candidate(curr_grid, available_actions):
+        # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
+        if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):
             self.active_solver_name = "spatial_cooperative"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 9. Click-only affordance: for pure action-6 games
+        # 11. Click-only affordance: for pure action-6 games
         has_movement = any(a in available_actions for a in [1, 2, 3, 4])
         if not has_movement and 6 in available_actions:
             return self._plan_click_affordance(curr_grid, available_actions)
 
-        # 7. Unified Spatial Navigation & Manipulation via HCIR across all levels
-        if has_movement:
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            return self._plan_hcir_step(curr_grid, available_actions)
-
-        # 8. Universal Fallback: HCIR Epistemic Cognitive Engine
+        # 12. Universal Epistemic Spatial Cognitive Reasoning
         return self._plan_hcir_step(curr_grid, available_actions)
 
     def _plan_click_affordance(
@@ -3410,6 +3434,7 @@ class InductiveLevelResult:
     efficiency_ratio: float
     time_seconds: float
     epistemic_probes: int
+    attempts: int = 1
 
 
 @dataclass
@@ -3426,8 +3451,13 @@ class InductiveEnvironmentResult:
 class InductiveARC3BenchmarkRunner:
     """Dedicated benchmark runner evaluating InductiveHCIRAgent across ARC-3 games."""
 
-    def __init__(self, max_steps_per_level: int = 150) -> None:
+    def __init__(
+        self,
+        max_steps_per_level: int = 150,
+        max_retries_per_level: int = 2,
+    ) -> None:
         self.max_steps = max_steps_per_level
+        self.max_retries_per_level = max_retries_per_level
         self.agent = InductiveHCIRAgent()
 
     def run_environment(
@@ -3435,12 +3465,17 @@ class InductiveARC3BenchmarkRunner:
         arcade_client: Any,
         game_id: str,
         max_levels: int = 2,
+        max_retries_per_level: int | None = None,
     ) -> InductiveEnvironmentResult:
         """Evaluate the inductive learner on an environment with cross-level transfer."""
         logger.info(f"Starting Inductive HCIR evaluation on game: {game_id}...")
         self.agent = InductiveHCIRAgent()
         env = arcade_client.make(game_id, render_mode=None)
         frame_data = env.reset()
+
+        retries_allowed = (
+            self.max_retries_per_level if max_retries_per_level is None else max_retries_per_level
+        )
 
         total_levels = min(getattr(frame_data, "win_levels", 1) or 1, max_levels)
         baseline_list = [50] * total_levels
@@ -3460,46 +3495,106 @@ class InductiveARC3BenchmarkRunner:
 
         for lvl_idx in range(total_levels):
             lvl_start = time.time()
-            # Retain cross-level knowledge for lvl_idx > 0
-            self.agent.reset_episode(retain_dynamics=(lvl_idx > 0))
             lvl_actions = 0
             completed = False
-
             baseline = baseline_list[lvl_idx] if lvl_idx < len(baseline_list) else 50
-            curr_grid = (
-                frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
-            )
 
-            for _ in range(self.max_steps):
-                available_actions = getattr(frame_data, "available_actions", [1, 2, 3, 4])
-                if not available_actions:
-                    available_actions = [1, 2, 3, 4]
+            max_attempts = 1 + max(0, retries_allowed)
+            attempts_made = 0
 
-                action_int, _ = self.agent.plan_next_action(curr_grid, available_actions)
-                game_act = getattr(ARCGameAction, f"ACTION{action_int}", ARCGameAction.ACTION1)
-
-                action_data = self.agent.last_action_data
-                prev_grid = curr_grid
-                if action_data:
+            for attempt in range(max_attempts):
+                attempts_made += 1
+                is_retry = attempt > 0
+                if is_retry:
+                    logger.info(
+                        f"Retrying level {lvl_idx} (attempt {attempt + 1}/{max_attempts}) "
+                        f"on game {game_id} with accumulated knowledge..."
+                    )
+                    self.agent.reset_episode(retain_dynamics=True, is_retry=True)
                     try:
-                        frame_data = env.step(game_act, data=action_data)
-                    except TypeError:
-                        frame_data = env.step(game_act)
+                        frame_data = env.step(ARCGameAction.RESET)
+                    except Exception as e:
+                        logger.warning(f"Failed to reset level {lvl_idx} with RESET action: {e}")
+                        break
                 else:
-                    frame_data = env.step(game_act)
-                curr_grid = frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
-                lvl_actions += 1
+                    self.agent.reset_episode(retain_dynamics=(lvl_idx > 0), is_retry=False)
 
-                curr_levels_done = getattr(frame_data, "levels_completed", 0)
-                if (
-                    curr_levels_done > lvl_idx
-                    or getattr(frame_data, "state", None) == ARCGameState.WIN
-                ):
-                    completed = True
-                    break
+                curr_grid = (
+                    frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
+                )
 
-                if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
-                    env.reset()
+                for _ in range(self.max_steps):
+                    available_actions = getattr(frame_data, "available_actions", [1, 2, 3, 4])
+                    if not available_actions:
+                        available_actions = [1, 2, 3, 4]
+
+                    action_int, _ = self.agent.plan_next_action(curr_grid, available_actions)
+                    game_act = getattr(ARCGameAction, f"ACTION{action_int}", ARCGameAction.ACTION1)
+
+                    action_data = self.agent.last_action_data
+                    is_complex = (
+                        action_int == 6
+                        or getattr(game_act, "name", "") == "ACTION6"
+                        or (hasattr(game_act, "is_complex") and game_act.is_complex())
+                    )
+                    if is_complex:
+                        if (
+                            not isinstance(action_data, dict)
+                            or "x" not in action_data
+                            or "y" not in action_data
+                        ):
+                            H, W = curr_grid.shape
+                            fallback_x, fallback_y = W // 2, H // 2
+                            if (
+                                hasattr(self.agent, "current_target_pos")
+                                and self.agent.current_target_pos is not None
+                            ):
+                                fallback_y, fallback_x = (
+                                    int(round(self.agent.current_target_pos[0])),
+                                    int(round(self.agent.current_target_pos[1])),
+                                )
+                            elif (
+                                hasattr(self.agent, "current_actor_pos")
+                                and self.agent.current_actor_pos is not None
+                            ):
+                                fallback_y, fallback_x = (
+                                    int(round(self.agent.current_actor_pos[0])),
+                                    int(round(self.agent.current_actor_pos[1])),
+                                )
+                            action_data = {
+                                "x": max(0, min(W - 1, fallback_x)),
+                                "y": max(0, min(H - 1, fallback_y)),
+                            }
+
+                    prev_grid = curr_grid
+                    if action_data:
+                        try:
+                            frame_data = env.step(game_act, data=action_data)
+                        except TypeError:
+                            frame_data = env.step(game_act)
+                    else:
+                        frame_data = env.step(game_act)
+
+                    if frame_data is None:
+                        break
+
+                    curr_grid = (
+                        frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
+                    )
+                    lvl_actions += 1
+
+                    curr_levels_done = getattr(frame_data, "levels_completed", 0)
+                    if (
+                        curr_levels_done > lvl_idx
+                        or getattr(frame_data, "state", None) == ARCGameState.WIN
+                    ):
+                        completed = True
+                        break
+
+                    if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
+                        break
+
+                if completed:
                     break
 
             if completed:
@@ -3548,6 +3643,7 @@ class InductiveARC3BenchmarkRunner:
                 efficiency_ratio=eff,
                 time_seconds=time.time() - lvl_start,
                 epistemic_probes=self.agent.knowledge_base.total_epistemic_probes,
+                attempts=attempts_made,
             )
             level_results.append(lvl_res)
 
@@ -3555,7 +3651,7 @@ class InductiveARC3BenchmarkRunner:
                 # Verify goal hypotheses on the failed/final level
                 self.agent.goal_inductor.verify_hypothesis(curr_grid, completed)
                 logger.info(
-                    f"Level {lvl_idx} {'PASSED' if completed else 'FAILED'} | "
+                    f"Level {lvl_idx} {'PASSED' if completed else 'FAILED'} (after {attempts_made} attempt{'s' if attempts_made > 1 else ''}) | "
                     f"Knowledge: {len(self.agent.knowledge_base.action_affordances)} affordances, "
                     f"{len(self.agent.knowledge_base.barrier_colors)} barrier colors, "
                     f"{len(self.agent.goal_inductor.hypotheses)} goal hypotheses, "

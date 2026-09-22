@@ -6,16 +6,6 @@ Provides native HCIR cognitive evaluation harnesses for:
    hierarchical subgoal trees, and multi-step mental rollouts).
 """
 
-from .arc_agi_3_runner import (
-    ActionDynamicsModel,
-    ARC3BenchmarkReport,
-    ARC3BenchmarkRunner,
-    ARC3EnvironmentResult,
-    ARC3InteractiveAgent,
-    ARC3LevelResult,
-    ARCGameState,
-    StateMutationModel,
-)
 from .arc_agi_runner import (
     ARCBenchmarkReport,
     ARCGrid,
@@ -23,6 +13,19 @@ from .arc_agi_runner import (
     ARCTaskResult,
     GridObject,
     GridTopologyExtractor,
+)
+from .arc_spatial_agent import (
+    ActionDynamicsModel,
+    ARC3BenchmarkReport,
+    ARC3BenchmarkRunner,
+    ARC3EnvironmentResult,
+    ARC3InteractiveAgent,
+    ARC3LevelResult,
+    ARC3SpatialCognitiveAgent,
+    ARCGameState,
+    MorphologicalConcept,
+    ShapeArchetype,
+    StateMutationModel,
 )
 from .config import ARC3BenchmarkConfig
 from .control_mode import (
@@ -60,6 +63,9 @@ __all__ = [
     "ARC3EnvironmentResult",
     "ARC3BenchmarkReport",
     "ARC3InteractiveAgent",
+    "ARC3SpatialCognitiveAgent",
+    "ShapeArchetype",
+    "MorphologicalConcept",
     "ARC3BenchmarkRunner",
     "ARC3BenchmarkConfig",
     # Control-Mode Primitive

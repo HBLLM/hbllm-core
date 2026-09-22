@@ -14,11 +14,14 @@ from hbllm.drivers.base import (
     DriverInput,
 )
 from hbllm.drivers.manager import DriverManager
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
 
 class MockDeviceDriver(BaseDriver):
-    """Mock driver simulating a connected device or environment."""
+    """Mock driver simulating a connected device or environment.
+
+    Drivers are pure I/O adapters — they have NO knowledge of HCIR internals.
+    They provide raw observations and accept action commands.
+    """
 
     def __init__(self, name: str = "mock_device") -> None:
         super().__init__(
@@ -69,30 +72,30 @@ class MockDeviceDriver(BaseDriver):
             raw_response=raw_result,
         )
 
-    def lift_to_hcir(self, inputs: DriverInput) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
-        # Lift device state into a domain-neutral entity
-        ent = SpatialEntity(
-            id="device_counter",
-            role=EntityRole.RESOURCE,
-            centroid=(0.0, 0.0),
-            grid_pos=(0, 0),
-            area=1,
-            bounding_box=(0, 0, 0, 0),
-            properties={"value": inputs.raw_data.get("counter", 0)},
-        )
-        return [ent], set()
+    def get_perception_data(self, inputs: DriverInput) -> dict[str, Any]:
+        """Return raw structured data — no HCIR types, just dicts.
+
+        The core blackbox interprets this data using its registered lifters.
+        The driver has NO knowledge of SpatialEntity, EntityRole, etc.
+        """
+        return {
+            "counter_value": inputs.raw_data.get("counter", 0),
+            "status": "online",
+        }
 
 
 class MockCognitiveAgent:
-    """Mock cognitive agent interfacing via DriverProtocol."""
+    """Mock cognitive agent interfacing via DriverProtocol.
+
+    Uses the new perception_data dict interface instead of SpatialEntity.
+    """
 
     def __init__(self) -> None:
         self.causal_history: list[tuple[DriverAction, DriverFeedback]] = []
 
     def plan_next_driver_action(
         self,
-        entities: list[SpatialEntity],
-        barriers: set[tuple[int, int]],
+        perception_data: dict[str, Any],
         available_actions: list[DriverAction],
         driver_input: DriverInput,
     ) -> DriverAction:

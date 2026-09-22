@@ -52,14 +52,15 @@ class EntityRole(StrEnum):
     COMPANION = "companion"  # Autonomous cooperative agent / companion
     UNKNOWN = "unknown"
 
-    # Backward compatibility aliases
-    AVATAR = "agent"
-    BARRIER = "obstacle"
-    MOVABLE_ITEM = "manipulable"
-    DOORWAY = "portal"
-    SWITCH = "actuator"
-    REFILL = "resource"
-    EXIT = "goal"
+
+# ── Backward Compatibility Aliases (deprecated, use canonical names above) ──
+AVATAR = EntityRole.AGENT
+BARRIER = EntityRole.OBSTACLE
+MOVABLE_ITEM = EntityRole.MANIPULABLE
+DOORWAY = EntityRole.PORTAL
+SWITCH = EntityRole.ACTUATOR
+REFILL = EntityRole.RESOURCE
+EXIT = EntityRole.GOAL
 
 
 @dataclass
@@ -75,6 +76,7 @@ class SpatialEntity:
     component_id: int = -1
     is_deliverable: bool = False
     is_delivered: bool = False
+    shape_archetype: Any = None
     properties: dict[str, Any] = field(default_factory=dict)
 
     def __init__(
@@ -89,6 +91,7 @@ class SpatialEntity:
         component_id: int = -1,
         is_deliverable: bool = False,
         is_delivered: bool = False,
+        shape_archetype: Any = None,
         properties: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
@@ -101,9 +104,12 @@ class SpatialEntity:
         self.component_id = component_id
         self.is_deliverable = is_deliverable
         self.is_delivered = is_delivered
+        self.shape_archetype = shape_archetype
         self.properties = dict(properties or {})
         if color is not None:
             self.properties["visual_id"] = color
+        if shape_archetype is not None:
+            self.properties["shape_archetype"] = shape_archetype
         self.properties.update(kwargs)
 
     @property
@@ -180,6 +186,10 @@ class HCIRSpatialEntityPlanner:
         """Records an empirically discovered impassable barrier from a blocked movement attempt."""
         self._learned_barriers.add(attempted_pos)
 
+    def remove_collision_barrier(self, pos: tuple[int, int]) -> None:
+        """Removes a previously recorded collision barrier when dynamic obstacles unblock or rotate."""
+        self._learned_barriers.discard(pos)
+
     # ═══════════════════════════════════════════════════════════════════════
     # 1. TOPOLOGICAL ENTITY GRAPH CONSTRUCTION (DOMAIN-AGNOSTIC)
     # ═══════════════════════════════════════════════════════════════════════
@@ -205,16 +215,13 @@ class HCIRSpatialEntityPlanner:
         # Gestalt grouping: deduplicate co-located entities (e.g. concentric composite items)
         deduped_entities: dict[str, SpatialEntity] = {}
         for ent in entities:
-            if ent.role in (EntityRole.OBSTACLE, EntityRole.BARRIER):
+            if ent.role == EntityRole.OBSTACLE:
                 continue
             co_located = [
                 ex_id
                 for ex_id, ex in deduped_entities.items()
                 if ex.grid_pos == ent.grid_pos
-                and (
-                    ex.role == ent.role
-                    or ex.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM)
-                )
+                and (ex.role == ent.role or ex.role == EntityRole.MANIPULABLE)
             ]
             if co_located:
                 ex_id = co_located[0]
@@ -228,7 +235,7 @@ class HCIRSpatialEntityPlanner:
 
         # Identify controllable agent
         for ent in eg.entities.values():
-            if ent.role in (EntityRole.AGENT, EntityRole.AVATAR):
+            if ent.role == EntityRole.AGENT:
                 eg.agent = ent
                 break
 
@@ -236,7 +243,7 @@ class HCIRSpatialEntityPlanner:
         transit_barriers = set(eg.barriers)
         movable_barriers = set()
         for ent in eg.entities.values():
-            if ent.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM) and ent != eg.agent:
+            if ent.role == EntityRole.MANIPULABLE and ent != eg.agent:
                 transit_barriers.add(ent.grid_pos)
                 movable_barriers.add(ent.grid_pos)
         # Established doorway slots along a cut-set partition are boundary portals, not free transit
@@ -256,7 +263,7 @@ class HCIRSpatialEntityPlanner:
             receptacles = [
                 e
                 for e in eg.entities.values()
-                if e.role in (EntityRole.RECEPTACLE, EntityRole.GOAL, EntityRole.EXIT)
+                if e.role in (EntityRole.RECEPTACLE, EntityRole.GOAL)
             ]
 
             for rec in receptacles:
@@ -275,7 +282,7 @@ class HCIRSpatialEntityPlanner:
                         eg.agent.component_id = 0
                         rec.component_id = 1
                         for e_id, ent in list(eg.entities.items()):
-                            if ent.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM):
+                            if ent.role == EntityRole.MANIPULABLE:
                                 if (ent.grid_pos in cut_res.start_component) or any(
                                     math.hypot(ent.grid_pos[0] - r, ent.grid_pos[1] - c)
                                     <= step * 1.2
@@ -337,10 +344,50 @@ class HCIRSpatialEntityPlanner:
         delivered_positions: set[tuple[int, int]] | None = None,
         is_carrying: bool = False,
         carried_offset: tuple[float, float] = (0.0, 0.0),
+        has_pickup_drop: bool = True,
+        item_colors: set[int] | None = None,
     ) -> list[SequencePlanStep]:
-        """Plans the sequence of entity interactions from first principles using state-space A*."""
+        """Plans the sequence of entity interactions from first principles using state-space A*.
+
+        Agent state is read from workspace graph variables when available.
+        Explicit parameters override workspace-sourced values for backward compatibility.
+        """
         if not eg.avatar:
             return []
+
+        # ── Resolve agent state from workspace graph (MIMO blackbox reads) ──
+        if workspace is not None and hasattr(workspace, "graph"):
+            from hbllm.hcir.graph import WorldVariableNode
+
+            def _ws_var(name: str) -> Any:
+                n = workspace.graph.get_node(name)
+                return n.value if isinstance(n, WorldVariableNode) else None
+
+            # Carrying state
+            ws_carry = _ws_var("var_carrying_state")
+            if ws_carry and isinstance(ws_carry, dict):
+                if not is_carrying:
+                    is_carrying = ws_carry.get("holding", False)
+                if carried_offset == (0.0, 0.0):
+                    ws_off = ws_carry.get("offset", (0.0, 0.0))
+                    carried_offset = (float(ws_off[0]), float(ws_off[1]))
+
+            # Delivered positions
+            if delivered_positions is None:
+                ws_deliv = _ws_var("var_delivered_positions")
+                if ws_deliv and isinstance(ws_deliv, (list, set)):
+                    delivered_positions = {tuple(p) for p in ws_deliv}
+
+            # Item colors (for filtering non-item entities)
+            if item_colors is None:
+                ws_ic = _ws_var("var_learned_item_colors")
+                if ws_ic and isinstance(ws_ic, (list, set)):
+                    item_colors = set(ws_ic)
+
+            # Action capabilities
+            ws_caps = _ws_var("var_action_capabilities")
+            if ws_caps and isinstance(ws_caps, dict):
+                has_pickup_drop = ws_caps.get("pickup_drop", has_pickup_drop)
 
         # Recall active constraints from native HCIR memory
         impassable_gates, energy_records = self._recall_memory_constraints(workspace)
@@ -350,17 +397,12 @@ class HCIRSpatialEntityPlanner:
 
         # Topology 1: Topologically Partitioned Transit & Bottleneck Portal Delivery
         if is_partitioned:
-            doorways = [
-                e for e in eg.entities.values() if e.role in (EntityRole.PORTAL, EntityRole.DOORWAY)
-            ]
+            doorways = [e for e in eg.entities.values() if e.role == EntityRole.PORTAL]
             if doorways:
                 doorway_positions = {d.properties.get("gate_cell", d.grid_pos) for d in doorways}
                 occupied_gates = set()
                 for ent in eg.entities.values():
-                    if (
-                        ent.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM)
-                        and ent != eg.agent
-                    ):
+                    if ent.role == EntityRole.MANIPULABLE and ent != eg.agent:
                         for gp in doorway_positions:
                             if (
                                 math.hypot(ent.grid_pos[0] - gp[0], ent.grid_pos[1] - gp[1])
@@ -375,7 +417,24 @@ class HCIRSpatialEntityPlanner:
                     for d in doorways
                     if d.properties.get("gate_cell", d.grid_pos) not in occupied_gates
                 ]
-                active_doorways = unoccupied_doorways if unoccupied_doorways else doorways
+                # Only consider portals whose approach cell is reachable from the
+                # agent's current partition side.
+                avatar_comp_set = eg.cut_sets[0].start_component if eg.cut_sets else set()
+                reachable_unoccupied = [
+                    d
+                    for d in unoccupied_doorways
+                    if d.properties.get("approach_cell", d.grid_pos) in avatar_comp_set
+                ]
+                reachable_occupied = [
+                    d
+                    for d in doorways
+                    if d.properties.get("approach_cell", d.grid_pos) in avatar_comp_set
+                    and d not in unoccupied_doorways
+                ]
+                # Prefer: unoccupied+reachable > occupied+reachable > any
+                active_doorways = (
+                    reachable_unoccupied or reachable_occupied or unoccupied_doorways or doorways
+                )
 
                 # If the agent is ALREADY carrying an item:
                 if is_carrying:
@@ -403,9 +462,10 @@ class HCIRSpatialEntityPlanner:
                 candidate_items = [
                     e
                     for e in eg.entities.values()
-                    if e.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM)
+                    if e.role == EntityRole.MANIPULABLE
                     and e.component_id == avatar_comp
                     and not e.is_delivered
+                    and (item_colors is None or e.color in item_colors)
                     and not any(
                         math.hypot(e.grid_pos[0] - gp[0], e.grid_pos[1] - gp[1])
                         < eg.step_size * 0.75
@@ -497,16 +557,10 @@ class HCIRSpatialEntityPlanner:
 
         # Topology 2: Resource-Constrained Multi-Goal Sequence Search
         exits = [
-            e
-            for e in eg.entities.values()
-            if e.role in (EntityRole.GOAL, EntityRole.EXIT, EntityRole.RECEPTACLE)
+            e for e in eg.entities.values() if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)
         ]
-        refills = [
-            e for e in eg.entities.values() if e.role in (EntityRole.RESOURCE, EntityRole.REFILL)
-        ]
-        switches = [
-            e for e in eg.entities.values() if e.role in (EntityRole.ACTUATOR, EntityRole.SWITCH)
-        ]
+        refills = [e for e in eg.entities.values() if e.role == EntityRole.RESOURCE]
+        switches = [e for e in eg.entities.values() if e.role == EntityRole.ACTUATOR]
 
         if exits and (initial_energy is not None or refills):
             exit_ent = exits[0]
@@ -531,9 +585,7 @@ class HCIRSpatialEntityPlanner:
                             if ent.role
                             in (
                                 EntityRole.ACTUATOR,
-                                EntityRole.SWITCH,
                                 EntityRole.RESOURCE,
-                                EntityRole.REFILL,
                             )
                             else "MOVE"
                         ),
@@ -545,16 +597,16 @@ class HCIRSpatialEntityPlanner:
         def is_item_delivered(e: SpatialEntity) -> bool:
             if e.is_delivered:
                 return True
+            for rec in exits:
+                b = rec.bounding_box
+                if (b[0] <= e.grid_pos[0] <= b[1] - eg.step_size + 1) and (
+                    b[2] <= e.grid_pos[1] <= b[3] - eg.step_size + 1
+                ):
+                    return True
             if delivered_positions:
                 if e.grid_pos in delivered_positions or any(
                     math.hypot(e.grid_pos[0] - dp[0], e.grid_pos[1] - dp[1]) < eg.step_size
                     for dp in delivered_positions
-                ):
-                    return True
-            for rec in exits:
-                b = rec.bounding_box
-                if (b[0] - 1 <= e.grid_pos[0] <= b[1] + 1) and (
-                    b[2] - 1 <= e.grid_pos[1] <= b[3] + 1
                 ):
                     return True
             return False
@@ -562,11 +614,12 @@ class HCIRSpatialEntityPlanner:
         items = [
             e
             for e in eg.entities.values()
-            if e.role in (EntityRole.MANIPULABLE, EntityRole.MOVABLE_ITEM)
+            if e.role == EntityRole.MANIPULABLE
             and not is_item_delivered(e)
+            and (item_colors is None or e.color in item_colors)
         ]
-        if items and exits:
-            exit_ent = exits[0]
+        if has_pickup_drop and (items or is_carrying) and exits:
+            exit_ent = max(exits, key=lambda e: (e.role == EntityRole.RECEPTACLE, e.area))
             items.sort(
                 key=lambda e: math.hypot(
                     e.grid_pos[0] - eg.avatar.grid_pos[0],
@@ -578,23 +631,22 @@ class HCIRSpatialEntityPlanner:
             b = exit_ent.bounding_box
             step_s = eg.step_size
             slots = []
-            occupied = set(eg.barriers)
+            occupied = set()
             if delivered_positions:
                 occupied.update(delivered_positions)
             for e in eg.entities.values():
                 if e != eg.agent and e.role not in (
                     EntityRole.RECEPTACLE,
                     EntityRole.GOAL,
-                    EntityRole.EXIT,
                 ):
                     occupied.add(e.grid_pos)
 
-            snap_min_r = int(round(b[0] / step_s)) * step_s
-            snap_max_r = int(round(b[1] / step_s)) * step_s
-            snap_min_c = int(round(b[2] / step_s)) * step_s
-            snap_max_c = int(round(b[3] / step_s)) * step_s
-            for sr in range(snap_min_r, snap_max_r + 1, step_s):
-                for sc in range(snap_min_c, snap_max_c + 1, step_s):
+            snap_min_r = int(math.ceil(b[0] / step_s)) * step_s
+            max_valid_r = b[1] - step_s + 1
+            snap_min_c = int(math.ceil(b[2] / step_s)) * step_s
+            max_valid_c = b[3] - step_s + 1
+            for sr in range(snap_min_r, max_valid_r + 1, step_s):
+                for sc in range(snap_min_c, max_valid_c + 1, step_s):
                     pos = (sr, sc)
                     if pos not in occupied:
                         slots.append(pos)
@@ -744,7 +796,7 @@ class HCIRSpatialEntityPlanner:
                 )
             return plan
 
-        nav_goals = [e for e in exits if e.role in (EntityRole.GOAL, EntityRole.EXIT)]
+        nav_goals = [e for e in exits if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)]
         if nav_goals:
             return [
                 SequencePlanStep(
@@ -875,15 +927,6 @@ class HCIRSpatialEntityPlanner:
             ):
                 return act
 
-        # Fallback to standard cardinal mapping
-        if dr < 0:
-            return 1
-        if dr > 0:
-            return 2
-        if dc < 0:
-            return 3
-        if dc > 0:
-            return 4
         return None
 
     def compute_safe_path(
@@ -1006,9 +1049,7 @@ class HCIRSpatialEntityPlanner:
                         if dist <= energy:
                             # Resource restores budget to full, actuator consumes energy
                             nxt_energy = (
-                                initial_energy
-                                if nxt.role in (EntityRole.RESOURCE, EntityRole.REFILL)
-                                else energy - dist
+                                initial_energy if nxt.role == EntityRole.RESOURCE else energy - dist
                             )
                             nxt_mask = mask | (1 << idx)
                             heapq.heappush(

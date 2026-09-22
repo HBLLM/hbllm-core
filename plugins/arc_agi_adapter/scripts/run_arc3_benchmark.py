@@ -6,7 +6,7 @@ import logging
 import time
 from pathlib import Path
 
-from plugins.arc_agi_adapter.arc_agi_3_runner import ARC3BenchmarkRunner
+from plugins.arc_agi_adapter.arc_spatial_agent import ARC3BenchmarkRunner
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("arc3_runner")

@@ -299,13 +299,15 @@ class HierarchicalGoalDecomposer:
 
             if reachable_candidates:
                 # Prioritize candidates matching learned target features from HCIR workspace
-                target_feat_vars = workspace.graph.get_node(
-                    "var_target_entity_features"
-                ) or workspace.graph.get_node("var_learned_item_colors")
+                target_feat_vars = (
+                    workspace.graph.get_node("var_target_features")
+                    or workspace.graph.get_node("var_target_entity_features")
+                    or workspace.graph.get_node("var_learned_item_colors")
+                )
                 learned_features = (
                     set(target_feat_vars.value)
                     if isinstance(target_feat_vars, WorldVariableNode)
-                    and isinstance(target_feat_vars.value, list)
+                    and isinstance(target_feat_vars.value, (list, set))
                     else set()
                 )
 
@@ -314,6 +316,8 @@ class HierarchicalGoalDecomposer:
                     c_feat = (
                         cand_dict.get("feature_id")
                         or cand_dict.get("visual_id")
+                        or cand_dict.get("visual_feature")
+                        or cand_dict.get("target_feature")
                         or cand_dict.get("color")
                     )
                     is_known = 0 if (c_feat is not None and c_feat in learned_features) else 1
@@ -326,6 +330,8 @@ class HierarchicalGoalDecomposer:
                 cand_feat = (
                     best_cand.get("feature_id")
                     or best_cand.get("visual_id")
+                    or best_cand.get("visual_feature")
+                    or best_cand.get("target_feature")
                     or best_cand.get("color")
                 )
 
@@ -341,7 +347,7 @@ class HierarchicalGoalDecomposer:
                         "target_position": cand_pos,
                         "item_position": best_cand.get("item_position", cand_pos),
                         "target_feature": cand_feat,
-                        "item_color": cand_feat,
+                        "visual_feature": cand_feat,
                         "item_area": best_cand.get("area"),
                         "target_entity": cand_id,
                         "parent_goal_id": primary_goal.id,
@@ -536,12 +542,16 @@ class HierarchicalGoalDecomposer:
         target_template: np.ndarray,
         available_tools: list[dict[str, Any]],
         current_tool_id: Any | None = None,
+        current_feature_value: Any | None = None,
+        feature_selectors: list[dict[str, Any]] | None = None,
+        # Backward-compatibility kwargs
         current_palette_color: int | None = None,
         palette_swatches: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
     ) -> GoalNode | None:
-        """Decompose a pattern alignment goal into tool selection, color selection, and application subgoals.
+        """Decompose a pattern alignment goal into tool selection, feature selection, and application subgoals.
 
-        Finds the tool and color that maximize visual Hamming distance reduction between the
+        Finds the tool and target feature value that maximize distance reduction between the
         editable canvas and the reference template.
         """
         if canvas_matrix.shape != target_template.shape:
@@ -551,8 +561,13 @@ class HierarchicalGoalDecomposer:
         if not np.any(diff_mask):
             return None
 
+        active_feature = (
+            current_feature_value if current_feature_value is not None else current_palette_color
+        )
+        selectors = feature_selectors if feature_selectors is not None else palette_swatches
+
         best_tool: dict[str, Any] | None = None
-        best_target_color: int | None = None
+        best_target_feature: Any | None = None
         best_net_gain: int = -999999
 
         for tool in available_tools:
@@ -565,54 +580,56 @@ class HierarchicalGoalDecomposer:
             if not np.any(sector_diff):
                 continue
 
-            # Candidate color: most frequent color in target template within the sector
-            target_colors = target_template[sector_diff]
-            if len(target_colors) == 0:
+            # Candidate feature: most frequent feature in target template within the sector
+            target_features = target_template[sector_diff]
+            if len(target_features) == 0:
                 continue
-            cand_color = int(np.bincount(target_colors).argmax())
+            cand_feat = int(np.bincount(target_features).argmax())
 
-            # Evaluate net improvement if we stamp with cand_color
+            # Evaluate net improvement if we stamp with cand_feat
             corrects = int(
-                np.sum((canvas_matrix != cand_color) & (target_template == cand_color) & mask)
+                np.sum((canvas_matrix != cand_feat) & (target_template == cand_feat) & mask)
             )
             corrupts = int(
-                np.sum((canvas_matrix == cand_color) & (target_template != cand_color) & mask)
+                np.sum((canvas_matrix == cand_feat) & (target_template != cand_feat) & mask)
             )
             net_gain = corrects - corrupts
 
             if net_gain > best_net_gain:
                 best_net_gain = net_gain
                 best_tool = tool
-                best_target_color = cand_color
+                best_target_feature = cand_feat
 
-        if best_tool is None or best_target_color is None or best_net_gain <= 0:
+        if best_tool is None or best_target_feature is None or best_net_gain <= 0:
             return None
 
         tool_id = best_tool.get("tool_id")
-        # Step 1: Precondition - Palette color match
-        if current_palette_color is not None and current_palette_color != best_target_color:
-            swatch_coord = None
-            if palette_swatches:
-                for sw in palette_swatches:
-                    if sw.get("color") == best_target_color:
-                        swatch_coord = sw.get("coord")
+        # Step 1: Precondition - Feature selector match
+        if active_feature is not None and active_feature != best_target_feature:
+            selector_coord = None
+            if selectors:
+                for sw in selectors:
+                    sw_feat = sw.get("feature_id", sw.get("visual_id", sw.get("color")))
+                    if sw_feat == best_target_feature:
+                        selector_coord = sw.get("coord", sw.get("position"))
                         break
 
-            subgoal_id = f"subgoal_select_color_{best_target_color}"
-            color_subgoal = GoalNode(
+            subgoal_id = f"subgoal_select_feature_{best_target_feature}"
+            feature_subgoal = GoalNode(
                 id=subgoal_id,
-                description=f"Select palette color {best_target_color} for pattern alignment",
+                description=f"Select feature value {best_target_feature} for pattern alignment",
                 priority=min(1.0, max(0.0, float(primary_goal.priority))),
                 resolved=False,
                 properties={
-                    "affordance": "SELECT_COLOR",
-                    "target_color": best_target_color,
-                    "target_position": swatch_coord,
+                    "affordance": "SELECT_FEATURE",
+                    "target_feature": best_target_feature,
+                    "target_color": best_target_feature,  # backward compat
+                    "target_position": selector_coord,
                     "parent_goal_id": primary_goal.id,
                 },
             )
-            workspace.upsert_node(color_subgoal)
-            return color_subgoal
+            workspace.upsert_node(feature_subgoal)
+            return feature_subgoal
 
         # Step 2: Precondition - Tool alignment match
         if current_tool_id is not None and current_tool_id != tool_id:
