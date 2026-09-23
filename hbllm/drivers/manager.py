@@ -54,6 +54,9 @@ class DriverManager:
     def set_cognitive_engine(self, engine: Any) -> None:
         """Embed a CognitiveBlackbox for self-contained cognitive operation."""
         self._cognitive_engine = engine
+        if hasattr(engine, "register_driver"):
+            for driver in self._drivers.values():
+                engine.register_driver(driver)
         logger.info("Embedded CognitiveBlackbox into DriverManager")
 
     # ── Driver Registration & Lifecycle ───────────────────────────────────
@@ -61,6 +64,10 @@ class DriverManager:
     def register(self, driver: BaseDriver) -> None:
         """Register a driver instance in the manager."""
         self._drivers[driver.name] = driver
+        if self._cognitive_engine is not None and hasattr(
+            self._cognitive_engine, "register_driver"
+        ):
+            self._cognitive_engine.register_driver(driver)
         logger.info("Registered driver: '%s'", driver.name)
 
     def get_driver(self, name: str) -> BaseDriver:

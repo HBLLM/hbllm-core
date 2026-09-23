@@ -18,6 +18,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -687,6 +688,9 @@ class ARC3InteractiveAgent:
         action_id: int,
         prev_grid: np.ndarray,
         curr_grid: np.ndarray,
+        won: bool = False,
+        lost: bool = False,
+        **kwargs: Any,
     ) -> None:
         """Infer avatar identity, motor displacement, barriers, and state mutations."""
         if prev_grid.shape != curr_grid.shape:
@@ -2319,6 +2323,43 @@ class ARC3InteractiveAgent:
         self.last_action_data = None
         return best_action, confidence
 
+    def load_knowledge(self, knowledge_dir: Path | str, game_id: str = "arc_agi") -> bool:
+        """Load persistent KnowledgeGraph from disk into agent state."""
+        kg_path = Path(knowledge_dir) / f"{game_id}_knowledge_graph.json"
+        if not kg_path.exists():
+            return False
+        try:
+            import json
+
+            with open(kg_path) as f:
+                data = json.load(f)
+            for ent in data.get("entities", []):
+                attrs = ent.get("attributes", {})
+                if ent.get("type") == "perceptual_feature" and attrs.get("role") == "avatar":
+                    self.avatar_color = attrs.get("feature_id")
+                elif ent.get("type") == "perceptual_feature" and attrs.get("role") == "obstacle":
+                    feat = attrs.get("feature_id")
+                    if feat is not None:
+                        self.pushable_colors.discard(feat)
+                elif ent.get("type") == "motor_action":
+                    act_id = attrs.get("action_id")
+                    if act_id:
+                        model = self.action_models.get_action_model(act_id)
+                        model.delta_r = attrs.get("delta_r", 0)
+                        model.delta_c = attrs.get("delta_c", 0)
+                        model.confidence = attrs.get("confidence", 0.6)
+                        model.probes_tested = attrs.get("probes_tested", 1)
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load knowledge in ARC3InteractiveAgent: {e}")
+            return False
+
+    def save_knowledge(self, knowledge_dir: Path | str, game_id: str = "arc_agi") -> Path:
+        """Save persistent KnowledgeGraph to disk."""
+        target_dir = Path(knowledge_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        return target_dir / f"{game_id}_knowledge_graph.json"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. ARC-AGI-3 Benchmark Runner
@@ -2328,8 +2369,13 @@ class ARC3InteractiveAgent:
 class ARC3BenchmarkRunner:
     """Executes the official ARC-AGI-3 interactive benchmark evaluation."""
 
-    def __init__(self, max_steps_per_level: int = 150) -> None:
+    def __init__(
+        self,
+        max_steps_per_level: int = 150,
+        knowledge_dir: Path | str | None = None,
+    ) -> None:
         self.max_steps = max_steps_per_level
+        self.knowledge_dir = Path(knowledge_dir) if knowledge_dir else None
         self.agent = ARC3InteractiveAgent()
 
     def run_environment(
@@ -2337,10 +2383,25 @@ class ARC3BenchmarkRunner:
         arcade_client: Any,
         game_id: str,
         max_levels: int | None = None,
+        knowledge_dir: Path | str | None = None,
     ) -> ARC3EnvironmentResult:
         """Run the HBLLM interactive agent through an ARC-AGI-3 game environment."""
         logger.info(f"Starting ARC-AGI-3 evaluation on game: {game_id}...")
         start_time = time.time()
+
+        # Isolate agent per environment to prevent cross-game coordinate contamination
+        self.agent = ARC3InteractiveAgent()
+
+        # Load existing core KnowledgeGraph if available
+        k_dir = knowledge_dir or self.knowledge_dir
+        if k_dir:
+            loaded = self.agent.load_knowledge(k_dir, game_id=game_id)
+            if loaded:
+                logger.info(
+                    "[CORE KNOWLEDGE GRAPH] Loaded prior knowledge for '%s' from %s",
+                    game_id,
+                    k_dir,
+                )
 
         env = arcade_client.make(game_id, render_mode=None)
         frame_data = env.reset()
@@ -2407,19 +2468,24 @@ class ARC3BenchmarkRunner:
                 curr_grid = frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
                 lvl_actions += 1
 
-                # Update causal motor models
-                self.agent.update_causal_dynamics(action_int, prev_grid, curr_grid)
-
                 # Check level completion
                 curr_levels_done = getattr(frame_data, "levels_completed", 0)
-                if (
+                is_win = (
                     curr_levels_done > lvl_idx
                     or getattr(frame_data, "state", None) == ARCGameState.WIN
-                ):
+                )
+                is_game_over = getattr(frame_data, "state", None) == ARCGameState.GAME_OVER
+
+                # Update causal motor models
+                self.agent.update_causal_dynamics(
+                    action_int, prev_grid, curr_grid, won=is_win, lost=is_game_over
+                )
+
+                if is_win:
                     completed = True
                     break
 
-                if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
+                if is_game_over:
                     # Reset current level
                     env.reset()
                     break
@@ -2471,6 +2537,22 @@ class ARC3BenchmarkRunner:
             else 0.0
         )
 
+        # Persist updated KnowledgeGraph to disk
+        if k_dir:
+            try:
+                saved_path = self.agent.save_knowledge(k_dir, game_id=game_id)
+                logger.info(
+                    "[CORE KNOWLEDGE GRAPH] Saved updated knowledge graph for '%s' to %s",
+                    game_id,
+                    saved_path,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[CORE KNOWLEDGE GRAPH] Failed to save knowledge graph for '%s': %s",
+                    game_id,
+                    e,
+                )
+
         return ARC3EnvironmentResult(
             game_id=game_id,
             total_levels=total_levels,
@@ -2488,6 +2570,7 @@ class ARC3BenchmarkRunner:
         self,
         game_ids: list[str] | None = None,
         max_levels_per_game: int = 2,
+        knowledge_dir: Path | str | None = None,
     ) -> ARC3BenchmarkReport:
         """Run full ARC-AGI-3 benchmark battery across multiple official environments."""
         if Arcade is None:
@@ -2505,10 +2588,13 @@ class ARC3BenchmarkRunner:
 
         start_time = time.time()
         env_results: list[ARC3EnvironmentResult] = []
+        k_dir = knowledge_dir or self.knowledge_dir
 
         for gid in target_ids:
             try:
-                res = self.run_environment(arc, gid, max_levels=max_levels_per_game)
+                res = self.run_environment(
+                    arc, gid, max_levels=max_levels_per_game, knowledge_dir=k_dir
+                )
                 env_results.append(res)
             except Exception as e:
                 logger.error(f"Error executing ARC-AGI-3 environment '{gid}': {e}")

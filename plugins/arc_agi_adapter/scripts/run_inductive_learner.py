@@ -37,6 +37,20 @@ def main() -> None:
         help="Maximum levels per game to evaluate (default: 2).",
     )
     parser.add_argument(
+        "--max-retries",
+        "--retries",
+        dest="max_retries",
+        type=int,
+        default=2,
+        help="Number of retries per level if attempt fails (default: 2, total attempts = 1 + retries).",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=120,
+        help="Maximum action steps per level attempt (default: 120).",
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
         default=os.getenv("ARC_API_KEY", ""),
@@ -54,6 +68,12 @@ def main() -> None:
         default="arc_agi_3_inductive_scorecard.json",
         help="Path to save JSON scorecard.",
     )
+    parser.add_argument(
+        "--knowledge-dir",
+        type=str,
+        default="data/cognitive_memory/arc_agi_3",
+        help="Directory to persist and load core KnowledgeGraph files (default: data/cognitive_memory/arc_agi_3).",
+    )
     args = parser.parse_args()
 
     try:
@@ -64,7 +84,11 @@ def main() -> None:
         logger.error(f"Failed to initialize ARC Arcade client: {e}")
         return
 
-    runner = InductiveARC3BenchmarkRunner(max_steps_per_level=120)
+    runner = InductiveARC3BenchmarkRunner(
+        max_steps_per_level=args.max_steps,
+        max_retries_per_level=args.max_retries,
+        knowledge_dir=args.knowledge_dir,
+    )
     results = []
     start = time.time()
     game_list = args.games
@@ -74,13 +98,21 @@ def main() -> None:
         )
         game_list = sorted([e.game_id.split("-")[0] for e in envs])
 
-    for gid in game_list:
+    for idx, gid in enumerate(game_list, 1):
         try:
             max_lvl = (
                 1 if (gid in ["su15", "lf52", "ka59"] and args.max_levels == 2) else args.max_levels
             )
-            res = runner.run_environment(arcade_client, gid, max_levels=max_lvl)
+            res = runner.run_environment(
+                arcade_client,
+                gid,
+                max_levels=max_lvl,
+                max_retries_per_level=args.max_retries,
+            )
             results.append(res)
+            logger.info(
+                f"[{idx}/{len(game_list)}] Completed {gid}: {res.levels_completed}/{res.total_levels} levels passed ({res.total_actions} actions)"
+            )
         except Exception as e:
             logger.error(f"Error evaluating game {gid}: {e}")
 
@@ -133,6 +165,20 @@ def main() -> None:
     Path(args.output_report).write_text(report_md, encoding="utf-8")
 
     scorecard_data = {
+        "total_levels_completed": total_completed,
+        "total_levels": total_levels,
+        "duration_seconds": duration,
+        "results": [
+            {
+                "game_id": r.game_id,
+                "levels_completed": r.levels_completed,
+                "total_levels": r.total_levels,
+                "level_results": [lvl.completed for lvl in r.level_results],
+                "level_attempts": [getattr(lvl, "attempts", 1) for lvl in r.level_results],
+                "duration": round(sum(lvl.time_seconds for lvl in r.level_results), 2),
+            }
+            for r in results
+        ],
         "games": [
             {
                 "game_id": r.game_id,
@@ -154,7 +200,7 @@ def main() -> None:
                 ],
             }
             for r in results
-        ]
+        ],
     }
     Path(args.output_json).write_text(json.dumps(scorecard_data, indent=2), encoding="utf-8")
     print("\n" + report_md + "\n")

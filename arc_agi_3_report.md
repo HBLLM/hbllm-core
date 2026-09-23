@@ -1,40 +1,33 @@
 # Official ARC-AGI-3 Interactive Reasoning Benchmark Report
-**Evaluation Date**: 2026-09-18 14:18:16
-**Overall Level Completion Rate**: **3/8 (37.5%)**
-**Mean Fluid Action Efficiency**: **60.6%** (vs Human Baseline)
-**Mean Epistemic Brier Uncertainty**: **0.4646**
-**Total Actions Executed**: 456 across 4 environment(s)
-**Total Evaluation Time**: 21.52s
+**Evaluation Date**: 2026-09-23 09:42:12
+**Overall Level Completion Rate**: **2/6 (33.3%)**
+**Mean Fluid Action Efficiency**: **41.8%** (vs Human Baseline)
+**Mean Epistemic Brier Uncertainty**: **0.4608**
+**Total Actions Executed**: 405 across 3 environment(s)
+**Total Evaluation Time**: 53.60s
 
 ## 1. Environment Performance Breakdown
 | Environment | Levels Completed | Win Rate | Actions Taken | Human Baseline | Efficiency | Brier Error |
 |---|---|---|---|---|---|---|
-| `ls20` | 1/2 | 50.0% | 99 | 145 | **35.5%** | 0.4297 |
-| `wa30` | 2/2 | 100.0% | 91 | 190 | **206.8%** | 0.0182 |
-| `cd82` | 0/2 | 0.0% | 200 | 63 | **0.0%** | 0.6880 |
-| `su15` | 0/2 | 0.0% | 66 | 64 | **0.0%** | 0.7225 |
+| `wa30` | 1/2 | 50.0% | 109 | 190 | **88.8%** | 0.4100 |
+| `ls20` | 1/2 | 50.0% | 96 | 145 | **36.7%** | 0.4653 |
+| `cd82` | 0/2 | 0.0% | 200 | 63 | **0.0%** | 0.5070 |
 
 ## 2. Level-by-Level Trace & Causal Dynamics
-### Environment: `ls20`
-| Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |
-|---|---|---|---|---|---|---|
-| Level 1 | **PASSED** | 31 | 22 | 71.0% | 0.0133 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |
-| Level 2 | **ACTIVE** | 68 | 123 | 0.0% | 0.8461 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |
-
 ### Environment: `wa30`
 | Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |
 |---|---|---|---|---|---|---|
-| Level 1 | **PASSED** | 36 | 71 | 197.2% | 0.0207 | `A1:(-4,+0), A2:(+4,+0), A3:(+0,-3), A4:(+0,+4), A5:(+0,+0)` |
-| Level 2 | **PASSED** | 55 | 119 | 216.4% | 0.0157 | `A1:(+0,-4), A2:(+0,-4), A3:(+0,-4), A4:(+0,-4)` |
+| Level 1 | **PASSED** | 40 | 71 | 177.5% | 0.0119 | `A1:(-4,+0), A2:(+4,+0), A3:(+0,-4), A4:(+0,+4), A5:(+0,+0)` |
+| Level 2 | **ACTIVE** | 69 | 119 | 0.0% | 0.8082 | `A1:(-4,+0), A2:(+4,+0), A3:(+0,-4), A4:(+0,+4), A5:(+0,+0)` |
+
+### Environment: `ls20`
+| Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |
+|---|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 30 | 22 | 73.3% | 0.0459 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |
+| Level 2 | **ACTIVE** | 66 | 123 | 0.0% | 0.8847 | `A1:(-5,+0), A2:(+5,+0), A3:(+0,-5), A4:(+0,+5)` |
 
 ### Environment: `cd82`
 | Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |
 |---|---|---|---|---|---|---|
-| Level 1 | **ACTIVE** | 100 | 55 | 0.0% | 0.5423 | `A1:(-5,+1), A2:(+6,-1), A3:(-1,-5), A4:(+1,+6)` |
-| Level 2 | **ACTIVE** | 100 | 8 | 0.0% | 0.8338 | `A1:(-5,+1), A2:(+6,-1), A3:(+1,-5), A4:(+1,+6), A6:(+0,+0), A5:(+0,+0)` |
-
-### Environment: `su15`
-| Level | Completed | Actions | Baseline | Efficiency | Brier | Inferred Motor Dynamics |
-|---|---|---|---|---|---|---|
-| Level 1 | **ACTIVE** | 33 | 22 | 0.0% | 0.7225 | `A6:(+0,+0)` |
-| Level 2 | **ACTIVE** | 33 | 42 | 0.0% | 0.7225 | `A6:(+0,+0)` |
+| Level 1 | **ACTIVE** | 100 | 55 | 0.0% | 0.5210 | `A1:(-4,+1), A2:(+4,+0), A3:(+0,-4), A4:(+1,+4), A5:(+0,+0)` |
+| Level 2 | **ACTIVE** | 100 | 8 | 0.0% | 0.4931 | `A1:(-5,-1), A2:(+6,+1), A3:(+1,-5), A4:(-1,+6), A5:(+0,+0)` |

@@ -135,3 +135,27 @@ class BaseDriver(ABC):
         Override in domain-specific drivers. Default returns empty dict.
         """
         return {}
+
+    def resolve_action(
+        self,
+        intent: Any,
+        available_actions: list[DriverAction],
+        context: dict[str, Any] | None = None,
+    ) -> DriverAction | None:
+        """Dynamically resolve an action matching a requested cognitive intent or plan step.
+
+        Drivers can override this method to provide domain-specific action resolution.
+        The default implementation matches requested intent against DriverAction.semantic_intent.
+        """
+        if not available_actions:
+            return None
+        target_intent = str(intent).strip().lower()
+        for a in available_actions:
+            if a.semantic_intent and a.semantic_intent.strip().lower() == target_intent:
+                return a
+        for a in available_actions:
+            if a.semantic_intent:
+                norm = a.semantic_intent.strip().lower()
+                if target_intent in norm or norm in target_intent:
+                    return a
+        return None

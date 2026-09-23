@@ -22,21 +22,44 @@ Architecture:
 from __future__ import annotations
 
 import logging
+import math
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
-from hbllm.drivers.base import DriverAction, DriverFeedback, DriverInput
-from hbllm.hcir.graph import WorldVariableNode
+import numpy as np
+
+from hbllm.drivers.base import (
+    BaseDriver,
+    DriverAction,
+    DriverFeedback,
+    DriverInput,
+    DriverModality,
+)
+from hbllm.hcir.graph import (
+    BeliefNode,
+    FalsificationStatus,
+    GoalNode,
+    HCIRNodeType,
+    WorldVariableNode,
+)
+from hbllm.hcir.learning_loop import LearningLoopEngine
+from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
+    EntityRole,
     HCIRSpatialEntityPlanner,
     SequencePlanStep,
+    SpatialActionIntent,
     SpatialEntity,
 )
 from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+from hbllm.memory.knowledge_graph import KnowledgeGraph
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +74,159 @@ PerceptionLifterFn = Callable[
     [dict[str, Any], "AgentState"],
     tuple[list[SpatialEntity], set[tuple[int, int]]],
 ]
+
+
+def default_grid_2d_lifter(
+    perception_data: dict[str, Any],
+    state: AgentState,
+) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
+    """Domain-agnostic perception lifter for 2D grid modalities.
+
+    Extracts spatial entities and barriers using empirical feature memory:
+    - Segments connected components of non-background cells.
+    - Estimates background feature from perimeter distribution.
+    - Identifies avatar from state.avatar_feature or perception data.
+    - Dynamically maps entity roles:
+        * Feature in learned_target_features -> EntityRole.GOAL
+        * Feature in learned_obstacle_features -> barriers
+        * Unknown features -> EntityRole.UNKNOWN
+    """
+    grid = perception_data.get("grid")
+    if grid is None:
+        return [], set()
+    if not isinstance(grid, np.ndarray):
+        grid = np.array(grid)
+    if grid.ndim != 2:
+        return [], set()
+
+    H, W = grid.shape
+
+    # Update avatar feature if provided in perception data
+    if perception_data.get("avatar_feature") is not None:
+        state.avatar_feature = perception_data.get("avatar_feature")
+    elif perception_data.get("avatar_color") is not None:
+        state.avatar_feature = perception_data.get("avatar_color")
+
+    # Estimate background feature from perimeter mode
+    perimeter = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
+    vals, counts = np.unique(perimeter, return_counts=True)
+    if state.avatar_feature is not None and len(vals) > 1:
+        other_idx = [i for i, v in enumerate(vals) if v != state.avatar_feature]
+        bg_val = (
+            int(vals[other_idx[np.argmax(counts[other_idx])]])
+            if other_idx
+            else int(vals[np.argmax(counts)])
+        )
+    else:
+        bg_val = int(vals[np.argmax(counts)]) if len(vals) > 0 else 0
+
+    barriers: set[tuple[int, int]] = set()
+    for r in range(H):
+        for c in range(W):
+            if int(grid[r, c]) in state.learned_obstacle_features:
+                barriers.add((r, c))
+
+    visited = np.zeros((H, W), dtype=bool)
+    entities: list[SpatialEntity] = []
+
+    # 1. Lift Avatar Entity if known
+    if state.avatar_feature is not None:
+        avatar_pts = np.argwhere(grid == state.avatar_feature)
+        if len(avatar_pts) > 0:
+            for ar, ac in avatar_pts:
+                visited[ar, ac] = True
+            min_r, min_c = avatar_pts.min(axis=0)
+            max_r, max_c = avatar_pts.max(axis=0)
+            cr, cc = avatar_pts.mean(axis=0)
+            avatar_ent = SpatialEntity(
+                id="agent",
+                role=EntityRole.AGENT,
+                centroid=(float(cr), float(cc)),
+                grid_pos=(int(round(cr)), int(round(cc))),
+                area=len(avatar_pts),
+                bounding_box=(int(min_r), int(max_r), int(min_c), int(max_c)),
+                feature_id=state.avatar_feature,
+                properties={
+                    "cells": [tuple(p) for p in avatar_pts],
+                    "feature": state.avatar_feature,
+                },
+            )
+            entities.append(avatar_ent)
+
+    # 2. Lift Other Connected Components
+    for r in range(H):
+        for c in range(W):
+            if visited[r, c]:
+                continue
+            val = int(grid[r, c])
+            if val == bg_val:
+                visited[r, c] = True
+                continue
+            if val in state.learned_obstacle_features:
+                visited[r, c] = True
+                continue
+
+            # Connected component flood fill
+            cells: list[tuple[int, int]] = []
+            queue = [(r, c)]
+            visited[r, c] = True
+            while queue:
+                cr, cc = queue.pop()
+                cells.append((cr, cc))
+                for nr, nc in ((cr - 1, cc), (cr + 1, cc), (cr, cc - 1), (cr, cc + 1)):
+                    if 0 <= nr < H and 0 <= nc < W and not visited[nr, nc]:
+                        if int(grid[nr, nc]) == val:
+                            visited[nr, nc] = True
+                            queue.append((nr, nc))
+
+            min_r = min(p[0] for p in cells)
+            max_r = max(p[0] for p in cells)
+            min_c = min(p[1] for p in cells)
+            max_c = max(p[1] for p in cells)
+
+            # Check if this component is an outer border frame or massive wall partition
+            is_outer_frame = (
+                (min_r <= 1 and max_r >= H - 2 and min_c <= 1 and max_c >= W - 2)
+                or (max_r - min_r >= H - 2 and max_c - min_c >= W - 2)
+                or (len(cells) > H * W * 0.35)
+            )
+            if is_outer_frame:
+                barriers.update(cells)
+                continue
+
+            centroid = (
+                sum(p[0] for p in cells) / len(cells),
+                sum(p[1] for p in cells) / len(cells),
+            )
+            grid_pos = (int(round(centroid[0])), int(round(centroid[1])))
+
+            if val in state.learned_target_features:
+                role = EntityRole.GOAL
+                ent_id = f"goal_{val}_{len(entities)}"
+            elif not state.learned_target_features and (
+                1 <= len(cells) <= max(64, int(H * W * 0.08))
+            ):
+                # Gestalt Visual Saliency: isolated, rare foreground cluster hypothesized as candidate goal
+                role = EntityRole.GOAL
+                ent_id = f"cand_goal_{val}_{len(entities)}"
+            else:
+                role = EntityRole.UNKNOWN
+                ent_id = f"entity_{val}_{len(entities)}"
+
+            saliency = 1.0 / math.log2(2 + len(cells))
+            ent = SpatialEntity(
+                id=ent_id,
+                role=role,
+                centroid=centroid,
+                grid_pos=grid_pos,
+                area=len(cells),
+                bounding_box=(min_r, max_r, min_c, max_c),
+                feature_id=val,
+                properties={"cells": cells, "feature": val, "saliency": saliency},
+            )
+            entities.append(ent)
+
+    return entities, barriers
 
 
 class AgentPhase(StrEnum):
@@ -72,7 +248,18 @@ class CarryingState:
 
 
 class AgentState:
-    """All mutable cognitive agent state, owned by the blackbox (not plugins)."""
+    """All mutable cognitive agent state, owned by the blackbox (not plugins).
+
+    Domain-agnostic perceptual state, empirical action models, and exploration frontiers:
+    - learned_obstacle_features: Set of perceptual features recognized as impassable.
+    - learned_target_features: Set of perceptual features recognized as goals or items.
+    - learned_traversable_features: Set of perceptual features recognized as open pathways.
+    - avatar_feature: Perceptual feature identifying the controllable agent entity.
+    - action_models: Empirical dynamics models f(action) -> (delta_r, delta_c, confidence).
+    - step_size: Inferred lattice stride or movement quantization.
+    - explored_entity_positions: Historical coordinates of explored entities and waypoints.
+    - explored_entity_ids: IDs of evaluated entities.
+    """
 
     def __init__(
         self,
@@ -86,52 +273,102 @@ class AgentState:
         step_count: int = 0,
         total_reward: float = 0.0,
         action_models: dict[int, Any] | None = None,
-        # Backward-compatibility kwargs
-        learned_barrier_colors: set[int] | None = None,
-        learned_item_colors: set[int] | None = None,
-        learned_walkable_colors: set[int] | None = None,
+        avatar_feature: Any | None = None,
+        step_size: int = 1,
+        explored_entity_positions: set[tuple[int, int]] | None = None,
+        explored_entity_ids: set[str] | None = None,
+        last_action_id: int | None = None,
+        last_action_blocked: bool = False,
+        domain_instructions: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         self.phase = phase
         self.carrying = carrying if carrying is not None else CarryingState()
         self.delivered_positions = set(delivered_positions or [])
         self.learned_obstacle_features = set(learned_obstacle_features or [])
-        if learned_barrier_colors:
-            self.learned_obstacle_features.update(learned_barrier_colors)
         self.learned_target_features = set(learned_target_features or [])
-        if learned_item_colors:
-            self.learned_target_features.update(learned_item_colors)
         self.learned_traversable_features = set(learned_traversable_features or [])
-        if learned_walkable_colors:
-            self.learned_traversable_features.update(learned_walkable_colors)
         self.current_plan = list(current_plan or [])
         self.step_count = step_count
         self.total_reward = total_reward
         self.action_models = dict(action_models or {})
+        self.avatar_feature = avatar_feature
+        self.step_size = max(1, step_size)
+        self.explored_entity_positions = set(explored_entity_positions or [])
+        self.explored_entity_ids = set(explored_entity_ids or [])
+        self.last_action_id = last_action_id
+        self.last_action_blocked = last_action_blocked
+        self.domain_instructions = dict(domain_instructions or {})
 
-    # Backward-compatible property aliases
-    @property
-    def learned_barrier_colors(self) -> set[Any]:
-        return self.learned_obstacle_features
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize AgentState to a JSON-compatible dictionary."""
+        models_dict = {}
+        for a, m in self.action_models.items():
+            models_dict[str(a)] = {
+                "action_id": getattr(m, "action_id", int(a)),
+                "delta_r": getattr(m, "delta_r", 0),
+                "delta_c": getattr(m, "delta_c", 0),
+                "confidence": getattr(m, "confidence", 0.5),
+                "probes_tested": getattr(m, "probes_tested", 1),
+            }
+        return {
+            "phase": self.phase.value if hasattr(self.phase, "value") else str(self.phase),
+            "step_count": self.step_count,
+            "total_reward": self.total_reward,
+            "avatar_feature": self.avatar_feature,
+            "step_size": self.step_size,
+            "learned_obstacle_features": list(self.learned_obstacle_features),
+            "learned_target_features": list(self.learned_target_features),
+            "learned_traversable_features": list(self.learned_traversable_features),
+            "explored_entity_positions": [list(p) for p in self.explored_entity_positions],
+            "explored_entity_ids": list(self.explored_entity_ids),
+            "delivered_positions": [list(p) for p in self.delivered_positions],
+            "action_models": models_dict,
+            "last_action_id": self.last_action_id,
+            "last_action_blocked": self.last_action_blocked,
+            "domain_instructions": dict(self.domain_instructions),
+        }
 
-    @learned_barrier_colors.setter
-    def learned_barrier_colors(self, val: set[Any]) -> None:
-        self.learned_obstacle_features = set(val)
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentState:
+        """Hydrate AgentState from a serialized dictionary."""
+        action_models = {}
+        for a_str, md in data.get("action_models", {}).items():
+            try:
+                a_id = int(a_str)
+                action_models[a_id] = ActionDynamicsModel(
+                    action_id=md.get("action_id", a_id),
+                    delta_r=md.get("delta_r", 0),
+                    delta_c=md.get("delta_c", 0),
+                    confidence=md.get("confidence", 0.5),
+                    probes_tested=md.get("probes_tested", 1),
+                )
+            except Exception:
+                continue
 
-    @property
-    def learned_item_colors(self) -> set[Any]:
-        return self.learned_target_features
+        phase_val = data.get("phase", AgentPhase.EPISTEMIC_LEARNING)
+        try:
+            phase = AgentPhase(phase_val)
+        except Exception:
+            phase = AgentPhase.EPISTEMIC_LEARNING
 
-    @learned_item_colors.setter
-    def learned_item_colors(self, val: set[Any]) -> None:
-        self.learned_target_features = set(val)
-
-    @property
-    def learned_walkable_colors(self) -> set[Any]:
-        return self.learned_traversable_features
-
-    @learned_walkable_colors.setter
-    def learned_walkable_colors(self, val: set[Any]) -> None:
-        self.learned_traversable_features = set(val)
+        return cls(
+            phase=phase,
+            step_count=data.get("step_count", 0),
+            total_reward=float(data.get("total_reward", 0.0)),
+            avatar_feature=data.get("avatar_feature"),
+            step_size=int(data.get("step_size", 1)),
+            learned_obstacle_features=set(data.get("learned_obstacle_features", [])),
+            learned_target_features=set(data.get("learned_target_features", [])),
+            learned_traversable_features=set(data.get("learned_traversable_features", [])),
+            explored_entity_positions={tuple(p) for p in data.get("explored_entity_positions", [])},
+            explored_entity_ids=set(data.get("explored_entity_ids", [])),
+            delivered_positions={tuple(p) for p in data.get("delivered_positions", [])},
+            action_models=action_models,
+            last_action_id=data.get("last_action_id"),
+            last_action_blocked=bool(data.get("last_action_blocked", False)),
+            domain_instructions=data.get("domain_instructions", {}),
+        )
 
 
 class CognitiveBlackbox:
@@ -142,7 +379,7 @@ class CognitiveBlackbox:
 
     Usage:
         blackbox = CognitiveBlackbox()
-        blackbox.register_lifter("arc_agi", my_arc_lifter_fn)
+        blackbox.register_driver(my_driver)  # e.g. RoboticsDriver, BrowserDriver, GridDriver
         blackbox.observe(driver_input, perception_data={...})
         action = blackbox.decide(available_actions)
         blackbox.update(action, feedback)
@@ -152,17 +389,54 @@ class CognitiveBlackbox:
         self.workspace = workspace or HCIRWorkspaceState()
         self.spatial_planner = HCIRSpatialEntityPlanner()
         self.goal_decomposer = HierarchicalGoalDecomposer()
+        self.learning_loop = LearningLoopEngine(self.workspace)
         self.state = AgentState()
+
+        # Core KnowledgeGraph per source/domain for structured relational learning
+        self._knowledge_graphs: dict[str, KnowledgeGraph] = {}
 
         # Per-source state for MIMO multi-driver support
         self._source_states: dict[str, AgentState] = {}
         self._source_entity_graphs: dict[str, EntityGraph] = {}
 
+        # Registered drivers: driver_name -> BaseDriver
+        # All actions, capabilities, and lifters are dynamically managed through registered drivers
+        self._registered_drivers: dict[str, BaseDriver] = {}
+
         # Registered perception lifters: source_type -> lifter_fn
         # These convert raw perception data into internal HCIR types
         self._lifters: dict[str, PerceptionLifterFn] = {}
 
-    # ── Lifter Registration ───────────────────────────────────────────────
+        # Registered action resolvers: source_type -> resolver_fn
+        # These dynamically resolve requested actions from driver actions without hardcoded logic
+        self._action_resolvers: dict[str, Any] = {}
+
+        # Register default modality lifters
+        self.register_lifter(DriverModality.GRID_2D.value, default_grid_2d_lifter)
+
+    def get_knowledge_graph(self, source_id: str = "default") -> KnowledgeGraph:
+        """Get or initialize the core KnowledgeGraph for a specific source/domain."""
+        if source_id not in self._knowledge_graphs:
+            self._knowledge_graphs[source_id] = KnowledgeGraph()
+        return self._knowledge_graphs[source_id]
+
+    # ── Driver, Lifter & Resolver Registration ────────────────────────────
+
+    def register_driver(self, driver: BaseDriver) -> None:
+        """Register a connected driver, dynamically binding its lifter, action resolution, and capabilities."""
+        self._registered_drivers[driver.name] = driver
+
+        # Auto-register driver's custom action resolver if implemented
+        if hasattr(driver, "resolve_action") and callable(driver.resolve_action):
+            self.register_action_resolver(driver.name, driver.resolve_action)
+
+        # Auto-register driver's custom perception lifter if provided
+        if hasattr(driver, "get_perception_lifter") and callable(driver.get_perception_lifter):
+            lifter = driver.get_perception_lifter()
+            if callable(lifter):
+                self.register_lifter(driver.name, lifter)
+
+        logger.info("Registered driver '%s' into CognitiveBlackbox", driver.name)
 
     def register_lifter(
         self,
@@ -176,11 +450,42 @@ class CognitiveBlackbox:
         domain-specific interpretation enters the core.
 
         Args:
-            source_type: Driver source identifier (e.g., "arc_agi", "sokoban")
+            source_type: Driver source identifier (e.g., "robotics", "web_browser", "grid_env")
             lifter: Callable(perception_data, agent_state) -> (entities, barriers)
         """
+
         self._lifters[source_type] = lifter
         logger.info("Registered perception lifter for source_type='%s'", source_type)
+
+    def register_action_resolver(
+        self,
+        source_type: str,
+        resolver: Any,
+    ) -> None:
+        """Register a domain-specific action resolver for a registered driver."""
+        self._action_resolvers[source_type] = resolver
+        logger.info("Registered action resolver for source_type='%s'", source_type)
+
+    def feed_instructions(
+        self,
+        source_type: str,
+        instructions: dict[str, Any] | list[str],
+    ) -> None:
+        """Feed domain-level declarative instructions or capabilities when a plugin loads.
+
+        Allows external plugins/adapters to configure domain conventions, action mappings,
+        or interaction rules without hardcoding them into core HCIR.
+        """
+        state = self.get_state(source_type)
+        if isinstance(instructions, dict):
+            state.domain_instructions.update(instructions)
+            if "action_capabilities" in instructions:
+                self._upsert_var("var_action_capabilities", instructions["action_capabilities"])
+            if "target_features" in instructions:
+                state.learned_target_features.update(instructions["target_features"])
+        elif isinstance(instructions, list):
+            state.domain_instructions.setdefault("rules", []).extend(instructions)
+        logger.info("Fed domain instructions for source_type='%s'", source_type)
 
     # ── Source Management (MIMO) ──────────────────────────────────────────
 
@@ -217,27 +522,42 @@ class CognitiveBlackbox:
         if state.learned_target_features:
             self._upsert_var("var_target_features", list(state.learned_target_features))
             self._upsert_var("var_target_entity_features", list(state.learned_target_features))
-            self._upsert_var("var_learned_item_colors", list(state.learned_target_features))
 
         # Learned obstacle features
         if state.learned_obstacle_features:
             self._upsert_var("var_obstacle_features", list(state.learned_obstacle_features))
-            self._upsert_var("var_learned_barrier_colors", list(state.learned_obstacle_features))
 
         # Learned traversable features
         if state.learned_traversable_features:
             self._upsert_var("var_traversable_features", list(state.learned_traversable_features))
-            self._upsert_var(
-                "var_learned_walkable_colors", list(state.learned_traversable_features)
-            )
 
-        # Action capabilities
+        # Action capabilities (inferred dynamically from motor models / registered actions)
+        has_interactive = any(
+            (m.delta_r == 0 and m.delta_c == 0 and getattr(m, "probes_tested", 0) > 0)
+            for m in state.action_models.values()
+        )
         self._upsert_var(
             "var_action_capabilities",
             {
-                "pickup_drop": 5 in state.action_models,
+                "has_interaction": has_interactive,
+                "pickup_drop": has_interactive,
             },
         )
+
+        # Step size
+        self._upsert_var("var_step_size", state.step_size)
+
+        # Explored entity positions and IDs
+        if state.explored_entity_positions:
+            self._upsert_var(
+                "var_explored_entity_positions",
+                [list(p) for p in state.explored_entity_positions],
+            )
+        if state.explored_entity_ids:
+            self._upsert_var(
+                "var_explored_entity_ids",
+                list(state.explored_entity_ids),
+            )
 
     def _upsert_var(self, name: str, value: Any) -> None:
         """Upsert a WorldVariableNode into the workspace graph."""
@@ -281,13 +601,28 @@ class CognitiveBlackbox:
         if lifter is not None:
             entities, barriers = lifter(perception_data, state)
             grid_shape = driver_input.metadata.get("grid_shape", (64, 64))
-            step_size = driver_input.metadata.get("step_size", 1)
+            raw_step_size = driver_input.metadata.get("step_size", state.step_size)
+            if state.step_size <= 1:
+                state.step_size = max(1, raw_step_size)
+            elif raw_step_size > 0:
+                state.step_size = math.gcd(state.step_size, raw_step_size)
+
+            # Reconcile step_size with calibrated orthogonal motor dynamics
+            calibrated_steps = [
+                max(abs(m.delta_r), abs(m.delta_c))
+                for m in state.action_models.values()
+                if (m.delta_r != 0 or m.delta_c != 0) and getattr(m, "confidence", 0) >= 0.5
+            ]
+            if calibrated_steps:
+                state.step_size = min(calibrated_steps)
+
+            effective_step_size = max(1, state.step_size)
 
             eg = self.spatial_planner.construct_entity_graph(
                 entities=entities,
                 barriers=barriers,
                 grid_shape=grid_shape,
-                step_size=step_size,
+                step_size=effective_step_size,
             )
             self._source_entity_graphs[source_id] = eg
             return eg
@@ -324,14 +659,152 @@ class CognitiveBlackbox:
                 workspace=self.workspace,
             )
 
+        # Wire HierarchicalGoalDecomposer: If spatial planner found no sequence and there is an avatar,
+        # decompose obstructed goal into prerequisite subgoals (DEPENDS_ON) or epistemic frontiers
+        if not state.current_plan and eg.avatar:
+            goals = [
+                e
+                for e in eg.entities.values()
+                if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)
+            ]
+            if goals:
+                primary_goal_ent = min(
+                    goals,
+                    key=lambda g: math.hypot(
+                        g.grid_pos[0] - eg.avatar.grid_pos[0],
+                        g.grid_pos[1] - eg.avatar.grid_pos[1],
+                    ),
+                )
+                goal_node = GoalNode(
+                    id=f"goal_{primary_goal_ent.id}",
+                    description=f"Reach {primary_goal_ent.id}",
+                    properties={"target_position": primary_goal_ent.grid_pos},
+                )
+                subgoal_node = self.goal_decomposer.decompose_goal(
+                    workspace=self.workspace,
+                    primary_goal=goal_node,
+                    avatar_pos=eg.avatar.grid_pos,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                )
+                if subgoal_node and "target_position" in subgoal_node.properties:
+                    target_pos = subgoal_node.properties["target_position"]
+                    if target_pos != eg.avatar.grid_pos:
+                        state.current_plan = [
+                            SequencePlanStep(
+                                target_entity_id=subgoal_node.id,
+                                target_pos=target_pos,
+                                action_type=SpatialActionIntent.NAVIGATE,
+                            )
+                        ]
+
         # Convert plan to action
         if state.current_plan:
             step = state.current_plan[0]
-            action = self._plan_step_to_action(step, eg, state, available_actions)
+            action = self._plan_step_to_action(
+                step, eg, state, available_actions, source_id=source_id
+            )
             return action
 
-        # Fallback: return first available action
-        return available_actions[0] if available_actions else DriverAction(action_id=0)
+        # Fallback: explore unvisited frontiers or move with anti-repetition momentum
+        return self._decide_exploratory_action(available_actions, state, eg, source_id=source_id)
+
+    def _decide_exploratory_action(
+        self,
+        available_actions: list[DriverAction],
+        state: AgentState,
+        eg: EntityGraph | None,
+        source_id: str = "default",
+    ) -> DriverAction:
+        """Intelligent curiosity-driven exploratory action selection.
+
+        Never repeats a blocked action in place. Leverages topological
+        frontier exploration, unexamined entities, and anti-repetition momentum.
+        """
+        if not available_actions:
+            return DriverAction(action_id=0)
+
+        # 1. Topological frontier search: actively route toward unvisited corridors
+        if eg is not None and eg.avatar is not None:
+            frontier_cell = self.spatial_planner._find_nearest_unexplored_frontier(
+                start=eg.avatar.grid_pos,
+                barrier_cells=eg.barriers,
+                grid_shape=eg.grid_shape,
+                step_size=eg.step_size,
+                visited_cells=state.explored_entity_positions,
+            )
+            if frontier_cell is not None:
+                safe_path = self.spatial_planner.compute_safe_path(
+                    start=eg.avatar.grid_pos,
+                    goal=frontier_cell,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                )
+                if safe_path and len(safe_path) > 1:
+                    next_cell = safe_path[1]
+                    if (
+                        next_cell not in eg.barriers
+                        and next_cell not in self.spatial_planner._learned_barriers
+                    ):
+                        dr = next_cell[0] - eg.avatar.grid_pos[0]
+                        dc = next_cell[1] - eg.avatar.grid_pos[1]
+                        act_id = self.spatial_planner.get_action_for_delta(
+                            dr, dc, state.action_models
+                        )
+                        if act_id is not None:
+                            for a in available_actions:
+                                if a.action_id == act_id:
+                                    state.current_plan = [
+                                        SequencePlanStep(
+                                            target_entity_id="frontier",
+                                            target_pos=p,
+                                            action_type=SpatialActionIntent.NAVIGATE,
+                                        )
+                                        for p in safe_path[1:]
+                                    ]
+                                    return a
+
+        # 2. Anti-repetition momentum: do NOT repeat the action that just collided or was blocked
+        blocked_act_id = (
+            state.last_action_id if getattr(state, "last_action_blocked", False) else None
+        )
+
+        untested = []
+        valid_moves = []
+        non_movement_actions = []
+        avatar_pos = eg.avatar.grid_pos if (eg and eg.avatar) else None
+
+        for a in available_actions:
+            if a.action_id == blocked_act_id:
+                continue
+            m = state.action_models.get(a.action_id)
+            if m is None or getattr(m, "probes_tested", 0) == 0:
+                untested.append(a)
+            elif getattr(m, "delta_r", 0) != 0 or getattr(m, "delta_c", 0) != 0:
+                # Do not choose an action that points directly into a known barrier
+                if avatar_pos is not None:
+                    dest = (avatar_pos[0] + m.delta_r, avatar_pos[1] + m.delta_c)
+                    if dest in eg.barriers or dest in self.spatial_planner._learned_barriers:
+                        continue
+                valid_moves.append(a)
+            else:
+                non_movement_actions.append(a)
+
+        # Prioritize: untested action probes > valid movement actions not into barriers > interaction/context actions
+        if untested:
+            return untested[0]
+        if valid_moves:
+            idx = state.step_count % len(valid_moves)
+            return valid_moves[idx]
+        if non_movement_actions:
+            idx = state.step_count % len(non_movement_actions)
+            return non_movement_actions[idx]
+
+        # Fallback to any non-blocked action
+        non_blocked = [a for a in available_actions if a.action_id != blocked_act_id]
+        return non_blocked[0] if non_blocked else available_actions[0]
 
     # ── Feedback (Causal Update) ──────────────────────────────────────────
 
@@ -354,32 +827,283 @@ class CognitiveBlackbox:
 
         # Empirical trial-and-error learning from feedback info
         info = feedback.info or {}
-        if "observed_delta" in info:
-            act_id = action.action_id
-            delta = info["observed_delta"]
-            if act_id not in state.action_models:
-                from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+        act_id = action.action_id
+        state.last_action_id = act_id
 
-                state.action_models[act_id] = ActionDynamicsModel(
-                    action_id=act_id,
-                    delta_r=int(delta[0]) if len(delta) > 0 else 0,
-                    delta_c=int(delta[1]) if len(delta) > 1 else 0,
-                    confidence=0.6,
-                )
-            else:
-                model = state.action_models[act_id]
-                if hasattr(model, "update_from_trial"):
+        # Determine whether action is an in-place interaction / non-directional action
+        is_interaction = action.semantic_intent in (
+            SpatialActionIntent.INTERACT,
+            SpatialActionIntent.PICKUP,
+            SpatialActionIntent.DROP,
+            SpatialActionIntent.ACTUATE,
+            "INTERACT",
+            "PICKUP",
+            "DROP",
+            "ACTUATE",
+        ) or (
+            act_id in state.action_models
+            and state.action_models[act_id].delta_r == 0
+            and state.action_models[act_id].delta_c == 0
+            and getattr(state.action_models[act_id], "probes_tested", 0) > 1
+        )
+
+        # Track movement vs blocked collision
+        obs_delta = info.get("observed_delta")
+        is_blocked = "collision_feature" in info or (
+            obs_delta is not None
+            and obs_delta[0] == 0
+            and obs_delta[1] == 0
+            and not is_interaction
+            and (
+                act_id not in state.action_models
+                or state.action_models[act_id].delta_r != 0
+                or state.action_models[act_id].delta_c != 0
+            )
+        )
+        state.last_action_blocked = is_blocked
+
+        interaction_actions = set(state.domain_instructions.get("interaction_actions", [5, 6, 7]))
+        if action.semantic_intent == SpatialActionIntent.INTERACT or act_id in interaction_actions:
+            is_interaction = True
+
+        if act_id not in state.action_models:
+            from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+            delta = info.get("observed_delta", [0, 0])
+            dr = int(delta[0]) if len(delta) > 0 else 0
+            dc = int(delta[1]) if len(delta) > 1 else 0
+            if is_interaction or abs(dr) > 10 or abs(dc) > 10:
+                dr, dc = 0, 0
+            state.action_models[act_id] = ActionDynamicsModel(
+                action_id=act_id,
+                delta_r=dr,
+                delta_c=dc,
+                confidence=0.6 if ("observed_delta" in info and not is_interaction) else 0.3,
+                probes_tested=1,
+            )
+        else:
+            model = state.action_models[act_id]
+            if is_interaction:
+                model.delta_r = 0
+                model.delta_c = 0
+            elif "observed_delta" in info:
+                delta = info["observed_delta"]
+                dr = int(delta[0]) if len(delta) > 0 else 0
+                dc = int(delta[1]) if len(delta) > 1 else 0
+                is_valid = True
+                if state.step_size > 1 and getattr(model, "confidence", 0) >= 0.5:
+                    if abs(dr) > 2 * state.step_size or abs(dc) > 2 * state.step_size:
+                        is_valid = False
+                elif abs(dr) > 10 or abs(dc) > 10:
+                    is_valid = False
+
+                if is_valid and not is_blocked and hasattr(model, "update_from_trial"):
                     model.update_from_trial(delta, success=True)
+            if hasattr(model, "probes_tested"):
+                model.probes_tested += 1
 
-        if "collision_feature" in info:
-            feat = info["collision_feature"]
-            state.learned_obstacle_features.add(feat)
-            state.learned_traversable_features.discard(feat)
+        if "step_size" in info:
+            new_sz = int(info["step_size"])
+            if new_sz > 0:
+                if state.step_size <= 1:
+                    state.step_size = new_sz
+                else:
+                    state.step_size = math.gcd(state.step_size, new_sz)
+
+        # Reconcile step_size with calibrated orthogonal motor dynamics
+        calibrated_steps = [
+            max(abs(m.delta_r), abs(m.delta_c))
+            for m in state.action_models.values()
+            if (m.delta_r != 0 or m.delta_c != 0) and getattr(m, "confidence", 0) >= 0.5
+        ]
+        if calibrated_steps:
+            state.step_size = min(calibrated_steps)
+
+        # Wire Native HCIR Memory: Record trial failures & collision barriers in BeliefNode & EpisodeNode
+        eg = self._source_entity_graphs.get(source_id)
+        avatar_pos = eg.avatar.grid_pos if (eg and eg.avatar) else None
+
+        if "collision_feature" in info or is_blocked:
+            if "collision_feature" in info:
+                feat = info["collision_feature"]
+                state.learned_obstacle_features.add(feat)
+                state.learned_traversable_features.discard(feat)
+
+            # Compute the attempted obstacle coordinate that caused the collision (not where agent is standing)
+            barrier_pos = None
+            if avatar_pos and not is_interaction:
+                model = state.action_models.get(act_id)
+                if model and (model.delta_r != 0 or model.delta_c != 0):
+                    barrier_pos = (avatar_pos[0] + model.delta_r, avatar_pos[1] + model.delta_c)
+
+            if barrier_pos and barrier_pos != avatar_pos:
+                self.spatial_planner.record_failure(
+                    workspace=self.workspace,
+                    session_id=source_id,
+                    failed_action=act_id,
+                    failure_pos=barrier_pos,
+                    reason="collision",
+                )
+            # Replan around collision obstacle and mark failed entity/pos as explored
+            if state.current_plan:
+                failed_step = state.current_plan[0]
+                if failed_step.target_entity_id:
+                    state.explored_entity_ids.add(failed_step.target_entity_id)
+                state.explored_entity_positions.add(failed_step.target_pos)
+                state.current_plan.clear()
 
         if "traversed_feature" in info:
             feat = info["traversed_feature"]
-            state.learned_traversable_features.add(feat)
-            state.learned_obstacle_features.discard(feat)
+            if feat not in state.learned_obstacle_features:
+                state.learned_traversable_features.add(feat)
+
+        # Empirical Target Feature Induction (from reward > 0 or success)
+        if feedback.success or feedback.reward > 0:
+            if "reached_feature" in info:
+                feat = info["reached_feature"]
+                state.learned_target_features.add(feat)
+                state.learned_obstacle_features.discard(feat)
+                state.learned_traversable_features.discard(feat)
+
+        # Empirical Hazard Feature Induction (from failed termination)
+        if feedback.terminated and not feedback.success:
+            if "hazard_feature" in info:
+                feat = info["hazard_feature"]
+                state.learned_obstacle_features.add(feat)
+                state.learned_traversable_features.discard(feat)
+                state.learned_target_features.discard(feat)
+
+            hazard_pos = None
+            if avatar_pos and not is_interaction:
+                model = state.action_models.get(act_id)
+                if model and (model.delta_r != 0 or model.delta_c != 0):
+                    hazard_pos = (avatar_pos[0] + model.delta_r, avatar_pos[1] + model.delta_c)
+
+            if hazard_pos and hazard_pos != avatar_pos:
+                self.spatial_planner.record_failure(
+                    workspace=self.workspace,
+                    session_id=source_id,
+                    failed_action=act_id,
+                    failure_pos=hazard_pos,
+                    reason="hazard" if "hazard_feature" in info else "trial_failed",
+                )
+            state.current_plan.clear()
+
+        # Wire LearningLoopEngine on episode termination
+        if feedback.terminated:
+            receipt = ExecutionReceipt(
+                execution_id=uuid.uuid4().hex[:8],
+                success=feedback.success,
+                final_snapshot_version=state.step_count,
+            )
+            self.learning_loop.evaluate_receipt(receipt, user_reward=feedback.reward)
+
+        # Project into core KnowledgeGraph (entities and relations)
+        kg = self.get_knowledge_graph(source_id)
+
+        # 1. Motor dynamics entity
+        m = state.action_models.get(act_id)
+        if m is not None:
+            kg.add_entity(
+                label=f"action_{act_id}",
+                entity_type="motor_action",
+                attributes={
+                    "action_id": act_id,
+                    "delta_r": getattr(m, "delta_r", 0),
+                    "delta_c": getattr(m, "delta_c", 0),
+                    "confidence": getattr(m, "confidence", 0.5),
+                    "probes_tested": getattr(m, "probes_tested", 1),
+                },
+            )
+            kg.add_relation(
+                source_label=f"env_{source_id}",
+                target_label=f"action_{act_id}",
+                relation_type="affords_action",
+                weight=getattr(m, "confidence", 0.5),
+                metadata={"delta_r": getattr(m, "delta_r", 0), "delta_c": getattr(m, "delta_c", 0)},
+            )
+
+        # 2. Avatar entity
+        if state.avatar_feature is not None:
+            kg.add_entity(
+                label=f"feat_{state.avatar_feature}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": state.avatar_feature, "role": "avatar"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{state.avatar_feature}",
+                target_label="avatar",
+                relation_type="is_a",
+                weight=1.0,
+            )
+
+        # 3. Obstacle feature
+        if "collision_feature" in info or (
+            "hazard_feature" in info and feedback.terminated and not feedback.success
+        ):
+            cf = info.get("collision_feature", info.get("hazard_feature"))
+            kg.add_entity(
+                label=f"feat_{cf}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": cf, "role": "obstacle"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{cf}",
+                target_label="obstacle",
+                relation_type="is_a",
+                weight=1.0,
+            )
+            kg.reinforce(f"feat_{cf}", evidence="obstacle_collision", confidence_boost=0.1)
+            kg.add_relation(
+                source_label=f"action_{act_id}",
+                target_label=f"feat_{cf}",
+                relation_type="collides_with",
+                weight=1.0,
+            )
+
+        # 4. Traversable feature
+        if "traversed_feature" in info:
+            tf = info["traversed_feature"]
+            kg.add_entity(
+                label=f"feat_{tf}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": tf, "role": "traversable"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{tf}",
+                target_label="traversable",
+                relation_type="is_a",
+                weight=1.0,
+            )
+            kg.reinforce(f"feat_{tf}", evidence="traversed_pathway", confidence_boost=0.1)
+
+        # 5. Target / goal feature
+        if (feedback.success or feedback.reward > 0) and "reached_feature" in info:
+            rf = info["reached_feature"]
+            kg.add_entity(
+                label=f"feat_{rf}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": rf, "role": "target"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{rf}",
+                target_label="target",
+                relation_type="is_a",
+                weight=1.0,
+            )
+            kg.reinforce(f"feat_{rf}", evidence="reached_goal", confidence_boost=0.1)
+
+        # 6. Core LearningLoop reflection on episode termination
+        if feedback.terminated:
+            try:
+                receipt = ExecutionReceipt(
+                    execution_id=uuid.uuid4().hex[:8],
+                    success=feedback.success,
+                    final_snapshot_version=getattr(self.workspace, "current_snapshot_version", 1),
+                )
+                self.learning_loop.evaluate_receipt(receipt, user_reward=feedback.reward)
+            except Exception as e:
+                logger.debug("Learning loop evaluation: %s", e)
 
     # ── Reset ─────────────────────────────────────────────────────────────
 
@@ -397,18 +1121,329 @@ class CognitiveBlackbox:
             saved_targets = set(state.learned_target_features)
             saved_traversable = set(state.learned_traversable_features)
             saved_action_models = dict(state.action_models)
+            saved_avatar = getattr(state, "avatar_feature", None)
+            saved_step_size = getattr(state, "step_size", 1)
+            saved_explored_positions = set(getattr(state, "explored_entity_positions", set()))
+            saved_explored_ids = set(getattr(state, "explored_entity_ids", set()))
+            saved_instructions = dict(getattr(state, "domain_instructions", {}))
 
             self._source_states[source_id] = AgentState(
                 learned_obstacle_features=saved_obstacles,
                 learned_target_features=saved_targets,
                 learned_traversable_features=saved_traversable,
                 action_models=saved_action_models,
+                avatar_feature=saved_avatar,
+                step_size=saved_step_size,
+                explored_entity_positions=saved_explored_positions,
+                explored_entity_ids=saved_explored_ids,
+                domain_instructions=saved_instructions,
             )
         else:
             self._source_states[source_id] = AgentState()
 
         self._source_entity_graphs.pop(source_id, None)
         self.spatial_planner.reset()
+
+    # ── Knowledge Graph Persistence ───────────────────────────────────────
+
+    def save_knowledge(
+        self,
+        path_or_dir: str | Path,
+        source_id: str = "default",
+    ) -> Path:
+        """Persist learned knowledge graph and state for a domain/environment.
+
+        Uses core KnowledgeGraph.save_to_disk() to write the entity-relation
+        graph containing motor models, obstacle/target classifications,
+        and affordance invariants.
+
+        Args:
+            path_or_dir: Target file path (.json) or directory to save inside.
+            source_id: Environment/source identifier (e.g. 'cd82', 'arc_agi').
+
+        Returns:
+            The Path where knowledge was written.
+        """
+        p = Path(path_or_dir)
+        if p.is_dir() or p.suffix != ".json":
+            p.mkdir(parents=True, exist_ok=True)
+            target_path = p / f"{source_id}_knowledge_graph.json"
+        else:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            target_path = p
+
+        kg = self.get_knowledge_graph(source_id)
+        state = self.get_state(source_id)
+
+        # Fallback/sync from active source if source_id state is empty
+        if (
+            not state.action_models
+            and not state.learned_obstacle_features
+            and state.avatar_feature is None
+        ):
+            for fallback_id in ["arc_agi", "default"]:
+                if fallback_id in self._source_states and fallback_id != source_id:
+                    fb_state = self._source_states[fallback_id]
+                    if (
+                        fb_state.action_models
+                        or fb_state.learned_obstacle_features
+                        or fb_state.avatar_feature is not None
+                    ):
+                        state = fb_state
+                        self._source_states[source_id] = fb_state
+                        break
+
+        # Project all current state features into KnowledgeGraph before saving
+        if state.avatar_feature is not None:
+            kg.add_entity(
+                label=f"feat_{state.avatar_feature}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": state.avatar_feature, "role": "avatar"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{state.avatar_feature}",
+                target_label="avatar",
+                relation_type="is_a",
+                weight=1.0,
+            )
+        for ob in state.learned_obstacle_features:
+            kg.add_entity(
+                label=f"feat_{ob}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": ob, "role": "obstacle"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{ob}",
+                target_label="obstacle",
+                relation_type="is_a",
+                weight=1.0,
+            )
+        for tg in state.learned_target_features:
+            kg.add_entity(
+                label=f"feat_{tg}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": tg, "role": "target"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{tg}",
+                target_label="target",
+                relation_type="is_a",
+                weight=1.0,
+            )
+        for tr in state.learned_traversable_features:
+            kg.add_entity(
+                label=f"feat_{tr}",
+                entity_type="perceptual_feature",
+                attributes={"feature_id": tr, "role": "traversable"},
+            )
+            kg.add_relation(
+                source_label=f"feat_{tr}",
+                target_label="traversable",
+                relation_type="is_a",
+                weight=1.0,
+            )
+        for a_id, m in state.action_models.items():
+            kg.add_entity(
+                label=f"action_{a_id}",
+                entity_type="motor_action",
+                attributes={
+                    "action_id": a_id,
+                    "delta_r": getattr(m, "delta_r", 0),
+                    "delta_c": getattr(m, "delta_c", 0),
+                    "confidence": getattr(m, "confidence", 0.5),
+                    "probes_tested": getattr(m, "probes_tested", 1),
+                },
+            )
+            kg.add_relation(
+                source_label=f"env_{source_id}",
+                target_label=f"action_{a_id}",
+                relation_type="affords_action",
+                weight=getattr(m, "confidence", 0.5),
+                metadata={"delta_r": getattr(m, "delta_r", 0), "delta_c": getattr(m, "delta_c", 0)},
+            )
+
+        # Project workspace BeliefNodes (learned negative constraints) into KnowledgeGraph
+        for b_node in self.workspace.graph.nodes_by_type(HCIRNodeType.BELIEF):
+            if isinstance(b_node, BeliefNode) and b_node.properties.get("negative_constraint"):
+                pos = b_node.properties.get("position")
+                if pos:
+                    kg.add_entity(
+                        label=f"belief_{pos[0]}_{pos[1]}",
+                        entity_type="belief_constraint",
+                        attributes={
+                            "position": list(pos),
+                            "reason": b_node.properties.get("reason", "collision"),
+                            "confidence": getattr(b_node, "epistemic_confidence", 0.95),
+                        },
+                    )
+
+        # Ensure environment entity reflects latest metadata
+        kg.add_entity(
+            label=f"env_{source_id}",
+            entity_type="environment",
+            attributes={
+                "source_id": source_id,
+                "step_size": state.step_size,
+                "step_count": state.step_count,
+                "total_reward": state.total_reward,
+                "avatar_feature": state.avatar_feature,
+                "state_snapshot": state.to_dict(),
+            },
+        )
+
+        kg.save_to_disk(target_path)
+        logger.info(
+            "Saved KnowledgeGraph for source '%s' to %s (%d entities, %d relations)",
+            source_id,
+            target_path,
+            kg.entity_count,
+            kg.relation_count,
+        )
+        return target_path
+
+    def load_knowledge(
+        self,
+        path_or_dir: str | Path,
+        source_id: str = "default",
+    ) -> bool:
+        """Load previously learned knowledge graph from disk into core blackbox.
+
+        Restores:
+        - Calibrated action dynamics models (dr, dc, confidence)
+        - Discovered obstacle/hazard features
+        - Discovered target/goal features
+        - Discovered traversable floor features
+        - Inferred controllable avatar feature
+        - Lattice step size
+
+        Args:
+            path_or_dir: File path or directory containing saved knowledge graphs.
+            source_id: Environment/source identifier.
+
+        Returns:
+            True if knowledge was found and loaded successfully, False otherwise.
+        """
+        p = Path(path_or_dir)
+        if p.is_dir():
+            target_path = p / f"{source_id}_knowledge_graph.json"
+            if not target_path.exists():
+                alt_path = p / f"{source_id}_kg.json"
+                if alt_path.exists():
+                    target_path = alt_path
+                else:
+                    return False
+        else:
+            target_path = p
+            if not target_path.exists():
+                return False
+
+        try:
+            loaded_kg = KnowledgeGraph.load_from_disk(target_path)
+        except Exception as e:
+            logger.warning("Failed to load KnowledgeGraph from %s: %s", target_path, e)
+            return False
+
+        self._knowledge_graphs[source_id] = loaded_kg
+        state = self.get_state(source_id)
+
+        # Check for state_snapshot attribute on env entity first
+        env_ent = loaded_kg.get_entity(f"env_{source_id}")
+        if env_ent and "state_snapshot" in env_ent.attributes:
+            hydrated = AgentState.from_dict(env_ent.attributes["state_snapshot"])
+            self._source_states[source_id] = hydrated
+            self._source_states["arc_agi"] = hydrated
+            state = hydrated
+
+        # Extract entities and relations from KnowledgeGraph to ensure complete sync
+        for ent in loaded_kg._entities.values():
+            if ent.entity_type == "motor_action":
+                act_id = ent.attributes.get("action_id")
+                if act_id is not None:
+                    state.action_models[int(act_id)] = ActionDynamicsModel(
+                        action_id=int(act_id),
+                        delta_r=int(ent.attributes.get("delta_r", 0)),
+                        delta_c=int(ent.attributes.get("delta_c", 0)),
+                        confidence=float(ent.attributes.get("confidence", 0.8)),
+                        probes_tested=int(ent.attributes.get("probes_tested", 1)),
+                    )
+
+        # Extract obstacle, target, traversable, avatar from relations
+        for rel in loaded_kg._relations.values():
+            if rel.relation_type == "is_a":
+                src_ent = loaded_kg._entities.get(rel.source_id)
+                tgt_ent = loaded_kg._entities.get(rel.target_id)
+                if src_ent and tgt_ent and "feature_id" in src_ent.attributes:
+                    feat = src_ent.attributes["feature_id"]
+                    if tgt_ent.label == "obstacle":
+                        state.learned_obstacle_features.add(feat)
+                    elif tgt_ent.label == "target":
+                        state.learned_target_features.add(feat)
+                    elif tgt_ent.label == "traversable":
+                        state.learned_traversable_features.add(feat)
+                    elif tgt_ent.label == "avatar":
+                        state.avatar_feature = feat
+
+        # Reconcile: obstacles can never be traversable
+        state.learned_traversable_features.difference_update(state.learned_obstacle_features)
+
+        # Sanitize motor models against corrupted displacements
+        for m in state.action_models.values():
+            if abs(m.delta_r) > 10 or abs(m.delta_c) > 10:
+                m.delta_r = 0
+                m.delta_c = 0
+                m.confidence = 0.3
+
+        # Restore belief constraints into workspace graph and spatial_planner
+        for ent in loaded_kg._entities.values():
+            if ent.entity_type == "belief_constraint":
+                pos_list = ent.attributes.get("position")
+                if pos_list and len(pos_list) == 2:
+                    pos = (int(pos_list[0]), int(pos_list[1]))
+                    self.spatial_planner.record_collision_barrier(pos)
+                    reason = ent.attributes.get("reason", "collision")
+                    belief_node = BeliefNode(
+                        id=f"belief_barrier_{pos[0]}_{pos[1]}",
+                        claim=f"Position {pos} is impassable or causes {reason}",
+                        statement=f"Position {pos} is impassable or causes {reason}",
+                        epistemic_confidence=float(ent.attributes.get("confidence", 0.95)),
+                        belief_type="causal",
+                        falsification_status=FalsificationStatus.CORROBORATED,
+                        properties={
+                            "position": pos,
+                            "negative_constraint": True,
+                            "reason": reason,
+                        },
+                        tags=["negative_constraint", reason],
+                    )
+                    self.workspace.upsert_node(belief_node)
+
+        # Also sync to arc_agi source_id if active
+        if source_id != "arc_agi":
+            arc_state = self.get_state("arc_agi")
+            arc_state.avatar_feature = state.avatar_feature
+            arc_state.step_size = state.step_size
+            arc_state.learned_obstacle_features.update(state.learned_obstacle_features)
+            arc_state.learned_target_features.update(state.learned_target_features)
+            arc_state.learned_traversable_features.update(state.learned_traversable_features)
+            arc_state.action_models.update(state.action_models)
+
+        # Sync state to workspace and spatial planner
+        self.sync_state_to_workspace(source_id)
+        if hasattr(self.spatial_planner, "step_size"):
+            self.spatial_planner.step_size = state.step_size
+
+        logger.info(
+            "Loaded KnowledgeGraph for source '%s' from %s: "
+            "avatar=%s, %d action models, %d obstacles, %d targets, %d traversable",
+            source_id,
+            target_path,
+            state.avatar_feature,
+            len(state.action_models),
+            len(state.learned_obstacle_features),
+            len(state.learned_target_features),
+            len(state.learned_traversable_features),
+        )
+        return True
 
     # ── Internal Helpers ──────────────────────────────────────────────────
 
@@ -418,36 +1453,160 @@ class CognitiveBlackbox:
         eg: EntityGraph,
         state: AgentState,
         available_actions: list[DriverAction],
+        source_id: str = "default",
     ) -> DriverAction:
         """Convert a high-level plan step into a concrete driver action."""
         if not eg.avatar:
-            return available_actions[0] if available_actions else DriverAction(action_id=0)
+            return self._decide_exploratory_action(
+                available_actions, state, eg, source_id=source_id
+            )
 
         avatar_pos = eg.avatar.grid_pos
         target_pos = step.target_pos
+        state.explored_entity_positions.add(avatar_pos)
 
         # Compute delta to target
         dr = target_pos[0] - avatar_pos[0]
         dc = target_pos[1] - avatar_pos[1]
 
-        if dr == 0 and dc == 0:
-            # At target — execute the action type
-            if step.action_type in ("PICKUP", "DROP", "ACTIVATE"):
-                # Find the interact action
-                for a in available_actions:
-                    if a.semantic_intent in ("interact", "pickup_drop", "activate"):
-                        return a
-            # Advance plan
+        step_sz = max(1, eg.step_size)
+        if abs(dr) < step_sz and abs(dc) < step_sz:
+            if step.target_entity_id:
+                state.explored_entity_ids.add(step.target_entity_id)
+            state.explored_entity_positions.add(target_pos)
+
+            # If the step requires an interaction/manipulation action at the target entity
+            is_navigation = not step.action_type or step.action_type in (
+                SpatialActionIntent.NAVIGATE,
+                "NAVIGATE",
+                "MOVE",
+            )
+            if not is_navigation:
+                action = self._resolve_driver_action(
+                    step.action_type, available_actions, state, source_id=source_id
+                )
+                if action is not None:
+                    if state.current_plan:
+                        state.current_plan.pop(0)
+                    return action
+
+            # Advance plan for completed waypoint/movement
             if state.current_plan:
                 state.current_plan.pop(0)
-            return available_actions[0] if available_actions else DriverAction(action_id=0)
+                if state.current_plan:
+                    return self._plan_step_to_action(
+                        state.current_plan[0], eg, state, available_actions, source_id=source_id
+                    )
+            return self._decide_exploratory_action(
+                available_actions, state, eg, source_id=source_id
+            )
 
-        # Navigate toward target using LEARNED action models (not hardcoded)
+        # Geodesic collision-free navigation toward target
+        footprint_offsets: list[tuple[int, int]] | None = (
+            [(int(round(step.carried_offset[0])), int(round(step.carried_offset[1])))]
+            if hasattr(step, "carried_offset") and step.carried_offset != (0, 0)
+            else None
+        )
+        safe_path = self.spatial_planner.compute_safe_path(
+            start=avatar_pos,
+            goal=target_pos,
+            barrier_cells=eg.barriers,
+            grid_shape=eg.grid_shape,
+            step_size=eg.step_size,
+            footprint_offsets=footprint_offsets,
+        )
+
+        step_dr, step_dc = dr, dc
+        if safe_path and len(safe_path) > 1:
+            next_cell = safe_path[1]
+            if (
+                next_cell not in eg.barriers
+                and next_cell not in self.spatial_planner._learned_barriers
+            ):
+                step_dr = next_cell[0] - avatar_pos[0]
+                step_dc = next_cell[1] - avatar_pos[1]
+                action_id = self.spatial_planner.get_action_for_delta(
+                    step_dr, step_dc, state.action_models
+                )
+                if action_id is not None:
+                    for a in available_actions:
+                        if a.action_id == action_id:
+                            return a
+
+        # Fallback to direct displacement matching ONLY if not moving into a known barrier
         action_id = self.spatial_planner.get_action_for_delta(dr, dc, state.action_models)
         if action_id is not None:
-            for a in available_actions:
-                if a.action_id == action_id:
+            m = state.action_models.get(action_id)
+            if m:
+                dest = (avatar_pos[0] + m.delta_r, avatar_pos[1] + m.delta_c)
+                if dest not in eg.barriers and dest not in self.spatial_planner._learned_barriers:
+                    for a in available_actions:
+                        if a.action_id == action_id:
+                            return a
+
+        # Fallback to intelligent exploratory action rather than blind action 0/1
+        return self._decide_exploratory_action(available_actions, state, eg, source_id=source_id)
+
+    def _resolve_driver_action(
+        self,
+        requested_type: str,
+        available_actions: list[DriverAction],
+        state: AgentState,
+        source_id: str = "default",
+    ) -> DriverAction | None:
+        """Dynamically resolve an action matching requested intent from registered drivers.
+
+        Resolution order:
+        1. Registered driver for this source_id (if registered).
+        2. Custom action resolver registered for this source_id (if any).
+        3. Semantic intent declared by DriverAction.semantic_intent.
+        4. In-place / zero-displacement action from learned motor calibration.
+        5. Any available action not classified as a directional movement action in learned models.
+        """
+        # 1. Registered driver resolution
+        driver = self._registered_drivers.get(source_id)
+        if driver is not None and hasattr(driver, "resolve_action"):
+            res = driver.resolve_action(requested_type, available_actions, context={"state": state})
+            if res is not None:
+                return res
+
+        # 2. Custom driver-registered resolver if provided
+        resolver = self._action_resolvers.get(source_id)
+        if resolver is not None:
+            res = resolver(requested_type, available_actions, state)
+            if res is not None:
+                return res
+
+        normalized_req = str(requested_type).strip().lower()
+
+        # 3. Semantic intent declared by driver actions
+        for a in available_actions:
+            if a.semantic_intent:
+                norm_intent = a.semantic_intent.strip().lower()
+                if (
+                    norm_intent == normalized_req
+                    or normalized_req in norm_intent
+                    or norm_intent in normalized_req
+                ):
                     return a
 
-        # Fallback to any movement action
-        return available_actions[0] if available_actions else DriverAction(action_id=0)
+        # 4. Learned zero-displacement in-place action from motor models
+        for a in available_actions:
+            m = state.action_models.get(a.action_id)
+            if (
+                m is not None
+                and m.delta_r == 0
+                and m.delta_c == 0
+                and getattr(m, "probes_tested", 0) > 0
+            ):
+                return a
+
+        # 5. Any available action not classified as a directional movement action in learned models
+        directional_ids = {
+            act_id for act_id, m in state.action_models.items() if m.delta_r != 0 or m.delta_c != 0
+        }
+        for a in available_actions:
+            if a.action_id not in directional_ids:
+                return a
+
+        return None

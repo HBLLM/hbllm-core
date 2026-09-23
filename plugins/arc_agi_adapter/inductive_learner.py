@@ -19,6 +19,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -2870,6 +2871,67 @@ class InductiveHCIRAgent:
             else:
                 self.epistemic_probe_budget = max(1, 4 - self.current_level * 2)
 
+    def save_knowledge(self, knowledge_dir: Path | str, game_id: str) -> Path:
+        """Persist accumulated knowledge to disk via core KnowledgeGraph."""
+        # 1. Sync knowledge_base into spatial_cognitive_agent
+        if self.knowledge_base.controllable_signature.color is not None:
+            self.spatial_cognitive_agent.avatar_color = (
+                self.knowledge_base.controllable_signature.color
+            )
+        self.spatial_cognitive_agent.learned_barrier_colors.update(
+            self.knowledge_base.barrier_colors
+        )
+        self.spatial_cognitive_agent.learned_walkable_colors.update(
+            self.knowledge_base.walkable_colors
+        )
+        for a, aff in self.knowledge_base.action_affordances.items():
+            if aff.confidence >= 0.4 and a not in self.spatial_cognitive_agent.action_models:
+                self.spatial_cognitive_agent.action_models[a] = ActionDynamicsModel(
+                    action_id=a,
+                    delta_r=aff.delta_r,
+                    delta_c=aff.delta_c,
+                    confidence=aff.confidence,
+                    probes_tested=aff.times_tested,
+                )
+
+        # 2. Save via spatial_cognitive_agent into core KnowledgeGraph
+        return self.spatial_cognitive_agent.save_knowledge(knowledge_dir, game_id=game_id)
+
+    def load_knowledge(self, knowledge_dir: Path | str, game_id: str) -> bool:
+        """Load persistent KnowledgeGraph from disk and seed inductive knowledge base."""
+        loaded = self.spatial_cognitive_agent.load_knowledge(knowledge_dir, game_id=game_id)
+        if loaded:
+            # Hydrate knowledge_base from spatial_cognitive_agent / blackbox
+            if self.spatial_cognitive_agent.avatar_color is not None:
+                self.knowledge_base.controllable_signature.color = (
+                    self.spatial_cognitive_agent.avatar_color
+                )
+            self.knowledge_base.barrier_colors.update(
+                self.spatial_cognitive_agent.learned_barrier_colors
+            )
+            self.knowledge_base.walkable_colors.update(
+                self.spatial_cognitive_agent.learned_walkable_colors
+            )
+            for a_id, m in self.spatial_cognitive_agent.action_models.items():
+                aff = self.knowledge_base.action_affordances.setdefault(
+                    a_id, ActionAffordance(action_id=a_id)
+                )
+                aff.delta_r = m.delta_r
+                aff.delta_c = m.delta_c
+                aff.confidence = max(aff.confidence, m.confidence)
+                aff.times_tested = max(aff.times_tested, m.probes_tested)
+            # Pre-calibrated dynamics mean epistemic probing can be bypassed
+            if len(self.spatial_cognitive_agent.action_models) >= 4:
+                self.epistemic_probe_budget = 0
+            logger.info(
+                "[CORE KNOWLEDGE GRAPH] Hydrated InductiveHCIRAgent for game '%s': avatar=%s, %d affordances, %d barriers",
+                game_id,
+                self.knowledge_base.controllable_signature.color,
+                len(self.knowledge_base.action_affordances),
+                len(self.knowledge_base.barrier_colors),
+            )
+        return loaded
+
     def _dispatch_active_solver(
         self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
@@ -2912,7 +2974,10 @@ class InductiveHCIRAgent:
             self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
             if self.prev_grid is not None and self.last_action is not None:
                 self.spatial_cognitive_agent.update_causal_dynamics(
-                    self.last_action, self.prev_grid, curr_grid
+                    self.last_action,
+                    self.prev_grid,
+                    curr_grid,
+                    won=(getattr(self, "last_frame_state", None) == "WIN"),
                 )
             action, conf = self.spatial_cognitive_agent.plan_next_action(
                 curr_grid, available_actions
@@ -2951,7 +3016,12 @@ class InductiveHCIRAgent:
             self.knowledge_base.register_observation(
                 self.prev_grid, self.last_action, curr_grid, diff
             )
-            self.hcir_agent.update_causal_dynamics(self.last_action, self.prev_grid, curr_grid)
+            self.hcir_agent.update_causal_dynamics(
+                self.last_action,
+                self.prev_grid,
+                curr_grid,
+                won=(getattr(self, "last_frame_state", None) == "WIN"),
+            )
 
             # Record trial-and-error outcome
             pos = self.current_actor_pos or (0, 0)
@@ -3455,9 +3525,11 @@ class InductiveARC3BenchmarkRunner:
         self,
         max_steps_per_level: int = 150,
         max_retries_per_level: int = 2,
+        knowledge_dir: Path | str | None = None,
     ) -> None:
         self.max_steps = max_steps_per_level
         self.max_retries_per_level = max_retries_per_level
+        self.knowledge_dir = Path(knowledge_dir) if knowledge_dir else None
         self.agent = InductiveHCIRAgent()
 
     def run_environment(
@@ -3466,10 +3538,23 @@ class InductiveARC3BenchmarkRunner:
         game_id: str,
         max_levels: int = 2,
         max_retries_per_level: int | None = None,
+        knowledge_dir: Path | str | None = None,
     ) -> InductiveEnvironmentResult:
         """Evaluate the inductive learner on an environment with cross-level transfer."""
         logger.info(f"Starting Inductive HCIR evaluation on game: {game_id}...")
         self.agent = InductiveHCIRAgent()
+
+        # Load existing core KnowledgeGraph if available
+        k_dir = knowledge_dir or self.knowledge_dir
+        if k_dir:
+            loaded = self.agent.load_knowledge(k_dir, game_id=game_id)
+            if loaded:
+                logger.info(
+                    "[CORE KNOWLEDGE GRAPH] Successfully loaded prior knowledge for '%s' from %s",
+                    game_id,
+                    k_dir,
+                )
+
         env = arcade_client.make(game_id, render_mode=None)
         frame_data = env.reset()
 
@@ -3581,6 +3666,12 @@ class InductiveARC3BenchmarkRunner:
                     curr_grid = (
                         frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
                     )
+                    state_val = getattr(frame_data, "state", None)
+                    self.agent.last_frame_state = (
+                        getattr(state_val, "value", str(state_val))
+                        if state_val is not None
+                        else None
+                    )
                     lvl_actions += 1
 
                     curr_levels_done = getattr(frame_data, "levels_completed", 0)
@@ -3589,6 +3680,10 @@ class InductiveARC3BenchmarkRunner:
                         or getattr(frame_data, "state", None) == ARCGameState.WIN
                     ):
                         completed = True
+                        if hasattr(self.agent, "spatial_cognitive_agent"):
+                            self.agent.spatial_cognitive_agent.update_causal_dynamics(
+                                action_int, prev_grid, curr_grid, won=True
+                            )
                         break
 
                     if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
@@ -3657,8 +3752,23 @@ class InductiveARC3BenchmarkRunner:
                     f"{len(self.agent.goal_inductor.hypotheses)} goal hypotheses, "
                     f"{self.agent.trial_memory.total_trials} trials recorded"
                 )
-                # If level failed or whole game won, stop further levels
                 break
+
+        # Persist accumulated KnowledgeGraph to disk
+        if k_dir:
+            try:
+                saved_path = self.agent.save_knowledge(k_dir, game_id=game_id)
+                logger.info(
+                    "[CORE KNOWLEDGE GRAPH] Saved updated knowledge graph for '%s' to %s",
+                    game_id,
+                    saved_path,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[CORE KNOWLEDGE GRAPH] Failed to save knowledge graph for '%s': %s",
+                    game_id,
+                    e,
+                )
 
         mean_eff = (
             sum(r.efficiency_ratio for r in level_results) / len(level_results)

@@ -145,7 +145,6 @@ class TestCognitiveBlackboxLearning:
         assert state.action_models[2].delta_r == 1
         assert state.action_models[2].delta_c == 0
         assert 0 in state.learned_traversable_features
-        assert 0 in state.learned_walkable_colors
 
         # Collision with obstacle
         col_feedback = DriverFeedback(
@@ -157,7 +156,6 @@ class TestCognitiveBlackboxLearning:
         )
         blackbox.update(action, col_feedback)
         assert 8 in state.learned_obstacle_features
-        assert 8 in state.learned_barrier_colors
 
     def test_blackbox_memory_retention(self) -> None:
         blackbox = CognitiveBlackbox()

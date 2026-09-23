@@ -150,6 +150,23 @@ class ARC3Driver(BaseDriver):
             avail = [1, 2, 3, 4]
         return [DriverAction(action_id=a, semantic_intent=f"action_{a}") for a in avail]
 
+    def resolve_action(
+        self,
+        intent: Any,
+        available_actions: list[DriverAction],
+        context: dict[str, Any] | None = None,
+    ) -> DriverAction | None:
+        """Dynamically resolve an ARC action for the requested cognitive intent."""
+        avail_dict = {a.action_id: a for a in available_actions}
+        norm = str(intent).upper()
+        # In ARC-AGI games, action 5 is the primary interaction / manipulation button
+        if norm in ("INTERACT", "PICKUP", "DROP", "ACTIVATE", "ACTUATE"):
+            if 5 in avail_dict:
+                return avail_dict[5]
+            if 6 in avail_dict:
+                return avail_dict[6]
+        return super().resolve_action(intent, available_actions, context=context)
+
     def send_output(self, action: DriverAction) -> Any:
         """Send action to ARC environment and return raw frame data."""
         self._prev_grid = self.get_inputs().raw_data.copy()

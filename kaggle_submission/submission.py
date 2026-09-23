@@ -925,6 +925,16 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                     return sorted(list(set(acts)))
         return [1, 2, 3, 4, 5, 6, 7]
 
+    def _extract_state(self, latest_frame: Any) -> str | None:
+        """Pull the raw WIN/GAME_OVER/NOT_FINISHED state off the frame, if present."""
+        state = getattr(latest_frame, "state", None)
+        if state is None and isinstance(latest_frame, dict):
+            state = latest_frame.get("state")
+        if state is None:
+            return None
+        val = getattr(state, "value", state)
+        return str(val) if val is not None else None
+
     def choose_action(self, frames: Any, latest_frame: Any) -> Any:
         """The core Kaggle agent interface: chooses next GameAction from current visual observation."""
         grid = self._extract_grid(latest_frame, frames)
@@ -939,6 +949,9 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
         self.last_grid = grid.copy()
         self.step_count += 1
+
+        # Make the real WIN/GAME_OVER signal reachable from the feedback loop
+        self.internal_agent.last_frame_state = self._extract_state(latest_frame)
 
         action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
         action_data = getattr(self.internal_agent, "last_action_data", None)

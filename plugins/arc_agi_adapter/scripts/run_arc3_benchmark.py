@@ -27,6 +27,12 @@ def main() -> None:
         help="Maximum levels per game to evaluate (default: 2).",
     )
     parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=120,
+        help="Maximum action steps per level (default: 120).",
+    )
+    parser.add_argument(
         "--output-report",
         type=str,
         default="arc_agi_3_report.md",
@@ -38,13 +44,26 @@ def main() -> None:
         default="arc_agi_3_scorecard.json",
         help="Path to save the raw JSON scorecard.",
     )
+    parser.add_argument(
+        "--knowledge-dir",
+        type=str,
+        default="data/cognitive_memory/arc_agi_3",
+        help="Directory to persist and load core KnowledgeGraph files (default: data/cognitive_memory/arc_agi_3).",
+    )
     args = parser.parse_args()
 
     logger.info(f"Initializing HBLLM ARC-AGI-3 Benchmark Runner on games: {args.games}...")
-    runner = ARC3BenchmarkRunner(max_steps_per_level=120)
+    runner = ARC3BenchmarkRunner(
+        max_steps_per_level=args.max_steps,
+        knowledge_dir=args.knowledge_dir,
+    )
 
     start = time.time()
-    report = runner.run_benchmark(game_ids=args.games, max_levels_per_game=args.max_levels)
+    report = runner.run_benchmark(
+        game_ids=args.games,
+        max_levels_per_game=args.max_levels,
+        knowledge_dir=args.knowledge_dir,
+    )
     duration = time.time() - start
 
     md = report.format_markdown()

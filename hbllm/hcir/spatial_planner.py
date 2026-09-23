@@ -53,6 +53,16 @@ class EntityRole(StrEnum):
     UNKNOWN = "unknown"
 
 
+class SpatialActionIntent(StrEnum):
+    """Semantic action intents for spatial planning subgoals."""
+
+    NAVIGATE = "NAVIGATE"
+    INTERACT = "INTERACT"
+    ACTUATE = "ACTIVATE"
+    PICKUP = "PICKUP"
+    DROP = "DROP"
+
+
 # ── Backward Compatibility Aliases (deprecated, use canonical names above) ──
 AVATAR = EntityRole.AGENT
 BARRIER = EntityRole.OBSTACLE
@@ -87,6 +97,7 @@ class SpatialEntity:
         grid_pos: tuple[int, int],
         area: int,
         bounding_box: tuple[int, int, int, int],
+        feature_id: Any | None = None,
         color: int | None = None,
         component_id: int = -1,
         is_deliverable: bool = False,
@@ -106,11 +117,23 @@ class SpatialEntity:
         self.is_delivered = is_delivered
         self.shape_archetype = shape_archetype
         self.properties = dict(properties or {})
-        if color is not None:
-            self.properties["visual_id"] = color
+        feat = feature_id if feature_id is not None else color
+        if feat is not None:
+            self.properties["feature_id"] = feat
+            self.properties["visual_id"] = feat
         if shape_archetype is not None:
             self.properties["shape_archetype"] = shape_archetype
         self.properties.update(kwargs)
+
+    @property
+    def feature_id(self) -> Any:
+        """Generic perceptual feature identifier."""
+        return self.properties.get("feature_id", self.properties.get("visual_id", 0))
+
+    @feature_id.setter
+    def feature_id(self, val: Any) -> None:
+        self.properties["feature_id"] = val
+        self.properties["visual_id"] = val
 
     @property
     def color(self) -> int:
@@ -120,6 +143,7 @@ class SpatialEntity:
     @color.setter
     def color(self, val: int) -> None:
         self.properties["visual_id"] = val
+        self.properties["feature_id"] = val
 
 
 @dataclass
@@ -150,7 +174,7 @@ class SequencePlanStep:
 
     target_entity_id: str
     target_pos: tuple[int, int]
-    action_type: str  # "MOVE", "PICKUP", "DROP", "ACTIVATE"
+    action_type: str = SpatialActionIntent.NAVIGATE  # SpatialActionIntent semantic intent
     approach_facing: tuple[int, int] | None = None
     carried_offset: tuple[int, int] | tuple[float, float] = (0, 0)
     expected_energy_cost: int = 0
@@ -344,8 +368,8 @@ class HCIRSpatialEntityPlanner:
         delivered_positions: set[tuple[int, int]] | None = None,
         is_carrying: bool = False,
         carried_offset: tuple[float, float] = (0.0, 0.0),
-        has_pickup_drop: bool = True,
         item_colors: set[int] | None = None,
+        **kwargs: Any,
     ) -> list[SequencePlanStep]:
         """Plans the sequence of entity interactions from first principles using state-space A*.
 
@@ -354,6 +378,10 @@ class HCIRSpatialEntityPlanner:
         """
         if not eg.avatar:
             return []
+
+        # Explored entities and positions across episodes/retries
+        explored_ids: set[str] = set()
+        explored_positions: set[tuple[int, int]] = set()
 
         # ── Resolve agent state from workspace graph (MIMO blackbox reads) ──
         if workspace is not None and hasattr(workspace, "graph"):
@@ -378,16 +406,23 @@ class HCIRSpatialEntityPlanner:
                 if ws_deliv and isinstance(ws_deliv, (list, set)):
                     delivered_positions = {tuple(p) for p in ws_deliv}
 
-            # Item colors (for filtering non-item entities)
+            # Target features (for filtering non-target entities)
             if item_colors is None:
-                ws_ic = _ws_var("var_learned_item_colors")
+                ws_ic = (
+                    _ws_var("var_target_features")
+                    or _ws_var("var_target_entity_features")
+                    or _ws_var("var_learned_item_colors")
+                )
                 if ws_ic and isinstance(ws_ic, (list, set)):
                     item_colors = set(ws_ic)
 
-            # Action capabilities
-            ws_caps = _ws_var("var_action_capabilities")
-            if ws_caps and isinstance(ws_caps, dict):
-                has_pickup_drop = ws_caps.get("pickup_drop", has_pickup_drop)
+            # Explored entities and positions (to avoid repetition loops across retries)
+            ws_ids = _ws_var("var_explored_entity_ids")
+            if ws_ids and isinstance(ws_ids, (list, set)):
+                explored_ids = set(ws_ids)
+            ws_pos = _ws_var("var_explored_entity_positions")
+            if ws_pos and isinstance(ws_pos, (list, set)):
+                explored_positions = {tuple(p) for p in ws_pos}
 
         # Recall active constraints from native HCIR memory
         impassable_gates, energy_records = self._recall_memory_constraints(workspace)
@@ -396,7 +431,10 @@ class HCIRSpatialEntityPlanner:
         is_partitioned = len(eg.cut_sets) > 0
 
         # Topology 1: Topologically Partitioned Transit & Bottleneck Portal Delivery
-        if is_partitioned:
+        has_manipulable_items = (
+            any(e.role == EntityRole.MANIPULABLE for e in eg.entities.values()) or is_carrying
+        )
+        if is_partitioned and has_manipulable_items:
             doorways = [e for e in eg.entities.values() if e.role == EntityRole.PORTAL]
             if doorways:
                 doorway_positions = {d.properties.get("gate_cell", d.grid_pos) for d in doorways}
@@ -452,7 +490,7 @@ class HCIRSpatialEntityPlanner:
                         SequencePlanStep(
                             target_entity_id=doorway.id,
                             target_pos=appr_cell,
-                            action_type="DROP",
+                            action_type=SpatialActionIntent.DROP,
                             approach_facing=handoff_facing,
                             carried_offset=carried_offset,
                         )
@@ -522,7 +560,7 @@ class HCIRSpatialEntityPlanner:
                         SequencePlanStep(
                             target_entity_id=item.id,
                             target_pos=pickup_stand,
-                            action_type="PICKUP",
+                            action_type=SpatialActionIntent.PICKUP,
                             approach_facing=pickup_facing,
                             carried_offset=carried_offset,
                         )
@@ -532,7 +570,7 @@ class HCIRSpatialEntityPlanner:
                         SequencePlanStep(
                             target_entity_id=doorway.id,
                             target_pos=appr_cell,
-                            action_type="DROP",
+                            action_type=SpatialActionIntent.DROP,
                             approach_facing=pickup_facing,
                             carried_offset=carried_offset,
                         )
@@ -550,7 +588,7 @@ class HCIRSpatialEntityPlanner:
                         SequencePlanStep(
                             target_entity_id="stand_clear",
                             target_pos=stand_clear_pos,
-                            action_type="MOVE",
+                            action_type=SpatialActionIntent.NAVIGATE,
                         )
                     )
                 return plan
@@ -581,13 +619,13 @@ class HCIRSpatialEntityPlanner:
                         target_entity_id=ent.id,
                         target_pos=ent.grid_pos,
                         action_type=(
-                            "ACTIVATE"
+                            SpatialActionIntent.ACTUATE
                             if ent.role
                             in (
                                 EntityRole.ACTUATOR,
                                 EntityRole.RESOURCE,
                             )
-                            else "MOVE"
+                            else SpatialActionIntent.NAVIGATE
                         ),
                     )
                     for ent in seq
@@ -618,7 +656,7 @@ class HCIRSpatialEntityPlanner:
             and not is_item_delivered(e)
             and (item_colors is None or e.color in item_colors)
         ]
-        if has_pickup_drop and (items or is_carrying) and exits:
+        if (items or is_carrying) and exits:
             exit_ent = max(exits, key=lambda e: (e.role == EntityRole.RECEPTACLE, e.area))
             items.sort(
                 key=lambda e: math.hypot(
@@ -693,7 +731,7 @@ class HCIRSpatialEntityPlanner:
                         SequencePlanStep(
                             target_entity_id=exit_ent.id,
                             target_pos=ds,
-                            action_type="DROP",
+                            action_type=SpatialActionIntent.DROP,
                             approach_facing=facing,
                             carried_offset=carried_offset,
                         )
@@ -780,7 +818,7 @@ class HCIRSpatialEntityPlanner:
                     SequencePlanStep(
                         target_entity_id=item.id,
                         target_pos=stand_pos,
-                        action_type="PICKUP",
+                        action_type=SpatialActionIntent.PICKUP,
                         approach_facing=pickup_facing,
                         carried_offset=carried_offset_cand,
                     )
@@ -789,7 +827,7 @@ class HCIRSpatialEntityPlanner:
                     SequencePlanStep(
                         target_entity_id=exit_ent.id,
                         target_pos=drop_stand,
-                        action_type="DROP",
+                        action_type=SpatialActionIntent.DROP,
                         approach_facing=drop_facing,
                         carried_offset=carried_offset_cand,
                     )
@@ -797,16 +835,236 @@ class HCIRSpatialEntityPlanner:
             return plan
 
         nav_goals = [e for e in exits if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)]
-        if nav_goals:
-            return [
-                SequencePlanStep(
-                    target_entity_id=nav_goals[0].id,
-                    target_pos=nav_goals[0].grid_pos,
-                    action_type="MOVE",
+        if nav_goals and eg.avatar:
+
+            def nav_goal_priority(g: SpatialEntity) -> tuple[bool, float]:
+                is_explored = (
+                    g.id in explored_ids
+                    or g.grid_pos in explored_positions
+                    or any(
+                        math.hypot(g.grid_pos[0] - p[0], g.grid_pos[1] - p[1]) < eg.step_size * 0.75
+                        for p in explored_positions
+                    )
                 )
-            ]
+                dist = math.hypot(
+                    g.grid_pos[0] - eg.avatar.grid_pos[0],
+                    g.grid_pos[1] - eg.avatar.grid_pos[1],
+                )
+                return (is_explored, dist)
+
+            nav_goals.sort(key=nav_goal_priority)
+            for g in nav_goals:
+                target_pos = g.grid_pos
+                plan_action = SpatialActionIntent.NAVIGATE
+                if target_pos in eg.barriers:
+                    # Inaccessible barrier cell — stand in adjacent non-barrier cell
+                    adj_cells = [
+                        (target_pos[0] + dr, target_pos[1] + dc)
+                        for dr, dc in (
+                            (-eg.step_size, 0),
+                            (eg.step_size, 0),
+                            (0, -eg.step_size),
+                            (0, eg.step_size),
+                        )
+                    ]
+                    valid_adj = [
+                        p
+                        for p in adj_cells
+                        if 0 <= p[0] < eg.grid_shape[0]
+                        and 0 <= p[1] < eg.grid_shape[1]
+                        and p not in eg.barriers
+                    ]
+                    if valid_adj:
+                        valid_adj.sort(
+                            key=lambda p: math.hypot(
+                                p[0] - eg.avatar.grid_pos[0],
+                                p[1] - eg.avatar.grid_pos[1],
+                            )
+                        )
+                        target_pos = valid_adj[0]
+                        plan_action = SpatialActionIntent.INTERACT
+                    else:
+                        continue
+
+                path = self.compute_safe_path(
+                    start=eg.avatar.grid_pos,
+                    goal=target_pos,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                )
+                if path and len(path) > 1:
+                    return [
+                        SequencePlanStep(
+                            target_entity_id=g.id,
+                            target_pos=target_pos,
+                            action_type=plan_action,
+                        )
+                    ]
+
+        # Epistemic candidate exploration: if no reachable goals exist, plan toward
+        # nearest reachable interactive actuators/switches or unknown entities.
+        # De-prioritize entities explored without success in this or prior attempts.
+        candidate_entities = [
+            e for e in eg.entities.values() if e != eg.avatar and e.role != EntityRole.AGENT
+        ]
+        if candidate_entities and eg.avatar:
+
+            def exploration_priority(e: SpatialEntity) -> tuple[int, bool, float]:
+                role_prio = 1
+                if e.role in (EntityRole.ACTUATOR, EntityRole.PORTAL):
+                    role_prio = 0
+                elif e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE):
+                    role_prio = 0
+
+                is_explored = (
+                    e.id in explored_ids
+                    or e.grid_pos in explored_positions
+                    or any(
+                        math.hypot(e.grid_pos[0] - p[0], e.grid_pos[1] - p[1]) < eg.step_size * 0.75
+                        for p in explored_positions
+                    )
+                )
+                dist = math.hypot(
+                    e.grid_pos[0] - eg.avatar.grid_pos[0],
+                    e.grid_pos[1] - eg.avatar.grid_pos[1],
+                )
+                return (role_prio, is_explored, dist)
+
+            candidate_entities.sort(key=exploration_priority)
+            for cand in candidate_entities:
+                cand_pos = cand.grid_pos
+                cand_action = (
+                    SpatialActionIntent.ACTUATE
+                    if cand.role == EntityRole.ACTUATOR
+                    else SpatialActionIntent.NAVIGATE
+                )
+                if cand_pos in eg.barriers:
+                    adj_cells = [
+                        (cand_pos[0] + dr, cand_pos[1] + dc)
+                        for dr, dc in (
+                            (-eg.step_size, 0),
+                            (eg.step_size, 0),
+                            (0, -eg.step_size),
+                            (0, eg.step_size),
+                        )
+                    ]
+                    valid_adj = [
+                        p
+                        for p in adj_cells
+                        if 0 <= p[0] < eg.grid_shape[0]
+                        and 0 <= p[1] < eg.grid_shape[1]
+                        and p not in eg.barriers
+                    ]
+                    if valid_adj:
+                        valid_adj.sort(
+                            key=lambda p: math.hypot(
+                                p[0] - eg.avatar.grid_pos[0],
+                                p[1] - eg.avatar.grid_pos[1],
+                            )
+                        )
+                        cand_pos = valid_adj[0]
+                        cand_action = SpatialActionIntent.INTERACT
+                    else:
+                        continue
+                elif cand.role in (EntityRole.ACTUATOR, EntityRole.MANIPULABLE):
+                    if (
+                        math.hypot(
+                            cand_pos[0] - eg.avatar.grid_pos[0],
+                            cand_pos[1] - eg.avatar.grid_pos[1],
+                        )
+                        <= eg.step_size * 1.5
+                    ):
+                        cand_action = SpatialActionIntent.INTERACT
+
+                path = self.compute_safe_path(
+                    start=eg.avatar.grid_pos,
+                    goal=cand_pos,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                )
+                if path and len(path) > 1:
+                    return [
+                        SequencePlanStep(
+                            target_entity_id=cand.id,
+                            target_pos=cand_pos,
+                            action_type=cand_action,
+                        )
+                    ]
+
+        # Topological Frontier Exploration: if no entities are reachable, explore
+        # the closest reachable unvisited open-space cell to map out unexplored corridors
+        if eg.avatar:
+            frontier_cell = self._find_nearest_unexplored_frontier(
+                start=eg.avatar.grid_pos,
+                barrier_cells=eg.barriers,
+                grid_shape=eg.grid_shape,
+                step_size=eg.step_size,
+                visited_cells=explored_positions,
+            )
+            if frontier_cell is not None:
+                path = self.compute_safe_path(
+                    start=eg.avatar.grid_pos,
+                    goal=frontier_cell,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                )
+                if path and len(path) > 1:
+                    return [
+                        SequencePlanStep(
+                            target_entity_id=f"frontier_{idx}",
+                            target_pos=wp,
+                            action_type=SpatialActionIntent.NAVIGATE,
+                        )
+                        for idx, wp in enumerate(path[1:])
+                    ]
+                return [
+                    SequencePlanStep(
+                        target_entity_id="frontier",
+                        target_pos=frontier_cell,
+                        action_type=SpatialActionIntent.NAVIGATE,
+                    )
+                ]
 
         return []
+
+    def _find_nearest_unexplored_frontier(
+        self,
+        start: tuple[int, int],
+        barrier_cells: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int,
+        visited_cells: set[tuple[int, int]],
+    ) -> tuple[int, int] | None:
+        """Topological frontier search (BFS) for the nearest unvisited open space cell."""
+        from collections import deque
+
+        H, W = grid_shape
+        step = max(1, step_size)
+        queue = deque([start])
+        seen = {start}
+
+        while queue:
+            cr, cc = queue.popleft()
+            for dr, dc in ((-step, 0), (step, 0), (0, -step), (0, step)):
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in seen:
+                    seen.add((nr, nc))
+                    has_barrier = any(
+                        (nr + ro, nc + co) in barrier_cells
+                        for ro in range(step)
+                        for co in range(step)
+                    )
+                    if not has_barrier:
+                        is_visited = (nr, nc) in visited_cells or any(
+                            math.hypot(nr - vr, nc - vc) < step * 0.75 for vr, vc in visited_cells
+                        )
+                        if not is_visited and (nr, nc) != start:
+                            return (nr, nc)
+                        queue.append((nr, nc))
+        return None
 
     # ═══════════════════════════════════════════════════════════════════════
     # 3. NATIVE HCIR MEMORY INTEGRATION (EpisodeNode, BeliefNode)
@@ -822,10 +1080,18 @@ class HCIRSpatialEntityPlanner:
         attempted_sequence: list[str] | None = None,
     ) -> None:
         """Records a trial failure into HCIR native memory (EpisodeNode & BeliefNode)."""
-        logger.info(
-            f"Recording trial failure in HCIR memory: session={session_id}, "
-            f"pos={failure_pos}, reason={reason}"
+        is_new_barrier = (
+            reason == "collision" and failure_pos and failure_pos not in self._learned_barriers
         )
+        if is_new_barrier or (reason != "collision"):
+            logger.info(
+                f"Recording trial failure in HCIR memory: session={session_id}, "
+                f"pos={failure_pos}, reason={reason}"
+            )
+        else:
+            logger.debug(
+                f"Barrier {failure_pos} already known in HCIR memory (session={session_id})"
+            )
 
         if attempted_sequence:
             self._failed_sequences.add(tuple(attempted_sequence))

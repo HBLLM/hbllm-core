@@ -266,10 +266,8 @@ class ARCPerceptualLifter:
                     role = EntityRole.RECEPTACLE
 
             if role == EntityRole.UNKNOWN:
-                if (o.color in learned_i) or (
-                    not learned_i and o.color != avatar_color and o.area <= max_item_area
-                ):
-                    role = EntityRole.MANIPULABLE
+                if o.color in learned_r or is_inside_receptacle:
+                    role = EntityRole.RECEPTACLE
                 elif (
                     o.color in learned_b
                     or (int(round(o.centroid[0])), int(round(o.centroid[1]))) in raw_barriers
@@ -277,8 +275,18 @@ class ARCPerceptualLifter:
                 ):
                     role = EntityRole.OBSTACLE
                     raw_barriers.update(o_coords)
-                elif o.color in learned_r or is_inside_receptacle:
-                    role = EntityRole.RECEPTACLE
+                elif o.color in learned_i:
+                    role = (
+                        EntityRole.MANIPULABLE
+                        if (receptacle_bounds or learned_r)
+                        else EntityRole.GOAL
+                    )
+                elif not learned_i and o.color != avatar_color and o.area <= max_item_area:
+                    role = (
+                        EntityRole.MANIPULABLE
+                        if (receptacle_bounds or learned_r)
+                        else EntityRole.GOAL
+                    )
                 else:
                     role = EntityRole.ACTUATOR
 
@@ -295,3 +303,70 @@ class ARCPerceptualLifter:
             entities.append(ent)
 
         return entities, raw_barriers
+
+
+def arc_perception_lifter(
+    perception_data: dict[str, Any],
+    state: Any,
+) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
+    """Domain-specific perception lifter for ARC-AGI-3 grid environments.
+
+    Lifts 2D pixel grids into domain-agnostic SpatialEntities with roles:
+    AGENT, MANIPULABLE, RECEPTACLE, PORTAL, ACTUATOR, and OBSTACLE.
+    """
+    from plugins.arc_agi_adapter.arc_agi_runner import ARCGrid, GridTopologyExtractor
+
+    grid = perception_data.get("grid")
+    if grid is None:
+        return [], set()
+
+    H, W = grid.shape
+    step = getattr(state, "step_size", 1) or perception_data.get("step_size", 1)
+    avatar_color = getattr(state, "avatar_feature", None) or perception_data.get("avatar_color")
+
+    raw_objects = GridTopologyExtractor.extract_objects(
+        ARCGrid(grid.tolist() if hasattr(grid, "tolist") else grid)
+    )
+
+    counts = np.bincount(grid.ravel())
+    bg_color = int(np.argmax(counts))
+    traversable = getattr(state, "learned_traversable_features", set())
+    walkable = set(traversable) | {0, bg_color}
+    for col, count in enumerate(counts):
+        if count >= int(H * W * 0.20) and col != avatar_color:
+            walkable.add(int(col))
+
+    # Detect receptacle candidate bounds
+    receptacle_bounds = perception_data.get("target_zone_bounds")
+    domain_instr = getattr(state, "domain_instructions", {})
+    if not receptacle_bounds and "receptacle_bounds" in domain_instr:
+        receptacle_bounds = domain_instr["receptacle_bounds"]
+
+    if not receptacle_bounds:
+        for o in raw_objects:
+            if (
+                o.color not in walkable
+                and o.color not in (0, avatar_color)
+                and 24 <= o.area <= int(H * W * 0.20)
+                and o.width >= 6
+                and o.height >= 3
+            ):
+                receptacle_bounds = (o.min_r, o.max_r, o.min_c, o.max_c)
+                break
+
+    learned_r = domain_instr.get("learned_receptacle_colors", set())
+    learned_i = getattr(state, "learned_target_features", set())
+    learned_b = getattr(state, "learned_obstacle_features", set())
+
+    entities, barriers = ARCPerceptualLifter.lift(
+        grid=grid,
+        raw_objects=raw_objects,
+        avatar_color=avatar_color,
+        learned_item_colors=learned_i,
+        learned_receptacle_colors=learned_r,
+        learned_barrier_colors=learned_b,
+        walkable_colors=walkable,
+        step_size=step,
+        target_zone_bounds=receptacle_bounds,
+    )
+    return entities, barriers
