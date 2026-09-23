@@ -102,6 +102,7 @@ class ARC3SpatialCognitiveAgent:
         # that read/write agent attributes directly don't crash.
         # Over time these consumers should be refactored to use the blackbox.
         self.avatar_centroid: tuple[float, float] | None = None
+        self.avatar_grid_pos: tuple[int, int] | None = None
         self.learned_receptacle_colors: set[int] = set()
         self.learned_receptacle_bounds: tuple[int, int, int, int] | None = None
         self.known_barriers: np.ndarray | None = None
@@ -266,9 +267,23 @@ class ARC3SpatialCognitiveAgent:
             "avatar_color": self.avatar_color,
             "target_zone_bounds": getattr(self, "target_zone_bounds", None),
         }
-        self.blackbox.observe(driver_input, perception_data)
+        eg = self.blackbox.observe(driver_input, perception_data)
+        if eg and eg.avatar:
+            self.avatar_centroid = eg.avatar.centroid
+            self.raw_avatar_centroid = eg.avatar.centroid
+            self.start_pos = eg.avatar.grid_pos
+            self.avatar_grid_pos = eg.avatar.grid_pos
 
         blackbox_state = self.blackbox.get_state("arc_agi")
+        self.holding_item = getattr(blackbox_state.carrying, "is_carrying", False)
+        self.carried_offset = getattr(blackbox_state.carrying, "carried_offset", (0.0, 0.0))
+        if blackbox_state.current_plan:
+            step_node = blackbox_state.current_plan[0]
+            self.goal_centroid = (float(step_node.target_pos[0]), float(step_node.target_pos[1]))
+            self.active_goal_node = step_node
+        else:
+            self.goal_centroid = None
+            self.active_goal_node = None
 
         # Prioritize exploratory probing of untested actions to calibrate motor models
         untested = [
@@ -358,6 +373,19 @@ class ARC3SpatialCognitiveAgent:
             if avatar_col is not None
             else np.empty((0, 2), dtype=int)
         )
+        diff_prev_pts = (
+            np.argwhere((prev_grid == avatar_col) & diff_mask)
+            if avatar_col is not None
+            else np.empty((0, 2), dtype=int)
+        )
+        diff_curr_pts = (
+            np.argwhere((curr_grid == avatar_col) & diff_mask)
+            if avatar_col is not None
+            else np.empty((0, 2), dtype=int)
+        )
+
+        use_prev = diff_prev_pts if len(diff_prev_pts) > 0 and len(diff_curr_pts) > 0 else prev_pts
+        use_curr = diff_curr_pts if len(diff_prev_pts) > 0 and len(diff_curr_pts) > 0 else curr_pts
         prev_set = {tuple(p) for p in prev_pts}
         curr_set = {tuple(p) for p in curr_pts}
 
@@ -366,36 +394,50 @@ class ARC3SpatialCognitiveAgent:
         diff_count = int(np.sum(diff_mask))
         is_global_transition = diff_count > int(prev_grid.size * 0.40)
 
-        if avatar_col is not None and len(prev_pts) > 0 and len(curr_pts) > 0:
-            pr, pc = prev_pts.mean(axis=0)
-            cr, cc = curr_pts.mean(axis=0)
+        if avatar_col is not None and len(use_prev) > 0 and len(use_curr) > 0:
+            pr, pc = use_prev.mean(axis=0)
+            cr, cc = use_curr.mean(axis=0)
             dr, dc = int(round(cr - pr)), int(round(cc - pc))
 
-            size_ratio = max(len(prev_pts), len(curr_pts)) / max(
-                1, min(len(prev_pts), len(curr_pts))
+            if self.step_size > 1:
+                p_min_r, p_min_c = use_prev.min(axis=0)
+                c_min_r, c_min_c = use_curr.min(axis=0)
+                cell_dr = int(
+                    (c_min_r // self.step_size - p_min_r // self.step_size) * self.step_size
+                )
+                cell_dc = int(
+                    (c_min_c // self.step_size - p_min_c // self.step_size) * self.step_size
+                )
+                if cell_dr != 0 or cell_dc != 0:
+                    dr, dc = cell_dr, cell_dc
+                elif abs(dr) >= self.step_size - 1 or abs(dc) >= self.step_size - 1:
+                    if abs(dr) >= self.step_size - 1:
+                        dr = int(np.sign(dr)) * self.step_size
+                    if abs(dc) >= self.step_size - 1:
+                        dc = int(np.sign(dc)) * self.step_size
+
+            size_ratio = max(len(use_prev), len(use_curr)) / max(
+                1, min(len(use_prev), len(use_curr))
             )
             is_valid_move = (
                 not is_interaction
                 and not is_terminal
                 and not is_global_transition
-                and size_ratio <= 1.35
+                and size_ratio <= 1.5
                 and (
                     self.step_size <= 1
                     or (abs(dr) <= 2 * self.step_size and abs(dc) <= 2 * self.step_size)
                 )
-                and (abs(dr) <= 8 and abs(dc) <= 8)
+                and (abs(dr) <= 12 and abs(dc) <= 12)
             )
 
             if is_valid_move and (dr != 0 or dc != 0):
                 info["observed_delta"] = [dr, dc]
-                stride = (
-                    math.gcd(abs(dr), abs(dc)) if (dr != 0 and dc != 0) else max(abs(dr), abs(dc))
-                )
+                stride = max(abs(dr), abs(dc))
                 if stride > 0:
                     if self.step_size <= 1:
                         self.step_size = stride
-                    else:
-                        self.step_size = math.gcd(self.step_size, stride)
+                        self.spatial_planner.step_size = stride
                     info["step_size"] = self.step_size
 
                 # Align step_size with calibrated orthogonal motor dynamics
@@ -419,6 +461,13 @@ class ARC3SpatialCognitiveAgent:
                     and cand_feat != avatar_col
                 ):
                     info["traversed_feature"] = cand_feat
+
+            if avatar_col is not None and len(curr_pts) > 0:
+                self.avatar_centroid = (float(cr), float(cc))
+                self.raw_avatar_centroid = (float(cr), float(cc))
+                step = max(1, self.step_size)
+                c_min_r, c_min_c = curr_pts.min(axis=0)
+                self.avatar_grid_pos = (int(c_min_r // step * step), int(c_min_c // step * step))
 
             elif not is_interaction and not is_terminal and not is_global_transition:
                 # Movement was blocked by an obstacle

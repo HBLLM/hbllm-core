@@ -80,8 +80,8 @@ class ARCPerceptualLifter:
                     for bc in range(o.min_c, o.max_c + 1):
                         raw_barriers.add((br, bc))
             else:
-                col_key = int(round(o.centroid[1] / step)) * step
-                row_key = int(round(o.centroid[0] / step)) * step
+                col_key = int(o.min_c // step * step) if step > 1 else int(round(o.centroid[1]))
+                row_key = int(o.min_r // step * step) if step > 1 else int(round(o.centroid[0]))
                 col_blocks[(o.color, col_key)].append(o)
                 row_blocks[(o.color, row_key)].append(o)
 
@@ -132,12 +132,12 @@ class ARCPerceptualLifter:
 
         if target_zone_bounds:
             tz_r = (
-                int(round(((target_zone_bounds[0] + target_zone_bounds[1]) * 0.5) / step)) * step
+                int(target_zone_bounds[0] // step * step)
                 if step > 1
                 else int(round((target_zone_bounds[0] + target_zone_bounds[1]) * 0.5))
             )
             tz_c = (
-                int(round(((target_zone_bounds[2] + target_zone_bounds[3]) * 0.5) / step)) * step
+                int(target_zone_bounds[2] // step * step)
                 if step > 1
                 else int(round((target_zone_bounds[2] + target_zone_bounds[3]) * 0.5))
             )
@@ -192,8 +192,12 @@ class ARCPerceptualLifter:
             ):
                 is_avatar = True
 
-            r = int(round(o.centroid[0] / step)) * step if step > 1 else int(round(o.centroid[0]))
-            c = int(round(o.centroid[1] / step)) * step if step > 1 else int(round(o.centroid[1]))
+            if step > 1:
+                r = int(o.min_r // step * step)
+                c = int(o.min_c // step * step)
+            else:
+                r = int(round(o.centroid[0]))
+                c = int(round(o.centroid[1]))
             e_id = f"ent_{o.color}_{r}_{c}"
 
             if is_avatar:

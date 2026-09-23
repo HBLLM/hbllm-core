@@ -2996,6 +2996,20 @@ class InductiveHCIRAgent:
                     confidence=m.confidence,
                     times_tested=m.probes_tested,
                 )
+            if getattr(self.spatial_cognitive_agent, "avatar_grid_pos", None):
+                self.current_actor_pos = self.spatial_cognitive_agent.avatar_grid_pos
+            elif self.spatial_cognitive_agent.avatar_centroid:
+                self.current_actor_pos = (
+                    int(round(self.spatial_cognitive_agent.avatar_centroid[0])),
+                    int(round(self.spatial_cognitive_agent.avatar_centroid[1])),
+                )
+            if self.spatial_cognitive_agent.goal_centroid:
+                self.current_target_pos = (
+                    int(round(self.spatial_cognitive_agent.goal_centroid[0])),
+                    int(round(self.spatial_cognitive_agent.goal_centroid[1])),
+                )
+            else:
+                self.current_target_pos = None
         else:
             action, conf = 1, 0.50
 
@@ -3211,10 +3225,12 @@ class InductiveHCIRAgent:
         action, conf = self.hcir_agent.plan_next_action(curr_grid, available_actions)
         self.last_action_data = self.hcir_agent.last_action_data
 
-        if self.hcir_agent.avatar_centroid:
+        if getattr(self.hcir_agent, "avatar_grid_pos", None):
+            self.current_actor_pos = self.hcir_agent.avatar_grid_pos
+        elif self.hcir_agent.avatar_centroid:
             self.current_actor_pos = (
-                int(self.hcir_agent.avatar_centroid[0]),
-                int(self.hcir_agent.avatar_centroid[1]),
+                int(round(self.hcir_agent.avatar_centroid[0])),
+                int(round(self.hcir_agent.avatar_centroid[1])),
             )
 
         if self.hcir_agent.goal_centroid:
