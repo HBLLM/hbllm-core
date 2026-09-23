@@ -34,10 +34,14 @@ class JsonFileGraphStore(IGraphStore):
         self._cached_graph = graph
         data = graph.to_dict()
 
-        temp_path = self.file_path.with_suffix(".tmp")
+        import uuid
+
+        temp_path = self.file_path.with_name(
+            f"{self.file_path.stem}_{os.getpid()}_{uuid.uuid4().hex[:6]}.tmp"
+        )
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+                json.dump(data, f, separators=(",", ":"), ensure_ascii=False)
             os.replace(temp_path, self.file_path)
             logger.debug(f"Saved {len(list(graph.all_nodes()))} nodes to {self.file_path}")
         except Exception as e:

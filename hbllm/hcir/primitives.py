@@ -7,6 +7,7 @@ Zero domain-specific hardcoding. Part of the core HBLLM Cognitive OS ISA.
 from __future__ import annotations
 
 from collections import Counter, deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -899,3 +900,178 @@ def op_sort_and_pack_entities(
             packed[curr_r : curr_r + ch, :cw] = c_grid
             curr_r += ch
         return packed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Milestone 2: Multi-Layer Cut-Set Decomposition & Layer Transformations
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def op_extract_layers(grid: Grid) -> tuple[Grid, Grid, Grid]:
+    """Decompose grid into 3 orthogonal layers: background, frame/barrier, and entity."""
+    bg = detect_background_color(grid)
+    h, w = grid.shape
+    bg_layer = np.full((h, w), bg, dtype=int)
+    frame_layer = np.full((h, w), bg, dtype=int)
+    entity_layer = np.full((h, w), bg, dtype=int)
+
+    ents = segment_entities(grid, bg_color=bg, connectivity=4)
+    for ent in ents:
+        # Enclosing frame or barrier spanning >= 60% of canvas dimension
+        if ent.is_frame or ent.height >= max(3, int(h * 0.6)) or ent.width >= max(3, int(w * 0.6)):
+            for r, c in ent.coords:
+                frame_layer[r, c] = ent.color
+        else:
+            for r, c in ent.coords:
+                entity_layer[r, c] = ent.color
+
+    return bg_layer, frame_layer, entity_layer
+
+
+def op_layer_compose(bg_layer: Grid, frame_layer: Grid, entity_layer: Grid) -> Grid:
+    """Composite layers with priority: entity > frame > background."""
+    bg = detect_background_color(bg_layer)
+    result = bg_layer.copy()
+
+    frame_mask = frame_layer != bg
+    result[frame_mask] = frame_layer[frame_mask]
+
+    entity_mask = entity_layer != bg
+    result[entity_mask] = entity_layer[entity_mask]
+
+    return result
+
+
+def op_transform_layer(grid: Grid, target_layer: str, transform_fn: Callable[[Grid], Grid]) -> Grid:
+    """Transform only the targeted layer while preserving static layers."""
+    bg_layer, frame_layer, entity_layer = op_extract_layers(grid)
+    if target_layer == "entity":
+        transformed = transform_fn(entity_layer)
+        return op_layer_compose(bg_layer, frame_layer, transformed)
+    elif target_layer == "frame":
+        transformed = transform_fn(frame_layer)
+        return op_layer_compose(bg_layer, transformed, entity_layer)
+    else:
+        return transform_fn(grid)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. Milestone 3: Cellular Automata, Spatial Grammar & Symmetry Completion
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def op_cellular_grow(
+    grid: Grid,
+    seed_color: int | None = None,
+    target_color: int | None = None,
+    steps: int = 1,
+    diagonals: bool = False,
+) -> Grid:
+    """Frontier diffusion: expand seed colored cells outwards into background cells."""
+    res = grid.copy()
+    bg = detect_background_color(grid)
+    h, w = res.shape
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if diagonals:
+        dirs += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    for _ in range(steps):
+        next_grid = res.copy()
+        for r in range(h):
+            for c in range(w):
+                val = int(res[r, c])
+                if seed_color is not None and val != seed_color:
+                    continue
+                if val == bg:
+                    continue
+                fill_c = target_color if target_color is not None else val
+                for dr, dc in dirs:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < h and 0 <= nc < w and res[nr, nc] == bg:
+                        next_grid[nr, nc] = fill_c
+        res = next_grid
+    return res
+
+
+def op_complete_symmetry(grid: Grid, axis: str = "both") -> Grid:
+    """Auto-complete reflective symmetry across the specified axis into background cells."""
+    res = grid.copy()
+    bg = detect_background_color(grid)
+    h, w = res.shape
+
+    if axis in ("horizontal", "both"):
+        for r in range(h):
+            for c in range(w):
+                mc = w - 1 - c
+                if res[r, c] == bg and res[r, mc] != bg:
+                    res[r, c] = res[r, mc]
+
+    if axis in ("vertical", "both"):
+        for r in range(h):
+            for c in range(w):
+                mr = h - 1 - r
+                if res[r, c] == bg and res[mr, c] != bg:
+                    res[r, c] = res[mr, c]
+
+    if axis in ("main_diag", "both") and h == w:
+        for r in range(h):
+            for c in range(w):
+                if res[r, c] == bg and res[c, r] != bg:
+                    res[r, c] = res[c, r]
+
+    return res
+
+
+def op_tessellate_periodic(grid: Grid, r_factor: int = 2, c_factor: int = 2) -> Grid:
+    """Tile the lattice periodically with repetition factors."""
+    return np.tile(grid, (r_factor, c_factor))
+
+
+def op_maze_route(
+    grid: Grid,
+    start_color: int,
+    target_color: int,
+    wall_color: int | None = None,
+    path_color: int | None = None,
+) -> Grid:
+    """Find shortest path connecting start_color to target_color avoiding obstacles."""
+    res = grid.copy()
+    bg = detect_background_color(grid)
+    h, w = res.shape
+    starts = [tuple(p) for p in np.argwhere(grid == start_color)]
+    targets = [tuple(p) for p in np.argwhere(grid == target_color)]
+    if not starts or not targets:
+        return res
+
+    draw_c = path_color if path_color is not None else start_color
+    target_set = set(targets)
+    queue: deque[tuple[int, int]] = deque([starts[0]])
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {starts[0]: None}
+    visited: set[tuple[int, int]] = {starts[0]}
+    found_target = None
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    while queue:
+        curr = queue.popleft()
+        if curr in target_set:
+            found_target = curr
+            break
+        cr, cc = curr
+        for dr, dc in dirs:
+            nr, nc = cr + dr, cc + dc
+            if 0 <= nr < h and 0 <= nc < w and (nr, nc) not in visited:
+                val = int(grid[nr, nc])
+                if wall_color is not None and val == wall_color:
+                    continue
+                if val == bg or (nr, nc) in target_set:
+                    visited.add((nr, nc))
+                    parent[(nr, nc)] = curr
+                    queue.append((nr, nc))
+
+    if found_target:
+        curr = parent[found_target]
+        while curr and curr != starts[0]:
+            res[curr[0], curr[1]] = draw_c
+            curr = parent[curr]
+
+    return res
