@@ -663,3 +663,239 @@ def op_slide_until_contact(grid: Grid, direction: str = "down") -> Grid:
                     res[r + dr, c] = e.color
                 obstacle_coords.update({(r + dr, c) for r, c in curr_coords})
     return res
+
+
+def op_filter_keep_unique_color(grid: Grid) -> Grid:
+    """Retain only entities whose color appears uniquely among all entities."""
+    bg = detect_background_color(grid)
+    ents = segment_entities(grid, bg_color=bg)
+    if not ents:
+        return grid.copy()
+    color_counts: dict[int, int] = {}
+    for e in ents:
+        color_counts[e.color] = color_counts.get(e.color, 0) + 1
+    unique_colors = {c for c, cnt in color_counts.items() if cnt == 1}
+    res = np.full_like(grid, bg)
+    for e in ents:
+        if e.color in unique_colors:
+            for r, c in e.coords:
+                res[r, c] = e.color
+    return res
+
+
+def op_filter_keep_extreme_coord(grid: Grid, extreme: str = "top") -> Grid:
+    """Retain only the entity located at the extreme coordinate."""
+    bg = detect_background_color(grid)
+    ents = segment_entities(grid, bg_color=bg)
+    if not ents:
+        return grid.copy()
+    if extreme == "top":
+        target = min(ents, key=lambda e: e.min_r)
+    elif extreme == "bottom":
+        target = max(ents, key=lambda e: e.max_r)
+    elif extreme == "left":
+        target = min(ents, key=lambda e: e.min_c)
+    elif extreme == "right":
+        target = max(ents, key=lambda e: e.max_c)
+    else:
+        target = ents[0]
+    res = np.full_like(grid, bg)
+    for r, c in target.coords:
+        res[r, c] = target.color
+    return res
+
+
+def op_filter_keep_framed(grid: Grid) -> Grid:
+    """Retain only entities that form hollow frames (contain internal voids)."""
+    bg = detect_background_color(grid)
+    ents = segment_entities(grid, bg_color=bg)
+    res = np.full_like(grid, bg)
+    for e in ents:
+        # Check if entity bounding box contains background pixels that don't reach canvas edge
+        rmin, rmax, cmin, cmax = e.min_r, e.max_r, e.min_c, e.max_c
+        if rmax - rmin >= 2 and cmax - cmin >= 2:
+            sub = grid[rmin : rmax + 1, cmin : cmax + 1]
+            sub_holes = op_fill_enclosed_voids(sub, fill_color=e.color, connectivity=4)
+            if not np.array_equal(sub, sub_holes):
+                for r, c in e.coords:
+                    res[r, c] = e.color
+    return res
+
+
+def op_filter_keep_solid(grid: Grid) -> Grid:
+    """Retain only solid entities (no enclosed interior voids)."""
+    bg = detect_background_color(grid)
+    ents = segment_entities(grid, bg_color=bg)
+    res = np.full_like(grid, bg)
+    for e in ents:
+        rmin, rmax, cmin, cmax = e.min_r, e.max_r, e.min_c, e.max_c
+        if rmax - rmin < 2 or cmax - cmin < 2:
+            for r, c in e.coords:
+                res[r, c] = e.color
+        else:
+            sub = grid[rmin : rmax + 1, cmin : cmax + 1]
+            sub_holes = op_fill_enclosed_voids(sub, fill_color=e.color, connectivity=4)
+            if np.array_equal(sub, sub_holes):
+                for r, c in e.coords:
+                    res[r, c] = e.color
+    return res
+
+
+def op_raycast_cardinal(
+    grid: Grid, directions: tuple[str, ...] = ("up", "down", "left", "right")
+) -> Grid:
+    """Emit colored rays from foreground pixels along cardinal directions."""
+    res = grid.copy()
+    h, w = res.shape
+    bg = detect_background_color(grid)
+    pts = np.argwhere(grid != bg)
+    for r0, c0 in pts:
+        color = int(grid[r0, c0])
+        if "up" in directions:
+            for r in range(r0 - 1, -1, -1):
+                if res[r, c0] != bg:
+                    break
+                res[r, c0] = color
+        if "down" in directions:
+            for r in range(r0 + 1, h):
+                if res[r, c0] != bg:
+                    break
+                res[r, c0] = color
+        if "left" in directions:
+            for c in range(c0 - 1, -1, -1):
+                if res[r0, c] != bg:
+                    break
+                res[r0, c] = color
+        if "right" in directions:
+            for c in range(c0 + 1, w):
+                if res[r0, c] != bg:
+                    break
+                res[r0, c] = color
+    return res
+
+
+def op_raycast_diagonal(grid: Grid) -> Grid:
+    """Emit colored rays from foreground pixels along 45-degree diagonal directions."""
+    res = grid.copy()
+    h, w = res.shape
+    bg = detect_background_color(grid)
+    pts = np.argwhere(grid != bg)
+    for r0, c0 in pts:
+        color = int(grid[r0, c0])
+        for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            r, c = r0 + dr, c0 + dc
+            while 0 <= r < h and 0 <= c < w:
+                if res[r, c] != bg:
+                    break
+                res[r, c] = color
+                r += dr
+                c += dc
+    return res
+
+
+def op_extend_lines(grid: Grid, axis: str = "both") -> Grid:
+    """Extend straight horizontal or vertical lines across canvas."""
+    res = grid.copy()
+    h, w = res.shape
+    bg = detect_background_color(grid)
+
+    # Horizontal lines of >= 2 pixels
+    if axis in ("both", "h"):
+        for r in range(h):
+            row = grid[r]
+            colors = set(row[row != bg])
+            for col in colors:
+                cols = np.where(row == col)[0]
+                if len(cols) >= 2 and np.max(np.diff(cols)) == 1:
+                    res[r, :] = col
+
+    # Vertical lines of >= 2 pixels
+    if axis in ("both", "v"):
+        for c in range(w):
+            col_arr = grid[:, c]
+            colors = set(col_arr[col_arr != bg])
+            for col in colors:
+                rows = np.where(col_arr == col)[0]
+                if len(rows) >= 2 and np.max(np.diff(rows)) == 1:
+                    res[:, c] = col
+
+    return res
+
+
+def op_extract_perimeter_only(grid: Grid) -> Grid:
+    """Retain only the boundary perimeter of foreground entities, clearing interior."""
+    bg = detect_background_color(grid)
+    res = grid.copy()
+    h, w = res.shape
+    fg_mask = grid != bg
+    for r in range(h):
+        for c in range(w):
+            if not fg_mask[r, c]:
+                continue
+            # Interior pixel has all 4 cardinal neighbors in foreground
+            is_interior = (
+                r > 0
+                and r < h - 1
+                and c > 0
+                and c < w - 1
+                and fg_mask[r - 1, c]
+                and fg_mask[r + 1, c]
+                and fg_mask[r, c - 1]
+                and fg_mask[r, c + 1]
+            )
+            if is_interior:
+                res[r, c] = bg
+    return res
+
+
+def op_recolor_enclosed_cavities(
+    grid: Grid, fill_color: int, border_color: int | None = None
+) -> Grid:
+    """Recolor internal cavities enclosed by a border of specific or any color."""
+    bg = detect_background_color(grid)
+    filled = op_fill_enclosed_voids(grid, fill_color=fill_color, connectivity=4)
+    # Target only the newly filled void pixels
+    void_mask = (filled == fill_color) & (grid == bg)
+    res = grid.copy()
+    res[void_mask] = fill_color
+    return res
+
+
+def op_sort_and_pack_entities(
+    grid: Grid, sort_key: str = "area", direction: str = "horizontal"
+) -> Grid:
+    """Extract individual entities, sort them, and tightly pack them into a contiguous canvas."""
+    bg = detect_background_color(grid)
+    ents = segment_entities(grid, bg_color=bg)
+    if not ents:
+        return grid.copy()
+    if sort_key == "area":
+        ents.sort(key=lambda e: e.area, reverse=True)
+    elif sort_key == "color":
+        ents.sort(key=lambda e: e.color)
+    elif sort_key == "height":
+        ents.sort(key=lambda e: e.height, reverse=True)
+    elif sort_key == "width":
+        ents.sort(key=lambda e: e.width, reverse=True)
+
+    crops = [grid[e.min_r : e.max_r + 1, e.min_c : e.max_c + 1] for e in ents]
+    if direction == "horizontal":
+        max_h = max(c.shape[0] for c in crops)
+        total_w = sum(c.shape[1] for c in crops)
+        packed = np.full((max_h, total_w), bg, dtype=int)
+        curr_c = 0
+        for c_grid in crops:
+            ch, cw = c_grid.shape
+            packed[:ch, curr_c : curr_c + cw] = c_grid
+            curr_c += cw
+        return packed
+    else:
+        total_h = sum(c.shape[0] for c in crops)
+        max_w = max(c.shape[1] for c in crops)
+        packed = np.full((total_h, max_w), bg, dtype=int)
+        curr_r = 0
+        for c_grid in crops:
+            ch, cw = c_grid.shape
+            packed[curr_r : curr_r + ch, :cw] = c_grid
+            curr_r += ch
+        return packed

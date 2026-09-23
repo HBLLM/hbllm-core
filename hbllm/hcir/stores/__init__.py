@@ -261,3 +261,6 @@ class InMemoryGraphStore(IGraphStore):
 
     def delete_edge(self, edge_id: str) -> None:
         self._stored_edges.pop(edge_id, None)
+
+
+from hbllm.hcir.stores.json_graph_store import JsonFileGraphStore
