@@ -275,8 +275,8 @@ class ARC3SpatialCognitiveAgent:
 
     @classmethod
     def is_spatial_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
-        """Domain-agnostic check if environment possesses 2D movement or spatial interaction actions."""
-        return any(a in available_actions for a in [1, 2, 3, 4, 6])
+        """Domain-agnostic check if environment possesses 2D movement actions."""
+        return any(a in available_actions for a in [1, 2, 3, 4])
 
     @classmethod
     def is_cooperative_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -605,9 +605,19 @@ class ARC3SpatialCognitiveAgent:
                             pr, pc = prev_pts.mean(axis=0)
                             max_dist = max(3.0, float(self.step_size) * 1.8)
                             if math.hypot(r - pr, c - pc) <= max_dist:
+                                dr_sign = int(np.sign(r - pr))
+                                dc_sign = int(np.sign(c - pc))
+                                step_s = float(self.step_size)
                                 blackbox_state.carrying.holding = True
                                 blackbox_state.carrying.entity_id = f"item_{prev_grid[r, c]}"
-                                blackbox_state.carrying.offset = (float(r - pr), float(c - pc))
+                                blackbox_state.carrying.offset = (
+                                    (
+                                        float(dr_sign * step_s),
+                                        float(dc_sign * step_s),
+                                    )
+                                    if (dr_sign != 0 or dc_sign != 0)
+                                    else (float(r - pr), float(c - pc))
+                                )
                                 info["holding_change"] = True
                                 picked_up = True
                                 break

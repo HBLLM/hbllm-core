@@ -873,10 +873,14 @@ class HCIRSpatialEntityPlanner:
             # If the avatar is already carrying a payload, plan its delivery first
             if is_carrying and carried_offset != (0.0, 0.0):
                 best_drop_info = None
+                dr_s = int(np.sign(carried_offset[0]))
+                dc_s = int(np.sign(carried_offset[1]))
+                c_off_r = dr_s * eg.step_size
+                c_off_c = dc_s * eg.step_size
                 for slot in available_slots:
                     ds = (
-                        int(round(slot[0] - carried_offset[0])),
-                        int(round(slot[1] - carried_offset[1])),
+                        slot[0] - c_off_r,
+                        slot[1] - c_off_c,
                     )
                     is_valid_ds = (
                         0 <= ds[0] < eg.grid_shape[0]
@@ -885,20 +889,18 @@ class HCIRSpatialEntityPlanner:
                         and ds not in (delivered_positions or set())
                     )
                     if is_valid_ds:
-                        dr = int(np.sign(carried_offset[0]))
-                        dc = int(np.sign(carried_offset[1]))
-                        best_drop_info = (ds, slot, (dr, dc))
+                        best_drop_info = (ds, slot, (dr_s, dc_s))
                         break
                 if not best_drop_info and available_slots:
                     slot = available_slots[0]
                     ds = (
-                        int(round(slot[0] - carried_offset[0])),
-                        int(round(slot[1] - carried_offset[1])),
+                        slot[0] - c_off_r,
+                        slot[1] - c_off_c,
                     )
                     best_drop_info = (
                         ds,
                         slot,
-                        (int(np.sign(carried_offset[0])), int(np.sign(carried_offset[1]))),
+                        (dr_s, dc_s),
                     )
 
                 if best_drop_info:

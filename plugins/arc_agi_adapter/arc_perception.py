@@ -403,6 +403,8 @@ def arc_perception_lifter(
 
     # Detect receptacle candidate bounds
     receptacle_bounds = perception_data.get("target_zone_bounds")
+    if not receptacle_bounds and hasattr(state, "learned_receptacle_bounds"):
+        receptacle_bounds = getattr(state, "learned_receptacle_bounds", None)
     domain_instr = getattr(state, "domain_instructions", {})
     if not receptacle_bounds and "receptacle_bounds" in domain_instr:
         receptacle_bounds = domain_instr["receptacle_bounds"]
@@ -417,7 +419,17 @@ def arc_perception_lifter(
                 and o.height >= 3
             ):
                 receptacle_bounds = (o.min_r, o.max_r, o.min_c, o.max_c)
+                if state is not None:
+                    try:
+                        state.learned_receptacle_bounds = receptacle_bounds
+                    except Exception:
+                        pass
                 break
+    elif state is not None and not getattr(state, "learned_receptacle_bounds", None):
+        try:
+            state.learned_receptacle_bounds = receptacle_bounds
+        except Exception:
+            pass
 
     learned_r = domain_instr.get("learned_receptacle_colors", set())
     learned_i = getattr(state, "learned_target_features", set())

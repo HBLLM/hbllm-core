@@ -24,6 +24,14 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills import (
+    CoupledControllableSkillAcquisition,
+    KinematicMomentumSkillAcquisition,
+    MorphologicalProgramSynthesis,
+    PermutationAlgebraSkillAcquisition,
+    RelationalAffordanceSkillAcquisition,
+    SpatiotemporalSkillAcquisition,
+)
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
@@ -307,6 +315,16 @@ class CrossLevelKnowledgeBase:
         self._pending_interaction: dict | None = None
         # Learned procedural skills transferred across levels
         self.skills: list[HCIRSkill] = []
+
+        # Multi-Paradigm Skill Acquisition Engines
+        self.spatiotemporal: SpatiotemporalSkillAcquisition = SpatiotemporalSkillAcquisition()
+        self.permutation: PermutationAlgebraSkillAcquisition = PermutationAlgebraSkillAcquisition()
+        self.kinematics: KinematicMomentumSkillAcquisition = KinematicMomentumSkillAcquisition()
+        self.relational: RelationalAffordanceSkillAcquisition = (
+            RelationalAffordanceSkillAcquisition()
+        )
+        self.morphology: MorphologicalProgramSynthesis = MorphologicalProgramSynthesis()
+        self.coupled: CoupledControllableSkillAcquisition = CoupledControllableSkillAcquisition()
 
     def register_skill(self, skill: HCIRSkill) -> None:
         """Store an acquired skill for reuse in subsequent levels.
@@ -3356,68 +3374,53 @@ class InductiveHCIRAgent:
         if self.active_solver_name is not None:
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # Specialized Archetype Solvers (can be bypassed via disable_archetypes)
-        if not self.disable_archetypes:
-            # 2. Specialized maze/resource constraint predicate check
-            if all(
-                a in available_actions for a in [1, 2, 3, 4]
-            ) and self.spatial_navigator.is_resource_constrained_maze(
-                curr_grid, self.current_level
-            ):
-                self.active_solver_name = "spatial_navigation"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        # 2. Multi-Paradigm Skill Acquisition Solvers (Core General Reasoning)
+        if all(
+            a in available_actions for a in [1, 2, 3, 4]
+        ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
+            self.active_solver_name = "spatial_navigation"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 3. Canvas Stamping / Pattern Matching Branch (diff minimization)
-            if (
-                5 in available_actions
-                and 6 in available_actions
-                and 7 not in available_actions
-                and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
-            ):
-                self.active_solver_name = "canvas_stamping"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if (
+            5 in available_actions
+            and 6 in available_actions
+            and 7 not in available_actions
+            and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
+        ):
+            self.active_solver_name = "canvas_stamping"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 4. Vortex Attractor Shockwave Branch
-            if (
-                6 in available_actions
-                and 7 in available_actions
-                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-                and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
-            ):
-                self.active_solver_name = "vortex"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if (
+            6 in available_actions
+            and 7 in available_actions
+            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
+            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
+        ):
+            self.active_solver_name = "vortex"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 5. Discrete Permutation & Linear System Solvers (e.g. Lights Out via GF(2))
-            if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-                self.active_solver_name = "lights_out"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
+            self.active_solver_name = "lights_out"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 6. Mirrored Convergence Solver (e.g. m0r0)
-            if self.mirrored_convergence_solver.is_mirrored_convergence(
-                curr_grid, available_actions
-            ):
-                self.active_solver_name = "mirrored_convergence"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if self.mirrored_convergence_solver.is_mirrored_convergence(curr_grid, available_actions):
+            self.active_solver_name = "mirrored_convergence"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 7. Gravity Spill Platform Solver (e.g. sp80)
-            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-                self.active_solver_name = "gravity_spill"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
+            self.active_solver_name = "gravity_spill"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 8. Peg Solitaire Solver (e.g. lf52)
-            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-                self.active_solver_name = "peg"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
+            self.active_solver_name = "peg"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
-            # 9. Track Maze Navigation Solver (e.g. tu93)
-            if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
-                self.active_solver_name = "track_maze"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
+            self.active_solver_name = "track_maze"
+            return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
-        if self.disable_archetypes or self.spatial_cognitive_agent.is_spatial_candidate(
-            curr_grid, available_actions
-        ):
+        if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):
             self.active_solver_name = "spatial_cooperative"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
@@ -3451,6 +3454,14 @@ class InductiveHCIRAgent:
         grid_bytes = curr_grid.tobytes()
         is_revisit = grid_bytes in self._click_visited_states
         self._click_visited_states.add(grid_bytes)
+
+        # Discrete Permutation / Lights Out solver
+        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
+            act, conf, data = self.lights_out_solver.plan_step(curr_grid, self.current_level)
+            self.prev_grid = curr_grid.copy()
+            self.last_action = act
+            self.last_action_data = data
+            return act, conf
 
         # Interleave non-click actions (e.g. Action 7 submit/commit) if present
         other_actions = [a for a in available_actions if a != 6]

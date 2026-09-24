@@ -49,6 +49,14 @@ from hbllm.hcir.graph import (
 )
 from hbllm.hcir.learning_loop import LearningLoopEngine
 from hbllm.hcir.receipt import ExecutionReceipt
+from hbllm.hcir.skills import (
+    CoupledControllableSkillAcquisition,
+    KinematicMomentumSkillAcquisition,
+    MorphologicalProgramSynthesis,
+    PermutationAlgebraSkillAcquisition,
+    RelationalAffordanceSkillAcquisition,
+    SpatiotemporalSkillAcquisition,
+)
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
     EntityRole,
@@ -339,6 +347,12 @@ class AgentState:
         learned_obstacle_signatures: set[str] | None = None,
         learned_cargo_signatures: set[str] | None = None,
         learned_affordance_rules: dict[str, ObjectAffordanceRule] | None = None,
+        spatiotemporal_skills: SpatiotemporalSkillAcquisition | None = None,
+        permutation_skills: PermutationAlgebraSkillAcquisition | None = None,
+        kinematic_skills: KinematicMomentumSkillAcquisition | None = None,
+        relational_skills: RelationalAffordanceSkillAcquisition | None = None,
+        morphology_skills: MorphologicalProgramSynthesis | None = None,
+        coupled_skills: CoupledControllableSkillAcquisition | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -387,6 +401,32 @@ class AgentState:
         self.learned_cargo_signatures: set[str] = set(learned_cargo_signatures or [])
         self.learned_affordance_rules: dict[str, ObjectAffordanceRule] = dict(
             learned_affordance_rules or {}
+        )
+        self.spatiotemporal_skills: SpatiotemporalSkillAcquisition = (
+            spatiotemporal_skills
+            if spatiotemporal_skills is not None
+            else SpatiotemporalSkillAcquisition()
+        )
+        self.permutation_skills: PermutationAlgebraSkillAcquisition = (
+            permutation_skills
+            if permutation_skills is not None
+            else PermutationAlgebraSkillAcquisition()
+        )
+        self.kinematic_skills: KinematicMomentumSkillAcquisition = (
+            kinematic_skills
+            if kinematic_skills is not None
+            else KinematicMomentumSkillAcquisition()
+        )
+        self.relational_skills: RelationalAffordanceSkillAcquisition = (
+            relational_skills
+            if relational_skills is not None
+            else RelationalAffordanceSkillAcquisition()
+        )
+        self.morphology_skills: MorphologicalProgramSynthesis = (
+            morphology_skills if morphology_skills is not None else MorphologicalProgramSynthesis()
+        )
+        self.coupled_skills: CoupledControllableSkillAcquisition = (
+            coupled_skills if coupled_skills is not None else CoupledControllableSkillAcquisition()
         )
 
     def get_active_condition(self) -> str:
@@ -888,6 +928,12 @@ class CognitiveBlackbox:
                 state.explored_entity_positions.add(eg.avatar.grid_pos)
                 if state.milestone_start_pos is None:
                     state.milestone_start_pos = eg.avatar.grid_pos
+            if entities and hasattr(state, "spatiotemporal_skills"):
+                state.spatiotemporal_skills.observe(
+                    step=state.step_count,
+                    entities=entities,
+                    agent_pos=eg.avatar.grid_pos if eg and eg.avatar else None,
+                )
             self._source_entity_graphs[source_id] = eg
             return eg
 
@@ -924,6 +970,121 @@ class CognitiveBlackbox:
         if eg is None:
             # No entity graph available — return first available action
             return available_actions[0] if available_actions else DriverAction(action_id=0)
+
+        # Multi-paradigm skill acquisition engine triggers
+        p_data = self._source_perception_data.get(source_id, {})
+        raw_grid = p_data.get("grid")
+        act_ids = [a.action_id for a in available_actions if isinstance(a.action_id, int)]
+
+        if (
+            raw_grid is not None
+            and isinstance(raw_grid, np.ndarray)
+            and not state.active_skill_queue
+        ):
+            # A. Mirrored / Coupled Multi-Agent Convergence (e.g. m0r0)
+            if hasattr(
+                state, "coupled_skills"
+            ) and state.coupled_skills.is_mirrored_convergence_grid(raw_grid, act_ids):
+                j_plan = state.coupled_skills.plan_mirrored_convergence_grid(raw_grid)
+                if j_plan:
+                    state.active_skill_queue = [
+                        DriverAction(action_id=act, semantic_intent=SpatialActionIntent.NAVIGATE)
+                        for act in j_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d coupled convergence actions",
+                        source_id,
+                        len(j_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
+
+            # B. Peg Solitaire & Relational Ternary Affordances (e.g. lf52)
+            if hasattr(
+                state, "relational_skills"
+            ) and state.relational_skills.is_peg_solitaire_grid(raw_grid, act_ids):
+                p_plan = state.relational_skills.plan_peg_solitaire_grid(
+                    raw_grid, getattr(state, "current_level", 0)
+                )
+                if p_plan:
+                    state.active_skill_queue = [
+                        DriverAction(
+                            action_id=act,
+                            semantic_intent=SpatialActionIntent.INTERACT,
+                            parameters=dict(d) if d is not None else {},
+                        )
+                        for act, d in p_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d peg solitaire ternary actions",
+                        source_id,
+                        len(p_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
+
+            # C. Discrete Permutation & Lights Out GF(2) (e.g. ft09)
+            if hasattr(state, "permutation_skills") and state.permutation_skills.is_lights_out_grid(
+                raw_grid, act_ids
+            ):
+                l_plan = state.permutation_skills.plan_lights_out_grid(
+                    raw_grid, getattr(state, "current_level", 0)
+                )
+                if l_plan:
+                    state.active_skill_queue = [
+                        DriverAction(
+                            action_id=act,
+                            semantic_intent=SpatialActionIntent.INTERACT,
+                            parameters=dict(d) if d is not None else {},
+                        )
+                        for act, d in l_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d algebraic GF(2) toggle actions",
+                        source_id,
+                        len(l_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
+
+            # D. Spatiotemporal Track Maze Navigation (e.g. tu93)
+            if hasattr(
+                state, "spatiotemporal_skills"
+            ) and state.spatiotemporal_skills.is_track_maze_grid(raw_grid, act_ids):
+                t_plan = state.spatiotemporal_skills.plan_track_maze_grid(raw_grid)
+                if t_plan:
+                    state.active_skill_queue = [
+                        DriverAction(action_id=act, semantic_intent=SpatialActionIntent.NAVIGATE)
+                        for act in t_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d spatiotemporal track maze actions",
+                        source_id,
+                        len(t_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
+
+            # E. Morphology & Gravity Spill Platform Cascades (e.g. sp80)
+            if hasattr(
+                state, "morphology_skills"
+            ) and state.morphology_skills.is_gravity_spill_grid(raw_grid, act_ids):
+                g_plan = state.morphology_skills.plan_gravity_spill_grid(
+                    raw_grid, getattr(state, "current_level", 0)
+                )
+                if g_plan:
+                    state.active_skill_queue = [
+                        DriverAction(
+                            action_id=act,
+                            semantic_intent=SpatialActionIntent.INTERACT
+                            if d
+                            else SpatialActionIntent.NAVIGATE,
+                            parameters=dict(d) if d is not None else {},
+                        )
+                        for act, d in g_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d gravity spill cascade actions",
+                        source_id,
+                        len(g_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
 
         # Check if environment is non-spatial or click-dominant:
         has_movement = any(
@@ -1226,7 +1387,33 @@ class CognitiveBlackbox:
         if grid is None or not isinstance(grid, np.ndarray) or grid.ndim != 2:
             return click_action
 
+        # Check if environment is a discrete toggle / lights-out puzzle solved algebraically
+        # Strictly for non-avatar abstract grids of size <= 256
+        if (
+            hasattr(state, "permutation_skills")
+            and state.permutation_skills.is_toggle_puzzle
+            and (eg is None or not eg.avatar)
+            and grid.size <= 256
+        ):
+            sol = state.permutation_skills.solve_lights_out(grid)
+
+            if sol:
+                next_c = sol[0]
+                state.last_action_parameters = {"x": next_c[1], "y": next_c[0]}
+                logger.info(
+                    "CognitiveBlackbox[%s]: Executing algebraic GF(2) toggle click at (%d, %d)",
+                    source_id,
+                    next_c[0],
+                    next_c[1],
+                )
+                return DriverAction(
+                    action_id=click_action.action_id if click_action.action_id is not None else 6,
+                    semantic_intent=SpatialActionIntent.INTERACT,
+                    parameters={"x": next_c[1], "y": next_c[0]},
+                )
+
         # Check if alternative non-click action should be executed (e.g. Action 7 commit/submit)
+
         other_actions = [a for a in available_actions if a.action_id != 6]
         if other_actions:
             should_try_other = False
@@ -1775,6 +1962,57 @@ class CognitiveBlackbox:
             if hasattr(model, "probes_tested"):
                 model.probes_tested += 1
 
+        # Feed kinematics & permutation skill acquisition engines
+        eg_curr = self._source_entity_graphs.get(source_id)
+        if (
+            eg_curr
+            and eg_curr.avatar
+            and hasattr(state, "kinematic_skills")
+            and "observed_delta" in info
+        ):
+            intended = (
+                (
+                    state.action_models[act_id].delta_r,
+                    state.action_models[act_id].delta_c,
+                )
+                if act_id in state.action_models
+                else (0, 0)
+            )
+            delta = info["observed_delta"]
+            dr_obs = int(delta[0]) if len(delta) > 0 else 0
+            dc_obs = int(delta[1]) if len(delta) > 1 else 0
+            cur_pos = eg_curr.avatar.grid_pos
+            prev_pos = (cur_pos[0] - dr_obs, cur_pos[1] - dc_obs)
+            state.kinematic_skills.observe_displacement(
+                intended_delta=intended,
+                start_pos=prev_pos,
+                end_pos=cur_pos,
+                barriers=eg_curr.barriers,
+                grid_shape=eg_curr.grid_shape,
+            )
+
+        p_data = self._source_perception_data.get(source_id, {})
+        curr_g = p_data.get("grid")
+        prev_g = getattr(state, "_last_step_grid", None)
+        if (
+            prev_g is not None
+            and curr_g is not None
+            and isinstance(curr_g, np.ndarray)
+            and hasattr(state, "permutation_skills")
+        ):
+            click_pt = None
+            if action.parameters and "x" in action.parameters and "y" in action.parameters:
+                click_pt = (int(action.parameters["y"]), int(action.parameters["x"]))
+            elif state.last_action_parameters:
+                click_pt = (
+                    int(state.last_action_parameters.get("y", 0)),
+                    int(state.last_action_parameters.get("x", 0)),
+                )
+            if click_pt:
+                state.permutation_skills.observe_toggle(click_pt, prev_g, curr_g)
+        if curr_g is not None and isinstance(curr_g, np.ndarray):
+            state._last_step_grid = curr_g.copy()
+
         if "step_size" in info:
             new_sz = int(info["step_size"])
             if new_sz > 0:
@@ -2236,6 +2474,12 @@ class CognitiveBlackbox:
             saved_obstacle_sigs = set(getattr(state, "learned_obstacle_signatures", set()))
             saved_cargo_sigs = set(getattr(state, "learned_cargo_signatures", set()))
             saved_affordance_rules = dict(getattr(state, "learned_affordance_rules", {}))
+            saved_spatiotemporal = getattr(state, "spatiotemporal_skills", None)
+            saved_permutation = getattr(state, "permutation_skills", None)
+            saved_kinematic = getattr(state, "kinematic_skills", None)
+            saved_relational = getattr(state, "relational_skills", None)
+            saved_morphology = getattr(state, "morphology_skills", None)
+            saved_coupled = getattr(state, "coupled_skills", None)
             if (
                 is_retry
                 and not getattr(state, "last_attempt_won", False)
@@ -2269,6 +2513,12 @@ class CognitiveBlackbox:
                 learned_obstacle_signatures=saved_obstacle_sigs,
                 learned_cargo_signatures=saved_cargo_sigs,
                 learned_affordance_rules=saved_affordance_rules,
+                spatiotemporal_skills=saved_spatiotemporal,
+                permutation_skills=saved_permutation,
+                kinematic_skills=saved_kinematic,
+                relational_skills=saved_relational,
+                morphology_skills=saved_morphology,
+                coupled_skills=saved_coupled,
             )
         else:
             self._source_states[source_id] = AgentState()
