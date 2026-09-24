@@ -1075,3 +1075,151 @@ def op_maze_route(
             curr = parent[curr]
 
     return res
+
+
+def op_rigid_body_gravity(grid: Grid, direction: str = "down") -> Grid:
+    """Simulate 2D physical gravity for multi-color/single-color rigid bodies with obstacle collisions.
+
+    Each 4-connected cluster of non-background pixels moves as a rigid body until colliding
+    with the grid boundary or with stationary obstacle bodies.
+    """
+    bg = detect_background_color(grid)
+    h, w = grid.shape
+    dir_map = {
+        "down": (1, 0),
+        "up": (-1, 0),
+        "left": (0, -1),
+        "right": (0, 1),
+    }
+    dr, dc = dir_map.get(direction, (1, 0))
+
+    # Segment all non-background 4-connected entities (preserving internal colors)
+    visited: set[tuple[int, int]] = set()
+    entities: list[list[tuple[int, int, int]]] = []
+
+    for r in range(h):
+        for c in range(w):
+            if grid[r, c] == bg or (r, c) in visited:
+                continue
+            entity_cells: list[tuple[int, int, int]] = []
+            queue: deque[tuple[int, int]] = deque([(r, c)])
+            visited.add((r, c))
+            while queue:
+                cr, cc = queue.popleft()
+                entity_cells.append((cr, cc, int(grid[cr, cc])))
+                for ndr, ndc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = cr + ndr, cc + ndc
+                    if (
+                        0 <= nr < h
+                        and 0 <= nc < w
+                        and (nr, nc) not in visited
+                        and grid[nr, nc] != bg
+                    ):
+                        visited.add((nr, nc))
+                        queue.append((nr, nc))
+            entities.append(entity_cells)
+
+    if not entities:
+        return grid.copy()
+
+    active_entities = [list(e) for e in entities]
+
+    while True:
+        # Stepwise collision detection: find all entities that are stationary in this step
+        stationary: set[int] = set()
+        for i, ent in enumerate(active_entities):
+            if any(not (0 <= r + dr < h and 0 <= c + dc < w) for r, c, _ in ent):
+                stationary.add(i)
+
+        changed = True
+        while changed:
+            changed = False
+            stationary_cells: set[tuple[int, int]] = set()
+            for i in stationary:
+                for r, c, _ in active_entities[i]:
+                    stationary_cells.add((r, c))
+
+            for i, ent in enumerate(active_entities):
+                if i not in stationary:
+                    if any((r + dr, c + dc) in stationary_cells for r, c, _ in ent):
+                        stationary.add(i)
+                        changed = True
+
+        if len(stationary) == len(active_entities):
+            break
+
+        # Move all non-stationary entities by (dr, dc)
+        for i in range(len(active_entities)):
+            if i not in stationary:
+                active_entities[i] = [(r + dr, c + dc, col) for r, c, col in active_entities[i]]
+
+    res = np.full((h, w), bg, dtype=int)
+    for ent in active_entities:
+        for r, c, col in ent:
+            res[r, c] = col
+
+    return res
+
+
+def op_morphological_dilate(grid: Grid, connectivity: int = 4) -> Grid:
+    """Dilate non-background entities by 1 pixel in 4-way or 8-way connectivity."""
+    res = grid.copy()
+    bg = detect_background_color(grid)
+    h, w = grid.shape
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if connectivity == 8:
+        dirs += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    fg_pts = [(r, c, int(grid[r, c])) for r in range(h) for c in range(w) if grid[r, c] != bg]
+    for r, c, col in fg_pts:
+        for dr, dc in dirs:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < h and 0 <= nc < w and res[nr, nc] == bg:
+                res[nr, nc] = col
+    return res
+
+
+def op_patch_boundary_frame(grid: Grid, frame_color: int, mode: str = "canvas") -> Grid:
+    """Draw a 1-pixel frame around the canvas perimeter or around non-background bbox."""
+    res = grid.copy()
+    h, w = grid.shape
+    if mode == "canvas":
+        res[0, :] = frame_color
+        res[h - 1, :] = frame_color
+        res[:, 0] = frame_color
+        res[:, w - 1] = frame_color
+    elif mode == "bbox":
+        bg = detect_background_color(grid)
+        pts = np.argwhere(grid != bg)
+        if len(pts) > 0:
+            min_r, min_c = pts.min(axis=0)
+            max_r, max_c = pts.max(axis=0)
+            res[min_r, min_c : max_c + 1] = frame_color
+            res[max_r, min_c : max_c + 1] = frame_color
+            res[min_r : max_r + 1, min_c] = frame_color
+            res[min_r : max_r + 1, max_c] = frame_color
+    return res
+
+
+def op_patch_isolated_markers(grid: Grid, marker_color: int, anchor: str = "corners") -> Grid:
+    """Place isolated 1-pixel markers at structural anchor positions."""
+    res = grid.copy()
+    h, w = grid.shape
+    if anchor == "corners":
+        res[0, 0] = marker_color
+        res[0, w - 1] = marker_color
+        res[h - 1, 0] = marker_color
+        res[h - 1, w - 1] = marker_color
+    elif anchor == "center":
+        res[h // 2, w // 2] = marker_color
+    elif anchor == "bbox_corners":
+        bg = detect_background_color(grid)
+        pts = np.argwhere(grid != bg)
+        if len(pts) > 0:
+            min_r, min_c = pts.min(axis=0)
+            max_r, max_c = pts.max(axis=0)
+            res[min_r, min_c] = marker_color
+            res[min_r, max_c] = marker_color
+            res[max_r, min_c] = marker_color
+            res[max_r, max_c] = marker_color
+    return res
