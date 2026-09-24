@@ -893,7 +893,12 @@ class HCIRSpatialEntityPlanner:
                     grid_shape=eg.grid_shape,
                     step_size=eg.step_size,
                 )
-                if path and len(path) > 1:
+                if (
+                    path
+                    and len(path) > 1
+                    and math.hypot(path[-1][0] - target_pos[0], path[-1][1] - target_pos[1])
+                    <= eg.step_size * 0.95
+                ):
                     return [
                         SequencePlanStep(
                             target_entity_id=g.id,
@@ -984,7 +989,12 @@ class HCIRSpatialEntityPlanner:
                     grid_shape=eg.grid_shape,
                     step_size=eg.step_size,
                 )
-                if path and len(path) > 1:
+                if (
+                    path
+                    and len(path) > 1
+                    and math.hypot(path[-1][0] - cand_pos[0], path[-1][1] - cand_pos[1])
+                    <= eg.step_size * 0.95
+                ):
                     return [
                         SequencePlanStep(
                             target_entity_id=cand.id,
@@ -1178,20 +1188,31 @@ class HCIRSpatialEntityPlanner:
     # 4. LOW-LEVEL GEODESIC SEARCH & ACTION SELECTION
     # ═══════════════════════════════════════════════════════════════════════
 
-    def get_action_for_delta(self, dr: int, dc: int, action_models: dict[int, Any]) -> int | None:
-        """Finds available action whose dynamics produce delta (dr, dc)."""
+    def get_action_for_delta(
+        self,
+        dr: int,
+        dc: int,
+        action_models: dict[int, Any],
+        condition: str | None = None,
+    ) -> int | None:
+        """Finds available action whose dynamics produce delta (dr, dc) under given condition."""
         sign_r = int(np.sign(dr))
         sign_c = int(np.sign(dc))
 
         for act, model in action_models.items():
-            if not hasattr(model, "delta_r") or not hasattr(model, "delta_c"):
+            if hasattr(model, "get_displacement"):
+                m_dr, m_dc = model.get_displacement(condition)
+            elif hasattr(model, "delta_r") and hasattr(model, "delta_c"):
+                m_dr, m_dc = model.delta_r, model.delta_c
+            else:
                 continue
-            m_r = int(np.sign(model.delta_r))
-            m_c = int(np.sign(model.delta_c))
+
+            m_r = int(np.sign(m_dr))
+            m_c = int(np.sign(m_dc))
             if (sign_r != 0 and m_r == sign_r and m_c == 0) or (
                 sign_c != 0 and m_c == sign_c and m_r == 0
             ):
-                return act
+                return int(act) if isinstance(act, str) and act.isdigit() else act
 
         return None
 

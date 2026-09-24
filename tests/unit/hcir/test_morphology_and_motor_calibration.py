@@ -121,6 +121,68 @@ class TestMotorCalibrationAndCausalLearning:
         assert rule.occurrences == 3
         assert rule.posterior_value == "still_closed"
 
+    def test_conditional_action_dynamics_branching(self) -> None:
+        """Verify that condition-tagged updates maintain separate branches and prevent EMA corruption."""
+        model = ActionDynamicsModel(action_id=1, delta_r=0, delta_c=0, confidence=0.5)
+
+        # Baseline empty-handed movement: action 1 moves (-1, 0)
+        model.update_from_trial(
+            observed_delta=(-1, 0), success=True, learning_rate=1.0, condition="default"
+        )
+        assert model.delta_r == -1
+        assert model.delta_c == 0
+
+        # Movement when carrying heavy item: action 1 moves (0, 0) or different direction
+        model.update_from_trial(observed_delta=(0, 0), success=True, condition="carrying")
+        assert model.delta_r == -1  # Default branch unaffected!
+        assert model.delta_c == 0
+
+        # Carrying branch has (0, 0)
+        carrying_dyn = model.get_dynamics("carrying")
+        assert carrying_dyn.delta_r == 0
+        assert carrying_dyn.delta_c == 0
+        assert model.get_displacement("carrying") == (0, 0)
+        assert model.get_displacement("default") == (-1, 0)
+
+    def test_multimodal_contradiction_forking(self) -> None:
+        """Verify that high-confidence model encountering conflicting observations forks rather than corrupts EMA."""
+        model = ActionDynamicsModel(
+            action_id=2, delta_r=1, delta_c=0, confidence=0.9, probes_tested=5
+        )
+
+        # Contradictory observation without explicit condition (e.g. mode changed in environment)
+        model.update_from_trial(observed_delta=(0, 1), success=True)
+
+        # Baseline is preserved
+        assert model.delta_r == 1
+        assert model.delta_c == 0
+
+        # An alternative branch was forked
+        assert "cond_0_1" in model.conditional_branches
+        branch = model.conditional_branches["cond_0_1"]
+        assert branch.delta_r == 0
+        assert branch.delta_c == 1
+
+    def test_conditioned_action_dynamics_container(self) -> None:
+        """Verify ConditionedActionDynamics dict-like access and fallback."""
+        from hbllm.hcir.world.motor_calibration import ConditionedActionDynamics
+
+        cad = ConditionedActionDynamics()
+        m_base = ActionDynamicsModel(action_id=1, delta_r=-1, delta_c=0, confidence=0.9)
+        m_carry = ActionDynamicsModel(action_id=1, delta_r=0, delta_c=0, confidence=0.8)
+
+        cad.set(1, None, m_base)
+        cad.set(1, "carrying", m_carry)
+
+        assert cad.get(1) == m_base
+        assert cad.get(1, "carrying") == m_carry
+        assert cad.get(1, "unknown_mode") == m_base  # Fallback to implicit default
+
+        cad.set_active_condition("carrying")
+        assert cad[1] == m_carry
+        cad.set_active_condition(None)
+        assert cad[1] == m_base
+
 
 class TestCognitiveBlackboxLearning:
     def test_blackbox_learns_from_feedback_trial_and_error(self) -> None:

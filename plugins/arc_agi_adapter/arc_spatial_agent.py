@@ -116,7 +116,6 @@ class ARC3SpatialCognitiveAgent:
         self.phase: AgentPhase = AgentPhase.EPISTEMIC_LEARNING
         self.control_context: Any = None
         self.decomposer: Any = self.blackbox.goal_decomposer
-        self.state_mutations: list[StateMutationModel] = []
         self.pushable_colors: set[int] = set()
         self.holding_item: bool = False
         self.carried_offset: tuple[float, float] = (0.0, 0.0)
@@ -222,6 +221,15 @@ class ARC3SpatialCognitiveAgent:
     @walkable_colors.setter
     def walkable_colors(self, value: set[int]) -> None:
         self.learned_walkable_colors = value
+
+    @property
+    def state_mutations(self) -> list[StateMutationModel]:
+        """Proxy to blackbox state mutations for backward compatibility."""
+        return self.blackbox.get_state("arc_agi").state_mutations
+
+    @state_mutations.setter
+    def state_mutations(self, value: list[StateMutationModel]) -> None:
+        self.blackbox.get_state("arc_agi").state_mutations = list(value)
 
     @classmethod
     def is_spatial_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -384,6 +392,22 @@ class ARC3SpatialCognitiveAgent:
             else np.empty((0, 2), dtype=int)
         )
 
+        # Check for discrete state mutation: avatar color changed upon stepping on tile
+        if avatar_col is not None and len(prev_pts) > 0 and len(curr_pts) == 0:
+            pr, pc = prev_pts.mean(axis=0)
+            r_c, c_c = int(round(pr)), int(round(pc))
+            if 0 <= r_c < curr_grid.shape[0] and 0 <= c_c < curr_grid.shape[1]:
+                new_c = int(curr_grid[r_c, c_c])
+                if new_c != 0 and new_c != avatar_col:
+                    info["prior_avatar_feature"] = avatar_col
+                    info["new_avatar_feature"] = new_c
+                    info["avatar_feature"] = new_c
+                    info["traversed_feature"] = int(prev_grid[r_c, c_c])
+                    avatar_col = new_c
+                    self.avatar_color = new_c
+                    curr_pts = np.argwhere(curr_grid == avatar_col)
+                    diff_curr_pts = np.argwhere((curr_grid == avatar_col) & diff_mask)
+
         use_prev = diff_prev_pts if len(diff_prev_pts) > 0 and len(diff_curr_pts) > 0 else prev_pts
         use_curr = diff_curr_pts if len(diff_prev_pts) > 0 and len(diff_curr_pts) > 0 else curr_pts
         prev_set = {tuple(p) for p in prev_pts}
@@ -504,11 +528,13 @@ class ARC3SpatialCognitiveAgent:
                                 blackbox_state.carrying.holding = True
                                 blackbox_state.carrying.entity_id = f"item_{prev_grid[r, c]}"
                                 blackbox_state.carrying.offset = (float(r - pr), float(c - pc))
+                                info["holding_change"] = True
                                 break
             else:
                 blackbox_state.carrying.holding = False
                 blackbox_state.carrying.entity_id = ""
                 blackbox_state.carrying.offset = (0.0, 0.0)
+                info["holding_change"] = True
 
         # Empirical Goal / Hazard Attribution
         if won:

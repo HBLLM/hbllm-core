@@ -58,7 +58,10 @@ from hbllm.hcir.spatial_planner import (
 )
 from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
 from hbllm.hcir.workspace import HCIRWorkspaceState
-from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+from hbllm.hcir.world.motor_calibration import (
+    ActionDynamicsModel,
+    StateMutationModel,
+)
 from hbllm.memory.knowledge_graph import KnowledgeGraph
 
 logger = logging.getLogger(__name__)
@@ -280,6 +283,8 @@ class AgentState:
         last_action_id: int | None = None,
         last_action_blocked: bool = False,
         domain_instructions: dict[str, Any] | None = None,
+        state_mutations: list[StateMutationModel] | None = None,
+        active_condition: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -299,18 +304,31 @@ class AgentState:
         self.last_action_id = last_action_id
         self.last_action_blocked = last_action_blocked
         self.domain_instructions = dict(domain_instructions or {})
+        self.state_mutations: list[StateMutationModel] = list(state_mutations or [])
+        self.active_condition = active_condition
+
+    def get_active_condition(self) -> str:
+        """Derive the active environmental/motor condition string."""
+        if self.active_condition:
+            return self.active_condition
+        if self.carrying and self.carrying.holding:
+            return "carrying"
+        return "default"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize AgentState to a JSON-compatible dictionary."""
         models_dict = {}
         for a, m in self.action_models.items():
-            models_dict[str(a)] = {
-                "action_id": getattr(m, "action_id", int(a)),
-                "delta_r": getattr(m, "delta_r", 0),
-                "delta_c": getattr(m, "delta_c", 0),
-                "confidence": getattr(m, "confidence", 0.5),
-                "probes_tested": getattr(m, "probes_tested", 1),
-            }
+            if hasattr(m, "to_dict"):
+                models_dict[str(a)] = m.to_dict()
+            else:
+                models_dict[str(a)] = {
+                    "action_id": getattr(m, "action_id", int(a)),
+                    "delta_r": getattr(m, "delta_r", 0),
+                    "delta_c": getattr(m, "delta_c", 0),
+                    "confidence": getattr(m, "confidence", 0.5),
+                    "probes_tested": getattr(m, "probes_tested", 1),
+                }
         return {
             "phase": self.phase.value if hasattr(self.phase, "value") else str(self.phase),
             "step_count": self.step_count,
@@ -327,6 +345,8 @@ class AgentState:
             "last_action_id": self.last_action_id,
             "last_action_blocked": self.last_action_blocked,
             "domain_instructions": dict(self.domain_instructions),
+            "state_mutations": [m.to_dict() for m in self.state_mutations],
+            "active_condition": self.active_condition,
         }
 
     @classmethod
@@ -336,15 +356,15 @@ class AgentState:
         for a_str, md in data.get("action_models", {}).items():
             try:
                 a_id = int(a_str)
-                action_models[a_id] = ActionDynamicsModel(
-                    action_id=md.get("action_id", a_id),
-                    delta_r=md.get("delta_r", 0),
-                    delta_c=md.get("delta_c", 0),
-                    confidence=md.get("confidence", 0.5),
-                    probes_tested=md.get("probes_tested", 1),
-                )
+                action_models[a_id] = ActionDynamicsModel.from_dict(md)
             except Exception:
                 continue
+
+        mutations = [
+            StateMutationModel.from_dict(mut_data)
+            for mut_data in data.get("state_mutations", [])
+            if isinstance(mut_data, dict)
+        ]
 
         phase_val = data.get("phase", AgentPhase.EPISTEMIC_LEARNING)
         try:
@@ -368,6 +388,8 @@ class AgentState:
             last_action_id=data.get("last_action_id"),
             last_action_blocked=bool(data.get("last_action_blocked", False)),
             domain_instructions=data.get("domain_instructions", {}),
+            state_mutations=mutations,
+            active_condition=data.get("active_condition"),
         )
 
 
@@ -495,6 +517,33 @@ class CognitiveBlackbox:
             self._source_states[source_id] = AgentState()
         return self._source_states[source_id]
 
+    def record_state_mutation(
+        self,
+        mutation: StateMutationModel,
+        source_id: str = "default",
+    ) -> None:
+        """Record or reinforce a learned state mutation model."""
+        state = self.get_state(source_id)
+        for existing in state.state_mutations:
+            if (
+                existing.trigger_type == mutation.trigger_type
+                and existing.trigger_pos == mutation.trigger_pos
+                and existing.trigger_feature == mutation.trigger_feature
+                and existing.mutation_type == mutation.mutation_type
+            ):
+                existing.record_observation(mutation.posterior_value)
+                return
+        state.state_mutations.append(mutation)
+        logger.info(
+            "CognitiveBlackbox[%s]: Induced StateMutationModel(%s at pos=%s feat=%s: %s -> %s)",
+            source_id,
+            mutation.mutation_type,
+            mutation.trigger_pos,
+            mutation.trigger_feature,
+            mutation.prior_value,
+            mutation.posterior_value,
+        )
+
     # ── Workspace Graph Synchronization ───────────────────────────────────
 
     def sync_state_to_workspace(self, source_id: str = "default") -> None:
@@ -557,6 +606,13 @@ class CognitiveBlackbox:
             self._upsert_var(
                 "var_explored_entity_ids",
                 list(state.explored_entity_ids),
+            )
+
+        # Learned state mutations
+        if state.state_mutations:
+            self._upsert_var(
+                "var_state_mutations",
+                [m.to_dict() for m in state.state_mutations],
             )
 
     def _upsert_var(self, name: str, value: Any) -> None:
@@ -659,9 +715,22 @@ class CognitiveBlackbox:
                 workspace=self.workspace,
             )
 
-        # Wire HierarchicalGoalDecomposer: If spatial planner found no sequence and there is an avatar,
-        # decompose obstructed goal into prerequisite subgoals (DEPENDS_ON) or epistemic frontiers
-        if not state.current_plan and eg.avatar:
+        # Wire HierarchicalGoalDecomposer & StateMutationModel:
+        # If spatial planner found no sequence (or only undirected frontier exploration) and there is an avatar,
+        # decompose obstructed goal into prerequisite state mutation triggers (e.g. switch to open barrier or remap color),
+        # dependency subgoals (DEPENDS_ON), or epistemic frontiers.
+        is_exploratory_plan = bool(
+            not state.current_plan
+            or (
+                state.current_plan[0].action_type
+                in (SpatialActionIntent.NAVIGATE, SpatialActionIntent.INTERACT)
+                and any(
+                    state.current_plan[0].target_entity_id.startswith(prefix)
+                    for prefix in ("frontier", "portal_", "cand_", "entity_")
+                )
+            )
+        )
+        if is_exploratory_plan and eg.avatar:
             goals = [
                 e
                 for e in eg.entities.values()
@@ -680,24 +749,67 @@ class CognitiveBlackbox:
                     description=f"Reach {primary_goal_ent.id}",
                     properties={"target_position": primary_goal_ent.grid_pos},
                 )
-                subgoal_node = self.goal_decomposer.decompose_goal(
-                    workspace=self.workspace,
-                    primary_goal=goal_node,
-                    avatar_pos=eg.avatar.grid_pos,
-                    barrier_cells=eg.barriers,
-                    grid_shape=eg.grid_shape,
-                    step_size=eg.step_size,
-                )
-                if subgoal_node and "target_position" in subgoal_node.properties:
-                    target_pos = subgoal_node.properties["target_position"]
-                    if target_pos != eg.avatar.grid_pos:
-                        state.current_plan = [
-                            SequencePlanStep(
-                                target_entity_id=subgoal_node.id,
-                                target_pos=target_pos,
-                                action_type=SpatialActionIntent.NAVIGATE,
-                            )
-                        ]
+
+                # Check if any learned state mutation can resolve the obstruction
+                # (e.g. switch tile to open barrier, transformer tile to remap color)
+                mutation_step = None
+                if state.state_mutations:
+                    for mut in state.state_mutations:
+                        if mut.confidence >= 0.5 and mut.trigger_pos:
+                            t_pos = (int(mut.trigger_pos[0]), int(mut.trigger_pos[1]))
+                            if t_pos != eg.avatar.grid_pos and t_pos not in eg.barriers:
+                                p = self.spatial_planner.compute_safe_path(
+                                    start=eg.avatar.grid_pos,
+                                    goal=t_pos,
+                                    barrier_cells=eg.barriers,
+                                    grid_shape=eg.grid_shape,
+                                    step_size=eg.step_size,
+                                )
+                                if (
+                                    p
+                                    and len(p) > 1
+                                    and math.hypot(p[-1][0] - t_pos[0], p[-1][1] - t_pos[1])
+                                    <= eg.step_size * 0.95
+                                ):
+                                    mutation_step = SequencePlanStep(
+                                        target_entity_id=f"mutation_{mut.mutation_type}_{t_pos[0]}_{t_pos[1]}",
+                                        target_pos=t_pos,
+                                        action_type=(
+                                            SpatialActionIntent.INTERACT
+                                            if mut.trigger_type == "ACTION"
+                                            else SpatialActionIntent.NAVIGATE
+                                        ),
+                                    )
+                                    logger.info(
+                                        "CognitiveBlackbox[%s]: Chained state mutation trigger %s at %s to unblock goal %s",
+                                        source_id,
+                                        mut.mutation_type,
+                                        t_pos,
+                                        primary_goal_ent.id,
+                                    )
+                                    break
+
+                if mutation_step:
+                    state.current_plan = [mutation_step]
+                else:
+                    subgoal_node = self.goal_decomposer.decompose_goal(
+                        workspace=self.workspace,
+                        primary_goal=goal_node,
+                        avatar_pos=eg.avatar.grid_pos,
+                        barrier_cells=eg.barriers,
+                        grid_shape=eg.grid_shape,
+                        step_size=eg.step_size,
+                    )
+                    if subgoal_node and "target_position" in subgoal_node.properties:
+                        target_pos = subgoal_node.properties["target_position"]
+                        if target_pos != eg.avatar.grid_pos:
+                            state.current_plan = [
+                                SequencePlanStep(
+                                    target_entity_id=subgoal_node.id,
+                                    target_pos=target_pos,
+                                    action_type=SpatialActionIntent.NAVIGATE,
+                                )
+                            ]
 
         # Convert plan to action
         if state.current_plan:
@@ -751,7 +863,7 @@ class CognitiveBlackbox:
                         dr = next_cell[0] - eg.avatar.grid_pos[0]
                         dc = next_cell[1] - eg.avatar.grid_pos[1]
                         act_id = self.spatial_planner.get_action_for_delta(
-                            dr, dc, state.action_models
+                            dr, dc, state.action_models, condition=state.get_active_condition()
                         )
                         if act_id is not None:
                             for a in available_actions:
@@ -782,15 +894,21 @@ class CognitiveBlackbox:
             m = state.action_models.get(a.action_id)
             if m is None or getattr(m, "probes_tested", 0) == 0:
                 untested.append(a)
-            elif getattr(m, "delta_r", 0) != 0 or getattr(m, "delta_c", 0) != 0:
-                # Do not choose an action that points directly into a known barrier
-                if avatar_pos is not None:
-                    dest = (avatar_pos[0] + m.delta_r, avatar_pos[1] + m.delta_c)
-                    if dest in eg.barriers or dest in self.spatial_planner._learned_barriers:
-                        continue
-                valid_moves.append(a)
             else:
-                non_movement_actions.append(a)
+                m_dr, m_dc = (
+                    m.get_displacement(state.get_active_condition())
+                    if hasattr(m, "get_displacement")
+                    else (getattr(m, "delta_r", 0), getattr(m, "delta_c", 0))
+                )
+                if m_dr != 0 or m_dc != 0:
+                    # Do not choose an action that points directly into a known barrier
+                    if avatar_pos is not None:
+                        dest = (avatar_pos[0] + m_dr, avatar_pos[1] + m_dc)
+                        if dest in eg.barriers or dest in self.spatial_planner._learned_barriers:
+                            continue
+                    valid_moves.append(a)
+                else:
+                    non_movement_actions.append(a)
 
         # Prioritize: untested action probes > valid movement actions not into barriers > interaction/context actions
         if untested:
@@ -898,7 +1016,9 @@ class CognitiveBlackbox:
                     is_valid = False
 
                 if is_valid and not is_blocked and hasattr(model, "update_from_trial"):
-                    model.update_from_trial(delta, success=True)
+                    model.update_from_trial(
+                        delta, success=True, condition=state.get_active_condition()
+                    )
             if hasattr(model, "probes_tested"):
                 model.probes_tested += 1
 
@@ -919,9 +1039,70 @@ class CognitiveBlackbox:
         if calibrated_steps:
             state.step_size = min(calibrated_steps)
 
-        # Wire Native HCIR Memory: Record trial failures & collision barriers in BeliefNode & EpisodeNode
+        # Wire Causal Induction: StateMutationModel discovery
         eg = self._source_entity_graphs.get(source_id)
         avatar_pos = eg.avatar.grid_pos if (eg and eg.avatar) else None
+
+        # 1. Direct state mutations passed in feedback info
+        if "state_mutations" in info:
+            for mut in info["state_mutations"]:
+                if isinstance(mut, StateMutationModel):
+                    self.record_state_mutation(mut, source_id=source_id)
+                elif isinstance(mut, dict):
+                    self.record_state_mutation(
+                        StateMutationModel.from_dict(mut), source_id=source_id
+                    )
+
+        # 2. Causal induction from avatar feature changes (e.g. stepping on transformer tile)
+        new_av_feat = info.get("new_avatar_feature")
+        prior_av_feat = info.get("prior_avatar_feature", state.avatar_feature)
+        if new_av_feat is not None and prior_av_feat is not None and new_av_feat != prior_av_feat:
+            mut = StateMutationModel(
+                trigger_type="CONTACT",
+                trigger_pos=avatar_pos,
+                trigger_feature=info.get("traversed_feature"),
+                mutation_type="COLOR_REMAP",
+                prior_value=prior_av_feat,
+                posterior_value=new_av_feat,
+                confidence=0.95,
+            )
+            self.record_state_mutation(mut, source_id=source_id)
+            state.avatar_feature = new_av_feat
+        elif new_av_feat is not None and state.avatar_feature is None:
+            state.avatar_feature = new_av_feat
+        elif "avatar_feature" in info and state.avatar_feature is None:
+            state.avatar_feature = info["avatar_feature"]
+
+        # 3. Causal induction from barrier opening
+        if "barrier_opened" in info or "opened_barriers" in info:
+            opened = info.get("opened_barriers") or info.get("barrier_opened")
+            mut = StateMutationModel(
+                trigger_type="ACTION" if is_interaction else "CONTACT",
+                trigger_pos=avatar_pos,
+                trigger_feature=act_id if is_interaction else info.get("traversed_feature"),
+                mutation_type="BARRIER_OPEN",
+                prior_value="blocked",
+                posterior_value="open",
+                confidence=0.95,
+                metadata={"opened_cells": list(opened) if isinstance(opened, (list, set)) else []},
+            )
+            self.record_state_mutation(mut, source_id=source_id)
+
+        # 4. Carrying / holding state mutations
+        if "holding_change" in info:
+            prior_h = not state.carrying.holding
+            mut = StateMutationModel(
+                trigger_type="ACTION",
+                trigger_pos=avatar_pos,
+                trigger_feature=act_id,
+                mutation_type="HOLDING_CHANGE",
+                prior_value=prior_h,
+                posterior_value=state.carrying.holding,
+                confidence=0.95,
+            )
+            self.record_state_mutation(mut, source_id=source_id)
+
+        # Wire Native HCIR Memory: Record trial failures & collision barriers in BeliefNode & EpisodeNode
 
         if "collision_feature" in info or is_blocked:
             if "collision_feature" in info:
@@ -1526,7 +1707,10 @@ class CognitiveBlackbox:
                 step_dr = next_cell[0] - avatar_pos[0]
                 step_dc = next_cell[1] - avatar_pos[1]
                 action_id = self.spatial_planner.get_action_for_delta(
-                    step_dr, step_dc, state.action_models
+                    step_dr,
+                    step_dc,
+                    state.action_models,
+                    condition=state.get_active_condition(),
                 )
                 if action_id is not None:
                     for a in available_actions:
@@ -1534,11 +1718,18 @@ class CognitiveBlackbox:
                             return a
 
         # Fallback to direct displacement matching ONLY if not moving into a known barrier
-        action_id = self.spatial_planner.get_action_for_delta(dr, dc, state.action_models)
+        action_id = self.spatial_planner.get_action_for_delta(
+            dr, dc, state.action_models, condition=state.get_active_condition()
+        )
         if action_id is not None:
             m = state.action_models.get(action_id)
             if m:
-                dest = (avatar_pos[0] + m.delta_r, avatar_pos[1] + m.delta_c)
+                m_dr, m_dc = (
+                    m.get_displacement(state.get_active_condition())
+                    if hasattr(m, "get_displacement")
+                    else (getattr(m, "delta_r", 0), getattr(m, "delta_c", 0))
+                )
+                dest = (avatar_pos[0] + m_dr, avatar_pos[1] + m_dc)
                 if dest not in eg.barriers and dest not in self.spatial_planner._learned_barriers:
                     for a in available_actions:
                         if a.action_id == action_id:

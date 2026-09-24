@@ -425,3 +425,25 @@ def test_cross_attempt_frontier_exploration() -> None:
     # The planner must prioritize the unexplored candidate (cand_new at (3, 1))
     assert plan[0].target_entity_id == "cand_new"
     assert plan[0].target_pos == (3, 1)
+
+
+def test_arc_spatial_agent_state_mutation_tracking() -> None:
+    """Verify that ARC3SpatialCognitiveAgent detects color remap and tracks state_mutations."""
+    agent = ARC3SpatialCognitiveAgent()
+    agent.avatar_color = 3
+
+    g0 = np.zeros((8, 8), dtype=int)
+    g0[4, 4] = 3
+
+    # Stepping onto transformer tile at (4, 4) mutates avatar color to 7
+    g1 = np.zeros((8, 8), dtype=int)
+    g1[4, 4] = 7
+
+    agent.update_causal_dynamics(action_id=1, prev_grid=g0, curr_grid=g1)
+
+    assert agent.avatar_color == 7
+    assert len(agent.state_mutations) == 1
+    mut = agent.state_mutations[0]
+    assert mut.mutation_type == "COLOR_REMAP"
+    assert mut.prior_value == 3
+    assert mut.posterior_value == 7
