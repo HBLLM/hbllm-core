@@ -8,6 +8,7 @@ Learned affordances and causal rules are discovered empirically through experien
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,6 +29,8 @@ class ShapeArchetype:
     def from_coords(cls, coords: set[tuple[int, int]] | list[tuple[int, int]]) -> ShapeArchetype:
         if not coords:
             return cls(frozenset(), 0, 0, 0, ())
+        if len(coords) == 1:
+            return _SINGLE_PIXEL_ARCHETYPE
         min_r = min(r for r, c in coords)
         min_c = min(c for r, c in coords)
         norm_coords = frozenset((r - min_r, c - min_c) for r, c in coords)
@@ -35,14 +38,13 @@ class ShapeArchetype:
         w = max(c for r, c in norm_coords) + 1
         area = len(norm_coords)
 
-        orbit = cls._compute_rotations(norm_coords, h, w)
-        canon = min(orbit, key=lambda s: sorted(s))
+        canon_id = _canonicalize_shape(norm_coords, h, w)
         return cls(
             relative_coords=norm_coords,
             height=h,
             width=w,
             area=area,
-            canonical_id=tuple(sorted(canon)),
+            canonical_id=canon_id,
         )
 
     @classmethod
@@ -65,6 +67,24 @@ class ShapeArchetype:
         if self.area != other.area:
             return False
         return self.canonical_id == other.canonical_id
+
+
+@functools.lru_cache(maxsize=4096)
+def _canonicalize_shape(
+    norm_coords: frozenset[tuple[int, int]], h: int, w: int
+) -> tuple[tuple[int, int], ...]:
+    orbit = ShapeArchetype._compute_rotations(norm_coords, h, w)
+    canon = min(orbit, key=lambda s: sorted(s))
+    return tuple(sorted(canon))
+
+
+_SINGLE_PIXEL_ARCHETYPE = ShapeArchetype(
+    relative_coords=frozenset({(0, 0)}),
+    height=1,
+    width=1,
+    area=1,
+    canonical_id=((0, 0),),
+)
 
 
 class MorphologicalConcept:

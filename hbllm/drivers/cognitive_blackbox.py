@@ -314,6 +314,7 @@ class AgentState:
         conditionally_locked_goals: set[tuple[int, int]] | None = None,
         consecutive_blocked_moves: int = 0,
         controllable_switch_usage: int = 0,
+        consecutive_movement_steps: int = 0,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -347,6 +348,7 @@ class AgentState:
         )
         self.consecutive_blocked_moves = consecutive_blocked_moves
         self.controllable_switch_usage = controllable_switch_usage
+        self.consecutive_movement_steps = consecutive_movement_steps
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -399,6 +401,7 @@ class AgentState:
             "conditionally_locked_goals": [list(p) for p in self.conditionally_locked_goals],
             "consecutive_blocked_moves": self.consecutive_blocked_moves,
             "controllable_switch_usage": self.controllable_switch_usage,
+            "consecutive_movement_steps": self.consecutive_movement_steps,
         }
 
     @classmethod
@@ -461,6 +464,7 @@ class AgentState:
             },
             consecutive_blocked_moves=int(data.get("consecutive_blocked_moves", 0)),
             controllable_switch_usage=int(data.get("controllable_switch_usage", 0)),
+            consecutive_movement_steps=int(data.get("consecutive_movement_steps", 0)),
         )
 
 
@@ -761,6 +765,8 @@ class CognitiveBlackbox:
                 grid_shape=grid_shape,
                 step_size=effective_step_size,
             )
+            if eg and eg.avatar:
+                state.explored_entity_positions.add(eg.avatar.grid_pos)
             self._source_entity_graphs[source_id] = eg
             return eg
 
@@ -797,6 +803,9 @@ class CognitiveBlackbox:
             return self._decide_abstract_transition_action(
                 available_actions, state, source_id=source_id, eg=eg
             )
+
+        if eg and eg.avatar:
+            state.explored_entity_positions.add(eg.avatar.grid_pos)
 
         # Multi-entity controllable switching check (Action 5):
         # If the agent has hit consecutive obstacles or cannot path to any goals, and Action 5 is available:
@@ -839,6 +848,21 @@ class CognitiveBlackbox:
                 )
             )
         )
+        other_non_moves = [a for a in available_actions if a.action_id not in (1, 2, 3, 4, 5, 6)]
+        if (
+            is_exploratory_plan
+            and (has_click or bool(other_non_moves))
+            and getattr(state, "consecutive_movement_steps", 0) >= 2
+        ):
+            state.consecutive_movement_steps = 0
+            state.current_plan.clear()
+            if has_click and (not other_non_moves or (state.step_count % 2 == 0)):
+                return self._decide_abstract_transition_action(
+                    available_actions, state, source_id=source_id, eg=eg
+                )
+            if other_non_moves:
+                idx = (state.step_count // 2) % len(other_non_moves)
+                return other_non_moves[idx]
         if is_exploratory_plan and eg.avatar:
             goals = [
                 e
@@ -983,10 +1007,25 @@ class CognitiveBlackbox:
             action = self._plan_step_to_action(
                 step, eg, state, available_actions, source_id=source_id
             )
-            return action
+        else:
+            action = self._decide_exploratory_action(
+                available_actions, state, eg, source_id=source_id
+            )
 
-        # Fallback: explore unvisited frontiers or move with anti-repetition momentum
-        return self._decide_exploratory_action(available_actions, state, eg, source_id=source_id)
+        # Track consecutive movement vs interaction
+        is_move = action.semantic_intent == SpatialActionIntent.NAVIGATE or (
+            action.action_id in state.action_models
+            and (
+                state.action_models[action.action_id].delta_r != 0
+                or state.action_models[action.action_id].delta_c != 0
+            )
+        )
+        if is_move:
+            state.consecutive_movement_steps = getattr(state, "consecutive_movement_steps", 0) + 1
+        else:
+            state.consecutive_movement_steps = 0
+
+        return action
 
     def _decide_abstract_transition_action(
         self,
@@ -1287,10 +1326,50 @@ class CognitiveBlackbox:
                 else:
                     non_movement_actions.append(a)
 
-        # Prioritize: untested action probes > valid movement actions not into barriers > interaction/context actions
+        # Check if click interaction is available
+        has_click = any(
+            isinstance(a.action_id, int) and a.action_id == 6 for a in available_actions
+        )
+
+        # Prioritize: untested action probes first
         if untested:
-            return untested[0]
+            cand = untested[0]
+            if cand.action_id == 6:
+                return self._decide_abstract_transition_action(
+                    available_actions, state, source_id=source_id, eg=eg
+                )
+            return cand
+
+        # Epistemic Interleaving: If interaction actions (click or triggers) are available,
+        # do not get trapped in endless movement ping-pong.
+        # Interleave interaction when:
+        # 1. consecutive movement steps >= 2, or
+        # 2. movement is blocked, or
+        # 3. no valid movement actions exist.
+        should_interact = (has_click or bool(non_movement_actions)) and (
+            not valid_moves
+            or state.consecutive_blocked_moves > 0
+            or getattr(state, "consecutive_movement_steps", 0) >= 2
+        )
+
+        if should_interact:
+            state.consecutive_movement_steps = 0
+            if has_click:
+                return self._decide_abstract_transition_action(
+                    available_actions, state, source_id=source_id, eg=eg
+                )
+            if non_movement_actions:
+                idx = state.step_count % len(non_movement_actions)
+                return non_movement_actions[idx]
+
         if valid_moves:
+            state.consecutive_movement_steps = getattr(state, "consecutive_movement_steps", 0) + 1
+            # Directional momentum: if last action was valid and not blocked, persist in that direction
+            last_act = next((a for a in valid_moves if a.action_id == state.last_action_id), None)
+            if last_act is not None and not getattr(state, "last_action_blocked", False):
+                if (state.step_count % 3) != 0:
+                    return last_act
+
             # Active Inference evaluation
             if len(valid_moves) > 1:
                 candidate_nodes = []
@@ -1299,7 +1378,20 @@ class CognitiveBlackbox:
                     node = ActionNode(id=f"act_{a.action_id}", intent=str(a.action_id))
                     m = state.action_models.get(a.action_id)
                     m_conf = getattr(m, "confidence", 0.5) if m else 0.5
-                    info_map[node.id] = max(0.1, 1.0 - m_conf)
+                    # Avoid reversing 180 degrees directly back to last position
+                    is_reverse = False
+                    if state.last_action_id in state.action_models and m is not None:
+                        last_m = state.action_models[state.last_action_id]
+                        if (
+                            m.delta_r == -last_m.delta_r
+                            and m.delta_c == -last_m.delta_c
+                            and (m.delta_r != 0 or m.delta_c != 0)
+                        ):
+                            is_reverse = True
+                    novelty = max(0.1, 1.0 - m_conf)
+                    if is_reverse:
+                        novelty *= 0.3
+                    info_map[node.id] = novelty
                     candidate_nodes.append(node)
                 ranked = self.active_inference.evaluate_candidates(candidate_nodes, info_map)
                 if ranked:
@@ -1310,10 +1402,6 @@ class CognitiveBlackbox:
             idx = state.step_count % len(valid_moves)
             return valid_moves[idx]
 
-        # If spatial movement is blocked, check for click interaction
-        has_click = any(
-            isinstance(a.action_id, int) and a.action_id == 6 for a in available_actions
-        )
         if has_click:
             return self._decide_abstract_transition_action(
                 available_actions, state, source_id=source_id, eg=eg
@@ -1367,6 +1455,8 @@ class CognitiveBlackbox:
             and state.action_models[act_id].delta_c == 0
             and getattr(state.action_models[act_id], "probes_tested", 0) > 1
         )
+        if is_interaction:
+            state.consecutive_movement_steps = 0
 
         # Track movement vs blocked collision
         obs_delta = info.get("observed_delta")

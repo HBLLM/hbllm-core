@@ -98,7 +98,8 @@ class BaseAffordanceDiscoveryEngine:
             hypothesis.supporting_episodes.append(target_id)
             # Register in self.confirmed_affordances (prevent duplicates)
             aff_list = self.confirmed_affordances.setdefault(hypothesis.entity_shape, [])
-            if hypothesis.affordance_label not in aff_list:
+            is_new = hypothesis.affordance_label not in aff_list
+            if is_new:
                 aff_list.append(hypothesis.affordance_label)
             # Register in external target_store if provided
             if target_store is not None:
@@ -112,12 +113,13 @@ class BaseAffordanceDiscoveryEngine:
                 post_conf=1.0,
                 step_index=step,
             )
-            logger.info(
-                "Affordance confirmed: AFFORDS(%s, %s) => %s",
-                hypothesis.entity_shape,
-                hypothesis.action,
-                hypothesis.affordance_label,
-            )
+            if is_new:
+                logger.info(
+                    "Affordance confirmed: AFFORDS(%s, %s) => %s",
+                    hypothesis.entity_shape,
+                    hypothesis.action,
+                    hypothesis.affordance_label,
+                )
         else:
             hypothesis.falsified = True
             hypothesis.confidence = 0.0

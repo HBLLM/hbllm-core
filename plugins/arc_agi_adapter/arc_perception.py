@@ -108,24 +108,13 @@ class ARCPerceptualLifter:
 
         # Detect receptacle bounds to prevent interior cavity colors from being classified as items
         receptacle_bounds = []
-        min_receptacle_span = max(3, step * 2)
-        min_receptacle_area = min_receptacle_span * min_receptacle_span
         if target_zone_bounds:
             receptacle_bounds.append(target_zone_bounds)
         else:
             for o in raw_objects:
                 if o.color in walkable or o.color == 0 or o.area >= int(H * W * 0.35):
                     continue
-                if (
-                    o.color in learned_r
-                    or getattr(o, "is_frame", False)
-                    or (
-                        o.color not in (avatar_color, 0)
-                        and (o.max_r - o.min_r >= min_receptacle_span)
-                        and (o.max_c - o.min_c >= min_receptacle_span)
-                        and o.area >= min_receptacle_area
-                    )
-                ):
+                if o.color in learned_r or getattr(o, "is_frame", False):
                     receptacle_bounds.append((o.min_r, o.max_r, o.min_c, o.max_c))
 
         entities: list[SpatialEntity] = []
