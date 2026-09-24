@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import Counter
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -246,8 +247,14 @@ class ARC3SpatialCognitiveAgent:
         if not retain_dynamics:
             self.step_size = 1
             self.avatar_color = None
-        self.blackbox.reset(source_id="arc_agi", retain_memory=retain_dynamics)
-        self.blackbox.reset(source_id="default", retain_memory=retain_dynamics)
+        self.active_goal_node = None
+        self.goal_centroid = None
+        self.avatar_centroid = None
+        self.raw_avatar_centroid = None
+        self.avatar_grid_pos = None
+        self.start_pos = None
+        self.blackbox.reset(source_id="arc_agi", retain_memory=retain_dynamics, is_retry=is_retry)
+        self.blackbox.reset(source_id="default", retain_memory=retain_dynamics, is_retry=is_retry)
 
     def plan_next_action(
         self,
@@ -394,11 +401,22 @@ class ARC3SpatialCognitiveAgent:
 
         # Check for discrete state mutation: avatar color changed upon stepping on tile
         if avatar_col is not None and len(prev_pts) > 0 and len(curr_pts) == 0:
+            bg = getattr(self, "background_color", None)
+            if bg is None and prev_grid.size > 0:
+                bg = int(np.bincount(prev_grid.flatten()).argmax())
             pr, pc = prev_pts.mean(axis=0)
             r_c, c_c = int(round(pr)), int(round(pc))
             if 0 <= r_c < curr_grid.shape[0] and 0 <= c_c < curr_grid.shape[1]:
                 new_c = int(curr_grid[r_c, c_c])
-                if new_c != 0 and new_c != avatar_col:
+                new_c_count = int(np.sum(curr_grid == new_c))
+                # Only remap if new_c is a valid, compact foreground entity, not background/floor
+                if (
+                    new_c != 0
+                    and (bg is None or new_c != bg)
+                    and new_c != avatar_col
+                    and new_c_count < (curr_grid.size * 0.25)
+                    and new_c_count <= max(10, len(prev_pts) * 3)
+                ):
                     info["prior_avatar_feature"] = avatar_col
                     info["new_avatar_feature"] = new_c
                     info["avatar_feature"] = new_c
@@ -475,27 +493,24 @@ class ARC3SpatialCognitiveAgent:
                     info["step_size"] = self.step_size
                 # Sample from prev_grid at newly entered cells to record the traversed floor feature
                 newly_entered = curr_set - prev_set
-                cand_feat = (
-                    int(prev_grid[next(iter(newly_entered))])
-                    if newly_entered
-                    else int(prev_grid[int(round(cr)), int(round(cc))])
+                cells_to_sample = (
+                    newly_entered if newly_entered else {(int(round(cr)), int(round(cc)))}
                 )
-                if (
-                    cand_feat not in blackbox_state.learned_obstacle_features
-                    and cand_feat != avatar_col
-                ):
-                    info["traversed_feature"] = cand_feat
-
-            if avatar_col is not None and len(curr_pts) > 0:
-                self.avatar_centroid = (float(cr), float(cc))
-                self.raw_avatar_centroid = (float(cr), float(cc))
-                step = max(1, self.step_size)
-                c_min_r, c_min_c = curr_pts.min(axis=0)
-                self.avatar_grid_pos = (int(c_min_r // step * step), int(c_min_c // step * step))
+                floor_feats = [
+                    int(prev_grid[r, c])
+                    for r, c in cells_to_sample
+                    if 0 <= r < prev_grid.shape[0]
+                    and 0 <= c < prev_grid.shape[1]
+                    and int(prev_grid[r, c]) != avatar_col
+                    and int(prev_grid[r, c]) not in blackbox_state.learned_obstacle_features
+                ]
+                if floor_feats:
+                    info["traversed_feature"] = Counter(floor_feats).most_common(1)[0][0]
 
             elif not is_interaction and not is_terminal and not is_global_transition:
                 # Movement was blocked by an obstacle
                 info["observed_delta"] = [0, 0]
+                info["blocked"] = True
                 model = action_models.get(action_id)
                 expected_dr = getattr(model, "delta_r", 0) if model else 0
                 expected_dc = getattr(model, "delta_c", 0) if model else 0
@@ -514,6 +529,13 @@ class ARC3SpatialCognitiveAgent:
                             if feat != avatar_col and feat != bg:
                                 info["collision_feature"] = feat
                                 break
+
+            if avatar_col is not None and len(curr_pts) > 0:
+                self.avatar_centroid = (float(cr), float(cc))
+                self.raw_avatar_centroid = (float(cr), float(cc))
+                step = max(1, self.step_size)
+                c_min_r, c_min_c = curr_pts.min(axis=0)
+                self.avatar_grid_pos = (int(c_min_r // step * step), int(c_min_c // step * step))
 
         # Payload pickup/drop affordance detection (Action 5)
         if action_id == 5 and changed:
@@ -538,14 +560,52 @@ class ARC3SpatialCognitiveAgent:
 
         # Empirical Goal / Hazard Attribution
         if won:
-            # The cell entered resulted in victory
+            # The cell/entity entered resulted in victory
             newly_entered = curr_set - prev_set
-            if newly_entered:
-                sr, sc = next(iter(newly_entered))
-                info["reached_feature"] = int(prev_grid[sr, sc])
-            elif len(curr_pts) > 0:
-                cr, cc = curr_pts.mean(axis=0)
-                info["reached_feature"] = int(prev_grid[int(round(cr)), int(round(cc))])
+            cells_to_check = newly_entered if newly_entered else curr_set
+            bg = getattr(self, "background_color", None)
+            if bg is None and prev_grid.size > 0:
+                bg = int(np.bincount(prev_grid.flatten()).argmax())
+
+            target_feat = None
+            if self.active_goal_node:
+                tid = getattr(self.active_goal_node, "target_entity_id", "")
+                tpos = getattr(self.active_goal_node, "target_pos", None)
+                if tid.startswith("goal_") or tid.startswith("cand_goal_"):
+                    parts = tid.split("_")
+                    if len(parts) >= 3 and parts[-2].isdigit():
+                        target_feat = int(parts[-2])
+                if (
+                    target_feat is None
+                    and tpos
+                    and 0 <= tpos[0] < prev_grid.shape[0]
+                    and 0 <= tpos[1] < prev_grid.shape[1]
+                ):
+                    feat_at_tpos = int(prev_grid[tpos[0], tpos[1]])
+                    if feat_at_tpos != avatar_col and (bg is None or feat_at_tpos != bg):
+                        target_feat = feat_at_tpos
+
+            entered_feats = [
+                int(prev_grid[r, c])
+                for r, c in cells_to_check
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]
+            ]
+            cand_feats = [
+                f
+                for f in entered_feats
+                if f != avatar_col and f != bg and f not in blackbox_state.learned_obstacle_features
+            ]
+
+            if target_feat is not None and target_feat in cand_feats:
+                info["reached_feature"] = target_feat
+            elif cand_feats:
+                non_traversable_cands = [
+                    f for f in cand_feats if f not in blackbox_state.learned_traversable_features
+                ]
+                chosen_pool = non_traversable_cands if non_traversable_cands else cand_feats
+                info["reached_feature"] = Counter(chosen_pool).most_common(1)[0][0]
+            elif entered_feats:
+                info["reached_feature"] = entered_feats[0]
             elif avatar_col is not None and len(prev_pts) > 0:
                 model = action_models.get(action_id)
                 edr = getattr(model, "delta_r", 0) if model else 0
@@ -558,9 +618,26 @@ class ARC3SpatialCognitiveAgent:
         elif lost:
             # Terminated without winning — hazard stepped into
             newly_entered = curr_set - prev_set
-            if newly_entered:
-                sr, sc = next(iter(newly_entered))
-                info["hazard_feature"] = int(prev_grid[sr, sc])
+            cells_to_check = newly_entered if newly_entered else curr_set
+            bg = getattr(self, "background_color", None)
+            if bg is None and prev_grid.size > 0:
+                bg = int(np.bincount(prev_grid.flatten()).argmax())
+            entered_feats = [
+                int(prev_grid[r, c])
+                for r, c in cells_to_check
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]
+            ]
+            cand_hazards = [
+                f
+                for f in entered_feats
+                if f != avatar_col
+                and f != bg
+                and f not in blackbox_state.learned_traversable_features
+            ]
+            if cand_hazards:
+                info["hazard_feature"] = Counter(cand_hazards).most_common(1)[0][0]
+            elif entered_feats:
+                info["hazard_feature"] = entered_feats[0]
             elif avatar_col is not None and len(prev_pts) > 0:
                 model = action_models.get(action_id)
                 edr = getattr(model, "delta_r", 0) if model else 0

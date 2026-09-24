@@ -2750,6 +2750,7 @@ class InductiveHCIRAgent:
         self.visit_counts.clear()
         self.last_action = None
         self.last_action_data = None
+        self.last_frame_state = None
         self._click_targets = []
         self._click_index = 0
         self._clicked_positions.clear()
@@ -2785,151 +2786,57 @@ class InductiveHCIRAgent:
         else:
             if not is_retry:
                 self.current_level += 1
-            self.hcir_agent.reset_episode(retain_dynamics=True, is_retry=is_retry)
+            # Delegate directly to core CognitiveBlackbox via ARC3SpatialCognitiveAgent
             self.spatial_cognitive_agent.reset_episode(retain_dynamics=True, is_retry=is_retry)
+            self.hcir_agent = self.spatial_cognitive_agent
 
-            # Transfer cross-level knowledge zero-shot
-            if self.knowledge_base.controllable_signature.color is not None:
-                self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
-            elif self.hcir_agent.avatar_color is not None:
-                self.knowledge_base.controllable_signature.color = self.hcir_agent.avatar_color
+            # Sync any seeded legacy knowledge base models to core blackbox for backward compatibility
+            state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+            if (
+                self.knowledge_base.controllable_signature.color is not None
+                and state.avatar_feature is None
+            ):
+                self.spatial_cognitive_agent.avatar_color = (
+                    self.knowledge_base.controllable_signature.color
+                )
+            for a_id, aff in self.knowledge_base.action_affordances.items():
+                if a_id not in state.action_models:
+                    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
-            for a, aff in self.knowledge_base.action_affordances.items():
-                if aff.confidence >= 0.4 and a not in self.hcir_agent.action_models:
-                    self.hcir_agent.action_models[a] = ActionDynamicsModel(
-                        action_id=a,
+                    state.action_models[a_id] = ActionDynamicsModel(
+                        action_id=a_id,
                         delta_r=aff.delta_r,
                         delta_c=aff.delta_c,
                         confidence=aff.confidence,
                         probes_tested=aff.times_tested,
                     )
 
-            # Transfer learned barrier colors between knowledge base and HCIR
-            self.hcir_agent.learned_barrier_colors.update(self.knowledge_base.barrier_colors)
-            self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
-
-            # Transfer learned walkable colors
-            self.hcir_agent.learned_walkable_colors.update(self.knowledge_base.walkable_colors)
-            self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
-
-            # Sync object recipes <-> learned item and receptacle colors
-            for r in self.knowledge_base.object_recipes.values():
-                if r.outcome == "pickup":
-                    if isinstance(self.hcir_agent.learned_item_colors, set):
-                        self.hcir_agent.learned_item_colors.add(r.object_color)
-                    else:
-                        self.hcir_agent.learned_item_colors[r.object_color] = {
-                            "action": r.interaction_action,
-                            "type": "pickup",
-                        }
-                    if r.delivery_zone_bounds:
-                        self.hcir_agent.learned_receptacle_bounds = r.delivery_zone_bounds
-                    if r.delivery_zone_color is not None:
-                        self.hcir_agent.learned_receptacle_colors.add(r.delivery_zone_color)
-
-            if isinstance(self.hcir_agent.learned_item_colors, dict):
-                item_iter = self.hcir_agent.learned_item_colors.items()
-            else:
-                item_iter = [(c, {"action": 5}) for c in self.hcir_agent.learned_item_colors]
-
-            for c, item_info in item_iter:
-                if c not in self.knowledge_base.object_recipes:
-                    rec_bounds = getattr(
-                        self.hcir_agent, "learned_receptacle_bounds", None
-                    ) or getattr(self.hcir_agent, "target_zone_bounds", None)
-                    self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
-                        object_color=c,
-                        interaction_action=item_info.get("action", 5),
-                        outcome="pickup",
-                        delivery_zone_color=(
-                            next(iter(self.hcir_agent.learned_receptacle_colors))
-                            if self.hcir_agent.learned_receptacle_colors
-                            else None
-                        ),
-                        delivery_zone_bounds=rec_bounds,
-                        confidence=0.8,
-                        times_confirmed=1,
-                    )
-
-            # Transfer trial memory barriers (spatial patterns survive level change)
-            if self.trial_memory.barrier_positions:
-                logger.info(
-                    f"Carrying {len(self.trial_memory.barrier_positions)} barrier positions "
-                    f"from trial memory to level {self.current_level}"
-                )
-
-            # Transfer goal hypotheses (verified on prior levels)
-            best_hyp = self.goal_inductor.get_best_hypothesis()
-            if best_hyp:
-                logger.info(
-                    f"Goal hypothesis for level {self.current_level}: "
-                    f"{best_hyp.description} (score={best_hyp.score():.2f})"
-                )
-
-            # Reduce exploration budget on later levels: zero if dynamics are already grounded
-            if self.knowledge_base.is_world_model_grounded([1, 2, 3, 4]):
+            # If core blackbox has grounded motor models, bypass exploratory probing
+            if len(state.action_models) >= 4 and all(
+                getattr(m, "confidence", 0) >= 0.5 for m in state.action_models.values()
+            ):
                 self.epistemic_probe_budget = 0
             else:
                 self.epistemic_probe_budget = max(1, 4 - self.current_level * 2)
 
     def save_knowledge(self, knowledge_dir: Path | str, game_id: str) -> Path:
         """Persist accumulated knowledge to disk via core KnowledgeGraph."""
-        # 1. Sync knowledge_base into spatial_cognitive_agent
-        if self.knowledge_base.controllable_signature.color is not None:
-            self.spatial_cognitive_agent.avatar_color = (
-                self.knowledge_base.controllable_signature.color
-            )
-        self.spatial_cognitive_agent.learned_barrier_colors.update(
-            self.knowledge_base.barrier_colors
-        )
-        self.spatial_cognitive_agent.learned_walkable_colors.update(
-            self.knowledge_base.walkable_colors
-        )
-        for a, aff in self.knowledge_base.action_affordances.items():
-            if aff.confidence >= 0.4 and a not in self.spatial_cognitive_agent.action_models:
-                self.spatial_cognitive_agent.action_models[a] = ActionDynamicsModel(
-                    action_id=a,
-                    delta_r=aff.delta_r,
-                    delta_c=aff.delta_c,
-                    confidence=aff.confidence,
-                    probes_tested=aff.times_tested,
-                )
-
-        # 2. Save via spatial_cognitive_agent into core KnowledgeGraph
         return self.spatial_cognitive_agent.save_knowledge(knowledge_dir, game_id=game_id)
 
     def load_knowledge(self, knowledge_dir: Path | str, game_id: str) -> bool:
-        """Load persistent KnowledgeGraph from disk and seed inductive knowledge base."""
+        """Load persistent KnowledgeGraph from disk using core KnowledgeGraph."""
         loaded = self.spatial_cognitive_agent.load_knowledge(knowledge_dir, game_id=game_id)
         if loaded:
-            # Hydrate knowledge_base from spatial_cognitive_agent / blackbox
-            if self.spatial_cognitive_agent.avatar_color is not None:
-                self.knowledge_base.controllable_signature.color = (
-                    self.spatial_cognitive_agent.avatar_color
-                )
-            self.knowledge_base.barrier_colors.update(
-                self.spatial_cognitive_agent.learned_barrier_colors
-            )
-            self.knowledge_base.walkable_colors.update(
-                self.spatial_cognitive_agent.learned_walkable_colors
-            )
-            for a_id, m in self.spatial_cognitive_agent.action_models.items():
-                aff = self.knowledge_base.action_affordances.setdefault(
-                    a_id, ActionAffordance(action_id=a_id)
-                )
-                aff.delta_r = m.delta_r
-                aff.delta_c = m.delta_c
-                aff.confidence = max(aff.confidence, m.confidence)
-                aff.times_tested = max(aff.times_tested, m.probes_tested)
-            # Pre-calibrated dynamics mean epistemic probing can be bypassed
-            if len(self.spatial_cognitive_agent.action_models) >= 4:
+            state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+            if len(state.action_models) >= 4:
                 self.epistemic_probe_budget = 0
             logger.info(
-                "[CORE KNOWLEDGE GRAPH] Hydrated InductiveHCIRAgent for game '%s': avatar=%s, %d affordances, %d barriers",
+                "[CORE KNOWLEDGE GRAPH] Hydrated CognitiveBlackbox for game '%s': avatar=%s, %d action models, %d obstacles, %d targets",
                 game_id,
-                self.knowledge_base.controllable_signature.color,
-                len(self.knowledge_base.action_affordances),
-                len(self.knowledge_base.barrier_colors),
+                state.avatar_feature,
+                len(state.action_models),
+                len(state.learned_obstacle_features),
+                len(state.learned_target_features),
             )
         return loaded
 
@@ -3384,6 +3291,8 @@ class InductiveHCIRAgent:
             if diff.diff_type != DiffType.NO_CHANGE:
                 self._effective_colors.add(col)
                 self._consecutive_effective_clicks += 1
+                # When a click produces state change, previously quiescent targets may become active!
+                self._quiescent_targets.clear()
 
                 # Check teleological progress of remote payload entities (size <= 9)
                 diff_mask = self.prev_grid != curr_grid
@@ -3694,11 +3603,13 @@ class InductiveARC3BenchmarkRunner:
                         frame_data.frame[-1] if frame_data and frame_data.frame else prev_grid
                     )
                     state_val = getattr(frame_data, "state", None)
-                    self.agent.last_frame_state = (
-                        getattr(state_val, "value", str(state_val))
-                        if state_val is not None
-                        else None
-                    )
+                    if state_val is not None:
+                        val = getattr(state_val, "value", None)
+                        self.agent.last_frame_state = (
+                            str(val) if val is not None else str(state_val)
+                        )
+                    else:
+                        self.agent.last_frame_state = None
                     lvl_actions += 1
 
                     curr_levels_done = getattr(frame_data, "levels_completed", 0)
@@ -3709,7 +3620,7 @@ class InductiveARC3BenchmarkRunner:
                         completed = True
                         if hasattr(self.agent, "spatial_cognitive_agent"):
                             self.agent.spatial_cognitive_agent.update_causal_dynamics(
-                                action_int, prev_grid, curr_grid, won=True
+                                action_int, prev_grid, prev_grid, won=True
                             )
                         break
 
@@ -3721,37 +3632,10 @@ class InductiveARC3BenchmarkRunner:
 
             if completed:
                 levels_completed += 1
-                # Notify goal inductor about successful completion
-                self.agent.goal_inductor.observe_completion(curr_grid)
-                self.agent.knowledge_base.levels_solved += 1
-
-                # Learn delivery zone from successful completion
-                # If the HCIR agent has a target zone, store it in pickup recipes
-                hcir = self.agent.hcir_agent
-                if hcir.target_zone_bounds:
-                    tz_bounds = hcir.target_zone_bounds
-                    tz_colors = getattr(hcir, "target_zone_base_colors", set())
-                    tz_color = next(iter(tz_colors)) if tz_colors else None
-                    for recipe in self.agent.knowledge_base.object_recipes.values():
-                        if recipe.outcome == "pickup":
-                            recipe.delivery_zone_bounds = tz_bounds
-                            recipe.delivery_zone_color = tz_color
-                            recipe.confidence = min(1.0, recipe.confidence + 0.3)
-                            logger.info(
-                                "Recipe CONFIRMED: color=%d → deliver to zone %s (conf=%.2f)",
-                                recipe.object_color,
-                                tz_bounds,
-                                recipe.confidence,
-                            )
-                if lvl_idx + 1 < total_levels:
-                    # Advance environment to render the fresh frame of the new level
-                    advance_act = getattr(ARCGameAction, "ACTION5", ARCGameAction.ACTION1)
-                    try:
-                        fresh_frame = env.step(advance_act)
-                        if fresh_frame and fresh_frame.frame:
-                            frame_data = fresh_frame
-                    except Exception as e:
-                        logger.debug(f"Level transition advance: {e}")
+                if hasattr(self.agent, "spatial_cognitive_agent"):
+                    self.agent.spatial_cognitive_agent.blackbox.sync_state_to_workspace(
+                        source_id="arc_agi"
+                    )
 
             total_actions += lvl_actions
             total_baseline += baseline
@@ -3764,20 +3648,19 @@ class InductiveARC3BenchmarkRunner:
                 baseline_actions=baseline,
                 efficiency_ratio=eff,
                 time_seconds=time.time() - lvl_start,
-                epistemic_probes=self.agent.knowledge_base.total_epistemic_probes,
+                epistemic_probes=0,
                 attempts=attempts_made,
             )
             level_results.append(lvl_res)
 
             if not completed or getattr(frame_data, "state", None) == ARCGameState.WIN:
-                # Verify goal hypotheses on the failed/final level
-                self.agent.goal_inductor.verify_hypothesis(curr_grid, completed)
+                state = self.agent.spatial_cognitive_agent.blackbox.get_state("arc_agi")
                 logger.info(
                     f"Level {lvl_idx} {'PASSED' if completed else 'FAILED'} (after {attempts_made} attempt{'s' if attempts_made > 1 else ''}) | "
-                    f"Knowledge: {len(self.agent.knowledge_base.action_affordances)} affordances, "
-                    f"{len(self.agent.knowledge_base.barrier_colors)} barrier colors, "
-                    f"{len(self.agent.goal_inductor.hypotheses)} goal hypotheses, "
-                    f"{self.agent.trial_memory.total_trials} trials recorded"
+                    f"Core Knowledge: {len(state.action_models)} action models, "
+                    f"{len(state.learned_obstacle_features)} obstacle features, "
+                    f"{len(state.learned_target_features)} target features, "
+                    f"{len(state.state_mutations)} state mutations"
                 )
                 break
 

@@ -157,6 +157,14 @@ def default_grid_2d_lifter(
             entities.append(avatar_ent)
 
     # 2. Lift Other Connected Components
+    foreground_features = {
+        int(grid[r, c])
+        for r in range(H)
+        for c in range(W)
+        if int(grid[r, c]) != bg_val and int(grid[r, c]) not in state.learned_obstacle_features
+    }
+    grid_has_learned_targets = bool(foreground_features & state.learned_target_features)
+
     for r in range(H):
         for c in range(W):
             if visited[r, c]:
@@ -206,9 +214,7 @@ def default_grid_2d_lifter(
             if val in state.learned_target_features:
                 role = EntityRole.GOAL
                 ent_id = f"goal_{val}_{len(entities)}"
-            elif not state.learned_target_features and (
-                1 <= len(cells) <= max(64, int(H * W * 0.08))
-            ):
+            elif (not grid_has_learned_targets) and (1 <= len(cells) <= max(64, int(H * W * 0.08))):
                 # Gestalt Visual Saliency: isolated, rare foreground cluster hypothesized as candidate goal
                 role = EntityRole.GOAL
                 ent_id = f"cand_goal_{val}_{len(entities)}"
@@ -979,6 +985,22 @@ class CognitiveBlackbox:
             )
         )
         state.last_action_blocked = is_blocked
+        if is_blocked:
+            state.current_plan.clear()
+            eg_temp = self._source_entity_graphs.get(source_id)
+            avatar_pos = eg_temp.avatar.grid_pos if (eg_temp and eg_temp.avatar) else None
+            if avatar_pos is not None and act_id in state.action_models:
+                m_temp = state.action_models[act_id]
+                m_dr = getattr(m_temp, "delta_r", 0)
+                m_dc = getattr(m_temp, "delta_c", 0)
+                if m_dr != 0 or m_dc != 0:
+                    step_sz = max(1, state.step_size)
+                    norm_dr = int(np.sign(m_dr)) * step_sz
+                    norm_dc = int(np.sign(m_dc)) * step_sz
+                    blocked_cell = (avatar_pos[0] + norm_dr, avatar_pos[1] + norm_dc)
+                    self.spatial_planner._learned_barriers.add(blocked_cell)
+                    if eg_temp is not None:
+                        eg_temp.barriers.add(blocked_cell)
 
         interaction_actions = set(state.domain_instructions.get("interaction_actions", [5, 6, 7]))
         if action.semantic_intent == SpatialActionIntent.INTERACT or act_id in interaction_actions:
@@ -1288,11 +1310,19 @@ class CognitiveBlackbox:
 
     # ── Reset ─────────────────────────────────────────────────────────────
 
-    def reset(self, source_id: str = "default", retain_memory: bool = True) -> None:
+    def reset(
+        self,
+        source_id: str = "default",
+        retain_memory: bool = True,
+        is_retry: bool = False,
+    ) -> None:
         """Reset agent state for a new episode.
 
         If retain_memory is True, learned knowledge persists
         across episodes (transfer learning from experience).
+        If is_retry is False (new level/subtask), episode-specific
+        spatial visit coordinates are cleared so prior positions
+        do not ghost-contaminate the fresh layout.
         """
         state = self.get_state(source_id)
 
@@ -1304,8 +1334,15 @@ class CognitiveBlackbox:
             saved_action_models = dict(state.action_models)
             saved_avatar = getattr(state, "avatar_feature", None)
             saved_step_size = getattr(state, "step_size", 1)
-            saved_explored_positions = set(getattr(state, "explored_entity_positions", set()))
-            saved_explored_ids = set(getattr(state, "explored_entity_ids", set()))
+            saved_explored_positions = (
+                set(getattr(state, "explored_entity_positions", set())) if is_retry else set()
+            )
+            saved_explored_ids = (
+                set(getattr(state, "explored_entity_ids", set())) if is_retry else set()
+            )
+            saved_delivered_positions = (
+                set(getattr(state, "delivered_positions", set())) if is_retry else set()
+            )
             saved_instructions = dict(getattr(state, "domain_instructions", {}))
             saved_mutations = list(getattr(state, "state_mutations", []))
             saved_condition = getattr(state, "active_condition", None)
@@ -1319,6 +1356,7 @@ class CognitiveBlackbox:
                 step_size=saved_step_size,
                 explored_entity_positions=saved_explored_positions,
                 explored_entity_ids=saved_explored_ids,
+                delivered_positions=saved_delivered_positions,
                 domain_instructions=saved_instructions,
                 state_mutations=saved_mutations,
                 active_condition=saved_condition,
@@ -1327,7 +1365,7 @@ class CognitiveBlackbox:
             self._source_states[source_id] = AgentState()
 
         self._source_entity_graphs.pop(source_id, None)
-        self.spatial_planner.reset()
+        self.spatial_planner.reset(is_retry=is_retry)
 
     # ── Knowledge Graph Persistence ───────────────────────────────────────
 
@@ -1539,6 +1577,15 @@ class CognitiveBlackbox:
             self._source_states["arc_agi"] = hydrated
             state = hydrated
 
+        # Clear episode-specific transient caches so fresh layouts are not contaminated
+        state.explored_entity_positions.clear()
+        state.explored_entity_ids.clear()
+        state.delivered_positions.clear()
+        state.step_count = 0
+        state.total_reward = 0.0
+        state.current_plan.clear()
+        self.spatial_planner.reset(is_retry=False)
+
         # Extract entities and relations from KnowledgeGraph to ensure complete sync
         for ent in loaded_kg._entities.values():
             if ent.entity_type == "motor_action":
@@ -1578,13 +1625,12 @@ class CognitiveBlackbox:
                 m.delta_c = 0
                 m.confidence = 0.3
 
-        # Restore belief constraints into workspace graph and spatial_planner
+        # Restore belief constraints into workspace graph as historical beliefs
         for ent in loaded_kg._entities.values():
             if ent.entity_type == "belief_constraint":
                 pos_list = ent.attributes.get("position")
                 if pos_list and len(pos_list) == 2:
                     pos = (int(pos_list[0]), int(pos_list[1]))
-                    self.spatial_planner.record_collision_barrier(pos)
                     reason = ent.attributes.get("reason", "collision")
                     belief_node = BeliefNode(
                         id=f"belief_barrier_{pos[0]}_{pos[1]}",
@@ -1726,18 +1772,25 @@ class CognitiveBlackbox:
             dr, dc, state.action_models, condition=state.get_active_condition()
         )
         if action_id is not None:
-            m = state.action_models.get(action_id)
-            if m:
-                m_dr, m_dc = (
-                    m.get_displacement(state.get_active_condition())
-                    if hasattr(m, "get_displacement")
-                    else (getattr(m, "delta_r", 0), getattr(m, "delta_c", 0))
-                )
-                dest = (avatar_pos[0] + m_dr, avatar_pos[1] + m_dc)
-                if dest not in eg.barriers and dest not in self.spatial_planner._learned_barriers:
-                    for a in available_actions:
-                        if a.action_id == action_id:
-                            return a
+            blocked_act_id = (
+                state.last_action_id if getattr(state, "last_action_blocked", False) else None
+            )
+            if action_id != blocked_act_id:
+                m = state.action_models.get(action_id)
+                if m:
+                    m_dr, m_dc = (
+                        m.get_displacement(state.get_active_condition())
+                        if hasattr(m, "get_displacement")
+                        else (getattr(m, "delta_r", 0), getattr(m, "delta_c", 0))
+                    )
+                    dest = (avatar_pos[0] + m_dr, avatar_pos[1] + m_dc)
+                    if (
+                        dest not in eg.barriers
+                        and dest not in self.spatial_planner._learned_barriers
+                    ):
+                        for a in available_actions:
+                            if a.action_id == action_id:
+                                return a
 
         # Fallback to intelligent exploratory action rather than blind action 0/1
         return self._decide_exploratory_action(available_actions, state, eg, source_id=source_id)

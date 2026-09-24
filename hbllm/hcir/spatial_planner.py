@@ -201,10 +201,12 @@ class HCIRSpatialEntityPlanner:
         self._failed_sequences: set[tuple[str, ...]] = set()
         self._known_doorways: dict[tuple[int, int], tuple[int, int]] = {}
 
-    def reset(self) -> None:
+    def reset(self, is_retry: bool = False) -> None:
         """Resets episode-specific spatial memory caches."""
         self._known_doorways.clear()
         self._failed_sequences.clear()
+        if not is_retry:
+            self._learned_barriers.clear()
 
     def record_collision_barrier(self, attempted_pos: tuple[int, int]) -> None:
         """Records an empirically discovered impassable barrier from a blocked movement attempt."""
@@ -423,6 +425,10 @@ class HCIRSpatialEntityPlanner:
             ws_pos = _ws_var("var_explored_entity_positions")
             if ws_pos and isinstance(ws_pos, (list, set)):
                 explored_positions = {tuple(p) for p in ws_pos}
+
+        # Fallback if memorized item colors do not match any entity in the current layout
+        if item_colors and not any(e.color in item_colors for e in eg.entities.values()):
+            item_colors = None
 
         # Recall active constraints from native HCIR memory
         impassable_gates, energy_records = self._recall_memory_constraints(workspace)
