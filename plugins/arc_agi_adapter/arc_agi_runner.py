@@ -242,24 +242,46 @@ class GridTopologyExtractor:
                             visited.add((nr, nc))
                             queue.append((nr, nc))
 
-                min_r = min(cr for cr, _ in coords)
-                max_r = max(cr for cr, _ in coords)
-                min_c = min(cc for _, cc in coords)
-                max_c = max(cc for _, cc in coords)
                 area = len(coords)
-                centroid = (
-                    sum(cr for cr, _ in coords) / area,
-                    sum(cc for _, cc in coords) / area,
-                )
+                if area == 1:
+                    cr, cc = next(iter(coords))
+                    min_r = max_r = cr
+                    min_c = max_c = cc
+                    centroid = (float(cr), float(cc))
+                    h = w = 1
+                    is_line = True
+                    enclosed: set[tuple[int, int]] = set()
+                    is_frame = False
+                else:
+                    min_r = min_c = 1000000
+                    max_r = max_c = -1000000
+                    sum_r = sum_c = 0
+                    for cr, cc in coords:
+                        if cr < min_r:
+                            min_r = cr
+                        if cr > max_r:
+                            max_r = cr
+                        if cc < min_c:
+                            min_c = cc
+                        if cc > max_c:
+                            max_c = cc
+                        sum_r += cr
+                        sum_c += cc
+                    centroid = (sum_r / area, sum_c / area)
+                    h = max_r - min_r + 1
+                    w = max_c - min_c + 1
+                    is_line = (h == 1 and area == w) or (w == 1 and area == h)
 
-                # Check if it's a straight line
-                h = max_r - min_r + 1
-                w = max_c - min_c + 1
-                is_line = (h == 1 and area == w) or (w == 1 and area == h)
-
-                # Check if it forms a closed frame / container
-                enclosed = GridTopologyExtractor.detect_interior_void(grid, coords)
-                is_frame = len(enclosed) > 0
+                    # Check if it forms a closed frame / container
+                    # A closed frame requires at least a 3x3 bounding perimeter (>= 8 pixels) and cannot be a straight line
+                    if h >= 3 and w >= 3 and area >= 8 and not is_line:
+                        enclosed = GridTopologyExtractor.detect_interior_void(
+                            grid, coords, min_r=min_r, max_r=max_r, min_c=min_c, max_c=max_c
+                        )
+                        is_frame = len(enclosed) > 0
+                    else:
+                        enclosed = set()
+                        is_frame = False
 
                 obj = GridObject(
                     object_id=f"obj_{color}_{r}_{c}",
@@ -281,16 +303,22 @@ class GridTopologyExtractor:
 
     @staticmethod
     def detect_interior_void(
-        grid: ARCGrid, boundary_coords: set[tuple[int, int]]
+        grid: ARCGrid,
+        boundary_coords: set[tuple[int, int]],
+        min_r: int | None = None,
+        max_r: int | None = None,
+        min_c: int | None = None,
+        max_c: int | None = None,
     ) -> set[tuple[int, int]]:
         """Detect internal void pixels enclosed by a set of boundary coordinates."""
         if not boundary_coords:
             return set()
 
-        min_r = min(cr for cr, _ in boundary_coords)
-        max_r = max(cr for cr, _ in boundary_coords)
-        min_c = min(cc for _, cc in boundary_coords)
-        max_c = max(cc for _, cc in boundary_coords)
+        if min_r is None or max_r is None or min_c is None or max_c is None:
+            min_r = min(cr for cr, _ in boundary_coords)
+            max_r = max(cr for cr, _ in boundary_coords)
+            min_c = min(cc for _, cc in boundary_coords)
+            max_c = max(cc for _, cc in boundary_coords)
 
         # If boundary doesn't have an area >= 3x3, it cannot enclose anything
         if (max_r - min_r < 2) or (max_c - min_c < 2):

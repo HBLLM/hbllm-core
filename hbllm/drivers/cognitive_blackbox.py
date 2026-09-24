@@ -25,7 +25,7 @@ import logging
 import math
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -59,6 +59,7 @@ from hbllm.hcir.spatial_planner import (
 )
 from hbllm.hcir.subgoal_decomposer import (
     EpistemicFrontierDetector,
+    HCIRSkill,
     HierarchicalGoalDecomposer,
 )
 from hbllm.hcir.workspace import HCIRWorkspaceState
@@ -315,6 +316,13 @@ class AgentState:
         consecutive_blocked_moves: int = 0,
         controllable_switch_usage: int = 0,
         consecutive_movement_steps: int = 0,
+        learned_skills: dict[str, HCIRSkill] | None = None,
+        active_skill_queue: list[DriverAction] | None = None,
+        failed_trajectories: list[list[int]] | None = None,
+        recent_action_history: list[int] | None = None,
+        recent_action_data_history: list[dict[str, Any] | None] | None = None,
+        milestone_start_pos: tuple[int, int] | None = None,
+        last_attempt_won: bool = False,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -349,6 +357,15 @@ class AgentState:
         self.consecutive_blocked_moves = consecutive_blocked_moves
         self.controllable_switch_usage = controllable_switch_usage
         self.consecutive_movement_steps = consecutive_movement_steps
+        self.learned_skills: dict[str, HCIRSkill] = dict(learned_skills or {})
+        self.active_skill_queue: list[DriverAction] = list(active_skill_queue or [])
+        self.failed_trajectories: list[list[int]] = list(failed_trajectories or [])
+        self.recent_action_history: list[int] = list(recent_action_history or [])
+        self.recent_action_data_history: list[dict[str, Any] | None] = list(
+            recent_action_data_history or []
+        )
+        self.milestone_start_pos = milestone_start_pos
+        self.last_attempt_won = last_attempt_won
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -402,6 +419,11 @@ class AgentState:
             "consecutive_blocked_moves": self.consecutive_blocked_moves,
             "controllable_switch_usage": self.controllable_switch_usage,
             "consecutive_movement_steps": self.consecutive_movement_steps,
+            "failed_trajectories": [list(t) for t in self.failed_trajectories],
+            "learned_skills": {
+                k: v.to_dict() if hasattr(v, "to_dict") else asdict(v)
+                for k, v in self.learned_skills.items()
+            },
         }
 
     @classmethod
@@ -420,6 +442,15 @@ class AgentState:
             for mut_data in data.get("state_mutations", [])
             if isinstance(mut_data, dict)
         ]
+
+        skills: dict[str, HCIRSkill] = {}
+        for sk_id, sk_data in data.get("learned_skills", {}).items():
+            if isinstance(sk_data, dict):
+                skills[sk_id] = (
+                    HCIRSkill.from_dict(sk_data)
+                    if hasattr(HCIRSkill, "from_dict")
+                    else HCIRSkill(**sk_data)
+                )
 
         phase_val = data.get("phase", AgentPhase.EPISTEMIC_LEARNING)
         try:
@@ -465,6 +496,10 @@ class AgentState:
             consecutive_blocked_moves=int(data.get("consecutive_blocked_moves", 0)),
             controllable_switch_usage=int(data.get("controllable_switch_usage", 0)),
             consecutive_movement_steps=int(data.get("consecutive_movement_steps", 0)),
+            learned_skills=skills,
+            failed_trajectories=[
+                list(t) for t in data.get("failed_trajectories", []) if isinstance(t, list)
+            ],
         )
 
 
@@ -627,6 +662,36 @@ class CognitiveBlackbox:
             mutation.posterior_value,
         )
 
+        # Harvest procedural sub-skill from recent actions leading to this mutation
+        if state.recent_action_history:
+            sub_seq = list(state.recent_action_history[-8:])
+            sub_data = list(state.recent_action_data_history[-8:])
+            skill_id = f"mut_{mutation.mutation_type}_{mutation.trigger_feature}"
+            state.learned_skills[skill_id] = HCIRSkill(
+                skill_id=skill_id,
+                preconditions={
+                    "trigger_pos": mutation.trigger_pos,
+                    "trigger_feature": mutation.trigger_feature,
+                },
+                action_sequence=sub_seq,
+                action_data_sequence=sub_data,
+                expected_effect={
+                    "mutation_type": mutation.mutation_type,
+                    "posterior_value": mutation.posterior_value,
+                },
+                confidence=0.85,
+                times_executed=1,
+                times_succeeded=1,
+            )
+            logger.info(
+                "CognitiveBlackbox[%s]: Harvested procedural sub-skill '%s' (%d actions) producing %s -> %s",
+                source_id,
+                skill_id,
+                len(sub_seq),
+                mutation.prior_value,
+                mutation.posterior_value,
+            )
+
     # ── Workspace Graph Synchronization ───────────────────────────────────
 
     def sync_state_to_workspace(self, source_id: str = "default") -> None:
@@ -767,6 +832,8 @@ class CognitiveBlackbox:
             )
             if eg and eg.avatar:
                 state.explored_entity_positions.add(eg.avatar.grid_pos)
+                if state.milestone_start_pos is None:
+                    state.milestone_start_pos = eg.avatar.grid_pos
             self._source_entity_graphs[source_id] = eg
             return eg
 
@@ -788,6 +855,18 @@ class CognitiveBlackbox:
         state = self.get_state(source_id)
         eg = entity_graph or self._source_entity_graphs.get(source_id)
 
+        # 1. Execute queued skill actions if active
+        if state.active_skill_queue:
+            next_act = state.active_skill_queue.pop(0)
+            if any(a.action_id == next_act.action_id for a in available_actions):
+                logger.info(
+                    "CognitiveBlackbox[%s]: Executing queued sub-skill action %s",
+                    source_id,
+                    next_act.action_id,
+                )
+                return next_act
+            state.active_skill_queue.clear()
+
         if eg is None:
             # No entity graph available — return first available action
             return available_actions[0] if available_actions else DriverAction(action_id=0)
@@ -808,11 +887,17 @@ class CognitiveBlackbox:
             state.explored_entity_positions.add(eg.avatar.grid_pos)
 
         # Multi-entity controllable switching check (Action 5):
-        # If the agent has hit consecutive obstacles or cannot path to any goals, and Action 5 is available:
+        # If the agent has hit consecutive obstacles, has no viable path to goal, and Action 5 is available:
         has_action_5 = any(a.action_id == 5 for a in available_actions)
         act5_action = next((a for a in available_actions if a.action_id == 5), None)
-        if has_action_5 and act5_action is not None and not state.carrying.holding:
-            if state.consecutive_blocked_moves >= 2 and state.controllable_switch_usage < 15:
+        if (
+            has_action_5
+            and act5_action is not None
+            and not state.carrying.holding
+            and state.last_action_id != 5
+            and not state.current_plan
+        ):
+            if state.consecutive_blocked_moves >= 3 and state.controllable_switch_usage < 5:
                 state.controllable_switch_usage += 1
                 state.consecutive_blocked_moves = 0
                 state.current_plan.clear()
@@ -1025,6 +1110,37 @@ class CognitiveBlackbox:
         else:
             state.consecutive_movement_steps = 0
 
+        # Failure Trajectory Inhibition & Taboo Path Branching:
+        if state.failed_trajectories and len(available_actions) > 1:
+            curr_prefix = state.recent_action_history
+            pref_len = len(curr_prefix)
+            matching_failed_actions = {
+                traj[pref_len]
+                for traj in state.failed_trajectories
+                if len(traj) > pref_len and traj[:pref_len] == curr_prefix
+            }
+            if action.action_id in matching_failed_actions:
+                valid_alternatives = [
+                    a
+                    for a in available_actions
+                    if a.action_id not in matching_failed_actions
+                    and not (
+                        a.action_id in state.action_models
+                        and getattr(state.action_models[a.action_id], "delta_r", 0) == 0
+                        and getattr(state.action_models[a.action_id], "delta_c", 0) == 0
+                        and a.semantic_intent == SpatialActionIntent.NAVIGATE
+                    )
+                ]
+                if valid_alternatives:
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Action %s replays failed trajectory prefix (len=%d). Taboo branching to %s.",
+                        source_id,
+                        action.action_id,
+                        pref_len,
+                        valid_alternatives[0].action_id,
+                    )
+                    action = valid_alternatives[0]
+
         return action
 
     def _decide_abstract_transition_action(
@@ -1055,6 +1171,25 @@ class CognitiveBlackbox:
         grid = p_data.get("grid")
         if grid is None or not isinstance(grid, np.ndarray) or grid.ndim != 2:
             return click_action
+
+        # Check if alternative non-click action should be executed (e.g. Action 7 commit/submit)
+        other_actions = [a for a in available_actions if a.action_id != 6]
+        if other_actions:
+            should_try_other = False
+            if state.step_count > 0 and state.step_count % 8 == 0:
+                should_try_other = True
+            elif state.quiescent_click_targets and state.step_count % 4 == 0:
+                should_try_other = True
+
+            if should_try_other:
+                chosen_other = other_actions[(state.step_count // 4) % len(other_actions)]
+                logger.info(
+                    "CognitiveBlackbox[%s]: Interleaving alternative action %s among click sequences (step=%d)",
+                    source_id,
+                    chosen_other.action_id,
+                    state.step_count,
+                )
+                return chosen_other
 
         H, W = grid.shape
         perimeter = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
@@ -1438,6 +1573,10 @@ class CognitiveBlackbox:
         info = feedback.info or {}
         act_id = action.action_id
         state.last_action_id = act_id
+        state.recent_action_history.append(act_id)
+        state.recent_action_data_history.append(
+            dict(action.parameters) if action.parameters else None
+        )
 
         # Determine whether action is an in-place interaction / non-directional action
         is_interaction = action.semantic_intent in (
@@ -1518,6 +1657,7 @@ class CognitiveBlackbox:
                             eg_temp.barriers.add(blocked_cell)
         else:
             state.consecutive_blocked_moves = 0
+            state.controllable_switch_usage = 0
 
         interaction_actions = set(state.domain_instructions.get("interaction_actions", [5, 6, 7]))
         if action.semantic_intent == SpatialActionIntent.INTERACT or act_id in interaction_actions:
@@ -1641,9 +1781,6 @@ class CognitiveBlackbox:
             )
             self.record_state_mutation(mut, source_id=source_id)
         elif act_id == 5 and not state.carrying.holding:
-            # Action 5 occurred without holding change (e.g. controllable entity switch)
-            # Clear motor action models to recalibrate dynamics for the newly controlled entity
-            state.action_models.clear()
             state.consecutive_blocked_moves = 0
 
         # 5. Wire Abstract Transition System (ATS) & Affordance Engine
@@ -1656,6 +1793,16 @@ class CognitiveBlackbox:
                 if action.parameters:
                     click_r = int(action.parameters.get("y", 0))
                     click_c = int(action.parameters.get("x", 0))
+                    mut = StateMutationModel(
+                        trigger_type="CLICK",
+                        trigger_pos=(click_r, click_c),
+                        trigger_feature=act_id,
+                        mutation_type="GRID_MUTATION",
+                        prior_value=0,
+                        posterior_value=1,
+                        confidence=0.9,
+                    )
+                    self.record_state_mutation(mut, source_id=source_id)
                     p_data = self._source_perception_data.get(source_id, {})
                     grid = p_data.get("grid")
                     if (
@@ -1720,12 +1867,33 @@ class CognitiveBlackbox:
 
         # Empirical Target Feature Induction (from reward > 0 or success)
         if feedback.success or feedback.reward > 0:
+            state.last_attempt_won = True
             if "reached_feature" in info:
                 feat = info["reached_feature"]
                 if state.avatar_feature is None or feat != state.avatar_feature:
                     state.learned_target_features.add(feat)
                     state.learned_obstacle_features.discard(feat)
                     state.learned_traversable_features.discard(feat)
+
+            if state.recent_action_history:
+                macro_id = f"win_seq_len_{len(state.recent_action_history)}"
+                state.learned_skills[macro_id] = HCIRSkill(
+                    skill_id=macro_id,
+                    preconditions={"initial_pos": state.milestone_start_pos},
+                    action_sequence=list(state.recent_action_history),
+                    action_data_sequence=list(state.recent_action_data_history),
+                    expected_effect={"success": True, "reward": state.total_reward},
+                    confidence=1.0,
+                    times_executed=1,
+                    times_succeeded=1,
+                )
+                logger.info(
+                    "CognitiveBlackbox[%s]: Harvested macro winning skill '%s' (%d actions, reward=%.1f)",
+                    source_id,
+                    macro_id,
+                    len(state.recent_action_history),
+                    state.total_reward,
+                )
 
         # Empirical Hazard Feature Induction (from failed termination or negative reward)
         if (feedback.terminated and not feedback.success) or feedback.reward < 0:
@@ -1916,6 +2084,16 @@ class CognitiveBlackbox:
             )
             saved_click_usage = dict(getattr(state, "click_target_usage", {})) if is_retry else {}
             saved_entity_usage = dict(getattr(state, "entity_usage", {})) if is_retry else {}
+            saved_skills = dict(getattr(state, "learned_skills", {}))
+            saved_failed_trajectories = list(getattr(state, "failed_trajectories", []))
+            if (
+                is_retry
+                and not getattr(state, "last_attempt_won", False)
+                and state.recent_action_history
+            ):
+                saved_failed_trajectories.append(list(state.recent_action_history))
+                if len(saved_failed_trajectories) > 20:
+                    saved_failed_trajectories = saved_failed_trajectories[-20:]
 
             self._source_states[source_id] = AgentState(
                 learned_obstacle_features=saved_obstacles,
@@ -1935,6 +2113,8 @@ class CognitiveBlackbox:
                 completed_control_targets=saved_completed,
                 click_target_usage=saved_click_usage,
                 entity_usage=saved_entity_usage,
+                learned_skills=saved_skills,
+                failed_trajectories=saved_failed_trajectories,
             )
         else:
             self._source_states[source_id] = AgentState()

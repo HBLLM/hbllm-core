@@ -3288,7 +3288,9 @@ class InductiveHCIRAgent:
                 return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
-        if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):
+        if self.disable_archetypes or self.spatial_cognitive_agent.is_spatial_candidate(
+            curr_grid, available_actions
+        ):
             self.active_solver_name = "spatial_cooperative"
             return self._dispatch_active_solver(curr_grid, available_actions)
 
@@ -3323,6 +3325,15 @@ class InductiveHCIRAgent:
         is_revisit = grid_bytes in self._click_visited_states
         self._click_visited_states.add(grid_bytes)
 
+        # Interleave non-click actions (e.g. Action 7 submit/commit) if present
+        other_actions = [a for a in available_actions if a != 6]
+        if other_actions and (self.step_counter % 8 == 0 or len(self._quiescent_targets) > 0):
+            chosen = other_actions[(self.step_counter // 8) % len(other_actions)]
+            self.prev_grid = curr_grid.copy()
+            self.last_action = chosen
+            self.last_action_data = None
+            return chosen, 0.6
+
         # Learn from previous click and evaluate causal momentum
         if (
             self.prev_grid is not None
@@ -3335,7 +3346,19 @@ class InductiveHCIRAgent:
             if diff.diff_type != DiffType.NO_CHANGE:
                 self._effective_colors.add(col)
                 self._consecutive_effective_clicks += 1
-                # When a click produces state change, previously quiescent targets may become active!
+                # When a click produces state change, harvest procedural sub-skill
+                sk = HCIRSkill(
+                    skill_id=f"click_target_{cr}_{cc}_col_{col}",
+                    preconditions={"color": col, "coord": (cr, cc)},
+                    action_sequence=[6],
+                    action_data_sequence=[{"x": cc, "y": cr}],
+                    expected_effect={"diff_type": str(diff.diff_type)},
+                    confidence=0.85,
+                    times_executed=1,
+                    times_succeeded=1,
+                )
+                self.knowledge_base.register_skill(sk)
+                # Previously quiescent targets may become active!
                 self._quiescent_targets.clear()
 
                 # Check teleological progress of remote payload entities (size <= 9)

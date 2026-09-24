@@ -815,3 +815,28 @@ class HCIRSkill:
     confidence: float = 1.0
     times_executed: int = 0
     times_succeeded: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "skill_id": self.skill_id,
+            "preconditions": dict(self.preconditions),
+            "action_sequence": list(self.action_sequence),
+            "action_data_sequence": [dict(d) if d else None for d in self.action_data_sequence],
+            "expected_effect": dict(self.expected_effect),
+            "confidence": self.confidence,
+            "times_executed": self.times_executed,
+            "times_succeeded": self.times_succeeded,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HCIRSkill:
+        return cls(
+            skill_id=data.get("skill_id", ""),
+            preconditions=data.get("preconditions", {}),
+            action_sequence=list(data.get("action_sequence", [])),
+            action_data_sequence=list(data.get("action_data_sequence", [])),
+            expected_effect=data.get("expected_effect", {}),
+            confidence=float(data.get("confidence", 1.0)),
+            times_executed=int(data.get("times_executed", 0)),
+            times_succeeded=int(data.get("times_succeeded", 0)),
+        )

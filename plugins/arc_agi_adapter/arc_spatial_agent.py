@@ -239,8 +239,8 @@ class ARC3SpatialCognitiveAgent:
 
     @classmethod
     def is_spatial_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
-        """Domain-agnostic check if environment possesses 2D movement actions."""
-        return any(a in available_actions for a in [1, 2, 3, 4])
+        """Domain-agnostic check if environment possesses 2D movement or spatial interaction actions."""
+        return any(a in available_actions for a in [1, 2, 3, 4, 6])
 
     @classmethod
     def is_cooperative_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -577,9 +577,9 @@ class ARC3SpatialCognitiveAgent:
                                 break
                 if not picked_up:
                     # Action 5 caused a screen transition without payload pickup:
-                    # Re-detect active controllable entity focus
-                    self.avatar_color = None
-                    blackbox_state.action_models.clear()
+                    # Re-detect active controllable entity focus only if prior avatar is no longer in grid
+                    if avatar_col is not None and not np.any(curr_grid == avatar_col):
+                        self.avatar_color = None
             else:
                 blackbox_state.carrying.holding = False
                 blackbox_state.carrying.entity_id = ""
@@ -660,6 +660,8 @@ class ARC3SpatialCognitiveAgent:
                 )
                 if hasattr(self.knowledge_base, "register_skill"):
                     self.knowledge_base.register_skill(skill)
+                    for sk in getattr(blackbox_state, "learned_skills", {}).values():
+                        self.knowledge_base.register_skill(sk)
 
         elif lost:
             # Terminated without winning — hazard stepped into / negative failure harvesting
@@ -728,6 +730,11 @@ class ARC3SpatialCognitiveAgent:
             info=info,
         )
         self.blackbox.update(action, feedback, source_id="arc_agi")
+
+        # Sync newly learned procedural sub-skills into cross-level knowledge base
+        if self.knowledge_base is not None and hasattr(self.knowledge_base, "register_skill"):
+            for sk in getattr(blackbox_state, "learned_skills", {}).values():
+                self.knowledge_base.register_skill(sk)
 
     def record_episode_outcome(self, completed: bool, reason: str = "") -> None:
         """Record trial outcome in cross-game memory."""
