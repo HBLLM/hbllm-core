@@ -237,6 +237,42 @@ class ARC3SpatialCognitiveAgent:
     def state_mutations(self, value: list[StateMutationModel]) -> None:
         self.blackbox.get_state("arc_agi").state_mutations = list(value)
 
+    @property
+    def learned_target_signatures(self) -> set[str]:
+        """Proxy to blackbox learned target signatures."""
+        return self.blackbox.get_state("arc_agi").learned_target_signatures
+
+    @learned_target_signatures.setter
+    def learned_target_signatures(self, value: set[str]) -> None:
+        self.blackbox.get_state("arc_agi").learned_target_signatures = set(value)
+
+    @property
+    def learned_cargo_signatures(self) -> set[str]:
+        """Proxy to blackbox learned cargo signatures."""
+        return self.blackbox.get_state("arc_agi").learned_cargo_signatures
+
+    @learned_cargo_signatures.setter
+    def learned_cargo_signatures(self, value: set[str]) -> None:
+        self.blackbox.get_state("arc_agi").learned_cargo_signatures = set(value)
+
+    @property
+    def learned_obstacle_signatures(self) -> set[str]:
+        """Proxy to blackbox learned obstacle signatures."""
+        return self.blackbox.get_state("arc_agi").learned_obstacle_signatures
+
+    @learned_obstacle_signatures.setter
+    def learned_obstacle_signatures(self, value: set[str]) -> None:
+        self.blackbox.get_state("arc_agi").learned_obstacle_signatures = set(value)
+
+    @property
+    def learned_affordance_rules(self) -> dict[str, Any]:
+        """Proxy to blackbox learned affordance rules."""
+        return self.blackbox.get_state("arc_agi").learned_affordance_rules
+
+    @learned_affordance_rules.setter
+    def learned_affordance_rules(self, value: dict[str, Any]) -> None:
+        self.blackbox.get_state("arc_agi").learned_affordance_rules = dict(value)
+
     @classmethod
     def is_spatial_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Domain-agnostic check if environment possesses 2D movement or spatial interaction actions."""

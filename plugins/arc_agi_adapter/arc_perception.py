@@ -39,6 +39,10 @@ class ARCPerceptualLifter:
         step_size: int = 1,
         target_zone_bounds: tuple[int, int, int, int] | None = None,
         shape_concepts: dict[tuple[tuple[int, int], ...], MorphologicalConcept] | None = None,
+        learned_target_signatures: set[str] | None = None,
+        learned_cargo_signatures: set[str] | None = None,
+        learned_obstacle_signatures: set[str] | None = None,
+        learned_affordance_rules: dict[str, Any] | None = None,
     ) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
         H, W = grid.shape
         step = step_size
@@ -167,7 +171,28 @@ class ARCPerceptualLifter:
                     )
                     < step * 1.5
                 )
-                if not is_av_cand:
+                is_known_item = (learned_item_colors and o.color in learned_item_colors) or (
+                    learned_receptacle_colors and o.color in learned_receptacle_colors
+                )
+                if not is_av_cand and not is_known_item:
+                    cand_ent = SpatialEntity(
+                        id="temp",
+                        role=EntityRole.UNKNOWN,
+                        centroid=(float(o.centroid[0]), float(o.centroid[1])),
+                        grid_pos=(int(round(o.centroid[0])), int(round(o.centroid[1]))),
+                        area=int(o.area),
+                        bounding_box=(int(o.min_r), int(o.max_r), int(o.min_c), int(o.max_c)),
+                        color=int(o.color),
+                    )
+                    cand_sig = cand_ent.get_signature_key()
+                    if (
+                        (learned_cargo_signatures and cand_sig in learned_cargo_signatures)
+                        or (learned_target_signatures and cand_sig in learned_target_signatures)
+                        or (learned_affordance_rules and cand_sig in learned_affordance_rules)
+                    ):
+                        is_known_item = True
+
+                if not is_av_cand and not is_known_item:
                     continue
 
             # 1. Avatar / Goal check
@@ -254,8 +279,48 @@ class ARCPerceptualLifter:
             )
             arch = ShapeArchetype.from_coords(o_coords)
 
+            ent = SpatialEntity(
+                id=e_id,
+                role=EntityRole.UNKNOWN,
+                centroid=(float(o.centroid[0]), float(o.centroid[1])),
+                grid_pos=(r, c),
+                area=int(o.area),
+                bounding_box=(int(o.min_r), int(o.max_r), int(o.min_c), int(o.max_c)),
+                color=int(o.color),
+                shape_archetype=arch,
+            )
+            sig_key = ent.get_signature_key()
+
             role = EntityRole.UNKNOWN
-            if shape_concepts and arch.canonical_id in shape_concepts:
+            if learned_affordance_rules and sig_key in learned_affordance_rules:
+                rule = learned_affordance_rules[sig_key]
+                role = (
+                    rule.role
+                    if hasattr(rule, "role")
+                    else getattr(EntityRole, rule.get("role", "UNKNOWN"), EntityRole.UNKNOWN)
+                )
+            elif learned_obstacle_signatures and sig_key in learned_obstacle_signatures:
+                role = EntityRole.OBSTACLE
+            elif learned_cargo_signatures and sig_key in learned_cargo_signatures:
+                role = EntityRole.MANIPULABLE
+            elif learned_target_signatures and sig_key in learned_target_signatures:
+                role = EntityRole.GOAL
+
+            if role == EntityRole.OBSTACLE:
+                raw_barriers.update(o_coords)
+            elif role in (
+                EntityRole.MANIPULABLE,
+                EntityRole.GOAL,
+                EntityRole.RECEPTACLE,
+                EntityRole.ACTUATOR,
+            ):
+                raw_barriers.difference_update(o_coords)
+
+            if (
+                role == EntityRole.UNKNOWN
+                and shape_concepts
+                and arch.canonical_id in shape_concepts
+            ):
                 concept = shape_concepts[arch.canonical_id]
                 concept.observed_colors.add(int(o.color))
                 if concept.inferred_role in (EntityRole.PORTAL, EntityRole.PORTAL):
@@ -299,16 +364,7 @@ class ARCPerceptualLifter:
                 else:
                     role = EntityRole.ACTUATOR
 
-            ent = SpatialEntity(
-                id=e_id,
-                role=role,
-                centroid=(float(o.centroid[0]), float(o.centroid[1])),
-                grid_pos=(r, c),
-                area=int(o.area),
-                bounding_box=(int(o.min_r), int(o.max_r), int(o.min_c), int(o.max_c)),
-                color=int(o.color),
-                shape_archetype=arch,
-            )
+            ent.role = role
             entities.append(ent)
 
         return entities, raw_barriers
@@ -366,6 +422,10 @@ def arc_perception_lifter(
     learned_r = domain_instr.get("learned_receptacle_colors", set())
     learned_i = getattr(state, "learned_target_features", set())
     learned_b = getattr(state, "learned_obstacle_features", set())
+    learned_ts = getattr(state, "learned_target_signatures", set())
+    learned_cs = getattr(state, "learned_cargo_signatures", set())
+    learned_os = getattr(state, "learned_obstacle_signatures", set())
+    learned_ar = getattr(state, "learned_affordance_rules", {})
 
     entities, barriers = ARCPerceptualLifter.lift(
         grid=grid,
@@ -377,5 +437,9 @@ def arc_perception_lifter(
         walkable_colors=walkable,
         step_size=step,
         target_zone_bounds=receptacle_bounds,
+        learned_target_signatures=learned_ts,
+        learned_cargo_signatures=learned_cs,
+        learned_obstacle_signatures=learned_os,
+        learned_affordance_rules=learned_ar,
     )
     return entities, barriers

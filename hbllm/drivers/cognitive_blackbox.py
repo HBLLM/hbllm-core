@@ -53,6 +53,7 @@ from hbllm.hcir.spatial_planner import (
     EntityGraph,
     EntityRole,
     HCIRSpatialEntityPlanner,
+    ObjectAffordanceRule,
     SequencePlanStep,
     SpatialActionIntent,
     SpatialEntity,
@@ -247,6 +248,17 @@ def default_grid_2d_lifter(
                 feature_id=val,
                 properties={"cells": cells, "feature": val, "saliency": saliency},
             )
+            sig_key = ent.get_signature_key()
+            if sig_key in state.learned_affordance_rules:
+                ent.role = state.learned_affordance_rules[sig_key].role
+            elif sig_key in state.learned_obstacle_signatures:
+                barriers.update(cells)
+                continue
+            elif sig_key in state.learned_cargo_signatures:
+                ent.role = EntityRole.MANIPULABLE
+            elif sig_key in state.learned_target_signatures:
+                ent.role = EntityRole.GOAL
+
             entities.append(ent)
 
     return entities, barriers
@@ -323,6 +335,10 @@ class AgentState:
         recent_action_data_history: list[dict[str, Any] | None] | None = None,
         milestone_start_pos: tuple[int, int] | None = None,
         last_attempt_won: bool = False,
+        learned_target_signatures: set[str] | None = None,
+        learned_obstacle_signatures: set[str] | None = None,
+        learned_cargo_signatures: set[str] | None = None,
+        learned_affordance_rules: dict[str, ObjectAffordanceRule] | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -366,6 +382,12 @@ class AgentState:
         )
         self.milestone_start_pos = milestone_start_pos
         self.last_attempt_won = last_attempt_won
+        self.learned_target_signatures: set[str] = set(learned_target_signatures or [])
+        self.learned_obstacle_signatures: set[str] = set(learned_obstacle_signatures or [])
+        self.learned_cargo_signatures: set[str] = set(learned_cargo_signatures or [])
+        self.learned_affordance_rules: dict[str, ObjectAffordanceRule] = dict(
+            learned_affordance_rules or {}
+        )
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -420,6 +442,13 @@ class AgentState:
             "controllable_switch_usage": self.controllable_switch_usage,
             "consecutive_movement_steps": self.consecutive_movement_steps,
             "failed_trajectories": [list(t) for t in self.failed_trajectories],
+            "learned_target_signatures": list(self.learned_target_signatures),
+            "learned_obstacle_signatures": list(self.learned_obstacle_signatures),
+            "learned_cargo_signatures": list(self.learned_cargo_signatures),
+            "learned_affordance_rules": {
+                k: v.to_dict() if hasattr(v, "to_dict") else asdict(v)
+                for k, v in self.learned_affordance_rules.items()
+            },
             "learned_skills": {
                 k: v.to_dict() if hasattr(v, "to_dict") else asdict(v)
                 for k, v in self.learned_skills.items()
@@ -451,6 +480,11 @@ class AgentState:
                     if hasattr(HCIRSkill, "from_dict")
                     else HCIRSkill(**sk_data)
                 )
+
+        aff_rules: dict[str, ObjectAffordanceRule] = {}
+        for r_k, r_v in data.get("learned_affordance_rules", {}).items():
+            if isinstance(r_v, dict):
+                aff_rules[r_k] = ObjectAffordanceRule.from_dict(r_v)
 
         phase_val = data.get("phase", AgentPhase.EPISTEMIC_LEARNING)
         try:
@@ -497,6 +531,10 @@ class AgentState:
             controllable_switch_usage=int(data.get("controllable_switch_usage", 0)),
             consecutive_movement_steps=int(data.get("consecutive_movement_steps", 0)),
             learned_skills=skills,
+            learned_target_signatures=set(data.get("learned_target_signatures", [])),
+            learned_obstacle_signatures=set(data.get("learned_obstacle_signatures", [])),
+            learned_cargo_signatures=set(data.get("learned_cargo_signatures", [])),
+            learned_affordance_rules=aff_rules,
             failed_trajectories=[
                 list(t) for t in data.get("failed_trajectories", []) if isinstance(t, list)
             ],
@@ -727,6 +765,22 @@ class CognitiveBlackbox:
         # Learned traversable features
         if state.learned_traversable_features:
             self._upsert_var("var_traversable_features", list(state.learned_traversable_features))
+
+        # Learned compound signatures & affordance rules
+        if state.learned_target_signatures:
+            self._upsert_var("var_target_signatures", list(state.learned_target_signatures))
+        if state.learned_cargo_signatures:
+            self._upsert_var("var_cargo_signatures", list(state.learned_cargo_signatures))
+        if state.learned_obstacle_signatures:
+            self._upsert_var("var_obstacle_signatures", list(state.learned_obstacle_signatures))
+        if state.learned_affordance_rules:
+            self._upsert_var(
+                "var_affordance_rules",
+                {
+                    k: v.to_dict() if hasattr(v, "to_dict") else asdict(v)
+                    for k, v in state.learned_affordance_rules.items()
+                },
+            )
 
         # Action capabilities (inferred dynamically from motor models / registered actions)
         has_interactive = any(
@@ -1655,6 +1709,26 @@ class CognitiveBlackbox:
                         self.spatial_planner._learned_barriers.add(blocked_cell)
                         if eg_temp is not None:
                             eg_temp.barriers.add(blocked_cell)
+                        if eg_temp:
+                            for ent in eg_temp.entities.values():
+                                if ent.role != EntityRole.AGENT:
+                                    b = getattr(ent, "bounding_box", None)
+                                    if (
+                                        b
+                                        and (b[0] <= blocked_cell[0] <= b[1])
+                                        and (b[2] <= blocked_cell[1] <= b[3])
+                                    ) or ent.grid_pos == blocked_cell:
+                                        sig = ent.get_signature_key()
+                                        state.learned_obstacle_signatures.add(sig)
+                                        state.learned_target_signatures.discard(sig)
+                                        state.learned_cargo_signatures.discard(sig)
+                                        state.learned_affordance_rules[sig] = ObjectAffordanceRule(
+                                            signature_key=sig,
+                                            role=EntityRole.OBSTACLE,
+                                            outcomes=["collision"],
+                                            confidence=1.0,
+                                        )
+                                        break
         else:
             state.consecutive_blocked_moves = 0
             state.controllable_switch_usage = 0
@@ -1780,6 +1854,27 @@ class CognitiveBlackbox:
                 confidence=0.95,
             )
             self.record_state_mutation(mut, source_id=source_id)
+
+            if state.carrying.holding and eg and avatar_pos:
+                for ent in eg.entities.values():
+                    if ent != eg.agent and ent.role != EntityRole.OBSTACLE:
+                        dist = math.hypot(
+                            ent.grid_pos[0] - avatar_pos[0],
+                            ent.grid_pos[1] - avatar_pos[1],
+                        )
+                        if dist <= max(2.5, state.step_size * 2.0):
+                            sig = ent.get_signature_key()
+                            state.learned_cargo_signatures.add(sig)
+                            state.learned_obstacle_signatures.discard(sig)
+                            state.learned_affordance_rules[sig] = ObjectAffordanceRule(
+                                signature_key=sig,
+                                role=EntityRole.MANIPULABLE,
+                                preferred_action=act_id,
+                                action_intent=SpatialActionIntent.PICKUP,
+                                outcomes=["pickup_success"],
+                                confidence=1.0,
+                            )
+                            break
         elif act_id == 5 and not state.carrying.holding:
             state.consecutive_blocked_moves = 0
 
@@ -1823,6 +1918,22 @@ class CognitiveBlackbox:
                         self.affordance_engine.update_affordance_from_evidence(
                             aff_hyp, success=True, target_id=f"tile_{click_r}_{click_c}"
                         )
+                    if eg:
+                        for ent in eg.entities.values():
+                            b = getattr(ent, "bounding_box", None)
+                            if (
+                                b and b[0] <= click_r <= b[1] and b[2] <= click_c <= b[3]
+                            ) or ent.grid_pos == (click_r, click_c):
+                                sig = ent.get_signature_key()
+                                state.learned_affordance_rules[sig] = ObjectAffordanceRule(
+                                    signature_key=sig,
+                                    role=EntityRole.ACTUATOR,
+                                    preferred_action=act_id,
+                                    action_intent=SpatialActionIntent.ACTUATE,
+                                    outcomes=["mutation"],
+                                    confidence=1.0,
+                                )
+                                break
             else:
                 if action.parameters:
                     click_r = int(action.parameters.get("y", 0))
@@ -1874,6 +1985,41 @@ class CognitiveBlackbox:
                     state.learned_target_features.add(feat)
                     state.learned_obstacle_features.discard(feat)
                     state.learned_traversable_features.discard(feat)
+
+            if eg and avatar_pos:
+                for ent in eg.entities.values():
+                    if ent != eg.agent:
+                        b = getattr(ent, "bounding_box", None)
+                        is_near = (
+                            b
+                            and (b[0] <= avatar_pos[0] <= b[1])
+                            and (b[2] <= avatar_pos[1] <= b[3])
+                        ) or (
+                            math.hypot(
+                                ent.grid_pos[0] - avatar_pos[0], ent.grid_pos[1] - avatar_pos[1]
+                            )
+                            <= max(2.5, state.step_size * 2.0)
+                        )
+                        if is_near:
+                            sig = ent.get_signature_key()
+                            if sig not in state.learned_cargo_signatures:
+                                state.learned_target_signatures.add(sig)
+                                state.learned_obstacle_signatures.discard(sig)
+                                rule_role = (
+                                    EntityRole.RECEPTACLE
+                                    if state.carrying.holding
+                                    else EntityRole.GOAL
+                                )
+                                state.learned_affordance_rules[sig] = ObjectAffordanceRule(
+                                    signature_key=sig,
+                                    role=rule_role,
+                                    preferred_action=act_id,
+                                    action_intent=SpatialActionIntent.NAVIGATE
+                                    if not is_interaction
+                                    else SpatialActionIntent.INTERACT,
+                                    outcomes=["win"] if feedback.success else ["reward"],
+                                    confidence=1.0,
+                                )
 
             if state.recent_action_history:
                 macro_id = f"win_seq_len_{len(state.recent_action_history)}"
@@ -2086,6 +2232,10 @@ class CognitiveBlackbox:
             saved_entity_usage = dict(getattr(state, "entity_usage", {})) if is_retry else {}
             saved_skills = dict(getattr(state, "learned_skills", {}))
             saved_failed_trajectories = list(getattr(state, "failed_trajectories", []))
+            saved_target_sigs = set(getattr(state, "learned_target_signatures", set()))
+            saved_obstacle_sigs = set(getattr(state, "learned_obstacle_signatures", set()))
+            saved_cargo_sigs = set(getattr(state, "learned_cargo_signatures", set()))
+            saved_affordance_rules = dict(getattr(state, "learned_affordance_rules", {}))
             if (
                 is_retry
                 and not getattr(state, "last_attempt_won", False)
@@ -2115,6 +2265,10 @@ class CognitiveBlackbox:
                 entity_usage=saved_entity_usage,
                 learned_skills=saved_skills,
                 failed_trajectories=saved_failed_trajectories,
+                learned_target_signatures=saved_target_sigs,
+                learned_obstacle_signatures=saved_obstacle_sigs,
+                learned_cargo_signatures=saved_cargo_sigs,
+                learned_affordance_rules=saved_affordance_rules,
             )
         else:
             self._source_states[source_id] = AgentState()

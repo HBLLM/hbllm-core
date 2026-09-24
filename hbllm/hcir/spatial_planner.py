@@ -145,6 +145,135 @@ class SpatialEntity:
         self.properties["visual_id"] = val
         self.properties["feature_id"] = val
 
+    def get_compound_signature(self) -> dict[str, Any]:
+        """Position-invariant compound geometric and perceptual signature.
+
+        Captures:
+        - feature_id: visual token, color, or feature ID
+        - shape_category: 'point', 'line_h', 'line_v', 'rect', 'complex', or 'irregular'
+        - size_bucket: 'point' (1), 'small' (2-4), 'medium' (5-16), 'large' (17-64), 'xlarge' (>64)
+        - aspect: 'square', 'wide', or 'tall'
+        - area: exact area
+        - height: bounding box height
+        - width: bounding box width
+        """
+        bb = self.bounding_box
+        h = max(1, bb[1] - bb[0] + 1) if bb else 1
+        w = max(1, bb[3] - bb[2] + 1) if bb else 1
+        if self.shape_archetype is not None:
+            h = getattr(self.shape_archetype, "height", h)
+            w = getattr(self.shape_archetype, "width", w)
+
+        area = self.area if self.area > 0 else (h * w)
+
+        if area <= 1:
+            shape_cat = "point"
+            size_bucket = "point"
+        else:
+            if h == 1 and w > 1:
+                shape_cat = "line_h"
+            elif w == 1 and h > 1:
+                shape_cat = "line_v"
+            elif area == h * w:
+                shape_cat = "rect"
+            elif self.shape_archetype is not None and getattr(
+                self.shape_archetype, "canonical_id", None
+            ):
+                shape_cat = "complex"
+            else:
+                shape_cat = "irregular"
+
+            if area <= 4:
+                size_bucket = "small"
+            elif area <= 16:
+                size_bucket = "medium"
+            elif area <= 64:
+                size_bucket = "large"
+            else:
+                size_bucket = "xlarge"
+
+        aspect_val = w / max(1, h)
+        if aspect_val >= 1.5:
+            aspect = "wide"
+        elif aspect_val <= 0.67:
+            aspect = "tall"
+        else:
+            aspect = "square"
+
+        return {
+            "feature_id": self.feature_id,
+            "shape_category": shape_cat,
+            "size_bucket": size_bucket,
+            "aspect": aspect,
+            "area": area,
+            "height": h,
+            "width": w,
+        }
+
+    def get_signature_key(self) -> str:
+        """Compact canonical string key representing the compound signature.
+
+        Format: 'f{feature_id}_s{shape_category}_z{size_bucket}'
+        Example: 'f3_srect_zsmall', 'f2_sline_v_zlarge', 'f0_spoint_zpoint'
+        """
+        if "signature_key" in self.properties:
+            return str(self.properties["signature_key"])
+        sig = self.get_compound_signature()
+        key = f"f{sig['feature_id']}_s{sig['shape_category']}_z{sig['size_bucket']}"
+        self.properties["signature_key"] = key
+        return key
+
+
+@dataclass
+class ObjectAffordanceRule:
+    """Empirically learned behavioral affordance rule for an object signature.
+
+    Binds a compound object signature to compatible actions and functional roles:
+    - signature_key: Canonical signature string (e.g. 'f3_srect_zsmall')
+    - role: Inferred EntityRole (e.g. EntityRole.MANIPULABLE, GOAL, OBSTACLE, ACTUATOR)
+    - preferred_action: Specific action ID or semantic intent (e.g. 5 for PICKUP)
+    - action_intent: Semantic intent string (e.g. 'PICKUP', 'NAVIGATE', 'INTERACT')
+    - outcomes: Observed outcome tags (e.g. 'pickup_success', 'reward', 'collision')
+    - confidence: Empirical confidence [0.0, 1.0]
+    - times_confirmed: Number of positive interactions
+    """
+
+    signature_key: str
+    role: EntityRole = EntityRole.UNKNOWN
+    preferred_action: int | None = None
+    action_intent: str | None = None
+    outcomes: list[str] = field(default_factory=list)
+    confidence: float = 1.0
+    times_confirmed: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "signature_key": self.signature_key,
+            "role": self.role.value if hasattr(self.role, "value") else str(self.role),
+            "preferred_action": self.preferred_action,
+            "action_intent": self.action_intent,
+            "outcomes": list(self.outcomes),
+            "confidence": self.confidence,
+            "times_confirmed": self.times_confirmed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ObjectAffordanceRule:
+        role_str = data.get("role", EntityRole.UNKNOWN)
+        try:
+            role = EntityRole(role_str)
+        except Exception:
+            role = EntityRole.UNKNOWN
+        return cls(
+            signature_key=data["signature_key"],
+            role=role,
+            preferred_action=data.get("preferred_action"),
+            action_intent=data.get("action_intent"),
+            outcomes=list(data.get("outcomes", [])),
+            confidence=float(data.get("confidence", 1.0)),
+            times_confirmed=int(data.get("times_confirmed", 1)),
+        )
+
 
 @dataclass
 class EntityGraph:
@@ -371,6 +500,9 @@ class HCIRSpatialEntityPlanner:
         is_carrying: bool = False,
         carried_offset: tuple[float, float] = (0.0, 0.0),
         item_colors: set[int] | None = None,
+        target_signatures: set[str] | None = None,
+        cargo_signatures: set[str] | None = None,
+        obstacle_signatures: set[str] | None = None,
         **kwargs: Any,
     ) -> list[SequencePlanStep]:
         """Plans the sequence of entity interactions from first principles using state-space A*.
@@ -418,6 +550,20 @@ class HCIRSpatialEntityPlanner:
                 if ws_ic and isinstance(ws_ic, (list, set)):
                     item_colors = set(ws_ic)
 
+            # Target & obstacle compound signatures
+            if target_signatures is None:
+                ws_ts = _ws_var("var_target_signatures")
+                if ws_ts and isinstance(ws_ts, (list, set)):
+                    target_signatures = set(ws_ts)
+            if cargo_signatures is None:
+                ws_cs = _ws_var("var_cargo_signatures")
+                if ws_cs and isinstance(ws_cs, (list, set)):
+                    cargo_signatures = set(ws_cs)
+            if obstacle_signatures is None:
+                ws_os = _ws_var("var_obstacle_signatures")
+                if ws_os and isinstance(ws_os, (list, set)):
+                    obstacle_signatures = set(ws_os)
+
             # Explored entities and positions (to avoid repetition loops across retries)
             ws_ids = _ws_var("var_explored_entity_ids")
             if ws_ids and isinstance(ws_ids, (list, set)):
@@ -426,9 +572,33 @@ class HCIRSpatialEntityPlanner:
             if ws_pos and isinstance(ws_pos, (list, set)):
                 explored_positions = {tuple(p) for p in ws_pos}
 
-        # Fallback if memorized item colors do not match any entity in the current layout
+        target_sigs = set(target_signatures or [])
+        cargo_sigs = set(cargo_signatures or [])
+        obs_sigs = set(obstacle_signatures or [])
+
+        # Fallback if memorized item colors/signatures do not match any entity in the current layout
         if item_colors and not any(e.color in item_colors for e in eg.entities.values()):
             item_colors = None
+        if target_sigs and not any(
+            e.get_signature_key() in target_sigs for e in eg.entities.values()
+        ):
+            target_sigs = set()
+        if cargo_sigs and not any(
+            e.get_signature_key() in cargo_sigs for e in eg.entities.values()
+        ):
+            cargo_sigs = set()
+
+        def is_candidate_item(e: SpatialEntity) -> bool:
+            sig = e.get_signature_key()
+            if sig in obs_sigs:
+                return False
+            if cargo_sigs and sig in cargo_sigs:
+                return True
+            if target_sigs and sig in target_sigs:
+                return True
+            if item_colors is not None and e.color in item_colors:
+                return True
+            return item_colors is None and not cargo_sigs and not target_sigs
 
         # Recall active constraints from native HCIR memory
         impassable_gates, energy_records = self._recall_memory_constraints(workspace)
@@ -509,7 +679,7 @@ class HCIRSpatialEntityPlanner:
                     if e.role == EntityRole.MANIPULABLE
                     and e.component_id == avatar_comp
                     and not e.is_delivered
-                    and (item_colors is None or e.color in item_colors)
+                    and is_candidate_item(e)
                     and not any(
                         math.hypot(e.grid_pos[0] - gp[0], e.grid_pos[1] - gp[1])
                         < eg.step_size * 0.75
@@ -660,7 +830,7 @@ class HCIRSpatialEntityPlanner:
             for e in eg.entities.values()
             if e.role == EntityRole.MANIPULABLE
             and not is_item_delivered(e)
-            and (item_colors is None or e.color in item_colors)
+            and is_candidate_item(e)
         ]
         if (items or is_carrying) and exits:
             exit_ent = max(exits, key=lambda e: (e.role == EntityRole.RECEPTACLE, e.area))
@@ -843,7 +1013,7 @@ class HCIRSpatialEntityPlanner:
         nav_goals = [e for e in exits if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)]
         if nav_goals and eg.avatar:
 
-            def nav_goal_priority(g: SpatialEntity) -> tuple[bool, float]:
+            def nav_goal_priority(g: SpatialEntity) -> tuple[bool, bool, float]:
                 is_explored = (
                     g.id in explored_ids
                     or g.grid_pos in explored_positions
@@ -852,11 +1022,12 @@ class HCIRSpatialEntityPlanner:
                         for p in explored_positions
                     )
                 )
+                matches_target_sig = bool(target_sigs and g.get_signature_key() in target_sigs)
                 dist = math.hypot(
                     g.grid_pos[0] - eg.avatar.grid_pos[0],
                     g.grid_pos[1] - eg.avatar.grid_pos[1],
                 )
-                return (is_explored, dist)
+                return (not matches_target_sig, is_explored, dist)
 
             nav_goals.sort(key=nav_goal_priority)
             for g in nav_goals:

@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
@@ -264,6 +265,9 @@ class ObjectInteractionRecipe:
     """
 
     object_color: int  # Color that identifies this object type
+    signature_key: str | None = None  # Compound signature 'f{c}_s{shape}_z{size}'
+    shape_category: str | None = None  # 'point', 'line_h', 'line_v', 'rect', etc.
+    size_bucket: str | None = None  # 'point', 'small', 'medium', 'large'
     object_area_range: tuple[int, int] = (1, 100)  # (min_area, max_area) observed
     interaction_action: int = 5  # Action that works (5=pickup/interact, 6=click)
     outcome: str = "unknown"  # 'pickup', 'destroy', 'transform', 'toggle'
@@ -295,6 +299,8 @@ class CrossLevelKnowledgeBase:
         # Object Interaction Memory: learned recipes for interacting with objects
         # Maps object_color -> ObjectInteractionRecipe
         self.object_recipes: dict[int, ObjectInteractionRecipe] = {}
+        # Maps signature_key -> ObjectInteractionRecipe
+        self.signature_recipes: dict[str, ObjectInteractionRecipe] = {}
         # Snapshot of grid when level completes (for learning delivery zones)
         self.last_completion_grid: np.ndarray | None = None
         # Track objects near avatar when action 5 is used (for learning pickup)
@@ -475,10 +481,28 @@ class CrossLevelKnowledgeBase:
                             dist = math.hypot(lr - ar, lc - ac)
                             if dist < 15:  # within interaction range
                                 area = int(np.count_nonzero(prev_grid == lost_color))
+                                min_r = int(np.min(lost_pts[:, 0]))
+                                max_r = int(np.max(lost_pts[:, 0]))
+                                min_c = int(np.min(lost_pts[:, 1]))
+                                max_c = int(np.max(lost_pts[:, 1]))
+                                ent_temp = SpatialEntity(
+                                    id=f"lost_{lost_color}",
+                                    role=EntityRole.MANIPULABLE,
+                                    centroid=(lr, lc),
+                                    grid_pos=(int(round(lr)), int(round(lc))),
+                                    area=area,
+                                    bounding_box=(min_r, max_r, min_c, max_c),
+                                    color=lost_color,
+                                )
+                                sig_meta = ent_temp.get_compound_signature()
+                                sig_key = ent_temp.get_signature_key()
                                 recipe = self.object_recipes.get(lost_color)
                                 if recipe is None:
                                     recipe = ObjectInteractionRecipe(
                                         object_color=lost_color,
+                                        signature_key=sig_key,
+                                        shape_category=sig_meta["shape_category"],
+                                        size_bucket=sig_meta["size_bucket"],
                                         object_area_range=(max(1, area - 5), area + 5),
                                         interaction_action=5,
                                         outcome="pickup",
@@ -486,14 +510,21 @@ class CrossLevelKnowledgeBase:
                                         times_confirmed=1,
                                     )
                                     self.object_recipes[lost_color] = recipe
+                                    self.signature_recipes[sig_key] = recipe
                                     logger.info(
-                                        "Recipe LEARNED: color=%d + action 5 = pickup (area=%d)",
+                                        "Recipe LEARNED: sig=%s (color=%d) + action 5 = pickup (area=%d)",
+                                        sig_key,
                                         lost_color,
                                         area,
                                     )
                                 else:
                                     recipe.times_confirmed += 1
                                     recipe.confidence = min(1.0, recipe.confidence + 0.2)
+                                    if not recipe.signature_key:
+                                        recipe.signature_key = sig_key
+                                        recipe.shape_category = sig_meta["shape_category"]
+                                        recipe.size_bucket = sig_meta["size_bucket"]
+                                    self.signature_recipes[sig_key] = recipe
 
             # Detect CONTACT PICKUP: movement action causes object to disappear (walked over it)
             elif action in (1, 2, 3, 4) and lost_colors:
@@ -509,10 +540,28 @@ class CrossLevelKnowledgeBase:
                             dist = math.hypot(lr - ar, lc - ac)
                             if dist < 10:  # avatar walked to where the object was
                                 area = int(np.count_nonzero(prev_grid == lost_color))
+                                min_r = int(np.min(lost_pts[:, 0]))
+                                max_r = int(np.max(lost_pts[:, 0]))
+                                min_c = int(np.min(lost_pts[:, 1]))
+                                max_c = int(np.max(lost_pts[:, 1]))
+                                ent_temp = SpatialEntity(
+                                    id=f"lost_{lost_color}",
+                                    role=EntityRole.MANIPULABLE,
+                                    centroid=(lr, lc),
+                                    grid_pos=(int(round(lr)), int(round(lc))),
+                                    area=area,
+                                    bounding_box=(min_r, max_r, min_c, max_c),
+                                    color=lost_color,
+                                )
+                                sig_meta = ent_temp.get_compound_signature()
+                                sig_key = ent_temp.get_signature_key()
                                 recipe = self.object_recipes.get(lost_color)
                                 if recipe is None:
                                     recipe = ObjectInteractionRecipe(
                                         object_color=lost_color,
+                                        signature_key=sig_key,
+                                        shape_category=sig_meta["shape_category"],
+                                        size_bucket=sig_meta["size_bucket"],
                                         object_area_range=(max(1, area - 5), area + 5),
                                         interaction_action=0,  # 0 = contact (any movement)
                                         outcome="pickup",
@@ -520,28 +569,64 @@ class CrossLevelKnowledgeBase:
                                         times_confirmed=1,
                                     )
                                     self.object_recipes[lost_color] = recipe
+                                    self.signature_recipes[sig_key] = recipe
                                     logger.info(
-                                        "Recipe LEARNED: color=%d + contact = pickup (area=%d)",
+                                        "Recipe LEARNED: sig=%s (color=%d) + contact = pickup (area=%d)",
+                                        sig_key,
                                         lost_color,
                                         area,
                                     )
                                 else:
                                     recipe.times_confirmed += 1
                                     recipe.confidence = min(1.0, recipe.confidence + 0.15)
+                                    if not recipe.signature_key:
+                                        recipe.signature_key = sig_key
+                                        recipe.shape_category = sig_meta["shape_category"]
+                                        recipe.size_bucket = sig_meta["size_bucket"]
+                                    self.signature_recipes[sig_key] = recipe
 
             # Detect CLICK interaction: action 6 near object causes change
             elif action == 6 and (lost_colors or gained_colors):
                 for changed_color in lost_colors | gained_colors:
+                    ch_pts = np.argwhere(curr_grid == changed_color)
+                    sig_key = None
+                    shape_cat = None
+                    size_b = None
+                    if len(ch_pts) > 0:
+                        min_r = int(np.min(ch_pts[:, 0]))
+                        max_r = int(np.max(ch_pts[:, 0]))
+                        min_c = int(np.min(ch_pts[:, 1]))
+                        max_c = int(np.max(ch_pts[:, 1]))
+                        ent_temp = SpatialEntity(
+                            id=f"ch_{changed_color}",
+                            role=EntityRole.ACTUATOR,
+                            centroid=(float(np.mean(ch_pts[:, 0])), float(np.mean(ch_pts[:, 1]))),
+                            grid_pos=(min_r, min_c),
+                            area=len(ch_pts),
+                            bounding_box=(min_r, max_r, min_c, max_c),
+                            color=changed_color,
+                        )
+                        sig_meta = ent_temp.get_compound_signature()
+                        sig_key = ent_temp.get_signature_key()
+                        shape_cat = sig_meta["shape_category"]
+                        size_b = sig_meta["size_bucket"]
                     if changed_color not in self.object_recipes:
-                        self.object_recipes[changed_color] = ObjectInteractionRecipe(
+                        recipe = ObjectInteractionRecipe(
                             object_color=changed_color,
+                            signature_key=sig_key,
+                            shape_category=shape_cat,
+                            size_bucket=size_b,
                             interaction_action=6,
                             outcome="transform",
                             confidence=0.4,
                             times_confirmed=1,
                         )
+                        self.object_recipes[changed_color] = recipe
+                        if sig_key:
+                            self.signature_recipes[sig_key] = recipe
                         logger.info(
-                            "Recipe LEARNED: color=%d + action 6 = transform",
+                            "Recipe LEARNED: sig=%s (color=%d) + action 6 = transform",
+                            sig_key,
                             changed_color,
                         )
 
@@ -3142,22 +3227,32 @@ class InductiveHCIRAgent:
                     return probe_action, 0.3
 
         # 6. Recipe synchronization — ensure learned recipes are active in HCIR agent
-        if self.knowledge_base.object_recipes and self.knowledge_base.levels_solved > 0:
-            for c, recipe in self.knowledge_base.object_recipes.items():
-                if recipe.outcome == "pickup":
-                    item_colors = self.hcir_agent.learned_item_colors
-                    if c not in item_colors:
-                        if isinstance(item_colors, set):
-                            item_colors.add(c)
-                        elif isinstance(item_colors, dict):
-                            item_colors[c] = {"action": recipe.interaction_action}
-                    if (
-                        recipe.delivery_zone_bounds
-                        and not self.hcir_agent.learned_receptacle_bounds
-                    ):
-                        self.hcir_agent.learned_receptacle_bounds = recipe.delivery_zone_bounds
-                    if recipe.delivery_zone_color is not None:
-                        self.hcir_agent.learned_receptacle_colors.add(recipe.delivery_zone_color)
+        if self.knowledge_base.levels_solved > 0:
+            if self.knowledge_base.signature_recipes:
+                for sig_key, recipe in self.knowledge_base.signature_recipes.items():
+                    if recipe.outcome == "pickup":
+                        self.hcir_agent.learned_cargo_signatures.add(sig_key)
+                    elif recipe.outcome in ("goal", "target"):
+                        self.hcir_agent.learned_target_signatures.add(sig_key)
+
+            if self.knowledge_base.object_recipes:
+                for c, recipe in self.knowledge_base.object_recipes.items():
+                    if recipe.outcome == "pickup":
+                        item_colors = self.hcir_agent.learned_item_colors
+                        if c not in item_colors:
+                            if isinstance(item_colors, set):
+                                item_colors.add(c)
+                            elif isinstance(item_colors, dict):
+                                item_colors[c] = {"action": recipe.interaction_action}
+                        if (
+                            recipe.delivery_zone_bounds
+                            and not self.hcir_agent.learned_receptacle_bounds
+                        ):
+                            self.hcir_agent.learned_receptacle_bounds = recipe.delivery_zone_bounds
+                        if recipe.delivery_zone_color is not None:
+                            self.hcir_agent.learned_receptacle_colors.add(
+                                recipe.delivery_zone_color
+                            )
 
         if self.knowledge_base.skills and self.hcir_agent.primary_goal_node:
             HierarchicalGoalDecomposer.decompose_with_skills(
@@ -3211,6 +3306,38 @@ class InductiveHCIRAgent:
                         else None
                     ),
                     delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                    confidence=0.8,
+                    times_confirmed=1,
+                )
+
+        for sig_key in self.hcir_agent.learned_cargo_signatures:
+            if sig_key not in self.knowledge_base.signature_recipes:
+                feat_part = sig_key.split("_")[0][1:] if "_" in sig_key else "0"
+                col_val = int(feat_part) if feat_part.isdigit() else 0
+                self.knowledge_base.signature_recipes[sig_key] = ObjectInteractionRecipe(
+                    object_color=col_val,
+                    signature_key=sig_key,
+                    interaction_action=5,
+                    outcome="pickup",
+                    delivery_zone_color=(
+                        next(iter(self.hcir_agent.learned_receptacle_colors))
+                        if self.hcir_agent.learned_receptacle_colors
+                        else None
+                    ),
+                    delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                    confidence=0.8,
+                    times_confirmed=1,
+                )
+
+        for sig_key in self.hcir_agent.learned_target_signatures:
+            if sig_key not in self.knowledge_base.signature_recipes:
+                feat_part = sig_key.split("_")[0][1:] if "_" in sig_key else "0"
+                col_val = int(feat_part) if feat_part.isdigit() else 0
+                self.knowledge_base.signature_recipes[sig_key] = ObjectInteractionRecipe(
+                    object_color=col_val,
+                    signature_key=sig_key,
+                    interaction_action=0,
+                    outcome="goal",
                     confidence=0.8,
                     times_confirmed=1,
                 )
