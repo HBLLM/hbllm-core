@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -605,6 +606,18 @@ def op_kronecker_mask(grid: Grid) -> Grid:
     return np.kron(mask, grid).copy()
 
 
+def op_kronecker_inverted(grid: Grid) -> Grid:
+    """Fractal self-expansion where active cells are replaced by inverted input pattern."""
+    bg = detect_background_color(grid)
+    fg_colors = [c for c in np.unique(grid) if c != bg]
+    if not fg_colors:
+        return grid.copy()
+    fg = int(fg_colors[0])
+    mask = (grid != bg).astype(int)
+    inv = np.where(grid == bg, fg, bg)
+    return np.kron(mask, inv).astype(int).copy()
+
+
 def op_tile_periodic(grid: Grid, reps_r: int, reps_c: int) -> Grid:
     """Tile grid periodically reps_r times vertically and reps_c horizontally."""
     return np.tile(grid, (reps_r, reps_c)).copy()
@@ -938,6 +951,43 @@ def op_recolor_enclosed_cavities(
     void_mask = (filled == fill_color) & (grid == bg)
     res = grid.copy()
     res[void_mask] = fill_color
+    return res
+
+
+def op_recolor_cavities_by_feature(
+    grid: Grid,
+    feature: str,
+    feature_map: dict[Any, int],
+    bg: int | None = None,
+) -> Grid:
+    """Recolor internal cavities of enclosed structures according to structural features (size, area, etc.)."""
+    if bg is None:
+        bg = detect_background_color(grid)
+    res = grid.copy()
+    entities = segment_entities(grid, bg_color=bg)
+    for ent in entities:
+        box_h = ent.height
+        box_w = ent.width
+        if feature == "max_dim":
+            key: Any = max(box_h, box_w)
+        elif feature == "exact_dim":
+            key = (box_h, box_w)
+        elif feature == "comp_area":
+            key = ent.area
+        elif feature == "cavity_area":
+            key = len(ent.enclosed_coords)
+        else:
+            key = max(box_h, box_w)
+
+        if key in feature_map:
+            fill_c = feature_map[key]
+            if ent.enclosed_coords:
+                for r, c in ent.enclosed_coords:
+                    if res[r, c] == bg:
+                        res[r, c] = fill_c
+            else:
+                sub = res[ent.min_r + 1 : ent.max_r, ent.min_c + 1 : ent.max_c]
+                sub[sub == bg] = fill_c
     return res
 
 
