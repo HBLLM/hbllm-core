@@ -40,6 +40,7 @@ from hbllm.drivers.base import (
     DriverModality,
 )
 from hbllm.hcir.graph import (
+    ActionNode,
     BeliefNode,
     FalsificationStatus,
     GoalNode,
@@ -56,8 +57,20 @@ from hbllm.hcir.spatial_planner import (
     SpatialActionIntent,
     SpatialEntity,
 )
-from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
+from hbllm.hcir.subgoal_decomposer import (
+    EpistemicFrontierDetector,
+    HierarchicalGoalDecomposer,
+)
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+from hbllm.hcir.world.affordance_discovery import (
+    AffordanceHypothesis,
+    BaseAffordanceDiscoveryEngine,
+)
+from hbllm.hcir.world.causal_discovery import (
+    BaseCausalDiscoveryEngine,
+    WorldCausalGraph,
+)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -291,6 +304,13 @@ class AgentState:
         domain_instructions: dict[str, Any] | None = None,
         state_mutations: list[StateMutationModel] | None = None,
         active_condition: str | None = None,
+        quiescent_click_targets: set[tuple[int, int]] | None = None,
+        effective_features: set[Any] | None = None,
+        completed_control_targets: set[tuple[int, int]] | None = None,
+        click_target_usage: dict[tuple[int, int], int] | None = None,
+        entity_usage: dict[str, int] | None = None,
+        last_click_target: tuple[int, int, Any, str] | None = None,
+        last_action_parameters: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -312,6 +332,13 @@ class AgentState:
         self.domain_instructions = dict(domain_instructions or {})
         self.state_mutations: list[StateMutationModel] = list(state_mutations or [])
         self.active_condition = active_condition
+        self.quiescent_click_targets: set[tuple[int, int]] = set(quiescent_click_targets or [])
+        self.effective_features: set[Any] = set(effective_features or [])
+        self.completed_control_targets: set[tuple[int, int]] = set(completed_control_targets or [])
+        self.click_target_usage: dict[tuple[int, int], int] = dict(click_target_usage or {})
+        self.entity_usage: dict[str, int] = dict(entity_usage or {})
+        self.last_click_target = last_click_target
+        self.last_action_parameters = last_action_parameters
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -353,6 +380,14 @@ class AgentState:
             "domain_instructions": dict(self.domain_instructions),
             "state_mutations": [m.to_dict() for m in self.state_mutations],
             "active_condition": self.active_condition,
+            "quiescent_click_targets": [list(p) for p in self.quiescent_click_targets],
+            "effective_features": list(self.effective_features),
+            "completed_control_targets": [list(p) for p in self.completed_control_targets],
+            "click_target_usage": {
+                f"{r}_{c}": count for (r, c), count in self.click_target_usage.items()
+            },
+            "entity_usage": dict(self.entity_usage),
+            "last_action_parameters": self.last_action_parameters,
         }
 
     @classmethod
@@ -378,6 +413,14 @@ class AgentState:
         except Exception:
             phase = AgentPhase.EPISTEMIC_LEARNING
 
+        click_usage: dict[tuple[int, int], int] = {}
+        for k, v in data.get("click_target_usage", {}).items():
+            try:
+                parts = k.split("_")
+                click_usage[(int(parts[0]), int(parts[1]))] = int(v)
+            except Exception:
+                continue
+
         return cls(
             phase=phase,
             step_count=data.get("step_count", 0),
@@ -396,6 +439,12 @@ class AgentState:
             domain_instructions=data.get("domain_instructions", {}),
             state_mutations=mutations,
             active_condition=data.get("active_condition"),
+            quiescent_click_targets={tuple(p) for p in data.get("quiescent_click_targets", [])},
+            effective_features=set(data.get("effective_features", [])),
+            completed_control_targets={tuple(p) for p in data.get("completed_control_targets", [])},
+            click_target_usage=click_usage,
+            entity_usage=dict(data.get("entity_usage", {})),
+            last_action_parameters=data.get("last_action_parameters"),
         )
 
 
@@ -420,12 +469,20 @@ class CognitiveBlackbox:
         self.learning_loop = LearningLoopEngine(self.workspace)
         self.state = AgentState()
 
+        # Core interventional causal discovery, affordance learning, and active inference
+        self.causal_engine: BaseCausalDiscoveryEngine = BaseCausalDiscoveryEngine(
+            causal_graph=WorldCausalGraph()
+        )
+        self.affordance_engine: BaseAffordanceDiscoveryEngine = BaseAffordanceDiscoveryEngine()
+        self.active_inference: ActiveInferenceEngine = ActiveInferenceEngine()
+
         # Core KnowledgeGraph per source/domain for structured relational learning
         self._knowledge_graphs: dict[str, KnowledgeGraph] = {}
 
         # Per-source state for MIMO multi-driver support
         self._source_states: dict[str, AgentState] = {}
         self._source_entity_graphs: dict[str, EntityGraph] = {}
+        self._source_perception_data: dict[str, dict[str, Any]] = {}
 
         # Registered drivers: driver_name -> BaseDriver
         # All actions, capabilities, and lifters are dynamically managed through registered drivers
@@ -651,7 +708,9 @@ class CognitiveBlackbox:
         state = self.get_state(source_id)
         state.step_count += 1
 
-        if perception_data is None:
+        if perception_data is not None:
+            self._source_perception_data[source_id] = perception_data
+        else:
             return None
 
         # Use registered lifter to convert raw data → internal entities
@@ -710,6 +769,18 @@ class CognitiveBlackbox:
         if eg is None:
             # No entity graph available — return first available action
             return available_actions[0] if available_actions else DriverAction(action_id=0)
+
+        # Check if environment is non-spatial or click-dominant:
+        has_movement = any(
+            isinstance(a.action_id, int) and a.action_id in (1, 2, 3, 4) for a in available_actions
+        )
+        has_click = any(
+            isinstance(a.action_id, int) and a.action_id == 6 for a in available_actions
+        )
+        if (not has_movement and has_click) or (eg is not None and eg.avatar is None and has_click):
+            return self._decide_abstract_transition_action(
+                available_actions, state, source_id=source_id, eg=eg
+            )
 
         # Sync state to workspace so planner can read it
         self.sync_state_to_workspace(source_id)
@@ -828,6 +899,147 @@ class CognitiveBlackbox:
         # Fallback: explore unvisited frontiers or move with anti-repetition momentum
         return self._decide_exploratory_action(available_actions, state, eg, source_id=source_id)
 
+    def _decide_abstract_transition_action(
+        self,
+        available_actions: list[DriverAction],
+        state: AgentState,
+        source_id: str = "default",
+        eg: EntityGraph | None = None,
+    ) -> DriverAction:
+        """Domain-agnostic Abstract Transition System (ATS) action selection for non-spatial puzzles.
+
+        Selects discrete interaction targets (e.g. click coordinates for action 6,
+        or discrete switch/button state toggles) using novelty, information gain,
+        and causal effectiveness while strictly penalizing quiescent and completed controls.
+        """
+        click_action = None
+        for a in available_actions:
+            if (
+                getattr(a, "action_id", None) == 6
+                or getattr(a, "semantic_intent", None) == SpatialActionIntent.INTERACT
+            ):
+                click_action = a
+                break
+        if click_action is None:
+            click_action = available_actions[0] if available_actions else DriverAction(action_id=6)
+
+        p_data = self._source_perception_data.get(source_id, {})
+        grid = p_data.get("grid")
+        if grid is None or not isinstance(grid, np.ndarray) or grid.ndim != 2:
+            return click_action
+
+        H, W = grid.shape
+        perimeter = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
+        vals, counts = np.unique(perimeter, return_counts=True)
+        bg = int(vals[np.argmax(counts)]) if len(vals) > 0 else 0
+
+        # Causal momentum: if previous click on target produced verified change, repeat action
+        last_tgt = state.last_click_target
+        if last_tgt is not None:
+            lr, lc, lcol, leid = last_tgt
+            if (
+                (lr, lc) not in state.quiescent_click_targets
+                and (lr, lc) not in state.completed_control_targets
+                and lcol in state.effective_features
+                and state.click_target_usage.get((lr, lc), 0) < 12
+            ):
+                state.click_target_usage[(lr, lc)] = state.click_target_usage.get((lr, lc), 0) + 1
+                state.entity_usage[leid] = state.entity_usage.get(leid, 0) + 1
+                state.last_action_parameters = {"x": lc, "y": lr}
+                return DriverAction(
+                    action_id=click_action.action_id if click_action.action_id is not None else 6,
+                    semantic_intent=SpatialActionIntent.INTERACT,
+                    parameters={"x": lc, "y": lr},
+                )
+
+        from scipy.ndimage import label
+
+        mask = (grid != bg) & (grid != 0)
+        labeled_grid, num_features = label(mask)
+
+        candidates: list[tuple[int, int, int, str, float]] = []
+
+        for fid in range(1, num_features + 1):
+            pts = np.argwhere(labeled_grid == fid)
+            if len(pts) == 0:
+                continue
+            min_r, min_c = int(pts[:, 0].min()), int(pts[:, 1].min())
+            max_r, max_c = int(pts[:, 0].max()), int(pts[:, 1].max())
+
+            # Filter full-width / full-height borders
+            if (max_r - min_r >= H - 3 and max_c - min_c >= W - 3) or (
+                (min_r <= 1 and max_r <= 1) or (min_r >= H - 2 and max_r >= H - 2)
+            ):
+                continue
+            # Filter 1-pixel thin frame lines
+            if (max_r - min_r == 0 and max_c - min_c > 8) or (
+                max_c - min_c == 0 and max_r - min_r > 8
+            ):
+                continue
+
+            cr, cc = int(round(float(pts[:, 0].mean()))), int(round(float(pts[:, 1].mean())))
+            if grid[cr, cc] == bg or grid[cr, cc] == 0:
+                cr, cc = int(pts[len(pts) // 2, 0]), int(pts[len(pts) // 2, 1])
+
+            col = int(grid[cr, cc])
+            eid = f"ent_{fid}_{col}"
+
+            is_eff = (
+                150.0
+                if col in state.effective_features or col in state.learned_target_features
+                else 0.0
+            )
+            not_q = -500.0 if (cr, cc) in state.quiescent_click_targets else 0.0
+            not_comp = -600.0 if (cr, cc) in state.completed_control_targets else 0.0
+            is_2d = 30.0 if (max_r - min_r >= 1 and max_c - min_c >= 1) else 0.0
+            is_btn_sz = 30.0 if (4 <= len(pts) <= 300) else 0.0
+
+            usage = state.click_target_usage.get((cr, cc), 0)
+            target_pen = -float(usage) * 10.0
+            ent_usage = state.entity_usage.get(eid, 0)
+            ent_pen = -float(ent_usage) * 25.0
+
+            tot_score = is_eff + not_q + not_comp + is_2d + is_btn_sz + target_pen + ent_pen
+            candidates.append((cr, cc, col, eid, tot_score))
+
+            if max_r - min_r >= 4:
+                p1_r = min_r + (max_r - min_r) // 4
+                p2_r = max_r - (max_r - min_r) // 4
+                candidates.append((p1_r, cc, col, eid, tot_score - 5.0))
+                candidates.append((p2_r, cc, col, eid, tot_score - 5.0))
+            if max_c - min_c >= 4:
+                p1_c = min_c + (max_c - min_c) // 4
+                p2_c = max_c - (max_c - min_c) // 4
+                candidates.append((cr, p1_c, col, eid, tot_score - 5.0))
+                candidates.append((cr, p2_c, col, eid, tot_score - 5.0))
+
+        if not candidates:
+            non_bg = np.argwhere(grid != bg)
+            if len(non_bg) > 0:
+                best_r, best_c = int(non_bg[0, 0]), int(non_bg[0, 1])
+                best_col = int(grid[best_r, best_c])
+                best_eid = "fallback_0"
+            else:
+                best_r, best_c = H // 2, W // 2
+                best_col = 0
+                best_eid = "fallback_center"
+        else:
+            candidates.sort(key=lambda x: x[4], reverse=True)
+            best_r, best_c, best_col, best_eid, _ = candidates[0]
+
+        state.click_target_usage[(best_r, best_c)] = (
+            state.click_target_usage.get((best_r, best_c), 0) + 1
+        )
+        state.entity_usage[best_eid] = state.entity_usage.get(best_eid, 0) + 1
+        state.last_click_target = (best_r, best_c, best_col, best_eid)
+        state.last_action_parameters = {"x": best_c, "y": best_r}
+
+        return DriverAction(
+            action_id=click_action.action_id if click_action.action_id is not None else 6,
+            semantic_intent=SpatialActionIntent.INTERACT,
+            parameters={"x": best_c, "y": best_r},
+        )
+
     def _decide_exploratory_action(
         self,
         available_actions: list[DriverAction],
@@ -843,15 +1055,30 @@ class CognitiveBlackbox:
         if not available_actions:
             return DriverAction(action_id=0)
 
-        # 1. Topological frontier search: actively route toward unvisited corridors
+        # 1. Epistemic Frontier Search: actively route toward unvisited corridors / boundary frontiers
         if eg is not None and eg.avatar is not None:
-            frontier_cell = self.spatial_planner._find_nearest_unexplored_frontier(
-                start=eg.avatar.grid_pos,
+            grid_shape = eg.grid_shape
+            unobserved_mask = np.ones(grid_shape, dtype=bool)
+            for r, c in state.explored_entity_positions:
+                if 0 <= r < grid_shape[0] and 0 <= c < grid_shape[1]:
+                    unobserved_mask[r, c] = False
+
+            frontiers = EpistemicFrontierDetector.detect_frontiers(
+                avatar_pos=eg.avatar.grid_pos,
+                unobserved_mask=unobserved_mask,
                 barrier_cells=eg.barriers,
-                grid_shape=eg.grid_shape,
+                grid_shape=grid_shape,
                 step_size=eg.step_size,
-                visited_cells=state.explored_entity_positions,
             )
+            frontier_cell = frontiers[0][0] if frontiers else None
+            if frontier_cell is None:
+                frontier_cell = self.spatial_planner._find_nearest_unexplored_frontier(
+                    start=eg.avatar.grid_pos,
+                    barrier_cells=eg.barriers,
+                    grid_shape=eg.grid_shape,
+                    step_size=eg.step_size,
+                    visited_cells=state.explored_entity_positions,
+                )
             if frontier_cell is not None:
                 safe_path = self.spatial_planner.compute_safe_path(
                     start=eg.avatar.grid_pos,
@@ -920,8 +1147,34 @@ class CognitiveBlackbox:
         if untested:
             return untested[0]
         if valid_moves:
+            # Active Inference evaluation
+            if len(valid_moves) > 1:
+                candidate_nodes = []
+                info_map = {}
+                for a in valid_moves:
+                    node = ActionNode(id=f"act_{a.action_id}", intent=str(a.action_id))
+                    m = state.action_models.get(a.action_id)
+                    m_conf = getattr(m, "confidence", 0.5) if m else 0.5
+                    info_map[node.id] = max(0.1, 1.0 - m_conf)
+                    candidate_nodes.append(node)
+                ranked = self.active_inference.evaluate_candidates(candidate_nodes, info_map)
+                if ranked:
+                    top_id_str = ranked[0].action.id.replace("act_", "")
+                    for a in valid_moves:
+                        if str(a.action_id) == top_id_str:
+                            return a
             idx = state.step_count % len(valid_moves)
             return valid_moves[idx]
+
+        # If spatial movement is blocked, check for click interaction
+        has_click = any(
+            isinstance(a.action_id, int) and a.action_id == 6 for a in available_actions
+        )
+        if has_click:
+            return self._decide_abstract_transition_action(
+                available_actions, state, source_id=source_id, eg=eg
+            )
+
         if non_movement_actions:
             idx = state.step_count % len(non_movement_actions)
             return non_movement_actions[idx]
@@ -1124,6 +1377,42 @@ class CognitiveBlackbox:
             )
             self.record_state_mutation(mut, source_id=source_id)
 
+        # 5. Wire Abstract Transition System (ATS) & Affordance Engine
+        if is_interaction or act_id == 6:
+            grid_changed = info.get("grid_changed", False)
+            if grid_changed:
+                state.quiescent_click_targets.clear()
+                if "traversed_feature" in info:
+                    state.effective_features.add(info["traversed_feature"])
+                if action.parameters:
+                    click_r = int(action.parameters.get("y", 0))
+                    click_c = int(action.parameters.get("x", 0))
+                    p_data = self._source_perception_data.get(source_id, {})
+                    grid = p_data.get("grid")
+                    if (
+                        grid is not None
+                        and isinstance(grid, np.ndarray)
+                        and 0 <= click_r < grid.shape[0]
+                        and 0 <= click_c < grid.shape[1]
+                    ):
+                        tgt_col = int(grid[click_r, click_c])
+                        state.effective_features.add(tgt_col)
+                        aff_hyp = AffordanceHypothesis(
+                            action=act_id,
+                            entity_shape=f"color_{tgt_col}",
+                            affordance_label="INTERACTIVE_TRIGGER",
+                            confidence=1.0,
+                            confirmed=True,
+                        )
+                        self.affordance_engine.update_affordance_from_evidence(
+                            aff_hyp, success=True, target_id=f"tile_{click_r}_{click_c}"
+                        )
+            else:
+                if action.parameters:
+                    click_r = int(action.parameters.get("y", 0))
+                    click_c = int(action.parameters.get("x", 0))
+                    state.quiescent_click_targets.add((click_r, click_c))
+
         # Wire Native HCIR Memory: Record trial failures & collision barriers in BeliefNode & EpisodeNode
 
         if "collision_feature" in info or is_blocked:
@@ -1164,9 +1453,10 @@ class CognitiveBlackbox:
         if feedback.success or feedback.reward > 0:
             if "reached_feature" in info:
                 feat = info["reached_feature"]
-                state.learned_target_features.add(feat)
-                state.learned_obstacle_features.discard(feat)
-                state.learned_traversable_features.discard(feat)
+                if state.avatar_feature is None or feat != state.avatar_feature:
+                    state.learned_target_features.add(feat)
+                    state.learned_obstacle_features.discard(feat)
+                    state.learned_traversable_features.discard(feat)
 
         # Empirical Hazard Feature Induction (from failed termination)
         if feedback.terminated and not feedback.success:
@@ -1346,6 +1636,15 @@ class CognitiveBlackbox:
             saved_instructions = dict(getattr(state, "domain_instructions", {}))
             saved_mutations = list(getattr(state, "state_mutations", []))
             saved_condition = getattr(state, "active_condition", None)
+            saved_effective_features = set(getattr(state, "effective_features", set()))
+            saved_quiescent = (
+                set(getattr(state, "quiescent_click_targets", set())) if is_retry else set()
+            )
+            saved_completed = (
+                set(getattr(state, "completed_control_targets", set())) if is_retry else set()
+            )
+            saved_click_usage = dict(getattr(state, "click_target_usage", {})) if is_retry else {}
+            saved_entity_usage = dict(getattr(state, "entity_usage", {})) if is_retry else {}
 
             self._source_states[source_id] = AgentState(
                 learned_obstacle_features=saved_obstacles,
@@ -1360,6 +1659,11 @@ class CognitiveBlackbox:
                 domain_instructions=saved_instructions,
                 state_mutations=saved_mutations,
                 active_condition=saved_condition,
+                quiescent_click_targets=saved_quiescent,
+                effective_features=saved_effective_features,
+                completed_control_targets=saved_completed,
+                click_target_usage=saved_click_usage,
+                entity_usage=saved_entity_usage,
             )
         else:
             self._source_states[source_id] = AgentState()
@@ -1430,6 +1734,8 @@ class CognitiveBlackbox:
                 weight=1.0,
             )
         for ob in state.learned_obstacle_features:
+            if state.avatar_feature is not None and ob == state.avatar_feature:
+                continue
             kg.add_entity(
                 label=f"feat_{ob}",
                 entity_type="perceptual_feature",
@@ -1442,6 +1748,8 @@ class CognitiveBlackbox:
                 weight=1.0,
             )
         for tg in state.learned_target_features:
+            if state.avatar_feature is not None and tg == state.avatar_feature:
+                continue
             kg.add_entity(
                 label=f"feat_{tg}",
                 entity_type="perceptual_feature",
@@ -1466,14 +1774,19 @@ class CognitiveBlackbox:
                 weight=1.0,
             )
         for a_id, m in state.action_models.items():
+            conf = float(getattr(m, "confidence", 0.5))
+            dr = int(getattr(m, "delta_r", 0))
+            dc = int(getattr(m, "delta_c", 0))
+            if conf < 0.5 or abs(dr) > 10 or abs(dc) > 10:
+                continue
             kg.add_entity(
                 label=f"action_{a_id}",
                 entity_type="motor_action",
                 attributes={
                     "action_id": a_id,
-                    "delta_r": getattr(m, "delta_r", 0),
-                    "delta_c": getattr(m, "delta_c", 0),
-                    "confidence": getattr(m, "confidence", 0.5),
+                    "delta_r": dr,
+                    "delta_c": dc,
+                    "confidence": conf,
                     "probes_tested": getattr(m, "probes_tested", 1),
                 },
             )
@@ -1499,6 +1812,10 @@ class CognitiveBlackbox:
                             "confidence": getattr(b_node, "epistemic_confidence", 0.95),
                         },
                     )
+
+        if state.avatar_feature is not None:
+            state.learned_target_features.discard(state.avatar_feature)
+            state.learned_obstacle_features.discard(state.avatar_feature)
 
         # Ensure environment entity reflects latest metadata
         kg.add_entity(
@@ -1615,8 +1932,11 @@ class CognitiveBlackbox:
                     elif tgt_ent.label == "avatar":
                         state.avatar_feature = feat
 
-        # Reconcile: obstacles can never be traversable
+        # Reconcile: obstacles can never be traversable, and avatar cannot be target or obstacle
         state.learned_traversable_features.difference_update(state.learned_obstacle_features)
+        if state.avatar_feature is not None:
+            state.learned_target_features.discard(state.avatar_feature)
+            state.learned_obstacle_features.discard(state.avatar_feature)
 
         # Sanitize motor models against corrupted displacements
         for m in state.action_models.values():

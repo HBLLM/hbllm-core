@@ -3109,10 +3109,12 @@ class InductiveHCIRAgent:
         if self.knowledge_base.object_recipes and self.knowledge_base.levels_solved > 0:
             for c, recipe in self.knowledge_base.object_recipes.items():
                 if recipe.outcome == "pickup":
-                    if c not in self.hcir_agent.learned_item_colors:
-                        self.hcir_agent.learned_item_colors[c] = {
-                            "action": recipe.interaction_action
-                        }
+                    item_colors = self.hcir_agent.learned_item_colors
+                    if c not in item_colors:
+                        if isinstance(item_colors, set):
+                            item_colors.add(c)
+                        elif isinstance(item_colors, dict):
+                            item_colors[c] = {"action": recipe.interaction_action}
                     if (
                         recipe.delivery_zone_bounds
                         and not self.hcir_agent.learned_receptacle_bounds
@@ -3155,7 +3157,13 @@ class InductiveHCIRAgent:
 
         self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
         self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
-        for c, item_info in self.hcir_agent.learned_item_colors.items():
+        item_colors_ref = self.hcir_agent.learned_item_colors
+        items_dict = (
+            item_colors_ref.items()
+            if isinstance(item_colors_ref, dict)
+            else {c: {"action": 5} for c in item_colors_ref}.items()
+        )
+        for c, item_info in items_dict:
             if c not in self.knowledge_base.object_recipes:
                 self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
                     object_color=c,
@@ -3664,8 +3672,8 @@ class InductiveARC3BenchmarkRunner:
                 )
                 break
 
-        # Persist accumulated KnowledgeGraph to disk
-        if k_dir:
+        # Persist accumulated KnowledgeGraph to disk only if progress was made
+        if k_dir and levels_completed > 0:
             try:
                 saved_path = self.agent.save_knowledge(k_dir, game_id=game_id)
                 logger.info(

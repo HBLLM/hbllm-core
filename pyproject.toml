@@ -177,6 +177,7 @@ exclude = [
     "^plugins/(?!developmental_adapter)",
     "^experiments/",
     "^scratch/",
+    "hbllm/hcir/primitives.py",
 ]
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 

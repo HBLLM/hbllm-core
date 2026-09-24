@@ -253,6 +253,7 @@ class ARC3SpatialCognitiveAgent:
         self.raw_avatar_centroid = None
         self.avatar_grid_pos = None
         self.start_pos = None
+        self.last_action_data = None
         self.blackbox.reset(source_id="arc_agi", retain_memory=retain_dynamics, is_retry=is_retry)
         self.blackbox.reset(source_id="default", retain_memory=retain_dynamics, is_retry=is_retry)
 
@@ -300,15 +301,19 @@ class ARC3SpatialCognitiveAgent:
             self.goal_centroid = None
             self.active_goal_node = None
 
-        # Prioritize exploratory probing of untested actions to calibrate motor models
-        untested = [
+        # Prioritize exploratory probing of untested movement actions to calibrate motor models
+        untested_moves = [
             a
             for a in available_actions
-            if a not in blackbox_state.action_models
-            or getattr(blackbox_state.action_models[a], "probes_tested", 0) == 0
+            if a in (1, 2, 3, 4)
+            and (
+                a not in blackbox_state.action_models
+                or getattr(blackbox_state.action_models[a], "probes_tested", 0) == 0
+            )
         ]
-        if untested:
-            return untested[0], 0.5
+        if untested_moves:
+            self.last_action_data = None
+            return untested_moves[0], 0.5
 
         driver_actions = [
             DriverAction(
@@ -320,6 +325,7 @@ class ARC3SpatialCognitiveAgent:
             for a in available_actions
         ]
         action = self.blackbox.decide(driver_actions, source_id="arc_agi")
+        self.last_action_data = action.parameters if action.parameters else None
 
         model = blackbox_state.action_models.get(action.action_id)
         conf = getattr(model, "confidence", 0.5) if model is not None else 0.5
@@ -335,10 +341,14 @@ class ARC3SpatialCognitiveAgent:
         curr_grid: np.ndarray,
         won: bool = False,
         lost: bool = False,
+        action_data: dict[str, int] | None = None,
     ) -> None:
         """Update blackbox with action-outcome feedback for trial-and-error learning."""
         if prev_grid.shape != curr_grid.shape:
             return
+
+        if action_data is None:
+            action_data = self.last_action_data
 
         diff_mask = prev_grid != curr_grid
         changed = bool(np.any(diff_mask))
@@ -588,7 +598,9 @@ class ARC3SpatialCognitiveAgent:
             entered_feats = [
                 int(prev_grid[r, c])
                 for r, c in cells_to_check
-                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]
+                if 0 <= r < prev_grid.shape[0]
+                and 0 <= c < prev_grid.shape[1]
+                and (avatar_col is None or int(prev_grid[r, c]) != avatar_col)
             ]
             cand_feats = [
                 f
@@ -654,6 +666,7 @@ class ARC3SpatialCognitiveAgent:
                 if action_id in (5, 6, 7)
                 else SpatialActionIntent.NAVIGATE
             ),
+            parameters=dict(action_data) if action_data else {},
         )
         feedback = DriverFeedback(
             success=won,
