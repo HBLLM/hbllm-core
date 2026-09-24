@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import Counter
 from typing import Any
 
 import numpy as np
@@ -155,6 +156,17 @@ class ARCPerceptualLifter:
             )
             entities.append(receptacle_ent)
 
+        candidate_item_counts = Counter(
+            int(o.color)
+            for o in raw_objects
+            if o.color not in walkable
+            and o.color != 0
+            and (avatar_color is None or o.color != avatar_color)
+            and o.color not in learned_b
+            and o.color not in learned_r
+            and o.area <= max_item_area
+        )
+
         for o in raw_objects:
             if o.color in walkable or o.color == 0 or o.area >= int(H * W * 0.30):
                 continue
@@ -286,11 +298,15 @@ class ARCPerceptualLifter:
                         else EntityRole.GOAL
                     )
                 elif not learned_i and o.color != avatar_color and o.area <= max_item_area:
-                    role = (
-                        EntityRole.MANIPULABLE
-                        if (receptacle_bounds or learned_r)
-                        else EntityRole.GOAL
-                    )
+                    # Multi-instance objects are manipulable cargo items; singleton unique colors are transformation pads/actuators
+                    if (receptacle_bounds or learned_r) and candidate_item_counts.get(
+                        int(o.color), 0
+                    ) > 1:
+                        role = EntityRole.MANIPULABLE
+                    elif receptacle_bounds or learned_r:
+                        role = EntityRole.ACTUATOR
+                    else:
+                        role = EntityRole.GOAL
                 else:
                     role = EntityRole.ACTUATOR
 

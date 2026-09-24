@@ -120,7 +120,7 @@ def main() -> None:
                 f"[{idx}/{len(game_list)}] Completed {gid}: {res.levels_completed}/{res.total_levels} levels passed ({res.total_actions} actions)"
             )
         except Exception as e:
-            logger.error(f"Error evaluating game {gid}: {e}")
+            logger.error(f"Error evaluating game {gid}: {e}", exc_info=True)
 
     duration = time.time() - start
     logger.info(f"Inductive evaluation completed in {duration:.2f}s across {len(results)} games.")

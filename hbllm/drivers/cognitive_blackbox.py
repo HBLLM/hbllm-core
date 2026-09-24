@@ -311,6 +311,9 @@ class AgentState:
         entity_usage: dict[str, int] | None = None,
         last_click_target: tuple[int, int, Any, str] | None = None,
         last_action_parameters: dict[str, Any] | None = None,
+        conditionally_locked_goals: set[tuple[int, int]] | None = None,
+        consecutive_blocked_moves: int = 0,
+        controllable_switch_usage: int = 0,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -339,6 +342,11 @@ class AgentState:
         self.entity_usage: dict[str, int] = dict(entity_usage or {})
         self.last_click_target = last_click_target
         self.last_action_parameters = last_action_parameters
+        self.conditionally_locked_goals: set[tuple[int, int]] = set(
+            conditionally_locked_goals or []
+        )
+        self.consecutive_blocked_moves = consecutive_blocked_moves
+        self.controllable_switch_usage = controllable_switch_usage
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -388,6 +396,9 @@ class AgentState:
             },
             "entity_usage": dict(self.entity_usage),
             "last_action_parameters": self.last_action_parameters,
+            "conditionally_locked_goals": [list(p) for p in self.conditionally_locked_goals],
+            "consecutive_blocked_moves": self.consecutive_blocked_moves,
+            "controllable_switch_usage": self.controllable_switch_usage,
         }
 
     @classmethod
@@ -445,6 +456,11 @@ class AgentState:
             click_target_usage=click_usage,
             entity_usage=dict(data.get("entity_usage", {})),
             last_action_parameters=data.get("last_action_parameters"),
+            conditionally_locked_goals={
+                tuple(p) for p in data.get("conditionally_locked_goals", []) if len(p) >= 2
+            },
+            consecutive_blocked_moves=int(data.get("consecutive_blocked_moves", 0)),
+            controllable_switch_usage=int(data.get("controllable_switch_usage", 0)),
         )
 
 
@@ -782,6 +798,22 @@ class CognitiveBlackbox:
                 available_actions, state, source_id=source_id, eg=eg
             )
 
+        # Multi-entity controllable switching check (Action 5):
+        # If the agent has hit consecutive obstacles or cannot path to any goals, and Action 5 is available:
+        has_action_5 = any(a.action_id == 5 for a in available_actions)
+        act5_action = next((a for a in available_actions if a.action_id == 5), None)
+        if has_action_5 and act5_action is not None and not state.carrying.holding:
+            if state.consecutive_blocked_moves >= 2 and state.controllable_switch_usage < 15:
+                state.controllable_switch_usage += 1
+                state.consecutive_blocked_moves = 0
+                state.current_plan.clear()
+                logger.info(
+                    "CognitiveBlackbox[%s]: Cycling controllable entity focus via Action 5 (usage=%d).",
+                    source_id,
+                    state.controllable_switch_usage,
+                )
+                return act5_action
+
         # Sync state to workspace so planner can read it
         self.sync_state_to_workspace(source_id)
 
@@ -821,6 +853,63 @@ class CognitiveBlackbox:
                         g.grid_pos[1] - eg.avatar.grid_pos[1],
                     ),
                 )
+
+                # Check if primary goal is conditionally locked (e.g. state mutation required to enter):
+                is_goal_locked = (
+                    primary_goal_ent.grid_pos in state.conditionally_locked_goals
+                    or any(
+                        math.hypot(
+                            primary_goal_ent.grid_pos[0] - p[0], primary_goal_ent.grid_pos[1] - p[1]
+                        )
+                        < eg.step_size * 0.95
+                        for p in state.conditionally_locked_goals
+                    )
+                )
+                if is_goal_locked:
+                    actuators = [
+                        e
+                        for e in eg.entities.values()
+                        if e.role in (EntityRole.ACTUATOR, EntityRole.RESOURCE)
+                        and e.grid_pos not in eg.barriers
+                    ]
+                    unexplored_act = [
+                        a for a in actuators if a.grid_pos not in state.explored_entity_positions
+                    ]
+                    candidate_actuators = unexplored_act or actuators
+                    if candidate_actuators:
+                        cand_act = min(
+                            candidate_actuators,
+                            key=lambda a: math.hypot(
+                                a.grid_pos[0] - eg.avatar.grid_pos[0],
+                                a.grid_pos[1] - eg.avatar.grid_pos[1],
+                            ),
+                        )
+                        act_plan = self.spatial_planner.compute_safe_path(
+                            start=eg.avatar.grid_pos,
+                            goal=cand_act.grid_pos,
+                            barrier_cells=eg.barriers,
+                            grid_shape=eg.grid_shape,
+                            step_size=eg.step_size,
+                        )
+                        if act_plan and len(act_plan) > 1:
+                            state.current_plan = [
+                                SequencePlanStep(
+                                    target_entity_id=cand_act.id,
+                                    target_pos=cand_act.grid_pos,
+                                    action_type=SpatialActionIntent.NAVIGATE,
+                                ),
+                                SequencePlanStep(
+                                    target_entity_id=primary_goal_ent.id,
+                                    target_pos=primary_goal_ent.grid_pos,
+                                    action_type=SpatialActionIntent.NAVIGATE,
+                                ),
+                            ]
+                            logger.info(
+                                "CognitiveBlackbox[%s]: Goal %s is conditionally locked. Chaining transformation pad %s before re-entry.",
+                                source_id,
+                                primary_goal_ent.id,
+                                cand_act.id,
+                            )
                 goal_node = GoalNode(
                     id=f"goal_{primary_goal_ent.id}",
                     description=f"Reach {primary_goal_ent.id}",
@@ -1012,6 +1101,61 @@ class CognitiveBlackbox:
                 p2_c = max_c - (max_c - min_c) // 4
                 candidates.append((cr, p1_c, col, eid, tot_score - 5.0))
                 candidates.append((cr, p2_c, col, eid, tot_score - 5.0))
+
+        # Extract enclosed cavities / sockets in background regions
+        bg_mask = (grid == bg) | (grid == 0)
+        labeled_bg, num_bg = label(bg_mask)
+        for bid in range(1, num_bg + 1):
+            bg_pts = np.argwhere(labeled_bg == bid)
+            if len(bg_pts) == 0:
+                continue
+            # Ignore outer edge background
+            if any(p[0] <= 0 or p[0] >= H - 1 or p[1] <= 0 or p[1] >= W - 1 for p in bg_pts):
+                continue
+            if 1 <= len(bg_pts) <= 120:
+                b_cr = int(round(float(bg_pts[:, 0].mean())))
+                b_cc = int(round(float(bg_pts[:, 1].mean())))
+                b_eid = f"cavity_{bid}"
+                b_usage = state.click_target_usage.get((b_cr, b_cc), 0)
+                b_score = 45.0 - float(b_usage) * 10.0
+                if (b_cr, b_cc) in state.quiescent_click_targets:
+                    b_score -= 500.0
+                candidates.append((b_cr, b_cc, int(bg), b_eid, b_score))
+
+        # Structural Symmetry Prior:
+        # Detect reflectional horizontal or vertical symmetry and prioritize asymmetric discrepancy points
+        flip_h = np.fliplr(grid)
+        flip_v = np.flipud(grid)
+        h_diff = grid != flip_h
+        v_diff = grid != flip_v
+        total_cells = float(max(1, H * W))
+        h_asymm_ratio = float(np.sum(h_diff)) / total_cells
+        v_asymm_ratio = float(np.sum(v_diff)) / total_cells
+
+        asymm_mask = None
+        if 0.002 < h_asymm_ratio <= 0.35:
+            asymm_mask = h_diff
+        elif 0.002 < v_asymm_ratio <= 0.35:
+            asymm_mask = v_diff
+
+        if asymm_mask is not None:
+            asymm_pts = np.argwhere(asymm_mask)
+            for pt in asymm_pts:
+                ar, ac = int(pt[0]), int(pt[1])
+                found = False
+                for i, (cr, cc, col, eid, sc) in enumerate(candidates):
+                    if abs(cr - ar) <= 1 and abs(cc - ac) <= 1:
+                        candidates[i] = (cr, cc, col, eid, sc + 80.0)
+                        found = True
+                        break
+                if not found:
+                    a_col = int(grid[ar, ac])
+                    a_eid = f"asymm_{ar}_{ac}"
+                    a_usage = state.click_target_usage.get((ar, ac), 0)
+                    a_score = 65.0 - float(a_usage) * 10.0
+                    if (ar, ac) in state.quiescent_click_targets:
+                        a_score -= 500.0
+                    candidates.append((ar, ac, a_col, a_eid, a_score))
 
         if not candidates:
             non_bg = np.argwhere(grid != bg)
@@ -1239,6 +1383,7 @@ class CognitiveBlackbox:
         )
         state.last_action_blocked = is_blocked
         if is_blocked:
+            state.consecutive_blocked_moves += 1
             state.current_plan.clear()
             eg_temp = self._source_entity_graphs.get(source_id)
             avatar_pos = eg_temp.avatar.grid_pos if (eg_temp and eg_temp.avatar) else None
@@ -1251,9 +1396,38 @@ class CognitiveBlackbox:
                     norm_dr = int(np.sign(m_dr)) * step_sz
                     norm_dc = int(np.sign(m_dc)) * step_sz
                     blocked_cell = (avatar_pos[0] + norm_dr, avatar_pos[1] + norm_dc)
-                    self.spatial_planner._learned_barriers.add(blocked_cell)
-                    if eg_temp is not None:
-                        eg_temp.barriers.add(blocked_cell)
+
+                    # Non-destructive conditional goal lock protection:
+                    # Never permanently blacklist a goal, receptacle, portal, or actuator as an obstacle!
+                    is_goal_or_actuator = False
+                    if eg_temp:
+                        for ent in eg_temp.entities.values():
+                            if ent.role in (
+                                EntityRole.GOAL,
+                                EntityRole.RECEPTACLE,
+                                EntityRole.PORTAL,
+                                EntityRole.ACTUATOR,
+                            ):
+                                b = getattr(ent, "bounding_box", None)
+                                if (
+                                    b
+                                    and (b[0] <= blocked_cell[0] <= b[1])
+                                    and (b[2] <= blocked_cell[1] <= b[3])
+                                ):
+                                    is_goal_or_actuator = True
+                                    break
+                                elif ent.grid_pos == blocked_cell:
+                                    is_goal_or_actuator = True
+                                    break
+
+                    if is_goal_or_actuator:
+                        state.conditionally_locked_goals.add(blocked_cell)
+                    else:
+                        self.spatial_planner._learned_barriers.add(blocked_cell)
+                        if eg_temp is not None:
+                            eg_temp.barriers.add(blocked_cell)
+        else:
+            state.consecutive_blocked_moves = 0
 
         interaction_actions = set(state.domain_instructions.get("interaction_actions", [5, 6, 7]))
         if action.semantic_intent == SpatialActionIntent.INTERACT or act_id in interaction_actions:
@@ -1376,6 +1550,11 @@ class CognitiveBlackbox:
                 confidence=0.95,
             )
             self.record_state_mutation(mut, source_id=source_id)
+        elif act_id == 5 and not state.carrying.holding:
+            # Action 5 occurred without holding change (e.g. controllable entity switch)
+            # Clear motor action models to recalibrate dynamics for the newly controlled entity
+            state.action_models.clear()
+            state.consecutive_blocked_moves = 0
 
         # 5. Wire Abstract Transition System (ATS) & Affordance Engine
         if is_interaction or act_id == 6:
@@ -1458,27 +1637,29 @@ class CognitiveBlackbox:
                     state.learned_obstacle_features.discard(feat)
                     state.learned_traversable_features.discard(feat)
 
-        # Empirical Hazard Feature Induction (from failed termination)
-        if feedback.terminated and not feedback.success:
+        # Empirical Hazard Feature Induction (from failed termination or negative reward)
+        if (feedback.terminated and not feedback.success) or feedback.reward < 0:
             if "hazard_feature" in info:
                 feat = info["hazard_feature"]
                 state.learned_obstacle_features.add(feat)
                 state.learned_traversable_features.discard(feat)
                 state.learned_target_features.discard(feat)
 
-            hazard_pos = None
-            if avatar_pos and not is_interaction:
+            hazard_pos = info.get("hazard_pos")
+            if hazard_pos is None and avatar_pos and not is_interaction:
                 model = state.action_models.get(act_id)
                 if model and (model.delta_r != 0 or model.delta_c != 0):
                     hazard_pos = (avatar_pos[0] + model.delta_r, avatar_pos[1] + model.delta_c)
 
             if hazard_pos and hazard_pos != avatar_pos:
+                attempted = [str(a) for a in getattr(state, "action_history", [])[-10:]]
                 self.spatial_planner.record_failure(
                     workspace=self.workspace,
                     session_id=source_id,
                     failed_action=act_id,
                     failure_pos=hazard_pos,
                     reason="hazard" if "hazard_feature" in info else "trial_failed",
+                    attempted_sequence=attempted,
                 )
             state.current_plan.clear()
 
@@ -1722,53 +1903,57 @@ class CognitiveBlackbox:
 
         # Project all current state features into KnowledgeGraph before saving
         if state.avatar_feature is not None:
+            av_id = int(state.avatar_feature)
             kg.add_entity(
-                label=f"feat_{state.avatar_feature}",
+                label=f"feat_{av_id}",
                 entity_type="perceptual_feature",
-                attributes={"feature_id": state.avatar_feature, "role": "avatar"},
+                attributes={"feature_id": av_id, "role": "avatar"},
             )
             kg.add_relation(
-                source_label=f"feat_{state.avatar_feature}",
+                source_label=f"feat_{av_id}",
                 target_label="avatar",
                 relation_type="is_a",
                 weight=1.0,
             )
         for ob in state.learned_obstacle_features:
-            if state.avatar_feature is not None and ob == state.avatar_feature:
+            ob_id = int(ob)
+            if state.avatar_feature is not None and ob_id == int(state.avatar_feature):
                 continue
             kg.add_entity(
-                label=f"feat_{ob}",
+                label=f"feat_{ob_id}",
                 entity_type="perceptual_feature",
-                attributes={"feature_id": ob, "role": "obstacle"},
+                attributes={"feature_id": ob_id, "role": "obstacle"},
             )
             kg.add_relation(
-                source_label=f"feat_{ob}",
+                source_label=f"feat_{ob_id}",
                 target_label="obstacle",
                 relation_type="is_a",
                 weight=1.0,
             )
         for tg in state.learned_target_features:
-            if state.avatar_feature is not None and tg == state.avatar_feature:
+            tg_id = int(tg)
+            if state.avatar_feature is not None and tg_id == int(state.avatar_feature):
                 continue
             kg.add_entity(
-                label=f"feat_{tg}",
+                label=f"feat_{tg_id}",
                 entity_type="perceptual_feature",
-                attributes={"feature_id": tg, "role": "target"},
+                attributes={"feature_id": tg_id, "role": "target"},
             )
             kg.add_relation(
-                source_label=f"feat_{tg}",
+                source_label=f"feat_{tg_id}",
                 target_label="target",
                 relation_type="is_a",
                 weight=1.0,
             )
         for tr in state.learned_traversable_features:
+            tr_id = int(tr)
             kg.add_entity(
-                label=f"feat_{tr}",
+                label=f"feat_{tr_id}",
                 entity_type="perceptual_feature",
-                attributes={"feature_id": tr, "role": "traversable"},
+                attributes={"feature_id": tr_id, "role": "traversable"},
             )
             kg.add_relation(
-                source_label=f"feat_{tr}",
+                source_label=f"feat_{tr_id}",
                 target_label="traversable",
                 relation_type="is_a",
                 weight=1.0,
@@ -2033,6 +2218,19 @@ class CognitiveBlackbox:
                 "MOVE",
             )
             if not is_navigation:
+                # Approach facing orientation check:
+                # If approach_facing is required, ensure the agent turns in that direction first
+                face_dr, face_dc = getattr(step, "approach_facing", None) or (0, 0)
+                if (face_dr != 0 or face_dc != 0) and not getattr(step, "_facing_oriented", False):
+                    face_act_id = self.spatial_planner.get_action_for_delta(
+                        face_dr, face_dc, state.action_models
+                    )
+                    if face_act_id is not None and state.last_action_id != face_act_id:
+                        step._facing_oriented = True
+                        for a in available_actions:
+                            if a.action_id == face_act_id:
+                                return a
+
                 action = self._resolve_driver_action(
                     step.action_type, available_actions, state, source_id=source_id
                 )

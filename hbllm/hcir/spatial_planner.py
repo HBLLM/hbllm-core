@@ -901,7 +901,7 @@ class HCIRSpatialEntityPlanner:
                 )
                 if (
                     path
-                    and len(path) > 1
+                    and (len(path) > 1 or target_pos == eg.avatar.grid_pos)
                     and math.hypot(path[-1][0] - target_pos[0], path[-1][1] - target_pos[1])
                     <= eg.step_size * 0.95
                 ):
@@ -1096,10 +1096,15 @@ class HCIRSpatialEntityPlanner:
         attempted_sequence: list[str] | None = None,
     ) -> None:
         """Records a trial failure into HCIR native memory (EpisodeNode & BeliefNode)."""
+        if failure_pos:
+            failure_pos = (int(failure_pos[0]), int(failure_pos[1]))
+
         is_new_barrier = (
-            reason == "collision" and failure_pos and failure_pos not in self._learned_barriers
+            reason in ("collision", "hazard", "trial_failed", "death")
+            and failure_pos
+            and failure_pos not in self._learned_barriers
         )
-        if is_new_barrier or (reason != "collision"):
+        if is_new_barrier or (reason not in ("collision", "hazard", "trial_failed", "death")):
             logger.info(
                 f"Recording trial failure in HCIR memory: session={session_id}, "
                 f"pos={failure_pos}, reason={reason}"
@@ -1112,7 +1117,7 @@ class HCIRSpatialEntityPlanner:
         if attempted_sequence:
             self._failed_sequences.add(tuple(attempted_sequence))
 
-        if reason == "collision" and failure_pos:
+        if reason in ("collision", "hazard", "trial_failed", "death") and failure_pos:
             self._learned_barriers.add(failure_pos)
 
         if workspace is None:

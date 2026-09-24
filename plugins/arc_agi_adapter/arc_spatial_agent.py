@@ -21,6 +21,7 @@ import numpy as np
 from hbllm.drivers.base import DriverAction, DriverFeedback, DriverInput, DriverModality
 from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from hbllm.hcir.subgoal_decomposer import HCIRSkill
 from hbllm.hcir.world.morphology import MorphologicalConcept
 from hbllm.hcir.world.motor_calibration import StateMutationModel
 from plugins.arc_agi_adapter.arc_driver import ARC3Driver
@@ -153,6 +154,10 @@ class ARC3SpatialCognitiveAgent:
         self.picked_up_source_position: tuple[int, int] | None = None
         self.probe_reset_done: bool = False
         self.lattice_offset: tuple[int, int] = (0, 0)
+        self.episode_action_log: list[int] = []
+        self.episode_action_data_log: list[dict[str, Any] | None] = []
+        self.knowledge_base: Any = None
+        self.trial_memory: Any = None
 
         # Seed from persistent cross-game memory
         self.cross_game_memory.transfer_to_agent(self)
@@ -254,6 +259,8 @@ class ARC3SpatialCognitiveAgent:
         self.avatar_grid_pos = None
         self.start_pos = None
         self.last_action_data = None
+        self.episode_action_log.clear()
+        self.episode_action_data_log.clear()
         self.blackbox.reset(source_id="arc_agi", retain_memory=retain_dynamics, is_retry=is_retry)
         self.blackbox.reset(source_id="default", retain_memory=retain_dynamics, is_retry=is_retry)
 
@@ -349,6 +356,9 @@ class ARC3SpatialCognitiveAgent:
 
         if action_data is None:
             action_data = self.last_action_data
+
+        self.episode_action_log.append(action_id)
+        self.episode_action_data_log.append(dict(action_data) if action_data else None)
 
         diff_mask = prev_grid != curr_grid
         changed = bool(np.any(diff_mask))
@@ -547,21 +557,29 @@ class ARC3SpatialCognitiveAgent:
                 c_min_r, c_min_c = curr_pts.min(axis=0)
                 self.avatar_grid_pos = (int(c_min_r // step * step), int(c_min_c // step * step))
 
-        # Payload pickup/drop affordance detection (Action 5)
+        # Payload pickup/drop affordance detection or controllable focus switch (Action 5)
         if action_id == 5 and changed:
             if not blackbox_state.carrying.holding:
                 diff_cells = np.argwhere(prev_grid != curr_grid)
+                picked_up = False
                 for dr_c in diff_cells:
                     r, c = int(dr_c[0]), int(dr_c[1])
                     if avatar_col is not None and prev_grid[r, c] != avatar_col:
                         if len(prev_pts) > 0:
                             pr, pc = prev_pts.mean(axis=0)
-                            if math.hypot(r - pr, c - pc) <= 2.0:
+                            max_dist = max(3.0, float(self.step_size) * 1.8)
+                            if math.hypot(r - pr, c - pc) <= max_dist:
                                 blackbox_state.carrying.holding = True
                                 blackbox_state.carrying.entity_id = f"item_{prev_grid[r, c]}"
                                 blackbox_state.carrying.offset = (float(r - pr), float(c - pc))
                                 info["holding_change"] = True
+                                picked_up = True
                                 break
+                if not picked_up:
+                    # Action 5 caused a screen transition without payload pickup:
+                    # Re-detect active controllable entity focus
+                    self.avatar_color = None
+                    blackbox_state.action_models.clear()
             else:
                 blackbox_state.carrying.holding = False
                 blackbox_state.carrying.entity_id = ""
@@ -627,8 +645,24 @@ class ARC3SpatialCognitiveAgent:
                 if 0 <= tr < prev_grid.shape[0] and 0 <= tc < prev_grid.shape[1]:
                     info["reached_feature"] = int(prev_grid[tr, tc])
 
+            # Positive Skill Harvesting: Register consolidated macro skill for cross-level transfer
+            if self.episode_action_log and self.knowledge_base is not None:
+                reached_feat = info.get("reached_feature", "goal")
+                skill = HCIRSkill(
+                    skill_id=f"reach_feat_{reached_feat}",
+                    preconditions={"start_pos": self.start_pos},
+                    action_sequence=list(self.episode_action_log),
+                    action_data_sequence=list(self.episode_action_data_log),
+                    expected_effect={"won": True, "reached_feature": reached_feat},
+                    confidence=0.85,
+                    times_executed=1,
+                    times_succeeded=1,
+                )
+                if hasattr(self.knowledge_base, "register_skill"):
+                    self.knowledge_base.register_skill(skill)
+
         elif lost:
-            # Terminated without winning — hazard stepped into
+            # Terminated without winning — hazard stepped into / negative failure harvesting
             newly_entered = curr_set - prev_set
             cells_to_check = newly_entered if newly_entered else curr_set
             bg = getattr(self, "background_color", None)
@@ -650,6 +684,10 @@ class ARC3SpatialCognitiveAgent:
                 info["hazard_feature"] = Counter(cand_hazards).most_common(1)[0][0]
             elif entered_feats:
                 info["hazard_feature"] = entered_feats[0]
+
+            hazard_pos: tuple[int, int] | None = None
+            if newly_entered:
+                hazard_pos = tuple(next(iter(newly_entered)))
             elif avatar_col is not None and len(prev_pts) > 0:
                 model = action_models.get(action_id)
                 edr = getattr(model, "delta_r", 0) if model else 0
@@ -657,7 +695,22 @@ class ARC3SpatialCognitiveAgent:
                 pr, pc = prev_pts.mean(axis=0)
                 tr, tc = int(round(pr + edr)), int(round(pc + edc))
                 if 0 <= tr < prev_grid.shape[0] and 0 <= tc < prev_grid.shape[1]:
-                    info["hazard_feature"] = int(prev_grid[tr, tc])
+                    if "hazard_feature" not in info:
+                        info["hazard_feature"] = int(prev_grid[tr, tc])
+                    hazard_pos = (tr, tc)
+
+            if hazard_pos is not None:
+                info["hazard_pos"] = hazard_pos
+
+            # Register fatal failure in knowledge base and trial memory so it is avoided in retries
+            h_feat = info.get("hazard_feature")
+            if self.knowledge_base is not None and h_feat is not None:
+                if hasattr(self.knowledge_base, "register_hazard"):
+                    self.knowledge_base.register_hazard(h_feat, pos=hazard_pos, action=action_id)
+                else:
+                    getattr(self.knowledge_base, "hazard_colors", set()).add(h_feat)
+                    getattr(self.knowledge_base, "barrier_colors", set()).add(h_feat)
+                    getattr(self.knowledge_base, "walkable_colors", set()).discard(h_feat)
 
         action = DriverAction(
             action_id=action_id,
@@ -670,7 +723,7 @@ class ARC3SpatialCognitiveAgent:
         )
         feedback = DriverFeedback(
             success=won,
-            reward=1.0 if won else 0.0,
+            reward=1.0 if won else (-1.0 if lost else 0.0),
             terminated=(won or lost),
             info=info,
         )

@@ -2,11 +2,14 @@
 
 import numpy as np
 
+from hbllm.hcir.subgoal_decomposer import HCIRSkill
+from plugins.arc_agi_adapter.arc_spatial_agent import ARC3SpatialCognitiveAgent
 from plugins.arc_agi_adapter.inductive_learner import (
     ActionAffordance,
     CanvasRegion,
     CausalAffordanceEngine,
     CausalHypothesis,
+    CrossLevelKnowledgeBase,
     DiffType,
     DynamicCanvasMatcher,
     DynamicPermutationSolver,
@@ -658,3 +661,89 @@ def test_inductive_agent_phase3_tools_initialized() -> None:
     assert len(agent.hazard_tracker.hazard_history) == 1
     agent.reset_episode()
     assert len(agent.hazard_tracker.hazard_history) == 0
+
+
+def test_inductive_knowledge_base_skill_reinforcement_and_hazard() -> None:
+    """Verify skill registration keeps shorter route, boosts confidence, and hazard registration blocks fatal features."""
+    kb = CrossLevelKnowledgeBase()
+    kb.walkable_colors.add(2)
+    kb.walkable_colors.add(0)
+
+    # Initial skill with 4 actions
+    s1 = HCIRSkill(
+        skill_id="reach_goal",
+        preconditions={"start": (0, 0)},
+        action_sequence=[1, 1, 4, 4],
+        expected_effect={"won": True},
+        confidence=0.7,
+        times_executed=1,
+        times_succeeded=1,
+    )
+    kb.register_skill(s1)
+    assert len(kb.skills) == 1
+    assert len(kb.skills[0].action_sequence) == 4
+    assert kb.skills[0].times_executed == 1
+
+    # More efficient route with 2 actions reinforces the same skill
+    s2 = HCIRSkill(
+        skill_id="reach_goal",
+        preconditions={"start": (0, 0)},
+        action_sequence=[1, 4],
+        expected_effect={"won": True},
+        confidence=0.8,
+        times_executed=1,
+        times_succeeded=1,
+    )
+    kb.register_skill(s2)
+    assert len(kb.skills) == 1
+    # Kept shorter route
+    assert len(kb.skills[0].action_sequence) == 2
+    # Accumulated executions
+    assert kb.skills[0].times_executed == 2
+    assert kb.skills[0].confidence == min(1.0, 0.7 + 0.15)
+
+    # Test negative hazard learning
+    kb.register_hazard(color=2, pos=(3, 3), action=1)
+    assert 2 in kb.hazard_colors
+    assert 2 in kb.barrier_colors
+    assert 2 not in kb.walkable_colors
+
+
+def test_agent_bidirectional_reinforcement_positive_and_negative() -> None:
+    """Verify ARC3SpatialCognitiveAgent harvests skills on win and harvests hazards/barriers on loss."""
+    agent = ARC3SpatialCognitiveAgent()
+    kb = CrossLevelKnowledgeBase()
+    agent.knowledge_base = kb
+
+    prev = np.zeros((10, 10), dtype=int)
+    prev[2, 2] = 3  # avatar
+    prev[2, 5] = 2  # hazard
+    prev[8, 8] = 4  # goal
+
+    # 1. Negative learning: step into hazard and lose
+    curr_lost = prev.copy()
+    curr_lost[2, 2] = 0
+    curr_lost[2, 5] = 3  # avatar stepped onto hazard cell (2, 5)
+
+    agent.update_causal_dynamics(action_id=4, prev_grid=prev, curr_grid=curr_lost, lost=True)
+
+    # Check hazard was learned in blackbox obstacle features and spatial planner barriers
+    bb_state = agent.blackbox.get_state("arc_agi")
+    assert 2 in bb_state.learned_obstacle_features
+    assert (2, 5) in agent.spatial_planner._learned_barriers
+    assert 2 in kb.hazard_colors
+
+    # 2. Positive learning: win the level
+    agent.reset_episode(retain_dynamics=True, is_retry=True)
+    # The learned obstacle feature and barrier must persist across retries
+    assert 2 in bb_state.learned_obstacle_features
+    assert (2, 5) in agent.spatial_planner._learned_barriers
+
+    curr_won = prev.copy()
+    curr_won[2, 2] = 0
+    curr_won[8, 8] = 3  # avatar reached goal
+    agent.update_causal_dynamics(action_id=1, prev_grid=prev, curr_grid=curr_won, won=True)
+
+    # Verify skill was harvested into knowledge base
+    assert len(kb.skills) >= 1
+    assert any(s.expected_effect.get("won") is True for s in kb.skills)

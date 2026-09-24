@@ -285,6 +285,7 @@ class CrossLevelKnowledgeBase:
         self.goal_target_zone: tuple[int, int, int, int] | None = None
         self.walkable_colors: set[int] = set()
         self.barrier_colors: set[int] = set()
+        self.hazard_colors: set[int] = set()
         self.discrete_state_transitions: dict[
             tuple[int, int], int
         ] = {}  # (slot_idx, action) -> next_slot
@@ -302,12 +303,43 @@ class CrossLevelKnowledgeBase:
         self.skills: list[HCIRSkill] = []
 
     def register_skill(self, skill: HCIRSkill) -> None:
-        """Store an acquired skill for reuse in subsequent levels."""
+        """Store an acquired skill for reuse in subsequent levels.
+
+        Reaching the same effect again reinforces confidence and keeps
+        whichever route was more efficient, rather than just overwriting.
+        """
         for i, s in enumerate(self.skills):
             if s.skill_id == skill.skill_id:
-                self.skills[i] = skill
+                better = skill if len(skill.action_sequence) <= len(s.action_sequence) else s
+                self.skills[i] = HCIRSkill(
+                    skill_id=skill.skill_id,
+                    preconditions=better.preconditions,
+                    action_sequence=better.action_sequence,
+                    action_data_sequence=better.action_data_sequence,
+                    expected_effect=better.expected_effect,
+                    confidence=min(1.0, s.confidence + 0.15),
+                    times_executed=s.times_executed + 1,
+                    times_succeeded=s.times_succeeded + 1,
+                )
                 return
         self.skills.append(skill)
+
+    def register_hazard(
+        self,
+        color: int,
+        pos: tuple[int, int] | None = None,
+        action: int | None = None,
+    ) -> None:
+        """Record a discovered lethal hazard or negative constraint.
+
+        Persists across levels and retries so known fatal features are never
+        stepped onto or interacted with again.
+        """
+        self.hazard_colors.add(color)
+        self.barrier_colors.add(color)
+        self.walkable_colors.discard(color)
+        if color in self.object_recipes:
+            del self.object_recipes[color]
 
     def register_observation(
         self,
@@ -2693,6 +2725,7 @@ class InductiveHCIRAgent:
         self.disable_archetypes: bool = disable_archetypes
         self.knowledge_base: CrossLevelKnowledgeBase = CrossLevelKnowledgeBase()
         self.spatial_cognitive_agent: ARC3SpatialCognitiveAgent = ARC3SpatialCognitiveAgent()
+        self.spatial_cognitive_agent.knowledge_base = self.knowledge_base
         self.hcir_agent: ARC3SpatialCognitiveAgent = self.spatial_cognitive_agent
         self.canvas_matcher: VisualCanvasMatcher = VisualCanvasMatcher()
         self.spatial_navigator: SpatialResourceNavigator = SpatialResourceNavigator()
@@ -2733,6 +2766,7 @@ class InductiveHCIRAgent:
         self._prev_min_dist: dict[int, int] = {}
         # Trial-and-error components
         self.trial_memory: TrialFeedbackMemory = TrialFeedbackMemory()
+        self.spatial_cognitive_agent.trial_memory = self.trial_memory
         self.goal_inductor: GoalStateInductor = GoalStateInductor()
         self.step_counter: int = 0
         self.epistemic_probe_budget: int = 6  # initial exploration steps
@@ -2782,6 +2816,8 @@ class InductiveHCIRAgent:
             self.knowledge_base = CrossLevelKnowledgeBase()
             self.hcir_agent.reset_episode(retain_dynamics=False, is_retry=False)
             self.spatial_cognitive_agent.reset_episode(retain_dynamics=False, is_retry=False)
+            self.spatial_cognitive_agent.knowledge_base = self.knowledge_base
+            self.spatial_cognitive_agent.trial_memory = self.trial_memory
             self.current_level = 0
         else:
             if not is_retry:
@@ -3628,11 +3664,15 @@ class InductiveARC3BenchmarkRunner:
                         completed = True
                         if hasattr(self.agent, "spatial_cognitive_agent"):
                             self.agent.spatial_cognitive_agent.update_causal_dynamics(
-                                action_int, prev_grid, prev_grid, won=True
+                                action_int, prev_grid, curr_grid, won=True
                             )
                         break
 
                     if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
+                        if hasattr(self.agent, "spatial_cognitive_agent"):
+                            self.agent.spatial_cognitive_agent.update_causal_dynamics(
+                                action_int, prev_grid, curr_grid, lost=True
+                            )
                         break
 
                 if completed:
