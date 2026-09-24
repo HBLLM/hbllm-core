@@ -87,6 +87,7 @@ ALL SYNTHETIC PROCEDURAL TESTS PASSED (100% SUCCESS RATE)!
 5. **Run Evaluation & Generate `submission.parquet`**:
    ```python
    from kaggle_submission.submission import MyAgent
+
    # Initialize agent and run through competition evaluation harness
    agent = MyAgent()
    ```
