@@ -74,6 +74,11 @@ def main() -> None:
         default="data/cognitive_memory/arc_agi_3",
         help="Directory to persist and load core KnowledgeGraph files (default: data/cognitive_memory/arc_agi_3).",
     )
+    parser.add_argument(
+        "--disable-archetypes",
+        action="store_true",
+        help="Bypass all 8 specialized archetype solvers and force all games through core CognitiveBlackbox / HCIR reasoning.",
+    )
     args = parser.parse_args()
 
     try:
@@ -88,6 +93,7 @@ def main() -> None:
         max_steps_per_level=args.max_steps,
         max_retries_per_level=args.max_retries,
         knowledge_dir=args.knowledge_dir,
+        disable_archetypes=args.disable_archetypes,
     )
     results = []
     start = time.time()

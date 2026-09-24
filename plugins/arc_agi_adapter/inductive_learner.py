@@ -2689,7 +2689,8 @@ class InductiveHCIRAgent:
     goal predicates on Level 1, persisting accumulated knowledge across levels.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, disable_archetypes: bool = False) -> None:
+        self.disable_archetypes: bool = disable_archetypes
         self.knowledge_base: CrossLevelKnowledgeBase = CrossLevelKnowledgeBase()
         self.spatial_cognitive_agent: ARC3SpatialCognitiveAgent = ARC3SpatialCognitiveAgent()
         self.hcir_agent: ARC3SpatialCognitiveAgent = self.spatial_cognitive_agent
@@ -3277,57 +3278,63 @@ class InductiveHCIRAgent:
         if self.active_solver_name is not None:
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 2. Specialized maze/resource constraint predicate check
-        if all(
-            a in available_actions for a in [1, 2, 3, 4]
-        ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
-            self.active_solver_name = "spatial_navigation"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+        # Specialized Archetype Solvers (can be bypassed via disable_archetypes)
+        if not self.disable_archetypes:
+            # 2. Specialized maze/resource constraint predicate check
+            if all(
+                a in available_actions for a in [1, 2, 3, 4]
+            ) and self.spatial_navigator.is_resource_constrained_maze(
+                curr_grid, self.current_level
+            ):
+                self.active_solver_name = "spatial_navigation"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 3. Canvas Stamping / Pattern Matching Branch (diff minimization)
-        if (
-            5 in available_actions
-            and 6 in available_actions
-            and 7 not in available_actions
-            and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
-        ):
-            self.active_solver_name = "canvas_stamping"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 3. Canvas Stamping / Pattern Matching Branch (diff minimization)
+            if (
+                5 in available_actions
+                and 6 in available_actions
+                and 7 not in available_actions
+                and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
+            ):
+                self.active_solver_name = "canvas_stamping"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 4. Vortex Attractor Shockwave Branch
-        if (
-            6 in available_actions
-            and 7 in available_actions
-            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
-        ):
-            self.active_solver_name = "vortex"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 4. Vortex Attractor Shockwave Branch
+            if (
+                6 in available_actions
+                and 7 in available_actions
+                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
+                and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
+            ):
+                self.active_solver_name = "vortex"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 5. Discrete Permutation & Linear System Solvers (e.g. Lights Out via GF(2))
-        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "lights_out"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 5. Discrete Permutation & Linear System Solvers (e.g. Lights Out via GF(2))
+            if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
+                self.active_solver_name = "lights_out"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 6. Mirrored Convergence Solver (e.g. m0r0)
-        if self.mirrored_convergence_solver.is_mirrored_convergence(curr_grid, available_actions):
-            self.active_solver_name = "mirrored_convergence"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 6. Mirrored Convergence Solver (e.g. m0r0)
+            if self.mirrored_convergence_solver.is_mirrored_convergence(
+                curr_grid, available_actions
+            ):
+                self.active_solver_name = "mirrored_convergence"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 7. Gravity Spill Platform Solver (e.g. sp80)
-        if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-            self.active_solver_name = "gravity_spill"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 7. Gravity Spill Platform Solver (e.g. sp80)
+            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
+                self.active_solver_name = "gravity_spill"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 8. Peg Solitaire Solver (e.g. lf52)
-        if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-            self.active_solver_name = "peg"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 8. Peg Solitaire Solver (e.g. lf52)
+            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
+                self.active_solver_name = "peg"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 9. Track Maze Navigation Solver (e.g. tu93)
-        if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "track_maze"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # 9. Track Maze Navigation Solver (e.g. tu93)
+            if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
+                self.active_solver_name = "track_maze"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
         if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):
@@ -3542,11 +3549,13 @@ class InductiveARC3BenchmarkRunner:
         max_steps_per_level: int = 150,
         max_retries_per_level: int = 2,
         knowledge_dir: Path | str | None = None,
+        disable_archetypes: bool = False,
     ) -> None:
         self.max_steps = max_steps_per_level
         self.max_retries_per_level = max_retries_per_level
         self.knowledge_dir = Path(knowledge_dir) if knowledge_dir else None
-        self.agent = InductiveHCIRAgent()
+        self.disable_archetypes = disable_archetypes
+        self.agent = InductiveHCIRAgent(disable_archetypes=disable_archetypes)
 
     def run_environment(
         self,
@@ -3557,8 +3566,10 @@ class InductiveARC3BenchmarkRunner:
         knowledge_dir: Path | str | None = None,
     ) -> InductiveEnvironmentResult:
         """Evaluate the inductive learner on an environment with cross-level transfer."""
-        logger.info(f"Starting Inductive HCIR evaluation on game: {game_id}...")
-        self.agent = InductiveHCIRAgent()
+        logger.info(
+            f"Starting Inductive HCIR evaluation on game: {game_id} (disable_archetypes={self.disable_archetypes})..."
+        )
+        self.agent = InductiveHCIRAgent(disable_archetypes=self.disable_archetypes)
 
         # Load existing core KnowledgeGraph if available
         k_dir = knowledge_dir or self.knowledge_dir

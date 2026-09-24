@@ -1307,6 +1307,8 @@ class CognitiveBlackbox:
             saved_explored_positions = set(getattr(state, "explored_entity_positions", set()))
             saved_explored_ids = set(getattr(state, "explored_entity_ids", set()))
             saved_instructions = dict(getattr(state, "domain_instructions", {}))
+            saved_mutations = list(getattr(state, "state_mutations", []))
+            saved_condition = getattr(state, "active_condition", None)
 
             self._source_states[source_id] = AgentState(
                 learned_obstacle_features=saved_obstacles,
@@ -1318,6 +1320,8 @@ class CognitiveBlackbox:
                 explored_entity_positions=saved_explored_positions,
                 explored_entity_ids=saved_explored_ids,
                 domain_instructions=saved_instructions,
+                state_mutations=saved_mutations,
+                active_condition=saved_condition,
             )
         else:
             self._source_states[source_id] = AgentState()

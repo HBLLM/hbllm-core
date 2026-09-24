@@ -413,6 +413,50 @@ def op_panels_xor(panels: list[Grid], bg: int = 0) -> Grid:
     return res
 
 
+def op_panels_majority_vote(panels: list[Grid], bg: int = 0) -> Grid:
+    """Cell-wise majority color consensus across all extracted subgrid panels."""
+    if not panels:
+        return np.zeros((1, 1), dtype=int)
+    h, w = panels[0].shape
+    if any(p.shape != (h, w) for p in panels):
+        return panels[0].copy()
+
+    res = np.full((h, w), bg, dtype=int)
+    for r in range(h):
+        for c in range(w):
+            vals = [int(p[r, c]) for p in panels]
+            # Counter of colors, prioritizing non-background on tie
+            counts = Counter(vals)
+            top_col = counts.most_common(1)[0][0]
+            if top_col == bg and len(counts) > 1:
+                # If non-bg has votes equal to bg, pick non-bg
+                non_bg_common = [col for col, cnt in counts.most_common() if col != bg]
+                if non_bg_common and counts[non_bg_common[0]] >= counts[bg]:
+                    top_col = non_bg_common[0]
+            res[r, c] = top_col
+    return res
+
+
+def op_panel_select_extreme(panels: list[Grid], extreme: str = "most_fg", bg: int = 0) -> Grid:
+    """Select the single subgrid panel matching an extremum property."""
+    if not panels:
+        return np.zeros((1, 1), dtype=int)
+    if len(panels) == 1:
+        return panels[0].copy()
+
+    if extreme == "most_fg":
+        return max(panels, key=lambda p: int(np.sum(p != bg))).copy()
+    elif extreme == "least_fg":
+        non_empty = [p for p in panels if np.sum(p != bg) > 0]
+        return min(non_empty or panels, key=lambda p: int(np.sum(p != bg))).copy()
+    elif extreme == "max_colors":
+        return max(panels, key=lambda p: len(set(np.unique(p)) - {bg})).copy()
+    elif extreme == "min_colors":
+        non_empty = [p for p in panels if np.sum(p != bg) > 0]
+        return min(non_empty or panels, key=lambda p: len(set(np.unique(p)) - {bg})).copy()
+    return panels[0].copy()
+
+
 def op_panel_intersection_recolor(panels: list[Grid], fill_color: int, bg: int = 0) -> Grid:
     """Compute Boolean intersection across panels and recolor matching pixels."""
     if not panels:
@@ -568,9 +612,44 @@ def op_tile_periodic(grid: Grid, reps_r: int, reps_c: int) -> Grid:
 
 def op_tile_reflected(grid: Grid) -> Grid:
     """Reflected 2x2 tiling: top-left (orig), top-right (fliplr), bottom-left (flipud), bottom-right (rot180)."""
-    top = np.hstack([grid, np.fliplr(grid)])
-    bottom = np.hstack([np.flipud(grid), np.rot90(grid, 2)])
-    return np.vstack([top, bottom]).copy()
+    return op_tile_reflected_gen(grid, 2, 2, mode="mirror_quad")
+
+
+def op_tile_reflected_gen(
+    grid: Grid,
+    reps_r: int = 2,
+    reps_c: int = 2,
+    mode: str = "mirror_quad",
+) -> Grid:
+    """Tile grid with parity-based spatial reflection symmetries across rows and columns.
+
+    Modes:
+    - 'mirror_quad': Reflects across both axes (odd row flips ud, odd col flips lr).
+    - 'alternating_rows': Odd rows are flipped horizontally (fliplr).
+    - 'alternating_cols': Odd cols are flipped vertically (flipud).
+    - 'checkerboard': Cells where (r + c) % 2 == 1 are flipped lr and ud.
+    """
+    h, w = grid.shape
+    out = np.zeros((h * reps_r, w * reps_c), dtype=int)
+    for r in range(reps_r):
+        for c in range(reps_c):
+            block = grid.copy()
+            if mode == "mirror_quad":
+                if r % 2 == 1:
+                    block = np.flipud(block)
+                if c % 2 == 1:
+                    block = np.fliplr(block)
+            elif mode == "alternating_rows":
+                if r % 2 == 1:
+                    block = np.fliplr(block)
+            elif mode == "alternating_cols":
+                if c % 2 == 1:
+                    block = np.flipud(block)
+            elif mode == "checkerboard":
+                if (r + c) % 2 == 1:
+                    block = np.fliplr(np.flipud(block))
+            out[r * h : (r + 1) * h, c * w : (c + 1) * w] = block
+    return out.copy()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
