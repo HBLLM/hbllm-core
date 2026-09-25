@@ -135,6 +135,10 @@ class AutonomousEpistemicEngine:
         # Mental Imagination & Precomputed Execution Queue
         self.mental_plan: deque[MentalSimulationStep] = deque()
 
+        # Epistemic probe counters
+        self.level_epistemic_probes: int = 0
+        self.total_epistemic_probes: int = 0
+
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset episodic state upon level transition or death."""
         self.prev_grid = None
@@ -147,8 +151,10 @@ class AutonomousEpistemicEngine:
         self.active_probe_id = None
         self.probe_target_steps = 0
         self.recent_positions.clear()
+        self.level_epistemic_probes = 0
 
         if not retain_dynamics:
+            self.total_epistemic_probes = 0
             self.avatar_feature = None
             self.avatar_pos = None
             self.action_dynamics.clear()
@@ -394,16 +400,45 @@ class AutonomousEpistemicEngine:
         prev_entities = self.extract_entities(self.prev_grid, bg)
         curr_entities = self.extract_entities(curr_grid, bg)
 
-        # Check all entity pairs that moved
-        moved_entities: list[tuple[SpatialEntity, tuple[int, int]]] = []
+        # Match entities between previous and current frames
+        # 1. Filter out stationary entities at identical positions to prevent false movement pairings
+        unmatched_prev: list[SpatialEntity] = []
+        unmatched_curr: dict[int, SpatialEntity] = {id(ce): ce for ce in curr_entities}
+
         for pe in prev_entities:
-            for ce in curr_entities:
+            stat_match = None
+            for ce_id, ce in unmatched_curr.items():
+                if (
+                    pe.feature_id == ce.feature_id
+                    and pe.area == ce.area
+                    and pe.grid_pos == ce.grid_pos
+                ):
+                    stat_match = ce_id
+                    break
+            if stat_match is not None:
+                del unmatched_curr[stat_match]
+            else:
+                unmatched_prev.append(pe)
+
+        # 2. Match remaining entities that actually shifted position (1-to-1 assignment)
+        moved_entities: list[tuple[SpatialEntity, tuple[int, int]]] = []
+        for pe in unmatched_prev:
+            best_ce_id = None
+            min_dist = float("inf")
+            best_delta = (0, 0)
+            for ce_id, ce in unmatched_curr.items():
                 if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 64:
                     dr = ce.grid_pos[0] - pe.grid_pos[0]
                     dc = ce.grid_pos[1] - pe.grid_pos[1]
-                    if (dr != 0 or dc != 0) and abs(dr) <= 3 and abs(dc) <= 3:
-                        moved_entities.append((ce, (dr, dc)))
-                        break
+                    dist = abs(dr) + abs(dc)
+                    if 0 < dist <= 6 and abs(dr) <= 3 and abs(dc) <= 3:
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_ce_id = ce_id
+                            best_delta = (dr, dc)
+            if best_ce_id is not None:
+                matched_ce = unmatched_curr.pop(best_ce_id)
+                moved_entities.append((matched_ce, best_delta))
 
         for ce, (dr, dc) in moved_entities:
             if self.avatar_feature is None or self.avatar_feature == ce.feature_id:
@@ -432,12 +467,13 @@ class AutonomousEpistemicEngine:
                 )
             elif self.avatar_feature is not None and ce.feature_id != self.avatar_feature:
                 # Entity pushed by avatar!
-                self.learned_cargo_features.add(ce.feature_id)
-                logger.info(
-                    "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
-                    ce.feature_id,
-                    ce.area,
-                )
+                if ce.feature_id not in self.learned_cargo_features:
+                    self.learned_cargo_features.add(ce.feature_id)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
+                        ce.feature_id,
+                        ce.area,
+                    )
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
         # If pixels changed at coordinates outside the avatar's movement trajectory
@@ -894,6 +930,8 @@ class AutonomousEpistemicEngine:
         """
         H, W = curr_grid.shape
         bg = self.estimate_background(curr_grid)
+        self.level_epistemic_probes += 1
+        self.total_epistemic_probes += 1
 
         # 1. Uncalibrated actions take absolute priority for motor grounding
         untested = [a for a in available_actions if a not in self.tested_actions]
@@ -921,7 +959,7 @@ class AutonomousEpistemicEngine:
 
         # Click Affordance Exploration (e.g. for action 6 games)
         if 6 in available_actions and not any(a in available_actions for a in [1, 2, 3, 4]):
-            candidates: list[tuple[int, int, float]] = []
+            click_candidates: list[tuple[int, int, float]] = []
             for e in unknown_entities:
                 cr, cc = e.grid_pos
                 if (cr, cc) in self.quiescent_click_targets:
@@ -930,11 +968,11 @@ class AutonomousEpistemicEngine:
                 saliency = 100.0 / math.log2(2 + e.area)
                 usage_pen = float(self.entity_visit_counts.get(e.id, 0)) * 25.0
                 cand_score = saliency - usage_pen
-                candidates.append((cr, cc, cand_score))
+                click_candidates.append((cr, cc, cand_score))
 
-            if candidates:
-                candidates.sort(key=lambda x: x[2], reverse=True)
-                best_r, best_c, _ = candidates[0]
+            if click_candidates:
+                click_candidates.sort(key=lambda x: x[2], reverse=True)
+                best_r, best_c, _ = click_candidates[0]
                 self.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
                     self.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
                 )
@@ -1004,7 +1042,7 @@ class AutonomousEpistemicEngine:
                 return best_act, None
 
             # 3. Filter candidate unprobed entities
-            candidates = [
+            candidate_entities = [
                 e
                 for e in unknown_entities
                 if e.id not in self.probed_entity_ids
@@ -1016,9 +1054,9 @@ class AutonomousEpistemicEngine:
             ]
 
             # If no active target committed, select a new candidate
-            if self.active_probe_target is None and candidates:
+            if self.active_probe_target is None and candidate_entities:
                 scored: list[tuple[SpatialEntity, float]] = []
-                for e in candidates:
+                for e in candidate_entities:
                     dist = abs(e.grid_pos[0] - self.avatar_pos[0]) + abs(
                         e.grid_pos[1] - self.avatar_pos[1]
                     )

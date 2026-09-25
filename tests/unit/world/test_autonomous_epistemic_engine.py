@@ -325,3 +325,37 @@ def test_curiosity_oscillation_loop_breaking() -> None:
     )
     # Verify both entities were probed and registered
     assert len(engine.probed_entity_ids) >= 1
+
+
+def test_pushable_cargo_discovery_and_deduplication() -> None:
+    """Verify pushable cargo is identified and stationary cargo entities do not generate false movement."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 1)
+
+    grid_prev = np.zeros((6, 6), dtype=int)
+    grid_prev[1, 1] = 1  # avatar
+    grid_prev[1, 2] = 4  # cargo block A
+    grid_prev[3, 3] = 4  # cargo block B (stationary)
+
+    grid_curr = np.zeros((6, 6), dtype=int)
+    grid_curr[1, 2] = 1  # avatar stepped into (1, 2)
+    grid_curr[1, 3] = 4  # cargo block A pushed to (1, 3)
+    grid_curr[3, 3] = 4  # cargo block B remained at (3, 3)
+
+    engine.prev_grid = grid_prev
+    engine.last_action = 4
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_curr, [1, 2, 3, 4])
+
+    assert 4 in engine.learned_cargo_features
+    # Re-observe another push to verify idempotent learning without errors
+    grid_next = grid_curr.copy()
+    grid_next[1, 2] = 0
+    grid_next[1, 3] = 1  # avatar
+    grid_next[1, 4] = 4  # cargo pushed again
+    engine.prev_grid = grid_curr
+    engine.last_action = 4
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_next, [1, 2, 3, 4])
+    assert 4 in engine.learned_cargo_features

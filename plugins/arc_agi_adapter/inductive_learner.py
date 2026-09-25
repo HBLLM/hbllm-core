@@ -3981,6 +3981,16 @@ class InductiveARC3BenchmarkRunner:
             total_baseline += baseline
             eff = (baseline / lvl_actions) if completed and lvl_actions > 0 else 0.0
 
+            lvl_epistemic_probes = 0
+            if hasattr(self.agent, "autonomous_engine"):
+                lvl_epistemic_probes = getattr(
+                    self.agent.autonomous_engine, "level_epistemic_probes", 0
+                )
+            elif hasattr(self.agent, "knowledge_base"):
+                lvl_epistemic_probes = getattr(
+                    self.agent.knowledge_base, "total_epistemic_probes", 0
+                )
+
             lvl_res = InductiveLevelResult(
                 level_index=lvl_idx,
                 completed=completed,
@@ -3988,7 +3998,7 @@ class InductiveARC3BenchmarkRunner:
                 baseline_actions=baseline,
                 efficiency_ratio=eff,
                 time_seconds=time.time() - lvl_start,
-                epistemic_probes=0,
+                epistemic_probes=lvl_epistemic_probes,
                 attempts=attempts_made,
             )
             level_results.append(lvl_res)
