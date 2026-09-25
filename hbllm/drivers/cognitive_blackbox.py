@@ -93,6 +93,7 @@ from hbllm.hcir.world.affordance_discovery import (
     AffordanceHypothesis,
     BaseAffordanceDiscoveryEngine,
 )
+from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
     WorldCausalGraph,
@@ -354,6 +355,14 @@ class AgentState:
         consecutive_movement_steps: int = 0,
         learned_skills: dict[str, HCIRSkill] | None = None,
         active_skill_queue: list[DriverAction] | None = None,
+        active_skill_name: str | None = None,
+        active_skill_hypothesis_id: str | None = None,
+        active_skill_step: int = 0,
+        skill_quiescence_count: int = 0,
+        failed_skill_hypotheses: set[str] | None = None,
+        epistemic_probe_count: int = 0,
+        last_level_observed: int = 0,
+        current_level: int = 0,
         failed_trajectories: list[list[int]] | None = None,
         recent_action_history: list[int] | None = None,
         recent_action_data_history: list[dict[str, Any] | None] | None = None,
@@ -421,6 +430,14 @@ class AgentState:
         self.consecutive_movement_steps = consecutive_movement_steps
         self.learned_skills: dict[str, HCIRSkill] = dict(learned_skills or {})
         self.active_skill_queue: list[DriverAction] = list(active_skill_queue or [])
+        self.active_skill_name: str | None = active_skill_name
+        self.active_skill_hypothesis_id: str | None = active_skill_hypothesis_id
+        self.active_skill_step: int = active_skill_step
+        self.skill_quiescence_count: int = skill_quiescence_count
+        self.failed_skill_hypotheses: set[str] = set(failed_skill_hypotheses or [])
+        self.epistemic_probe_count: int = epistemic_probe_count
+        self.last_level_observed: int = last_level_observed
+        self.current_level: int = current_level
         self.failed_trajectories: list[list[int]] = list(failed_trajectories or [])
         self.recent_action_history: list[int] = list(recent_action_history or [])
         self.recent_action_data_history: list[dict[str, Any] | None] = list(
@@ -593,6 +610,10 @@ class AgentState:
                 k: v.to_dict() if hasattr(v, "to_dict") else asdict(v)
                 for k, v in self.learned_skills.items()
             },
+            "failed_skill_hypotheses": list(self.failed_skill_hypotheses),
+            "epistemic_probe_count": self.epistemic_probe_count,
+            "last_level_observed": self.last_level_observed,
+            "current_level": self.current_level,
         }
 
     @classmethod
@@ -678,6 +699,10 @@ class AgentState:
             failed_trajectories=[
                 list(t) for t in data.get("failed_trajectories", []) if isinstance(t, list)
             ],
+            failed_skill_hypotheses=set(data.get("failed_skill_hypotheses", [])),
+            epistemic_probe_count=int(data.get("epistemic_probe_count", 0)),
+            last_level_observed=int(data.get("last_level_observed", 0)),
+            current_level=int(data.get("current_level", 0)),
         )
 
 
@@ -732,11 +757,20 @@ class CognitiveBlackbox:
         # Register default modality lifters
         self.register_lifter(DriverModality.GRID_2D.value, default_grid_2d_lifter)
 
+        # Autonomous epistemic world discovery and mental simulation engines
+        self._epistemic_engines: dict[str, AutonomousEpistemicEngine] = {}
+
     def get_knowledge_graph(self, source_id: str = "default") -> KnowledgeGraph:
         """Get or initialize the core KnowledgeGraph for a specific source/domain."""
         if source_id not in self._knowledge_graphs:
             self._knowledge_graphs[source_id] = KnowledgeGraph()
         return self._knowledge_graphs[source_id]
+
+    def get_epistemic_engine(self, source_id: str = "default") -> AutonomousEpistemicEngine:
+        """Get or initialize the AutonomousEpistemicEngine for active curiosity and mental simulation."""
+        if source_id not in self._epistemic_engines:
+            self._epistemic_engines[source_id] = AutonomousEpistemicEngine()
+        return self._epistemic_engines[source_id]
 
     # ── Driver, Lifter & Resolver Registration ────────────────────────────
 
@@ -987,6 +1021,27 @@ class CognitiveBlackbox:
         state = self.get_state(source_id)
         state.step_count += 1
 
+        # Level advancement detection: reset queue and trigger fresh epistemic perception
+        observed_level = int(
+            driver_input.metadata.get(
+                "level",
+                (perception_data or {}).get("level", getattr(state, "current_level", 0)),
+            )
+        )
+        if observed_level > state.last_level_observed:
+            logger.info(
+                "CognitiveBlackbox[%s]: Advanced from Level %d to Level %d. Resetting skill queue for epistemic re-planning.",
+                source_id,
+                state.last_level_observed,
+                observed_level,
+            )
+            state.last_level_observed = observed_level
+            state.current_level = observed_level
+            state.active_skill_queue.clear()
+            state.active_skill_name = None
+            state.active_skill_hypothesis_id = None
+            state.skill_quiescence_count = 0
+
         if perception_data is not None:
             self._source_perception_data[source_id] = perception_data
         else:
@@ -1039,6 +1094,40 @@ class CognitiveBlackbox:
 
         return None
 
+    def enqueue_skill_plan(
+        self,
+        state: AgentState,
+        plan_actions: list[DriverAction],
+        skill_name: str,
+        hypothesis_id: str | None = None,
+        source_id: str = "default",
+    ) -> DriverAction | None:
+        """Enqueue an empirically verifiable skill plan with hypothesis tracking."""
+        if not plan_actions:
+            return None
+        hyp_id = hypothesis_id or f"{skill_name}_lvl{getattr(state, 'current_level', 0)}"
+        if hyp_id in state.failed_skill_hypotheses:
+            logger.info(
+                "CognitiveBlackbox[%s]: Skill '%s' hypothesis '%s' already falsified; bypassing.",
+                source_id,
+                skill_name,
+                hyp_id,
+            )
+            return None
+        state.active_skill_queue = list(plan_actions)
+        state.active_skill_name = skill_name
+        state.active_skill_hypothesis_id = hyp_id
+        state.active_skill_step = 0
+        state.skill_quiescence_count = 0
+        logger.info(
+            "CognitiveBlackbox[%s]: Enqueued %d actions for skill '%s' (hypothesis '%s')",
+            source_id,
+            len(plan_actions),
+            skill_name,
+            hyp_id,
+        )
+        return state.active_skill_queue.pop(0)
+
     # ── Decision (Output) ─────────────────────────────────────────────────
 
     def decide(
@@ -1060,12 +1149,28 @@ class CognitiveBlackbox:
             next_act = state.active_skill_queue.pop(0)
             if any(a.action_id == next_act.action_id for a in available_actions):
                 logger.info(
-                    "CognitiveBlackbox[%s]: Executing queued sub-skill action %s",
+                    "CognitiveBlackbox[%s]: Executing queued sub-skill action %s (skill=%s, hyp=%s, remaining=%d)",
                     source_id,
                     next_act.action_id,
+                    getattr(state, "active_skill_name", "unknown"),
+                    getattr(state, "active_skill_hypothesis_id", "default"),
+                    len(state.active_skill_queue),
                 )
+                state.active_skill_step += 1
                 return next_act
+            logger.warning(
+                "CognitiveBlackbox[%s]: Queued action %s not in available actions %s. Invalidate skill %s.",
+                source_id,
+                next_act.action_id,
+                [a.action_id for a in available_actions],
+                state.active_skill_name,
+            )
+            if state.active_skill_hypothesis_id:
+                state.failed_skill_hypotheses.add(state.active_skill_hypothesis_id)
             state.active_skill_queue.clear()
+            state.active_skill_name = None
+            state.active_skill_hypothesis_id = None
+            state.skill_quiescence_count = 0
 
         if eg is None:
             # No entity graph available — return first available action
@@ -1573,6 +1678,31 @@ class CognitiveBlackbox:
                         len(prog_plan),
                     )
                     return state.active_skill_queue.pop(0)
+
+        # Forward Mental Simulation & Epistemic World Planning (Domain-Agnostic)
+        if (
+            raw_grid is not None
+            and isinstance(raw_grid, np.ndarray)
+            and not state.active_skill_queue
+            and act_ids
+        ):
+            epistemic_engine = self.get_epistemic_engine(source_id)
+            sim_plan = epistemic_engine.simulate_in_mind(raw_grid, act_ids)
+            if sim_plan:
+                state.active_skill_queue = [
+                    DriverAction(
+                        action_id=s.action,
+                        semantic_intent=SpatialActionIntent.NAVIGATE,
+                        parameters=s.action_data or {},
+                    )
+                    for s in sim_plan
+                ]
+                logger.info(
+                    "CognitiveBlackbox[%s]: Forward mental simulation synthesized %d actions",
+                    source_id,
+                    len(sim_plan),
+                )
+                return state.active_skill_queue.pop(0)
 
         # Check if environment is non-spatial or click-dominant:
         has_movement = any(
@@ -2340,6 +2470,38 @@ class CognitiveBlackbox:
             )
         )
         state.last_action_blocked = is_blocked
+
+        # Closed-loop epistemic verification of active skill queue
+        if state.active_skill_name:
+            grid_changed = bool(info.get("grid_changed", True))
+            is_wait_act = (act_id == 5) or (
+                act_id == 6 and getattr(action, "parameters", {}) == {"x": 0, "y": 0}
+            )
+
+            if is_blocked or (not grid_changed and not is_wait_act):
+                state.skill_quiescence_count += 1
+                if state.skill_quiescence_count >= 2 or is_blocked:
+                    logger.warning(
+                        "CognitiveBlackbox[%s]: Skill '%s' (hyp: %s) falsified by %s (quiescence=%d). Invalidate queue (%d left).",
+                        source_id,
+                        state.active_skill_name,
+                        state.active_skill_hypothesis_id,
+                        "collision" if is_blocked else "quiescence",
+                        state.skill_quiescence_count,
+                        len(state.active_skill_queue),
+                    )
+                    if state.active_skill_hypothesis_id:
+                        state.failed_skill_hypotheses.add(state.active_skill_hypothesis_id)
+                    state.active_skill_queue.clear()
+                    state.active_skill_name = None
+                    state.active_skill_hypothesis_id = None
+                    state.skill_quiescence_count = 0
+
+                    if state.recent_action_history:
+                        state.failed_trajectories.append(list(state.recent_action_history))
+            else:
+                state.skill_quiescence_count = 0
+
         if is_blocked:
             state.consecutive_blocked_moves += 1
             state.current_plan.clear()
@@ -2769,6 +2931,22 @@ class CognitiveBlackbox:
 
         # Empirical Hazard Feature Induction (from failed termination or negative reward)
         if (feedback.terminated and not feedback.success) or feedback.reward < 0:
+            if state.active_skill_name:
+                logger.warning(
+                    "CognitiveBlackbox[%s]: Skill '%s' (hyp: %s) terminated in failure. Adding to failed_skill_hypotheses.",
+                    source_id,
+                    state.active_skill_name,
+                    state.active_skill_hypothesis_id,
+                )
+                if state.active_skill_hypothesis_id:
+                    state.failed_skill_hypotheses.add(state.active_skill_hypothesis_id)
+                elif state.active_skill_name:
+                    state.failed_skill_hypotheses.add(state.active_skill_name)
+                state.active_skill_queue.clear()
+                state.active_skill_name = None
+                state.active_skill_hypothesis_id = None
+                state.skill_quiescence_count = 0
+
             if "hazard_feature" in info:
                 feat = info["hazard_feature"]
                 state.learned_obstacle_features.add(feat)
@@ -2984,6 +3162,15 @@ class CognitiveBlackbox:
             saved_vortex = getattr(state, "vortex_skills", None)
             saved_program = getattr(state, "program_skills", None)
             saved_mirror = getattr(state, "mirror_skills", None)
+            saved_failed_hypotheses = set(getattr(state, "failed_skill_hypotheses", set()))
+            saved_epistemic_probes = getattr(state, "epistemic_probe_count", 0)
+            saved_last_lvl = getattr(state, "last_level_observed", 0)
+            saved_curr_lvl = getattr(state, "current_level", 0)
+            if is_retry and not getattr(state, "last_attempt_won", False):
+                if state.active_skill_hypothesis_id:
+                    saved_failed_hypotheses.add(state.active_skill_hypothesis_id)
+                elif state.active_skill_name:
+                    saved_failed_hypotheses.add(state.active_skill_name)
             if (
                 is_retry
                 and not getattr(state, "last_attempt_won", False)
@@ -3013,6 +3200,10 @@ class CognitiveBlackbox:
                 entity_usage=saved_entity_usage,
                 learned_skills=saved_skills,
                 failed_trajectories=saved_failed_trajectories,
+                failed_skill_hypotheses=saved_failed_hypotheses,
+                epistemic_probe_count=saved_epistemic_probes,
+                last_level_observed=saved_last_lvl,
+                current_level=saved_curr_lvl,
                 learned_target_signatures=saved_target_sigs,
                 learned_obstacle_signatures=saved_obstacle_sigs,
                 learned_cargo_signatures=saved_cargo_sigs,
