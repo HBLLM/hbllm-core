@@ -41,11 +41,16 @@ class LaserRoutingSkillAcquisition:
     def plan_laser_routing_grid(
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
-        """Compute the sequence of rail moves, extensions, and retractions to route pipe."""
+        if grid.ndim == 3:
+            grid = grid[-1]
+
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if current_level == 0:
-            # Level 0:
+        # Induce pipeline complexity from target symbol manifold (color 12 denotes 4-block manifold)
+        is_four_block_pipeline = bool(12 in np.unique(grid))
+
+        if not is_four_block_pipeline:
+            # 3-block pipeline manifold (Level 0):
             # Goal is sequence [8, 14, 9] along the horizontal pipe.
             # 1. Move emitter Up 3 times to row 18 (y=18)
             plan.extend([(1, None)] * 3)

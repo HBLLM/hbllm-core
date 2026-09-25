@@ -73,11 +73,13 @@ class VisualCanvasSkillAcquisition:
 
         self.curr_pos: int = 0
         self.active_color: int = 15
+        self._last_tpl_bytes: bytes | None = None
 
     def reset(self) -> None:
         """Reset episode state."""
         self.curr_pos = 0
         self.active_color = 15
+        self._last_tpl_bytes = None
 
     @classmethod
     def is_canvas_stamping_grid(
@@ -183,49 +185,65 @@ class VisualCanvasSkillAcquisition:
 
         template = grid[3:13, 3:13]
         canvas = grid[34:44, 27:37]
-        diff = (canvas != template) & self.valid_mask
 
+        # Detect level transition
+        tpl_bytes = template.tobytes()
+        if not hasattr(self, "_last_tpl_bytes") or self._last_tpl_bytes != tpl_bytes:
+            self._last_tpl_bytes = tpl_bytes
+            self.curr_pos = 0
+            self.active_color = 15
+
+        diff = (canvas != template) & self.valid_mask
         if not np.any(diff):
             return 5, 0.99, None
 
-        self.curr_pos = self.detect_basket_pos(grid)
+        colors = [int(c) for c in np.unique(template[self.valid_mask])]
 
-        best_pos = None
-        best_col = None
-        best_gain = -9999
-        for pos, m in self.masks.items():
-            sec_diff = m & diff
-            if not np.any(sec_diff):
+        # BFS for shortest sequence of (stencil, color) stamps to match template
+        queue: deque[tuple[list[tuple[int, int]], np.ndarray]] = deque([([], canvas.copy())])
+        visited: set[bytes] = {canvas[self.valid_mask].tobytes()}
+        sol: list[tuple[int, int]] | None = None
+        while queue:
+            seq, c = queue.popleft()
+            if np.array_equal(c[self.valid_mask], template[self.valid_mask]):
+                sol = seq
+                break
+            if len(seq) >= 4:
                 continue
-            for col in np.unique(template[sec_diff]):
-                gain = int(np.sum((canvas != col) & (template == col) & m & self.valid_mask)) - int(
-                    np.sum((canvas == col) & (template != col) & m & self.valid_mask)
-                )
-                if gain > best_gain:
-                    best_gain = gain
-                    best_pos = pos
-                    best_col = int(col)
+            for s_idx in range(8):
+                m = self.masks[s_idx]
+                for col in colors:
+                    nxt = c.copy()
+                    nxt[m] = col
+                    k = nxt[self.valid_mask].tobytes()
+                    if k not in visited:
+                        visited.add(k)
+                        queue.append((seq + [(s_idx, col)], nxt))
 
-        if best_pos is None or best_col is None:
+        if not sol:
             return 5, 0.99, None
 
-        if self.active_color != best_col:
+        target_pos, target_col = sol[0]
+
+        # 1. Switch color if needed
+        if self.active_color != target_col:
             swatches = self.detect_swatches(grid)
             swatch_coord = None
             for sw in swatches:
-                if sw["color"] == best_col:
+                if sw["color"] == target_col:
                     swatch_coord = sw["coord"]
                     break
             if swatch_coord is None:
                 swatch_coord = (
-                    37 if best_col == 0 else (43 if best_col == 15 else 46),
+                    37 if target_col == 0 else (43 if target_col == 15 else 46),
                     4,
                 )
-            self.active_color = best_col
+            self.active_color = target_col
             return 6, 0.95, {"x": swatch_coord[0], "y": swatch_coord[1]}
 
-        if self.curr_pos != best_pos:
-            path = self.plan_ring_path(self.curr_pos, best_pos)
+        # 2. Move along ring if needed
+        if self.curr_pos != target_pos:
+            path = self.plan_ring_path(self.curr_pos, target_pos)
             if path:
                 act = path[0]
                 cr, cc = self.ring_coords[self.curr_pos]
@@ -233,4 +251,5 @@ class VisualCanvasSkillAcquisition:
                 self.curr_pos = self.coord_to_pos.get((cr + dr, cc + dc), self.curr_pos)
                 return act, 0.95, None
 
+        # 3. Stamp canvas
         return 5, 0.99, None

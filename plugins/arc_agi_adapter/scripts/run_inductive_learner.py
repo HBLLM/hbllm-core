@@ -97,7 +97,9 @@ def main() -> None:
     )
     results = []
     start = time.time()
-    game_list = args.games
+    game_list: list[str] = []
+    for g in args.games:
+        game_list.extend([x.strip() for x in g.split(",") if x.strip()])
     if game_list == ["all"] or "all" in game_list:
         envs = (
             arcade_client.get_environments() if hasattr(arcade_client, "get_environments") else []
@@ -106,13 +108,10 @@ def main() -> None:
 
     for idx, gid in enumerate(game_list, 1):
         try:
-            max_lvl = (
-                1 if (gid in ["su15", "lf52", "ka59"] and args.max_levels == 2) else args.max_levels
-            )
             res = runner.run_environment(
                 arcade_client,
                 gid,
-                max_levels=max_lvl,
+                max_levels=args.max_levels,
                 max_retries_per_level=args.max_retries,
             )
             results.append(res)

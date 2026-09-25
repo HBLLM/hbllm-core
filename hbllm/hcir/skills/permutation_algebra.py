@@ -12,6 +12,8 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import GF2LinearSolver, RemoteActuator
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,70 +41,6 @@ class ToggleIncidenceModel:
             if 0 <= nr < H and 0 <= nc < W:
                 res.append((nr, nc))
         return res
-
-
-class GF2LinearSolver:
-    """Solves systems of linear congruences A * x = b (mod 2) using Gaussian elimination."""
-
-    @classmethod
-    def solve(cls, A: np.ndarray, b: np.ndarray) -> np.ndarray | None:
-        """Solve A * x = b (mod 2).
-
-        Args:
-            A: Binary matrix of shape (M, N) with values in {0, 1}.
-            b: Binary vector of length M with values in {0, 1}.
-
-        Returns:
-            Binary solution vector x of length N, or None if system is inconsistent.
-        """
-        M, N = A.shape
-        if M > 256 or N > 256:
-            return None
-
-        # Augmented matrix [A | b]
-        aug = np.zeros((M, N + 1), dtype=np.uint8)
-        aug[:, :N] = (A % 2).astype(np.uint8)
-        aug[:, N] = (b % 2).astype(np.uint8)
-
-        # 1. Forward Elimination over GF(2)
-        row = 0
-        pivot_cols: list[int] = []
-
-        for col in range(N):
-            if row >= M:
-                break
-
-            # Find pivot in this column using vectorized argmax
-            col_vals = aug[row:M, col]
-            rel_piv = int(np.argmax(col_vals))
-            if col_vals[rel_piv] == 0:
-                continue
-
-            pivot_row = row + rel_piv
-
-            # Swap pivot row into place
-            if pivot_row != row:
-                aug[[row, pivot_row]] = aug[[pivot_row, row]]
-
-            # Vectorized Jordan elimination over GF(2)
-            mask = aug[:, col] == 1
-            mask[row] = False
-            aug[mask] ^= aug[row]
-
-            pivot_cols.append(col)
-            row += 1
-
-        # 2. Check consistency: if any row is [0, 0, ..., 0 | 1], no solution
-        for r in range(row, M):
-            if aug[r, N] == 1:
-                return None
-
-        # 3. Back-substitution / Read solution
-        x = np.zeros(N, dtype=np.uint8)
-        for r, col in enumerate(pivot_cols):
-            x[col] = aug[r, N]
-
-        return x
 
 
 class PermutationAlgebraSkillAcquisition:
@@ -233,20 +171,74 @@ class PermutationAlgebraSkillAcquisition:
         cls, grid: Any, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Compute algebraic solution clicks to resolve cellular toggle grid."""
-        if current_level == 0:
-            return [
-                (6, {"x": 38, "y": 38}),
-                (6, {"x": 38, "y": 46}),
-                (6, {"x": 54, "y": 46}),
-                (6, {"x": 38, "y": 54}),
-            ]
-        else:
-            return [
-                (6, {"x": 22, "y": 16}),
-                (6, {"x": 22, "y": 24}),
-                (6, {"x": 38, "y": 24}),
-                (6, {"x": 22, "y": 32}),
-                (6, {"x": 38, "y": 32}),
-                (6, {"x": 30, "y": 48}),
-                (6, {"x": 22, "y": 48}),
-            ]
+        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+            return []
+
+        # 1. Detect candidate component pixels of toggle tiles
+        pts = np.argwhere(np.isin(grid, [8, 9, 12, 0, 2]))
+        pts = [p for p in pts if p[0] < 60]
+        visited: set[tuple[int, int]] = set()
+        raw_tiles: list[tuple[int, int, bool]] = []
+        for r, c in pts:
+            if (r, c) not in visited:
+                comp: list[tuple[int, int]] = []
+                q = [(r, c)]
+                visited.add((r, c))
+                while q:
+                    cr, cc = q.pop()
+                    comp.append((cr, cc))
+                    for nr, nc in [(cr + 1, cc), (cr - 1, cc), (cr, cc + 1), (cr, cc - 1)]:
+                        if 0 <= nr < 60 and 0 <= nc < 64 and (nr, nc) not in visited:
+                            if grid[nr, nc] in [8, 9, 12, 0, 2]:
+                                visited.add((nr, nc))
+                                q.append((nr, nc))
+                if 20 <= len(comp) <= 45:
+                    cr = int(round(float(np.mean([p[0] for p in comp]))))
+                    cc = int(round(float(np.mean([p[1] for p in comp]))))
+                    # Ensure tile is on interactive active board (color 4 background present)
+                    is_on_board = any(
+                        grid[
+                            max(0, cr - 4) : min(64, cr + 5), max(0, cc - 4) : min(64, cc + 5)
+                        ].flatten()
+                        == 4
+                    )
+                    if is_on_board and cc < 60:
+                        patch = grid[cr - 1 : cr + 2, cc - 1 : cc + 2]
+                        is_on = bool(np.sum(patch == 9) >= 4)
+                        raw_tiles.append((cc, cr, is_on))
+
+        def is_orthogonal_8(t1: tuple[int, int, bool], t2: tuple[int, int, bool]) -> bool:
+            dx = abs(t1[0] - t2[0])
+            dy = abs(t1[1] - t2[1])
+            return (dx == 8 and dy == 0) or (dx == 0 and dy == 8)
+
+        # 2. Filter to regular orthogonal lattice tiles
+        tiles: list[tuple[int, int, bool]] = []
+        for t1 in raw_tiles:
+            nbrs = sum(1 for t2 in raw_tiles if is_orthogonal_8(t1, t2))
+            if nbrs >= 1:
+                tiles.append(t1)
+
+        tiles.sort(key=lambda t: (t[1], t[0]))
+        N = len(tiles)
+        if N == 0:
+            return []
+
+        # 3. Construct GF(2) linear incidence system A * x = b (mod 2)
+        A = np.zeros((N, N), dtype=int)
+        b = np.zeros(N, dtype=int)
+        for i in range(N):
+            b[i] = 1 if tiles[i][2] else 0
+            for j in range(N):
+                if i == j or is_orthogonal_8(tiles[i], tiles[j]):
+                    A[i, j] = 1
+
+        sol = GF2LinearSolver.solve(A, b)
+        if sol is None:
+            return []
+
+        plan: list[tuple[int, dict[str, int] | None]] = []
+        for idx in np.where(sol == 1)[0]:
+            plan.append(RemoteActuator.click(tiles[idx][0], tiles[idx][1]))
+
+        return plan

@@ -695,6 +695,25 @@ class PhysicsPredictor:
             track_identifier if track_identifier is not None else kwargs.get("track_color", 2)
         )
         H, W = grid.shape
+
+        # Detect directional hazards / sentinels along the lattice
+        forbidden_transitions: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+        hazard_colors = kwargs.get("hazard_colors", (8, 15))
+        pts_hz = np.argwhere(np.isin(grid, hazard_colors))
+        if len(pts_hz) > 0:
+            hz_r, hz_c = int(np.min(pts_hz[:, 0])), int(np.min(pts_hz[:, 1]))
+            hz_patch = grid[hz_r : hz_r + patch_size, hz_c : hz_c + patch_size]
+            pts_ind = np.argwhere(hz_patch == 15)
+            if len(pts_ind) > 0:
+                eye_r, eye_c = int(pts_ind[0][0]), int(pts_ind[0][1])
+                dir_r = int(np.sign(eye_r - 1))
+                dir_c = int(np.sign(eye_c - 1))
+                if dir_r != 0 or dir_c != 0:
+                    v_node = (hz_r + dir_r * stride, hz_c + dir_c * stride)
+                    v_pre = (hz_r + dir_r * 2 * stride, hz_c + dir_c * 2 * stride)
+                    forbidden_transitions.add((v_pre, v_node))
+                    forbidden_transitions.add((v_node, (hz_r, hz_c)))
+
         queue = deque([(start_pos[0], start_pos[1], [])])
         visited = {(start_pos[0], start_pos[1])}
         moves = [
@@ -709,6 +728,8 @@ class PhysicsPredictor:
                 return path
             for dr, dc, br_dr, br_dc, act in moves:
                 nr, nc = cr + dr, cc + dc
+                if ((cr, cc), (nr, nc)) in forbidden_transitions:
+                    continue
                 br_r, br_c = cr + br_dr, cc + br_dc
                 if 0 <= br_r < H and 0 <= br_c < W:
                     patch = grid[br_r : br_r + patch_size, br_c : br_c + patch_size]

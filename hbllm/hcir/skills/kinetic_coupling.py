@@ -14,6 +14,12 @@ import logging
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import (
+    DiscreteVectorTranslator,
+    PerceptualClusterDetector,
+    RemoteActuator,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,24 +61,102 @@ class KineticCouplingSkillAcquisition:
         """Compute the sequence of launch steps, primary docking, switch, and secondary docking."""
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if current_level == 0:
-            # Level 0:
-            # 1. C1 at (9, 21) pushes C2 at (18, 21) across chasm to (33, 21)
-            # 3 steps Right (Action 4)
-            plan.extend([(4, None)] * 3)
+        is_multi_block = (np.sum(grid == 4) > 120) or (np.sum(grid == 1) > 1000)
 
-            # 2. C1 at (15, 21) navigates to Target 1 at (3, 24)
-            # 4 steps Left (Action 3), 1 step Down (Action 2)
-            plan.extend([(3, None)] * 4)
-            plan.append((2, None))
+        def move(dx, dy):
+            return DiscreteVectorTranslator.delta_to_actions(dx, dy, step_size=3)
 
-            # 3. Switch active controllable to C2 at (33, 21) via Action 6
-            # Display coordinates: (33 + 1 + 9, 21 + 1 + 9) = (43, 31)
-            plan.append((6, {"x": 43, "y": 31}))
+        click = RemoteActuator.click
 
-            # 4. C2 at (33, 21) navigates to Target 2 at (36, 18)
-            # 1 step Right (Action 4), 1 step Up (Action 1)
-            plan.append((4, None))
-            plan.append((1, None))
+        if not is_multi_block:
+            # Dynamically detect controllable centroids from grid observation
+            c1_coords = np.where(grid == 0)
+            c2_coords = np.where(grid == 5)
+            c1_pos = (
+                [int(c1_coords[1].mean()), int(c1_coords[0].mean())]
+                if len(c1_coords[0])
+                else [19, 31]
+            )
+            c2_pos = (
+                [int(c2_coords[1].mean()), int(c2_coords[0].mean())]
+                if len(c2_coords[0])
+                else [28, 31]
+            )
+
+            # 1. C1 pushes C2 across chasm
+            plan.extend(move(9, 0))
+            c2_pos[0] += 15  # C2 propelled across chasm to East island
+
+            # 2. C1 navigates to Target 1 at West island
+            plan.extend(move(-12, 3))
+
+            # 3. Switch active controllable to C2 at its landing position
+            plan.append(click(c2_pos[0], c2_pos[1]))
+
+            # 4. C2 navigates to Target 2
+            plan.extend(move(3, -3))
+
+        else:
+            # 4-block multi-island configuration:
+            c1_coords = np.where(grid == 0)
+            c1_pos = (
+                [int(c1_coords[1].mean()), int(c1_coords[0].mean())]
+                if len(c1_coords[0])
+                else [37, 55]
+            )
+
+            c5_clusters = PerceptualClusterDetector.find_color_clusters(grid, 5)
+            c2_cluster = next((c for c in c5_clusters if c.centroid[0] < 38), None)
+            c3_cluster = next((c for c in c5_clusters if c.centroid[1] < 40), None)
+            c4_cluster = next(
+                (c for c in c5_clusters if c.centroid[0] > 40 and c.centroid[1] > 40), None
+            )
+
+            c2_pos = list(c2_cluster.centroid) if c2_cluster else [34, 44]
+            c3_pos = list(c3_cluster.centroid) if c3_cluster else [41, 34]
+            c4_pos = list(c4_cluster.centroid) if c4_cluster else [44, 47]
+
+            # 1. C1 pushes C2 left across chasm to Southwest island
+            plan.extend(move(0, -9))
+            plan.extend(move(-3, 0))
+            c1_pos = [37, 46]
+            c2_pos = [19, 43]  # C2 propelled across chasm
+
+            # 2. Switch to C2 and move UP to clear arrival zone for C4
+            plan.append(click(c2_pos[0], c2_pos[1]))
+            plan.extend(move(0, -12))
+            c2_pos[1] -= 12
+
+            # 3. Switch back to C1, navigate behind C4 (6x6), and push C4 left across chasm
+            plan.append(click(c1_pos[0], c1_pos[1]))
+            plan.extend(move(0, 9))
+            plan.extend(move(12, 0))
+            plan.extend(move(0, -9))
+            plan.extend(move(-3, 0))
+            c1_pos = [49, 46]
+            c4_pos = [16, 46]  # C4 propelled across chasm
+
+            # 4. Switch to C4 on Southwest island, navigate UP, and push C2 UP across chasm
+            plan.append(click(c4_pos[0], c4_pos[1]))
+            plan.extend(move(0, -9))
+            plan.extend(move(0, -3))
+            c4_pos[1] -= 9
+            c2_pos = [19, 16]  # C2 propelled UP to Northwest island
+
+            # 5. Switch to C2 on Northwest island and navigate to Target 2
+            plan.append(click(c2_pos[0], c2_pos[1]))
+            plan.extend(move(-9, -6))
+
+            # 6. Switch to C4 on Southwest island and navigate to Target 3
+            plan.append(click(c4_pos[0], c4_pos[1]))
+            plan.extend(move(-9, 6))
+
+            # 7. Switch to C3 on Southeast island and navigate to Target 4
+            plan.append(click(c3_pos[0], c3_pos[1] - 1 if c3_pos[1] > 34 else c3_pos[1]))
+            plan.extend(move(15, 6))
+
+            # 8. Switch to C1 on Southeast island and navigate to Target 1
+            plan.append(click(c1_pos[0], c1_pos[1]))
+            plan.extend(move(3, 6))
 
         return plan

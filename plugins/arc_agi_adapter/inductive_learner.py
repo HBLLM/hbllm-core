@@ -2457,6 +2457,98 @@ class PegSolitaireSolver:
             pegs, holes, step_delta=1, target_peg_count=1
         )
         if not jumps:
+            # Check for mobile carriage / conveyor rail (multi-board solitaire)
+            carr_ents = [e for e in ents if e.color in (11, 12)]
+            if carr_ents:
+                carr_gx = int(round((carr_ents[0].centroid[1] - offset_x) / scale))
+                carr_gy = int(round((carr_ents[0].centroid[0] - offset_y) / scale))
+                carr0 = (carr_gx, carr_gy)
+
+                # Extract track points from grid
+                track = set()
+                for gy in range(-10, 15):
+                    for gx in range(-10, 15):
+                        r = int(round(offset_y + gy * scale))
+                        c = int(round(offset_x + gx * scale))
+                        if 0 <= r < 64 and 0 <= c < 64:
+                            if grid[r, c] in {5, 9, 11, 12}:
+                                track.add((gx, gy))
+                track.add(carr0)
+
+                # Run Joint Rail-Carriage BFS
+                from collections import deque
+
+                q = deque([((frozenset(pegs), carr0, False), [])])
+                vis = {(frozenset(pegs), carr0, False)}
+                sol = None
+
+                while q:
+                    (curr_p, c_pos, in_carr), pth = q.popleft()
+                    if len(curr_p) + (1 if in_carr else 0) <= 1:
+                        sol = pth
+                        break
+
+                    # 1. Move carriage
+                    for act_id, ddx, ddy in [(1, 0, -1), (2, 0, 1), (3, -1, 0), (4, 1, 0)]:
+                        nc = (c_pos[0] + ddx, c_pos[1] + ddy)
+                        if nc in track:
+                            st = (curr_p, nc, in_carr)
+                            if st not in vis:
+                                vis.add(st)
+                                q.append((st, pth + [("MOVE", act_id, None)]))
+
+                    # 2. Board jumps
+                    for p in curr_p:
+                        for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                            mid = (p[0] + ddx, p[1] + ddy)
+                            dest = (p[0] + 2 * ddx, p[1] + 2 * ddy)
+                            if mid in curr_p and dest not in curr_p:
+                                if dest in holes and dest != c_pos:
+                                    nxt_p = (curr_p - {p, mid}) | {dest}
+                                    st = (nxt_p, c_pos, in_carr)
+                                    if st not in vis:
+                                        vis.add(st)
+                                        q.append((st, pth + [("JUMP", p, dest)]))
+                                elif dest == c_pos and not in_carr:
+                                    nxt_p = curr_p - {p, mid}
+                                    st = (nxt_p, c_pos, True)
+                                    if st not in vis:
+                                        vis.add(st)
+                                        q.append((st, pth + [("JUMP", p, dest)]))
+
+                    # 3. Jump out of carriage
+                    if in_carr:
+                        for ddx, ddy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+                            mid = (c_pos[0] + ddx, c_pos[1] + ddy)
+                            dest = (c_pos[0] + 2 * ddx, c_pos[1] + 2 * ddy)
+                            if (
+                                mid in curr_p
+                                and dest not in curr_p
+                                and dest in holes
+                                and dest != c_pos
+                            ):
+                                nxt_p = (curr_p - {mid}) | {dest}
+                                st = (nxt_p, c_pos, False)
+                                if st not in vis:
+                                    vis.add(st)
+                                    q.append((st, pth + [("JUMP", c_pos, dest)]))
+
+                if sol:
+                    joint_queue: list[tuple[int, dict[str, int] | None]] = []
+                    for kind, arg1, arg2 in sol:
+                        if kind == "MOVE":
+                            joint_queue.append((arg1, None))
+                        elif kind == "JUMP":
+                            p1_x = int(round(offset_x + arg1[0] * scale))
+                            p1_y = int(round(offset_y + arg1[1] * scale))
+                            p2_x = int(round(offset_x + arg2[0] * scale))
+                            p2_y = int(round(offset_y + arg2[1] * scale))
+                            joint_queue.append((6, {"x": p1_x, "y": p1_y}))
+                            joint_queue.append((6, {"x": p2_x, "y": p2_y}))
+                    self.action_queue = joint_queue
+                    act, data = self.action_queue.pop(0)
+                    return act, 0.99, data
+
             return 1, 0.50, None
 
         queue: list[tuple[int, dict[str, int] | None]] = []

@@ -14,6 +14,18 @@ from __future__ import annotations
 from hbllm.hcir.skills.automaton_synthesis import (
     AutomatonProgramSynthesisSkillAcquisition,
 )
+from hbllm.hcir.skills.common_subskills import (
+    BlockPushPlanner,
+    ColorCluster,
+    DiscreteVectorTranslator,
+    GF2LinearSolver,
+    LatticeNavigator,
+    LatticeQuantizer,
+    PerceptualClusterDetector,
+    Raycaster2D,
+    RemoteActuator,
+    TemporalSyncPlanner,
+)
 from hbllm.hcir.skills.coupled_controllables import (
     CoupledControllableModel,
     CoupledControllableSkillAcquisition,
@@ -26,6 +38,9 @@ from hbllm.hcir.skills.hierarchical_pattern_grammar import (
 )
 from hbllm.hcir.skills.inverted_buoyancy import (
     InvertedBuoyancySkillAcquisition,
+)
+from hbllm.hcir.skills.kinematic_arm_linkage import (
+    KinematicLinkageSolver,
 )
 from hbllm.hcir.skills.kinematics import (
     KinematicModel,
@@ -48,6 +63,9 @@ from hbllm.hcir.skills.morphological_mutation import (
 from hbllm.hcir.skills.morphology_synthesis import (
     MorphologicalProgramSynthesis,
     MorphologicalTransformation,
+)
+from hbllm.hcir.skills.optical_mirror_reflection import (
+    OpticalMirrorReflectionSkillAcquisition,
 )
 from hbllm.hcir.skills.permutation_algebra import (
     GF2LinearSolver,
@@ -88,8 +106,11 @@ from hbllm.hcir.skills.vortex_attractor import (
 __all__ = [
     "AutomatonProgramSynthesisSkillAcquisition",
     "AutonomousTrajectoryModel",
+    "BlockPushPlanner",
+    "ColorCluster",
     "CoupledControllableModel",
     "CoupledControllableSkillAcquisition",
+    "DiscreteVectorTranslator",
     "EntityTrajectory",
     "GF2LinearSolver",
     "GrammarTranslationSkillAcquisition",
@@ -101,17 +122,24 @@ __all__ = [
     "KinematicMomentumSkillAcquisition",
     "KineticCouplingSkillAcquisition",
     "LaserRoutingSkillAcquisition",
+    "LatticeNavigator",
+    "LatticeQuantizer",
     "ModalIncantationSkillAcquisition",
     "MorphologicalProgramSynthesis",
     "MorphologicalStateMutationSkillAcquisition",
     "MorphologicalTransformation",
+    "OpticalMirrorReflectionSkillAcquisition",
+    "PerceptualClusterDetector",
     "PermutationAlgebraSkillAcquisition",
+    "Raycaster2D",
     "RelationalAffordanceRule",
     "RelationalAffordanceSkillAcquisition",
+    "RemoteActuator",
     "ReticleSuperpositionSkillAcquisition",
     "RigidAssemblySkillAcquisition",
     "SpatiotemporalSkillAcquisition",
     "TemporalEchoSkillAcquisition",
+    "TemporalSyncPlanner",
     "ToggleIncidenceModel",
     "TopologyTransformationSkillAcquisition",
     "VisualCanvasSkillAcquisition",

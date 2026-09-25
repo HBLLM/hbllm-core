@@ -281,6 +281,9 @@ class ARC3SpatialCognitiveAgent:
         from hbllm.hcir.skills.automaton_synthesis import (
             AutomatonProgramSynthesisSkillAcquisition,
         )
+        from hbllm.hcir.skills.optical_mirror_reflection import (
+            OpticalMirrorReflectionSkillAcquisition,
+        )
         from hbllm.hcir.skills.visual_program import (
             VisualProgramSynthesisSkillAcquisition,
         )
@@ -293,6 +296,10 @@ class ARC3SpatialCognitiveAgent:
         ):
             return True
         if VortexAttractorSkillAcquisition.is_vortex_attractor_grid(grid, available_actions):
+            return True
+        if OpticalMirrorReflectionSkillAcquisition.is_optical_mirror_reflection_grid(
+            grid, available_actions
+        ):
             return True
         if VisualProgramSynthesisSkillAcquisition.is_visual_program_grid(grid, available_actions):
             return True

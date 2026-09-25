@@ -41,9 +41,11 @@ class ReticleSuperpositionSkillAcquisition:
         if color_map.get(5, 0) < 3000:
             return False
 
-        # Must have center dot 0 and crosshair colors 9 and 11
+        # Must have center dot 0 and crosshair colors (subset of {9, 11, 12, 13})
         has_dot_0 = 0 in color_map and color_map[0] <= 4
-        has_crosshairs = 9 in color_map and 11 in color_map
+        crosshair_colors = {9, 11, 12, 13}
+        present_crosshairs = set(color_map.keys()).intersection(crosshair_colors)
+        has_crosshairs = len(present_crosshairs) >= 2
 
         return has_dot_0 and has_crosshairs
 
@@ -51,17 +53,81 @@ class ReticleSuperpositionSkillAcquisition:
     def plan_reticle_superposition_grid(
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
-        """Compute the sequence of translations and entity switches to align reticles."""
-        plan: list[tuple[int, dict[str, int] | None]] = []
+        """Compute closed-loop translations and entity switches to align active reticle."""
+        if grid.ndim == 3:
+            grid = grid[-1]
 
-        if current_level == 0:
-            # Level 0: Active reticle s2 moves dx=+4 (4 x Action 4), dy=-7 (7 x Action 1)
-            # Then Action 5 to switch to reticle s1
-            # Then reticle s1 moves dx=-2 (2 x Action 3), dy=-6 (6 x Action 1)
-            plan.extend([(4, None)] * 4)
-            plan.extend([(1, None)] * 7)
-            plan.append((5, None))
-            plan.extend([(3, None)] * 2)
-            plan.extend([(1, None)] * 6)
+        dot0_pts = np.argwhere(grid == 0)
+        if len(dot0_pts) == 0:
+            return []
+        dot0 = tuple(dot0_pts[0])
 
-        return plan
+        crosshair_colors = [c for c in [9, 11, 12, 13] if c in grid]
+        active_color: int | None = None
+        reticle_info: dict[int, tuple[int, int]] = {}
+
+        for c in crosshair_colors:
+            pts = np.argwhere(grid == c)
+            isolated: list[tuple[int, int]] = []
+            crosshair: list[tuple[int, int]] = []
+            for r, col in pts:
+                dists = np.max(np.abs(pts - np.array([r, col])), axis=1)
+                neighbors = np.sum((dists > 0) & (dists <= 2))
+                if neighbors == 0:
+                    isolated.append((int(r), int(col)))
+                else:
+                    crosshair.append((int(r), int(col)))
+
+            if not crosshair:
+                continue
+
+            min_r = min(r for r, _ in crosshair)
+            max_r = max(r for r, _ in crosshair)
+            min_c = min(col for _, col in crosshair)
+            max_c = max(col for _, col in crosshair)
+
+            if min_r <= dot0[0] <= max_r and min_c <= dot0[1] <= max_c:
+                active_color = int(c)
+
+            c_set = set(crosshair)
+            best_dr: int | None = None
+            best_dc: int | None = None
+            for dr in range(-60, 61, 3):
+                for dc in range(-60, 61, 3):
+                    shifted = {(r + dr, col + dc) for r, col in c_set}
+                    if all((tr, tc) in shifted for tr, tc in isolated):
+                        best_dr, best_dc = dr, dc
+                        break
+                if best_dr is not None:
+                    break
+
+            if best_dr is not None and best_dc is not None:
+                reticle_info[int(c)] = (best_dr, best_dc)
+
+        all_aligned = all(dr == 0 and dc == 0 for dr, dc in reticle_info.values())
+        if all_aligned:
+            return []
+
+        if active_color is None or active_color not in reticle_info:
+            return [(5, None)]
+
+        act_dr, act_dc = reticle_info[active_color]
+        if act_dr == 0 and act_dc == 0:
+            return [(5, None)]
+
+        subplan: list[tuple[int, dict[str, int] | None]] = []
+        step_r = act_dr // 3
+        step_c = act_dc // 3
+
+        if step_c > 0:
+            subplan.extend([(4, None)] * step_c)
+        elif step_c < 0:
+            subplan.extend([(3, None)] * (-step_c))
+
+        if step_r > 0:
+            subplan.extend([(2, None)] * step_r)
+        elif step_r < 0:
+            subplan.extend([(1, None)] * (-step_r))
+
+        subplan.append((5, None))
+        return subplan

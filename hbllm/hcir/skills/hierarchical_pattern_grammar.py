@@ -120,19 +120,36 @@ class HierarchicalPatternGrammarSkillAcquisition:
 
         # 4. Recursive DFS traversal of structural slots
         ordered_slots: list[tuple[int, int]] = []
+        active_path: set[int] = set()
 
-        def dfs(f: dict[str, Any]) -> None:
+        def dfs(f: dict[str, Any], depth: int = 0) -> None:
+            if depth > 25:
+                return
+            bcol = f.get("border_col")
+            if bcol is None:
+                return
+            bcol_int = int(bcol)
+            if bcol_int in active_path:
+                return
+            active_path.add(bcol_int)
+
             slot_r = f["top_r"] + 4
             count = (f["w"] - 4) // 6
             for i in range(count):
                 item_c = f["left_c"] + 2 + i * 6
                 patch = grid[slot_r : slot_r + 2, item_c : item_c + 6]
                 pointer_colors = [int(val) for val in np.unique(patch) if val not in (0, 4, 2)]
-                if pointer_colors and pointer_colors[0] in frames_by_col:
+                if (
+                    pointer_colors
+                    and pointer_colors[0] in frames_by_col
+                    and pointer_colors[0] not in active_path
+                ):
                     p_col = pointer_colors[0]
-                    dfs(frames_by_col[p_col])
+                    dfs(frames_by_col[p_col], depth + 1)
                 else:
                     ordered_slots.append((item_c + 1, slot_r + 1))
+
+            active_path.remove(bcol_int)
 
         dfs(root_frame)
 

@@ -877,38 +877,96 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
     autonomous puzzle solving across all ARC-AGI-3 archetypes.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    MAX_ACTIONS: int = 1000
+
+    def __init__(self, *args: Any, disable_archetypes: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
 
-        self.internal_agent: InductiveHCIRAgent = InductiveHCIRAgent()
+        self.disable_archetypes = disable_archetypes
+        self.internal_agent: InductiveHCIRAgent = InductiveHCIRAgent(
+            disable_archetypes=disable_archetypes
+        )
         self.step_count: int = 0
         self.last_grid: np.ndarray | None = None
+        self.current_game_id: str | None = None
+        self.current_levels_completed: int = 0
 
-    def reset_episode(self) -> None:
+    def is_done(self, frames: Any, latest_frame: Any) -> bool:
+        """Stop once all levels are won."""
+        win_levels = getattr(latest_frame, "win_levels", 1) or 1
+        state_str = getattr(
+            getattr(latest_frame, "state", None), "name", str(getattr(latest_frame, "state", ""))
+        )
+        levels_completed = getattr(latest_frame, "levels_completed", 0)
+        return state_str == "WIN" or levels_completed >= win_levels
+
+    def reset_episode(self, retain_dynamics: bool = False) -> None:
         """Reset internal state between episodes."""
-        self.internal_agent.reset_episode(retain_dynamics=False)
+        self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
         self.step_count = 0
         self.last_grid = None
 
     def _extract_grid(self, latest_frame: Any, frames: Any = None) -> np.ndarray:
         if isinstance(latest_frame, np.ndarray):
-            return latest_frame
-        if hasattr(latest_frame, "frame") and isinstance(latest_frame.frame, np.ndarray):
-            return latest_frame.frame
-        if hasattr(latest_frame, "grid") and isinstance(latest_frame.grid, np.ndarray):
-            return latest_frame.grid
-        if hasattr(latest_frame, "image") and isinstance(latest_frame.image, np.ndarray):
-            return latest_frame.image
+            return latest_frame[-1] if latest_frame.ndim == 3 else latest_frame
+        if hasattr(latest_frame, "frame"):
+            f = latest_frame.frame
+            if isinstance(f, np.ndarray):
+                return f[-1] if f.ndim == 3 else f
+            if isinstance(f, (list, tuple)) and len(f) > 0:
+                if isinstance(f[-1], np.ndarray):
+                    return f[-1]
+                try:
+                    return np.asarray(f[-1], dtype=int)
+                except Exception:
+                    pass
+        if hasattr(latest_frame, "grid"):
+            g = latest_frame.grid
+            if isinstance(g, np.ndarray):
+                return g
+            if isinstance(g, (list, tuple)) and len(g) > 0:
+                if isinstance(g[-1], np.ndarray):
+                    return g[-1]
+                try:
+                    return np.asarray(g[-1], dtype=int)
+                except Exception:
+                    pass
+        if hasattr(latest_frame, "image"):
+            im = latest_frame.image
+            if isinstance(im, np.ndarray):
+                return im
         if isinstance(latest_frame, (list, tuple)) and len(latest_frame) > 0:
+            if isinstance(latest_frame[-1], np.ndarray):
+                return latest_frame[-1]
             if isinstance(latest_frame[0], np.ndarray):
                 return latest_frame[0]
+            if hasattr(latest_frame[-1], "frame"):
+                f = latest_frame[-1].frame
+                if isinstance(f, np.ndarray):
+                    return f
+                if isinstance(f, (list, tuple)) and len(f) > 0:
+                    if isinstance(f[-1], np.ndarray):
+                        return f[-1]
+                    try:
+                        return np.asarray(f[-1], dtype=int)
+                    except Exception:
+                        pass
         if frames is not None and isinstance(frames, (list, tuple)) and len(frames) > 0:
             last = frames[-1]
             if isinstance(last, np.ndarray):
                 return last
-            if hasattr(last, "frame") and isinstance(last.frame, np.ndarray):
-                return last.frame
+            if hasattr(last, "frame"):
+                f = last.frame
+                if isinstance(f, np.ndarray):
+                    return f
+                if isinstance(f, (list, tuple)) and len(f) > 0:
+                    if isinstance(f[-1], np.ndarray):
+                        return f[-1]
+                    try:
+                        return np.asarray(f[-1], dtype=int)
+                    except Exception:
+                        pass
         return np.zeros((64, 64), dtype=int)
 
     def _extract_available_actions(self, latest_frame: Any) -> list[int]:
@@ -937,10 +995,24 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
     def choose_action(self, frames: Any, latest_frame: Any) -> Any:
         """The core Kaggle agent interface: chooses next GameAction from current visual observation."""
+        state_str = self._extract_state(latest_frame)
+
+        # Framework contract: First call or after death -> reset the level
+        if state_str in ("NOT_PLAYED", "GAME_OVER", "GameState.NOT_PLAYED", "GameState.GAME_OVER"):
+            self.internal_agent.reset_episode()
+            self.last_grid = None
+            return getattr(GameAction, "RESET", GameAction.ACTION1)
+
         grid = self._extract_grid(latest_frame, frames)
         available_actions = self._extract_available_actions(latest_frame)
 
         # Detect level transition: sudden large grid difference or episode reset
+        lvl_completed = getattr(latest_frame, "levels_completed", 0)
+        if lvl_completed > self.current_levels_completed:
+            self.current_levels_completed = lvl_completed
+            self.internal_agent.reset_episode(retain_dynamics=True)
+            self.last_grid = None
+
         if self.last_grid is not None and self.last_grid.shape == grid.shape:
             diff_ratio = float(np.mean(self.last_grid != grid))
             if diff_ratio > 0.50:
@@ -951,18 +1023,91 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self.step_count += 1
 
         # Make the real WIN/GAME_OVER signal reachable from the feedback loop
-        self.internal_agent.last_frame_state = self._extract_state(latest_frame)
+        self.internal_agent.last_frame_state = state_str
+        if hasattr(self.internal_agent, "current_level"):
+            self.internal_agent.current_level = lvl_completed
 
-        action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
-        action_data = getattr(self.internal_agent, "last_action_data", None)
+        # Automatically hydrate game-specific knowledge if available
+        game_id = getattr(self, "game_id", None) or getattr(latest_frame, "game_id", None)
+        if game_id and isinstance(game_id, str):
+            base_gid = game_id.split("-")[0].strip()
+            if getattr(self, "current_game_id", None) != base_gid:
+                self.current_game_id = base_gid
+                from pathlib import Path
+
+                for root_candidate in [
+                    Path.cwd(),
+                    Path(__file__).resolve().parent.parent,
+                    Path("/Users/Dumith_Salinda/Projects/HBLLM/core"),
+                    Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
+                ]:
+                    kdir = root_candidate / "data" / "cognitive_memory" / "arc_agi_3"
+                    if (kdir / f"{base_gid}_knowledge_graph.json").exists():
+                        self.internal_agent.load_knowledge(kdir, game_id=base_gid)
+                        break
+
+        try:
+            action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
+            action_data = getattr(self.internal_agent, "last_action_data", None)
+        except Exception:
+            # Fully resilient fallback: never crash the competition evaluation loop!
+            action_id = available_actions[0] if available_actions else 1
+            action_data = None
 
         # Return GameAction matching the action_id
         try:
-            act_enum = GameAction(action_id)
+            if hasattr(GameAction, f"ACTION{action_id}"):
+                act_enum = getattr(GameAction, f"ACTION{action_id}")
+            elif hasattr(GameAction, str(action_id)):
+                act_enum = getattr(GameAction, str(action_id))
+            else:
+                act_enum = GameAction(action_id)
         except Exception:
             act_enum = GameAction.ACTION1
 
-        # If Kaggle evaluation expects GameAction with action data attached:
+        # Fallback for complex actions (Action 6) if action_data is None or missing coords
+        if (
+            action_id == 6
+            or getattr(act_enum, "name", "") == "ACTION6"
+            or (hasattr(act_enum, "is_complex") and act_enum.is_complex())
+        ):
+            if (
+                not isinstance(action_data, dict)
+                or "x" not in action_data
+                or "y" not in action_data
+            ):
+                H, W = grid.shape
+                fallback_x, fallback_y = W // 2, H // 2
+                if (
+                    hasattr(self.internal_agent, "current_target_pos")
+                    and self.internal_agent.current_target_pos is not None
+                ):
+                    fallback_y, fallback_x = (
+                        int(round(self.internal_agent.current_target_pos[0])),
+                        int(round(self.internal_agent.current_target_pos[1])),
+                    )
+                elif (
+                    hasattr(self.internal_agent, "current_actor_pos")
+                    and self.internal_agent.current_actor_pos is not None
+                ):
+                    fallback_y, fallback_x = (
+                        int(round(self.internal_agent.current_actor_pos[0])),
+                        int(round(self.internal_agent.current_actor_pos[1])),
+                    )
+                action_data = {
+                    "x": max(0, min(W - 1, fallback_x)),
+                    "y": max(0, min(H - 1, fallback_y)),
+                }
+            else:
+                action_data = {"x": int(action_data["x"]), "y": int(action_data["y"])}
+
+            if hasattr(act_enum, "set_data"):
+                try:
+                    act_enum.set_data(action_data)
+                except Exception:
+                    pass
+
+        # Attach action data to GameAction instance
         if action_data is not None:
             try:
                 setattr(act_enum, "data", action_data)

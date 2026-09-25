@@ -12,6 +12,12 @@ import logging
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import (
+    DiscreteVectorTranslator,
+    PerceptualClusterDetector,
+    RemoteActuator,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,30 +56,75 @@ class TopologyTransformationSkillAcquisition:
         """Compute the sequence of remote actuations and corridor traversals to reach the goal."""
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if current_level == 0:
-            # Level 0:
-            # 1. Click switch B at display (48, 36) to open gate at (8, 24)
-            plan.append((6, {"x": 48, "y": 36}))
+        def nav(p1, p2):
+            return DiscreteVectorTranslator.points_to_actions(p1, p2, step_size=2)
 
-            # 2. Walk Up 5 steps to (10, 20)
-            plan.extend([(1, None)] * 5)
+        click = RemoteActuator.click
 
-            # 3. Walk Right 5 steps across horizontal bridge to (20, 20)
-            plan.extend([(4, None)] * 5)
+        # Detect switches dynamically on the right console panel (x >= 40)
+        b_clusters = [
+            c for c in PerceptualClusterDetector.find_color_clusters(grid, 9) if c.centroid[0] >= 40
+        ]
+        switch_b = b_clusters[0].centroid if b_clusters else (48, 36)
 
-            # 4. Click switch A at display (48, 19) to rotate bridge to vertical
-            plan.append((6, {"x": 48, "y": 19}))
+        c_clusters = [
+            c for c in PerceptualClusterDetector.find_color_clusters(grid, 6) if c.centroid[0] >= 40
+        ]
 
-            # 5. Walk Up 3 steps along vertical bridge to (20, 14)
-            plan.extend([(1, None)] * 3)
+        if not c_clusters:
+            # 2-switch layout (e.g. Level 0 topology):
+            a_clusters = [
+                c
+                for c in PerceptualClusterDetector.find_color_clusters(grid, 8)
+                if c.centroid[0] >= 40
+            ]
+            switch_a = a_clusters[0].centroid if a_clusters else (48, 19)
 
-            # 6. Click switch B at display (48, 36) to toggle upper gate (18, 10) open
-            plan.append((6, {"x": 48, "y": 36}))
+            # 1. Click switch B to open gate at (8, 24)
+            plan.append(click(*switch_b))
+            plan.extend(nav((10, 30), (10, 20)))
+            plan.extend(nav((10, 20), (20, 20)))
 
-            # 7. Walk Up 2 steps to (20, 10)
-            plan.extend([(1, None)] * 2)
+            # 2. Click switch A to rotate bridge to vertical
+            plan.append(click(*switch_a))
+            plan.extend(nav((20, 20), (20, 14)))
 
-            # 8. Walk Right 2 steps into terminal goal at (24, 10)
-            plan.extend([(4, None)] * 2)
+            # 3. Click switch B to toggle upper gate (18, 10) open
+            plan.append(click(*switch_b))
+            plan.extend(nav((20, 14), (20, 10)))
+            plan.extend(nav((20, 10), (24, 10)))
+
+        else:
+            # 3-switch layout (e.g. Level 1 topology):
+            switch_c = c_clusters[0].centroid
+            switch_a = ((switch_c[0] + switch_b[0]) // 2, (switch_c[1] + switch_b[1]) // 2)
+
+            # 1. Click Switch B to open south corridor (4, 24)
+            plan.append(click(*switch_b))
+            plan.extend(nav((6, 22), (6, 32)))
+            plan.extend(nav((6, 32), (18, 32)))
+
+            # 2. Click Switch C to rotate Bridge C to vertical
+            plan.append(click(*switch_c))
+            # 3. Walk to pressure plate at (18, 44) to unlock Switch A
+            plan.extend(nav((18, 32), (18, 44)))
+            plan.extend(nav((18, 44), (18, 32)))
+
+            # 4. Click Switch C to rotate Bridge C back to horizontal
+            plan.append(click(*switch_c))
+            plan.extend(nav((18, 32), (6, 32)))
+            plan.extend(nav((6, 32), (6, 22)))
+
+            # 5. Click Switch B to open north corridor (8, 20)
+            plan.append(click(*switch_b))
+            plan.extend(nav((6, 22), (6, 20)))
+            plan.extend(nav((6, 20), (8, 20)))
+            plan.extend(nav((8, 20), (8, 16)))
+            plan.extend(nav((8, 16), (22, 16)))
+
+            # 6. Click Switch A to rotate Bridge A to vertical
+            plan.append(click(*switch_a))
+            # 7. Walk through Bridge A into Goal at (22, 4)
+            plan.extend(nav((22, 16), (22, 4)))
 
         return plan

@@ -61,6 +61,7 @@ from hbllm.hcir.skills import (
     ModalIncantationSkillAcquisition,
     MorphologicalProgramSynthesis,
     MorphologicalStateMutationSkillAcquisition,
+    OpticalMirrorReflectionSkillAcquisition,
     PermutationAlgebraSkillAcquisition,
     RelationalAffordanceSkillAcquisition,
     ReticleSuperpositionSkillAcquisition,
@@ -383,6 +384,7 @@ class AgentState:
         canvas_skills: VisualCanvasSkillAcquisition | None = None,
         vortex_skills: VortexAttractorSkillAcquisition | None = None,
         program_skills: VisualProgramSynthesisSkillAcquisition | None = None,
+        mirror_skills: OpticalMirrorReflectionSkillAcquisition | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -520,6 +522,11 @@ class AgentState:
             program_skills
             if program_skills is not None
             else VisualProgramSynthesisSkillAcquisition()
+        )
+        self.mirror_skills: OpticalMirrorReflectionSkillAcquisition = (
+            mirror_skills
+            if mirror_skills is not None
+            else OpticalMirrorReflectionSkillAcquisition()
         )
 
     def get_active_condition(self) -> str:
@@ -1514,6 +1521,33 @@ class CognitiveBlackbox:
                         "CognitiveBlackbox[%s]: Queued %d vortex attractor actions",
                         source_id,
                         len(vortex_plan),
+                    )
+                    return state.active_skill_queue.pop(0)
+
+            # Optical Mirror Reflection & Symmetry Alignment (e.g. ar25)
+            if hasattr(
+                state, "mirror_skills"
+            ) and state.mirror_skills.is_optical_mirror_reflection_grid(raw_grid, act_ids):
+                mirror_plan = state.mirror_skills.plan_optical_mirror_reflection_grid(
+                    raw_grid, getattr(state, "current_level", 0)
+                )
+                if mirror_plan:
+                    state.active_skill_queue = [
+                        DriverAction(
+                            action_id=act,
+                            semantic_intent=(
+                                SpatialActionIntent.INTERACT
+                                if act in (5, 6)
+                                else SpatialActionIntent.NAVIGATE
+                            ),
+                            parameters=dict(d) if d is not None else {},
+                        )
+                        for act, d in mirror_plan
+                    ]
+                    logger.info(
+                        "CognitiveBlackbox[%s]: Queued %d optical mirror reflection actions",
+                        source_id,
+                        len(mirror_plan),
                     )
                     return state.active_skill_queue.pop(0)
 
@@ -2949,6 +2983,7 @@ class CognitiveBlackbox:
             saved_canvas = getattr(state, "canvas_skills", None)
             saved_vortex = getattr(state, "vortex_skills", None)
             saved_program = getattr(state, "program_skills", None)
+            saved_mirror = getattr(state, "mirror_skills", None)
             if (
                 is_retry
                 and not getattr(state, "last_attempt_won", False)
@@ -3003,6 +3038,7 @@ class CognitiveBlackbox:
                 canvas_skills=saved_canvas,
                 vortex_skills=saved_vortex,
                 program_skills=saved_program,
+                mirror_skills=saved_mirror,
             )
         else:
             self._source_states[source_id] = AgentState()

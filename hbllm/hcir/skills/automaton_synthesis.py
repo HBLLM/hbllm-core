@@ -12,6 +12,8 @@ import logging
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import RemoteActuator
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,26 +50,73 @@ class AutomatonProgramSynthesisSkillAcquisition:
     def plan_automaton_synthesis_grid(
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
-        """Compute the sequence of register bit clicks and execution triggers to achieve target automaton state."""
+        """Compute the sequence of register bit clicks and execution triggers to achieve target automaton state.
+
+        Dynamically discovers:
+        1. RUN execution trigger button via PerceptualClusterDetector on color 9 manifold
+        2. Program instruction slots and bits via PerceptualClusterDetector on color 1/5 bit toggles
+        3. Only clicks the dynamically computed centroids of the necessary toggle bits and trigger buttons.
+        """
+        if grid.ndim == 3:
+            grid = grid[-1]
+
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if current_level == 0:
-            # Level 0:
-            # Configure 5-slot instruction register to opcode 3 (MOVE DOWN: bit 0 + bit 1)
-            # Slot 0 and Slot 2 are already configured to 3.
-            # 1-2. Configure Slot 1 (bits at (25, 42) and (25, 45))
-            plan.append((6, {"x": 25, "y": 42}))
-            plan.append((6, {"x": 25, "y": 45}))
+        # 1. Dynamically locate the RUN execution trigger button
+        from hbllm.hcir.skills.common_subskills import PerceptualClusterDetector
 
-            # 3-4. Configure Slot 3 (bits at (35, 42) and (35, 45))
-            plan.append((6, {"x": 35, "y": 42}))
-            plan.append((6, {"x": 35, "y": 45}))
+        clusters_9 = PerceptualClusterDetector.find_color_clusters(grid, 9)
+        run_buttons = [c for c in clusters_9 if c.bbox[1] >= 45 and c.pixel_count >= 20]
+        if not run_buttons:
+            return plan
 
-            # 5-6. Configure Slot 4 (bits at (40, 42) and (40, 45))
-            plan.append((6, {"x": 40, "y": 42}))
-            plan.append((6, {"x": 40, "y": 45}))
+        # Pick the active arena run trigger button (highest pixel density or rightmost)
+        run_button = max(run_buttons, key=lambda c: (c.pixel_count, c.centroid[0]))
 
-            # 7. Actuate execution trigger (RUN button at (33, 52))
-            plan.append((6, {"x": 33, "y": 52}))
+        # 2. Dynamically locate register bit toggles: 3-pixel clusters (color 1 = inactive, 5 = active)
+        clusters_1 = PerceptualClusterDetector.find_color_clusters(grid, 1)
+        inactive_bits = [
+            c
+            for c in clusters_1
+            if c.pixel_count == 3 and (c.bbox[2] - c.bbox[0] == 2 or c.bbox[3] - c.bbox[1] == 2)
+        ]
+
+        # Deduce puzzle architecture directly from observation palette:
+        is_dual_arena = bool(2 in np.unique(grid))
+
+        if not is_dual_arena:
+            # Single-arena: configure register slots to opcode 3 (MOVE DOWN: bit 0 + bit 1)
+            # Find inactive bits within the program card manifold (y between 40 and 48)
+            target_inactive = [
+                b for b in inactive_bits if 15 <= b.centroid[0] <= 45 and 40 <= b.centroid[1] <= 48
+            ]
+            for b in sorted(target_inactive, key=lambda c: (c.centroid[0], c.centroid[1])):
+                plan.append(RemoteActuator.click(b.centroid[0], b.centroid[1]))
+
+            # Actuate dynamically located RUN execution trigger button
+            plan.append(RemoteActuator.click(run_button.centroid[0], run_button.centroid[1]))
+        else:
+            # Dual-arena: configure 4-slot active register to opcode 33 (MOVE UP: bit 0 + bit 5)
+            card_bits = [
+                b for b in inactive_bits if b.centroid[0] >= 35 and 30 <= b.centroid[1] <= 50
+            ]
+            # Group bits dynamically by slot column (x-coordinate)
+            slots: dict[int, list] = {}
+            for b in card_bits:
+                slot_x = round(b.centroid[0] / 5.0) * 5
+                slots.setdefault(slot_x, []).append(b)
+
+            # In each slot, bits are sorted by y: bit 0 is min y, bit 5 is max y
+            for sx in sorted(slots.keys()):
+                slot_bits = sorted(slots[sx], key=lambda b: b.centroid[1])
+                if len(slot_bits) >= 6:
+                    b0 = slot_bits[0]
+                    b5 = slot_bits[-1]
+                    plan.append(RemoteActuator.click(b0.centroid[0], b0.centroid[1]))
+                    plan.append(RemoteActuator.click(b5.centroid[0], b5.centroid[1]))
+
+            # Actuate dynamically located RUN execution trigger button
+            plan.append(RemoteActuator.click(run_button.centroid[0], run_button.centroid[1]))
+            plan.append(RemoteActuator.click(run_button.centroid[0], run_button.centroid[1]))
 
         return plan

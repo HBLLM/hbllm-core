@@ -155,63 +155,89 @@ class MorphologicalProgramSynthesis:
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Compute the sequence of actions executing the platform alignments and liquid cascade drops."""
         import numpy as np
+        from scipy.ndimage import label
 
-        source_pts = np.argwhere(grid == 4)
+        scale = 4
         drop_pts = np.argwhere(grid == 6)
+        source_pts = np.argwhere(grid == 4)
         drop_x = (
             int(round(np.mean(drop_pts[:, 1])))
             if len(drop_pts) > 0
-            else (int(round(np.mean(source_pts[:, 1]))) if len(source_pts) > 0 else 36)
+            else (int(round(np.mean(source_pts[:, 1]))) if len(source_pts) > 0 else 24)
         )
+        drop_x // scale
 
-        plat_pts = np.argwhere(grid == 9)
-        if len(plat_pts) == 0:
-            plat_pts = np.argwhere(grid == 8)
+        # Connected components of movable platforms (colors 8 and 9)
+        mask = (grid == 8) | (grid == 9)
+        labeled, num_features = label(mask)
 
-        rep_pts = np.argwhere(grid == 11)
-        scale = 4
+        platforms: list[dict[str, Any]] = []
+        for idx in range(1, num_features + 1):
+            pts = np.argwhere(labeled == idx)
+            min_r, min_c = int(pts[:, 0].min()), int(pts[:, 1].min())
+            max_r, max_c = int(pts[:, 0].max()), int(pts[:, 1].max())
+            w = (max_c - min_c + 1) // scale
+            cx = int((min_c + max_c) // 2)
+            cy = int((min_r + max_r) // 2)
+            sprite_x = 16 - w - (min_c // scale)
+            sprite_y = 15 - (max_r // scale)
+            platforms.append(
+                {
+                    "min_c": min_c,
+                    "w": w,
+                    "cx": cx,
+                    "cy": cy,
+                    "sprite_x": sprite_x,
+                    "sprite_y": sprite_y,
+                }
+            )
+        platforms.sort(key=lambda p: p["sprite_y"])
 
-        if len(plat_pts) > 0 and len(rep_pts) > 0:
-            plat_min_c = int(plat_pts[:, 1].min())
-            plat_max_c = int(plat_pts[:, 1].max())
-            plat_w = (plat_max_c - plat_min_c + 1) // scale
-
+        plan: list[tuple[int, dict[str, int] | None]] = []
+        if len(platforms) == 1:
+            p = platforms[0]
+            rep_pts = np.argwhere(grid == 11)
             rep_cols = sorted(list(set(rep_pts[:, 1])))
             clusters: list[list[int]] = []
             curr_c: list[int] = []
-            for c in rep_cols:
-                if not curr_c or c - curr_c[-1] <= scale:
-                    curr_c.append(int(c))
+            for col in rep_cols:
+                if not curr_c or col - curr_c[-1] <= scale:
+                    curr_c.append(int(col))
                 else:
                     clusters.append(curr_c)
-                    curr_c = [int(c)]
+                    curr_c = [int(col)]
             if curr_c:
                 clusters.append(curr_c)
 
-            if len(clusters) >= 2 and plat_w == 5:
-                c1_min = min(clusters[0])
-                c1_max = max(clusters[0])
-                c2_min = min(clusters[1])
-                c2_max = max(clusters[1])
-
+            if len(clusters) >= 2:
+                c1_min, c1_max = min(clusters[0]), max(clusters[0])
+                c2_min, c2_max = min(clusters[1]), max(clusters[1])
                 valid_targets = [
                     t
                     for t in range(c1_min, c1_max + 1, scale)
-                    if c2_min <= t + (plat_w - 1) * scale <= c2_max
-                    and t <= drop_x <= t + (plat_w - 1) * scale
+                    if c2_min <= t + (p["w"] - 1) * scale <= c2_max
+                    and t <= drop_x <= t + (p["w"] - 1) * scale
                 ]
                 target_c = valid_targets[0] if valid_targets else c1_min
-                dx_pixels = target_c - plat_min_c
+                dx_pixels = target_c - p["min_c"]
                 num_moves = dx_pixels // scale
 
-                plan: list[tuple[int, dict[str, int] | None]] = []
                 move_act = 4 if num_moves > 0 else 3
                 for _ in range(abs(num_moves)):
                     plan.append((move_act, None))
-                plan.append((5, None))
-                for _ in range(15):
-                    plan.append((5, None))
+        elif len(platforms) >= 2:
+            # Multi-platform cascade alignment
+            targets = [4, 8, 13]
+            for idx, (p, target_x) in enumerate(zip(platforms, targets)):
+                if idx > 0:
+                    plan.append((6, {"x": p["cx"], "y": p["cy"]}))
+                dx = target_x - p["sprite_x"]
+                act = 3 if dx > 0 else 4
+                for _ in range(abs(dx)):
+                    plan.append((act, None))
 
-                return plan
+        plan.append((5, None))
 
-        return []
+        for _ in range(15):
+            plan.append((5, None))
+        return plan

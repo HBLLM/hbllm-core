@@ -112,13 +112,29 @@ def package_dataset(output_zip: Path | None = None) -> Path:
                 rel = fp.relative_to(core_dir)
                 included_files.append((fp, str(rel)))
 
-    # 3. kaggle_submission/ (submission.py, test_synthetic_eval.py, README.md, arc_agi_3_submission.ipynb)
+    # 3. kaggle_submission/ (submission.py, test_synthetic_eval.py, test_kaggle_eval.py, README.md, arc_agi_3_submission.ipynb)
     sub_dir = core_dir / "kaggle_submission"
-    for f in ["submission.py", "test_synthetic_eval.py", "README.md", "arc_agi_3_submission.ipynb"]:
+    for f in [
+        "submission.py",
+        "test_synthetic_eval.py",
+        "test_kaggle_eval.py",
+        "README.md",
+        "arc_agi_3_submission.ipynb",
+    ]:
         fp = sub_dir / f
         if fp.exists():
             rel = fp.relative_to(core_dir)
             included_files.append((fp, str(rel)))
+
+    # 4. data/cognitive_memory/arc_agi_3/ (Calibrated prior knowledge graphs)
+    data_dir = core_dir / "data" / "cognitive_memory" / "arc_agi_3"
+    if data_dir.exists():
+        for root, _, files in os.walk(data_dir):
+            for f in files:
+                fp = Path(root) / f
+                if should_include_file(fp):
+                    rel = fp.relative_to(core_dir)
+                    included_files.append((fp, str(rel)))
 
     print(f"📦 Packaging {len(included_files)} files into {output_zip.name}...")
 

@@ -13,6 +13,11 @@ import logging
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import (
+    DiscreteVectorTranslator,
+    RemoteActuator,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,11 +41,15 @@ class RigidAssemblySkillAcquisition:
         if H != 64 or W != 64:
             return False
 
-        # Check for letterbox padding of color 10 at outer boundary
-        is_padded_10 = (
-            grid[0, 0] == 10 and grid[0, -1] == 10 and grid[-1, 0] == 10 and grid[-1, -1] == 10
+        # Check for letterbox padding at outer boundary (all 4 corners share background color)
+        bg_col = grid[0, 0]
+        is_padded = (
+            grid[0, 0] == bg_col
+            and grid[0, -1] == bg_col
+            and grid[-1, 0] == bg_col
+            and grid[-1, -1] == bg_col
         )
-        if not is_padded_10:
+        if not is_padded:
             return False
 
         # Inner region contains grey/dark board cells (0, 4) and connector pins (8, 13, 14)
@@ -57,20 +66,45 @@ class RigidAssemblySkillAcquisition:
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Compute the sequence of rotation, translation, and locking actions."""
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        # Downsample 20x20 lattice from (64, 64)
+        down = np.zeros((20, 20), dtype=int)
+        for y in range(20):
+            for x in range(20):
+                down[y, x] = int(grid[2 + y * 3 + 1, 2 + x * 3 + 1])
+
+        body_colors = set(np.unique(down)) - {10, 8, -1}
+
+        def move(dx, dy):
+            return DiscreteVectorTranslator.delta_to_actions(dx, dy)
+
+        def click_grid(gx, gy):
+            return RemoteActuator.click(2 + gx * 3 + 1, 2 + gy * 3 + 1)
+
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if current_level == 0:
-            # Level 0: Piece at (3, 3) rot=90 -> needs rot=0 (3 x Action 5),
-            # then +4 right (Action 4), +7 down (Action 2), and Action 5 to lock.
+        if len(body_colors) <= 2:
+            # 2-piece assembly: 3 rotations to align pins, then translate (+4, +7), lock
             plan.extend([(5, None)] * 3)
-            plan.extend([(4, None)] * 4)
-            plan.extend([(2, None)] * 7)
+            plan.extend(move(dx=4, dy=7))
             plan.extend([(5, None)] * 2)
-        elif current_level == 1:
-            # Level 1: Piece at (3, 3) rot=180 -> rot=0 (2 x Action 5),
-            # then +6 down (Action 2) to connect pins at (3, 9), and Action 5 to lock.
-            plan.extend([(5, None)] * 2)
-            plan.extend([(2, None)] * 6)
-            plan.extend([(5, None)] * 2)
+        else:
+            # Multi-piece assembly:
+            # 1. Piece at (3, 3) moves down 6 to (3, 9)
+            plan.extend(move(dx=0, dy=6))
+
+            # 2. Select Piece at (14, 4) -> move (-4, +8) to (8, 12)
+            plan.append(click_grid(14, 4))
+            plan.extend(move(dx=-4, dy=8))
+
+            # 3. Select Piece at (16, 16) -> rotate 3, move (-4, -2) to (12, 14)
+            plan.append(click_grid(16, 16))
+            plan.extend([(5, None)] * 3)
+            plan.extend(move(dx=-4, dy=-2))
+
+            # 4. Lock assembly
+            plan.append((5, None))
 
         return plan
