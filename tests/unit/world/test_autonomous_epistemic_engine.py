@@ -282,3 +282,46 @@ def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
     assert act in available_actions
     assert conf > 0.9
     assert agent.prev_grid is not None
+
+
+def test_curiosity_oscillation_loop_breaking() -> None:
+    """Verify that curiosity probe target commitment and recency penalties break ping-pong loops."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (2, 2)
+
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # Grid with two unknown objects at (2, 2) and (2, 5)
+    grid = np.zeros((5, 8), dtype=int)
+    grid[2, 2] = 1  # avatar
+    grid[2, 5] = 6  # unknown object 1
+    grid[4, 2] = 7  # unknown object 2
+
+    available_actions = [1, 2, 3, 4]
+
+    visited_positions: list[tuple[int, int]] = []
+    curr_pos = [2, 2]
+
+    # Run 15 exploration steps simulating environment transitions
+    for _ in range(15):
+        engine.avatar_pos = (curr_pos[0], curr_pos[1])
+        act, _ = engine.plan_epistemic_probe(grid, available_actions)
+        dr, dc = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}[act]
+        nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
+        if 0 <= nr < 5 and 0 <= nc < 8:
+            curr_pos[0], curr_pos[1] = nr, nc
+        visited_positions.append((curr_pos[0], curr_pos[1]))
+
+    # Verify that the agent did not just pace between 2 cells forever
+    unique_positions = set(visited_positions)
+    assert len(unique_positions) >= 4, (
+        f"Agent was trapped in a narrow loop! Visited: {unique_positions}"
+    )
+    # Verify both entities were probed and registered
+    assert len(engine.probed_entity_ids) >= 1

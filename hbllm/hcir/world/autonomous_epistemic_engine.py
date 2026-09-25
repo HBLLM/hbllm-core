@@ -126,6 +126,11 @@ class AutonomousEpistemicEngine:
         self.position_visit_counts: dict[tuple[int, int], int] = {}
         self.quiescent_click_targets: set[tuple[int, int]] = set()
         self.effective_click_targets: set[tuple[int, int]] = set()
+        self.active_probe_target: tuple[int, int] | None = None
+        self.active_probe_id: str | None = None
+        self.probe_target_steps: int = 0
+        self.probed_entity_ids: set[str] = set()
+        self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
 
         # Mental Imagination & Precomputed Execution Queue
         self.mental_plan: deque[MentalSimulationStep] = deque()
@@ -138,6 +143,10 @@ class AutonomousEpistemicEngine:
         self.consecutive_quiescent_actions = 0
         self.mental_plan.clear()
         self.active_hypothesis = None
+        self.active_probe_target = None
+        self.active_probe_id = None
+        self.probe_target_steps = 0
+        self.recent_positions.clear()
 
         if not retain_dynamics:
             self.avatar_feature = None
@@ -437,7 +446,8 @@ class AutonomousEpistemicEngine:
             for r, c, old_v, new_v in diff.mutated_pixels
             if self.avatar_pos is None or (r, c) != self.avatar_pos
         ]
-        if distant_mutations:
+        # Ignore global screen animations / camera scrolling changes (>64 pixels) for localized door mutation induction
+        if distant_mutations and len(distant_mutations) <= 64:
             trigger_pos = (
                 (int(action_data["y"]), int(action_data["x"]))
                 if action_data and "x" in action_data
@@ -449,23 +459,37 @@ class AutonomousEpistemicEngine:
                 else None
             )
 
-            mutation_model = StateMutationModel(
-                trigger_type="ACTION" if action >= 5 else "CONTACT",
-                trigger_pos=trigger_pos,
-                trigger_feature=trigger_feat,
-                mutation_type="ENVIRONMENTAL_TOGGLE",
-                prior_value=distant_mutations[0][2],
-                posterior_value=distant_mutations[0][3],
-                confidence=0.8,
-                occurrences=1,
+            # De-duplicate: update existing model instead of creating duplicates
+            existing_mut = next(
+                (
+                    m
+                    for m in self.state_mutations
+                    if m.trigger_pos == trigger_pos
+                    and m.trigger_feature == trigger_feat
+                    and m.prior_value == distant_mutations[0][2]
+                ),
+                None,
             )
-            self.state_mutations.append(mutation_model)
-            logger.info(
-                "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
-                mutation_model.trigger_type,
-                trigger_pos,
-                len(distant_mutations),
-            )
+            if existing_mut is not None:
+                existing_mut.record_observation(distant_mutations[0][3])
+            else:
+                mutation_model = StateMutationModel(
+                    trigger_type="ACTION" if action >= 5 else "CONTACT",
+                    trigger_pos=trigger_pos,
+                    trigger_feature=trigger_feat,
+                    mutation_type="ENVIRONMENTAL_TOGGLE",
+                    prior_value=distant_mutations[0][2],
+                    posterior_value=distant_mutations[0][3],
+                    confidence=0.8,
+                    occurrences=1,
+                )
+                self.state_mutations.append(mutation_model)
+                logger.info(
+                    "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
+                    mutation_model.trigger_type,
+                    trigger_pos,
+                    len(distant_mutations),
+                )
 
         # ── C. Win / Goal Grounding & Loss / Hazard Avoidance ────────────────
         if is_win:
@@ -920,28 +944,102 @@ class AutonomousEpistemicEngine:
                 self.quiescent_click_targets.clear()
                 return 6, {"x": W // 2, "y": H // 2}
 
-        # Spatial Movement Curiosity: Probe least-visited unknown entities
-        if self.avatar_pos is not None and unknown_entities:
-            scored_entities: list[tuple[SpatialEntity, float]] = []
-            for e in unknown_entities:
-                dist = abs(e.grid_pos[0] - self.avatar_pos[0]) + abs(
-                    e.grid_pos[1] - self.avatar_pos[1]
-                )
-                visits = self.entity_visit_counts.get(e.id, 0)
-                # Curiosity Formula = Information Value / Cost
-                info_val = 10.0 / (visits + 1.0)
-                cost = dist + 1.0
-                curiosity_score = info_val / cost
-                scored_entities.append((e, curiosity_score))
-
-            scored_entities.sort(key=lambda x: x[1], reverse=True)
-            target_entity = scored_entities[0][0]
-            self.entity_visit_counts[target_entity.id] = (
-                self.entity_visit_counts.get(target_entity.id, 0) + 1
+        # Spatial Movement Curiosity: Probe least-visited unknown entities with target commitment & loop breaking
+        if self.avatar_pos is not None:
+            # 1. Update position tracking and record recent history
+            self.recent_positions.append(self.avatar_pos)
+            self.position_visit_counts[self.avatar_pos] = (
+                self.position_visit_counts.get(self.avatar_pos, 0) + 1
             )
 
-            # Move toward target entity
-            tr, tc = target_entity.grid_pos
+            # Check if any entity was reached and mark it as probed
+            for e in entities:
+                if (
+                    abs(e.grid_pos[0] - self.avatar_pos[0])
+                    + abs(e.grid_pos[1] - self.avatar_pos[1])
+                    <= 1
+                ):
+                    self.probed_entity_ids.add(e.id)
+
+            # Check if current committed probe target is reached or timed out
+            if self.active_probe_target is not None:
+                dist_to_target = abs(self.active_probe_target[0] - self.avatar_pos[0]) + abs(
+                    self.active_probe_target[1] - self.avatar_pos[1]
+                )
+                self.probe_target_steps += 1
+                if dist_to_target <= 1 or self.probe_target_steps > 12:
+                    if self.active_probe_id:
+                        self.probed_entity_ids.add(self.active_probe_id)
+                    self.active_probe_target = None
+                    self.active_probe_id = None
+                    self.probe_target_steps = 0
+
+            # 2. Check for oscillation loop (e.g. A <-> B ping-pong)
+            is_oscillating = self.recent_positions.count(self.avatar_pos) >= 3
+            if is_oscillating:
+                logger.debug(
+                    "AutonomousEpistemicEngine: Oscillation detected at %s! Breaking loop...",
+                    self.avatar_pos,
+                )
+                self.active_probe_target = None
+                self.active_probe_id = None
+                best_act = available_actions[0]
+                min_visits = float("inf")
+                for act, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
+                    if act in available_actions:
+                        nr = self.avatar_pos[0] + dr
+                        nc = self.avatar_pos[1] + dc
+                        if not (0 <= nr < H and 0 <= nc < W):
+                            continue
+                        if (nr, nc) in self.learned_barriers or int(
+                            curr_grid[nr, nc]
+                        ) in self.learned_barrier_features:
+                            continue
+                        visits = self.position_visit_counts.get((nr, nc), 0)
+                        recency_pen = 20.0 if (nr, nc) in list(self.recent_positions)[-6:] else 0.0
+                        total_score = visits + recency_pen
+                        if total_score < min_visits:
+                            min_visits = total_score
+                            best_act = act
+                return best_act, None
+
+            # 3. Filter candidate unprobed entities
+            candidates = [
+                e
+                for e in unknown_entities
+                if e.id not in self.probed_entity_ids
+                and (
+                    abs(e.grid_pos[0] - self.avatar_pos[0])
+                    + abs(e.grid_pos[1] - self.avatar_pos[1])
+                )
+                > 1
+            ]
+
+            # If no active target committed, select a new candidate
+            if self.active_probe_target is None and candidates:
+                scored: list[tuple[SpatialEntity, float]] = []
+                for e in candidates:
+                    dist = abs(e.grid_pos[0] - self.avatar_pos[0]) + abs(
+                        e.grid_pos[1] - self.avatar_pos[1]
+                    )
+                    visits = self.entity_visit_counts.get(e.id, 0)
+                    info_val = 10.0 / (visits + 1.0)
+                    cost = dist + 1.0
+                    scored.append((e, info_val / cost))
+                scored.sort(key=lambda x: x[1], reverse=True)
+                chosen = scored[0][0]
+                self.active_probe_target = chosen.grid_pos
+                self.active_probe_id = chosen.id
+                self.probe_target_steps = 0
+                self.entity_visit_counts[chosen.id] = self.entity_visit_counts.get(chosen.id, 0) + 1
+
+            # 4. Navigate toward active target (or explore frontier if none available)
+            target_pos = self.active_probe_target
+            if target_pos is None:
+                tr, tc = H // 2, W // 2
+            else:
+                tr, tc = target_pos
+
             best_action = available_actions[0]
             min_dist = float("inf")
             for act, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
@@ -961,16 +1059,13 @@ class AutonomousEpistemicEngine:
                     ) in self.learned_barrier_features:
                         continue
 
-                    # Distance heuristic + visit count penalty to break pacing loops
-                    visit_penalty = float(self.position_visit_counts.get((nr, nc), 0)) * 0.75
-                    d = abs(tr - nr) + abs(tc - nc) + visit_penalty
+                    visit_penalty = float(self.position_visit_counts.get((nr, nc), 0)) * 1.5
+                    recency_penalty = 10.0 if (nr, nc) in list(self.recent_positions)[-4:] else 0.0
+                    d = abs(tr - nr) + abs(tc - nc) + visit_penalty + recency_penalty
                     if d < min_dist:
                         min_dist = d
                         best_action = act
 
-            self.position_visit_counts[self.avatar_pos] = (
-                self.position_visit_counts.get(self.avatar_pos, 0) + 1
-            )
             return best_action, None
 
         # Fallback: cycle available actions with loop prevention
