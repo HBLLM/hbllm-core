@@ -35,6 +35,7 @@ from hbllm.hcir.skills import (
 from hbllm.hcir.skills.kinematic_arm_linkage import KinematicLinkageSolver
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
+from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
@@ -2919,6 +2920,7 @@ class InductiveHCIRAgent:
 
     def __init__(self, disable_archetypes: bool = False) -> None:
         self.disable_archetypes: bool = disable_archetypes
+        self.autonomous_engine: AutonomousEpistemicEngine = AutonomousEpistemicEngine()
         self.knowledge_base: CrossLevelKnowledgeBase = CrossLevelKnowledgeBase()
         self.spatial_cognitive_agent: ARC3SpatialCognitiveAgent = ARC3SpatialCognitiveAgent()
         self.spatial_cognitive_agent.knowledge_base = self.knowledge_base
@@ -3005,6 +3007,7 @@ class InductiveHCIRAgent:
         self.linkage_solver.reset_episode()
         self.hazard_tracker.reset_episode()
         self.causal_engine.reset_episode()
+        self.autonomous_engine.reset_episode(retain_dynamics=retain_dynamics)
         if not retain_dynamics:
             self.active_solver_name = None
             self._effective_colors.clear()
@@ -3468,6 +3471,19 @@ class InductiveHCIRAgent:
         available_actions: list[int],
     ) -> tuple[int, float]:
         """Select action via trial-and-error induction or goal-directed transfer planning."""
+        if self.disable_archetypes:
+            act, data = self.autonomous_engine.decide(
+                curr_grid,
+                available_actions,
+                is_win=(getattr(self, "last_frame_state", None) == "WIN"),
+            )
+            self.last_action = act
+            self.last_action_data = data
+            self.prev_grid = curr_grid.copy()
+            if self.autonomous_engine.avatar_pos:
+                self.current_actor_pos = self.autonomous_engine.avatar_pos
+            return act, 0.95
+
         # 1. If a solver is already active for this episode, continue executing its plan
         if self.active_solver_name is not None:
             return self._dispatch_active_solver(curr_grid, available_actions)
@@ -3930,12 +3946,24 @@ class InductiveARC3BenchmarkRunner:
                             self.agent.spatial_cognitive_agent.update_causal_dynamics(
                                 action_int, prev_grid, curr_grid, won=True
                             )
+                        if hasattr(self.agent, "autonomous_engine"):
+                            self.agent.autonomous_engine.assimilate_feedback(
+                                curr_grid,
+                                [action_int],
+                                is_win=True,
+                            )
                         break
 
                     if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
                         if hasattr(self.agent, "spatial_cognitive_agent"):
                             self.agent.spatial_cognitive_agent.update_causal_dynamics(
                                 action_int, prev_grid, curr_grid, lost=True
+                            )
+                        if hasattr(self.agent, "autonomous_engine"):
+                            self.agent.autonomous_engine.assimilate_feedback(
+                                curr_grid,
+                                [action_int],
+                                is_lost=True,
                             )
                         break
 

@@ -165,3 +165,120 @@ def test_full_autonomous_loop_unseen_puzzle() -> None:
     assert won, "Agent failed to solve the unseen maze autonomously!"
     assert engine.avatar_feature == avatar_color
     assert len(engine.action_dynamics) >= 2
+
+
+def test_compound_mental_simulation_sokoban_push() -> None:
+    """Verify compound mental simulation forward-simulates pushing a block into a receptacle."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 1)
+
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    engine.learned_cargo_features.add(2)
+    engine.learned_goal_features.add(3)
+
+    # 1D corridor: [1 (avatar), 2 (block), 0 (empty), 3 (goal)]
+    grid = np.zeros((3, 6), dtype=int)
+    grid[1, 1] = 1  # avatar
+    grid[1, 2] = 2  # cargo block
+    grid[1, 4] = 3  # goal target
+
+    available_actions = [1, 2, 3, 4]
+
+    simulated_plan = engine.simulate_in_mind(grid, available_actions)
+    assert simulated_plan is not None
+    assert len(simulated_plan) == 2
+    # Pushing block twice to the right: (1, 2)->(1, 3), then (1, 3)->(1, 4)
+    assert [s.action for s in simulated_plan] == [4, 4]
+
+
+def test_hierarchical_subgoal_decomposition_multi_stage_switches() -> None:
+    """Verify recursive subgoal decomposition navigates multiple switches to unlock successive doors."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 1)
+
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel, StateMutationModel
+
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+    engine.learned_goal_features.add(7)
+
+    # Grid: 3 rows, 11 cols
+    # Row 1: [0, avatar(1), 0, switch1(5), door1(2), 0, switch2(6), door2(8), 0, goal(7), 0]
+    # Walls on row 0 and 2
+    grid = np.zeros((3, 11), dtype=int)
+    grid[0, :] = 9
+    grid[2, :] = 9
+    grid[1, 1] = 1  # avatar
+    grid[1, 3] = 5  # switch 1
+    grid[1, 4] = 2  # door 1 (barrier)
+    grid[1, 6] = 6  # switch 2
+    grid[1, 7] = 8  # door 2 (barrier)
+    grid[1, 9] = 7  # goal
+
+    engine.learned_barrier_features.add(9)
+    engine.learned_barrier_features.add(2)
+    engine.learned_barrier_features.add(8)
+
+    # Learned mutation rules:
+    # Switch 1 (feat 5) removes door 1 (val 2 -> 0)
+    engine.state_mutations.append(
+        StateMutationModel(
+            trigger_type="CONTACT",
+            trigger_pos=(1, 3),
+            trigger_feature=5,
+            prior_value=2,
+            posterior_value=0,
+            confidence=1.0,
+        )
+    )
+    # Switch 2 (feat 6) removes door 2 (val 8 -> 0)
+    engine.state_mutations.append(
+        StateMutationModel(
+            trigger_type="CONTACT",
+            trigger_pos=(1, 6),
+            trigger_feature=6,
+            prior_value=8,
+            posterior_value=0,
+            confidence=1.0,
+        )
+    )
+
+    available_actions = [1, 2, 3, 4]
+    plan = engine.simulate_in_mind(grid, available_actions)
+    assert plan is not None
+    # Path:
+    # (1, 1) -> (1, 3): 2 steps RIGHT (action 4, 4)
+    # (1, 3) -> (1, 6): 3 steps RIGHT (action 4, 4, 4) through door 1
+    # (1, 6) -> (1, 9): 3 steps RIGHT (action 4, 4, 4) through door 2
+    # Total = 8 steps RIGHT
+    assert len(plan) == 8
+    assert all(s.action == 4 for s in plan)
+
+
+def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
+    """Verify InductiveHCIRAgent with disable_archetypes=True routes via AutonomousEpistemicEngine."""
+    from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
+
+    agent = InductiveHCIRAgent(disable_archetypes=True)
+    assert hasattr(agent, "autonomous_engine")
+    assert agent.autonomous_engine is not None
+
+    # Test decision routing
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 2] = 1
+    available_actions = [1, 2, 3, 4]
+
+    act, conf = agent.plan_next_action(grid, available_actions)
+    assert act in available_actions
+    assert conf > 0.9
+    assert agent.prev_grid is not None

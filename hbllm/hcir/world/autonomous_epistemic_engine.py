@@ -111,6 +111,9 @@ class AutonomousEpistemicEngine:
         self.learned_walkable_features: set[int] = set()
         self.learned_goal_positions: set[tuple[int, int]] = set()
         self.learned_goal_features: set[int] = set()
+        self.learned_cargo_features: set[int] = set()
+        self.learned_receptacle_positions: set[tuple[int, int]] = set()
+        self.learned_receptacle_features: set[int] = set()
 
         # Causal Hypotheses & State Mutations
         self.hypotheses: list[CausalHypothesis] = []
@@ -145,6 +148,9 @@ class AutonomousEpistemicEngine:
             self.learned_barrier_features.clear()
             self.learned_goal_positions.clear()
             self.learned_goal_features.clear()
+            self.learned_cargo_features.clear()
+            self.learned_receptacle_positions.clear()
+            self.learned_receptacle_features.clear()
             self.state_mutations.clear()
             self.phase = EpistemicPhase.MOTOR_GROUNDING
         else:
@@ -174,18 +180,33 @@ class AutonomousEpistemicEngine:
             return 0
 
         # Check if perimeter is an enclosing outer frame (e.g. wall)
-        # If the perimeter has high homogeneity (>=75%), check interior mode
+        # If the perimeter has high homogeneity (>=70%) or top_val is known barrier
         top_val = int(vals[np.argmax(counts)])
         top_count = int(np.max(counts))
-        if top_count / len(perimeter) >= 0.75 and grid.shape[0] > 4 and grid.shape[1] > 4:
+        if (
+            (top_count / len(perimeter) >= 0.70 or top_val in self.learned_barrier_features)
+            and grid.shape[0] >= 3
+            and grid.shape[1] >= 3
+        ):
             interior = grid[1:-1, 1:-1]
             int_vals, int_counts = np.unique(interior, return_counts=True)
             if len(int_vals) > 0:
-                int_top_val = int(int_vals[np.argmax(int_counts)])
-                # If interior dominant color differs from perimeter frame, interior is background
-                if int_top_val != top_val and np.max(int_counts) / interior.size >= 0.20:
-                    self.learned_barrier_features.add(top_val)
-                    return int_top_val
+                valid_int = [
+                    i for i, v in enumerate(int_vals) if int(v) not in self.learned_barrier_features
+                ]
+                if valid_int:
+                    int_top_val = int(int_vals[valid_int[np.argmax(int_counts[valid_int])]])
+                    if int_top_val != top_val:
+                        self.learned_barrier_features.add(top_val)
+                        return int_top_val
+
+        # If top_val is a known barrier, avoid picking it as background
+        if top_val in self.learned_barrier_features and len(vals) > 1:
+            non_barriers = [
+                i for i, v in enumerate(vals) if int(v) not in self.learned_barrier_features
+            ]
+            if non_barriers:
+                return int(vals[non_barriers[np.argmax(counts[non_barriers])]])
 
         # If avatar is already hypothesized, avoid picking avatar color as background
         if self.avatar_feature is not None and len(vals) > 1:
@@ -241,7 +262,19 @@ class AutonomousEpistemicEngine:
                     role = EntityRole.OBSTACLE
                 elif val == self.avatar_feature:
                     role = EntityRole.AGENT
-                elif val in self.learned_goal_features or grid_pos in self.learned_goal_positions:
+                elif any(
+                    m.trigger_feature == val or m.trigger_pos == grid_pos
+                    for m in self.state_mutations
+                ):
+                    role = EntityRole.ACTUATOR
+                elif val in self.learned_cargo_features:
+                    role = EntityRole.MANIPULABLE
+                elif (
+                    val in self.learned_goal_features
+                    or val in self.learned_receptacle_features
+                    or grid_pos in self.learned_goal_positions
+                    or grid_pos in self.learned_receptacle_positions
+                ):
                     role = EntityRole.GOAL
                 elif area <= 16:
                     # Gestalt visual saliency: small foreground objects start as candidate interactives
@@ -299,6 +332,7 @@ class AutonomousEpistemicEngine:
         curr_grid: np.ndarray,
         available_actions: Sequence[int],
         is_win: bool = False,
+        is_lost: bool = False,
     ) -> None:
         """Assimilate sensory feedback from previous action into empirical world models."""
         if self.prev_grid is None or self.last_action is None:
@@ -351,49 +385,49 @@ class AutonomousEpistemicEngine:
         prev_entities = self.extract_entities(self.prev_grid, bg)
         curr_entities = self.extract_entities(curr_grid, bg)
 
-        moved_entity: SpatialEntity | None = None
-        observed_delta: tuple[int, int] = (0, 0)
-
+        # Check all entity pairs that moved
+        moved_entities: list[tuple[SpatialEntity, tuple[int, int]]] = []
         for pe in prev_entities:
             for ce in curr_entities:
                 if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 64:
                     dr = ce.grid_pos[0] - pe.grid_pos[0]
                     dc = ce.grid_pos[1] - pe.grid_pos[1]
                     if (dr != 0 or dc != 0) and abs(dr) <= 3 and abs(dc) <= 3:
-                        # Candidate controllable translation
-                        moved_entity = ce
-                        observed_delta = (dr, dc)
+                        moved_entities.append((ce, (dr, dc)))
                         break
-            if moved_entity is not None:
-                break
 
-        if moved_entity is not None:
-            # If avatar is not yet identified, this entity is our candidate avatar
-            if self.avatar_feature is None or self.avatar_feature == moved_entity.feature_id:
-                self.avatar_feature = moved_entity.feature_id
-                self.avatar_pos = moved_entity.grid_pos
-                self.avatar_size = moved_entity.area
-
-                # Calibrate ActionDynamicsModel for this action
+        for ce, (dr, dc) in moved_entities:
+            if self.avatar_feature is None or self.avatar_feature == ce.feature_id:
+                self.avatar_feature = ce.feature_id
+                self.avatar_pos = ce.grid_pos
+                self.avatar_size = ce.area
                 if action not in self.action_dynamics:
                     self.action_dynamics[action] = ActionDynamicsModel(
                         action_id=action,
-                        delta_r=observed_delta[0],
-                        delta_c=observed_delta[1],
+                        delta_r=dr,
+                        delta_c=dc,
                         confidence=0.6,
                         probes_tested=1,
                     )
                 else:
                     self.action_dynamics[action].update_from_trial(
-                        observed_delta, success=True, learning_rate=0.5
+                        (dr, dc), success=True, learning_rate=0.5
                     )
                 logger.debug(
                     "AutonomousEpistemicEngine: Avatar identified (feat=%d, size=%d). Calibrated action %d -> delta=(%d, %d)",
                     self.avatar_feature,
                     self.avatar_size,
                     action,
-                    observed_delta[0],
-                    observed_delta[1],
+                    dr,
+                    dc,
+                )
+            elif self.avatar_feature is not None and ce.feature_id != self.avatar_feature:
+                # Entity pushed by avatar!
+                self.learned_cargo_features.add(ce.feature_id)
+                logger.info(
+                    "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
+                    ce.feature_id,
+                    ce.area,
                 )
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
@@ -433,13 +467,19 @@ class AutonomousEpistemicEngine:
                 len(distant_mutations),
             )
 
-        # ── C. Win / Goal Grounding ──────────────────────────────────────────
+        # ── C. Win / Goal Grounding & Loss / Hazard Avoidance ────────────────
         if is_win:
             if self.avatar_pos is not None:
                 self.learned_goal_positions.add(self.avatar_pos)
             if self.active_hypothesis:
                 self.active_hypothesis.confirmed = True
                 self.active_hypothesis.confidence = 1.0
+
+        if is_lost:
+            if self.avatar_pos is not None:
+                self.learned_barriers.add(self.avatar_pos)
+            if self.active_hypothesis:
+                self.active_hypothesis.confidence = 0.0
 
     # ─────────────────────────────────────────────────────────────────────────
     # 3. Forward Mental Simulation (Planning in Imagination)
@@ -453,8 +493,10 @@ class AutonomousEpistemicEngine:
     ) -> list[MentalSimulationStep] | None:
         """Simulate candidate action sequences internally in memory without taking physical steps.
 
-        Uses learned dynamics, barrier models, and state mutation triggers to plan
-        a collision-free sequence directly to the target.
+        Supports:
+        1. Direct spatial navigation to goal.
+        2. Multi-object cargo manipulation & Sokoban pushing.
+        3. Hierarchical switch actuation and door unblocking via StateMutationModels.
         """
         if not self.is_motor_grounded() or self.avatar_pos is None:
             return None
@@ -463,20 +505,27 @@ class AutonomousEpistemicEngine:
         bg = self.estimate_background(curr_grid)
         entities = self.extract_entities(curr_grid, bg)
 
-        # Find target goals
-        goals = [
+        # 1. Identify goals & receptacles
+        goals: list[tuple[int, int]] = [
             e.grid_pos
             for e in entities
-            if e.role == target_role or e.feature_id in self.learned_goal_features
+            if e.role == target_role
+            or e.feature_id in self.learned_goal_features
+            or e.feature_id in self.learned_receptacle_features
+            or e.grid_pos in self.learned_goal_positions
+            or e.grid_pos in self.learned_receptacle_positions
         ]
         if not goals and self.learned_goal_positions:
             goals = [g for g in self.learned_goal_positions if 0 <= g[0] < H and 0 <= g[1] < W]
         if not goals:
-            # If no explicit goal known, look for rare Gestalt candidate
+            # Gestalt fallback: rare, small foreground entities (non-avatar, non-barrier)
             candidate_goals = [
                 e.grid_pos
                 for e in entities
-                if e.role == EntityRole.UNKNOWN and 1 <= e.area <= 9 and e.feature_id != bg
+                if e.role == EntityRole.UNKNOWN
+                and 1 <= e.area <= 9
+                and e.feature_id != bg
+                and e.feature_id != self.avatar_feature
             ]
             if candidate_goals:
                 goals = candidate_goals
@@ -484,14 +533,60 @@ class AutonomousEpistemicEngine:
         if not goals:
             return None
 
-        # Build mental obstacle map from confirmed barriers
-        static_barriers = set(self.learned_barriers)
+        # 2. Identify candidate pushable blocks / cargo
+        pushable_blocks: list[tuple[int, int]] = [
+            e.grid_pos
+            for e in entities
+            if (
+                e.feature_id in self.learned_cargo_features
+                or (
+                    e.role == EntityRole.MANIPULABLE
+                    and 1 <= e.area <= 9
+                    and e.feature_id != bg
+                    and e.feature_id != self.avatar_feature
+                    and e.grid_pos not in goals
+                )
+            )
+        ]
+
+        # 3. Identify barriers & doors with mutation triggers
+        static_barriers: set[tuple[int, int]] = set(self.learned_barriers)
         for r in range(H):
             for c in range(W):
                 if int(curr_grid[r, c]) in self.learned_barrier_features:
                     static_barriers.add((r, c))
 
-        # Available directional movements in mental model
+        # Check known state mutation triggers (switches that open doors)
+        mutation_triggers: dict[tuple[int, int], set[tuple[int, int]]] = {}
+        for m in self.state_mutations:
+            opened_cells: set[tuple[int, int]] = set()
+            for r in range(H):
+                for c in range(W):
+                    if int(curr_grid[r, c]) == m.prior_value and (
+                        m.posterior_value == bg or m.posterior_value == 0
+                    ):
+                        opened_cells.add((r, c))
+            if not opened_cells:
+                continue
+
+            # Map specific trigger pos if known
+            if (
+                m.trigger_pos is not None
+                and len(m.trigger_pos) >= 2
+                and 0 <= m.trigger_pos[0] < H
+                and 0 <= m.trigger_pos[1] < W
+            ):
+                tr_p = (int(m.trigger_pos[0]), int(m.trigger_pos[1]))
+                mutation_triggers.setdefault(tr_p, set()).update(opened_cells)
+
+            # Map any grid cell matching trigger_feature (cross-level generalization)
+            if m.trigger_feature is not None:
+                for r in range(H):
+                    for c in range(W):
+                        if int(curr_grid[r, c]) == m.trigger_feature:
+                            mutation_triggers.setdefault((r, c), set()).update(opened_cells)
+
+        # 4. Available directional movements in mental model
         movable_actions: list[tuple[int, int, int]] = []
         for act in available_actions:
             if act in self.action_dynamics and self.action_dynamics[act].confidence >= 0.5:
@@ -500,51 +595,263 @@ class AutonomousEpistemicEngine:
                     movable_actions.append((act, dr, dc))
 
         if not movable_actions:
-            # Default directional heuristic fallback
             for act, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
                 if act in available_actions:
                     movable_actions.append((act, dr, dc))
 
         start_pos = self.avatar_pos
-        target_pos = min(goals, key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]))
+        init_blocks = frozenset(pushable_blocks)
+        init_open: frozenset[tuple[int, int]] = frozenset()
 
-        # A* Search in mental space
-        open_set: list[tuple[float, int, tuple[int, int], list[MentalSimulationStep]]] = []
-        initial_h = abs(target_pos[0] - start_pos[0]) + abs(target_pos[1] - start_pos[1])
-        heapq.heappush(open_set, (initial_h, 0, start_pos, []))
+        is_block_delivery = bool(
+            pushable_blocks
+            and any(
+                e.feature_id in self.learned_cargo_features or e.role == EntityRole.MANIPULABLE
+                for e in entities
+            )
+        )
 
-        visited_costs: dict[tuple[int, int], int] = {start_pos: 0}
-        max_expansions = 2500
+        def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
+            if is_block_delivery and blocks:
+                b_list = list(blocks)
+                goal_dist = sum(
+                    min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list) for g in goals
+                )
+                avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
+                return float(goal_dist * 2.0 + avatar_to_b)
+            else:
+                return float(min(abs(g[0] - pos[0]) + abs(g[1] - pos[1]) for g in goals))
+
+        # A* State: (f_score, g_cost, counter, pos, blocks, open_barriers, path)
+        counter = 0
+        open_set: list[
+            tuple[
+                float,
+                int,
+                int,
+                tuple[int, int],
+                frozenset[tuple[int, int]],
+                frozenset[tuple[int, int]],
+                list[MentalSimulationStep],
+            ]
+        ] = []
+        h0 = heuristic(start_pos, init_blocks)
+        heapq.heappush(open_set, (h0, 0, counter, start_pos, init_blocks, init_open, []))
+
+        visited_states: set[
+            tuple[tuple[int, int], frozenset[tuple[int, int]], frozenset[tuple[int, int]]]
+        ] = set()
+        max_expansions = 4000
 
         while open_set and max_expansions > 0:
             max_expansions -= 1
-            f_score, g_cost, cur_pos, path = heapq.heappop(open_set)
+            f_score, g_cost, _, cur_pos, cur_blocks, cur_open, path = heapq.heappop(open_set)
 
-            # Check if target reached in mental simulation
-            if cur_pos == target_pos:
-                logger.info(
-                    "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
-                    len(path),
-                    target_pos,
-                )
-                return path
+            state_key = (cur_pos, cur_blocks, cur_open)
+            if state_key in visited_states:
+                continue
+            visited_states.add(state_key)
+
+            # Check termination
+            if is_block_delivery:
+                if all(g in cur_blocks for g in goals):
+                    logger.info(
+                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
+                        len(path),
+                    )
+                    return path
+            else:
+                if cur_pos in goals:
+                    logger.info(
+                        "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
+                        len(path),
+                        cur_pos,
+                    )
+                    return path
 
             for act, dr, dc in movable_actions:
                 nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W):
                     continue
-                if (nr, nc) in static_barriers and (nr, nc) != target_pos:
+
+                # Check if cell is barrier
+                if (nr, nc) in static_barriers and (nr, nc) not in cur_open:
+                    continue
+
+                new_blocks = cur_blocks
+                new_pos = (nr, nc)
+
+                # Check block pushing
+                if (nr, nc) in cur_blocks:
+                    pushed_r, pushed_c = nr + dr, nc + dc
+                    if not (0 <= pushed_r < H and 0 <= pushed_c < W):
+                        continue
+                    if (
+                        pushed_r,
+                        pushed_c,
+                    ) in static_barriers and (pushed_r, pushed_c) not in cur_open:
+                        continue
+                    if (pushed_r, pushed_c) in cur_blocks:
+                        continue
+
+                    # Valid push! Update block positions
+                    b_set = set(cur_blocks)
+                    b_set.remove((nr, nc))
+                    b_set.add((pushed_r, pushed_c))
+                    new_blocks = frozenset(b_set)
+
+                # Check state mutations (did new_pos or pushed block trigger a switch?)
+                new_open = cur_open
+                if new_pos in mutation_triggers:
+                    new_open = cur_open | frozenset(mutation_triggers[new_pos])
+                if is_block_delivery:
+                    for b_pos in new_blocks:
+                        if b_pos in mutation_triggers:
+                            new_open = new_open | frozenset(mutation_triggers[b_pos])
+
+                next_state_key = (new_pos, new_blocks, new_open)
+                if next_state_key in visited_states:
                     continue
 
                 new_cost = g_cost + 1
-                if (nr, nc) not in visited_costs or new_cost < visited_costs[(nr, nc)]:
-                    visited_costs[(nr, nc)] = new_cost
-                    h_val = abs(target_pos[0] - nr) + abs(target_pos[1] - nc)
-                    step = MentalSimulationStep(
-                        action=act,
-                        predicted_avatar_pos=(nr, nc),
+                h_val = heuristic(new_pos, new_blocks)
+                counter += 1
+                step = MentalSimulationStep(
+                    action=act,
+                    predicted_avatar_pos=new_pos,
+                )
+                heapq.heappush(
+                    open_set,
+                    (
+                        new_cost + h_val,
+                        new_cost,
+                        counter,
+                        new_pos,
+                        new_blocks,
+                        new_open,
+                        path + [step],
+                    ),
+                )
+
+        # Fallback to Hierarchical Subgoal Decomposition if compound A* did not reach the goals
+        if not is_block_delivery:
+            subgoal_plan = self._plan_hierarchical_subgoals(
+                curr_grid=curr_grid,
+                available_actions=available_actions,
+                start_pos=start_pos,
+                goals=set(goals),
+                static_barriers=static_barriers,
+                mutation_triggers=mutation_triggers,
+                movable_actions=movable_actions,
+            )
+            if subgoal_plan:
+                return subgoal_plan
+
+        return None
+
+    def _plan_hierarchical_subgoals(
+        self,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+        start_pos: tuple[int, int],
+        goals: set[tuple[int, int]],
+        static_barriers: set[tuple[int, int]],
+        mutation_triggers: dict[tuple[int, int], set[tuple[int, int]]],
+        movable_actions: list[tuple[int, int, int]],
+    ) -> list[MentalSimulationStep] | None:
+        """Recursive multi-stage subgoal decomposition for locked barrier doors and remote mutation triggers.
+
+        Decomposes high-level missions into sequential stages:
+        1. Find path to an accessible switch/key that removes a blocking barrier.
+        2. Actuate trigger and simulate environmental mutation (opening doors in mental model).
+        3. Recurse from the updated world state toward subsequent switches or final goals.
+        """
+        H, W = curr_grid.shape
+        cur_pos = start_pos
+        open_barriers: set[tuple[int, int]] = set()
+        accumulated_plan: list[MentalSimulationStep] = []
+        max_stages = 8
+
+        def find_shortest_path(
+            s_pos: tuple[int, int],
+            target_positions: set[tuple[int, int]],
+            active_barriers: set[tuple[int, int]],
+        ) -> list[MentalSimulationStep] | None:
+            """BFS to find shortest path to any target position avoiding active barriers."""
+            q: deque[tuple[tuple[int, int], list[MentalSimulationStep]]] = deque([(s_pos, [])])
+            visited = {s_pos}
+            while q:
+                p, path = q.popleft()
+                if p in target_positions:
+                    return path
+                for act, dr, dc in movable_actions:
+                    nr, nc = p[0] + dr, p[1] + dc
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    if (nr, nc) in active_barriers or (nr, nc) in visited:
+                        continue
+                    visited.add((nr, nc))
+                    step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
+                    q.append(((nr, nc), path + [step]))
+            return None
+
+        for _ in range(max_stages):
+            effective_barriers = static_barriers - open_barriers
+            # Check if any goal is reachable directly
+            goal_path = find_shortest_path(cur_pos, goals, effective_barriers)
+            if goal_path is not None:
+                accumulated_plan.extend(goal_path)
+                logger.info(
+                    "AutonomousEpistemicEngine: Hierarchical Subgoal Decomposition SUCCEEDED with %d total steps!",
+                    len(accumulated_plan),
+                )
+                return accumulated_plan
+
+            # Goal is not reachable. Find reachable mutation triggers (switches) that unlock new doors
+            candidate_triggers: list[tuple[tuple[int, int], list[MentalSimulationStep], int]] = []
+            for tr_pos, opened_set in mutation_triggers.items():
+                unopened = opened_set - open_barriers
+                if not unopened:
+                    continue  # already opened
+                # Check path to this switch
+                tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
+                if tr_path is not None:
+                    candidate_triggers.append((tr_pos, tr_path, len(unopened)))
+
+            if not candidate_triggers:
+                # No accessible switch found that can unlock any barrier
+                break
+
+            # Prioritize switch that opens the most barriers or is closest
+            candidate_triggers.sort(key=lambda x: (len(x[1]), -x[2]))
+            chosen_pos, switch_path, _ = candidate_triggers[0]
+
+            accumulated_plan.extend(switch_path)
+            cur_pos = chosen_pos
+            open_barriers.update(mutation_triggers[chosen_pos])
+
+            # If mutation requires interaction action (e.g. 5) instead of CONTACT, append interaction
+            matching_mutations = [
+                m
+                for m in self.state_mutations
+                if (
+                    m.trigger_pos == chosen_pos
+                    or (
+                        m.trigger_feature is not None
+                        and int(curr_grid[chosen_pos[0], chosen_pos[1]]) == m.trigger_feature
                     )
-                    heapq.heappush(open_set, (new_cost + h_val, new_cost, (nr, nc), path + [step]))
+                )
+            ]
+            if matching_mutations and matching_mutations[0].trigger_type == "ACTION":
+                act_id = int(matching_mutations[0].metadata.get("action_id", 5))
+                if act_id in available_actions:
+                    accumulated_plan.append(
+                        MentalSimulationStep(
+                            action=act_id,
+                            predicted_avatar_pos=cur_pos,
+                            expected_mutation="ACTION_TRIGGER",
+                        )
+                    )
 
         return None
 
