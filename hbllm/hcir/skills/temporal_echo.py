@@ -40,19 +40,12 @@ class TemporalEchoSkillAcquisition:
         if not np.all(row63 == row63[0]):
             return False
 
-        # Characteristic color set: black (0), blue/teal (1, 8), gray walls (5), avatar/bar (9)
-        unique_colors = set(np.unique(grid))
-        is_echo_palette = (
-            unique_colors.issubset({0, 1, 5, 8, 9, 10})
-            and 5 in unique_colors
-            and 9 in unique_colors
-        )
-
         # Top-left corner houses ghost counter indicators
+        bg = int(grid[0, -1])
         top_left = grid[0:5, 0:10]
-        has_ghost_indicators = 1 in top_left or 9 in top_left
+        has_ghost_indicators = np.sum(top_left != bg) >= 4
 
-        return is_echo_palette and has_ghost_indicators
+        return has_ghost_indicators
 
     @classmethod
     def plan_temporal_echo_grid(

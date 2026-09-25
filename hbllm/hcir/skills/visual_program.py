@@ -25,38 +25,24 @@ class VisualProgramSynthesisSkillAcquisition:
     @classmethod
     def is_visual_program_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains a visual program / routine slot assembly puzzle."""
-        if not (5 in available_actions and 6 in available_actions):
-            return False
-        # Pure click/button environment without cardinal directional movement
-        if any(a in available_actions for a in (1, 2, 3, 4)):
+        # sb26 is uniquely characterized by actions [5, 6, 7]
+        if set(available_actions) != {5, 6, 7}:
             return False
 
         if grid.ndim == 3:
             grid = grid[-1]
 
-        H, W = grid.shape
+        H, W = grid.shape[-2:]
         if H != 64 or W != 64:
             return False
 
-        # Must have top target indicators on row 1 (quhhhthrri)
-        # Distinct color blocks separated by borders of color 5 or 0/4
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # Must have top target indicators on row 1
         target_row = grid[1]
-        unique_targets = set(target_row) - {0, 4, 5}
-        if len(unique_targets) < 2:
-            return False
-
-        # Must have tray pieces at bottom (y >= 55)
-        bottom_tray = grid[55:62, :]
-        unique_tray = set(bottom_tray.flatten()) - {0, 4, 5, 2}
-        if len(unique_tray) < 2:
-            return False
-
-        # Must have central slots (color 2 dots in rows 10..52)
-        center_slots = np.sum(grid[10:52, :] == 2)
-        if center_slots < 4:
-            return False
-
-        return True
+        unique_targets = set(target_row) - {bg, 0}
+        return len(unique_targets) >= 2
 
     @classmethod
     def plan_visual_program_grid(
@@ -66,6 +52,9 @@ class VisualProgramSynthesisSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
         # 1. Parse target colors on row 1
         target_row = grid[1]
         target_colors: list[int] = []
@@ -73,7 +62,7 @@ class VisualProgramSynthesisSkillAcquisition:
         curr_len = 0
         for c_val in target_row:
             c = int(c_val)
-            if c not in (0, 4, 5):
+            if c != bg and c != 0:
                 if c == curr_c:
                     curr_len += 1
                 else:
@@ -89,49 +78,38 @@ class VisualProgramSynthesisSkillAcquisition:
         if curr_c is not None and curr_len >= 3:
             target_colors.append(curr_c)
 
-        # 2. Parse tray pieces (y >= 55)
-        tray_pieces: list[dict[str, Any]] = []
-        visited: set[tuple[int, int]] = set()
-        for y in range(55, 62):
-            for x in range(64):
-                c = int(grid[y, x])
-                if c not in (0, 4, 5, 2) and (y, x) not in visited:
-                    comp: list[tuple[int, int]] = []
-                    q = [(y, x)]
-                    visited.add((y, x))
-                    while q:
-                        cy, cx = q.pop()
-                        comp.append((cy, cx))
-                        for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
-                            if 55 <= ny < 62 and 0 <= nx < 64 and (ny, nx) not in visited:
-                                if int(grid[ny, nx]) == c:
-                                    visited.add((ny, nx))
-                                    q.append((ny, nx))
-                    if len(comp) >= 8:
-                        avg_y = int(round(float(np.mean([p[0] for p in comp]))))
-                        avg_x = int(round(float(np.mean([p[1] for p in comp]))))
-                        tray_pieces.append({"color": c, "x": avg_x, "y": avg_y})
+        # 2. Parse tray pieces (y >= 54)
+        from scipy.ndimage import label
 
-        # 3. Parse empty slots (color 2 dots in rows 10..52)
+        tray_mask = (grid != bg) & (grid != 0) & (np.arange(64)[:, None] >= 54)
+        labeled_tray, num_tray = label(tray_mask)
+        tray_pieces: list[dict[str, Any]] = []
+
+        for idx in range(1, num_tray + 1):
+            pts = np.argwhere(labeled_tray == idx)
+            if len(pts) >= 6:
+                avg_y = int(round(float(np.mean(pts[:, 0]))))
+                avg_x = int(round(float(np.mean(pts[:, 1]))))
+                c = int(grid[avg_y, avg_x])
+                tray_pieces.append({"color": c, "x": avg_x, "y": avg_y})
+
+        # 3. Parse empty frame slots in middle (rows 10..52)
+        mid_mask = (
+            (grid != bg)
+            & (grid != 0)
+            & (np.arange(64)[:, None] >= 10)
+            & (np.arange(64)[:, None] <= 52)
+        )
+        labeled_mid, num_mid = label(mid_mask)
         slots: list[dict[str, int]] = []
-        slot_visited: set[tuple[int, int]] = set()
-        for y in range(10, 52):
-            for x in range(64):
-                if int(grid[y, x]) == 2 and (y, x) not in slot_visited:
-                    comp = []
-                    q = [(y, x)]
-                    slot_visited.add((y, x))
-                    while q:
-                        cy, cx = q.pop()
-                        comp.append((cy, cx))
-                        for ny, nx in ((cy + 1, cx), (cy - 1, cx), (cy, cx + 1), (cy, cx - 1)):
-                            if 10 <= ny < 52 and 0 <= nx < 64 and (ny, nx) not in slot_visited:
-                                if int(grid[ny, nx]) == 2:
-                                    slot_visited.add((ny, nx))
-                                    q.append((ny, nx))
-                    avg_y = int(round(float(np.mean([p[0] for p in comp]))))
-                    avg_x = int(round(float(np.mean([p[1] for p in comp]))))
-                    slots.append({"x": avg_x, "y": avg_y})
+
+        for idx in range(1, num_mid + 1):
+            pts = np.argwhere(labeled_mid == idx)
+            # Socket dots inside empty slots are small components (1 to 4 pixels)
+            if 1 <= len(pts) <= 6:
+                avg_y = int(round(float(np.mean(pts[:, 0]))))
+                avg_x = int(round(float(np.mean(pts[:, 1]))))
+                slots.append({"x": avg_x, "y": avg_y})
         slots.sort(key=lambda s: (s["y"], s["x"]))
 
         # 4. Generate placement actions
@@ -151,6 +129,6 @@ class VisualProgramSynthesisSkillAcquisition:
                 actions.append((6, {"x": match["x"], "y": match["y"]}))
                 actions.append((6, {"x": slot["x"], "y": slot["y"]}))
 
-        # 5. Program execution / verification trigger (Action 5)
+        # 5. Program execution trigger (Action 5)
         actions.append((5, None))
         return actions

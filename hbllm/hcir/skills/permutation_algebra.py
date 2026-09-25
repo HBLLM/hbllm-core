@@ -152,79 +152,100 @@ class PermutationAlgebraSkillAcquisition:
         return solution_coords
 
     @classmethod
+    def _extract_tiles(cls, grid: np.ndarray) -> list[tuple[int, int, bool]]:
+        """Extract toggle tiles forming an 8-stride orthogonal lattice and their binary states."""
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # Find connected components of non-bg pixels in y < 60, x < 60
+        mask = (grid != bg) & (np.arange(64)[:, None] < 60) & (np.arange(64)[None, :] < 60)
+        from scipy.ndimage import label
+
+        labeled, num_features = label(mask)
+        raw_tiles: list[tuple[int, int, int]] = []  # (cc, cr, center_color)
+
+        for idx in range(1, num_features + 1):
+            pts = np.argwhere(labeled == idx)
+            if 15 <= len(pts) <= 50:
+                min_r, min_c = int(pts[:, 0].min()), int(pts[:, 1].min())
+                max_r, max_c = int(pts[:, 0].max()), int(pts[:, 1].max())
+                h = max_r - min_r + 1
+                w = max_c - min_c + 1
+                if 4 <= w <= 8 and 4 <= h <= 8:
+                    cr = (min_r + max_r) // 2
+                    cc = (min_c + max_c) // 2
+                    center_color = int(grid[cr, cc])
+                    raw_tiles.append((cc, cr, center_color))
+
+        def is_orthogonal_8(t1: tuple[int, int, Any], t2: tuple[int, int, Any]) -> bool:
+            dx = abs(t1[0] - t2[0])
+            dy = abs(t1[1] - t2[1])
+            return (dx == 8 and dy == 0) or (dx == 0 and dy == 8)
+
+        # Filter to tiles that belong to the 8-stride lattice
+        lattice_tiles = [
+            t for t in raw_tiles if sum(1 for t2 in raw_tiles if is_orthogonal_8(t, t2)) >= 1
+        ]
+        if len(lattice_tiles) < 4:
+            return []
+
+        # Determine binary ON/OFF state from center colors
+        center_colors = [t[2] for t in lattice_tiles]
+        u_cols, u_counts = np.unique(center_colors, return_counts=True)
+        if len(u_cols) < 2:
+            return []
+        # The off state is typically the majority or resting color, on state is minority
+        off_color = u_cols[np.argmax(u_counts)]
+
+        tiles = [(t[0], t[1], t[2] != off_color) for t in lattice_tiles]
+        tiles.sort(key=lambda t: (t[1], t[0]))
+        return tiles
+
+    @classmethod
     def is_lights_out_grid(cls, grid: Any, available_actions: list[int]) -> bool:
         """Domain-agnostic check if environment represents a Lights Out toggle grid."""
-        if available_actions != [6]:
+        if set(available_actions) != {6}:
             return False
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
             return False
-        colors = set(np.unique(grid))
-        return (
-            12 in colors
-            and 4 in colors
-            and 2 in colors
-            and (8 in colors or 9 in colors or 11 in colors)
+
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        from hbllm.hcir.skills.automaton_synthesis import (
+            AutomatonProgramSynthesisSkillAcquisition,
         )
+
+        if AutomatonProgramSynthesisSkillAcquisition.is_automaton_synthesis_grid(
+            grid, available_actions
+        ):
+            return False
+
+        tiles = cls._extract_tiles(grid)
+        return len(tiles) >= 4
 
     @classmethod
     def plan_lights_out_grid(
         cls, grid: Any, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Compute algebraic solution clicks to resolve cellular toggle grid."""
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
             return []
 
-        # 1. Detect candidate component pixels of toggle tiles
-        pts = np.argwhere(np.isin(grid, [8, 9, 12, 0, 2]))
-        pts = [p for p in pts if p[0] < 60]
-        visited: set[tuple[int, int]] = set()
-        raw_tiles: list[tuple[int, int, bool]] = []
-        for r, c in pts:
-            if (r, c) not in visited:
-                comp: list[tuple[int, int]] = []
-                q = [(r, c)]
-                visited.add((r, c))
-                while q:
-                    cr, cc = q.pop()
-                    comp.append((cr, cc))
-                    for nr, nc in [(cr + 1, cc), (cr - 1, cc), (cr, cc + 1), (cr, cc - 1)]:
-                        if 0 <= nr < 60 and 0 <= nc < 64 and (nr, nc) not in visited:
-                            if grid[nr, nc] in [8, 9, 12, 0, 2]:
-                                visited.add((nr, nc))
-                                q.append((nr, nc))
-                if 20 <= len(comp) <= 45:
-                    cr = int(round(float(np.mean([p[0] for p in comp]))))
-                    cc = int(round(float(np.mean([p[1] for p in comp]))))
-                    # Ensure tile is on interactive active board (color 4 background present)
-                    is_on_board = any(
-                        grid[
-                            max(0, cr - 4) : min(64, cr + 5), max(0, cc - 4) : min(64, cc + 5)
-                        ].flatten()
-                        == 4
-                    )
-                    if is_on_board and cc < 60:
-                        patch = grid[cr - 1 : cr + 2, cc - 1 : cc + 2]
-                        is_on = bool(np.sum(patch == 9) >= 4)
-                        raw_tiles.append((cc, cr, is_on))
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        tiles = cls._extract_tiles(grid)
+        N = len(tiles)
+        if N == 0:
+            return []
 
         def is_orthogonal_8(t1: tuple[int, int, bool], t2: tuple[int, int, bool]) -> bool:
             dx = abs(t1[0] - t2[0])
             dy = abs(t1[1] - t2[1])
             return (dx == 8 and dy == 0) or (dx == 0 and dy == 8)
 
-        # 2. Filter to regular orthogonal lattice tiles
-        tiles: list[tuple[int, int, bool]] = []
-        for t1 in raw_tiles:
-            nbrs = sum(1 for t2 in raw_tiles if is_orthogonal_8(t1, t2))
-            if nbrs >= 1:
-                tiles.append(t1)
-
-        tiles.sort(key=lambda t: (t[1], t[0]))
-        N = len(tiles)
-        if N == 0:
-            return []
-
-        # 3. Construct GF(2) linear incidence system A * x = b (mod 2)
+        # Construct GF(2) linear incidence system A * x = b (mod 2)
         A = np.zeros((N, N), dtype=int)
         b = np.zeros(N, dtype=int)
         for i in range(N):

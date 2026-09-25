@@ -33,21 +33,26 @@ class ReticleSuperpositionSkillAcquisition:
         if H != 64 or W != 64:
             return False
 
-        # Characteristic background color 5 and center indicator dot 0
+        # Dominant background color
+        bg = int(np.bincount(grid.flatten().astype(np.int64)).argmax())
+        if np.sum(grid == bg) < 3000:
+            return False
+
+        border_cols = set(grid[0, :]) | set(grid[-1, :]) | set(grid[:, 0]) | set(grid[:, -1])
         unique_colors, counts = np.unique(grid, return_counts=True)
         color_map = dict(zip(unique_colors, counts))
 
-        # Background color 5 must dominate (> 3000 cells)
-        if color_map.get(5, 0) < 3000:
-            return False
+        dot_candidates = [c for c, count in color_map.items() if c != bg and count <= 4]
+        has_dot = len(dot_candidates) >= 1
 
-        # Must have center dot 0 and crosshair colors (subset of {9, 11, 12, 13})
-        has_dot_0 = 0 in color_map and color_map[0] <= 4
-        crosshair_colors = {9, 11, 12, 13}
-        present_crosshairs = set(color_map.keys()).intersection(crosshair_colors)
-        has_crosshairs = len(present_crosshairs) >= 2
+        crosshair_colors = [
+            c
+            for c, count in color_map.items()
+            if c != bg and c not in dot_candidates and c not in border_cols and count >= 15
+        ]
+        has_crosshairs = len(crosshair_colors) >= 1
 
-        return has_dot_0 and has_crosshairs
+        return has_dot and has_crosshairs
 
     @classmethod
     def plan_reticle_superposition_grid(
@@ -57,12 +62,25 @@ class ReticleSuperpositionSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
-        dot0_pts = np.argwhere(grid == 0)
+        bg = int(np.bincount(grid.flatten().astype(np.int64)).argmax())
+        border_cols = set(grid[0, :]) | set(grid[-1, :]) | set(grid[:, 0]) | set(grid[:, -1])
+        unique_colors, counts = np.unique(grid, return_counts=True)
+        color_map = dict(zip(unique_colors, counts))
+
+        dot_candidates = [c for c, count in color_map.items() if c != bg and count <= 4]
+        if not dot_candidates:
+            return []
+        dot_col = dot_candidates[0]
+        dot0_pts = np.argwhere(grid == dot_col)
         if len(dot0_pts) == 0:
             return []
         dot0 = tuple(dot0_pts[0])
 
-        crosshair_colors = [c for c in [9, 11, 12, 13] if c in grid]
+        crosshair_colors = [
+            c
+            for c, count in color_map.items()
+            if c != bg and c != dot_col and c not in border_cols and count >= 15
+        ]
         active_color: int | None = None
         reticle_info: dict[int, tuple[int, int]] = {}
 

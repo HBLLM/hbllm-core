@@ -212,6 +212,17 @@ class CoupledControllableSkillAcquisition:
             gy = (min_r_e - offset_r) // scale
             avatars.append((gx, gy))
 
+        # Dynamically determine walkable floor colors vs boundary walls
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = vals[np.argmax(counts)]
+        avatar_color = avatar_entities[0].color
+
+        # Floor colors are the dominant colors within the playable grid area
+        play_area = grid[offset_r : offset_r + grid_h * scale, offset_c : offset_c + grid_w * scale]
+        p_vals, p_counts = np.unique(play_area, return_counts=True)
+        # Top 2 most frequent colors in play area are floor colors
+        floor_candidates = set(p_vals[np.argsort(p_counts)[-3:]]) - {avatar_color}
+
         walls = set()
         spikes = set()
         for gy in range(grid_h):
@@ -220,9 +231,12 @@ class CoupledControllableSkillAcquisition:
                     offset_r + gy * scale : offset_r + (gy + 1) * scale,
                     offset_c + gx * scale : offset_c + (gx + 1) * scale,
                 ]
-                if np.any(cell == 8):
-                    spikes.add((gx, gy))
-                elif not np.all(np.isin(cell, [5, avatar_entities[0].color])):
+                cell_colors = set(np.unique(cell))
+                # If cell is predominantly floor or avatar, it is walkable
+                if cell_colors.issubset(floor_candidates | {avatar_color}):
+                    continue
+                # If cell contains boundary / outer background, it is a wall
+                if bg in cell_colors or len(cell_colors - floor_candidates - {avatar_color}) >= 1:
                     walls.add((gx, gy))
 
         actions = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}

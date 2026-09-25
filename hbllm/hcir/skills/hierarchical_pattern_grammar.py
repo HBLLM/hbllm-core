@@ -37,11 +37,12 @@ class HierarchicalPatternGrammarSkillAcquisition:
             return False
 
         # 1. Target row at y=1: check for horizontal sequence of colored squares
+        ignore_colors = {int(grid[0, 0]), int(grid[0, -1])}
         has_targets = False
         target_count = 0
         for c in range(60):
             col = grid[1, c]
-            if col not in (0, 4) and grid[1, c + 1] == col and grid[1, c + 2] == col:
+            if col not in ignore_colors and grid[1, c + 1] == col and grid[1, c + 2] == col:
                 target_count += 1
                 c += 4
         if target_count >= 3:
@@ -52,7 +53,7 @@ class HierarchicalPatternGrammarSkillAcquisition:
         source_count = 0
         for c in range(60):
             col = grid[58, c]
-            if col not in (0, 4) and grid[57, c] == col and grid[59, c] == col:
+            if col not in ignore_colors and grid[57, c] == col and grid[59, c] == col:
                 source_count += 1
                 c += 4
         if source_count >= 3:
@@ -65,11 +66,13 @@ class HierarchicalPatternGrammarSkillAcquisition:
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Extract targets, source palette, and frame hierarchy to produce an action plan."""
+        ignore_colors = {int(grid[0, 0]), int(grid[0, -1])}
+
         # 1. Target sequence from row 1
         targets: list[tuple[int, int]] = []
         for c in range(60):
             col = int(grid[1, c])
-            if col not in (0, 4) and grid[1, c + 1] == col and grid[1, c + 2] == col:
+            if col not in ignore_colors and grid[1, c + 1] == col and grid[1, c + 2] == col:
                 if not targets or c - targets[-1][0] >= 5:
                     targets.append((c, col))
         target_colors = [col for _, col in targets]
@@ -78,7 +81,7 @@ class HierarchicalPatternGrammarSkillAcquisition:
         sources: dict[int, tuple[int, int]] = {}
         for c in range(60):
             col = int(grid[58, c])
-            if col not in (0, 4) and grid[57, c] == col and grid[59, c] == col:
+            if col not in ignore_colors and grid[57, c] == col and grid[59, c] == col:
                 if col not in sources:
                     sources[col] = (c, 58)
 
@@ -88,7 +91,7 @@ class HierarchicalPatternGrammarSkillAcquisition:
         for r in range(12, 45):
             for c in range(10, 50):
                 b_col = int(grid[r, c])
-                if b_col not in (0, 4, 2) and (r, c) not in visited_border:
+                if b_col not in ignore_colors and (r, c) not in visited_border:
                     w = 0
                     while c + w < 64 and grid[r, c + w] == b_col:
                         w += 1

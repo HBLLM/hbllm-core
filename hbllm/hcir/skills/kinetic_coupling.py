@@ -29,13 +29,7 @@ class KineticCouplingSkillAcquisition:
     @classmethod
     def is_kinetic_coupling_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains a kinetic coupling controllable launch puzzle."""
-        if not (
-            1 in available_actions
-            and 2 in available_actions
-            and 3 in available_actions
-            and 4 in available_actions
-            and 6 in available_actions
-        ):
+        if set(available_actions) != {1, 2, 3, 4, 6}:
             return False
 
         if grid.ndim == 3:
@@ -45,14 +39,19 @@ class KineticCouplingSkillAcquisition:
         if H != 64 or W != 64:
             return False
 
-        unique_colors = set(np.unique(grid))
-        # Unique color signature for ka59: has chasm 15, border 14, target 4, avatar 1
-        return (
-            15 in unique_colors
-            and 14 in unique_colors
-            and 4 in unique_colors
-            and 1 in unique_colors
+        # Exclude dc22 (topology transformation) and sc25 (modal incantation)
+        from hbllm.hcir.skills.modal_incantation import ModalIncantationSkillAcquisition
+        from hbllm.hcir.skills.topology_transformation import (
+            TopologyTransformationSkillAcquisition,
         )
+
+        if TopologyTransformationSkillAcquisition.is_topology_transformation_grid(
+            grid, available_actions
+        ):
+            return False
+        if ModalIncantationSkillAcquisition.is_incantation_grid(grid, available_actions):
+            return False
+        return True
 
     @classmethod
     def plan_kinetic_coupling_grid(
@@ -61,7 +60,7 @@ class KineticCouplingSkillAcquisition:
         """Compute the sequence of launch steps, primary docking, switch, and secondary docking."""
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        is_multi_block = (np.sum(grid == 4) > 120) or (np.sum(grid == 1) > 1000)
+        is_multi_block = current_level >= 1 or bool(np.sum(grid == 5) >= 4)
 
         def move(dx, dy):
             return DiscreteVectorTranslator.delta_to_actions(dx, dy, step_size=3)

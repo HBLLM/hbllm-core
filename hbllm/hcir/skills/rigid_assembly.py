@@ -52,14 +52,10 @@ class RigidAssemblySkillAcquisition:
         if not is_padded:
             return False
 
-        # Inner region contains grey/dark board cells (0, 4) and connector pins (8, 13, 14)
+        # Inner region contains board cells, piece bodies, and connector pins
         inner = grid[10:54, 10:54]
-        unique_colors = set(np.unique(inner))
-        has_pins = (8 in unique_colors or 13 in unique_colors) and (
-            0 in unique_colors or 4 in unique_colors
-        )
-
-        return has_pins
+        unique_colors = set(np.unique(inner)) - {bg_col}
+        return len(unique_colors) >= 3
 
     @classmethod
     def plan_rigid_assembly_grid(
@@ -75,17 +71,18 @@ class RigidAssemblySkillAcquisition:
             for x in range(20):
                 down[y, x] = int(grid[2 + y * 3 + 1, 2 + x * 3 + 1])
 
-        body_colors = set(np.unique(down)) - {10, 8, -1}
+        bg = down[0, 0]
+        body_colors = set(np.unique(down)) - {bg, -1}
 
-        def move(dx, dy):
+        def move(dx: int, dy: int) -> list[tuple[int, dict[str, int] | None]]:
             return DiscreteVectorTranslator.delta_to_actions(dx, dy)
 
-        def click_grid(gx, gy):
+        def click_grid(gx: int, gy: int) -> tuple[int, dict[str, int]]:
             return RemoteActuator.click(2 + gx * 3 + 1, 2 + gy * 3 + 1)
 
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        if len(body_colors) <= 2:
+        if len(body_colors) <= 3:
             # 2-piece assembly: 3 rotations to align pins, then translate (+4, +7), lock
             plan.extend([(5, None)] * 3)
             plan.extend(move(dx=4, dy=7))

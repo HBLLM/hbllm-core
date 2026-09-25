@@ -23,7 +23,7 @@ class GrammarTranslationSkillAcquisition:
     @classmethod
     def is_grammar_translation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains a formal rewrite grammar translation puzzle."""
-        # tr87 signature: actions {1, 2, 3, 4} (no click 5 or 6)
+        # tr87 signature: actions {1, 2, 3, 4} (no click 5, 6, 7)
         if set(available_actions) != {1, 2, 3, 4}:
             return False
 
@@ -34,13 +34,32 @@ class GrammarTranslationSkillAcquisition:
         if H != 64 or W != 64:
             return False
 
-        unique_colors = set(np.unique(grid))
-        # Unique color combination for tr87: background 3, grammar tags 7, and alphabet sets (10 or 11)
-        return (
-            3 in unique_colors
-            and 7 in unique_colors
-            and (10 in unique_colors or 11 in unique_colors)
-        )
+        # Structural signature:
+        # 1. Distinct bottom panel background region at y in [35, 60]
+        # 2. Presence of 7x7 square tile frames at top (y < 35)
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        bottom_half = grid[35:60, :]
+        bg_counts = np.bincount(bottom_half.flatten().astype(np.int64))
+        if bg_counts.max() < 0.35 * bottom_half.size:
+            return False
+
+        found_tiles = 0
+        for y in range(4, 28, 9):
+            for x in range(4, 56):
+                if x + 6 < 64 and y + 6 < 35:
+                    c = grid[y, x]
+                    if (
+                        c != bg
+                        and grid[y + 6, x] == c
+                        and grid[y, x + 6] == c
+                        and grid[y + 6, x + 6] == c
+                    ):
+                        found_tiles += 1
+                        if found_tiles >= 2:
+                            return True
+        return found_tiles >= 2
 
     GLYPH_TEMPLATES: dict[tuple[str, int], np.ndarray] = {
         ("A", 1): np.array(
@@ -130,9 +149,8 @@ class GrammarTranslationSkillAcquisition:
     }
 
     @classmethod
-    def match_glyph(cls, patch: np.ndarray) -> tuple[str, int] | None:
+    def match_glyph(cls, binary_patch: np.ndarray) -> tuple[str, int] | None:
         """Rotation-invariant matcher for 5x5 ARC glyph patches."""
-        binary_patch = patch == 5
         for (alpha, idx), tmpl in cls.GLYPH_TEMPLATES.items():
             for k in range(4):
                 if np.array_equal(np.rot90(binary_patch, k), tmpl):
@@ -158,43 +176,94 @@ class GrammarTranslationSkillAcquisition:
                     actions.extend([(1, None)] * abs(d))  # Decrement mod 7
             return actions
 
-        # Detect all glyphs across the grid
-        found_glyphs: list[tuple[int, int, str, int]] = []
-        visited = np.zeros((64, 64), dtype=bool)
-        for y in range(60):
-            for x in range(60):
-                if not visited[y, x] and (grid[y : y + 5, x : x + 5] == 5).sum() >= 7:
-                    matched = cls.match_glyph(grid[y : y + 5, x : x + 5])
-                    if matched is not None:
-                        found_glyphs.append((x, y, matched[0], matched[1]))
-                        visited[y : y + 5, x : x + 5] = True
+        # 1. Detect all 7x7 square tile frames and extract their interior 5x5 glyphs
+        found_glyphs: list[tuple[int, int, str, int, int]] = []
+        bg = int(grid[35, 0])
+        for y in range(64 - 6):
+            for x in range(64 - 6):
+                top = grid[y, x : x + 7]
+                bot = grid[y + 6, x : x + 7]
+                left = grid[y : y + 7, x]
+                right = grid[y : y + 7, x + 6]
+                c = top[0]
+                if c != 0 and c != bg:
+                    if (
+                        np.all(top == c)
+                        and np.all(bot == c)
+                        and np.all(left == c)
+                        and np.all(right == c)
+                    ):
+                        interior = grid[y + 1 : y + 6, x + 1 : x + 6]
+                        binary_patch = interior != c
+                        matched = cls.match_glyph(binary_patch)
+                        if matched is not None:
+                            found_glyphs.append((y + 1, x + 1, matched[0], matched[1], int(c)))
 
-        top_glyphs = sorted([g for g in found_glyphs if 35 <= g[1] < 48], key=lambda g: g[0])
-        bot_glyphs = sorted([g for g in found_glyphs if g[1] >= 48], key=lambda g: g[0])
+        input_glyphs = sorted([g for g in found_glyphs if 35 <= g[0] < 48], key=lambda g: g[1])
+        output_glyphs = sorted([g for g in found_glyphs if g[0] >= 48], key=lambda g: g[1])
 
-        top_indices = [g[3] for g in top_glyphs]
-        bot_indices = [g[3] for g in bot_glyphs]
+        if not input_glyphs or not output_glyphs:
+            return []
 
-        # Production rewrite rules induced from grammar rules
-        is_multi_tier = bool(11 in np.unique(grid))
-        if not is_multi_tier:
-            rules: dict[int, list[int]] = {4: [3], 2: [2], 3: [6], 5: [5], 1: [1], 7: [7]}
-        else:
-            rules = {1: [3], 3: [1, 5, 1], 5: [2, 2], 7: [7], 4: [4, 3, 6], 6: [4, 2]}
+        lhs_color = input_glyphs[0][4]
 
-        target_indices: list[int] = []
-        for t in top_indices:
-            target_indices.extend(rules.get(t, [t]))
+        # 2. Induce formal grammar rewrite rules from the specification panel (y < 35)
+        rule_glyphs = [g for g in found_glyphs if g[0] < 35]
+        rows: dict[int, list[tuple[int, int, str, int, int]]] = {}
+        for g in rule_glyphs:
+            row_key = round(g[0] / 5.0) * 5
+            rows.setdefault(row_key, []).append(g)
 
-        if bot_indices and target_indices and len(bot_indices) == len(target_indices):
-            diffs: list[int] = []
-            for cur, tgt in zip(bot_indices, target_indices):
-                d = (tgt - cur) % 7
-                if d > 3:
-                    d -= 7
-                diffs.append(d)
-            return generate_slot_plan(diffs)
+        rules: dict[tuple[int, ...], list[int]] = {}
+        for _, g_list in rows.items():
+            g_list.sort(key=lambda g: g[1])
+            curr_side = None
+            curr_chunk: list[tuple[int, int, str, int, int]] = []
+            rule_pairs: list[tuple[str, list[int]]] = []
+            for g in g_list:
+                side = "lhs" if g[4] == lhs_color else "rhs"
+                if side != curr_side:
+                    if curr_chunk and curr_side is not None:
+                        rule_pairs.append((curr_side, [c[3] for c in curr_chunk]))
+                    curr_side = side
+                    curr_chunk = [g]
+                else:
+                    curr_chunk.append(g)
+            if curr_chunk and curr_side is not None:
+                rule_pairs.append((curr_side, [c[3] for c in curr_chunk]))
 
-        # Fallback if perception fails
-        diffs = [2, 2, -3, 1, 2] if not is_multi_tier else [3, 2, -3, -2, -3, -3, 3]
+            for i in range(0, len(rule_pairs) - 1, 2):
+                if rule_pairs[i][0] == "lhs" and rule_pairs[i + 1][0] == "rhs":
+                    rules[tuple(rule_pairs[i][1])] = rule_pairs[i + 1][1]
+
+        # 3. Apply grammar rewrite to the input string
+        input_seq = [g[3] for g in input_glyphs]
+        target_seq: list[int] = []
+        idx = 0
+        while idx < len(input_seq):
+            matched_rule = False
+            for l in range(3, 0, -1):
+                if idx + l <= len(input_seq):
+                    sub = tuple(input_seq[idx : idx + l])
+                    if sub in rules:
+                        target_seq.extend(rules[sub])
+                        idx += l
+                        matched_rule = True
+                        break
+            if not matched_rule:
+                target_seq.append(input_seq[idx])
+                idx += 1
+
+        init_seq = [g[3] for g in output_glyphs]
+        if len(init_seq) != len(target_seq):
+            return []
+
+        # 4. Synthesize optimal cyclic mutation plan
+        diffs: list[int] = []
+        for cur, tgt in zip(init_seq, target_seq):
+            d = (tgt - cur) % 7
+            if d > 3:
+                d -= 7
+            diffs.append(d)
+
         return generate_slot_plan(diffs)

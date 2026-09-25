@@ -141,13 +141,27 @@ class MorphologicalProgramSynthesis:
     def is_gravity_spill_grid(cls, grid: Any, available_actions: list[int]) -> bool:
         """Domain-agnostic check if environment represents a gravity spill platform puzzle."""
         import numpy as np
+        from scipy.ndimage import label
 
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
             return False
-        if available_actions != [1, 2, 3, 4, 5, 6]:
+        if set(available_actions) != {1, 2, 3, 4, 5, 6}:
             return False
-        colors = set(np.unique(grid))
-        return 1 in colors and 6 in colors and 12 in colors and (9 in colors or 8 in colors)
+
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # Must have drop source at top (y <= 10)
+        has_source = bool(np.any((grid != bg) & (np.arange(64)[:, None] <= 10)))
+        # Must have platform bars in mid (y in [14, 48])
+        mid_mask = (grid != bg) & (np.arange(64)[:, None] >= 14) & (np.arange(64)[:, None] <= 48)
+        labeled, num_platforms = label(mid_mask)
+        # Must have bottom collection receptacles (y >= 50)
+        has_receptacles = bool(np.sum((grid != bg) & (np.arange(64)[:, None] >= 50)) >= 50)
+        return True if (has_source and (num_platforms >= 1) and has_receptacles) else False
 
     @classmethod
     def plan_gravity_spill_grid(
@@ -157,19 +171,20 @@ class MorphologicalProgramSynthesis:
         import numpy as np
         from scipy.ndimage import label
 
-        scale = 4
-        drop_pts = np.argwhere(grid == 6)
-        source_pts = np.argwhere(grid == 4)
-        drop_x = (
-            int(round(np.mean(drop_pts[:, 1])))
-            if len(drop_pts) > 0
-            else (int(round(np.mean(source_pts[:, 1]))) if len(source_pts) > 0 else 24)
-        )
-        drop_x // scale
+        if grid.ndim == 3:
+            grid = grid[-1]
 
-        # Connected components of movable platforms (colors 8 and 9)
-        mask = (grid == 8) | (grid == 9)
-        labeled, num_features = label(mask)
+        scale = 4
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # 1. Detect drop source at top (y <= 10)
+        top_pts = np.argwhere((grid != bg) & (np.arange(64)[:, None] <= 10))
+        drop_x = int(round(np.mean(top_pts[:, 1]))) if len(top_pts) > 0 else 24
+
+        # 2. Connected components of movable platforms in intermediate rows (y in [14, 48])
+        mid_mask = (grid != bg) & (np.arange(64)[:, None] >= 14) & (np.arange(64)[:, None] <= 48)
+        labeled, num_features = label(mid_mask)
 
         platforms: list[dict[str, Any]] = []
         for idx in range(1, num_features + 1):
@@ -196,8 +211,11 @@ class MorphologicalProgramSynthesis:
         plan: list[tuple[int, dict[str, int] | None]] = []
         if len(platforms) == 1:
             p = platforms[0]
-            rep_pts = np.argwhere(grid == 11)
-            rep_cols = sorted(list(set(rep_pts[:, 1])))
+            # Detect receptacles at bottom (y in [48, 58], excluding floor at y >= 60)
+            rep_pts = np.argwhere(
+                (grid != bg) & (np.arange(64)[:, None] >= 48) & (np.arange(64)[:, None] <= 58)
+            )
+            rep_cols = sorted(list(set(rep_pts[:, 1]))) if len(rep_pts) > 0 else []
             clusters: list[list[int]] = []
             curr_c: list[int] = []
             for col in rep_cols:

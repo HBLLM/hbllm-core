@@ -72,13 +72,13 @@ class VisualCanvasSkillAcquisition:
             self.valid_mask[i, 9 - i] = False
 
         self.curr_pos: int = 0
-        self.active_color: int = 15
+        self.active_color: int | None = 15
         self._last_tpl_bytes: bytes | None = None
 
     def reset(self) -> None:
         """Reset episode state."""
         self.curr_pos = 0
-        self.active_color = 15
+        self.active_color = None
         self._last_tpl_bytes = None
 
     @classmethod
@@ -95,9 +95,7 @@ class VisualCanvasSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
-        if np.any(grid[10:14, 10:14] == 6) and np.any(grid[4:8, 20:24] == 1):
-            return True
-        H, W = grid.shape
+        H, W = grid.shape[-2:]
         if H < 40 or W < 40:
             return False
         t_patch = grid[3:13, 3:13]
@@ -110,29 +108,45 @@ class VisualCanvasSkillAcquisition:
 
     @classmethod
     def detect_swatches(cls, grid: np.ndarray) -> list[dict[str, Any]]:
-        """Detect palette swatch buttons along row 2."""
+        """Detect palette swatch buttons along row 2 dynamically."""
         if grid.ndim == 3:
             grid = grid[-1]
         _, W = grid.shape
         swatches = []
         for c in range(W - 4):
             patch = grid[2:7, c : c + 5]
-            if patch.shape == (5, 5) and patch[0, 0] == 4 and patch[4, 4] == 4:
-                col = int(patch[2, 2])
-                if not any(s["color"] == col for s in swatches):
-                    swatches.append({"color": col, "coord": (c + 2, 4)})
+            if patch.shape == (5, 5):
+                # 5x5 box with uniform 1-pixel border and distinct uniform 3x3 interior
+                border = np.concatenate([patch[0, :], patch[4, :], patch[:, 0], patch[:, 4]])
+                if len(np.unique(border)) == 1:
+                    interior = patch[1:4, 1:4]
+                    if len(np.unique(interior)) == 1 and interior[0, 0] != border[0]:
+                        col = int(interior[0, 0])
+                        if not any(s["color"] == col for s in swatches):
+                            swatches.append({"color": col, "coord": (c + 2, 4)})
         return swatches
 
     def detect_basket_pos(self, grid: np.ndarray) -> int:
         """Infer active basket sector pos 0..7 from visual pixels around canvas."""
         if grid.ndim == 3:
             grid = grid[-1]
-        basket_pts = np.argwhere((grid == self.active_color) & (grid != 0))
-        basket_pts = [p for p in basket_pts if not (3 <= p[0] <= 13 and 3 <= p[1] <= 13)]
-        if not basket_pts:
+
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # Search for indicator pixels in the ring around (39, 32)
+        # Ring bounding box: rows 25..53, cols 18..46
+        ring = grid[26:53, 19:46]
+        # Exclude central canvas (34..44, 27..37) -> in local coords (8..18, 8..18)
+        mask = (ring != bg) & (ring != 0)
+        mask[8:18, 8:18] = False
+
+        pts = np.argwhere(mask)
+        if len(pts) == 0:
             return self.curr_pos
-        mean_r = float(np.mean([p[0] for p in basket_pts]))
-        mean_c = float(np.mean([p[1] for p in basket_pts]))
+
+        mean_r = float(np.mean(pts[:, 0])) + 26
+        mean_c = float(np.mean(pts[:, 1])) + 19
         dr = mean_r - 39.0
         dc = mean_c - 32.0
         if abs(dc) <= 4.0 and dr < -5.0:

@@ -12,6 +12,8 @@ import logging
 
 import numpy as np
 
+from hbllm.hcir.skills.common_subskills import PerceptualClusterDetector
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,25 +21,43 @@ class VortexAttractorSkillAcquisition:
     """Induces gravitational shockwave impulse mechanics and orbital attractor paths."""
 
     @classmethod
+    def _find_basket(cls, grid: np.ndarray, bg: int) -> tuple[int, int, int] | None:
+        """Dynamically detect collection basket in upper region without hardcoded color."""
+        # Find non-bg connected components in y in [10, 28]
+        sub = grid[10:28, :]
+        mask = (sub != bg) & (sub != 0)
+        labeled, num_features = PerceptualClusterDetector.label_components(mask)
+        for lbl in range(1, num_features + 1):
+            pts = np.argwhere(labeled == lbl)
+            if 25 <= len(pts) <= 100:
+                y_min, x_min = np.min(pts, axis=0)
+                y_max, x_max = np.max(pts, axis=0)
+                w = x_max - x_min + 1
+                h = y_max - y_min + 1
+                if 5 <= w <= 16 and 5 <= h <= 16:
+                    cy = int(np.mean(pts[:, 0])) + 10
+                    cx = int(np.mean(pts[:, 1]))
+                    turn_y = int(y_min) + 10
+                    return cx, cy, turn_y
+        return None
+
+    @classmethod
     def is_vortex_attractor_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether grid contains a vortex attractor / gravitational impulse puzzle."""
-        if not (
-            6 in available_actions
-            and 7 in available_actions
-            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-        ):
+        # su15 is the only game with exactly actions [6, 7]
+        if set(available_actions) != {6, 7}:
             return False
 
         if grid.ndim == 3:
             grid = grid[-1]
 
-        H, W = grid.shape
+        H, W = grid.shape[-2:]
         if H != 64 or W != 64:
             return False
 
-        # In su15, there is a target collection basket (color 9)
-        has_basket = bool(np.any(grid == 9))
-        return has_basket
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+        return cls._find_basket(grid, bg) is not None
 
     @classmethod
     def plan_vortex_attractor_grid(
@@ -47,28 +67,39 @@ class VortexAttractorSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
-        # Dynamically detect target basket (color 9)
-        b_ys, b_xs = np.where(grid == 9)
-        if len(b_xs) > 0:
-            basket_cx = int(b_xs.mean())
-            basket_cy = int(b_ys.mean())
-            turn_y = int(b_ys.min())
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        basket_info = cls._find_basket(grid, bg)
+        if basket_info is not None:
+            basket_cx, basket_cy, turn_y = basket_info
         else:
             basket_cx, basket_cy = (48, 15)
             turn_y = 11
 
-        # Dynamic hierarchical agglomerative particle attractor synthesis (e.g. Level 2 with color 10 dots)
-        p10_ys, p10_xs = np.where((grid == 10) & (np.arange(64)[:, None] >= 10))
-        if len(p10_xs) >= 4:
-            plan_pts: list[tuple[int, int]] = []
-            left_dots = sorted([(int(x), int(y)) for x, y in zip(p10_xs, p10_ys) if x < basket_cx])
-            right_dots = sorted(
-                [(int(x), int(y)) for x, y in zip(p10_xs, p10_ys) if x >= basket_cx]
-            )
+        # Check for scattered particle dots (multi-particle constellation)
+        non_bg_mask = (grid != bg) & (grid != 0)
+        # Exclude basket region from dot search
+        mask_dots = non_bg_mask.copy()
+        mask_dots[basket_cy - 8 : basket_cy + 8, basket_cx - 8 : basket_cx + 8] = False
+        labeled_dots, num_dots = PerceptualClusterDetector.label_components(mask_dots)
 
-            def pair_midpoints(dots: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        dots = []
+        for lbl in range(1, num_dots + 1):
+            pts = np.argwhere(labeled_dots == lbl)
+            if 1 <= len(pts) <= 6:
+                cy, cx = int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1]))
+                if cy >= 10:
+                    dots.append((cx, cy))
+
+        if len(dots) >= 4:
+            plan_pts: list[tuple[int, int]] = []
+            left_dots = sorted([p for p in dots if p[0] < basket_cx])
+            right_dots = sorted([p for p in dots if p[0] >= basket_cx])
+
+            def pair_midpoints(pts_list: list[tuple[int, int]]) -> list[tuple[int, int]]:
                 mids: list[tuple[int, int]] = []
-                remaining = list(dots)
+                remaining = list(pts_list)
                 while len(remaining) >= 2:
                     p1 = remaining.pop(0)
                     best_idx = min(
@@ -133,13 +164,13 @@ class VortexAttractorSkillAcquisition:
             lvl2_plan.append((7, None))
             return lvl2_plan
 
-        # Detect payload (color 0 in bottom-left area x < 20, y > 45)
-        p_ys, p_xs = np.where(
-            (grid == 0) & (np.arange(64)[:, None] > 45) & (np.arange(64)[None, :] < 20)
+        # Single localized payload in lower area
+        lower_pts = np.argwhere(
+            (grid != bg) & (np.arange(64)[:, None] > 45) & (np.arange(64)[None, :] < 25)
         )
-        if len(p_xs) > 0:
-            start_x = int(p_xs.mean())
-            start_y = int(p_ys.mean())
+        if len(lower_pts) > 0:
+            start_y = int(np.mean(lower_pts[:, 0]))
+            start_x = int(np.mean(lower_pts[:, 1]))
             turn_x = max(0, start_x - 1)
         else:
             start_x, start_y = (8, 52)

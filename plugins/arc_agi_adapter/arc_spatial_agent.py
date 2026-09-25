@@ -442,6 +442,9 @@ class ARC3SpatialCognitiveAgent:
         has_program_skill = hasattr(
             blackbox_state, "program_skills"
         ) and blackbox_state.program_skills.is_visual_program_grid(curr_grid, available_actions)
+        has_incantation_skill = hasattr(
+            blackbox_state, "incantation_skills"
+        ) and blackbox_state.incantation_skills.is_incantation_grid(curr_grid, available_actions)
         if (
             untested_moves
             and not has_queued_skills
@@ -458,6 +461,7 @@ class ARC3SpatialCognitiveAgent:
             and not has_canvas_skill
             and not has_vortex_skill
             and not has_program_skill
+            and not has_incantation_skill
         ):
             self.last_action_data = None
             return untested_moves[0], 0.5

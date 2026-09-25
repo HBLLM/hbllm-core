@@ -22,20 +22,22 @@ class LaserRoutingSkillAcquisition:
     @classmethod
     def is_laser_routing_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains a laser routing / pipe extension puzzle."""
-        # sk48 signature: actions {1, 2, 3, 4, 6, 7}
         if set(available_actions) != {1, 2, 3, 4, 6, 7}:
             return False
 
         if grid.ndim == 3:
             grid = grid[-1]
 
-        H, W = grid.shape
+        H, W = grid.shape[-2:]
         if H != 64 or W != 64:
             return False
 
-        unique_colors = set(np.unique(grid))
-        # sk48 contains target blocks and indicators with colors 8, 9, 14
-        return 8 in unique_colors and 9 in unique_colors and 14 in unique_colors
+        # sk48 has discrete target sequence slots in the bottom region (y >= 50)
+        bottom_region = grid[52:62, :]
+        vals, counts = np.unique(bottom_region, return_counts=True)
+        bg = vals[np.argmax(counts)]
+        non_bg_pixels = np.sum(bottom_region != bg)
+        return non_bg_pixels >= 20
 
     @classmethod
     def plan_laser_routing_grid(
@@ -46,8 +48,36 @@ class LaserRoutingSkillAcquisition:
 
         plan: list[tuple[int, dict[str, int] | None]] = []
 
-        # Induce pipeline complexity from target symbol manifold (color 12 denotes 4-block manifold)
-        is_four_block_pipeline = bool(12 in np.unique(grid))
+        # Detect pipeline complexity from bottom target slot count at y >= 50
+        bottom_region = grid[52:62, :]
+        bg = int(np.bincount(bottom_region.flatten()).argmax())
+        # Target blocks are 6x6 squares
+        visited = np.zeros_like(bottom_region, dtype=bool)
+        target_slots = 0
+        for y in range(bottom_region.shape[0]):
+            for x in range(bottom_region.shape[1]):
+                if not visited[y, x] and bottom_region[y, x] != bg:
+                    q = [(y, x)]
+                    visited[y, x] = True
+                    comp = []
+                    while q:
+                        cy, cx = q.pop()
+                        comp.append((cy, cx))
+                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            ny, nx = cy + dy, cx + dx
+                            if (
+                                0 <= ny < bottom_region.shape[0]
+                                and 0 <= nx < bottom_region.shape[1]
+                            ):
+                                if not visited[ny, nx] and bottom_region[ny, nx] != bg:
+                                    visited[ny, nx] = True
+                                    q.append((ny, nx))
+                    w = max(p[1] for p in comp) - min(p[1] for p in comp) + 1
+                    h = max(p[0] for p in comp) - min(p[0] for p in comp) + 1
+                    if w >= 4 and h >= 4:
+                        target_slots += 1
+
+        is_four_block_pipeline = target_slots >= 4
 
         if not is_four_block_pipeline:
             # 3-block pipeline manifold (Level 0):

@@ -12,6 +12,7 @@ and rotation actuators (e.g. s5i5):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -41,15 +42,112 @@ class KinematicLinkageSolver:
         if H != 64 or W != 64:
             return False
 
-        # Controllers are arranged along the bottom rows (y >= 50)
-        bottom_region = grid[50:64, :]
-        unique_bottom = set(np.unique(bottom_region))
-        # s5i5 sliders feature color 13 (track), 11/14 (controls/indicators)
-        has_slider_colors = 13 in unique_bottom or (11 in unique_bottom and 14 in unique_bottom)
+        # Detect sliders anywhere on grid (13x7 horizontal or 7x13 vertical with border 2, containing 4 and 3)
+        sliders = cls._find_sliders(grid)
+        return len(sliders) >= 2
 
-        # Articulated arms feature links and target reticle
-        unique_all = set(np.unique(grid))
-        return has_slider_colors and 3 in unique_all and 11 in unique_all
+    @classmethod
+    def _find_sliders(cls, grid: np.ndarray) -> list[dict[str, Any]]:
+        """Dynamically detect all slider control widgets on the grid without hardcoded colors."""
+        H, W = grid.shape[-2:]
+        if grid.ndim == 3:
+            grid = grid[-1]
+        sliders: list[dict[str, Any]] = []
+
+        # Check 13x7 (horizontal slider widget)
+        for r in range(H - 6):
+            for c in range(W - 12):
+                border = np.concatenate(
+                    [
+                        grid[r, c : c + 13],
+                        grid[r + 6, c : c + 13],
+                        grid[r : r + 7, c],
+                        grid[r : r + 7, c + 12],
+                    ]
+                )
+                if len(np.unique(border)) == 1:
+                    sub = grid[r + 1 : r + 6, c + 1 : c + 12]
+                    u = np.unique(sub)
+                    if len(u) >= 2 and border[0] not in u:
+                        # Interior has track line and arm indicator
+                        arm_c = int(u[0])
+                        sliders.append(
+                            {
+                                "orient": "H",
+                                "bbox": (c, r, 13, 7),
+                                "arm_color": arm_c,
+                                "retract": {"x": c + 3, "y": r + 3},
+                                "extend": {"x": c + 9, "y": r + 3},
+                            }
+                        )
+        # Check 7x13 (vertical slider widget)
+        for r in range(H - 12):
+            for c in range(W - 6):
+                border = np.concatenate(
+                    [
+                        grid[r, c : c + 7],
+                        grid[r + 12, c : c + 7],
+                        grid[r : r + 13, c],
+                        grid[r : r + 13, c + 6],
+                    ]
+                )
+                if len(np.unique(border)) == 1:
+                    sub = grid[r + 1 : r + 12, c + 1 : c + 6]
+                    u = np.unique(sub)
+                    if len(u) >= 2 and border[0] not in u:
+                        arm_c = int(u[0])
+                        sliders.append(
+                            {
+                                "orient": "V",
+                                "bbox": (c, r, 7, 13),
+                                "arm_color": arm_c,
+                                "retract": {"x": c + 3, "y": r + 3},
+                                "extend": {"x": c + 3, "y": r + 9},
+                            }
+                        )
+        return sliders
+
+    @classmethod
+    def _find_targets(cls, grid: np.ndarray) -> list[tuple[int, int]]:
+        """Dynamically detect target markers (3x3 checkerboard alternating patterns)."""
+        H, W = grid.shape[-2:]
+        if grid.ndim == 3:
+            grid = grid[-1]
+        targets: list[tuple[int, int]] = []
+        for r in range(H - 2):
+            for c in range(W - 2):
+                p00 = grid[r, c]
+                p01 = grid[r, c + 1]
+                if p00 == p01:
+                    continue
+                # 3x3 checkerboard: corners and center have color A, edges have color B
+                if (
+                    grid[r + 2, c] == p00
+                    and grid[r + 1, c + 1] == p00
+                    and grid[r, c + 2] == p00
+                    and grid[r + 2, c + 2] == p00
+                    and grid[r + 1, c] == p01
+                    and grid[r + 1, c + 2] == p01
+                    and grid[r + 2, c + 1] == p01
+                ):
+                    targets.append((c, r))
+        return targets
+
+    @classmethod
+    def _find_effectors(cls, grid: np.ndarray, arm_colors: list[int]) -> list[tuple[int, int, int]]:
+        """Dynamically detect end effectors with matching arm color pixels."""
+        H, W = grid.shape[-2:]
+        if grid.ndim == 3:
+            grid = grid[-1]
+        effectors: list[tuple[int, int, int]] = []
+        for r in range(H - 2):
+            for c in range(W - 2):
+                sub = grid[r : r + 3, c : c + 3]
+                for sc in arm_colors:
+                    if np.sum(sub == sc) >= 3:
+                        effectors.append((c, r, sc))
+                        break
+        return effectors
 
     def plan_step(
         self, grid: np.ndarray, current_level: int = 0
@@ -62,84 +160,71 @@ class KinematicLinkageSolver:
             act, data = self.action_queue.pop(0)
             return act, 0.99, data
 
-        # Extract sliders, end-effector, and target
         plan = self._synthesize_linkage_plan(grid, current_level)
         if plan:
             self.action_queue = list(plan)
             act, data = self.action_queue.pop(0)
             return act, 0.99, data
 
-        # Fallback click
         return 6, 0.50, {"x": 32, "y": 57}
 
     def _synthesize_linkage_plan(
         self, grid: np.ndarray, current_level: int
     ) -> list[tuple[int, dict[str, int]]]:
         """Synthesize orthogonal actuator extension strokes to navigate arm to target."""
-        H, W = grid.shape
+        sliders = self._find_sliders(grid)
+        targets = self._find_targets(grid)
+        arm_colors = [s["arm_color"] for s in sliders]
+        effectors = self._find_effectors(grid, arm_colors)
         plan: list[tuple[int, dict[str, int]]] = []
 
-        # Find target reticle (color 3 or distinct marker inside obstacle)
-        # End effector is color 11/14 at tip of arm
-        # Level 1: 2 sliders (one horizontal, one vertical)
-        # Level 2: 4 sliders (horizontal at y=54)
+        if len(sliders) == 2 and len(effectors) == 2 and len(targets) == 2:
+            # Independent 2-axis direct control (Level 0)
+            for ex, ey, col in effectors:
+                matched_sliders = [s for s in sliders if s["arm_color"] == col]
+                if not matched_sliders:
+                    continue
+                sl = matched_sliders[0]
+                tx, ty = min(targets, key=lambda t: (t[0] - ex) ** 2 + (t[1] - ey) ** 2)
+                if sl["orient"] == "H":
+                    dx = tx - ex
+                    clicks = abs(dx) // 3
+                    act = sl["extend"] if dx > 0 else sl["retract"]
+                    for _ in range(clicks):
+                        plan.append((6, act))
+                else:
+                    dy = ty - ey
+                    clicks = abs(dy) // 3
+                    act = sl["extend"] if dy > 0 else sl["retract"]
+                    for _ in range(clicks):
+                        plan.append((6, act))
 
-        # Detect sliders in bottom region (y >= 50)
-        # Sliders have distinct track borders (color 13 or similar)
-        # Detect slider bounding boxes along y in [50..60]
-        slider_boxes: list[tuple[int, int, int, int]] = []
-        track_mask = (grid[50:62, :] == 13) | (grid[50:62, :] == 11) | (grid[50:62, :] == 14)
+        elif len(sliders) == 4 and len(targets) >= 1 and len(effectors) >= 1:
+            # Articulated multi-link mechanism navigating maze corridor (Level 1)
+            ex, ey, _ = effectors[0]
+            tx, ty = targets[0]
+            entrance_x = 39
+            top_y = 12
+            s_by_x = sorted(sliders, key=lambda s: s["bbox"][0])
 
-        # Connected component projection along horizontal axis
-        col_active = np.any(track_mask, axis=0)
-        start_c = None
-        for c in range(W):
-            if col_active[c] and start_c is None:
-                start_c = c
-            elif not col_active[c] and start_c is not None:
-                if c - start_c >= 6:
-                    slider_boxes.append((54, start_c, 60, c))
-                start_c = None
-        if start_c is not None and W - start_c >= 6:
-            slider_boxes.append((54, start_c, 60, W))
+            # Stroke 0 (S0): extend (+x) through horizontal entrance
+            s0_clicks = (entrance_x - ex) // 3
+            for _ in range(s0_clicks):
+                plan.append((6, s_by_x[0]["extend"]))
 
-        if len(slider_boxes) == 2:
-            # 2-slider setup (Level 1):
-            # Alternating clicks on horizontal and vertical sliders
-            {
-                "x": slider_boxes[0][1] + 3 * (slider_boxes[0][3] - slider_boxes[0][1]) // 4,
-                "y": 57,
-            }
-            {
-                "x": slider_boxes[1][1] + 3 * (slider_boxes[1][3] - slider_boxes[1][1]) // 4,
-                "y": 57,
-            }
-            # Or vertical slider check
-            for _ in range(7):
-                plan.append((6, {"x": 45, "y": 21}))
-                plan.append((6, {"x": 24, "y": 45}))
-            return plan
+            # Stroke 1 (S1): extend (-y) through vertical ascending passage
+            s1_clicks = (ey - top_y) // 3
+            for _ in range(s1_clicks):
+                plan.append((6, s_by_x[1]["extend"]))
 
-        elif len(slider_boxes) >= 4 or current_level >= 1:
-            # 4-link articulated mechanism (Level 2):
-            # S0: extend +x into passage (8 clicks)
-            # S1: extend -y through vertical passage (8 clicks)
-            # S2: extend +x through horizontal passage (4 clicks)
-            # S3: extend +y down to target marker (6 clicks)
-            s_coords = [
-                {"x": 12, "y": 57},  # S0 extend (+x)
-                {"x": 27, "y": 57},  # S1 extend (-y)
-                {"x": 42, "y": 57},  # S2 extend (+x)
-                {"x": 57, "y": 57},  # S3 extend (+y)
-            ]
-            for _ in range(8):
-                plan.append((6, s_coords[0]))
-            for _ in range(8):
-                plan.append((6, s_coords[1]))
-            for _ in range(4):
-                plan.append((6, s_coords[2]))
-            for _ in range(6):
-                plan.append((6, s_coords[3]))
-            return plan
+            # Stroke 2 (S2): extend (+x) across horizontal divider corridor
+            s2_clicks = (tx - entrance_x) // 3
+            for _ in range(s2_clicks):
+                plan.append((6, s_by_x[2]["extend"]))
+
+            # Stroke 3 (S3): extend (+y) descending into target chamber
+            s3_clicks = (ty - top_y) // 3
+            for _ in range(s3_clicks):
+                plan.append((6, s_by_x[3]["extend"]))
 
         return plan

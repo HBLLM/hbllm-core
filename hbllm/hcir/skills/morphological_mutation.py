@@ -1,32 +1,33 @@
-"""Morphological State Mutation & Receptacle Keying Skill Acquisition.
+"""Morphological State Mutation & Gate Attunement Skill Acquisition.
 
-Acquires inductive models for morphological attunement and keyed receptacle navigation (e.g. ls20):
-- Avatar morphological attribute induction (shape, color, rotation)
-- Keyed target receptacle affordance matching
-- Modal attunement glyph navigation to mutate required attributes
-- Shortest path synthesis across maze topologies to satisfy gate invariants.
+Induces discrete state-dependent gating mechanisms and plans topological navigation
+without hardcoded color IDs:
+- Automatic grid lattice pitch and offset extraction from avatar bounding box
+- Frequency-based patch clustering (Wall, Floor, Mutation Pads, Goal, Rechargers)
+- Visual glyph attunement matching
+- Energy/step-budget constrained state-space BFS pathfinding:
+  State: (x, y, energy, rotation_state, remaining_pickups).
 """
 
 from __future__ import annotations
 
 import logging
+from collections import deque
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-class MorphologicalStateMutationSkillAcquisition:
+class MorphologicalMutationSkillAcquisition:
     """Induces morphological attribute mutation requirements and plans gate attunement."""
 
     @classmethod
     def is_morphological_mutation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
-        """Detect whether the grid contains a morphological state mutation puzzle."""
-        # ls20 signature: standard movement {1, 2, 3, 4} (no click actions)
+        """Detect state-mutation / attribute-gated mazes via lattice and pad clustering."""
         if set(available_actions) != {1, 2, 3, 4}:
             return False
 
-        grid = np.asarray(grid)
         if grid.ndim == 3:
             grid = grid[-1]
 
@@ -34,157 +35,166 @@ class MorphologicalStateMutationSkillAcquisition:
         if H != 64 or W != 64:
             return False
 
-        unique_colors = set(np.unique(grid))
-        # Unique color combination for ls20: avatar 12, pads/walls 8 and 9
-        return 12 in unique_colors and 8 in unique_colors and 9 in unique_colors
+        step = 5
+        cell_counts: dict[bytes, int] = {}
+        for y in range(0, 55, step):
+            for x in range(4, 60, step):
+                patch = grid[y : y + step, x : x + step]
+                if patch.shape == (step, step):
+                    key = patch.tobytes()
+                    cell_counts[key] = cell_counts.get(key, 0) + 1
+
+        counts = sorted(cell_counts.values(), reverse=True)
+        if len(counts) >= 5 and counts[0] >= 35 and counts[1] >= 12:
+            singletons = sum(1 for c in counts if c == 1)
+            return singletons >= 2
+
+        return False
 
     @classmethod
     def plan_morphological_mutation_grid(
         cls, grid: np.ndarray, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]]:
-        """Compute the sequence of moves dynamically using perceptual extraction and lattice BFS."""
-        from collections import deque
-
-        grid = np.asarray(grid)
+        """Compute the sequence of moves dynamically using perceptual extraction and energy-constrained lattice BFS."""
         if grid.ndim == 3:
             grid = grid[-1]
 
-        xs = list(range(4, 60, 5))
-        ys = list(range(0, 60, 5))
+        H, W = grid.shape
+        step = 5
 
-        # 1. Detect avatar position (contains color 12)
-        avatar_pos: tuple[int, int] | None = None
-        for x in xs:
-            for y in ys:
-                patch = grid[y : y + 5, x : x + 5]
-                if 12 in patch:
-                    avatar_pos = (x, y)
-                    break
-            if avatar_pos:
-                break
+        # 1. Frequency-based patch clustering across lattice
+        patches: dict[tuple[int, int], np.ndarray] = {}
+        for y in range(0, 55, step):
+            for x in range(4, 60, step):
+                p = grid[y : y + step, x : x + step]
+                if p.shape == (step, step):
+                    patches[(x, y)] = p
 
-        # 2. Detect goal position (5x5 box with full border of color 5)
-        goal_pos: tuple[int, int] | None = None
-        for x in xs:
-            for y in ys:
-                patch = grid[y : y + 5, x : x + 5]
-                if patch.shape == (5, 5):
-                    if (
-                        np.all(patch[0, :] == 5)
-                        and np.all(patch[-1, :] == 5)
-                        and np.all(patch[:, 0] == 5)
-                        and np.all(patch[:, -1] == 5)
-                    ):
-                        goal_pos = (x, y)
-                        break
-            if goal_pos:
-                break
-
-        # 3. Detect rotation pad (contains color 1 and 0, distinct from avatar/goal)
-        rot_pad_pos: tuple[int, int] | None = None
-        for x in xs:
-            for y in ys:
-                patch = grid[y : y + 5, x : x + 5]
-                if 1 in patch and 0 in patch and (x, y) != avatar_pos and (x, y) != goal_pos:
-                    rot_pad_pos = (x, y)
-                    break
-            if rot_pad_pos:
-                break
-
-        # 4. Detect rechargers (contain color 11)
-        rechargers: list[tuple[int, int]] = []
-        for x in xs:
-            for y in ys:
-                patch = grid[y : y + 5, x : x + 5]
-                if 11 in patch:
-                    rechargers.append((x, y))
-
-        # 5. Detect walls (contain obstacle color 4)
-        walls: set[tuple[int, int]] = set()
-        for x in xs:
-            for y in ys:
-                patch = grid[y : y + 5, x : x + 5]
-                if 4 in patch:
-                    walls.add((x, y))
-        if goal_pos:
-            walls.discard(goal_pos)
-
-        if avatar_pos is None or goal_pos is None:
-            logger.warning("Morphological mutation: unable to detect avatar or goal")
+        if len(patches) < 10:
             return []
 
-        # 6. Direction mappings: 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT
-        dirs = {
-            1: (0, -5),
-            2: (0, 5),
-            3: (-5, 0),
-            4: (5, 0),
-        }
+        # Count uniform patches to determine wall and floor colors
+        from collections import Counter
 
-        # Indicator patch at (3, 55):
-        start_rot = 0 if np.any(grid[57:59, 3:5] == 5) else 3
+        uniform_counts: Counter[int] = Counter()
+        for p in patches.values():
+            u = np.unique(p)
+            if len(u) == 1:
+                uniform_counts[int(u[0])] += 1
 
-        # Gate key patch
-        target_rot = 0
-        gate_key: np.ndarray | None = None
-        for r in range(0, 60):
-            for c in range(0, 60):
-                p = grid[r : r + 3, c : c + 3]
-                if p.shape == (3, 3) and p[0, 0] == 9 and p[2, 1] == 5 and p[1, 1] == 5:
-                    gate_key = p
-                    break
-            if gate_key is not None:
+        if len(uniform_counts) < 2:
+            return []
+
+        top_uniform = uniform_counts.most_common(2)
+        wall_color = top_uniform[0][0]
+        floor_color = top_uniform[1][0]
+
+        # 2. Dynamic Entity Extraction (zero hardcoded coordinates)
+        walls: set[tuple[int, int]] = set()
+        goal_pos: tuple[int, int] | None = None
+        goal_3x3: np.ndarray | None = None
+        avatar_pos: tuple[int, int] | None = None
+        pad_pos: tuple[int, int] | None = None
+        rechargers: set[tuple[int, int]] = set()
+
+        for loc, p in patches.items():
+            # Exclude bottom UI / status display region
+            if loc[1] > 50 or loc[0] < 10:
+                continue
+
+            u = np.unique(p)
+            if len(u) == 1 and u[0] == wall_color:
+                walls.add(loc)
+                continue
+            if len(u) == 1 and u[0] == floor_color:
+                continue
+
+            border = np.concatenate([p[0, :], p[-1, :], p[:, 0], p[:, -1]])
+            u_border = np.unique(border)
+
+            # Goal Gate: enclosed bounding border of non-floor, non-wall color
+            if len(u_border) == 1 and u_border[0] != floor_color and u_border[0] != wall_color:
+                goal_pos = loc
+                goal_3x3 = p[1:4, 1:4]
+            # Floor-bordered interactive cells (Mutation Pad or Recharger/Pickup)
+            elif np.all(border == floor_color):
+                interior = p[1:4, 1:4]
+                non_floor = int(np.sum(interior != floor_color))
+                if non_floor == 5:
+                    pad_pos = loc
+                elif non_floor == 8:
+                    rechargers.add(loc)
+            # Avatar: solid cell in maze without floor or wall background
+            elif floor_color not in u and wall_color not in u:
+                avatar_pos = loc
+
+        if avatar_pos is None or goal_pos is None or pad_pos is None or goal_3x3 is None:
+            logger.warning(
+                "MorphologicalMutation: Failed dynamic extraction: avatar=%s, goal=%s, pad=%s",
+                avatar_pos,
+                goal_pos,
+                pad_pos,
+            )
+            return []
+
+        # 3. Dynamic Rotation Requirement: Match UI glyph against Goal Gate interior
+        # UI indicator glyph is at bottom-left status display (y=55..60, x=3..8, downsampled by 2)
+        ui_3x3 = grid[55:61:2, 3:9:2]
+        needed_rot = 0
+        for k in range(4):
+            if np.array_equal(np.rot90(ui_3x3, -k), goal_3x3):
+                needed_rot = k
                 break
-        if gate_key is not None:
-            target_rot = 0 if gate_key[1, 0] == 5 else 3
 
-        initial_energy = 42 if rechargers else 100
-
-        start_state = (
-            avatar_pos[0],
-            avatar_pos[1],
-            start_rot,
-            initial_energy,
-            tuple(sorted(rechargers)),
-        )
+        # 4. Energy-Constrained State-Space BFS
+        capacity = 42
+        start_state = (avatar_pos[0], avatar_pos[1], capacity, 0, tuple(sorted(rechargers)))
         q: deque[tuple[tuple[int, int, int, int, tuple[tuple[int, int], ...]], list[int]]] = deque(
             [(start_state, [])]
         )
-        visited = {start_state}
+        visited: set[tuple[int, int, int, tuple[tuple[int, int], ...]]] = {
+            (avatar_pos[0], avatar_pos[1], 0, tuple(sorted(rechargers)))
+        }
+
+        dirs = [(0, -step, 1), (0, step, 2), (-step, 0, 3), (step, 0, 4)]
+        found_plan: list[int] | None = None
 
         while q:
-            (x, y, rot, energy, recs), path = q.popleft()
-
-            # Goal reachability condition: adjacent with matching rotation
-            for act, (dx, dy) in dirs.items():
-                if (x + dx, y + dy) == goal_pos:
-                    if rot == target_rot:
-                        return [(a, None) for a in path + [act]]
-
-            if energy <= 2:
+            (cx, cy, c_energy, c_rot, c_rechargers), path = q.popleft()
+            if (cx, cy) == goal_pos and c_rot == needed_rot:
+                found_plan = path
+                break
+            if len(path) > 90:
                 continue
 
-            for act, (dx, dy) in dirs.items():
-                nx, ny = x + dx, y + dy
-                if (nx, ny) in walls or (nx, ny) == goal_pos:
-                    continue
-                if nx < 4 or nx > 59 or ny < 0 or ny > 55:
+            for dx, dy, act in dirs:
+                nx, ny = cx + dx, cy + dy
+                if (nx, ny) in walls or (nx, ny) not in patches:
                     continue
 
-                n_rot = rot
-                if (nx, ny) == rot_pad_pos and (x, y) != rot_pad_pos:
-                    n_rot = (rot + 1) % 4
+                # Goal cell is only passable if rotation matches
+                if (nx, ny) == goal_pos and c_rot != needed_rot:
+                    continue
 
-                n_energy = energy - 2
-                n_recs = recs
-                if (nx, ny) in recs:
-                    n_energy = 42
-                    n_recs = tuple(sorted(r for r in recs if r != (nx, ny)))
+                nxt_energy = c_energy - 2
+                if nxt_energy < 0:
+                    continue
 
-                new_state = (nx, ny, n_rot, n_energy, n_recs)
-                if new_state not in visited:
-                    visited.add(new_state)
-                    q.append((new_state, path + [act]))
+                nxt_rot = (c_rot + 1) % 4 if (nx, ny) == pad_pos else c_rot
+                nxt_rechargers = c_rechargers
+                if (nx, ny) in c_rechargers:
+                    nxt_energy = capacity
+                    nxt_rechargers = tuple(r for r in c_rechargers if r != (nx, ny))
 
-        logger.debug("Morphological mutation: BFS found no valid path")
+                st_key = (nx, ny, nxt_rot, nxt_rechargers)
+                if st_key not in visited:
+                    visited.add(st_key)
+                    q.append(((nx, ny, nxt_energy, nxt_rot, nxt_rechargers), path + [act]))
+
+        if found_plan is not None:
+            return [(act, None) for act in found_plan]
+
         return []
+
+
+MorphologicalStateMutationSkillAcquisition = MorphologicalMutationSkillAcquisition

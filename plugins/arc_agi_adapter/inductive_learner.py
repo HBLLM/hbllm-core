@@ -32,6 +32,7 @@ from hbllm.hcir.skills import (
     RelationalAffordanceSkillAcquisition,
     SpatiotemporalSkillAcquisition,
 )
+from hbllm.hcir.skills.kinematic_arm_linkage import KinematicLinkageSolver
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
@@ -2930,6 +2931,7 @@ class InductiveHCIRAgent:
         self.lights_out_solver: LightsOutSolver = LightsOutSolver()
         self.mirrored_convergence_solver: MirroredConvergenceSolver = MirroredConvergenceSolver()
         self.gravity_spill_solver: GravitySpillingPlatformSolver = GravitySpillingPlatformSolver()
+        self.linkage_solver: KinematicLinkageSolver = KinematicLinkageSolver()
         self.topology_extractor: VisualTopologyExtractor = VisualTopologyExtractor()
         self.dynamic_navigator: DynamicSpatialNavigator = DynamicSpatialNavigator()
         self.dynamic_canvas_matcher: DynamicCanvasMatcher = DynamicCanvasMatcher()
@@ -3000,6 +3002,7 @@ class InductiveHCIRAgent:
         self.lights_out_solver.reset_episode()
         self.mirrored_convergence_solver.reset_episode()
         self.gravity_spill_solver.reset_episode()
+        self.linkage_solver.reset_episode()
         self.hazard_tracker.reset_episode()
         self.causal_engine.reset_episode()
         if not retain_dynamics:
@@ -3109,6 +3112,9 @@ class InductiveHCIRAgent:
             action, conf, action_data = self.gravity_spill_solver.plan_step(
                 curr_grid, self.current_level
             )
+        elif name == "kinematic_linkage":
+            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
+            action, conf, action_data = self.linkage_solver.plan_step(curr_grid, self.current_level)
         elif name == "spatial_cooperative":
             self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
             if self.prev_grid is not None and self.last_action is not None:

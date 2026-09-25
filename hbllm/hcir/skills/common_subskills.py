@@ -12,6 +12,11 @@ from typing import Any
 
 import numpy as np
 
+try:
+    from scipy.ndimage import label as ndi_label
+except ImportError:
+    ndi_label = None
+
 
 @dataclass(frozen=True)
 class ColorCluster:
@@ -92,6 +97,60 @@ class PerceptualClusterDetector:
         while arr.ndim > 2:
             arr = arr[0]
         return arr
+
+    @classmethod
+    def label_components(cls, mask: np.ndarray, connectivity: int = 4) -> tuple[np.ndarray, int]:
+        """Label connected components in a 2D boolean or integer mask.
+
+        Args:
+            mask: 2D array-like mask (nonzero / True indicates component pixels).
+            connectivity: Neighborhood connectivity criterion: 4 (orthogonal) or 8 (orthogonal + diagonal).
+
+        Returns:
+            labeled: 2D integer array where background is 0 and each distinct component is labeled 1..num_features.
+            num_features: Total count of connected components found.
+        """
+        arr = cls.normalize_grid(mask)
+        if ndi_label is not None:
+            struct = None if connectivity == 4 else np.ones((3, 3), dtype=int)
+            labeled, num_features = ndi_label(arr.astype(bool), structure=struct)
+            return labeled, int(num_features)
+
+        # BFS fallback when scipy is not available
+        H, W = arr.shape
+        labeled = np.zeros((H, W), dtype=int)
+        num_features = 0
+        ys, xs = np.where(arr)
+        if len(xs) == 0:
+            return labeled, 0
+
+        coords = list(zip(ys.tolist(), xs.tolist(), strict=False))
+        pts = set(coords)
+        visited: set[tuple[int, int]] = set()
+
+        deltas = (
+            [(0, 1), (0, -1), (1, 0), (-1, 0)]
+            if connectivity == 4
+            else [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+        )
+
+        for pt in coords:
+            if pt in visited:
+                continue
+            num_features += 1
+            q = deque([pt])
+            visited.add(pt)
+            while q:
+                cy, cx = q.popleft()
+                labeled[cy, cx] = num_features
+                for dy, dx in deltas:
+                    ny, nx = cy + dy, cx + dx
+                    nbr = (ny, nx)
+                    if nbr in pts and nbr not in visited:
+                        visited.add(nbr)
+                        q.append(nbr)
+
+        return labeled, num_features
 
     @classmethod
     def find_color_clusters(

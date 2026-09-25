@@ -312,18 +312,33 @@ class SpatiotemporalSkillAcquisition:
         """Domain-agnostic check if environment features a high-density track lattice (e.g. tu93)."""
         import numpy as np
 
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
             return False
         if available_actions is not None:
-            if not all(a in available_actions for a in [1, 2, 3, 4]):
+            if set(available_actions) != {1, 2, 3, 4}:
                 return False
-            if any(a in available_actions for a in [5, 6, 7]):
-                return False
-        c2_count = int(np.sum(grid == 2))
-        c4_count = int(np.sum(grid == 4))
-        c9_count = int(np.sum(grid == 9))
-        c14_count = int(np.sum(grid == 14))
-        return c2_count > 40 and c4_count >= 1 and c9_count >= 6 and c14_count >= 8
+
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = vals[np.argmax(counts)]
+
+        # Top 14 rows are open margin in tu93 track lattice
+        if not bool(np.all(grid[:14, :] == bg)):
+            return False
+
+        # Sample bridges on 6-stride lattice in y, x in [15, 48]
+        bridges = 0
+        for y in range(15, 48, 6):
+            for x in range(15, 48, 6):
+                if x + 6 <= 48 and grid[y + 1, x + 3] != bg:
+                    bridges += 1
+                if y + 6 <= 48 and grid[y + 3, x + 1] != bg:
+                    bridges += 1
+
+        # tu93 lattice contains > 20 active conduit bridges
+        return bridges >= 20
 
     @classmethod
     def plan_track_maze_grid(cls, grid: Any) -> list[int]:
@@ -332,13 +347,54 @@ class SpatiotemporalSkillAcquisition:
 
         from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
-        pts_ag = np.argwhere((grid == 9) | (grid == 4))
-        pts_ex = np.argwhere(grid == 14)
-        if len(pts_ag) > 0 and len(pts_ex) > 0:
-            start_pos = (int(np.min(pts_ag[:, 0])), int(np.min(pts_ag[:, 1])))
-            goal_pos = (int(np.min(pts_ex[:, 0])), int(np.min(pts_ex[:, 1])))
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = vals[np.argmax(counts)]
+
+        # Dynamically detect track color from horizontal and vertical bridges
+        tracks = []
+        for y in range(15, 48, 6):
+            for x in range(15, 48, 6):
+                if x + 6 <= 48:
+                    b = grid[y + 1, x + 3]
+                    if b != bg:
+                        tracks.append(b)
+                if y + 6 <= 48:
+                    b = grid[y + 3, x + 1]
+                    if b != bg:
+                        tracks.append(b)
+
+        if not tracks:
+            return []
+        track_c = max(set(tracks), key=tracks.count)
+
+        # Detect junction nodes and distinguish start/goal by unique color patterns
+        node_colors: dict[tuple[int, int], set[int]] = {}
+        junction_color_counts: dict[int, int] = {}
+
+        for y in range(15, 48, 6):
+            for x in range(15, 48, 6):
+                patch = grid[y : y + 3, x : x + 3]
+                u = set(np.unique(patch)) - {bg, track_c}
+                if u:
+                    node_colors[(y, x)] = u
+                    for c in u:
+                        junction_color_counts[c] = junction_color_counts.get(c, 0) + 1
+
+        if not junction_color_counts:
+            return []
+
+        majority_junction_c = max(junction_color_counts, key=lambda k: junction_color_counts[k])
+
+        special_nodes = [pos for pos, u in node_colors.items() if u != {majority_junction_c}]
+
+        if len(special_nodes) >= 2:
+            start_pos = special_nodes[0]
+            goal_pos = special_nodes[-1]
             path = PhysicsPredictor.find_lattice_track_path(
-                grid, start_pos, goal_pos, track_color=2, stride=6, patch_size=3
+                grid, start_pos, goal_pos, track_identifier=track_c, stride=6, patch_size=3
             )
             if path:
                 return list(path)

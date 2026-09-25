@@ -143,12 +143,33 @@ class RelationalAffordanceSkillAcquisition:
         """Domain-agnostic check if environment represents a peg solitaire ternary jump puzzle."""
         import numpy as np
 
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
+        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
             return False
-        if 6 not in available_actions or not any(a in available_actions for a in [1, 2, 3, 4]):
+        # Action signature: {1, 2, 3, 4, 6, 7}
+        if set(available_actions) != {1, 2, 3, 4, 6, 7}:
             return False
-        colors = set(np.unique(grid))
-        return 14 in colors and 10 in colors and not any(c in colors for c in [2, 3, 6, 8])
+
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        # Disambiguate from sk48: sk48 has target sequence slots in bottom region (y >= 50)
+        bottom_region = grid[52:62, :]
+        vals, counts = np.unique(bottom_region, return_counts=True)
+        bg = vals[np.argmax(counts)]
+        if np.sum(bottom_region != bg) >= 20:
+            return False
+
+        # Verify peg solitaire board in center: multiple small components of same size
+        from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
+
+        top_bg = np.bincount(grid.flatten()).argmax()
+        ents = VisualTopologyExtractor.extract_entities(grid, ignore_colors={int(top_bg), 0})
+        # Check if there is a color group with >= 4 identical small pegs
+        color_counts: dict[int, int] = {}
+        for e in ents:
+            if 6 <= e.size <= 25:
+                color_counts[e.color] = color_counts.get(e.color, 0) + 1
+        return any(cnt >= 4 for cnt in color_counts.values())
 
     @classmethod
     def plan_peg_solitaire_grid(
@@ -157,12 +178,32 @@ class RelationalAffordanceSkillAcquisition:
         """Compute sequence of ternary jumps (from_pos, mid_pos, to_pos) executed via clicks."""
         import math
 
+        import numpy as np
+
         from hbllm.hcir.world.predictors.physics import PhysicsPredictor
         from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
 
-        ents = VisualTopologyExtractor.extract_entities(grid, ignore_colors={0, 10})
-        peg_ents = [e for e in ents if e.color == 14 and 8 <= e.size <= 20]
-        if not peg_ents:
+        if grid.ndim == 3:
+            grid = grid[-1]
+
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        ents = VisualTopologyExtractor.extract_entities(grid, ignore_colors={bg, 0})
+
+        # Find peg entities: group of >= 4 entities with same color and size in [6, 25]
+        candidates_by_color: dict[int, list[Any]] = {}
+        for e in ents:
+            if 6 <= e.size <= 25:
+                candidates_by_color.setdefault(e.color, []).append(e)
+
+        if not candidates_by_color:
+            return []
+
+        # Pegs are the candidate color with the most instances
+        peg_color = max(candidates_by_color, key=lambda c: len(candidates_by_color[c]))
+        peg_ents = candidates_by_color[peg_color]
+        if len(peg_ents) < 3:
             return []
 
         # Compute lattice scale from minimum distance between pegs
@@ -193,7 +234,7 @@ class RelationalAffordanceSkillAcquisition:
                 r = int(round(offset_y + gy * scale))
                 c = int(round(offset_x + gx * scale))
                 if 0 <= r < 64 and 0 <= c < 64:
-                    if grid[r, c] in {1, 5, 9, 14}:
+                    if grid[r, c] != bg and grid[r, c] != 0:
                         holes.add((gx, gy))
 
         jumps = PhysicsPredictor.find_solitaire_jump_sequence(

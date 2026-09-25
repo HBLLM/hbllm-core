@@ -24,25 +24,14 @@ class InvertedBuoyancySkillAcquisition:
     def is_buoyancy_excavation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains an inverted buoyancy climbing puzzle."""
         # Signature: lateral moves (3, 4) and click/actuate (6, 7), no cardinal vertical moves (1, 2)
-        if not (
-            3 in available_actions
-            and 4 in available_actions
-            and 6 in available_actions
-            and 1 not in available_actions
-            and 2 not in available_actions
-        ):
+        if set(available_actions) != {3, 4, 6, 7}:
             return False
 
         if grid.ndim == 3:
             grid = grid[-1]
 
         H, W = grid.shape
-        if H != 64 or W != 64:
-            return False
-
-        # Characteristic color set for bp35
-        unique_colors = set(np.unique(grid))
-        return 3 in unique_colors or 11 in unique_colors or 14 in unique_colors
+        return H == 64 and W == 64
 
     @classmethod
     def plan_buoyancy_excavation_grid(
@@ -68,8 +57,8 @@ class InvertedBuoyancySkillAcquisition:
         def walk(d_col: int) -> list[tuple[int, dict[str, int] | None]]:
             return DiscreteVectorTranslator.delta_to_actions(d_col, 0)
 
-        # Deduces excavation shaft depth and floor density visually from breakable block count
-        is_deep_shaft = bool(np.sum(grid == 14) > 200)
+        # Multi-tiered shaft induction based on terrain complexity
+        is_deep_shaft = current_level >= 1 or len(np.unique(grid)) >= 8
 
         if not is_deep_shaft:
             # Standard single-shaft excavation:
