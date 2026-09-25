@@ -393,3 +393,54 @@ def test_block_stride_avatar_grounding() -> None:
 
     assert engine.is_motor_grounded()
     assert engine.action_dynamics[1].confidence >= 0.7
+
+
+def test_compound_avatar_grounding() -> None:
+    """Verify that multi-color compound avatars (e.g. ls20) are grounded into avatar_features without false cargo."""
+    engine = AutonomousEpistemicEngine()
+
+    # 32x32 grid with a compound avatar (color 12 on rows 15-16, color 9 on rows 17-19, cols 10-14)
+    grid_0 = np.zeros((32, 32), dtype=int)
+    grid_0[15:17, 10:15] = 12
+    grid_0[17:20, 10:15] = 9
+
+    # Action 1 (UP) translates both parts by (-5, 0)
+    grid_1 = np.zeros((32, 32), dtype=int)
+    grid_1[10:12, 10:15] = 12
+    grid_1[12:15, 10:15] = 9
+
+    engine.prev_grid = grid_0
+    engine.last_action = 1
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_1, [1, 2, 3, 4])
+
+    assert engine.avatar_features == {9, 12}
+    assert engine.avatar_size == 25
+    assert engine.learned_cargo_features == set()
+    assert engine.action_dynamics[1].get_displacement() == (-5, 0)
+
+
+def test_hud_status_bar_filtering() -> None:
+    """Verify that mutations in status bar / HUD regions are filtered out from environmental toggle models."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (20, 20)
+
+    # 64x64 grid with maze walls (4), solid divider at row 52, and HUD countdown at rows 61-62
+    grid_0 = np.full((64, 64), 3, dtype=int)
+    grid_0[52, :] = 4
+    grid_0[61, 10:20] = 11
+    grid_0[20, 20] = 1
+
+    # Step: Avatar moves, and HUD timer changes (11 -> 3)
+    grid_1 = grid_0.copy()
+    grid_1[20, 20] = 3
+    grid_1[19, 20] = 1
+    grid_1[61, 10:12] = 3
+
+    engine.prev_grid = grid_0
+    engine.last_action = 1
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_1, [1, 2, 3, 4])
+
+    assert len(engine.state_mutations) == 0

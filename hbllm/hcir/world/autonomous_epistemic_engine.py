@@ -99,6 +99,7 @@ class AutonomousEpistemicEngine:
 
         # Avatar self-model (Motor Grounding)
         self.avatar_feature: int | None = None
+        self.avatar_features: set[int] = set()
         self.avatar_pos: tuple[int, int] | None = None
         self.avatar_size: int = 1
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
@@ -156,6 +157,7 @@ class AutonomousEpistemicEngine:
         if not retain_dynamics:
             self.total_epistemic_probes = 0
             self.avatar_feature = None
+            self.avatar_features.clear()
             self.avatar_pos = None
             self.action_dynamics.clear()
             self.tested_actions.clear()
@@ -178,7 +180,7 @@ class AutonomousEpistemicEngine:
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions."""
-        return self.avatar_feature is not None and any(
+        return (self.avatar_feature is not None or bool(self.avatar_features)) and any(
             dyn.confidence >= 0.7 for dyn in self.action_dynamics.values()
         )
 
@@ -224,8 +226,11 @@ class AutonomousEpistemicEngine:
                 return int(vals[non_barriers[np.argmax(counts[non_barriers])]])
 
         # If avatar is already hypothesized, avoid picking avatar color as background
-        if self.avatar_feature is not None and len(vals) > 1:
-            other_idx = [i for i, v in enumerate(vals) if v != self.avatar_feature]
+        av_feats = self.avatar_features or (
+            {self.avatar_feature} if self.avatar_feature is not None else set()
+        )
+        if av_feats and len(vals) > 1:
+            other_idx = [i for i, v in enumerate(vals) if v not in av_feats]
             if other_idx:
                 return int(vals[other_idx[np.argmax(counts[other_idx])]])
         return top_val
@@ -273,9 +278,12 @@ class AutonomousEpistemicEngine:
                     or (area > H * W * 0.35)
                 )
 
+                av_feats = self.avatar_features or (
+                    {self.avatar_feature} if self.avatar_feature is not None else set()
+                )
                 if is_border or val in self.learned_barrier_features:
                     role = EntityRole.OBSTACLE
-                elif val == self.avatar_feature:
+                elif val in av_feats:
                     role = EntityRole.AGENT
                 elif any(
                     m.trigger_feature == val or m.trigger_pos == grid_pos
@@ -377,7 +385,10 @@ class AutonomousEpistemicEngine:
                 if 0 <= blocked_r < H and 0 <= blocked_c < W:
                     self.learned_barriers.add((blocked_r, blocked_c))
                     blocked_feature = int(curr_grid[blocked_r, blocked_c])
-                    if blocked_feature != self.bg_feature:
+                    av_feats = self.avatar_features or (
+                        {self.avatar_feature} if self.avatar_feature is not None else set()
+                    )
+                    if blocked_feature != self.bg_feature and blocked_feature not in av_feats:
                         self.learned_barrier_features.add(blocked_feature)
                     logger.debug(
                         "AutonomousEpistemicEngine: Grounded barrier at (%d, %d) with feature %d",
@@ -421,15 +432,15 @@ class AutonomousEpistemicEngine:
                 unmatched_prev.append(pe)
 
         # 2. Match remaining entities that actually shifted position (1-to-1 assignment)
-        moved_entities: list[tuple[SpatialEntity, tuple[int, int]]] = []
+        moved_entities: list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]] = []
         for pe in unmatched_prev:
             best_ce_id = None
             min_dist = float("inf")
             best_delta = (0, 0)
             for ce_id, ce in unmatched_curr.items():
                 if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 144:
-                    dr = ce.grid_pos[0] - pe.grid_pos[0]
-                    dc = ce.grid_pos[1] - pe.grid_pos[1]
+                    dr = int(round(ce.centroid[0] - pe.centroid[0]))
+                    dc = int(round(ce.centroid[1] - pe.centroid[1]))
                     dist = abs(dr) + abs(dc)
                     is_valid_displacement = (0 < dist <= 16 and (dr == 0 or dc == 0)) or (
                         0 < dist <= 8 and abs(dr) <= 4 and abs(dc) <= 4
@@ -441,13 +452,40 @@ class AutonomousEpistemicEngine:
                             best_delta = (dr, dc)
             if best_ce_id is not None:
                 matched_ce = unmatched_curr.pop(best_ce_id)
-                moved_entities.append((matched_ce, best_delta))
+                moved_entities.append((pe, matched_ce, best_delta))
 
-        for ce, (dr, dc) in moved_entities:
-            if self.avatar_feature is None or self.avatar_feature == ce.feature_id:
-                self.avatar_feature = ce.feature_id
-                self.avatar_pos = ce.grid_pos
-                self.avatar_size = ce.area
+        def _are_adjacent(e1: SpatialEntity, e2: SpatialEntity) -> bool:
+            bb1 = e1.bounding_box
+            bb2 = e2.bounding_box
+            r_gap = max(0, bb1[0] - bb2[1] - 1, bb2[0] - bb1[1] - 1)
+            c_gap = max(0, bb1[2] - bb2[3] - 1, bb2[2] - bb1[3] - 1)
+            return r_gap <= 1 and c_gap <= 1
+
+        if not self.avatar_features and self.avatar_feature is None:
+            if moved_entities:
+                delta_groups: dict[tuple[int, int], list[tuple[SpatialEntity, SpatialEntity]]] = {}
+                for pe, ce, delta in moved_entities:
+                    delta_groups.setdefault(delta, []).append((pe, ce))
+                best_delta, pairs = max(delta_groups.items(), key=lambda item: len(item[1]))
+                dr, dc = best_delta
+
+                comp_pairs: list[tuple[SpatialEntity, SpatialEntity]] = [pairs[0]]
+                for pe, ce in pairs[1:]:
+                    if any(_are_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
+                        comp_pairs.append((pe, ce))
+
+                self.avatar_features = {ce.feature_id for _, ce in comp_pairs}
+                self.avatar_feature = next(iter(self.avatar_features))
+                self.avatar_size = sum(ce.area for _, ce in comp_pairs)
+                all_cells = [
+                    cell
+                    for _, ce in comp_pairs
+                    for cell in ce.properties.get("cells", [ce.grid_pos])
+                ]
+                self.avatar_pos = (
+                    int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                    int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+                )
                 if action not in self.action_dynamics:
                     self.action_dynamics[action] = ActionDynamicsModel(
                         action_id=action,
@@ -461,29 +499,106 @@ class AutonomousEpistemicEngine:
                         (dr, dc), success=True, learning_rate=0.5
                     )
                 logger.debug(
-                    "AutonomousEpistemicEngine: Avatar identified (feat=%d, size=%d). Calibrated action %d -> delta=(%d, %d)",
-                    self.avatar_feature,
+                    "AutonomousEpistemicEngine: Avatar identified (feats=%s, size=%d). Calibrated action %d -> delta=(%d, %d)",
+                    self.avatar_features,
                     self.avatar_size,
                     action,
                     dr,
                     dc,
                 )
-            elif self.avatar_feature is not None and ce.feature_id != self.avatar_feature:
-                # Entity pushed by avatar!
-                if ce.feature_id not in self.learned_cargo_features:
-                    self.learned_cargo_features.add(ce.feature_id)
-                    logger.info(
-                        "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
-                        ce.feature_id,
-                        ce.area,
+        else:
+            known_av_feats = self.avatar_features or (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
+            av_moved = [item for item in moved_entities if item[1].feature_id in known_av_feats]
+            if av_moved:
+                av_pe, av_ce, (dr, dc) = av_moved[0]
+                all_cells = [
+                    cell
+                    for _, ce, _ in av_moved
+                    for cell in ce.properties.get("cells", [ce.grid_pos])
+                ]
+                self.avatar_pos = (
+                    int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                    int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+                )
+                if action not in self.action_dynamics:
+                    self.action_dynamics[action] = ActionDynamicsModel(
+                        action_id=action,
+                        delta_r=dr,
+                        delta_c=dc,
+                        confidence=0.6,
+                        probes_tested=1,
+                    )
+                else:
+                    self.action_dynamics[action].update_from_trial(
+                        (dr, dc), success=True, learning_rate=0.5
                     )
 
+                # Check non-avatar moved entities
+                for pe, ce, delta in moved_entities:
+                    if ce.feature_id in known_av_feats:
+                        continue
+                    pe_dist_along_motion = (pe.grid_pos[0] - av_pe.grid_pos[0]) * dr + (
+                        pe.grid_pos[1] - av_pe.grid_pos[1]
+                    ) * dc
+                    is_pushed = (delta == (dr, dc)) and (pe_dist_along_motion > 0)
+                    if is_pushed:
+                        if ce.feature_id not in self.learned_cargo_features:
+                            self.learned_cargo_features.add(ce.feature_id)
+                            logger.info(
+                                "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
+                                ce.feature_id,
+                                ce.area,
+                            )
+                    elif delta == (dr, dc) and any(
+                        _are_adjacent(ce, c_ce) for _, c_ce, _ in av_moved
+                    ):
+                        self.avatar_features.add(ce.feature_id)
+                        self.avatar_size += ce.area
+                        logger.info(
+                            "AutonomousEpistemicEngine: Discovered compound avatar component (feat=%d, size=%d)",
+                            ce.feature_id,
+                            ce.area,
+                        )
+
         # ── B. Environmental Mutation Induction ──────────────────────────────
-        # If pixels changed at coordinates outside the avatar's movement trajectory
+        # Pixels changed at coordinates outside avatar and cargo movements
+        movable_features = set(self.learned_cargo_features)
+        movable_features.update(self.avatar_features)
+        if self.avatar_feature is not None:
+            movable_features.add(self.avatar_feature)
+
+        def is_hud_mutation(r: int, c: int) -> bool:
+            if H >= 24:
+                if self.avatar_pos is not None:
+                    if r >= H - 6 and self.avatar_pos[0] < H - 8:
+                        return True
+                    if r < 3 and self.avatar_pos[0] >= 5:
+                        return True
+                    min_r, max_r = min(self.avatar_pos[0], r), max(self.avatar_pos[0], r)
+                    for div_r in range(min_r + 1, max_r):
+                        div_val = int(self.prev_grid[div_r, 0])
+                        if np.all(self.prev_grid[div_r, :] == div_val):
+                            if div_r >= H - 16 or div_r <= 16:
+                                return True
+                    min_c, max_c = min(self.avatar_pos[1], c), max(self.avatar_pos[1], c)
+                    for div_c in range(min_c + 1, max_c):
+                        div_val = int(self.prev_grid[0, div_c])
+                        if np.all(self.prev_grid[:, div_c] == div_val):
+                            if div_c >= W - 16 or div_c <= 16:
+                                return True
+                else:
+                    if r >= H - 6 or r < 3:
+                        return True
+            return False
+
         distant_mutations = [
             (r, c, old_v, new_v)
             for r, c, old_v, new_v in diff.mutated_pixels
-            if self.avatar_pos is None or (r, c) != self.avatar_pos
+            if old_v not in movable_features
+            and new_v not in movable_features
+            and not is_hud_mutation(r, c)
         ]
         # Ignore global screen animations / camera scrolling changes (>64 pixels) for localized door mutation induction
         if distant_mutations and len(distant_mutations) <= 64:
@@ -581,6 +696,9 @@ class AutonomousEpistemicEngine:
         if not goals and self.learned_goal_positions:
             goals = [g for g in self.learned_goal_positions if 0 <= g[0] < H and 0 <= g[1] < W]
         if not goals:
+            av_feats = self.avatar_features or (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
             # Gestalt fallback: rare, small foreground entities (non-avatar, non-barrier)
             candidate_goals = [
                 e.grid_pos
@@ -588,7 +706,7 @@ class AutonomousEpistemicEngine:
                 if e.role == EntityRole.UNKNOWN
                 and 1 <= e.area <= 9
                 and e.feature_id != bg
-                and e.feature_id != self.avatar_feature
+                and e.feature_id not in av_feats
             ]
             if candidate_goals:
                 goals = candidate_goals
@@ -597,6 +715,9 @@ class AutonomousEpistemicEngine:
             return None
 
         # 2. Identify candidate pushable blocks / cargo
+        av_feats = self.avatar_features or (
+            {self.avatar_feature} if self.avatar_feature is not None else set()
+        )
         pushable_blocks: list[tuple[int, int]] = [
             e.grid_pos
             for e in entities
@@ -606,7 +727,7 @@ class AutonomousEpistemicEngine:
                     e.role == EntityRole.MANIPULABLE
                     and 1 <= e.area <= 9
                     and e.feature_id != bg
-                    and e.feature_id != self.avatar_feature
+                    and e.feature_id not in av_feats
                     and e.grid_pos not in goals
                 )
             )
@@ -1028,8 +1149,14 @@ class AutonomousEpistemicEngine:
                 min_visits = float("inf")
                 for act, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
                     if act in available_actions:
-                        nr = self.avatar_pos[0] + dr
-                        nc = self.avatar_pos[1] + dc
+                        dr_cal, dc_cal = (
+                            self.action_dynamics[act].get_displacement()
+                            if act in self.action_dynamics
+                            and self.action_dynamics[act].confidence >= 0.5
+                            else (dr, dc)
+                        )
+                        nr = self.avatar_pos[0] + dr_cal
+                        nc = self.avatar_pos[1] + dc_cal
                         if not (0 <= nr < H and 0 <= nc < W):
                             continue
                         if (nr, nc) in self.learned_barriers or int(
