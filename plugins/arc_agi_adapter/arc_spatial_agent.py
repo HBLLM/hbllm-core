@@ -445,6 +445,11 @@ class ARC3SpatialCognitiveAgent:
         has_incantation_skill = hasattr(
             blackbox_state, "incantation_skills"
         ) and blackbox_state.incantation_skills.is_incantation_grid(curr_grid, available_actions)
+        has_optical_mirror_skill = hasattr(
+            blackbox_state, "optical_mirror_skills"
+        ) and blackbox_state.optical_mirror_skills.is_optical_mirror_reflection_grid(
+            curr_grid, available_actions
+        )
         if (
             untested_moves
             and not has_queued_skills
@@ -462,6 +467,7 @@ class ARC3SpatialCognitiveAgent:
             and not has_vortex_skill
             and not has_program_skill
             and not has_incantation_skill
+            and not has_optical_mirror_skill
         ):
             self.last_action_data = None
             return untested_moves[0], 0.5

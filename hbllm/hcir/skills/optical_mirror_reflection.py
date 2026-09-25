@@ -56,88 +56,86 @@ class OpticalMirrorReflectionSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
-        vals, counts = np.unique(grid, return_counts=True)
+        # Downsample 64x64 grid to 21x21 board
+        board = np.zeros((21, 21), dtype=int)
+        for r in range(21):
+            for c in range(21):
+                cell = grid[r * 3 : (r + 1) * 3, c * 3 : (c + 1) * 3]
+                u, uc = np.unique(cell, return_counts=True)
+                board[r, c] = u[np.argmax(uc)]
+
+        vals, counts = np.unique(board, return_counts=True)
         bg = vals[np.argmax(counts)]
 
-        # 1. Identify mirror line
-        mirror_c = None
-        mirror_cx = 31.0
-        for c in vals:
-            if c == bg:
-                continue
-            ys, xs = np.where(grid == c)
-            if len(xs) >= 30 and (ys.max() - ys.min()) >= 30 and (xs.max() - xs.min()) <= 6:
-                mirror_c = c
-                mirror_cx = float(np.mean(xs))
+        # Mirror: vertical line of single non-bg color spanning 21 rows
+        mirror_col = None
+        for c in range(21):
+            col_vals = board[:, c]
+            if len(np.unique(col_vals)) == 1 and col_vals[0] != bg:
+                mirror_col = c
                 break
 
-        # 2. Identify target dots and controllable shape
-        shape_pts = []
-        target_pts = []
-        for c in vals:
-            if c in (bg, mirror_c):
+        if mirror_col is None:
+            return []
+
+        shape_pts = set(zip(*np.where(board == 5)))
+        target_pts = set(zip(*np.where(board == 11)))
+
+        if not shape_pts or not target_pts:
+            return []
+
+        min_tr = min(r for r, c in target_pts)
+        min_sr = min(r for r, c in shape_pts)
+        dr = min_tr - min_sr
+
+        allowed_dm = [0] if current_level == 0 else list(range(-5, 6))
+
+        best_plan: tuple[int, int, int] | None = None
+        best_cost = 9999
+
+        for dm in allowed_dm:
+            new_m = mirror_col + dm
+            if not (0 <= new_m < 21):
                 continue
-            ys, xs = np.where(grid == c)
-            # Target dots are small (<= 15 pixels), shape is larger (>= 20 pixels)
-            if len(xs) <= 15 and len(xs) >= 2:
-                target_pts.extend(list(zip(xs, ys)))
-            elif len(xs) >= 20:
-                shape_pts.extend(list(zip(xs, ys)))
+            for dc in range(-20, 21):
+                valid = True
+                for sr, sc in shape_pts:
+                    nr = sr + dr
+                    nc = sc + dc
+                    if not (0 <= nr < 21 and 0 <= nc < 21):
+                        valid = False
+                        break
+                    refl_c = 2 * new_m - nc
+                    if (nr, refl_c) not in target_pts:
+                        valid = False
+                        break
+                if valid:
+                    cost = abs(dm) + abs(dc) + abs(dr) + (1 if dm != 0 else 0)
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_plan = (dm, dc, dr)
 
-        plan: list[tuple[int, dict[str, int] | None]] = []
+        if best_plan is None:
+            return []
 
-        # Cell size on 64x64 grid is approx 3.0 pixels (21x21 board)
-        cell_size = 3.0
+        dm, dc, dr = best_plan
+        actions: list[tuple[int, dict[str, int] | None]] = []
+        if dm < 0:
+            actions.extend([(3, None)] * (-dm))
+        elif dm > 0:
+            actions.extend([(4, None)] * dm)
 
-        if target_pts and shape_pts:
-            tgt_x = float(np.mean([p[0] for p in target_pts]))
-            tgt_y = float(np.mean([p[1] for p in target_pts]))
-            shp_x = float(np.mean([p[0] for p in shape_pts]))
-            shp_y = float(np.mean([p[1] for p in shape_pts]))
+        if current_level >= 1:
+            actions.append((5, None))
 
-            # Check if mirror is offset from symmetric center (31.0)
-            if mirror_cx > 33.0:
-                # Mirror needs adjustment left
-                mirror_steps = int(round((mirror_cx - 31.0) / cell_size))
-                for _ in range(max(1, mirror_steps)):
-                    plan.append((3, None))  # Move mirror left
-                plan.append((5, None))  # Switch to shape
-                # Update effective mirror position
-                mirror_cx -= mirror_steps * cell_size
+        if dc < 0:
+            actions.extend([(3, None)] * (-dc))
+        elif dc > 0:
+            actions.extend([(4, None)] * dc)
 
-            # Reflected target position in shape space
-            desired_shp_x = 2 * mirror_cx - tgt_x
-            desired_shp_y = tgt_y
+        if dr < 0:
+            actions.extend([(1, None)] * (-dr))
+        elif dr > 0:
+            actions.extend([(2, None)] * dr)
 
-            dx_steps = int(round((desired_shp_x - shp_x) / cell_size))
-            dy_steps = int(round((desired_shp_y - shp_y) / cell_size))
-
-            if dx_steps < 0:
-                for _ in range(abs(dx_steps)):
-                    plan.append((3, None))  # LEFT
-            elif dx_steps > 0:
-                for _ in range(dx_steps):
-                    plan.append((4, None))  # RIGHT
-
-            if dy_steps < 0:
-                for _ in range(abs(dy_steps)):
-                    plan.append((1, None))  # UP
-            elif dy_steps > 0:
-                for _ in range(dy_steps):
-                    plan.append((2, None))  # DOWN
-
-        if not plan:
-            # Fallback based on mirror position
-            if mirror_cx <= 33.0:
-                for _ in range(5):
-                    plan.append((3, None))
-                for _ in range(10):
-                    plan.append((2, None))
-            else:
-                for _ in range(2):
-                    plan.append((3, None))
-                plan.append((5, None))
-                for _ in range(8):
-                    plan.append((2, None))
-
-        return plan
+        return actions

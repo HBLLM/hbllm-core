@@ -51,8 +51,23 @@ class ReticleSuperpositionSkillAcquisition:
             if c != bg and c not in dot_candidates and c not in border_cols and count >= 15
         ]
         has_crosshairs = len(crosshair_colors) >= 1
+        if not (has_dot and has_crosshairs):
+            return False
 
-        return has_dot and has_crosshairs
+        # Genuine reticle superposition puzzles contain crosshair colors with isolated alignment dots
+        has_isolated_targets = False
+        for c in crosshair_colors:
+            pts = np.argwhere(grid == c)
+            for r, col in pts:
+                dists = np.max(np.abs(pts - np.array([r, col])), axis=1)
+                neighbors = np.sum((dists > 0) & (dists <= 2))
+                if neighbors == 0:
+                    has_isolated_targets = True
+                    break
+            if has_isolated_targets:
+                break
+
+        return has_isolated_targets
 
     @classmethod
     def plan_reticle_superposition_grid(
@@ -96,7 +111,7 @@ class ReticleSuperpositionSkillAcquisition:
                 else:
                     crosshair.append((int(r), int(col)))
 
-            if not crosshair:
+            if not crosshair or not isolated:
                 continue
 
             min_r = min(r for r, _ in crosshair)
@@ -121,6 +136,9 @@ class ReticleSuperpositionSkillAcquisition:
 
             if best_dr is not None and best_dc is not None:
                 reticle_info[int(c)] = (best_dr, best_dc)
+
+        if not reticle_info:
+            return []
 
         all_aligned = all(dr == 0 and dc == 0 for dr, dc in reticle_info.values())
         if all_aligned:
