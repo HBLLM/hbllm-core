@@ -275,8 +275,28 @@ class ARC3SpatialCognitiveAgent:
 
     @classmethod
     def is_spatial_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
-        """Domain-agnostic check if environment possesses 2D movement actions."""
-        return any(a in available_actions for a in [1, 2, 3, 4])
+        """Domain-agnostic check if environment possesses 2D movement actions or specialized skills."""
+        if any(a in available_actions for a in [1, 2, 3, 4]):
+            return True
+        from hbllm.hcir.skills.automaton_synthesis import (
+            AutomatonProgramSynthesisSkillAcquisition,
+        )
+        from hbllm.hcir.skills.visual_program import (
+            VisualProgramSynthesisSkillAcquisition,
+        )
+        from hbllm.hcir.skills.vortex_attractor import (
+            VortexAttractorSkillAcquisition,
+        )
+
+        if AutomatonProgramSynthesisSkillAcquisition.is_automaton_synthesis_grid(
+            grid, available_actions
+        ):
+            return True
+        if VortexAttractorSkillAcquisition.is_vortex_attractor_grid(grid, available_actions):
+            return True
+        if VisualProgramSynthesisSkillAcquisition.is_visual_program_grid(grid, available_actions):
+            return True
+        return False
 
     @classmethod
     def is_cooperative_candidate(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -306,8 +326,11 @@ class ARC3SpatialCognitiveAgent:
         available_actions: list[int],
         tags: list[str] | None = None,
         allow_soft_restart: bool = False,
+        level: int = 0,
     ) -> tuple[int, float]:
         """Plan next action by delegating to CognitiveBlackbox."""
+        if level is not None:
+            self.current_level = level
         driver_input = DriverInput(
             raw_data=curr_grid,
             modality=DriverModality.GRID_2D,
@@ -334,6 +357,7 @@ class ARC3SpatialCognitiveAgent:
             self.avatar_grid_pos = eg.avatar.grid_pos
 
         blackbox_state = self.blackbox.get_state("arc_agi")
+        blackbox_state.current_level = getattr(self, "current_level", 0)
         self.holding_item = getattr(blackbox_state.carrying, "is_carrying", False)
         self.carried_offset = getattr(blackbox_state.carrying, "carried_offset", (0.0, 0.0))
         if blackbox_state.current_plan:
@@ -345,6 +369,7 @@ class ARC3SpatialCognitiveAgent:
             self.active_goal_node = None
 
         # Prioritize exploratory probing of untested movement actions to calibrate motor models
+        # (Skip probing if the blackbox already has queued actions or specialized skills match)
         untested_moves = [
             a
             for a in available_actions
@@ -354,7 +379,79 @@ class ARC3SpatialCognitiveAgent:
                 or getattr(blackbox_state.action_models[a], "probes_tested", 0) == 0
             )
         ]
-        if untested_moves:
+        has_queued_skills = bool(blackbox_state.active_skill_queue)
+        has_assembly_skill = hasattr(
+            blackbox_state, "assembly_skills"
+        ) and blackbox_state.assembly_skills.is_rigid_assembly_grid(curr_grid, available_actions)
+        has_reticle_skill = hasattr(
+            blackbox_state, "reticle_skills"
+        ) and blackbox_state.reticle_skills.is_reticle_superposition_grid(
+            curr_grid, available_actions
+        )
+        has_temporal_skill = hasattr(
+            blackbox_state, "temporal_skills"
+        ) and blackbox_state.temporal_skills.is_temporal_echo_grid(curr_grid, available_actions)
+        has_buoyancy_skill = hasattr(
+            blackbox_state, "buoyancy_skills"
+        ) and blackbox_state.buoyancy_skills.is_buoyancy_excavation_grid(
+            curr_grid, available_actions
+        )
+        has_kinetic_coupling_skill = hasattr(
+            blackbox_state, "kinetic_coupling_skills"
+        ) and blackbox_state.kinetic_coupling_skills.is_kinetic_coupling_grid(
+            curr_grid, available_actions
+        )
+        has_grammar_translation_skill = hasattr(
+            blackbox_state, "grammar_translation_skills"
+        ) and blackbox_state.grammar_translation_skills.is_grammar_translation_grid(
+            curr_grid, available_actions
+        )
+        has_morphological_mutation_skill = hasattr(
+            blackbox_state, "morphological_mutation_skills"
+        ) and blackbox_state.morphological_mutation_skills.is_morphological_mutation_grid(
+            curr_grid, available_actions
+        )
+        has_topology_skill = hasattr(
+            blackbox_state, "topology_skills"
+        ) and blackbox_state.topology_skills.is_topology_transformation_grid(
+            curr_grid, available_actions
+        )
+        has_laser_routing_skill = hasattr(
+            blackbox_state, "laser_routing_skills"
+        ) and blackbox_state.laser_routing_skills.is_laser_routing_grid(
+            curr_grid, available_actions
+        )
+        has_automaton_skill = hasattr(
+            blackbox_state, "automaton_skills"
+        ) and blackbox_state.automaton_skills.is_automaton_synthesis_grid(
+            curr_grid, available_actions
+        )
+        has_canvas_skill = hasattr(
+            blackbox_state, "canvas_skills"
+        ) and blackbox_state.canvas_skills.is_canvas_stamping_grid(curr_grid, available_actions)
+        has_vortex_skill = hasattr(
+            blackbox_state, "vortex_skills"
+        ) and blackbox_state.vortex_skills.is_vortex_attractor_grid(curr_grid, available_actions)
+        has_program_skill = hasattr(
+            blackbox_state, "program_skills"
+        ) and blackbox_state.program_skills.is_visual_program_grid(curr_grid, available_actions)
+        if (
+            untested_moves
+            and not has_queued_skills
+            and not has_assembly_skill
+            and not has_reticle_skill
+            and not has_temporal_skill
+            and not has_buoyancy_skill
+            and not has_kinetic_coupling_skill
+            and not has_grammar_translation_skill
+            and not has_morphological_mutation_skill
+            and not has_topology_skill
+            and not has_laser_routing_skill
+            and not has_automaton_skill
+            and not has_canvas_skill
+            and not has_vortex_skill
+            and not has_program_skill
+        ):
             self.last_action_data = None
             return untested_moves[0], 0.5
 

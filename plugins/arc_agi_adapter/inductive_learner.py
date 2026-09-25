@@ -3027,7 +3027,7 @@ class InductiveHCIRAgent:
                     won=(getattr(self, "last_frame_state", None) == "WIN"),
                 )
             action, conf = self.spatial_cognitive_agent.plan_next_action(
-                curr_grid, available_actions
+                curr_grid, available_actions, level=self.current_level
             )
             action_data = getattr(self.spatial_cognitive_agent, "last_action_data", None)
 
@@ -3374,50 +3374,55 @@ class InductiveHCIRAgent:
         if self.active_solver_name is not None:
             return self._dispatch_active_solver(curr_grid, available_actions)
 
-        # 2. Multi-Paradigm Skill Acquisition Solvers (Core General Reasoning)
-        if all(
-            a in available_actions for a in [1, 2, 3, 4]
-        ) and self.spatial_navigator.is_resource_constrained_maze(curr_grid, self.current_level):
-            self.active_solver_name = "spatial_navigation"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+        # 2. Multi-Paradigm Skill Acquisition Solvers (Legacy Archetype Bypass)
+        if not self.disable_archetypes:
+            if all(
+                a in available_actions for a in [1, 2, 3, 4]
+            ) and self.spatial_navigator.is_resource_constrained_maze(
+                curr_grid, self.current_level
+            ):
+                self.active_solver_name = "spatial_navigation"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if (
-            5 in available_actions
-            and 6 in available_actions
-            and 7 not in available_actions
-            and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
-        ):
-            self.active_solver_name = "canvas_stamping"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if (
+                5 in available_actions
+                and 6 in available_actions
+                and 7 not in available_actions
+                and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
+            ):
+                self.active_solver_name = "canvas_stamping"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if (
-            6 in available_actions
-            and 7 in available_actions
-            and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-            and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
-        ):
-            self.active_solver_name = "vortex"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if (
+                6 in available_actions
+                and 7 in available_actions
+                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
+                and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
+            ):
+                self.active_solver_name = "vortex"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "lights_out"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
+                self.active_solver_name = "lights_out"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if self.mirrored_convergence_solver.is_mirrored_convergence(curr_grid, available_actions):
-            self.active_solver_name = "mirrored_convergence"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if self.mirrored_convergence_solver.is_mirrored_convergence(
+                curr_grid, available_actions
+            ):
+                self.active_solver_name = "mirrored_convergence"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-            self.active_solver_name = "gravity_spill"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
+                self.active_solver_name = "gravity_spill"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-            self.active_solver_name = "peg"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
+                self.active_solver_name = "peg"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
-        if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
-            self.active_solver_name = "track_maze"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
+                self.active_solver_name = "track_maze"
+                return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
         if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):

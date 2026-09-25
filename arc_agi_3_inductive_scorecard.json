@@ -1,7 +1,7 @@
 {
-  "total_levels_completed": 13,
+  "total_levels_completed": 25,
   "total_levels": 25,
-  "duration_seconds": 137.89341068267822,
+  "duration_seconds": 53.41543006896973,
   "results": [
     {
       "game_id": "ar25",
@@ -13,19 +13,19 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.53
+      "duration": 0.42
     },
     {
       "game_id": "bp35",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 4.79
+      "duration": 0.69
     },
     {
       "game_id": "cd82",
@@ -37,31 +37,31 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.04
+      "duration": 0.56
     },
     {
       "game_id": "cn04",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 5.88
+      "duration": 0.54
     },
     {
       "game_id": "dc22",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 8.41
+      "duration": 0.89
     },
     {
       "game_id": "ft09",
@@ -73,31 +73,31 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.01
+      "duration": 0.03
     },
     {
       "game_id": "g50t",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 3.94
+      "duration": 0.97
     },
     {
       "game_id": "ka59",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 6.87
+      "duration": 0.25
     },
     {
       "game_id": "lf52",
@@ -109,7 +109,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.07
+      "duration": 1.09
     },
     {
       "game_id": "lp85",
@@ -121,19 +121,19 @@
       "level_attempts": [
         1
       ],
-      "duration": 1.1
+      "duration": 0.2
     },
     {
       "game_id": "ls20",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 5.72
+      "duration": 0.37
     },
     {
       "game_id": "m0r0",
@@ -145,7 +145,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.15
+      "duration": 1.1
     },
     {
       "game_id": "r11l",
@@ -157,19 +157,19 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.36
+      "duration": 0.31
     },
     {
       "game_id": "re86",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 12.24
+      "duration": 0.4
     },
     {
       "game_id": "s5i5",
@@ -181,43 +181,43 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.35
+      "duration": 0.08
     },
     {
       "game_id": "sb26",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 9.92
+      "duration": 0.52
     },
     {
       "game_id": "sc25",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 13.7
+      "duration": 1.0
     },
     {
       "game_id": "sk48",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 7.69
+      "duration": 0.83
     },
     {
       "game_id": "sp80",
@@ -229,7 +229,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.03
+      "duration": 0.2
     },
     {
       "game_id": "su15",
@@ -241,31 +241,31 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.14
+      "duration": 0.49
     },
     {
       "game_id": "tn36",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 0.66
+      "duration": 0.29
     },
     {
       "game_id": "tr87",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
       "level_results": [
-        false
+        true
       ],
       "level_attempts": [
-        2
+        1
       ],
-      "duration": 9.18
+      "duration": 0.8
     },
     {
       "game_id": "tu93",
@@ -277,7 +277,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.14
+      "duration": 3.9
     },
     {
       "game_id": "vc33",
@@ -289,7 +289,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.1
+      "duration": 0.16
     },
     {
       "game_id": "wa30",
@@ -301,7 +301,7 @@
       "level_attempts": [
         1
       ],
-      "duration": 0.85
+      "duration": 3.35
     }
   ],
   "games": [
@@ -325,18 +325,18 @@
     },
     {
       "game_id": "bp35",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 90,
+      "total_actions": 17,
       "total_baseline": 21,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 1.2352941176470589,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 90,
+          "completed": true,
+          "actions_taken": 17,
           "baseline_actions": 21,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 1.2352941176470589,
           "epistemic_probes": 0
         }
       ]
@@ -361,36 +361,36 @@
     },
     {
       "game_id": "cn04",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 150,
+      "total_actions": 14,
       "total_baseline": 29,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 2.0714285714285716,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 150,
+          "completed": true,
+          "actions_taken": 14,
           "baseline_actions": 29,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 2.0714285714285716,
           "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "dc22",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 232,
+      "total_actions": 20,
       "total_baseline": 59,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 2.95,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 232,
+          "completed": true,
+          "actions_taken": 20,
           "baseline_actions": 59,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 2.95,
           "epistemic_probes": 0
         }
       ]
@@ -415,36 +415,36 @@
     },
     {
       "game_id": "g50t",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 240,
+      "total_actions": 17,
       "total_baseline": 78,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 4.588235294117647,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 240,
+          "completed": true,
+          "actions_taken": 17,
           "baseline_actions": 78,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 4.588235294117647,
           "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "ka59",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 200,
+      "total_actions": 11,
       "total_baseline": 28,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 2.5454545454545454,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 200,
+          "completed": true,
+          "actions_taken": 11,
           "baseline_actions": 28,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 2.5454545454545454,
           "epistemic_probes": 0
         }
       ]
@@ -453,16 +453,16 @@
       "game_id": "lf52",
       "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 8,
+      "total_actions": 12,
       "total_baseline": 32,
-      "mean_efficiency": 4.0,
+      "mean_efficiency": 2.6666666666666665,
       "level_results": [
         {
           "level_index": 0,
           "completed": true,
-          "actions_taken": 8,
+          "actions_taken": 12,
           "baseline_actions": 32,
-          "efficiency_ratio": 4.0,
+          "efficiency_ratio": 2.6666666666666665,
           "epistemic_probes": 0
         }
       ]
@@ -487,18 +487,18 @@
     },
     {
       "game_id": "ls20",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 240,
+      "total_actions": 13,
       "total_baseline": 22,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 1.6923076923076923,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 240,
+          "completed": true,
+          "actions_taken": 13,
           "baseline_actions": 22,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 1.6923076923076923,
           "epistemic_probes": 0
         }
       ]
@@ -507,16 +507,16 @@
       "game_id": "m0r0",
       "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 15,
+      "total_actions": 19,
       "total_baseline": 30,
-      "mean_efficiency": 2.0,
+      "mean_efficiency": 1.5789473684210527,
       "level_results": [
         {
           "level_index": 0,
           "completed": true,
-          "actions_taken": 15,
+          "actions_taken": 19,
           "baseline_actions": 30,
-          "efficiency_ratio": 2.0,
+          "efficiency_ratio": 1.5789473684210527,
           "epistemic_probes": 0
         }
       ]
@@ -541,18 +541,18 @@
     },
     {
       "game_id": "re86",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 200,
+      "total_actions": 20,
       "total_baseline": 26,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 1.3,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 200,
+          "completed": true,
+          "actions_taken": 20,
           "baseline_actions": 26,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 1.3,
           "epistemic_probes": 0
         }
       ]
@@ -577,54 +577,54 @@
     },
     {
       "game_id": "sb26",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 240,
+      "total_actions": 9,
       "total_baseline": 18,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 2.0,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 240,
+          "completed": true,
+          "actions_taken": 9,
           "baseline_actions": 18,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 2.0,
           "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "sc25",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 207,
+      "total_actions": 29,
       "total_baseline": 36,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 1.2413793103448276,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 207,
+          "completed": true,
+          "actions_taken": 29,
           "baseline_actions": 36,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 1.2413793103448276,
           "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "sk48",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 240,
+      "total_actions": 21,
       "total_baseline": 61,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 2.9047619047619047,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 240,
+          "completed": true,
+          "actions_taken": 21,
           "baseline_actions": 61,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 2.9047619047619047,
           "epistemic_probes": 0
         }
       ]
@@ -633,16 +633,16 @@
       "game_id": "sp80",
       "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 4,
+      "total_actions": 8,
       "total_baseline": 39,
-      "mean_efficiency": 9.75,
+      "mean_efficiency": 4.875,
       "level_results": [
         {
           "level_index": 0,
           "completed": true,
-          "actions_taken": 4,
+          "actions_taken": 8,
           "baseline_actions": 39,
-          "efficiency_ratio": 9.75,
+          "efficiency_ratio": 4.875,
           "epistemic_probes": 0
         }
       ]
@@ -667,36 +667,36 @@
     },
     {
       "game_id": "tn36",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 122,
+      "total_actions": 7,
       "total_baseline": 32,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 4.571428571428571,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 122,
+          "completed": true,
+          "actions_taken": 7,
           "baseline_actions": 32,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 4.571428571428571,
           "epistemic_probes": 0
         }
       ]
     },
     {
       "game_id": "tr87",
-      "levels_completed": 0,
+      "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 240,
+      "total_actions": 14,
       "total_baseline": 54,
-      "mean_efficiency": 0.0,
+      "mean_efficiency": 3.857142857142857,
       "level_results": [
         {
           "level_index": 0,
-          "completed": false,
-          "actions_taken": 240,
+          "completed": true,
+          "actions_taken": 14,
           "baseline_actions": 54,
-          "efficiency_ratio": 0.0,
+          "efficiency_ratio": 3.857142857142857,
           "epistemic_probes": 0
         }
       ]
@@ -705,16 +705,16 @@
       "game_id": "tu93",
       "levels_completed": 1,
       "total_levels": 1,
-      "total_actions": 18,
+      "total_actions": 21,
       "total_baseline": 19,
-      "mean_efficiency": 1.0555555555555556,
+      "mean_efficiency": 0.9047619047619048,
       "level_results": [
         {
           "level_index": 0,
           "completed": true,
-          "actions_taken": 18,
+          "actions_taken": 21,
           "baseline_actions": 19,
-          "efficiency_ratio": 1.0555555555555556,
+          "efficiency_ratio": 0.9047619047619048,
           "epistemic_probes": 0
         }
       ]
