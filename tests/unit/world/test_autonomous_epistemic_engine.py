@@ -359,3 +359,37 @@ def test_pushable_cargo_discovery_and_deduplication() -> None:
     engine.last_action_data = None
     engine.assimilate_feedback(grid_next, [1, 2, 3, 4])
     assert 4 in engine.learned_cargo_features
+
+
+def test_block_stride_avatar_grounding() -> None:
+    """Verify AutonomousEpistemicEngine grounds avatar and motor dynamics on multi-cell strides (e.g. wa30)."""
+    engine = AutonomousEpistemicEngine()
+
+    # 32x32 grid with a 4x4 avatar at (16, 16)
+    grid_0 = np.zeros((32, 32), dtype=int)
+    grid_0[16:20, 16:20] = 5
+
+    # Action 1 (UP) translates avatar 4 units upward to (12, 16)
+    grid_1 = np.zeros((32, 32), dtype=int)
+    grid_1[12:16, 16:20] = 5
+
+    engine.prev_grid = grid_0
+    engine.last_action = 1
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_1, [1, 2, 3, 4])
+
+    assert engine.avatar_feature == 5
+    assert 1 in engine.action_dynamics
+    assert engine.action_dynamics[1].get_displacement() == (-4, 0)
+    assert engine.action_dynamics[1].confidence >= 0.6
+
+    # Action 1 (UP) again translates avatar to (8, 16), confirming dynamics
+    grid_2 = np.zeros((32, 32), dtype=int)
+    grid_2[8:12, 16:20] = 5
+    engine.prev_grid = grid_1
+    engine.last_action = 1
+    engine.last_action_data = None
+    engine.assimilate_feedback(grid_2, [1, 2, 3, 4])
+
+    assert engine.is_motor_grounded()
+    assert engine.action_dynamics[1].confidence >= 0.7

@@ -427,11 +427,14 @@ class AutonomousEpistemicEngine:
             min_dist = float("inf")
             best_delta = (0, 0)
             for ce_id, ce in unmatched_curr.items():
-                if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 64:
+                if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 144:
                     dr = ce.grid_pos[0] - pe.grid_pos[0]
                     dc = ce.grid_pos[1] - pe.grid_pos[1]
                     dist = abs(dr) + abs(dc)
-                    if 0 < dist <= 6 and abs(dr) <= 3 and abs(dc) <= 3:
+                    is_valid_displacement = (0 < dist <= 16 and (dr == 0 or dc == 0)) or (
+                        0 < dist <= 8 and abs(dr) <= 4 and abs(dc) <= 4
+                    )
+                    if is_valid_displacement:
                         if dist < min_dist:
                             min_dist = dist
                             best_ce_id = ce_id
