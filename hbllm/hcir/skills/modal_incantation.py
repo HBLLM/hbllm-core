@@ -14,14 +14,17 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     PerceptualClusterDetector,
     RemoteActuator,
 )
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +47,11 @@ class IncantationGlyph:
     pattern: list[list[bool]]
 
 
-class ModalIncantationSkillAcquisition:
+class ModalIncantationSkillAcquisition(BaseHierarchicalSkill):
     """Acquires glyph-to-state-transformation affordances and plans incantations."""
+
+    skill_name: str = "modal_incantation_transformation"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
 
     # Canonical 3x3 glyph binary activation topologies
     KNOWN_GLYPHS: dict[str, IncantationGlyph] = {
@@ -280,3 +286,25 @@ class ModalIncantationSkillAcquisition:
             plan.extend(DiscreteVectorTranslator.delta_to_actions(0, dy, step_size=2))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for modal incantation keypad puzzles."""
+        return self.is_incantation_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for modal incantation keypad puzzles."""
+        return self.plan_incantation_grid(grid, current_level=current_level)

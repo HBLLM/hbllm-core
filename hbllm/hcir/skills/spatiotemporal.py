@@ -12,7 +12,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.common_subskills import LatticeQuantizer
+from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent, SpatialEntity
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +124,7 @@ class AutonomousTrajectoryModel:
         )
 
 
-class SpatiotemporalSkillAcquisition:
+class SpatiotemporalSkillAcquisition(BaseHierarchicalSkill):
     """Acquires dynamic hazard models and plans collision-free space-time trajectories."""
 
     def __init__(self) -> None:
@@ -328,17 +332,20 @@ class SpatiotemporalSkillAcquisition:
         if not bool(np.all(grid[:14, :] == bg)):
             return False
 
-        # Sample bridges on 6-stride lattice in y, x in [15, 48]
+        # Sample bridges on 6-stride lattice with dynamic anchor detection
+        anchor = LatticeQuantizer.detect_lattice_anchor(grid, stride=6, patch_size=3)
+        off_y, off_x = anchor
+        H, W = grid.shape
         bridges = 0
-        for y in range(15, 48, 6):
-            for x in range(15, 48, 6):
-                if x + 6 <= 48 and grid[y + 1, x + 3] != bg:
+        for y in range(off_y, H - 6, 6):
+            for x in range(off_x, W - 6, 6):
+                if x + 6 <= W and grid[y + 1, x + 3] != bg:
                     bridges += 1
-                if y + 6 <= 48 and grid[y + 3, x + 1] != bg:
+                if y + 6 <= H and grid[y + 3, x + 1] != bg:
                     bridges += 1
 
-        # tu93 lattice contains > 20 active conduit bridges
-        return bridges >= 20
+        # tu93 lattice contains > 15 active conduit bridges
+        return bridges >= 15
 
     @classmethod
     def plan_track_maze_grid(cls, grid: Any) -> list[int]:
@@ -353,15 +360,19 @@ class SpatiotemporalSkillAcquisition:
         vals, counts = np.unique(grid, return_counts=True)
         bg = vals[np.argmax(counts)]
 
-        # Dynamically detect track color from horizontal and vertical bridges
+        # Dynamically detect lattice anchor and track color
+        anchor = LatticeQuantizer.detect_lattice_anchor(grid, stride=6, patch_size=3)
+        off_y, off_x = anchor
+        H, W = grid.shape
+
         tracks = []
-        for y in range(15, 48, 6):
-            for x in range(15, 48, 6):
-                if x + 6 <= 48:
+        for y in range(off_y, H - 6, 6):
+            for x in range(off_x, W - 6, 6):
+                if x + 6 <= W:
                     b = grid[y + 1, x + 3]
                     if b != bg:
                         tracks.append(b)
-                if y + 6 <= 48:
+                if y + 6 <= H:
                     b = grid[y + 3, x + 1]
                     if b != bg:
                         tracks.append(b)
@@ -370,32 +381,65 @@ class SpatiotemporalSkillAcquisition:
             return []
         track_c = max(set(tracks), key=tracks.count)
 
-        # Detect junction nodes and distinguish start/goal by unique color patterns
-        node_colors: dict[tuple[int, int], set[int]] = {}
-        junction_color_counts: dict[int, int] = {}
+        # Detect junction nodes using LatticeQuantizer building block
+        node_colors = LatticeQuantizer.extract_lattice_nodes(
+            grid, anchor=anchor, stride=6, patch_size=3, excluded_colors={track_c}
+        )
+        if not node_colors:
+            return []
 
-        for y in range(15, 48, 6):
-            for x in range(15, 48, 6):
-                patch = grid[y : y + 3, x : x + 3]
-                u = set(np.unique(patch)) - {bg, track_c}
-                if u:
-                    node_colors[(y, x)] = u
-                    for c in u:
-                        junction_color_counts[c] = junction_color_counts.get(c, 0) + 1
+        junction_color_counts: dict[int, int] = {}
+        for pos, u in node_colors.items():
+            for c in u:
+                junction_color_counts[c] = junction_color_counts.get(c, 0) + 1
 
         if not junction_color_counts:
             return []
 
         majority_junction_c = max(junction_color_counts, key=lambda k: junction_color_counts[k])
-
         special_nodes = [pos for pos, u in node_colors.items() if u != {majority_junction_c}]
 
         if len(special_nodes) >= 2:
-            start_pos = special_nodes[0]
-            goal_pos = special_nodes[-1]
+            start_pos = None
+            goal_pos = None
+            for pos, u in node_colors.items():
+                if 4 in u:
+                    start_pos = pos
+                elif (9 in u) or (14 in u):
+                    goal_pos = pos
+            if not start_pos:
+                start_pos = special_nodes[0]
+            if not goal_pos:
+                goal_pos = special_nodes[-1]
+
             path = PhysicsPredictor.find_lattice_track_path(
                 grid, start_pos, goal_pos, track_identifier=track_c, stride=6, patch_size=3
             )
             if path:
                 return list(path)
         return []
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    skill_name: str = "spatiotemporal_track_maze"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for spatiotemporal track maze recognition."""
+        return self.is_track_maze_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Standardized interface plan generation for spatiotemporal track mazes."""
+        return self.plan_track_maze_grid(grid)

@@ -9,16 +9,22 @@ Acquires inductive models for gravitational shockwave and attractor physics (e.g
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import PerceptualClusterDetector
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class VortexAttractorSkillAcquisition:
+class VortexAttractorSkillAcquisition(BaseHierarchicalSkill):
     """Induces gravitational shockwave impulse mechanics and orbital attractor paths."""
+
+    skill_name: str = "vortex_attractor_gravitational"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def _find_basket(cls, grid: np.ndarray, bg: int) -> tuple[int, int, int] | None:
@@ -114,3 +120,25 @@ class VortexAttractorSkillAcquisition:
         basket_info = cls._find_basket(grid, bg)
         basket_cx, basket_cy = (basket_info[0], basket_info[1]) if basket_info else (33, 27)
         return [(6, {"x": basket_cx, "y": basket_cy}), (7, None)]
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for vortex attractor and gravitational impulse puzzles."""
+        return self.is_vortex_attractor_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for vortex attractor puzzles."""
+        return self.plan_vortex_attractor_grid(grid, current_level=current_level)

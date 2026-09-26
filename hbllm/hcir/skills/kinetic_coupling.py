@@ -11,20 +11,26 @@ and target receptacle docking (e.g. ka59):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     PerceptualClusterDetector,
     RemoteActuator,
 )
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class KineticCouplingSkillAcquisition:
+class KineticCouplingSkillAcquisition(BaseHierarchicalSkill):
     """Induces momentum launching and multi-controllable docking plans."""
+
+    skill_name: str = "kinetic_coupling_launch"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
 
     @classmethod
     def is_kinetic_coupling_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -159,3 +165,25 @@ class KineticCouplingSkillAcquisition:
             plan.extend(move(3, 6))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for kinetic coupling controllable launch puzzles."""
+        return self.is_kinetic_coupling_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for kinetic coupling controllable launch puzzles."""
+        return self.plan_kinetic_coupling_grid(grid, current_level=current_level)

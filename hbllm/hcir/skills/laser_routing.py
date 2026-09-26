@@ -10,14 +10,21 @@ and sokoban-style block sequencing (e.g. sk48):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class LaserRoutingSkillAcquisition:
+class LaserRoutingSkillAcquisition(BaseHierarchicalSkill):
     """Induces laser routing, pipe extension mechanics, and block sequencing."""
+
+    skill_name: str = "laser_routing_pipe_coupling"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_laser_routing_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -108,3 +115,25 @@ class LaserRoutingSkillAcquisition:
             plan.append((4, None))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for laser routing and pipe extension puzzles."""
+        return self.is_laser_routing_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for laser routing puzzles."""
+        return self.plan_laser_routing_grid(grid, current_level=current_level)

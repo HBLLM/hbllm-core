@@ -9,14 +9,21 @@ Acquires inductive kinematics and multi-entity alignment for reticle overlay env
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class ReticleSuperpositionSkillAcquisition:
+class ReticleSuperpositionSkillAcquisition(BaseHierarchicalSkill):
     """Induces multi-reticle alignment plans for crosshair superposition puzzles."""
+
+    skill_name: str = "reticle_superposition_crosshair"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.ALIGN
 
     @classmethod
     def is_reticle_superposition_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -167,3 +174,25 @@ class ReticleSuperpositionSkillAcquisition:
 
         subplan.append((5, None))
         return subplan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for reticle superposition crosshair puzzles."""
+        return self.is_reticle_superposition_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for reticle superposition crosshair puzzles."""
+        return self.plan_reticle_superposition_grid(grid, current_level=current_level)

@@ -16,11 +16,17 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
-class HierarchicalPatternGrammarSkillAcquisition:
+class HierarchicalPatternGrammarSkillAcquisition(BaseHierarchicalSkill):
     """Induces hierarchical call-tree grammars and plans discrete slot matches."""
+
+    skill_name: str = "hierarchical_pattern_grammar"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_pattern_grammar_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -184,3 +190,25 @@ class HierarchicalPatternGrammarSkillAcquisition:
             plan.append((5, None))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for hierarchical pattern grammar slot puzzles."""
+        return self.is_pattern_grammar_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for hierarchical pattern grammar slot puzzles."""
+        return self.plan_pattern_grammar_grid(grid, current_level=current_level)

@@ -9,16 +9,22 @@ Acquires inductive models for programming discrete automata via bit-addressable 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import RemoteActuator
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class AutomatonProgramSynthesisSkillAcquisition:
+class AutomatonProgramSynthesisSkillAcquisition(BaseHierarchicalSkill):
     """Induces automaton programming models, register bit assignments, and execution."""
+
+    skill_name: str = "automaton_program_synthesis"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_automaton_synthesis_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -183,5 +189,26 @@ class AutomatonProgramSynthesisSkillAcquisition:
 
             plan.append(RemoteActuator.click(run_button[0], run_button[1]))
             plan.append(RemoteActuator.click(run_button[0], run_button[1]))
-
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for automaton programming synthesis puzzles."""
+        return self.is_automaton_synthesis_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for automaton programming synthesis puzzles."""
+        return self.plan_automaton_synthesis_grid(grid, current_level=current_level)

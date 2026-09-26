@@ -15,6 +15,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,8 +31,11 @@ class MorphologicalTransformation:
     confidence: float = 1.0
 
 
-class MorphologicalProgramSynthesis:
+class MorphologicalProgramSynthesis(BaseHierarchicalSkill):
     """Induces geometric analogy transformations between source and canvas grids."""
+
+    skill_name: str = "morphological_gravity_spill"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     OPERATIONS = [
         ("IDENTITY", lambda a: a),
@@ -259,3 +265,25 @@ class MorphologicalProgramSynthesis:
         for _ in range(15):
             plan.append((5, None))
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for morphological gravity spill puzzles."""
+        return self.is_gravity_spill_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for morphological gravity spill puzzles."""
+        return self.plan_gravity_spill_grid(grid, current_level=current_level)

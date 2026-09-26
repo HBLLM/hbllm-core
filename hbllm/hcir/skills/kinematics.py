@@ -9,6 +9,12 @@ from __future__ import annotations
 import collections
 import logging
 from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +30,11 @@ class KinematicModel:
     observations_tested: int = 0
 
 
-class KinematicMomentumSkillAcquisition:
+class KinematicMomentumSkillAcquisition(BaseHierarchicalSkill):
     """Discovers sliding/momentum mechanics and plans multi-step inertial routes."""
+
+    skill_name: str = "kinematic_momentum_sliding"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     def __init__(self) -> None:
         self.model = KinematicModel()
@@ -151,3 +160,40 @@ class KinematicMomentumSkillAcquisition:
                     queue.append((dest, path + [(d, dest)]))
 
         return None
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for kinematic sliding environment recognition."""
+        if self.model.is_sliding_environment:
+            return True
+        if metadata and metadata.get("is_sliding"):
+            return True
+        return False
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Standardized interface plan generation for sliding momentum routes."""
+        if not metadata or "start" not in metadata or "goal" not in metadata:
+            return []
+        start = metadata["start"]
+        goal = metadata["goal"]
+        barriers = metadata.get("barriers", set())
+        grid_shape = (int(grid.shape[-2]), int(grid.shape[-1]))
+        path = self.plan_sliding_path(start, goal, barriers, grid_shape)
+        if not path:
+            return []
+        # Convert delta directions to action IDs (1: UP, 2: DOWN, 3: LEFT, 4: RIGHT)
+        delta_to_action = {(-1, 0): 1, (1, 0): 2, (0, -1): 3, (0, 1): 4}
+        return [delta_to_action[d] for d, _ in path if d in delta_to_action]

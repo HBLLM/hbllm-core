@@ -14,6 +14,9 @@ from __future__ import annotations
 from hbllm.hcir.skills.automaton_synthesis import (
     AutomatonProgramSynthesisSkillAcquisition,
 )
+from hbllm.hcir.skills.base import (
+    BaseHierarchicalSkill,
+)
 from hbllm.hcir.skills.common_subskills import (
     BlockPushPlanner,
     ColorCluster,
@@ -106,6 +109,7 @@ from hbllm.hcir.skills.vortex_attractor import (
 __all__ = [
     "AutomatonProgramSynthesisSkillAcquisition",
     "AutonomousTrajectoryModel",
+    "BaseHierarchicalSkill",
     "BlockPushPlanner",
     "ColorCluster",
     "CoupledControllableModel",

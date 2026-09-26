@@ -16,11 +16,17 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
-class VisualCanvasSkillAcquisition:
+class VisualCanvasSkillAcquisition(BaseHierarchicalSkill):
     """Induces stencil stamping mechanics, sector alignment, and swatch switching."""
+
+    skill_name: str = "visual_canvas_stencil_stamping"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     def __init__(self) -> None:
         self.ring_coords: dict[int, tuple[int, int]] = {
@@ -267,3 +273,26 @@ class VisualCanvasSkillAcquisition:
 
         # 3. Stamp canvas
         return 5, 0.99, None
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for visual canvas stencil stamping puzzles."""
+        return self.is_canvas_stamping_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for visual canvas stencil stamping puzzles."""
+        act, _, params = self.plan_canvas_stamping_step(grid)
+        return [(act, params)]

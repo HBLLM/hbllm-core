@@ -12,6 +12,11 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,8 +30,11 @@ class CoupledControllableModel:
     confidence: float = 0.5
 
 
-class CoupledControllableSkillAcquisition:
+class CoupledControllableSkillAcquisition(BaseHierarchicalSkill):
     """Discovers coupled/mirrored avatars and executes joint configuration planning."""
+
+    skill_name: str = "coupled_controllable_convergence"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     def __init__(self) -> None:
         self.model = CoupledControllableModel()
@@ -295,7 +303,26 @@ class CoupledControllableSkillAcquisition:
                     visited.add(new_state)
                     queue.append((new_state, path + [act]))
 
-            if found_path:
-                break
-
         return found_path or []
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for mirrored multi-agent convergence recognition."""
+        return self.is_mirrored_convergence_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[int]:
+        """Standardized interface plan generation for coupled controllable convergence."""
+        return self.plan_mirrored_convergence_grid(grid)

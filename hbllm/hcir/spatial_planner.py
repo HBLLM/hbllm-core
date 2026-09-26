@@ -61,6 +61,8 @@ class SpatialActionIntent(StrEnum):
     ACTUATE = "ACTIVATE"
     PICKUP = "PICKUP"
     DROP = "DROP"
+    MANIPULATE = "MANIPULATE"
+    ALIGN = "ALIGN"
 
 
 # ── Backward Compatibility Aliases (deprecated, use canonical names above) ──

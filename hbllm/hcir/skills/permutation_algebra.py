@@ -12,7 +12,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import GF2LinearSolver, RemoteActuator
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +45,11 @@ class ToggleIncidenceModel:
         return res
 
 
-class PermutationAlgebraSkillAcquisition:
+class PermutationAlgebraSkillAcquisition(BaseHierarchicalSkill):
     """Learns action incidence patterns and inverts combinatorial grid permutations."""
+
+    skill_name: str = "permutation_algebra_lights_out"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
 
     def __init__(self) -> None:
         self.toggle_model = ToggleIncidenceModel()
@@ -263,3 +268,25 @@ class PermutationAlgebraSkillAcquisition:
             plan.append(RemoteActuator.click(tiles[idx][0], tiles[idx][1]))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for Lights Out GF(2) algebraic puzzles."""
+        return self.is_lights_out_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for Lights Out GF(2) algebraic puzzles."""
+        return self.plan_lights_out_grid(grid, current_level=current_level)

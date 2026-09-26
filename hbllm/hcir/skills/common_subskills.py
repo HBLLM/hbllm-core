@@ -341,6 +341,74 @@ class LatticeQuantizer:
                     result[my, mx] = background_color
         return result
 
+    @classmethod
+    def detect_lattice_anchor(
+        cls,
+        grid: np.ndarray,
+        stride: int = 6,
+        patch_size: int = 3,
+        excluded_colors: set[int] | None = None,
+    ) -> tuple[int, int]:
+        """Detect the optimal (offset_y, offset_x) anchor of a discrete lattice on grid.
+
+        Scans 0 <= off_y < stride and 0 <= off_x < stride to find the anchor that
+        maximizes the count of discrete node patches containing foreground elements.
+        """
+        arr = PerceptualClusterDetector.normalize_grid(grid)
+        H, W = arr.shape
+        vals, counts = np.unique(arr, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+        excl = set(excluded_colors or set()) | {bg}
+
+        best_offset = (0, 0)
+        best_count = -1
+
+        for off_y in range(stride):
+            for off_x in range(stride):
+                count = 0
+                for y in range(off_y, H - patch_size + 1, stride):
+                    for x in range(off_x, W - patch_size + 1, stride):
+                        patch = arr[y : y + patch_size, x : x + patch_size]
+                        u = set(np.unique(patch)) - excl
+                        if u:
+                            count += 1
+                if count > best_count:
+                    best_count = count
+                    best_offset = (off_y, off_x)
+
+        return best_offset
+
+    @classmethod
+    def extract_lattice_nodes(
+        cls,
+        grid: np.ndarray,
+        anchor: tuple[int, int] | None = None,
+        stride: int = 6,
+        patch_size: int = 3,
+        excluded_colors: set[int] | None = None,
+    ) -> dict[tuple[int, int], set[int]]:
+        """Extract all discrete node positions and their unique foreground color sets."""
+        arr = PerceptualClusterDetector.normalize_grid(grid)
+        H, W = arr.shape
+        vals, counts = np.unique(arr, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+        excl = set(excluded_colors or set()) | {bg}
+
+        if anchor is None:
+            anchor = cls.detect_lattice_anchor(
+                arr, stride=stride, patch_size=patch_size, excluded_colors=excl
+            )
+
+        off_y, off_x = anchor
+        nodes: dict[tuple[int, int], set[int]] = {}
+        for y in range(off_y, H - patch_size + 1, stride):
+            for x in range(off_x, W - patch_size + 1, stride):
+                patch = arr[y : y + patch_size, x : x + patch_size]
+                u = set(np.unique(patch)) - excl
+                if u:
+                    nodes[(y, x)] = u
+        return nodes
+
 
 class TemporalSyncPlanner:
     """Coordinates multi-actor sequences, ghost replays, and temporal delays."""

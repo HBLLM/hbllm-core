@@ -11,14 +11,21 @@ Acquires inductive models for formal rewrite grammar translation and symbol sequ
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class GrammarTranslationSkillAcquisition:
+class GrammarTranslationSkillAcquisition(BaseHierarchicalSkill):
     """Induces formal rewrite grammars and plans symbol sequence transformations."""
+
+    skill_name: str = "grammar_translation_rewrite"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_grammar_translation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -267,3 +274,25 @@ class GrammarTranslationSkillAcquisition:
             diffs.append(d)
 
         return generate_slot_plan(diffs)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for formal rewrite grammar translation puzzles."""
+        return self.is_grammar_translation_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for formal rewrite grammar translation puzzles."""
+        return self.plan_grammar_translation_grid(grid, current_level=current_level)

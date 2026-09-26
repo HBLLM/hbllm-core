@@ -11,7 +11,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from hbllm.hcir.spatial_planner import SpatialEntity
+import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent, SpatialEntity
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +31,11 @@ class RelationalAffordanceRule:
     times_observed: int = 0
 
 
-class RelationalAffordanceSkillAcquisition:
+class RelationalAffordanceSkillAcquisition(BaseHierarchicalSkill):
     """Discovers and evaluates relational entity-entity interactions."""
+
+    skill_name: str = "relational_affordance_solitaire"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
 
     def __init__(self) -> None:
         self.rules: dict[tuple[str, str, str], RelationalAffordanceRule] = {}
@@ -253,3 +259,25 @@ class RelationalAffordanceSkillAcquisition:
             queue.append((6, {"x": x2, "y": y2}))
 
         return queue
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for peg solitaire relational affordances."""
+        return self.is_peg_solitaire_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for peg solitaire relational affordances."""
+        return self.plan_peg_solitaire_grid(grid, current_level=current_level)

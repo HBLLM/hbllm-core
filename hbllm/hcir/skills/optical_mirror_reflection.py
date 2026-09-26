@@ -9,14 +9,21 @@ Acquires inductive models for mirror reflections across reflective symmetry axes
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class OpticalMirrorReflectionSkillAcquisition:
+class OpticalMirrorReflectionSkillAcquisition(BaseHierarchicalSkill):
     """Induces optical mirror reflection alignments and multi-entity positioning."""
+
+    skill_name: str = "optical_mirror_reflection"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.ALIGN
 
     @classmethod
     def is_optical_mirror_reflection_grid(
@@ -139,3 +146,25 @@ class OpticalMirrorReflectionSkillAcquisition:
             actions.extend([(2, None)] * dr)
 
         return actions
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for optical mirror reflection puzzles."""
+        return self.is_optical_mirror_reflection_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for optical mirror reflection puzzles."""
+        return self.plan_optical_mirror_reflection_grid(grid, current_level=current_level)

@@ -16,11 +16,17 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
-class VisualProgramSynthesisSkillAcquisition:
+class VisualProgramSynthesisSkillAcquisition(BaseHierarchicalSkill):
     """Induces visual program / routine slot assembly plans."""
+
+    skill_name: str = "visual_program_synthesis"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_visual_program_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -132,3 +138,25 @@ class VisualProgramSynthesisSkillAcquisition:
         # 5. Program execution trigger (Action 5)
         actions.append((5, None))
         return actions
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for visual program slot assembly puzzles."""
+        return self.is_visual_program_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for visual program slot assembly puzzles."""
+        return self.plan_visual_program_grid(grid, current_level=current_level)

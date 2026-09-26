@@ -13,14 +13,21 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class MorphologicalMutationSkillAcquisition:
+class MorphologicalMutationSkillAcquisition(BaseHierarchicalSkill):
     """Induces morphological attribute mutation requirements and plans gate attunement."""
+
+    skill_name: str = "morphological_state_mutation"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     @classmethod
     def is_morphological_mutation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -195,6 +202,28 @@ class MorphologicalMutationSkillAcquisition:
             return [(act, None) for act in found_plan]
 
         return []
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for morphological mutation and attribute-gated mazes."""
+        return self.is_morphological_mutation_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for morphological mutation mazes."""
+        return self.plan_morphological_mutation_grid(grid, current_level=current_level)
 
 
 MorphologicalStateMutationSkillAcquisition = MorphologicalMutationSkillAcquisition

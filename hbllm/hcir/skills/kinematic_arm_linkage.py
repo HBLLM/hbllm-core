@@ -16,11 +16,17 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.spatial_planner import SpatialActionIntent
+
 logger = logging.getLogger(__name__)
 
 
-class KinematicLinkageSolver:
+class KinematicLinkageSolver(BaseHierarchicalSkill):
     """Solves multi-link articulated arm slider puzzles (e.g. s5i5) via free-space waypoint kinematic deformation."""
+
+    skill_name: str = "kinematic_arm_linkage"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     def __init__(self) -> None:
         self.action_queue: list[tuple[int, dict[str, int]]] = []
@@ -231,3 +237,26 @@ class KinematicLinkageSolver:
                 plan.append((6, s_by_x[3]["extend"]))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for articulated arm linkage puzzles."""
+        return self.is_kinematic_linkage(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for articulated arm linkage puzzles."""
+        plan = self._synthesize_linkage_plan(grid, current_level=current_level)
+        return [(act, data) for act, data in plan]

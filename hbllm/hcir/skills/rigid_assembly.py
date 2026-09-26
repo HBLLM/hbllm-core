@@ -10,19 +10,25 @@ translational piece assembly environments (e.g. Tangram, pin-locking jigsaw):
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     RemoteActuator,
 )
+from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class RigidAssemblySkillAcquisition:
+class RigidAssemblySkillAcquisition(BaseHierarchicalSkill):
     """Induces rotational and translational assembly plans for rigid pieces."""
+
+    skill_name: str = "rigid_body_assembly"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
 
     @classmethod
     def is_rigid_assembly_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -105,3 +111,25 @@ class RigidAssemblySkillAcquisition:
             plan.append((5, None))
 
         return plan
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BaseHierarchicalSkill Standardized Protocol Implementation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Standardized interface check for rigid body assembly / tangram puzzles."""
+        return self.is_rigid_assembly_grid(grid, available_actions)
+
+    def plan(
+        self,
+        grid: np.ndarray,
+        current_level: int = 0,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[tuple[int, dict[str, int] | None]]:
+        """Standardized interface plan generation for rigid body assembly / tangram puzzles."""
+        return self.plan_rigid_assembly_grid(grid, current_level=current_level)
