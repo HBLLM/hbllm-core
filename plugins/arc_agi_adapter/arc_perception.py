@@ -43,6 +43,7 @@ class ARCPerceptualLifter:
         learned_cargo_signatures: set[str] | None = None,
         learned_obstacle_signatures: set[str] | None = None,
         learned_affordance_rules: dict[str, Any] | None = None,
+        learned_hazard_colors: set[Any] | None = None,
     ) -> tuple[list[SpatialEntity], set[tuple[int, int]]]:
         H, W = grid.shape
         step = step_size
@@ -55,6 +56,7 @@ class ARCPerceptualLifter:
         learned_b = (learned_barrier_colors or set()) - walkable
         learned_i = (learned_item_colors or set()) - walkable
         learned_r = (learned_receptacle_colors or set()) - walkable
+        learned_h = (learned_hazard_colors or set()) - walkable
 
         raw_barriers: set[tuple[int, int]] = set()
         for b_col in learned_b:
@@ -345,6 +347,9 @@ class ARCPerceptualLifter:
                 ):
                     role = EntityRole.OBSTACLE
                     raw_barriers.update(o_coords)
+                elif o.color in learned_h:
+                    role = EntityRole.DYNAMIC_HAZARD
+                    raw_barriers.update(o_coords)
                 elif o.color in learned_i:
                     role = (
                         EntityRole.MANIPULABLE
@@ -434,6 +439,9 @@ def arc_perception_lifter(
     learned_r = domain_instr.get("learned_receptacle_colors", set())
     learned_i = getattr(state, "learned_target_features", set())
     learned_b = getattr(state, "learned_obstacle_features", set())
+    learned_h = getattr(state, "learned_hazard_features", set()) or perception_data.get(
+        "learned_hazard_features", set()
+    )
     learned_ts = getattr(state, "learned_target_signatures", set())
     learned_cs = getattr(state, "learned_cargo_signatures", set())
     learned_os = getattr(state, "learned_obstacle_signatures", set())
@@ -453,5 +461,6 @@ def arc_perception_lifter(
         learned_cargo_signatures=learned_cs,
         learned_obstacle_signatures=learned_os,
         learned_affordance_rules=learned_ar,
+        learned_hazard_colors=learned_h,
     )
     return entities, barriers

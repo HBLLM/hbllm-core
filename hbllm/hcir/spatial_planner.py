@@ -285,6 +285,7 @@ class EntityGraph:
     components: dict[int, set[tuple[int, int]]] = field(default_factory=dict)
     entity_to_comp: dict[str, int] = field(default_factory=dict)
     cut_sets: list[CutSetResult] = field(default_factory=list)
+    dynamic_hazards: list[SpatialEntity] = field(default_factory=list)
     grid_shape: tuple[int, int] = (64, 64)
     step_size: int = 1
 
@@ -372,6 +373,8 @@ class HCIRSpatialEntityPlanner:
         for ent in entities:
             if ent.role == EntityRole.OBSTACLE:
                 continue
+            if ent.role == EntityRole.DYNAMIC_HAZARD:
+                eg.dynamic_hazards.append(ent)
             co_located = [
                 ex_id
                 for ex_id, ex in deduped_entities.items()

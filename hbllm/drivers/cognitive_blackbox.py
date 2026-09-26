@@ -3721,18 +3721,54 @@ class CognitiveBlackbox:
             if hasattr(step, "carried_offset") and step.carried_offset != (0, 0)
             else None
         )
-        safe_path = self.spatial_planner.compute_safe_path(
-            start=avatar_pos,
-            goal=target_pos,
-            barrier_cells=eg.barriers,
-            grid_shape=eg.grid_shape,
-            step_size=eg.step_size,
-            footprint_offsets=footprint_offsets,
+        safe_path = None
+        has_dynamic_hazards = (
+            hasattr(state, "spatiotemporal_skills")
+            and state.spatiotemporal_skills
+            and (
+                bool(state.spatiotemporal_skills.hazard_features)
+                or bool(getattr(eg, "dynamic_hazards", None))
+            )
         )
+        curr_step = getattr(state, "step_count", getattr(state, "step_counter", 0))
+        if has_dynamic_hazards:
+            safe_path = state.spatiotemporal_skills.plan_space_time_path(
+                start=avatar_pos,
+                goal=target_pos,
+                current_t=curr_step,
+                grid_shape=eg.grid_shape,
+                static_barriers=eg.barriers,
+            )
+
+        if not safe_path:
+            safe_path = self.spatial_planner.compute_safe_path(
+                start=avatar_pos,
+                goal=target_pos,
+                barrier_cells=eg.barriers,
+                grid_shape=eg.grid_shape,
+                step_size=eg.step_size,
+                footprint_offsets=footprint_offsets,
+            )
 
         step_dr, step_dc = dr, dc
         if safe_path and len(safe_path) > 1:
             next_cell = safe_path[1]
+            # Dynamic safety verification at next time step t+1
+            if (
+                hasattr(state, "spatiotemporal_skills")
+                and state.spatiotemporal_skills
+                and not state.spatiotemporal_skills.is_cell_safe_at_time(
+                    next_cell[0], next_cell[1], curr_step + 1
+                )
+            ):
+                next_cell = avatar_pos  # wait while dynamic hazard crosses
+
+            if next_cell == avatar_pos:
+                # Stand still / wait for hazard to pass
+                for a in available_actions:
+                    if a.action_id in (0, 7):
+                        return a
+
             if (
                 next_cell not in eg.barriers
                 and next_cell not in self.spatial_planner._learned_barriers

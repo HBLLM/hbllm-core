@@ -353,6 +353,7 @@ class ARC3SpatialCognitiveAgent:
                 "level": lvl,
             },
         )
+        blackbox_state = self.blackbox.get_state("arc_agi")
         perception_data = {
             "grid": curr_grid,
             "grid_shape": tuple(curr_grid.shape),
@@ -361,6 +362,7 @@ class ARC3SpatialCognitiveAgent:
             "avatar_color": self.avatar_color,
             "target_zone_bounds": getattr(self, "target_zone_bounds", None),
             "level": lvl,
+            "learned_hazard_features": getattr(blackbox_state, "learned_hazard_features", set()),
         }
         eg = self.blackbox.observe(driver_input, perception_data)
         if eg and eg.avatar:
