@@ -933,7 +933,23 @@ class HCIRSpatialEntityPlanner:
                     >= eg.step_size * 0.75
                 ]
 
-            for idx, item in enumerate(items):
+            remaining_items = list(items)
+            current_stand_pos = eg.avatar.grid_pos
+            planned_drops = set(slots)
+            item_seq_idx = 0
+
+            while remaining_items:
+                # Greedy Nearest-Neighbor Subgoal Ordering:
+                # Pick remaining item that minimizes distance from the current avatar/drop stand position
+                best_item_idx = min(
+                    range(len(remaining_items)),
+                    key=lambda i: math.hypot(
+                        remaining_items[i].grid_pos[0] - current_stand_pos[0],
+                        remaining_items[i].grid_pos[1] - current_stand_pos[1],
+                    ),
+                )
+                item = remaining_items.pop(best_item_idx)
+
                 # Determine adjacent approach stand position
                 adj_cells = [
                     (item.grid_pos[0] - eg.step_size, item.grid_pos[1]),
@@ -951,11 +967,11 @@ class HCIRSpatialEntityPlanner:
 
                 # Pick an available slot from the pool
                 drop_pos = (
-                    available_slots[idx % len(available_slots)]
+                    available_slots[item_seq_idx % len(available_slots)]
                     if available_slots
                     else exit_ent.grid_pos
                 )
-                planned_drops = set(slots)
+                item_seq_idx += 1
 
                 # Rigid-body kinematic alignment:
                 valid_candidates = []
@@ -977,9 +993,7 @@ class HCIRSpatialEntityPlanner:
                 valid_candidates.sort(
                     key=lambda x: (
                         not x[0],
-                        math.hypot(
-                            x[1][0] - eg.avatar.grid_pos[0], x[1][1] - eg.avatar.grid_pos[1]
-                        ),
+                        math.hypot(x[1][0] - current_stand_pos[0], x[1][1] - current_stand_pos[1]),
                     )
                 )
 
@@ -1013,6 +1027,7 @@ class HCIRSpatialEntityPlanner:
                         carried_offset=carried_offset_cand,
                     )
                 )
+                current_stand_pos = drop_stand
             return plan
 
         nav_goals = [e for e in exits if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)]
@@ -1414,10 +1429,13 @@ class HCIRSpatialEntityPlanner:
     ) -> list[tuple[int, int]]:
         """Computes a collision-free geodesic path accounting for carried object footprint offsets."""
         offsets = footprint_offsets or [(0, 0)]
+        effective_barriers = set(barrier_cells)
+        if self._learned_barriers:
+            effective_barriers.update(self._learned_barriers - {goal, start})
         return PhysicsPredictor.compute_geodesic_path(
             start=start,
             goal=goal,
-            barrier_cells=barrier_cells,
+            barrier_cells=effective_barriers,
             grid_shape=grid_shape,
             step_size=step_size,
             footprint_offsets=offsets,

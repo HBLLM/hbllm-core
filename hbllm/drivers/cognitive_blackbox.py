@@ -3731,20 +3731,29 @@ class CognitiveBlackbox:
             )
         )
         curr_step = getattr(state, "step_count", getattr(state, "step_counter", 0))
+        effective_barriers = set(eg.barriers)
+        if (
+            hasattr(self.spatial_planner, "_learned_barriers")
+            and self.spatial_planner._learned_barriers
+        ):
+            effective_barriers.update(
+                self.spatial_planner._learned_barriers - {target_pos, avatar_pos}
+            )
+
         if has_dynamic_hazards:
             safe_path = state.spatiotemporal_skills.plan_space_time_path(
                 start=avatar_pos,
                 goal=target_pos,
                 current_t=curr_step,
                 grid_shape=eg.grid_shape,
-                static_barriers=eg.barriers,
+                static_barriers=effective_barriers,
             )
 
         if not safe_path:
             safe_path = self.spatial_planner.compute_safe_path(
                 start=avatar_pos,
                 goal=target_pos,
-                barrier_cells=eg.barriers,
+                barrier_cells=effective_barriers,
                 grid_shape=eg.grid_shape,
                 step_size=eg.step_size,
                 footprint_offsets=footprint_offsets,
