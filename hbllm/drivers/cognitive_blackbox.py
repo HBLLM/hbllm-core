@@ -3755,7 +3755,8 @@ class CognitiveBlackbox:
             next_cell = safe_path[1]
             # Dynamic safety verification at next time step t+1
             if (
-                hasattr(state, "spatiotemporal_skills")
+                has_dynamic_hazards
+                and hasattr(state, "spatiotemporal_skills")
                 and state.spatiotemporal_skills
                 and not state.spatiotemporal_skills.is_cell_safe_at_time(
                     next_cell[0], next_cell[1], curr_step + 1

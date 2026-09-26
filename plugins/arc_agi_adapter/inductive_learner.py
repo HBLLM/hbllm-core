@@ -3776,7 +3776,7 @@ class InductiveARC3BenchmarkRunner:
 
     def __init__(
         self,
-        max_steps_per_level: int = 150,
+        max_steps_per_level: int | None = None,
         max_retries_per_level: int = 2,
         knowledge_dir: Path | str | None = None,
         disable_archetypes: bool = False,
@@ -3840,6 +3840,11 @@ class InductiveARC3BenchmarkRunner:
             lvl_actions = 0
             completed = False
             baseline = baseline_list[lvl_idx] if lvl_idx < len(baseline_list) else 50
+            # By default scale step budget to 2x baseline actions (with floor of 60 steps)
+            if self.max_steps is not None and self.max_steps > 0:
+                effective_max_steps = max(self.max_steps, int(baseline * 2.0))
+            else:
+                effective_max_steps = max(int(baseline * 2.0), 60)
 
             max_attempts = 1 + max(0, retries_allowed)
             attempts_made = 0
@@ -3865,7 +3870,7 @@ class InductiveARC3BenchmarkRunner:
                     frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
                 )
 
-                for _ in range(self.max_steps):
+                for _ in range(effective_max_steps):
                     available_actions = getattr(frame_data, "available_actions", [1, 2, 3, 4])
                     if not available_actions:
                         available_actions = [1, 2, 3, 4]

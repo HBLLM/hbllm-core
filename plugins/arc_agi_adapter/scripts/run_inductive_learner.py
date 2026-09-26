@@ -47,8 +47,8 @@ def main() -> None:
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=120,
-        help="Maximum action steps per level attempt (default: 120).",
+        default=None,
+        help="Maximum action steps per level attempt (default: None, which automatically scales to 2x baseline).",
     )
     parser.add_argument(
         "--api-key",

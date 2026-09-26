@@ -177,7 +177,7 @@ class SpatiotemporalSkillAcquisition:
     ) -> bool:
         """Check if grid cell (r, c) is free of dynamic hazards at timestamp t."""
         for traj in self.trajectories.values():
-            if traj.feature_id not in self.hazard_features and not traj.is_periodic:
+            if traj.feature_id not in self.hazard_features:
                 continue
 
             pred = traj.predict_position(t)

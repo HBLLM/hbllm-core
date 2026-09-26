@@ -46,7 +46,14 @@ def test_kaggle_submission_agent(games: list[str], max_levels: int = 2, max_step
         start_t = time.time()
         completed_prev = 0
 
-        for s in range(max_steps * target_levels):
+        baselines = (
+            getattr(env, "baseline_actions", None)
+            or getattr(getattr(env, "info", None), "baseline_actions", None)
+            or [max_steps] * target_levels
+        )
+        total_budget = sum(max(max_steps, int(b * 2.0)) for b in list(baselines)[:target_levels])
+
+        for s in range(total_budget):
             action = agent.choose_action(history, frame)
             history.append(frame)
 
