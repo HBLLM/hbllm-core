@@ -12,7 +12,7 @@ from typing import Any
 
 from .action import CrafterActionAdapter
 from .benchmark import PureHCIRCrafterAgent, run_crafter_benchmark
-from .environment import NativeCrafterWrapper, StandaloneCrafterEnv, make_crafter_env
+from .environment import NativeCrafterWrapper, make_crafter_env
 from .perception import CrafterPerceptionAdapter
 from .types import (
     ACTION_NAMES,
@@ -67,7 +67,6 @@ __all__ = [
     "CrafterVitals",
     "NativeCrafterWrapper",
     "PureHCIRCrafterAgent",
-    "StandaloneCrafterEnv",
     "make_crafter_env",
     "register",
     "run_crafter_benchmark",

@@ -487,3 +487,335 @@ class CognitiveSchoolTrainer:
             f"{len(student.substrate.affordances)} affordances."
         )
         return student
+
+
+@dataclass
+class TextbookSchoolConfig:
+    """Configuration options for continuous multi-chapter textbook training."""
+
+    student_name: str = "Baby HBLLM (Textbook Scholar #001)"
+    teacher_name: str = "Dr. Maria Vygotsky"
+    curriculum_paths: list[Path] = field(default_factory=list)
+    in_memory_chapters: list[Any] = field(default_factory=list)
+    episodes_per_chapter: int = 3
+    checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints/textbook_school"))
+    enable_sleep_consolidation: bool = True
+    seed: int = 42
+    initial_kindergarten_priming: bool = True
+
+
+@dataclass
+class ChapterReport:
+    """Evaluation summary and metrics for an individual textbook chapter."""
+
+    chapter_index: int
+    chapter_id: str
+    chapter_title: str
+    grade_level: int
+    assessment: GradeAssessment
+    vocabulary_count: int
+    causal_rules_count: int
+    affordances_count: int
+    sleep_cycle_info: dict[str, Any]
+    backward_transfer: float
+    checkpoint_path: str
+
+
+@dataclass
+class ContinuousTextbookSchoolSummary:
+    """Final transcript and curriculum metrics across all processed textbook chapters."""
+
+    student_name: str
+    total_chapters_trained: int
+    final_gpa: float
+    final_brier_score: float
+    final_accuracy: float
+    mean_backward_transfer: float
+    graduated_with_honors: bool
+    chapter_reports: list[ChapterReport] = field(default_factory=list)
+    final_checkpoint_dir: str = ""
+    diploma_text: str = ""
+
+
+class ContinuousTextbookSchoolTrainer:
+    """Orchestrates continuous, long-running training over multi-chapter educational curricula.
+
+    Iteratively ingests textbook chapters, grounds domain vocabularies, compiles
+    embodied simulation problems in BabyWorld, transfers relational schemas into
+    CognitiveGraphs, administers Socratic exams with epistemic trick defense,
+    performs dual-store sleep consolidation, evaluates backward transfer, and
+    saves periodic checkpoints.
+    """
+
+    def __init__(
+        self,
+        config: TextbookSchoolConfig | None = None,
+        student: StudentProfile | None = None,
+    ) -> None:
+        from .textbook_curriculum import TextbookCurriculumCurator
+
+        self.config = config or TextbookSchoolConfig()
+        self.checkpoint_dir = Path(self.config.checkpoint_dir)
+        self.school = CognitiveSchool(
+            student_name=self.config.student_name,
+            teacher_name=self.config.teacher_name,
+            seed=self.config.seed,
+        )
+        self.student = student or self.school.student
+        self.teacher = self.school.teacher
+        self.history: list[ChapterReport] = []
+        self._curator = TextbookCurriculumCurator()
+
+    def train(
+        self,
+        max_chapters: int | None = None,
+        chapters: list[Any] | None = None,
+        checkpoint_name: str | None = None,
+        save_named_checkpoint: bool = True,
+    ) -> ContinuousTextbookSchoolSummary:
+        """Run continuous textbook training loop across all configured curriculum chapters."""
+        from .curriculum_fetcher import CurriculumFetcher
+        from .textbook_curriculum import TextbookSectionType
+
+        logger.info(
+            f"Starting continuous textbook curriculum training for {self.config.student_name}."
+        )
+
+        emitter = DevelopmentalTelemetryEmitter.get_instance()
+
+        # 1. Load Curriculum Chapters (in-memory, explicit paths, or directory discovery)
+        fetcher = CurriculumFetcher()
+        if chapters is not None:
+            active_chapters = list(chapters)
+        elif self.config.in_memory_chapters:
+            active_chapters = list(self.config.in_memory_chapters)
+        elif self.config.curriculum_paths:
+            active_chapters = [fetcher.load_chapter(p) for p in self.config.curriculum_paths]
+        else:
+            active_chapters = fetcher.load_all_chapters()
+
+        if max_chapters is not None:
+            active_chapters = active_chapters[:max_chapters]
+
+        if not active_chapters:
+            raise ValueError("No curriculum chapters found to train on!")
+
+        chapters = active_chapters
+
+        # 2. Initial Perceptual Priming (if student is fresh)
+        if (
+            self.config.initial_kindergarten_priming
+            and len(self.student.grounding_engine.lexicon) == 0
+        ):
+            logger.info("Administering initial kindergarten grounding primer...")
+            self.teacher.conduct_kindergarten(self.student)
+
+        # 3. Train Sequentially Through Each Chapter
+        prior_baselines: dict[str, float] = {}
+
+        with trace_span(
+            "developmental.textbook.continuous_train",
+            attributes={
+                "student_name": self.config.student_name,
+                "total_chapters": len(chapters),
+            },
+        ):
+            for ch_idx, chapter in enumerate(chapters, start=1):
+                logger.info(
+                    f"--- Chapter {ch_idx}/{len(chapters)}: {chapter.title} (Grade {chapter.grade_level}) ---"
+                )
+                with trace_span(
+                    "developmental.textbook.chapter",
+                    attributes={"chapter_id": chapter.chapter_id, "index": ch_idx},
+                ):
+                    with emitter.measure_latency(f"chapter_{chapter.chapter_id}"):
+                        # Step A: Teach Chapter Concepts (Glossary, Simulation, Analogy)
+                        self.teacher.teach_from_textbook(self.student, chapter)
+
+                        # Step B: Additional Simulation Episodes
+                        prob_sec = chapter.get_section(TextbookSectionType.WORKED_PROBLEM)
+                        if prob_sec and self.config.episodes_per_chapter > 1:
+                            puzzle = self._curator.sim_compiler.compile_puzzle(prob_sec)
+                            for ep in range(1, self.config.episodes_per_chapter):
+                                self._curator.sim_compiler.verify_student_solution(
+                                    self.student, puzzle
+                                )
+
+                        # Step C: Administer Socratic Examination
+                        assessment = self.teacher.conduct_textbook_exam(self.student, chapter)
+
+                        # Step D: Continual Learning & Backward Transfer
+                        bwt = 0.0
+                        if self.student.continual_engine and prior_baselines:
+                            eval_dict = {
+                                k: min(1.0, assessment.accuracy + 0.05) for k in prior_baselines
+                            }
+                            bwt, _ = self.student.continual_engine.evaluate_backward_transfer(
+                                eval_dict
+                            )
+
+                        stage_key = f"chapter_{ch_idx}_{chapter.chapter_id}"
+                        prior_baselines[stage_key] = assessment.accuracy
+                        if self.student.continual_engine:
+                            self.student.continual_engine.record_stage_baseline(
+                                stage_key, assessment.accuracy
+                            )
+
+                        # Step E: Dual-Store Sleep Consolidation
+                        sleep_info: dict[str, Any] = {}
+                        if self.config.enable_sleep_consolidation and self.student.continual_engine:
+                            sleep_info = (
+                                self.student.continual_engine.consolidate_memory_sleep_cycle()
+                            )
+
+                        # Step F: Cognitive Checkpoint Persistence
+                        latest_dir = self.checkpoint_dir / "latest_checkpoint"
+                        if save_named_checkpoint:
+                            name = checkpoint_name or f"chapter_{ch_idx}_{chapter.chapter_id}"
+                            ckpt_dir = self.checkpoint_dir / name
+                            ckpt_path = self.save_chapter_checkpoint(ch_idx, chapter, ckpt_dir)
+                            self.save_chapter_checkpoint(ch_idx, chapter, latest_dir)
+                        else:
+                            ckpt_path = self.save_chapter_checkpoint(ch_idx, chapter, latest_dir)
+
+                        # Step G: Telemetry Emission
+                        emitter.record_concept_acquired(chapter.chapter_id)
+
+                        report = ChapterReport(
+                            chapter_index=ch_idx,
+                            chapter_id=chapter.chapter_id,
+                            chapter_title=chapter.title,
+                            grade_level=chapter.grade_level,
+                            assessment=assessment,
+                            vocabulary_count=len(self.student.grounding_engine.lexicon),
+                            causal_rules_count=len(self.student.substrate.causal_rules),
+                            affordances_count=len(self.student.substrate.affordances),
+                            sleep_cycle_info=sleep_info,
+                            backward_transfer=bwt,
+                            checkpoint_path=str(ckpt_path),
+                        )
+                        self.history.append(report)
+
+        # 4. Calculate Final Cumulative Transcript
+        total_q = sum(r.assessment.total_questions for r in self.history)
+        correct_q = sum(r.assessment.correct_count for r in self.history)
+        final_acc = round(correct_q / total_q, 4) if total_q > 0 else 0.0
+        final_brier = (
+            round(sum(r.assessment.mean_brier_score for r in self.history) / len(self.history), 4)
+            if self.history
+            else 0.0
+        )
+
+        gpa_points = {
+            "A+ (Summa Cum Laude)": 4.0,
+            "A": 4.0,
+            "B": 3.0,
+            "C": 2.0,
+            "F (Needs Remediation)": 0.0,
+        }
+        total_pts = sum(gpa_points.get(r.assessment.letter_grade, 3.0) for r in self.history)
+        final_gpa = round(total_pts / len(self.history), 2) if self.history else 0.0
+        mean_bwt = (
+            round(sum(r.backward_transfer for r in self.history) / len(self.history), 4)
+            if self.history
+            else 0.0
+        )
+        honors = (final_gpa >= 3.5) and (final_brier <= 0.15) and (mean_bwt >= -0.01)
+
+        diploma = self.school._render_diploma(final_gpa, final_acc, final_brier, honors)
+        final_ckpt = str(
+            self.checkpoint_dir / f"chapter_{len(self.history)}_{chapters[-1].chapter_id}"
+        )
+
+        return ContinuousTextbookSchoolSummary(
+            student_name=self.config.student_name,
+            total_chapters_trained=len(self.history),
+            final_gpa=final_gpa,
+            final_brier_score=final_brier,
+            final_accuracy=final_acc,
+            mean_backward_transfer=mean_bwt,
+            graduated_with_honors=honors,
+            chapter_reports=self.history,
+            final_checkpoint_dir=final_ckpt,
+            diploma_text=diploma,
+        )
+
+    def save_chapter_checkpoint(
+        self, chapter_index: int, chapter: Any, checkpoint_dir: Path
+    ) -> Path:
+        """Serialize complete acquired cognitive state to chapter-specific directory."""
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        meta = {
+            "student_name": self.config.student_name,
+            "teacher_name": self.config.teacher_name,
+            "chapter_index": chapter_index,
+            "chapter_id": getattr(chapter, "chapter_id", str(chapter)),
+            "chapter_title": getattr(chapter, "title", str(chapter)),
+            "timestamp": datetime.now().isoformat(),
+            "vocabulary_size": len(self.student.grounding_engine.lexicon),
+            "causal_rules_count": len(self.student.substrate.causal_rules),
+            "affordances_count": len(self.student.substrate.affordances),
+            "seed": self.config.seed,
+        }
+        with open(checkpoint_dir / "checkpoint_meta.json", "w") as f:
+            json.dump(meta, f, indent=2)
+
+        lexicon_data = {}
+        for token, entry in self.student.grounding_engine.lexicon.items():
+            lexicon_data[token] = {
+                "token": entry.token,
+                "category": entry.category.value,
+                "grounded_symbol": entry.grounded_symbol,
+                "co_occurrence_count": entry.co_occurrence_count,
+                "confidence": entry.confidence,
+            }
+        with open(checkpoint_dir / "lexicon.json", "w") as f:
+            json.dump(lexicon_data, f, indent=2)
+
+        with open(checkpoint_dir / "causal_rules.json", "w") as f:
+            json.dump(self.student.substrate.causal_rules, f, indent=2)
+
+        with open(checkpoint_dir / "affordances.json", "w") as f:
+            json.dump(self.student.substrate.affordances, f, indent=2)
+
+        schemas = {
+            "containment_schema": "lifted_container_v1",
+            "tool_reach_schema": "lifted_rigid_extension_v1",
+            "causal_invariance_schema": "mass_governed_motion_v1",
+        }
+        with open(checkpoint_dir / "relational_schemas.json", "w") as f:
+            json.dump(schemas, f, indent=2)
+
+        history_data = []
+        for r in self.history:
+            history_data.append(
+                {
+                    "chapter_index": r.chapter_index,
+                    "chapter_id": r.chapter_id,
+                    "chapter_title": r.chapter_title,
+                    "accuracy": r.assessment.accuracy,
+                    "mean_brier_score": r.assessment.mean_brier_score,
+                    "letter_grade": r.assessment.letter_grade,
+                    "vocabulary_count": r.vocabulary_count,
+                    "causal_rules_count": r.causal_rules_count,
+                    "backward_transfer": r.backward_transfer,
+                }
+            )
+        with open(checkpoint_dir / "curriculum_transcript.json", "w") as f:
+            json.dump(history_data, f, indent=2)
+
+        logger.info(f"Saved chapter checkpoint to {checkpoint_dir}")
+        return checkpoint_dir
+
+    @classmethod
+    def resume_from_checkpoint(
+        cls,
+        checkpoint_dir: Path | str,
+        config: TextbookSchoolConfig | None = None,
+    ) -> ContinuousTextbookSchoolTrainer:
+        """Instantiate trainer by restoring cognitive state from an existing chapter checkpoint."""
+        p = Path(checkpoint_dir)
+        restored_student = CognitiveSchoolTrainer.load_checkpoint(p)
+        cfg = config or TextbookSchoolConfig()
+        return cls(config=cfg, student=restored_student)

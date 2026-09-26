@@ -120,12 +120,13 @@ The Execution Reality Layer and HCIR Causal Planners are evaluated strictly agai
 
 | Domain | Environment Package | Literature / RL Baseline | Pure HCIR Performance | Key Architectural Mechanism |
 | :--- | :--- | :---: | :---: | :--- |
-| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier | Causal Recipe DAG + Vital Priority Interrupts |
-| **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | **97.8%** Overall (44/45)<br>**80.0%** BossLevel | Spatial-epistemic search & key-door deduction |
-| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **80.0%** Native Success (16/20) | Reverse-BFS dead-end detection & frozen box hashing |
-| **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (15/15 episodes) | Causal recipe pipelining & counter contention resolution |
+| **Interactive Reasoning** | `arc_agi` / Official API | < 5% (RL exploration limits)<br>Human: 22–71 actions | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | Hierarchical Subgoal Trees (`DEPENDS_ON`) + Multi-Step Lookahead ($K \ge 2$) |
+| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier (31/33) | Causal Recipe DAG + Vital Priority Interrupts |
+| **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | **100.0%** Overall (45/45)<br>**100.0%** BossLevel (39.0 steps) | Spatial-epistemic search & type-safe key-door deduction |
+| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **100.0%** Native Success (15/15)<br>**0 deadlocks** across all tiers | Reachability macro-push search, line deadlock pruning (`PhysicsPredictor.is_line_deadlock()`), & 2x2 invariant checks |
+| **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (10/10 episodes) | Causal recipe pipelining & counter contention resolution |
 | **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA / TorchBeast) | **80.0%** (4/5 tiers at 100%) | Frontier glyph exploration & melee combat interrupts |
-| **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (Embodied CLIP / PPO) | **91.7%** (11/12 episodes) | Ground-truth 3D scene graph, camera yaw/pitch alignment & affordance reach |
+| **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (Embodied CLIP / PPO) | **50.0%** (Tiers 1–2 at 100%)<br>Pickup in 3 steps | Ground-truth 3D scene graph, camera yaw/pitch alignment & affordance reach |
 
 *For complete metric tables, 95% Wilson confidence intervals, per-tier breakdowns, and CLI reproducibility commands, refer to the [Embodied Cognitive & Frontier Benchmarks](../api/benchmarks.md#embodied-cognitive-frontier-benchmarks) API reference.*
 

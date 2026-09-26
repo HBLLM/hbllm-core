@@ -58,6 +58,7 @@ wheels/
 *.safetensors
 *.onnx
 *.gguf
+*.zip
 /hbllm/__pycache__
 
 # Runtime workspace artifacts
@@ -83,3 +84,7 @@ test_full_output.txt
 test_*_output.txt
 .envrc
 scratch/audit_grades_real.py
+/environment_files
+/plugins/developmental_adapter/reports
+/scratch/
+/kaggle_arc2_submission/

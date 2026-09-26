@@ -16,6 +16,7 @@ class PredictionErrorTypology(str, Enum):
 
     MODEL_ERROR = "model_error"
     ENVIRONMENT_CHANGE = "environment_change"
+    LATENT_CONFOUNDER = "latent_confounder"
 
 
 @dataclass

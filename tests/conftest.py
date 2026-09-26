@@ -124,6 +124,9 @@ except ImportError:
             return self.name == str(other) or str(self) == str(other)
 
     class _MockDevice:
+        type: str
+        index: int | None
+
         def __init__(self, device: Any = "cpu", *args: Any, **kwargs: Any) -> None:
             if isinstance(device, _MockDevice):
                 self.type = device.type

@@ -22,6 +22,19 @@ Architecture layers (strict dependency order)::
     HCIR Data Model           (Typed graph, types, validation)
 """
 
+from hbllm.hcir.spatial_planner import (
+    AVATAR,
+    BARRIER,
+    DOORWAY,
+    EXIT,
+    MOVABLE_ITEM,
+    REFILL,
+    SWITCH,
+    EntityGraph,
+    EntityRole,
+    HCIRSpatialEntityPlanner,
+    SpatialEntity,
+)
 from hbllm.hcir.types import (
     Confidence,
     CostMetric,
@@ -39,6 +52,39 @@ __all__ = [
     "TimeDuration",
     "Timestamp",
     "UncertaintyVector",
+    # --- Spatial Entity Planning ---
+    "HCIRSpatialEntityPlanner",
+    "EntityGraph",
+    "SpatialEntity",
+    "EntityRole",
+    # --- Backward Compat Aliases (deprecated) ---
+    "AVATAR",
+    "BARRIER",
+    "MOVABLE_ITEM",
+    "DOORWAY",
+    "SWITCH",
+    "REFILL",
+    "EXIT",
+    # --- Skill Acquisition ---
+    "AutonomousTrajectoryModel",
+    "CoupledControllableSkillAcquisition",
+    "GF2LinearSolver",
+    "KinematicMomentumSkillAcquisition",
+    "MorphologicalProgramSynthesis",
+    "PermutationAlgebraSkillAcquisition",
+    "RelationalAffordanceSkillAcquisition",
+    "SpatiotemporalSkillAcquisition",
 ]
 
-__hcir_version__ = "1.0.0"
+from hbllm.hcir.skills import (
+    AutonomousTrajectoryModel,
+    CoupledControllableSkillAcquisition,
+    GF2LinearSolver,
+    KinematicMomentumSkillAcquisition,
+    MorphologicalProgramSynthesis,
+    PermutationAlgebraSkillAcquisition,
+    RelationalAffordanceSkillAcquisition,
+    SpatiotemporalSkillAcquisition,
+)
+
+__hcir_version__ = "1.2.0"

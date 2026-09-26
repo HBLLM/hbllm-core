@@ -1,0 +1,783 @@
+"""Active Interventional Causal Discovery Engine for HCIR World Kernel.
+
+Implements domain-agnostic active hypothesis generation, interventional probing,
+strict falsification, Bayesian posterior updating, composite multi-object predicate discovery,
+and causal rule induction under confounding.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import time
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+from hbllm.hcir.world.world_causal import CausalEdgeType, WorldCausalGraph
+
+logger = logging.getLogger(__name__)
+
+
+class BeliefTransitionType(str, Enum):
+    """Immutable event types for event-sourced developmental belief logging."""
+
+    HYPOTHESIS_CREATED = "hypothesis_created"
+    HYPOTHESIS_TESTED = "hypothesis_tested"
+    HYPOTHESIS_FALSIFIED = "hypothesis_falsified"
+    HYPOTHESIS_CONFIRMED = "hypothesis_confirmed"
+    CONFIDENCE_CHANGED = "confidence_changed"
+    RULE_GENERALIZED = "rule_generalized"
+    RULE_REVISED = "rule_revised"
+    AFFORDANCE_DISCOVERED = "affordance_discovered"
+    SPATIAL_SCHEMA_INDUCED = "spatial_schema_induced"
+    TOOL_COMPOSED = "tool_composed"
+    GOAL_SYNTHESIZED = "goal_synthesized"
+    PLAN_EXECUTED = "plan_executed"
+    PLAN_REPLANNED = "plan_replanned"
+    CURIOSITY_EXPLORATION = "curiosity_exploration"
+    CONCEPT_INDUCED = "concept_induced"
+    LEXICON_GROUNDED = "lexicon_grounded"
+    COMPOSITION_PARSED = "composition_parsed"
+    MEMORY_CONSOLIDATED = "memory_consolidated"
+    METACOGNITION_CALIBRATED = "metacognition_calibrated"
+    CROSS_WORLD_TRANSFERRED = "cross_world_transferred"
+    CROSS_DOMAIN_TRANSFERRED = "cross_domain_transferred"
+
+
+class LogicOperator(str, Enum):
+    """Boolean logic operators for composite causal preconditions."""
+
+    AND = "AND"
+    OR = "OR"
+    NOT = "NOT"
+
+
+@dataclass
+class CausalPredicate:
+    """Unified representation for atomic, relational, and composite causal preconditions."""
+
+    # Atomic evaluation: e.g. variable="mass", operator="<", value=5.0
+    variable: str = ""
+    operator: str = "=="
+    value: Any = None
+
+    # Relational evaluation: e.g. relation="contained_in", target_entity="box_1"
+    relation: str = ""
+    target_entity: str = ""
+
+    # Composite evaluation: e.g. logic_op=AND, children=[pred1, pred2]
+    logic_op: LogicOperator | None = None
+    children: list[CausalPredicate] = field(default_factory=list)
+
+    def is_composite(self) -> bool:
+        """True if predicate represents a compound boolean expression."""
+        return self.logic_op is not None and bool(self.children)
+
+    def is_relational(self) -> bool:
+        """True if predicate represents an inter-entity relational edge."""
+        return bool(self.relation)
+
+    def evaluate(
+        self,
+        features: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> bool:
+        """Recursively evaluate predicate against features and optional context."""
+        # 1. Composite boolean evaluation
+        if self.logic_op == LogicOperator.AND:
+            if not self.children:
+                return True
+            return all(c.evaluate(features, context) for c in self.children)
+        elif self.logic_op == LogicOperator.OR:
+            if not self.children:
+                return False
+            return any(c.evaluate(features, context) for c in self.children)
+        elif self.logic_op == LogicOperator.NOT:
+            if not self.children:
+                return True
+            return not self.children[0].evaluate(features, context)
+
+        # 2. Relational evaluation
+        if self.is_relational():
+            rel_val = features.get(self.relation)
+            if rel_val is None and context:
+                rel_val = context.get(self.relation)
+                if rel_val is None and "relations" in context:
+                    relations = context["relations"]
+                    if isinstance(relations, dict):
+                        rel_val = relations.get(self.relation)
+                    elif isinstance(relations, list):
+                        for item in relations:
+                            if (
+                                isinstance(item, (tuple, list))
+                                and len(item) == 2
+                                and item[0] == self.relation
+                            ):
+                                rel_val = item[1]
+                                break
+            if rel_val is None:
+                return False
+
+            target = self.target_entity if self.target_entity != "" else self.value
+            if self.operator == "==":
+                return str(rel_val) == str(target)
+            elif self.operator == "!=":
+                return str(rel_val) != str(target)
+            elif self.operator == "in":
+                if isinstance(rel_val, (list, set, tuple)):
+                    return target in rel_val
+                return str(target) in str(rel_val)
+            elif self.operator == "contains":
+                if isinstance(rel_val, (list, set, tuple)):
+                    return target in rel_val
+                return str(target) in str(rel_val)
+            return False
+
+        # 3. Atomic attribute evaluation
+        val = features.get(self.variable)
+        if val is None:
+            return False
+        if self.operator == "==":
+            return str(val) == str(self.value)
+        elif self.operator == "!=":
+            return str(val) != str(self.value)
+        elif self.operator == "in":
+            if isinstance(self.value, (list, set, tuple)):
+                return val in self.value
+            return str(val) in str(self.value)
+        elif self.operator == "contains":
+            if isinstance(val, (list, set, tuple)):
+                return self.value in val
+            return str(self.value) in str(val)
+        try:
+            fval = float(val)
+            fthresh = float(self.value)
+            if self.operator == "<":
+                return fval < fthresh
+            elif self.operator == "<=":
+                return fval <= fthresh
+            elif self.operator == ">":
+                return fval > fthresh
+            elif self.operator == ">=":
+                return fval >= fthresh
+        except (ValueError, TypeError):
+            return False
+        return False
+
+    def describe(self) -> str:
+        """Generate human-readable and formal logical description."""
+        if self.logic_op == LogicOperator.AND:
+            parts = [
+                f"({c.describe()})" if c.is_composite() else c.describe() for c in self.children
+            ]
+            return " ∧ ".join(parts)
+        elif self.logic_op == LogicOperator.OR:
+            parts = [
+                f"({c.describe()})" if c.is_composite() else c.describe() for c in self.children
+            ]
+            return " ∨ ".join(parts)
+        elif self.logic_op == LogicOperator.NOT:
+            child_desc = self.children[0].describe() if self.children else "true"
+            return f"¬({child_desc})"
+        elif self.is_relational():
+            target = self.target_entity if self.target_entity != "" else self.value
+            if self.operator == "==":
+                return f"{self.relation}(x, {target})"
+            return f"{self.relation}(x, {target}) {self.operator} true"
+        return f"{self.variable} {self.operator} {self.value}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize predicate tree to dictionary."""
+        return {
+            "variable": self.variable,
+            "operator": self.operator,
+            "value": self.value,
+            "relation": self.relation,
+            "target_entity": self.target_entity,
+            "logic_op": self.logic_op.value if self.logic_op else None,
+            "children": [c.to_dict() for c in self.children],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CausalPredicate:
+        """Deserialize dictionary into predicate tree."""
+        lop = LogicOperator(data["logic_op"]) if data.get("logic_op") else None
+        children = [cls.from_dict(c) for c in data.get("children", [])]
+        return cls(
+            variable=data.get("variable", ""),
+            operator=data.get("operator", "=="),
+            value=data.get("value"),
+            relation=data.get("relation", ""),
+            target_entity=data.get("target_entity", ""),
+            logic_op=lop,
+            children=children,
+        )
+
+
+@dataclass
+class BeliefTransitionEvent:
+    """An immutable record of a developmental or cognitive belief transition."""
+
+    event_id: str = field(default_factory=lambda: f"bte_{uuid.uuid4().hex[:8]}")
+    event_type: BeliefTransitionType = BeliefTransitionType.HYPOTHESIS_CREATED
+    step_index: int = 0
+    hypothesis_id: str = ""
+    variable: str = ""  # e.g. "color", "mass", "shape", "feature_x"
+    condition: str = ""  # e.g. "color == 'red'", "mass < 5.0"
+    prior_confidence: float = 0.0
+    posterior_confidence: float = 0.0
+    is_falsified: bool = False
+    evidence: dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class CausalHypothesis:
+    """State tracker for candidate causal relationships."""
+
+    hypothesis_id: str = field(default_factory=lambda: f"hyp_{uuid.uuid4().hex[:6]}")
+    action: Any = "PUSH"
+    variable: str = "color"
+    operator: str = "=="
+    value: Any = "red"
+    consequence: str = "MOVES"
+    confidence: float = 0.5
+    interventions_tested: int = 0
+    falsified: bool = False
+    confirmed: bool = False
+    supporting_episodes: list[str] = field(default_factory=list)
+    counterexamples: list[str] = field(default_factory=list)
+    predicate: CausalPredicate | None = None
+
+    def get_predicate(self) -> CausalPredicate:
+        """Return existing predicate or synthesize atomic CausalPredicate."""
+        if self.predicate is not None:
+            return self.predicate
+        return CausalPredicate(
+            variable=self.variable,
+            operator=self.operator,
+            value=self.value,
+        )
+
+    def describe(self) -> str:
+        """Format causal hypothesis into symbolic statement."""
+        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        if self.predicate is not None:
+            return f"{act_val}(x) ∧ ({self.predicate.describe()}) => {self.consequence}"
+        return (
+            f"{act_val}(x) ∧ ({self.variable} {self.operator} {self.value}) => {self.consequence}"
+        )
+
+
+class BaseCausalDiscoveryEngine:
+    """Domain-agnostic causal discovery engine using active interventional contrastive inference."""
+
+    def __init__(
+        self,
+        causal_graph: WorldCausalGraph | None = None,
+    ) -> None:
+        self.causal_graph = causal_graph or WorldCausalGraph()
+        self.hypotheses: list[CausalHypothesis] = []
+        self.belief_history: list[BeliefTransitionEvent] = []
+        self.interventions_count: int = 0
+        self.confirmed_causal_rules: list[dict[str, Any]] = []
+
+    @staticmethod
+    def compute_hypothesis_entropy(hypotheses: Sequence[CausalHypothesis]) -> float:
+        """Compute Shannon entropy across active non-falsified hypotheses."""
+        active_confs = [h.confidence for h in hypotheses if not h.falsified and h.confidence > 0.0]
+        total = sum(active_confs)
+        if not active_confs or total <= 0.0:
+            return 0.0
+        probs = [c / total for c in active_confs]
+        return -sum(p * math.log2(p) for p in probs if p > 0.0)
+
+    def _compute_hypothesis_entropy(self) -> float:
+        """Helper for self-held hypotheses."""
+        return self.compute_hypothesis_entropy(self.hypotheses)
+
+    @staticmethod
+    def predict_hypothesis(
+        h: CausalHypothesis,
+        features: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> bool:
+        """Evaluate hypothesis prediction against observed features and optional context."""
+        if h.predicate is not None:
+            return h.predicate.evaluate(features, context)
+
+        # Legacy atomic attribute evaluation
+        val = features.get(h.variable)
+        if val is None:
+            return False
+        if h.operator == "==":
+            return str(val) == str(h.value)
+        elif h.operator == "!=":
+            return str(val) != str(h.value)
+        elif h.operator == "in":
+            if isinstance(h.value, (list, set, tuple)):
+                return val in h.value
+            return str(val) in str(h.value)
+        elif h.operator == "contains":
+            if isinstance(val, (list, set, tuple)):
+                return h.value in val
+            return str(h.value) in str(val)
+        try:
+            fval = float(val)
+            fthresh = float(h.value)
+            if h.operator == "<":
+                return fval < fthresh
+            elif h.operator == "<=":
+                return fval <= fthresh
+            elif h.operator == ">":
+                return fval > fthresh
+            elif h.operator == ">=":
+                return fval >= fthresh
+        except (ValueError, TypeError):
+            return False
+        return False
+
+    @staticmethod
+    def _predict_hypothesis(
+        h: CausalHypothesis,
+        features: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> bool:
+        """Backward-compatible private alias."""
+        return BaseCausalDiscoveryEngine.predict_hypothesis(h, features, context)
+
+    def compose_hypotheses(
+        self,
+        hypotheses: Sequence[CausalHypothesis],
+        logic_op: LogicOperator = LogicOperator.AND,
+        hypothesis_id: str | None = None,
+        action: Any | None = None,
+        consequence: str | None = None,
+    ) -> CausalHypothesis:
+        """Compose multiple hypotheses into a higher-order composite hypothesis."""
+        if not hypotheses:
+            raise ValueError("Cannot compose empty hypotheses list")
+
+        act = action if action is not None else hypotheses[0].action
+        cons = consequence if consequence is not None else hypotheses[0].consequence
+        children = [h.get_predicate() for h in hypotheses]
+        composite_pred = CausalPredicate(
+            logic_op=logic_op,
+            children=children,
+        )
+
+        if logic_op == LogicOperator.AND:
+            prior_conf = math.prod(h.confidence for h in hypotheses)
+        elif logic_op == LogicOperator.OR:
+            prior_conf = max(h.confidence for h in hypotheses)
+        else:
+            prior_conf = hypotheses[0].confidence
+
+        comp_hyp = CausalHypothesis(
+            hypothesis_id=hypothesis_id or f"hyp_comp_{uuid.uuid4().hex[:6]}",
+            action=act,
+            variable=hypotheses[0].variable,
+            operator=hypotheses[0].operator,
+            value=hypotheses[0].value,
+            consequence=cons,
+            confidence=max(0.05, round(prior_conf, 3)),
+            predicate=composite_pred,
+        )
+        self.hypotheses.append(comp_hyp)
+        return comp_hyp
+
+    def specialize_hypothesis(
+        self,
+        parent_hypothesis: CausalHypothesis,
+        discriminating_feature: str,
+        operator: str,
+        value: Any,
+        logic_op: LogicOperator = LogicOperator.AND,
+        hypothesis_id: str | None = None,
+    ) -> CausalHypothesis:
+        """Refine a partially predictive hypothesis by adding a discriminating condition."""
+        parent_pred = parent_hypothesis.get_predicate()
+        new_pred = CausalPredicate(
+            variable=discriminating_feature,
+            operator=operator,
+            value=value,
+        )
+        if parent_pred.logic_op == logic_op:
+            children = list(parent_pred.children) + [new_pred]
+        else:
+            children = [parent_pred, new_pred]
+
+        composite_pred = CausalPredicate(
+            logic_op=logic_op,
+            children=children,
+        )
+        specialized = CausalHypothesis(
+            hypothesis_id=hypothesis_id or f"hyp_spec_{uuid.uuid4().hex[:6]}",
+            action=parent_hypothesis.action,
+            variable=discriminating_feature,
+            operator=operator,
+            value=value,
+            consequence=parent_hypothesis.consequence,
+            confidence=max(0.1, round(parent_hypothesis.confidence * 0.8, 3)),
+            predicate=composite_pred,
+        )
+        self.hypotheses.append(specialized)
+        return specialized
+
+    def rank_interventional_candidates(
+        self,
+        candidate_ids: Sequence[str],
+        active_hypotheses: Sequence[CausalHypothesis],
+        feature_map: dict[str, dict[str, Any]],
+        exploration_penalty: float = 0.5,
+        context: dict[str, Any] | None = None,
+    ) -> list[tuple[str, float]]:
+        """Rank interventional candidates by expected information gain (hypothesis disagreement score)."""
+        active_hyps = [h for h in active_hypotheses if not h.falsified]
+        if not active_hyps:
+            return [(cid, 0.0) for cid in candidate_ids]
+
+        ranked: list[tuple[str, float]] = []
+        for ent_id in candidate_ids:
+            percept = feature_map.get(ent_id)
+            if not percept:
+                continue
+
+            predictions = [self.predict_hypothesis(h, percept, context) for h in active_hyps]
+
+            disagreements = 0
+            for i in range(len(predictions)):
+                for j in range(i + 1, len(predictions)):
+                    if predictions[i] != predictions[j]:
+                        disagreements += 1
+
+            times_tested = sum(
+                1
+                for h in active_hyps
+                if ent_id in h.supporting_episodes or ent_id in h.counterexamples
+            )
+            score = float(disagreements) - exploration_penalty * float(times_tested)
+            ranked.append((ent_id, score))
+
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        return ranked
+
+    def update_hypotheses_from_evidence(
+        self,
+        hypotheses: list[CausalHypothesis],
+        probe_result: dict[str, Any],
+        step_index: int = 0,
+        confirmation_threshold: float = 0.95,
+        confidence_step: float = 0.25,
+        context: dict[str, Any] | None = None,
+    ) -> list[BeliefTransitionEvent]:
+        """Update posterior confidences and falsify invalidated hypotheses on counterexample."""
+        did_move = bool(probe_result.get("did_move", False))
+        target_id = str(probe_result.get("target_id", ""))
+        events: list[BeliefTransitionEvent] = []
+
+        for h in hypotheses:
+            if h.falsified:
+                continue
+
+            prior_conf = h.confidence
+            predicted_move = self.predict_hypothesis(h, probe_result, context)
+            h.interventions_tested += 1
+
+            cond_str = (
+                h.predicate.describe()
+                if h.predicate is not None
+                else f"{h.variable} {h.operator} {h.value}"
+            )
+
+            if predicted_move != did_move:
+                # Prediction Error / Counterexample: Strict Falsification
+                h.falsified = True
+                h.confidence = 0.0
+                h.counterexamples.append(target_id)
+                events.append(
+                    BeliefTransitionEvent(
+                        event_type=BeliefTransitionType.HYPOTHESIS_FALSIFIED,
+                        step_index=step_index,
+                        hypothesis_id=h.hypothesis_id,
+                        variable=h.variable,
+                        condition=cond_str,
+                        prior_confidence=prior_conf,
+                        posterior_confidence=0.0,
+                        is_falsified=True,
+                        evidence={"counterexample": probe_result},
+                    )
+                )
+                logger.info(
+                    "Hypothesis falsified: %s (condition=%s)",
+                    h.hypothesis_id,
+                    cond_str,
+                    extra={"hypothesis_id": h.hypothesis_id, "variable": h.variable},
+                )
+            else:
+                # Evidence consistent with hypothesis
+                h.supporting_episodes.append(target_id)
+                h.confidence = min(1.0, h.confidence + confidence_step)
+                events.append(
+                    BeliefTransitionEvent(
+                        event_type=BeliefTransitionType.CONFIDENCE_CHANGED,
+                        step_index=step_index,
+                        hypothesis_id=h.hypothesis_id,
+                        variable=h.variable,
+                        condition=cond_str,
+                        prior_confidence=prior_conf,
+                        posterior_confidence=h.confidence,
+                        is_falsified=False,
+                        evidence={"supporting_evidence": probe_result},
+                    )
+                )
+
+                if h.confidence >= confirmation_threshold and not h.confirmed:
+                    h.confirmed = True
+                    events.append(
+                        BeliefTransitionEvent(
+                            event_type=BeliefTransitionType.HYPOTHESIS_CONFIRMED,
+                            step_index=step_index,
+                            hypothesis_id=h.hypothesis_id,
+                            variable=h.variable,
+                            condition=cond_str,
+                            prior_confidence=prior_conf,
+                            posterior_confidence=h.confidence,
+                            is_falsified=False,
+                            evidence={"confirmed_causal_law": h.describe()},
+                        )
+                    )
+
+        return events
+
+    def induce_causal_rule(
+        self,
+        confirmed_hyp: CausalHypothesis,
+        rule_store: list[dict[str, Any]],
+        causal_graph: WorldCausalGraph | None = None,
+        step_index: int = 0,
+    ) -> tuple[dict[str, Any], BeliefTransitionEvent]:
+        """Synthesize confirmed hypothesis into a generalized HCIR causal rule."""
+        action_val = (
+            confirmed_hyp.action.value
+            if hasattr(confirmed_hyp.action, "value")
+            else str(confirmed_hyp.action)
+        )
+        is_composite = (
+            confirmed_hyp.predicate is not None and confirmed_hyp.predicate.is_composite()
+        )
+        cond_str = (
+            confirmed_hyp.predicate.describe()
+            if confirmed_hyp.predicate is not None
+            else f"{confirmed_hyp.variable} {confirmed_hyp.operator} {confirmed_hyp.value}"
+        )
+
+        factors: list[str] = []
+        if is_composite and confirmed_hyp.predicate:
+            factors = [c.describe() for c in confirmed_hyp.predicate.children]
+        elif confirmed_hyp.predicate and confirmed_hyp.predicate.is_relational():
+            factors = [confirmed_hyp.predicate.describe()]
+        else:
+            factors = [f"{confirmed_hyp.variable} {confirmed_hyp.operator} {confirmed_hyp.value}"]
+
+        for existing in rule_store:
+            # Check atomic match
+            if not is_composite and (
+                existing.get("action") == action_val
+                and existing.get("consequence") == confirmed_hyp.consequence
+                and existing.get("precondition", {}).get("property") == confirmed_hyp.variable
+                and existing.get("precondition", {}).get("operator") == confirmed_hyp.operator
+                and existing.get("precondition", {}).get("value") == confirmed_hyp.value
+            ):
+                add_count = max(1, len(confirmed_hyp.supporting_episodes))
+                existing["empirical_support_count"] = (
+                    existing.get("empirical_support_count", 1) + add_count
+                )
+                existing["confidence"] = min(
+                    1.0, max(existing.get("confidence", 0.5), confirmed_hyp.confidence)
+                )
+                event = BeliefTransitionEvent(
+                    event_type=BeliefTransitionType.RULE_REVISED,
+                    step_index=step_index,
+                    hypothesis_id=confirmed_hyp.hypothesis_id,
+                    variable=confirmed_hyp.variable,
+                    condition=cond_str,
+                    prior_confidence=confirmed_hyp.confidence,
+                    posterior_confidence=existing["confidence"],
+                    is_falsified=False,
+                    evidence={"rule": existing},
+                )
+                return existing, event
+            # Check composite match
+            elif (
+                is_composite
+                and existing.get("action") == action_val
+                and existing.get("consequence") == confirmed_hyp.consequence
+                and existing.get("is_composite")
+                and existing.get("precondition", {}).get("composite_description") == cond_str
+            ):
+                add_count = max(1, len(confirmed_hyp.supporting_episodes))
+                existing["empirical_support_count"] = (
+                    existing.get("empirical_support_count", 1) + add_count
+                )
+                existing["confidence"] = min(
+                    1.0, max(existing.get("confidence", 0.5), confirmed_hyp.confidence)
+                )
+                event = BeliefTransitionEvent(
+                    event_type=BeliefTransitionType.RULE_REVISED,
+                    step_index=step_index,
+                    hypothesis_id=confirmed_hyp.hypothesis_id,
+                    variable=confirmed_hyp.variable,
+                    condition=cond_str,
+                    prior_confidence=confirmed_hyp.confidence,
+                    posterior_confidence=existing["confidence"],
+                    is_falsified=False,
+                    evidence={"rule": existing},
+                )
+                return existing, event
+
+        rule: dict[str, Any] = {
+            "rule_id": f"causal_rule_{len(rule_store) + 1}",
+            "action": action_val,
+            "is_composite": is_composite,
+            "predicate": confirmed_hyp.predicate.to_dict() if confirmed_hyp.predicate else None,
+            "precondition": {
+                "property": confirmed_hyp.variable,
+                "operator": confirmed_hyp.operator,
+                "value": confirmed_hyp.value,
+                "composite_description": cond_str if is_composite else "",
+            },
+            "consequence": confirmed_hyp.consequence,
+            "confidence": confirmed_hyp.confidence,
+            "empirical_support_count": len(confirmed_hyp.supporting_episodes),
+        }
+        rule_store.append(rule)
+
+        target_graph = causal_graph or self.causal_graph
+        if target_graph is not None:
+            source_node = (
+                cond_str
+                if is_composite
+                else f"{confirmed_hyp.variable}_{confirmed_hyp.operator}_{confirmed_hyp.value}"
+            )
+            target_node = str(confirmed_hyp.consequence)
+            target_graph.add_causal_relation(
+                source_id=source_node,
+                target_id=target_node,
+                relationship=CausalEdgeType.CAUSES,
+                weight=confirmed_hyp.confidence,
+                factors=factors,
+            )
+
+        event = BeliefTransitionEvent(
+            event_type=BeliefTransitionType.RULE_GENERALIZED,
+            step_index=step_index,
+            hypothesis_id=confirmed_hyp.hypothesis_id,
+            variable=confirmed_hyp.variable,
+            condition=cond_str,
+            prior_confidence=confirmed_hyp.confidence,
+            posterior_confidence=1.0,
+            is_falsified=False,
+            evidence={"generalized_rule": rule},
+        )
+        return rule, event
+
+    @staticmethod
+    def test_generalization(
+        test_objects: list[dict[str, Any]],
+        confirmed_rules: list[dict[str, Any]],
+    ) -> tuple[float, list[dict[str, Any]]]:
+        """Test acquired causal rules against held-out entities or worlds."""
+        if not confirmed_rules:
+            return 0.0, []
+
+        phys_rules = [
+            r
+            for r in confirmed_rules
+            if r.get("precondition", {}).get("property")
+            in ("surface_friction", "mass_sensation", "static_threshold", "clearance_diameter")
+            or r.get("is_composite")
+        ]
+        rule = phys_rules[0] if phys_rules else confirmed_rules[0]
+
+        eval_records = []
+        correct = 0
+
+        is_composite = bool(rule.get("is_composite")) and bool(rule.get("predicate"))
+        comp_predicate: CausalPredicate | None = None
+        if is_composite and rule.get("predicate"):
+            comp_predicate = CausalPredicate.from_dict(rule["predicate"])
+
+        precond = rule["precondition"]
+        prop_key = precond.get("property", "")
+        threshold = float(precond.get("value", 0.0)) if precond.get("value") is not None else 0.0
+        operator = precond.get("operator", "==")
+
+        for obj_info in test_objects:
+            actual_mass = float(obj_info.get("mass", 5.0))
+            actual_friction = float(obj_info.get("surface_friction", 1.0))
+            actual_static = float(obj_info.get("static_threshold", 0.0))
+            actual_clearance = float(obj_info.get("clearance_diameter", 0.4))
+
+            if is_composite and comp_predicate is not None:
+                predicted_moves = comp_predicate.evaluate(obj_info)
+            else:
+                if prop_key == "surface_friction":
+                    feat_val: Any = actual_friction
+                elif prop_key == "mass_sensation":
+                    feat_val = actual_mass
+                elif prop_key == "static_threshold":
+                    feat_val = actual_static
+                elif prop_key == "clearance_diameter":
+                    feat_val = actual_clearance
+                else:
+                    feat_val = obj_info.get(prop_key, "")
+
+                if operator == "<":
+                    predicted_moves = float(feat_val) < threshold
+                elif operator == "<=":
+                    predicted_moves = float(feat_val) <= threshold
+                elif operator == ">":
+                    predicted_moves = float(feat_val) > threshold
+                elif operator == ">=":
+                    predicted_moves = float(feat_val) >= threshold
+                elif operator == "==":
+                    predicted_moves = str(feat_val) == str(threshold)
+                else:
+                    predicted_moves = False
+
+            if prop_key == "clearance_diameter":
+                actual_moves = actual_clearance <= 0.5
+            else:
+                effective_resistance = max(actual_mass * actual_friction, actual_static)
+                actual_moves = 5.0 > effective_resistance
+
+            is_correct = predicted_moves == actual_moves
+            if is_correct:
+                correct += 1
+
+            eval_records.append(
+                {
+                    "id": obj_info.get("id", f"eval_obj_{len(eval_records) + 1}"),
+                    "color": obj_info.get("color"),
+                    "shape": obj_info.get("shape"),
+                    "mass": actual_mass,
+                    "surface_friction": actual_friction,
+                    "predicted_moves": predicted_moves,
+                    "actual_moves": actual_moves,
+                    "is_correct": is_correct,
+                }
+            )
+
+        accuracy = round(correct / len(test_objects), 4) if test_objects else 0.0
+        return accuracy, eval_records
+
+    def evaluate_generalization(
+        self,
+        test_objects: list[dict[str, Any]],
+    ) -> tuple[float, list[dict[str, Any]]]:
+        """Test acquired causal rules against held-out entities or worlds."""
+        return self.test_generalization(test_objects, self.confirmed_causal_rules)

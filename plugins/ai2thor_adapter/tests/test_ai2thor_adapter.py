@@ -1,7 +1,8 @@
-"""Tests for AI2-THOR Adapter Plugin, dual-mode wrapper, and benchmark utilities."""
+"""Tests for AI2-THOR Adapter Plugin, native wrapper, and benchmark utilities."""
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -17,12 +18,13 @@ for p in [str(_core_root), str(_plugins_root)]:
         sys.path.insert(0, p)
 
 from ai2thor_adapter import (
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
     AI2ThorActionType,
     AI2ThorGoal,
     AI2ThorPerceptionAdapter,
-    PureHCIRAI2ThorAgent,
+    NativeAI2ThorWrapper,
     make_ai2thor_env,
-    run_ai2thor_benchmark,
 )
 from ai2thor_adapter.action import AI2ThorActionAdapter
 from ai2thor_adapter.benchmark import resolve_cohort, wilson_score_interval
@@ -32,6 +34,18 @@ from ai2thor_adapter.types import (
     AI2ThorObservation,
     AI2ThorVector3,
 )
+
+
+def test_plugin_manifest() -> None:
+    manifest_path = Path(__file__).resolve().parent.parent / "plugin.json"
+    assert manifest_path.exists(), "plugin.json must exist"
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["name"] == PLUGIN_NAME
+    assert data["version"] == PLUGIN_VERSION
+    assert "ai2thor_observe" in data["capabilities"]
+    assert data.get("supports_native_execution") is True
+    assert "supports_standalone_fallback" not in data
 
 
 def test_cohort_resolution_valid() -> None:
@@ -61,42 +75,24 @@ def test_wilson_score_interval() -> None:
 
 
 def test_ai2thor_environment_lifecycle() -> None:
-    env = make_ai2thor_env(seed=42)
+    env = make_ai2thor_env(seed=42, tier=1)
     try:
+        assert isinstance(env, NativeAI2ThorWrapper)
         obs, info = env.reset(seed=42)
 
-        assert obs.agent_pose.position.x == 0.0
+        assert obs.agent_pose is not None
         assert len(obs.objects) > 0
-        assert "Mug_1" in [o.objectId for o in obs.objects]
-        assert "Microwave_1" in [o.objectId for o in obs.objects]
+        assert any("Apple" in o.objectType for o in obs.objects)
 
         # Execute a movement step
         next_obs, reward, term, trunc, info = env.step(AI2ThorActionType.MOVE_AHEAD)
-        assert not term
         assert next_obs.step_count == 1
     finally:
         env.close()
 
 
-def test_standalone_ai2thor_env_tiers() -> None:
-    for tier in [1, 2, 3, 4]:
-        env = make_ai2thor_env(tier=tier, prefer_native=False)
-        try:
-            obs, info = env.reset(seed=100)
-            assert isinstance(obs, AI2ThorObservation)
-            assert len(obs.objects) > 0
-            assert info["goal"] is not None
-
-            # Test action step
-            obs, r, term, trunc, info = env.step(AI2ThorActionType.MOVE_AHEAD)
-            assert isinstance(obs, AI2ThorObservation)
-            assert obs.step_count == 1
-        finally:
-            env.close()
-
-
 def test_ai2thor_perception_adapter() -> None:
-    env = make_ai2thor_env(seed=101)
+    env = make_ai2thor_env(seed=101, tier=1)
     try:
         obs, _ = env.reset(seed=101)
 
@@ -105,11 +101,7 @@ def test_ai2thor_perception_adapter() -> None:
 
         agent_node = graph.get_node("agent")
         assert agent_node is not None
-        assert agent_node.properties["rotation"] == 0.0
-
-        mug_node = graph.get_node("Mug_1")
-        assert mug_node is not None
-        assert mug_node.properties["is_pickupable"] is True
+        assert "rotation" in agent_node.properties
     finally:
         env.close()
 
@@ -147,43 +139,14 @@ def test_ai2thor_action_adapter_planning() -> None:
     assert action == AI2ThorActionType.MOVE_AHEAD
 
 
-def test_ai2thor_3d_pick_and_place() -> None:
-    env = make_ai2thor_env(seed=77)
-    try:
-        obs, info = env.reset(seed=77)
-        goal: AI2ThorGoal = info["goal"]
-        agent = PureHCIRAI2ThorAgent()
-
-        max_steps = 30
-        success = False
-        for _ in range(max_steps):
-            act = agent.select_action(obs, goal)
-            obs, r, term, trunc, info = env.step(act)
-            if term and r > 0.0:
-                success = True
-                break
-
-        assert success, f"Failed to complete AI2-THOR pick and place in {obs.step_count} steps"
-    finally:
-        env.close()
-
-
-def test_ai2thor_benchmark_smoke() -> None:
-    data = run_ai2thor_benchmark("pure-hcir", episodes=4, base_seed=500, prefer_native=False)
-    assert data["episodes"] >= 4
-    assert data["cohort"] == "pure-hcir"
-    assert "ci_95" in data
-    assert len(data["results"]) >= 4
-
-
 def test_native_ai2thor_wrapper_lifecycle() -> None:
-    env = make_ai2thor_env(seed=42, tier=1, prefer_native=True, require_native=True)
+    env = make_ai2thor_env(seed=42, tier=1)
     try:
         assert getattr(env, "is_native", False) is True
+        assert isinstance(env, NativeAI2ThorWrapper)
         obs, info = env.reset(seed=42)
         assert obs is not None
         assert obs.step_count == 0
-        # Verify observation carries typed 3D scene-graph metadata
         assert len(obs.objects) > 0
         assert hasattr(obs.objects[0], "objectId")
         assert hasattr(obs.objects[0], "position")
