@@ -209,7 +209,10 @@ class MyAgent(Agent):
             self.internal_agent.current_level = lvl_completed
 
         # Automatically hydrate game-specific knowledge if available
-        gid = getattr(self, "game_id", None) or getattr(latest_frame, "game_id", None)
+        raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
+        if raw_gid == "default_game":
+            raw_gid = getattr(latest_frame, "game_id", None)
+        gid = raw_gid
         if gid and isinstance(gid, str):
             base_gid = gid.split("-")[0].strip()
             if self.current_game_id != base_gid:
