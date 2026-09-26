@@ -122,6 +122,7 @@ __all__ = [
     "IncantationGlyph",
     "IncantationType",
     "InvertedBuoyancySkillAcquisition",
+    "KinematicLinkageSolver",
     "KinematicModel",
     "KinematicMomentumSkillAcquisition",
     "KineticCouplingSkillAcquisition",
