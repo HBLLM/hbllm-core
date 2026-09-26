@@ -997,9 +997,13 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         """The core Kaggle agent interface: chooses next GameAction from current visual observation."""
         state_str = self._extract_state(latest_frame)
 
-        # Framework contract: First call or after death -> reset the level
-        if state_str in ("NOT_PLAYED", "GAME_OVER", "GameState.NOT_PLAYED", "GameState.GAME_OVER"):
+        # Framework contract: First call -> fresh level; after death -> retry with retained dynamics
+        if state_str in ("NOT_PLAYED", "GameState.NOT_PLAYED"):
             self.internal_agent.reset_episode()
+            self.last_grid = None
+            return getattr(GameAction, "RESET", GameAction.ACTION1)
+        if state_str in ("GAME_OVER", "GameState.GAME_OVER"):
+            self.internal_agent.reset_episode(retain_dynamics=True)
             self.last_grid = None
             return getattr(GameAction, "RESET", GameAction.ACTION1)
 
@@ -1038,7 +1042,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 for root_candidate in [
                     Path.cwd(),
                     Path(__file__).resolve().parent.parent,
-                    Path("/Users/Dumith_Salinda/Projects/HBLLM/core"),
+                    Path("/kaggle/input/hbllm-kaggle-dataset"),
                     Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
                 ]:
                     kdir = root_candidate / "data" / "cognitive_memory" / "arc_agi_3"

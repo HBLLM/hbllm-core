@@ -3,24 +3,79 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-# Ensure HBLLM Core is on sys.path
+# Ensure HBLLM Core is on sys.path (Kaggle dataset or local checkout)
 for root, dirs, _ in os.walk("/kaggle/input"):
     if "hbllm" in dirs:
         if root not in sys.path:
             sys.path.insert(0, root)
         break
 
-# Local development fallback
-core_path = "/Users/Dumith_Salinda/Projects/HBLLM/core"
-if os.path.exists(core_path) and core_path not in sys.path:
-    sys.path.insert(0, core_path)
+# Portable local development fallback
+_here = Path(__file__).resolve().parent
+for cand in [_here.parent, _here.parent.parent, Path.cwd()]:
+    if (cand / "hbllm").exists() and str(cand) not in sys.path:
+        sys.path.insert(0, str(cand))
+        break
 
-from agents.agent import Agent
-from arcengine import FrameData, GameAction, GameState
+# Locate ARC-AGI-3-Agents framework if present
+for root, dirs, _ in os.walk("/kaggle"):
+    if "ARC-AGI-3-Agents" in dirs:
+        p = os.path.join(root, "ARC-AGI-3-Agents")
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        break
+
+try:
+    from agents.agent import Agent
+except ImportError:
+
+    class Agent:  # type: ignore[no-redef]
+        """Fallback base Agent class when running standalone outside framework."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+
+try:
+    from arcengine import FrameData, GameAction, GameState
+except ImportError:
+    from enum import Enum
+
+    class GameState(Enum):  # type: ignore[no-redef]
+        NOT_PLAYED = "NOT_PLAYED"
+        NOT_FINISHED = "NOT_FINISHED"
+        GAME_OVER = "GAME_OVER"
+        WIN = "WIN"
+
+    class GameAction(Enum):  # type: ignore[no-redef]
+        RESET = 0
+        ACTION1 = 1
+        ACTION2 = 2
+        ACTION3 = 3
+        ACTION4 = 4
+        ACTION5 = 5
+        ACTION6 = 6
+        ACTION7 = 7
+
+        def is_complex(self) -> bool:
+            return self.value == 6
+
+        def set_data(self, data: Any) -> None:
+            self.data = data
+
+    class FrameData:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self.state = GameState.NOT_PLAYED
+            self.frame = np.zeros((64, 64), dtype=int)
+            self.levels_completed = 0
+            self.win_levels = 1
+            self.available_actions = [1, 2, 3, 4, 5, 6, 7]
+
 
 logging.getLogger("hbllm").setLevel(logging.ERROR)
 logging.getLogger("arc_agi").setLevel(logging.ERROR)
@@ -33,8 +88,33 @@ class MyAgent(Agent):
 
     MAX_ACTIONS = 1000
 
-    def __init__(self, *args: Any, disable_archetypes: bool = False, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        card_id: str = "default_card",
+        game_id: str = "default_game",
+        agent_name: str = "myagent",
+        ROOT_URL: str = "http://gateway:8001",
+        record: bool = False,
+        arc_env: Any = None,
+        *args: Any,
+        disable_archetypes: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        try:
+            super().__init__(
+                card_id, game_id, agent_name, ROOT_URL, record, arc_env, *args, **kwargs
+            )
+        except Exception:
+            try:
+                super().__init__(*args, **kwargs)
+            except Exception:
+                pass
+        self.card_id = card_id
+        self.game_id = game_id
+        self.agent_name = agent_name
+        self.ROOT_URL = ROOT_URL
+        self.record = record
+        self.arc_env = arc_env
         self.disable_archetypes = disable_archetypes
         self.internal_agent = InductiveHCIRAgent(disable_archetypes=disable_archetypes)
         self.last_grid: np.ndarray | None = None
@@ -92,8 +172,16 @@ class MyAgent(Agent):
 
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         # Framework contract: First call or after a death -> reset the level
-        if latest_frame.state in (GameState.NOT_PLAYED, GameState.GAME_OVER):
+        if latest_frame.state is GameState.NOT_PLAYED:
             self.internal_agent.reset_episode()
+            self.last_grid = None
+            return GameAction.RESET
+        if latest_frame.state is GameState.GAME_OVER:
+            # A death retries the SAME level (per the framework's own RESET
+            # semantics), not a new one -- keep what's already been learned
+            # about it instead of rediscovering avatar color, action models,
+            # and barriers from zero on every single retry.
+            self.internal_agent.reset_episode(retain_dynamics=True)
             self.last_grid = None
             return GameAction.RESET
 
@@ -132,8 +220,9 @@ class MyAgent(Agent):
                 found_kdir = None
                 for root_cand in [
                     Path.cwd(),
-                    Path("/Users/Dumith_Salinda/Projects/HBLLM/core"),
+                    _here.parent,
                     Path("/kaggle/input/hbllm-kaggle-dataset"),
+                    Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
                 ]:
                     kdir = root_cand / "data" / "cognitive_memory" / "arc_agi_3"
                     if (kdir / f"{base_gid}_knowledge_graph.json").exists():

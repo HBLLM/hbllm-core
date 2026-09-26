@@ -112,10 +112,13 @@ def package_dataset(output_zip: Path | None = None) -> Path:
                 rel = fp.relative_to(core_dir)
                 included_files.append((fp, str(rel)))
 
-    # 3. kaggle_submission/ (submission.py, test_synthetic_eval.py, test_kaggle_eval.py, README.md, arc_agi_3_submission.ipynb)
+    # 3. kaggle_submission/ (my_agent.py, submission.py, build_notebook.py, test_synthetic_eval.py, test_kaggle_eval.py, README.md, arc_agi_3_submission.ipynb)
     sub_dir = core_dir / "kaggle_submission"
     for f in [
+        "my_agent.py",
         "submission.py",
+        "build_notebook.py",
+        "package_for_kaggle.py",
         "test_synthetic_eval.py",
         "test_kaggle_eval.py",
         "README.md",
