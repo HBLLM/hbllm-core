@@ -2833,8 +2833,24 @@ class CognitiveBlackbox:
         if "collision_feature" in info or is_blocked:
             if "collision_feature" in info:
                 feat = info["collision_feature"]
-                state.learned_obstacle_features.add(feat)
-                state.learned_traversable_features.discard(feat)
+                is_target_like = feat in state.learned_target_features or (
+                    eg
+                    and any(
+                        e.color == feat
+                        for e in eg.entities.values()
+                        if e.role
+                        in (
+                            EntityRole.GOAL,
+                            EntityRole.RECEPTACLE,
+                            EntityRole.MANIPULABLE,
+                            EntityRole.ACTUATOR,
+                            EntityRole.PORTAL,
+                        )
+                    )
+                )
+                if not is_target_like:
+                    state.learned_obstacle_features.add(feat)
+                    state.learned_traversable_features.discard(feat)
 
             # Compute the attempted obstacle coordinate that caused the collision (not where agent is standing)
             barrier_pos = None
@@ -2843,7 +2859,13 @@ class CognitiveBlackbox:
                 if model and (model.delta_r != 0 or model.delta_c != 0):
                     barrier_pos = (avatar_pos[0] + model.delta_r, avatar_pos[1] + model.delta_c)
 
-            if barrier_pos and barrier_pos != avatar_pos:
+            is_pickup_orient = bool(
+                state.current_plan
+                and getattr(state.current_plan[0], "_facing_oriented", False)
+                and state.current_plan[0].action_type in (SpatialActionIntent.PICKUP, "PICKUP")
+            )
+
+            if barrier_pos and barrier_pos != avatar_pos and not is_pickup_orient:
                 self.spatial_planner.record_failure(
                     workspace=self.workspace,
                     session_id=source_id,
@@ -2852,7 +2874,7 @@ class CognitiveBlackbox:
                     reason="collision",
                 )
             # Replan around collision obstacle and mark failed entity/pos as explored
-            if state.current_plan:
+            if state.current_plan and not is_pickup_orient:
                 failed_step = state.current_plan[0]
                 if failed_step.target_entity_id:
                     state.explored_entity_ids.add(failed_step.target_entity_id)
@@ -3582,6 +3604,59 @@ class CognitiveBlackbox:
                 available_actions, state, eg, source_id=source_id
             )
 
+        # Invariant check: If step is DROP but agent is NOT holding anything, discard DROP step
+        is_drop = step.action_type in (SpatialActionIntent.DROP, "DROP")
+        if is_drop and not getattr(state.carrying, "holding", False):
+            if state.current_plan:
+                state.current_plan.pop(0)
+                if state.current_plan:
+                    return self._plan_step_to_action(
+                        state.current_plan[0], eg, state, available_actions, source_id=source_id
+                    )
+            state.current_plan = self.spatial_planner.plan_sequence(eg=eg, workspace=self.workspace)
+            if state.current_plan:
+                return self._plan_step_to_action(
+                    state.current_plan[0], eg, state, available_actions, source_id=source_id
+                )
+
+        # Target item existence check for PICKUP steps
+        if step.action_type in (SpatialActionIntent.PICKUP, "PICKUP"):
+            tgt_ent = eg.entities.get(step.target_entity_id)
+            if tgt_ent is None or tgt_ent.is_delivered:
+                has_item_near = any(
+                    e.role == EntityRole.MANIPULABLE
+                    and not e.is_delivered
+                    and math.hypot(
+                        e.grid_pos[0] - step.target_pos[0], e.grid_pos[1] - step.target_pos[1]
+                    )
+                    <= max(4.0, float(eg.step_size) * 1.5)
+                    for e in eg.entities.values()
+                )
+                if not has_item_near:
+                    # Target item is gone; skip this pickup and its associated drop step
+                    if state.current_plan:
+                        state.current_plan.pop(0)
+                        if state.current_plan and state.current_plan[0].action_type in (
+                            SpatialActionIntent.DROP,
+                            "DROP",
+                        ):
+                            state.current_plan.pop(0)
+                        if state.current_plan:
+                            return self._plan_step_to_action(
+                                state.current_plan[0],
+                                eg,
+                                state,
+                                available_actions,
+                                source_id=source_id,
+                            )
+                    state.current_plan = self.spatial_planner.plan_sequence(
+                        eg=eg, workspace=self.workspace
+                    )
+                    if state.current_plan:
+                        return self._plan_step_to_action(
+                            state.current_plan[0], eg, state, available_actions, source_id=source_id
+                        )
+
         avatar_pos = eg.avatar.grid_pos
         target_pos = step.target_pos
         state.explored_entity_positions.add(avatar_pos)
@@ -3604,9 +3679,14 @@ class CognitiveBlackbox:
             )
             if not is_navigation:
                 # Approach facing orientation check:
-                # If approach_facing is required, ensure the agent turns in that direction first
+                # Only needed for PICKUP of an unheld item when approach_facing is specified
+                is_pickup = step.action_type in (SpatialActionIntent.PICKUP, "PICKUP")
                 face_dr, face_dc = getattr(step, "approach_facing", None) or (0, 0)
-                if (face_dr != 0 or face_dc != 0) and not getattr(step, "_facing_oriented", False):
+                if (
+                    is_pickup
+                    and (face_dr != 0 or face_dc != 0)
+                    and not getattr(step, "_facing_oriented", False)
+                ):
                     face_act_id = self.spatial_planner.get_action_for_delta(
                         face_dr, face_dc, state.action_models
                     )

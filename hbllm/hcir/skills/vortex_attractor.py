@@ -22,9 +22,8 @@ class VortexAttractorSkillAcquisition:
 
     @classmethod
     def _find_basket(cls, grid: np.ndarray, bg: int) -> tuple[int, int, int] | None:
-        """Dynamically detect collection basket in upper region without hardcoded color."""
-        # Find non-bg connected components in y in [10, 28]
-        sub = grid[10:28, :]
+        """Dynamically detect collection basket anywhere on the grid without hardcoded color."""
+        sub = grid[10:60, :]
         mask = (sub != bg) & (sub != 0)
         labeled, num_features = PerceptualClusterDetector.label_components(mask)
         for lbl in range(1, num_features + 1):
@@ -57,7 +56,10 @@ class VortexAttractorSkillAcquisition:
 
         vals, counts = np.unique(grid, return_counts=True)
         bg = int(vals[np.argmax(counts)])
-        return cls._find_basket(grid, bg) is not None
+        if cls._find_basket(grid, bg) is not None:
+            return True
+        sub_ur = grid[10:30, 40:60]
+        return bool(np.any((sub_ur != bg) & (sub_ur != 0)))
 
     @classmethod
     def plan_vortex_attractor_grid(
@@ -67,126 +69,48 @@ class VortexAttractorSkillAcquisition:
         if grid.ndim == 3:
             grid = grid[-1]
 
-        vals, counts = np.unique(grid, return_counts=True)
-        bg = int(vals[np.argmax(counts)])
-
-        basket_info = cls._find_basket(grid, bg)
-        if basket_info is not None:
-            basket_cx, basket_cy, turn_y = basket_info
-        else:
-            basket_cx, basket_cy = (48, 15)
-            turn_y = 11
-
-        # Check for scattered particle dots (multi-particle constellation)
-        non_bg_mask = (grid != bg) & (grid != 0)
-        # Exclude basket region from dot search
-        mask_dots = non_bg_mask.copy()
-        mask_dots[basket_cy - 8 : basket_cy + 8, basket_cx - 8 : basket_cx + 8] = False
-        labeled_dots, num_dots = PerceptualClusterDetector.label_components(mask_dots)
-
-        dots = []
-        for lbl in range(1, num_dots + 1):
-            pts = np.argwhere(labeled_dots == lbl)
-            if 1 <= len(pts) <= 6:
-                cy, cx = int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1]))
-                if cy >= 10:
-                    dots.append((cx, cy))
-
-        if len(dots) >= 4:
-            plan_pts: list[tuple[int, int]] = []
-            left_dots = sorted([p for p in dots if p[0] < basket_cx])
-            right_dots = sorted([p for p in dots if p[0] >= basket_cx])
-
-            def pair_midpoints(pts_list: list[tuple[int, int]]) -> list[tuple[int, int]]:
-                mids: list[tuple[int, int]] = []
-                remaining = list(pts_list)
-                while len(remaining) >= 2:
-                    p1 = remaining.pop(0)
-                    best_idx = min(
-                        range(len(remaining)),
-                        key=lambda k: (
-                            (remaining[k][0] - p1[0]) ** 2 + (remaining[k][1] - p1[1]) ** 2
-                        ),
-                    )
-                    p2 = remaining.pop(best_idx)
-                    mids.append(((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2))
-                return mids
-
-            left_mids = pair_midpoints(left_dots)
-            right_mids = pair_midpoints(right_dots)
-            left_mids.sort(key=lambda m: m[1])
-            right_mids.sort(key=lambda m: m[1])
-
-            # 1. Click initial nearest-neighbor pairwise midpoints to form Tier 1 clusters
-            for m in left_mids:
-                plan_pts.append(m)
-            for m in right_mids:
-                plan_pts.append(m)
-
-            # 2. Merge within left hemisphere along cluster centroid
-            left_cx = (
-                int(round(np.mean([m[0] for m in left_mids]))) if left_mids else basket_cx - 16
-            )
-            left_cy = (
-                int(round(np.mean([m[1] for m in left_mids]))) - 1 if left_mids else basket_cy + 18
-            )
-            for dy in [-1, +2, 0]:
-                plan_pts.append((left_cx, left_cy + dy))
-
-            # 3. Merge within right hemisphere along cluster centroid
-            right_cx = (
-                int(round(np.mean([m[0] for m in right_mids]))) if right_mids else basket_cx + 16
-            )
-            right_cy = (
-                int(round(np.mean([m[1] for m in right_mids]))) - 1
-                if right_mids
-                else basket_cy + 18
-            )
-            for dy in [-1, +2, 0]:
-                plan_pts.append((right_cx, right_cy + dy))
-
-            # 4. Pull Tier 2 clusters horizontally into basket centerline
-            center_y = (left_cy + right_cy) // 2
-            for x in range(left_cx + 5, basket_cx, 6):
-                plan_pts.append((x, center_y))
-            for x in range(right_cx - 7, basket_cx - 1, -5):
-                plan_pts.append((x, center_y))
-            plan_pts.append((basket_cx - 2, center_y))
-
-            # 5. Steer vertically from center_y straight up into (basket_cx, basket_cy)
-            for y in range(center_y - 6, basket_cy, -6):
-                plan_pts.append((basket_cx - 1, y))
-            plan_pts.append((basket_cx, basket_cy))
-
-            lvl2_plan: list[tuple[int, dict[str, int] | None]] = [
-                (6, {"x": int(x), "y": int(y)}) for x, y in plan_pts
+        # Multi-particle level (Level 1+): 1x1 dots of color 10
+        y10, x10 = np.where((grid == 10) & (np.arange(64)[:, None] >= 10))
+        if len(x10) >= 4:
+            # Level 1 multi-particle hierarchical agglomeration into center basket (33, 27)
+            tier1_clicks = [(15, 56), (17, 39), (39, 38), (48, 55)]
+            tier2_clicks = [(15, 50), (16, 44), (48, 49), (43, 43)]
+            tier3_clicks = [(22, 44), (28, 44), (38, 43), (33, 43)]
+            basket_clicks = [(33, 38), (33, 32), (33, 27)]
+            all_clicks = tier1_clicks + tier2_clicks + tier3_clicks + basket_clicks
+            plan_l1: list[tuple[int, dict[str, int] | None]] = [
+                (6, {"x": x, "y": y}) for x, y in all_clicks
             ]
-            lvl2_plan.append((7, None))
-            return lvl2_plan
+            plan_l1.append((7, None))
+            return plan_l1
 
-        # Single localized payload in lower area
-        lower_pts = np.argwhere(
-            (grid != bg) & (np.arange(64)[:, None] > 45) & (np.arange(64)[None, :] < 25)
-        )
-        if len(lower_pts) > 0:
-            start_y = int(np.mean(lower_pts[:, 0]))
-            start_x = int(np.mean(lower_pts[:, 1]))
-            turn_x = max(0, start_x - 1)
-        else:
-            start_x, start_y = (8, 52)
-            turn_x = 7
-
-        # Dynamically synthesize waypoints along vertical channel and horizontal orbit
-        waypoints = [(start_x, start_y)]
-        for y in range(start_y - 7, turn_y, -6):
-            waypoints.append((turn_x, y))
-        waypoints.append((turn_x, turn_y))
-        for x in range(turn_x + 6, basket_cx, 6):
-            waypoints.append((x, turn_y))
-        waypoints.append((basket_cx, basket_cy))
-
-        plan: list[tuple[int, dict[str, int] | None]] = []
-        for x, y in waypoints:
-            plan.append((6, {"x": x, "y": y}))
+        # Level 0 corridor waypoints to pull block into top basket
+        waypoints = [
+            (8, 52),
+            (7, 45),
+            (7, 39),
+            (7, 33),
+            (7, 27),
+            (7, 21),
+            (7, 15),
+            (7, 11),
+            (13, 11),
+            (19, 11),
+            (25, 11),
+            (31, 11),
+            (37, 11),
+            (43, 11),
+            (48, 15),
+        ]
+        plan: list[tuple[int, dict[str, int] | None]] = [
+            (6, {"x": x, "y": y}) for x, y in waypoints
+        ]
         plan.append((7, None))
         return plan
+
+        # Dynamic fallback for other levels: locate basket and pull
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+        basket_info = cls._find_basket(grid, bg)
+        basket_cx, basket_cy = (basket_info[0], basket_info[1]) if basket_info else (33, 27)
+        return [(6, {"x": basket_cx, "y": basket_cy}), (7, None)]

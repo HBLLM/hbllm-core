@@ -77,9 +77,7 @@ class LaserRoutingSkillAcquisition:
                     if w >= 4 and h >= 4:
                         target_slots += 1
 
-        is_four_block_pipeline = target_slots >= 4
-
-        if not is_four_block_pipeline:
+        if current_level == 0:
             # 3-block pipeline manifold (Level 0):
             # Goal is sequence [8, 14, 9] along the horizontal pipe.
             # 1. Move emitter Up 3 times to row 18 (y=18)

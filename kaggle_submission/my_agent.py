@@ -121,6 +121,13 @@ class MyAgent(Agent):
         self.current_game_id: str | None = None
         self.current_levels_completed: int = 0
 
+    def reset_episode(self, retain_dynamics: bool = False) -> None:
+        self.last_grid = None
+        if hasattr(self.internal_agent, "reset_episode"):
+            self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
+        if hasattr(self.internal_agent, "prev_grid"):
+            self.internal_agent.prev_grid = None
+
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
         win_levels = getattr(latest_frame, "win_levels", 1) or 1
         return latest_frame.state is GameState.WIN or latest_frame.levels_completed >= win_levels
@@ -171,52 +178,51 @@ class MyAgent(Agent):
         return [1, 2, 3, 4, 5, 6, 7]
 
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
-        # Framework contract: First call or after a death -> reset the level
-        if latest_frame.state is GameState.NOT_PLAYED:
-            self.internal_agent.reset_episode()
+        state_obj = getattr(latest_frame, "state", None)
+        state_name = getattr(state_obj, "name", str(state_obj))
+
+        # Explicit ARC contract: NOT_PLAYED or GAME_OVER resets
+        if state_obj is GameState.NOT_PLAYED or state_name == "NOT_PLAYED":
+            self.internal_agent.reset_episode(retain_dynamics=False)
             self.last_grid = None
-            return GameAction.RESET
-        if latest_frame.state is GameState.GAME_OVER:
-            # A death retries the SAME level (per the framework's own RESET
-            # semantics), not a new one -- keep what's already been learned
-            # about it instead of rediscovering avatar color, action models,
-            # and barriers from zero on every single retry.
-            self.internal_agent.reset_episode(retain_dynamics=True)
-            self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
             return GameAction.RESET
 
-        grid = self._extract_grid(latest_frame, frames)
-        available_actions = self._extract_available_actions(latest_frame)
-
-        # Detect level completion / transition
-        lvl_completed = getattr(latest_frame, "levels_completed", 0)
-        if lvl_completed > self.current_levels_completed:
-            self.current_levels_completed = lvl_completed
+        if state_obj is GameState.GAME_OVER or state_name == "GAME_OVER":
+            # Per competition semantics with ONLY_RESET_LEVELS=true,
+            # reset retries the same level: retain learned dynamics
             self.internal_agent.reset_episode(retain_dynamics=True)
             self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
+            return GameAction.RESET
 
-        if self.last_grid is not None and self.last_grid.shape == grid.shape:
-            diff_ratio = float(np.mean(self.last_grid != grid))
-            if diff_ratio > 0.50:
-                self.internal_agent.reset_episode(retain_dynamics=True)
+        # Check full_reset signal from ARC-AGI environment
+        if getattr(latest_frame, "full_reset", False):
+            self.internal_agent.reset_episode(retain_dynamics=False)
+            self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
 
-        self.last_grid = grid.copy()
-
-        # Update state and level
-        state_obj = latest_frame.state
-        self.internal_agent.last_frame_state = getattr(state_obj, "name", None) or str(state_obj)
-        if hasattr(self.internal_agent, "current_level"):
-            self.internal_agent.current_level = lvl_completed
-
-        # Automatically hydrate game-specific knowledge if available
+        # Game ID extraction and knowledge hydration BEFORE planning
         raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
-        if raw_gid == "default_game":
+        if raw_gid in ("default_game", "", None):
             raw_gid = getattr(latest_frame, "game_id", None)
-        gid = raw_gid
-        if gid and isinstance(gid, str):
-            base_gid = gid.split("-")[0].strip()
+        if raw_gid and isinstance(raw_gid, str):
+            base_gid = raw_gid.split("-")[0].strip()
             if self.current_game_id != base_gid:
+                print(
+                    f"[ARC] Switching game: {self.current_game_id} -> {base_gid} (raw={raw_gid})",
+                    flush=True,
+                )
                 self.current_game_id = base_gid
+                self.current_levels_completed = 0
+                self.internal_agent.reset_episode(retain_dynamics=False)
+                self.last_grid = None
+                if hasattr(self.internal_agent, "prev_grid"):
+                    self.internal_agent.prev_grid = None
+
                 import glob
                 from pathlib import Path
 
@@ -226,6 +232,7 @@ class MyAgent(Agent):
                     _here.parent,
                     Path("/kaggle/input/hbllm-kaggle-dataset"),
                     Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
+                    Path("/kaggle/input/arc-prize-2026-arc-agi-3"),
                 ]:
                     kdir = root_cand / "data" / "cognitive_memory" / "arc_agi_3"
                     if (kdir / f"{base_gid}_knowledge_graph.json").exists():
@@ -233,30 +240,96 @@ class MyAgent(Agent):
                         break
                 if found_kdir is None:
                     matches = glob.glob("/kaggle/input/**/arc_agi_3", recursive=True)
-                    if matches:
-                        found_kdir = Path(matches[0])
+                    for m in matches:
+                        if (Path(m) / f"{base_gid}_knowledge_graph.json").exists():
+                            found_kdir = Path(m)
+                            break
                 if found_kdir and (found_kdir / f"{base_gid}_knowledge_graph.json").exists():
+                    print(
+                        f"[ARC] Hydrated knowledge graph for {base_gid} from {found_kdir}",
+                        flush=True,
+                    )
                     self.internal_agent.load_knowledge(found_kdir, game_id=base_gid)
+                else:
+                    print(
+                        f"[ARC] Note: No offline knowledge graph found for {base_gid} (pure inductive reasoning)",
+                        flush=True,
+                    )
 
+        grid = self._extract_grid(latest_frame, frames)
+        available_actions = self._extract_available_actions(latest_frame)
+
+        # Detect level completion / transition
+        lvl_completed = getattr(latest_frame, "levels_completed", 0)
+        if lvl_completed > self.current_levels_completed:
+            print(
+                f"[ARC] Level completed: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
+                flush=True,
+            )
+            self.current_levels_completed = lvl_completed
+            self.internal_agent.reset_episode(retain_dynamics=True)
+            self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
+
+        self.last_grid = grid.copy()
+
+        # Synchronize working level and frame state
+        self.internal_agent.last_frame_state = state_name
+        if hasattr(self.internal_agent, "current_level"):
+            self.internal_agent.current_level = lvl_completed
+        if hasattr(self.internal_agent, "spatial_cognitive_agent"):
+            self.internal_agent.spatial_cognitive_agent.current_level = lvl_completed
+
+        # Diagnostic telemetry per step
+        step_idx = getattr(self.internal_agent, "step_counter", 0)
+        if step_idx < 5 or step_idx % 10 == 0:
+            print(
+                f"[ARC] game={raw_gid} base={self.current_game_id} step={step_idx} "
+                f"lvl={lvl_completed} state={state_name} actions={available_actions}",
+                flush=True,
+            )
+
+        # Execute cognitive planning: NEVER silently swallow exceptions
         try:
             action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
             action_data = getattr(self.internal_agent, "last_action_data", None)
-        except Exception:
-            action_id = available_actions[0] if available_actions else 1
-            action_data = None
+            if step_idx < 5 or step_idx % 10 == 0:
+                print(
+                    f"[ARC] -> action_id={action_id} conf={conf:.3f} data={action_data}", flush=True
+                )
+        except Exception as e:
+            import traceback
 
+            print(
+                f"[HBLLM FATAL] plan_next_action failed game={raw_gid} base={self.current_game_id} "
+                f"step={step_idx} lvl={lvl_completed} state={state_name}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exc(file=sys.stderr)
+            raise
+
+        # Resolve GameAction enum
         try:
             if hasattr(GameAction, f"ACTION{action_id}"):
                 act_enum = getattr(GameAction, f"ACTION{action_id}")
+            elif hasattr(GameAction, "from_id"):
+                act_enum = GameAction.from_id(int(action_id))
             elif hasattr(GameAction, str(action_id)):
                 act_enum = getattr(GameAction, str(action_id))
             else:
-                act_enum = GameAction(action_id)
-        except Exception:
-            act_enum = GameAction.ACTION1
+                act_enum = GameAction[f"ACTION{action_id}"]
+        except Exception as e:
+            print(
+                f"[HBLLM FATAL] Failed to resolve GameAction for action_id={action_id}: {e}",
+                file=sys.stderr,
+                flush=True,
+            )
+            raise
 
-        # Complex action (ACTION6) coordinates
-        if act_enum.is_complex() or action_id == 6:
+        # Complex action (ACTION6) coordinate attachment
+        if (hasattr(act_enum, "is_complex") and act_enum.is_complex()) or action_id == 6:
             if (
                 not isinstance(action_data, dict)
                 or "x" not in action_data
@@ -283,6 +356,8 @@ class MyAgent(Agent):
                 coords = {"x": max(0, min(W - 1, fallback_x)), "y": max(0, min(H - 1, fallback_y))}
             else:
                 coords = {"x": int(action_data["x"]), "y": int(action_data["y"])}
-            act_enum.set_data(coords)
+            if hasattr(act_enum, "set_data"):
+                act_enum.set_data(coords)
+            act_enum.data = coords
 
         return act_enum

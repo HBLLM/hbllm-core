@@ -135,7 +135,7 @@ class KinematicLinkageSolver:
 
     @classmethod
     def _find_effectors(cls, grid: np.ndarray, arm_colors: list[int]) -> list[tuple[int, int, int]]:
-        """Dynamically detect end effectors with matching arm color pixels."""
+        """Dynamically detect end effectors with matching arm color and central indicator."""
         H, W = grid.shape[-2:]
         if grid.ndim == 3:
             grid = grid[-1]
@@ -143,10 +143,9 @@ class KinematicLinkageSolver:
         for r in range(H - 2):
             for c in range(W - 2):
                 sub = grid[r : r + 3, c : c + 3]
-                for sc in arm_colors:
-                    if np.sum(sub == sc) >= 3:
-                        effectors.append((c, r, sc))
-                        break
+                if sub[1, 1] == 13 and np.sum(sub == 13) == 1:
+                    eff_color = int(sub[0, 1])
+                    effectors.append((c, r, eff_color))
         return effectors
 
     def plan_step(
@@ -155,6 +154,10 @@ class KinematicLinkageSolver:
         """Plan next click on the appropriate slider to deform linkage toward target."""
         if grid.ndim == 3:
             grid = grid[-1]
+
+        if current_level != self.current_level:
+            self.current_level = current_level
+            self.action_queue.clear()
 
         if self.action_queue:
             act, data = self.action_queue.pop(0)
@@ -180,20 +183,20 @@ class KinematicLinkageSolver:
 
         if len(sliders) == 2 and len(effectors) == 2 and len(targets) == 2:
             # Independent 2-axis direct control (Level 0)
+            h_sliders = [s for s in sliders if s["orient"] == "H"]
+            v_sliders = [s for s in sliders if s["orient"] == "V"]
             for ex, ey, col in effectors:
-                matched_sliders = [s for s in sliders if s["arm_color"] == col]
-                if not matched_sliders:
-                    continue
-                sl = matched_sliders[0]
                 tx, ty = min(targets, key=lambda t: (t[0] - ex) ** 2 + (t[1] - ey) ** 2)
-                if sl["orient"] == "H":
-                    dx = tx - ex
+                dx = tx - ex
+                dy = ty - ey
+                if abs(dx) > abs(dy) and h_sliders:
+                    sl = h_sliders[0]
                     clicks = abs(dx) // 3
                     act = sl["extend"] if dx > 0 else sl["retract"]
                     for _ in range(clicks):
                         plan.append((6, act))
-                else:
-                    dy = ty - ey
+                elif abs(dy) > abs(dx) and v_sliders:
+                    sl = v_sliders[0]
                     clicks = abs(dy) // 3
                     act = sl["extend"] if dy > 0 else sl["retract"]
                     for _ in range(clicks):

@@ -202,34 +202,101 @@ def build() -> dict:
                     import numpy as np
                     from arcengine import FrameData, GameAction, GameState
 
-                    # Verify NOT_PLAYED contract
-                    frame1 = FrameData()
-                    frame1.state = GameState.NOT_PLAYED
-                    frame1.frame = np.zeros((16, 16), dtype=int)
-                    act1 = test_agent.choose_action([], frame1)
-                    print(f"  ✓ State NOT_PLAYED -> Action: {act1.name} (Contract verified)")
+                    # 1. Verify NOT_PLAYED contract
+                    frame0 = FrameData(
+                        game_id="diag-001",
+                        state=GameState.NOT_PLAYED,
+                        frame=[[[0] * 64] * 64],
+                        available_actions=[1, 2, 3, 4],
+                    )
+                    act0 = test_agent.choose_action([], frame0)
+                    assert act0 == GameAction.RESET, f"Expected RESET on NOT_PLAYED, got {act0}"
+                    print(f"  ✓ Contract NOT_PLAYED -> Action: {act0.name}")
 
-                    # Verify NOT_FINISHED (in-progress) contract
-                    active_state = getattr(GameState, "NOT_FINISHED", getattr(GameState, "IN_PROGRESS", None))
-                    frame2 = FrameData()
-                    frame2.state = active_state
-                    frame2.frame = np.zeros((16, 16), dtype=int)
-                    act2 = test_agent.choose_action([frame1], frame2)
-                    state_label = getattr(active_state, "name", str(active_state))
-                    print(f"  ✓ State {state_label} -> Action: {act2.name} (Contract verified)")
+                    # 2. Verify active 64x64 gameplay with complex action support
+                    grid = np.zeros((64, 64), dtype=int)
+                    grid[10:15, 10:15] = 3
+                    grid[20:25, 20:25] = 10
+                    frame1 = FrameData(
+                        game_id="diag-001",
+                        state=GameState.NOT_FINISHED,
+                        frame=[grid.tolist()],
+                        available_actions=[1, 2, 3, 4, 6, 7],
+                    )
+                    act1 = test_agent.choose_action([frame0], frame1)
+                    assert isinstance(act1, GameAction), f"Invalid action: {act1}"
+                    print(f"  ✓ Turn 1 (64x64 grid) -> Action: {act1.name} (data={getattr(act1, 'data', None)})")
 
-                    # Verify GAME_OVER retention contract
-                    frame3 = FrameData()
-                    frame3.state = GameState.GAME_OVER
-                    frame3.frame = np.zeros((16, 16), dtype=int)
-                    act3 = test_agent.choose_action([frame1, frame2], frame3)
-                    print(f"  ✓ State GAME_OVER -> Action: {act3.name} (Dynamics retention verified)")
+                    # 3. Verify sequential turn progression
+                    grid2 = grid.copy()
+                    grid2[20:25, 20:25] = 0
+                    grid2[21:26, 20:25] = 10
+                    frame2 = FrameData(
+                        game_id="diag-001",
+                        state=GameState.NOT_FINISHED,
+                        frame=[grid2.tolist()],
+                        available_actions=[1, 2, 3, 4, 6, 7],
+                    )
+                    act2 = test_agent.choose_action([frame0, frame1], frame2)
+                    assert isinstance(act2, GameAction), f"Invalid action: {act2}"
+                    print(f"  ✓ Turn 2 (Sequential) -> Action: {act2.name}")
+
+                    # 4. Verify level transition contract (levels_completed increments)
+                    frame_lvl = FrameData(
+                        game_id="diag-001",
+                        state=GameState.NOT_FINISHED,
+                        frame=[grid2.tolist()],
+                        levels_completed=1,
+                        available_actions=[1, 2, 3, 4],
+                    )
+                    act_lvl = test_agent.choose_action([frame0, frame1, frame2], frame_lvl)
+                    assert test_agent.current_levels_completed == 1, "Level counter synchronization failed"
+                    print(f"  ✓ Level Transition (lvl 1) -> Action: {act_lvl.name} (Synchronized)")
+
+                    # 5. Verify GAME_OVER retention contract
+                    frame_death = FrameData(
+                        game_id="diag-001",
+                        state=GameState.GAME_OVER,
+                        frame=[grid2.tolist()],
+                        levels_completed=1,
+                        available_actions=[1, 2, 3, 4],
+                    )
+                    act_death = test_agent.choose_action([frame0, frame1, frame2, frame_lvl], frame_death)
+                    assert act_death == GameAction.RESET, f"Expected RESET on GAME_OVER, got {act_death}"
+                    print(f"  ✓ Contract GAME_OVER -> Action: {act_death.name} (Dynamics retention verified)")
+
+                    # 6. Test local Arcade environment if available
+                    try:
+                        from arc_agi import Arcade
+                        arcade = Arcade()
+                        env = arcade.make("ls20")
+                        if env is not None:
+                            print("  🎮 Running real gameplay simulation on local ls20...")
+                            real_agent = mod.MyAgent()
+                            real_frame = env.reset()
+                            real_history = []
+                            for step in range(15):
+                                real_act = real_agent.choose_action(real_history, real_frame)
+                                real_history.append(real_frame)
+                                act_data = getattr(real_act, "data", None)
+                                real_frame = env.step(real_act, data=act_data)
+                                if real_frame is None:
+                                    break
+                                state_name = getattr(real_frame.state, "name", str(real_frame.state))
+                                if state_name in ("WIN", "GAME_OVER"):
+                                    break
+                            print(f"  ✓ Successfully executed {len(real_history)} real environment turns on ls20!")
+                    except Exception as e:
+                        print(f"  ℹ️ Local environment simulation note (non-critical): {e}")
 
                     print("🎉 Pre-flight verification PASSED: Agent is ready for tournament submission!")
                 else:
                     print("⚠️ Could not load spec for /tmp/my_agent.py")
             except Exception as e:
-                print(f"⚠️ Pre-flight note: {e}")
+                import traceback
+                print(f"❌ Pre-flight fatal error: {e}")
+                traceback.print_exc()
+                raise
             print("=" * 70)
         """
     )

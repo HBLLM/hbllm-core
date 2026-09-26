@@ -33,6 +33,7 @@ from hbllm.hcir.skills import (
     SpatiotemporalSkillAcquisition,
 )
 from hbllm.hcir.skills.kinematic_arm_linkage import KinematicLinkageSolver
+from hbllm.hcir.skills.vortex_attractor import VortexAttractorSkillAcquisition
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.subgoal_decomposer import HCIRSkill, HierarchicalGoalDecomposer
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -2346,50 +2347,37 @@ class VortexAttractorSolver:
     """Solves gravitational shockwave / attractor puzzles by pulling numbered targets into collection baskets."""
 
     def __init__(self) -> None:
-        self.waypoint_idx: int = 0
-        self.waypoints: list[tuple[int, int]] = [
-            (8, 52),
-            (7, 45),
-            (7, 39),
-            (7, 33),
-            (7, 27),
-            (7, 21),
-            (7, 15),
-            (7, 11),
-            (13, 11),
-            (19, 11),
-            (25, 11),
-            (31, 11),
-            (37, 11),
-            (43, 11),
-            (48, 15),
-        ]
+        self.action_queue: list[tuple[int, dict[str, int] | None]] = []
+        self.current_level: int = 0
 
     def reset_episode(self) -> None:
-        self.waypoint_idx = 0
+        self.action_queue = []
+        self.current_level = 0
 
     def is_vortex_attractor_puzzle(
         self, grid: np.ndarray, available_actions: list[int] | None = None
     ) -> bool:
         if available_actions is not None:
-            if not (
-                6 in available_actions
-                and 7 in available_actions
-                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-            ):
+            if set(available_actions) != {6, 7}:
                 return False
-        H, W = grid.shape
-        if H != 64 or W != 64:
-            return False
-        # In su15, there is a basket at row 11..20, col 44..53
-        has_basket = bool(np.any(grid[11:20, 44:53] != 0))
-        return has_basket
+        return VortexAttractorSkillAcquisition.is_vortex_attractor_grid(
+            grid, available_actions or [6, 7]
+        )
 
-    def plan_step(self, grid: np.ndarray) -> tuple[int, float, dict[str, int] | None]:
-        if self.waypoint_idx < len(self.waypoints):
-            x, y = self.waypoints[self.waypoint_idx]
-            self.waypoint_idx += 1
-            return 6, 0.95, {"x": x, "y": y}
+    def plan_step(
+        self, grid: np.ndarray, current_level: int = 0
+    ) -> tuple[int, float, dict[str, int] | None]:
+        if current_level != self.current_level:
+            self.current_level = current_level
+            self.action_queue.clear()
+
+        if not self.action_queue:
+            plan = VortexAttractorSkillAcquisition.plan_vortex_attractor_grid(grid, current_level)
+            self.action_queue = list(plan)
+
+        if self.action_queue:
+            act, data = self.action_queue.pop(0)
+            return act, 0.99, data
         return 7, 0.99, None
 
 
@@ -3008,14 +2996,15 @@ class InductiveHCIRAgent:
         self.hazard_tracker.reset_episode()
         self.causal_engine.reset_episode()
         self.autonomous_engine.reset_episode(retain_dynamics=retain_dynamics)
+        self.active_solver_name = None
         if not retain_dynamics:
-            self.active_solver_name = None
             self._effective_colors.clear()
             self._quiescent_targets.clear()
             self._target_usage.clear()
             self._entity_usage.clear()
             self.knowledge_base = CrossLevelKnowledgeBase()
             self.hcir_agent.reset_episode(retain_dynamics=False, is_retry=False)
+            self.spatial_cognitive_agent.current_level = 0
             self.spatial_cognitive_agent.reset_episode(retain_dynamics=False, is_retry=False)
             self.spatial_cognitive_agent.knowledge_base = self.knowledge_base
             self.spatial_cognitive_agent.trial_memory = self.trial_memory
@@ -3024,6 +3013,7 @@ class InductiveHCIRAgent:
             if not is_retry:
                 self.current_level += 1
             # Delegate directly to core CognitiveBlackbox via ARC3SpatialCognitiveAgent
+            self.spatial_cognitive_agent.current_level = self.current_level
             self.spatial_cognitive_agent.reset_episode(retain_dynamics=True, is_retry=is_retry)
             self.hcir_agent = self.spatial_cognitive_agent
 
@@ -3095,7 +3085,7 @@ class InductiveHCIRAgent:
             )
         elif name == "vortex":
             self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.vortex_solver.plan_step(curr_grid)
+            action, conf, action_data = self.vortex_solver.plan_step(curr_grid, self.current_level)
         elif name == "peg":
             self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
             action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
@@ -3471,6 +3461,9 @@ class InductiveHCIRAgent:
         available_actions: list[int],
     ) -> tuple[int, float]:
         """Select action via trial-and-error induction or goal-directed transfer planning."""
+        if not isinstance(curr_grid, np.ndarray):
+            curr_grid = np.array(curr_grid)
+
         if self.disable_archetypes:
             act, data = self.autonomous_engine.decide(
                 curr_grid,
@@ -3536,6 +3529,10 @@ class InductiveHCIRAgent:
 
             if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
                 self.active_solver_name = "track_maze"
+                return self._dispatch_active_solver(curr_grid, available_actions)
+
+            if self.linkage_solver.is_kinematic_linkage(curr_grid, available_actions):
+                self.active_solver_name = "kinematic_linkage"
                 return self._dispatch_active_solver(curr_grid, available_actions)
 
         # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)

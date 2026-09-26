@@ -326,6 +326,9 @@ class ARC3SpatialCognitiveAgent:
         self.episode_action_data_log.clear()
         self.blackbox.reset(source_id="arc_agi", retain_memory=retain_dynamics, is_retry=is_retry)
         self.blackbox.reset(source_id="default", retain_memory=retain_dynamics, is_retry=is_retry)
+        st = self.blackbox.get_state("arc_agi")
+        st.current_level = getattr(self, "current_level", 0)
+        st.last_level_observed = getattr(self, "current_level", 0)
 
     def plan_next_action(
         self,
@@ -338,6 +341,7 @@ class ARC3SpatialCognitiveAgent:
         """Plan next action by delegating to CognitiveBlackbox."""
         if level is not None:
             self.current_level = level
+        lvl = getattr(self, "current_level", 0)
         driver_input = DriverInput(
             raw_data=curr_grid,
             modality=DriverModality.GRID_2D,
@@ -346,6 +350,7 @@ class ARC3SpatialCognitiveAgent:
                 "grid_shape": tuple(curr_grid.shape),
                 "step_size": self.step_size,
                 "tags": tags or [],
+                "level": lvl,
             },
         )
         perception_data = {
@@ -355,6 +360,7 @@ class ARC3SpatialCognitiveAgent:
             "tags": tags or [],
             "avatar_color": self.avatar_color,
             "target_zone_bounds": getattr(self, "target_zone_bounds", None),
+            "level": lvl,
         }
         eg = self.blackbox.observe(driver_input, perception_data)
         if eg and eg.avatar:
@@ -365,8 +371,12 @@ class ARC3SpatialCognitiveAgent:
 
         blackbox_state = self.blackbox.get_state("arc_agi")
         blackbox_state.current_level = getattr(self, "current_level", 0)
-        self.holding_item = getattr(blackbox_state.carrying, "is_carrying", False)
-        self.carried_offset = getattr(blackbox_state.carrying, "carried_offset", (0.0, 0.0))
+        self.holding_item = getattr(blackbox_state.carrying, "holding", False) or getattr(
+            blackbox_state.carrying, "is_carrying", False
+        )
+        self.carried_offset = getattr(blackbox_state.carrying, "offset", None) or getattr(
+            blackbox_state.carrying, "carried_offset", (0.0, 0.0)
+        )
         if blackbox_state.current_plan:
             step_node = blackbox_state.current_plan[0]
             self.goal_centroid = (float(step_node.target_pos[0]), float(step_node.target_pos[1]))

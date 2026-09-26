@@ -5,10 +5,18 @@ Simulates the exact evaluation loop executed in the Kaggle notebook.
 
 import sys
 import time
+from pathlib import Path
+
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 from arc_agi import Arcade
 
-from kaggle_submission.submission import MyAgent
+try:
+    from kaggle_submission.my_agent import MyAgent
+except ImportError:
+    from kaggle_submission.submission import MyAgent
 
 
 def test_kaggle_submission_agent(games: list[str], max_levels: int = 2, max_steps: int = 120):
