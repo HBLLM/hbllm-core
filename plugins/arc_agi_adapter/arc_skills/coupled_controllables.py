@@ -160,7 +160,9 @@ class CoupledControllableSkillAcquisition(BaseHierarchicalSkill):
             return False
         bg_counts = np.bincount(grid.flatten())
         top_colors = set(np.argsort(bg_counts)[-3:])
-        from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
+        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
+            VisualTopologyExtractor,
+        )
 
         entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
         for col in set(e.color for e in entities):
@@ -178,7 +180,9 @@ class CoupledControllableSkillAcquisition(BaseHierarchicalSkill):
 
         bg_counts = np.bincount(grid.flatten())
         top_colors = set(np.argsort(bg_counts)[-3:])
-        from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
+        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
+            VisualTopologyExtractor,
+        )
 
         entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
 

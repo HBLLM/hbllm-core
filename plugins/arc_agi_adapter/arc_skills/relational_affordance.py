@@ -166,7 +166,9 @@ class RelationalAffordanceSkillAcquisition(BaseHierarchicalSkill):
             return False
 
         # Verify peg solitaire board in center: multiple small components of same size
-        from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
+        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
+            VisualTopologyExtractor,
+        )
 
         top_bg = np.bincount(grid.flatten()).argmax()
         ents = VisualTopologyExtractor.extract_entities(grid, ignore_colors={int(top_bg), 0})
@@ -187,7 +189,9 @@ class RelationalAffordanceSkillAcquisition(BaseHierarchicalSkill):
         import numpy as np
 
         from hbllm.hcir.world.predictors.physics import PhysicsPredictor
-        from plugins.arc_agi_adapter.inductive_learner import VisualTopologyExtractor
+        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
+            VisualTopologyExtractor,
+        )
 
         if grid.ndim == 3:
             grid = grid[-1]

@@ -17,6 +17,15 @@ from .arc_agi_runner import (
     GridObject,
     GridTopologyExtractor,
 )
+from .arc_solvers.knowledge_base import (
+    CrossLevelKnowledgeBase,
+)
+from .arc_solvers.visual_analysis import (
+    DiffType,
+    FrameDiff,
+    FrameDiffAnalyzer,
+    PuzzleTypology,
+)
 from .arc_spatial_agent import (
     ARC3BenchmarkReport,
     ARC3BenchmarkRunner,
@@ -37,13 +46,8 @@ from .control_mode import (
     SwitchMode,
 )
 from .inductive_learner import (
-    CrossLevelKnowledgeBase,
-    DiffType,
-    FrameDiff,
-    FrameDiffAnalyzer,
     InductiveARC3BenchmarkRunner,
     InductiveHCIRAgent,
-    PuzzleTypology,
 )
 
 __all__ = [

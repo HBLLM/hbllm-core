@@ -156,6 +156,9 @@ class ARC3SpatialCognitiveAgent:
         self.lattice_offset: tuple[int, int] = (0, 0)
         self.episode_action_log: list[int] = []
         self.episode_action_data_log: list[dict[str, Any] | None] = []
+
+        # ── Register all ARC-AGI domain skills with the core blackbox ──
+        self._register_arc_skills()
         self.knowledge_base: Any = None
         self.trial_memory: Any = None
 
@@ -278,16 +281,16 @@ class ARC3SpatialCognitiveAgent:
         """Domain-agnostic check if environment possesses 2D movement actions or specialized skills."""
         if any(a in available_actions for a in [1, 2, 3, 4]):
             return True
-        from hbllm.hcir.skills.automaton_synthesis import (
+        from plugins.arc_agi_adapter.arc_skills.automaton_synthesis import (
             AutomatonProgramSynthesisSkillAcquisition,
         )
-        from hbllm.hcir.skills.optical_mirror_reflection import (
+        from plugins.arc_agi_adapter.arc_skills.optical_mirror_reflection import (
             OpticalMirrorReflectionSkillAcquisition,
         )
-        from hbllm.hcir.skills.visual_program import (
+        from plugins.arc_agi_adapter.arc_skills.visual_program import (
             VisualProgramSynthesisSkillAcquisition,
         )
-        from hbllm.hcir.skills.vortex_attractor import (
+        from plugins.arc_agi_adapter.arc_skills.vortex_attractor import (
             VortexAttractorSkillAcquisition,
         )
 
@@ -329,6 +332,90 @@ class ARC3SpatialCognitiveAgent:
         st = self.blackbox.get_state("arc_agi")
         st.current_level = getattr(self, "current_level", 0)
         st.last_level_observed = getattr(self, "current_level", 0)
+
+    def _register_arc_skills(self) -> None:
+        """Register all ARC-AGI domain skills with the CognitiveBlackbox."""
+        from plugins.arc_agi_adapter.arc_skills.automaton_synthesis import (
+            AutomatonProgramSynthesisSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.coupled_controllables import (
+            CoupledControllableSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.grammar_translation import (
+            GrammarTranslationSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.hierarchical_pattern_grammar import (
+            HierarchicalPatternGrammarSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.inverted_buoyancy import (
+            InvertedBuoyancySkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.kinematics import KinematicMomentumSkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.kinetic_coupling import (
+            KineticCouplingSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.laser_routing import LaserRoutingSkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.modal_incantation import (
+            ModalIncantationSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.morphological_mutation import (
+            MorphologicalStateMutationSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.morphology_synthesis import (
+            MorphologicalProgramSynthesis,
+        )
+        from plugins.arc_agi_adapter.arc_skills.optical_mirror_reflection import (
+            OpticalMirrorReflectionSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.permutation_algebra import (
+            PermutationAlgebraSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.relational_affordance import (
+            RelationalAffordanceSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.reticle_superposition import (
+            ReticleSuperpositionSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.rigid_assembly import RigidAssemblySkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.spatiotemporal import SpatiotemporalSkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.temporal_echo import TemporalEchoSkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.topology_transformation import (
+            TopologyTransformationSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.visual_canvas import VisualCanvasSkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.visual_program import (
+            VisualProgramSynthesisSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.vortex_attractor import (
+            VortexAttractorSkillAcquisition,
+        )
+
+        skills = [
+            CoupledControllableSkillAcquisition(),
+            RelationalAffordanceSkillAcquisition(),
+            PermutationAlgebraSkillAcquisition(),
+            SpatiotemporalSkillAcquisition(),
+            MorphologicalProgramSynthesis(),
+            ModalIncantationSkillAcquisition(),
+            HierarchicalPatternGrammarSkillAcquisition(),
+            RigidAssemblySkillAcquisition(),
+            ReticleSuperpositionSkillAcquisition(),
+            TemporalEchoSkillAcquisition(),
+            InvertedBuoyancySkillAcquisition(),
+            KineticCouplingSkillAcquisition(),
+            GrammarTranslationSkillAcquisition(),
+            MorphologicalStateMutationSkillAcquisition(),
+            TopologyTransformationSkillAcquisition(),
+            LaserRoutingSkillAcquisition(),
+            AutomatonProgramSynthesisSkillAcquisition(),
+            VisualCanvasSkillAcquisition(),
+            VortexAttractorSkillAcquisition(),
+            OpticalMirrorReflectionSkillAcquisition(),
+            VisualProgramSynthesisSkillAcquisition(),
+            KinematicMomentumSkillAcquisition(),
+        ]
+        for skill in skills:
+            self.blackbox.register_skill(skill, source_id="arc_agi")
 
     def plan_next_action(
         self,
@@ -399,88 +486,12 @@ class ARC3SpatialCognitiveAgent:
             )
         ]
         has_queued_skills = bool(blackbox_state.active_skill_queue)
-        has_assembly_skill = hasattr(
-            blackbox_state, "assembly_skills"
-        ) and blackbox_state.assembly_skills.is_rigid_assembly_grid(curr_grid, available_actions)
-        has_reticle_skill = hasattr(
-            blackbox_state, "reticle_skills"
-        ) and blackbox_state.reticle_skills.is_reticle_superposition_grid(
-            curr_grid, available_actions
+        # Check if ANY registered skill can handle this state — skip motor probing if so
+        has_matching_skill = any(
+            skill.can_handle(curr_grid, available_actions)
+            for skill in blackbox_state.skill_registry
         )
-        has_temporal_skill = hasattr(
-            blackbox_state, "temporal_skills"
-        ) and blackbox_state.temporal_skills.is_temporal_echo_grid(curr_grid, available_actions)
-        has_buoyancy_skill = hasattr(
-            blackbox_state, "buoyancy_skills"
-        ) and blackbox_state.buoyancy_skills.is_buoyancy_excavation_grid(
-            curr_grid, available_actions
-        )
-        has_kinetic_coupling_skill = hasattr(
-            blackbox_state, "kinetic_coupling_skills"
-        ) and blackbox_state.kinetic_coupling_skills.is_kinetic_coupling_grid(
-            curr_grid, available_actions
-        )
-        has_grammar_translation_skill = hasattr(
-            blackbox_state, "grammar_translation_skills"
-        ) and blackbox_state.grammar_translation_skills.is_grammar_translation_grid(
-            curr_grid, available_actions
-        )
-        has_morphological_mutation_skill = hasattr(
-            blackbox_state, "morphological_mutation_skills"
-        ) and blackbox_state.morphological_mutation_skills.is_morphological_mutation_grid(
-            curr_grid, available_actions
-        )
-        has_topology_skill = hasattr(
-            blackbox_state, "topology_skills"
-        ) and blackbox_state.topology_skills.is_topology_transformation_grid(
-            curr_grid, available_actions
-        )
-        has_laser_routing_skill = hasattr(
-            blackbox_state, "laser_routing_skills"
-        ) and blackbox_state.laser_routing_skills.is_laser_routing_grid(
-            curr_grid, available_actions
-        )
-        has_automaton_skill = hasattr(
-            blackbox_state, "automaton_skills"
-        ) and blackbox_state.automaton_skills.is_automaton_synthesis_grid(
-            curr_grid, available_actions
-        )
-        has_canvas_skill = hasattr(
-            blackbox_state, "canvas_skills"
-        ) and blackbox_state.canvas_skills.is_canvas_stamping_grid(curr_grid, available_actions)
-        has_vortex_skill = hasattr(
-            blackbox_state, "vortex_skills"
-        ) and blackbox_state.vortex_skills.is_vortex_attractor_grid(curr_grid, available_actions)
-        has_program_skill = hasattr(
-            blackbox_state, "program_skills"
-        ) and blackbox_state.program_skills.is_visual_program_grid(curr_grid, available_actions)
-        has_incantation_skill = hasattr(
-            blackbox_state, "incantation_skills"
-        ) and blackbox_state.incantation_skills.is_incantation_grid(curr_grid, available_actions)
-        has_optical_mirror_skill = hasattr(
-            blackbox_state, "optical_mirror_skills"
-        ) and blackbox_state.optical_mirror_skills.is_optical_mirror_reflection_grid(
-            curr_grid, available_actions
-        )
-        if (
-            untested_moves
-            and not has_queued_skills
-            and not has_assembly_skill
-            and not has_reticle_skill
-            and not has_temporal_skill
-            and not has_buoyancy_skill
-            and not has_kinetic_coupling_skill
-            and not has_grammar_translation_skill
-            and not has_morphological_mutation_skill
-            and not has_topology_skill
-            and not has_laser_routing_skill
-            and not has_automaton_skill
-            and not has_canvas_skill
-            and not has_vortex_skill
-            and not has_program_skill
-            and not has_incantation_skill
-            and not has_optical_mirror_skill
-        ):
+        if untested_moves and not has_queued_skills and not has_matching_skill:
             self.last_action_data = None
             return untested_moves[0], 0.5
 

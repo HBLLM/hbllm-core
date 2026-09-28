@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -46,30 +47,7 @@ from hbllm.hcir.graph import (
 )
 from hbllm.hcir.learning_loop import LearningLoopEngine
 from hbllm.hcir.receipt import ExecutionReceipt
-from hbllm.hcir.skills import (
-    AutomatonProgramSynthesisSkillAcquisition,
-    CoupledControllableSkillAcquisition,
-    GrammarTranslationSkillAcquisition,
-    HierarchicalPatternGrammarSkillAcquisition,
-    InvertedBuoyancySkillAcquisition,
-    KinematicMomentumSkillAcquisition,
-    KineticCouplingSkillAcquisition,
-    LaserRoutingSkillAcquisition,
-    ModalIncantationSkillAcquisition,
-    MorphologicalProgramSynthesis,
-    MorphologicalStateMutationSkillAcquisition,
-    OpticalMirrorReflectionSkillAcquisition,
-    PermutationAlgebraSkillAcquisition,
-    RelationalAffordanceSkillAcquisition,
-    ReticleSuperpositionSkillAcquisition,
-    RigidAssemblySkillAcquisition,
-    SpatiotemporalSkillAcquisition,
-    TemporalEchoSkillAcquisition,
-    TopologyTransformationSkillAcquisition,
-    VisualCanvasSkillAcquisition,
-    VisualProgramSynthesisSkillAcquisition,
-    VortexAttractorSkillAcquisition,
-)
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
     EntityRole,
@@ -369,28 +347,7 @@ class AgentState:
         learned_obstacle_signatures: set[str] | None = None,
         learned_cargo_signatures: set[str] | None = None,
         learned_affordance_rules: dict[str, ObjectAffordanceRule] | None = None,
-        spatiotemporal_skills: SpatiotemporalSkillAcquisition | None = None,
-        permutation_skills: PermutationAlgebraSkillAcquisition | None = None,
-        kinematic_skills: KinematicMomentumSkillAcquisition | None = None,
-        relational_skills: RelationalAffordanceSkillAcquisition | None = None,
-        morphology_skills: MorphologicalProgramSynthesis | None = None,
-        coupled_skills: CoupledControllableSkillAcquisition | None = None,
-        incantation_skills: ModalIncantationSkillAcquisition | None = None,
-        grammar_skills: HierarchicalPatternGrammarSkillAcquisition | None = None,
-        assembly_skills: RigidAssemblySkillAcquisition | None = None,
-        reticle_skills: ReticleSuperpositionSkillAcquisition | None = None,
-        temporal_skills: TemporalEchoSkillAcquisition | None = None,
-        buoyancy_skills: InvertedBuoyancySkillAcquisition | None = None,
-        kinetic_coupling_skills: KineticCouplingSkillAcquisition | None = None,
-        grammar_translation_skills: GrammarTranslationSkillAcquisition | None = None,
-        morphological_mutation_skills: MorphologicalStateMutationSkillAcquisition | None = None,
-        topology_skills: TopologyTransformationSkillAcquisition | None = None,
-        laser_routing_skills: LaserRoutingSkillAcquisition | None = None,
-        automaton_skills: AutomatonProgramSynthesisSkillAcquisition | None = None,
-        canvas_skills: VisualCanvasSkillAcquisition | None = None,
-        vortex_skills: VortexAttractorSkillAcquisition | None = None,
-        program_skills: VisualProgramSynthesisSkillAcquisition | None = None,
-        mirror_skills: OpticalMirrorReflectionSkillAcquisition | None = None,
+        skill_registry: list[BaseHierarchicalSkill] | None = None,
         **kwargs: Any,
     ) -> None:
         self.phase = phase
@@ -454,100 +411,7 @@ class AgentState:
         self.learned_affordance_rules: dict[str, ObjectAffordanceRule] = dict(
             learned_affordance_rules or {}
         )
-        self.spatiotemporal_skills: SpatiotemporalSkillAcquisition = (
-            spatiotemporal_skills
-            if spatiotemporal_skills is not None
-            else SpatiotemporalSkillAcquisition()
-        )
-        self.permutation_skills: PermutationAlgebraSkillAcquisition = (
-            permutation_skills
-            if permutation_skills is not None
-            else PermutationAlgebraSkillAcquisition()
-        )
-        self.kinematic_skills: KinematicMomentumSkillAcquisition = (
-            kinematic_skills
-            if kinematic_skills is not None
-            else KinematicMomentumSkillAcquisition()
-        )
-        self.relational_skills: RelationalAffordanceSkillAcquisition = (
-            relational_skills
-            if relational_skills is not None
-            else RelationalAffordanceSkillAcquisition()
-        )
-        self.morphology_skills: MorphologicalProgramSynthesis = (
-            morphology_skills if morphology_skills is not None else MorphologicalProgramSynthesis()
-        )
-        self.coupled_skills: CoupledControllableSkillAcquisition = (
-            coupled_skills if coupled_skills is not None else CoupledControllableSkillAcquisition()
-        )
-        self.incantation_skills: ModalIncantationSkillAcquisition = (
-            incantation_skills
-            if incantation_skills is not None
-            else ModalIncantationSkillAcquisition()
-        )
-        self.grammar_skills: HierarchicalPatternGrammarSkillAcquisition = (
-            grammar_skills
-            if grammar_skills is not None
-            else HierarchicalPatternGrammarSkillAcquisition()
-        )
-        self.assembly_skills: RigidAssemblySkillAcquisition = (
-            assembly_skills if assembly_skills is not None else RigidAssemblySkillAcquisition()
-        )
-        self.reticle_skills: ReticleSuperpositionSkillAcquisition = (
-            reticle_skills if reticle_skills is not None else ReticleSuperpositionSkillAcquisition()
-        )
-        self.temporal_skills: TemporalEchoSkillAcquisition = (
-            temporal_skills if temporal_skills is not None else TemporalEchoSkillAcquisition()
-        )
-        self.buoyancy_skills: InvertedBuoyancySkillAcquisition = (
-            buoyancy_skills if buoyancy_skills is not None else InvertedBuoyancySkillAcquisition()
-        )
-        self.kinetic_coupling_skills: KineticCouplingSkillAcquisition = (
-            kinetic_coupling_skills
-            if kinetic_coupling_skills is not None
-            else KineticCouplingSkillAcquisition()
-        )
-        self.grammar_translation_skills: GrammarTranslationSkillAcquisition = (
-            grammar_translation_skills
-            if grammar_translation_skills is not None
-            else GrammarTranslationSkillAcquisition()
-        )
-        self.morphological_mutation_skills: MorphologicalStateMutationSkillAcquisition = (
-            morphological_mutation_skills
-            if morphological_mutation_skills is not None
-            else MorphologicalStateMutationSkillAcquisition()
-        )
-        self.topology_skills: TopologyTransformationSkillAcquisition = (
-            topology_skills
-            if topology_skills is not None
-            else TopologyTransformationSkillAcquisition()
-        )
-        self.laser_routing_skills: LaserRoutingSkillAcquisition = (
-            laser_routing_skills
-            if laser_routing_skills is not None
-            else LaserRoutingSkillAcquisition()
-        )
-        self.automaton_skills: AutomatonProgramSynthesisSkillAcquisition = (
-            automaton_skills
-            if automaton_skills is not None
-            else AutomatonProgramSynthesisSkillAcquisition()
-        )
-        self.canvas_skills: VisualCanvasSkillAcquisition = (
-            canvas_skills if canvas_skills is not None else VisualCanvasSkillAcquisition()
-        )
-        self.vortex_skills: VortexAttractorSkillAcquisition = (
-            vortex_skills if vortex_skills is not None else VortexAttractorSkillAcquisition()
-        )
-        self.program_skills: VisualProgramSynthesisSkillAcquisition = (
-            program_skills
-            if program_skills is not None
-            else VisualProgramSynthesisSkillAcquisition()
-        )
-        self.mirror_skills: OpticalMirrorReflectionSkillAcquisition = (
-            mirror_skills
-            if mirror_skills is not None
-            else OpticalMirrorReflectionSkillAcquisition()
-        )
+        self.skill_registry: list[BaseHierarchicalSkill] = list(skill_registry or [])
 
     def get_active_condition(self) -> str:
         """Derive the active environmental/motor condition string."""
@@ -744,6 +608,7 @@ class CognitiveBlackbox:
         self._source_states: dict[str, AgentState] = {}
         self._source_entity_graphs: dict[str, EntityGraph] = {}
         self._source_perception_data: dict[str, dict[str, Any]] = {}
+        self._source_skill_registries: dict[str, list[BaseHierarchicalSkill]] = defaultdict(list)
 
         # Registered drivers: driver_name -> BaseDriver
         # All actions, capabilities, and lifters are dynamically managed through registered drivers
@@ -847,7 +712,8 @@ class CognitiveBlackbox:
     def get_state(self, source_id: str = "default") -> AgentState:
         """Get or create per-source agent state."""
         if source_id not in self._source_states:
-            self._source_states[source_id] = AgentState()
+            registered = list(self._source_skill_registries.get(source_id, []))
+            self._source_states[source_id] = AgentState(skill_registry=registered)
         return self._source_states[source_id]
 
     def record_state_mutation(
@@ -1010,6 +876,45 @@ class CognitiveBlackbox:
 
     # ── Observation (Input) ───────────────────────────────────────────────
 
+    def register_skill(self, skill: BaseHierarchicalSkill, source_id: str = "default") -> None:
+        """Register a domain-specific skill with the blackbox for generic dispatch.
+
+        Skills are tried in registration order. The first skill whose can_handle()
+        returns True gets to plan the next action sequence.
+
+        Args:
+            skill: A BaseHierarchicalSkill instance implementing can_handle() and plan().
+            source_id: The source state to register the skill on.
+        """
+        if skill not in self._source_skill_registries[source_id]:
+            self._source_skill_registries[source_id].append(skill)
+        state = self.get_state(source_id)
+        if skill not in state.skill_registry:
+            state.skill_registry.append(skill)
+            logger.debug(
+                "CognitiveBlackbox[%s]: Registered skill '%s'",
+                source_id,
+                skill.skill_name,
+            )
+
+    def get_skill(
+        self, skill_type: type, source_id: str = "default"
+    ) -> BaseHierarchicalSkill | None:
+        """Look up a registered skill by its class type.
+
+        Args:
+            skill_type: The class to search for in the registry.
+            source_id: The source state to search.
+
+        Returns:
+            The first registered skill instance of the given type, or None.
+        """
+        state = self.get_state(source_id)
+        for skill in state.skill_registry:
+            if isinstance(skill, skill_type):
+                return skill
+        return None
+
     def observe(
         self,
         driver_input: DriverInput,
@@ -1086,12 +991,16 @@ class CognitiveBlackbox:
                 state.explored_entity_positions.add(eg.avatar.grid_pos)
                 if state.milestone_start_pos is None:
                     state.milestone_start_pos = eg.avatar.grid_pos
-            if entities and hasattr(state, "spatiotemporal_skills"):
-                state.spatiotemporal_skills.observe(
-                    step=state.step_count,
-                    entities=entities,
-                    agent_pos=eg.avatar.grid_pos if eg and eg.avatar else None,
+            if entities:
+                _spatio_skill = next(
+                    (s for s in state.skill_registry if s.skill_name == "spatiotemporal"), None
                 )
+                if _spatio_skill and hasattr(_spatio_skill, "observe"):
+                    _spatio_skill.observe(
+                        step=state.step_count,
+                        entities=entities,
+                        agent_pos=eg.avatar.grid_pos if eg and eg.avatar else None,
+                    )
             self._source_entity_graphs[source_id] = eg
             return eg
 
@@ -1218,498 +1127,34 @@ class CognitiveBlackbox:
             and isinstance(raw_grid, np.ndarray)
             and not state.active_skill_queue
         ):
-            # A. Mirrored / Coupled Multi-Agent Convergence (e.g. m0r0)
-            if hasattr(
-                state, "coupled_skills"
-            ) and state.coupled_skills.is_mirrored_convergence_grid(raw_grid, act_ids):
-                j_plan = state.coupled_skills.plan_mirrored_convergence_grid(raw_grid)
-                if j_plan:
-                    state.active_skill_queue = [
-                        DriverAction(action_id=act, semantic_intent=SpatialActionIntent.NAVIGATE)
-                        for act in j_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d coupled convergence actions",
-                        source_id,
-                        len(j_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # B. Peg Solitaire & Relational Ternary Affordances (e.g. lf52)
-            if hasattr(
-                state, "relational_skills"
-            ) and state.relational_skills.is_peg_solitaire_grid(raw_grid, act_ids):
-                p_plan = state.relational_skills.plan_peg_solitaire_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if p_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
+            # ── Generic SkillRegistry Dispatch ──────────────────────────
+            # All domain-specific skills are registered via register_skill()
+            # and dispatched through the standardized BaseHierarchicalSkill protocol.
+            for skill in state.skill_registry:
+                try:
+                    if skill.can_handle(raw_grid, act_ids):
+                        plan = skill.plan_as_driver_actions(
+                            raw_grid,
+                            current_level=getattr(state, "current_level", 0),
                         )
-                        for act, d in p_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d peg solitaire ternary actions",
+                        if plan:
+                            state.active_skill_queue = list(plan)
+                            state.active_skill_name = skill.skill_name
+                            logger.info(
+                                "CognitiveBlackbox[%s]: SkillRegistry dispatched '%s' (%d actions)",
+                                source_id,
+                                skill.skill_name,
+                                len(plan),
+                            )
+                            return state.active_skill_queue.pop(0)
+                except Exception as e:
+                    logger.debug(
+                        "CognitiveBlackbox[%s]: Skill '%s' raised %s: %s",
                         source_id,
-                        len(p_plan),
+                        getattr(skill, "skill_name", "unknown"),
+                        type(e).__name__,
+                        e,
                     )
-                    return state.active_skill_queue.pop(0)
-
-            # C. Discrete Permutation & Lights Out GF(2) (e.g. ft09)
-            if hasattr(state, "permutation_skills") and state.permutation_skills.is_lights_out_grid(
-                raw_grid, act_ids
-            ):
-                l_plan = state.permutation_skills.plan_lights_out_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if l_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in l_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d algebraic GF(2) toggle actions",
-                        source_id,
-                        len(l_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # D. Spatiotemporal Track Maze Navigation (e.g. tu93)
-            if hasattr(
-                state, "spatiotemporal_skills"
-            ) and state.spatiotemporal_skills.is_track_maze_grid(raw_grid, act_ids):
-                t_plan = state.spatiotemporal_skills.plan_track_maze_grid(raw_grid)
-                if t_plan:
-                    state.active_skill_queue = [
-                        DriverAction(action_id=act, semantic_intent=SpatialActionIntent.NAVIGATE)
-                        for act in t_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d spatiotemporal track maze actions",
-                        source_id,
-                        len(t_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # E. Morphology & Gravity Spill Platform Cascades (e.g. sp80)
-            if hasattr(
-                state, "morphology_skills"
-            ) and state.morphology_skills.is_gravity_spill_grid(raw_grid, act_ids):
-                g_plan = state.morphology_skills.plan_gravity_spill_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if g_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT
-                            if d
-                            else SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in g_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d gravity spill cascade actions",
-                        source_id,
-                        len(g_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # F. Modal Incantation & Glyph-Induced Transformation (e.g. sc25)
-            if hasattr(
-                state, "incantation_skills"
-            ) and state.incantation_skills.is_incantation_grid(raw_grid, act_ids):
-                i_plan = state.incantation_skills.plan_incantation_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if i_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT
-                            if d
-                            else SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in i_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d modal incantation actions",
-                        source_id,
-                        len(i_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # G. Hierarchical Pattern Grammar & Discrete Slot Matching (e.g. sb26)
-            if hasattr(state, "grammar_skills") and state.grammar_skills.is_pattern_grammar_grid(
-                raw_grid, act_ids
-            ):
-                g_plan = state.grammar_skills.plan_pattern_grammar_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if g_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in g_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d hierarchical pattern grammar actions",
-                        source_id,
-                        len(g_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # H. Rigid-Body Assembly & Tangram Alignment (e.g. cn04)
-            if hasattr(state, "assembly_skills") and state.assembly_skills.is_rigid_assembly_grid(
-                raw_grid, act_ids
-            ):
-                a_plan = state.assembly_skills.plan_rigid_assembly_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if a_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in a_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d rigid assembly actions",
-                        source_id,
-                        len(a_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # I. Reticle Superposition & Crosshair Alignment (e.g. re86)
-            if hasattr(
-                state, "reticle_skills"
-            ) and state.reticle_skills.is_reticle_superposition_grid(raw_grid, act_ids):
-                r_plan = state.reticle_skills.plan_reticle_superposition_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if r_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in r_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d reticle superposition actions",
-                        source_id,
-                        len(r_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # J. Temporal Echo & Ghost Actuation (e.g. g50t)
-            if hasattr(state, "temporal_skills") and state.temporal_skills.is_temporal_echo_grid(
-                raw_grid, act_ids
-            ):
-                echo_plan = state.temporal_skills.plan_temporal_echo_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if echo_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in echo_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d temporal echo actions",
-                        source_id,
-                        len(echo_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # K. Inverted Buoyancy & Block Excavation (e.g. bp35)
-            if hasattr(
-                state, "buoyancy_skills"
-            ) and state.buoyancy_skills.is_buoyancy_excavation_grid(raw_grid, act_ids):
-                b_plan = state.buoyancy_skills.plan_buoyancy_excavation_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if b_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act == 6
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in b_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d inverted buoyancy excavation actions",
-                        source_id,
-                        len(b_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # L. Kinetic Coupling & Controllable Launch (e.g. ka59)
-            if hasattr(
-                state, "kinetic_coupling_skills"
-            ) and state.kinetic_coupling_skills.is_kinetic_coupling_grid(raw_grid, act_ids):
-                k_plan = state.kinetic_coupling_skills.plan_kinetic_coupling_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if k_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act == 6
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in k_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d kinetic coupling launch actions",
-                        source_id,
-                        len(k_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # M. Formal Rewrite Grammar Translation (e.g. tr87)
-            if hasattr(
-                state, "grammar_translation_skills"
-            ) and state.grammar_translation_skills.is_grammar_translation_grid(raw_grid, act_ids):
-                gt_plan = state.grammar_translation_skills.plan_grammar_translation_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if gt_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in gt_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d grammar translation actions",
-                        source_id,
-                        len(gt_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # N. Morphological State Mutation & Gate Attunement (e.g. ls20)
-            if hasattr(
-                state, "morphological_mutation_skills"
-            ) and state.morphological_mutation_skills.is_morphological_mutation_grid(
-                raw_grid, act_ids
-            ):
-                mm_plan = state.morphological_mutation_skills.plan_morphological_mutation_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if mm_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.NAVIGATE,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in mm_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d morphological mutation actions",
-                        source_id,
-                        len(mm_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # O. Dynamic Topology Transformation & Remote Actuation (e.g. dc22)
-            if hasattr(
-                state, "topology_skills"
-            ) and state.topology_skills.is_topology_transformation_grid(raw_grid, act_ids):
-                topo_plan = state.topology_skills.plan_topology_transformation_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if topo_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act == 6
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in topo_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d topology transformation actions",
-                        source_id,
-                        len(topo_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # P. Laser Routing & Kinematic Pipe Coupling (e.g. sk48)
-            if hasattr(
-                state, "laser_routing_skills"
-            ) and state.laser_routing_skills.is_laser_routing_grid(raw_grid, act_ids):
-                laser_plan = state.laser_routing_skills.plan_laser_routing_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if laser_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act == 6
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in laser_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d laser routing actions",
-                        source_id,
-                        len(laser_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # Q. Automaton Program Synthesis & Execution (e.g. tn36)
-            if hasattr(
-                state, "automaton_skills"
-            ) and state.automaton_skills.is_automaton_synthesis_grid(raw_grid, act_ids):
-                automaton_plan = state.automaton_skills.plan_automaton_synthesis_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if automaton_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in automaton_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d automaton program synthesis actions",
-                        source_id,
-                        len(automaton_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # R. Visual Canvas Stamping & Sector Template Alignment (e.g. cd82)
-            if hasattr(state, "canvas_skills") and state.canvas_skills.is_canvas_stamping_grid(
-                raw_grid, act_ids
-            ):
-                step_act, _, step_data = state.canvas_skills.plan_canvas_stamping_step(raw_grid)
-                return DriverAction(
-                    action_id=step_act,
-                    semantic_intent=(
-                        SpatialActionIntent.INTERACT
-                        if step_act in (5, 6)
-                        else SpatialActionIntent.NAVIGATE
-                    ),
-                    parameters=dict(step_data) if step_data is not None else {},
-                )
-
-            # S. Vortex Attractor & Gravitational Shockwave (e.g. su15)
-            if hasattr(state, "vortex_skills") and state.vortex_skills.is_vortex_attractor_grid(
-                raw_grid, act_ids
-            ):
-                vortex_plan = state.vortex_skills.plan_vortex_attractor_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if vortex_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act == 6
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in vortex_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d vortex attractor actions",
-                        source_id,
-                        len(vortex_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # Optical Mirror Reflection & Symmetry Alignment (e.g. ar25)
-            if hasattr(
-                state, "mirror_skills"
-            ) and state.mirror_skills.is_optical_mirror_reflection_grid(raw_grid, act_ids):
-                mirror_plan = state.mirror_skills.plan_optical_mirror_reflection_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if mirror_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=(
-                                SpatialActionIntent.INTERACT
-                                if act in (5, 6)
-                                else SpatialActionIntent.NAVIGATE
-                            ),
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in mirror_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d optical mirror reflection actions",
-                        source_id,
-                        len(mirror_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
-
-            # T. Visual Program Synthesis & Slot Assembly (e.g. sb26)
-            if hasattr(state, "program_skills") and state.program_skills.is_visual_program_grid(
-                raw_grid, act_ids
-            ):
-                prog_plan = state.program_skills.plan_visual_program_grid(
-                    raw_grid, getattr(state, "current_level", 0)
-                )
-                if prog_plan:
-                    state.active_skill_queue = [
-                        DriverAction(
-                            action_id=act,
-                            semantic_intent=SpatialActionIntent.INTERACT,
-                            parameters=dict(d) if d is not None else {},
-                        )
-                        for act, d in prog_plan
-                    ]
-                    logger.info(
-                        "CognitiveBlackbox[%s]: Queued %d visual program synthesis actions",
-                        source_id,
-                        len(prog_plan),
-                    )
-                    return state.active_skill_queue.pop(0)
 
         # Forward Mental Simulation & Epistemic World Planning (Domain-Agnostic)
         if (
@@ -2043,13 +1488,17 @@ class CognitiveBlackbox:
 
         # Check if environment is a discrete toggle / lights-out puzzle solved algebraically
         # Strictly for non-avatar abstract grids of size <= 256
+        _perm_skill = next(
+            (s for s in state.skill_registry if s.skill_name == "permutation_algebra"), None
+        )
         if (
-            hasattr(state, "permutation_skills")
-            and state.permutation_skills.is_toggle_puzzle
+            _perm_skill
+            and hasattr(_perm_skill, "is_toggle_puzzle")
+            and _perm_skill.is_toggle_puzzle
             and (eg is None or not eg.avatar)
             and grid.size <= 256
         ):
-            sol = state.permutation_skills.solve_lights_out(grid)
+            sol = _perm_skill.solve_lights_out(grid)
 
             if sol:
                 next_c = sol[0]
@@ -2669,33 +2118,36 @@ class CognitiveBlackbox:
             dc_obs = int(delta[1]) if len(delta) > 1 else 0
             cur_pos = eg_curr.avatar.grid_pos
             prev_pos = (cur_pos[0] - dr_obs, cur_pos[1] - dc_obs)
-            state.kinematic_skills.observe_displacement(
-                intended_delta=intended,
-                start_pos=prev_pos,
-                end_pos=cur_pos,
-                barriers=eg_curr.barriers,
-                grid_shape=eg_curr.grid_shape,
+            _kinematic_skill = next(
+                (s for s in state.skill_registry if s.skill_name == "kinematic_momentum"), None
             )
+            if _kinematic_skill and hasattr(_kinematic_skill, "observe_displacement"):
+                _kinematic_skill.observe_displacement(
+                    intended_delta=intended,
+                    start_pos=prev_pos,
+                    end_pos=cur_pos,
+                    barriers=eg_curr.barriers,
+                    grid_shape=eg_curr.grid_shape,
+                )
 
         p_data = self._source_perception_data.get(source_id, {})
         curr_g = p_data.get("grid")
         prev_g = getattr(state, "_last_step_grid", None)
-        if (
-            prev_g is not None
-            and curr_g is not None
-            and isinstance(curr_g, np.ndarray)
-            and hasattr(state, "permutation_skills")
-        ):
-            click_pt = None
-            if action.parameters and "x" in action.parameters and "y" in action.parameters:
-                click_pt = (int(action.parameters["y"]), int(action.parameters["x"]))
-            elif state.last_action_parameters:
-                click_pt = (
-                    int(state.last_action_parameters.get("y", 0)),
-                    int(state.last_action_parameters.get("x", 0)),
-                )
-            if click_pt:
-                state.permutation_skills.observe_toggle(click_pt, prev_g, curr_g)
+        if prev_g is not None and curr_g is not None and isinstance(curr_g, np.ndarray):
+            _perm_obs_skill = next(
+                (s for s in state.skill_registry if s.skill_name == "permutation_algebra"), None
+            )
+            if _perm_obs_skill and hasattr(_perm_obs_skill, "observe_toggle"):
+                click_pt = None
+                if action.parameters and "x" in action.parameters and "y" in action.parameters:
+                    click_pt = (int(action.parameters["y"]), int(action.parameters["x"]))
+                elif state.last_action_parameters:
+                    click_pt = (
+                        int(state.last_action_parameters.get("y", 0)),
+                        int(state.last_action_parameters.get("x", 0)),
+                    )
+                if click_pt:
+                    _perm_obs_skill.observe_toggle(click_pt, prev_g, curr_g)
         if curr_g is not None and isinstance(curr_g, np.ndarray):
             state._last_step_grid = curr_g.copy()
 
@@ -3162,6 +2614,9 @@ class CognitiveBlackbox:
         do not ghost-contaminate the fresh layout.
         """
         state = self.get_state(source_id)
+        saved_skill_registry = list(
+            getattr(state, "skill_registry", []) or self._source_skill_registries.get(source_id, [])
+        )
 
         if retain_memory:
             # Preserve learned knowledge
@@ -3288,9 +2743,12 @@ class CognitiveBlackbox:
                 vortex_skills=saved_vortex,
                 program_skills=saved_program,
                 mirror_skills=saved_mirror,
+                skill_registry=saved_skill_registry,
             )
         else:
-            self._source_states[source_id] = AgentState()
+            self._source_states[source_id] = AgentState(
+                skill_registry=saved_skill_registry,
+            )
 
         self._source_entity_graphs.pop(source_id, None)
         self.spatial_planner.reset(is_retry=is_retry)
@@ -3754,13 +3212,12 @@ class CognitiveBlackbox:
             else None
         )
         safe_path = None
-        has_dynamic_hazards = (
-            hasattr(state, "spatiotemporal_skills")
-            and state.spatiotemporal_skills
-            and (
-                bool(state.spatiotemporal_skills.hazard_features)
-                or bool(getattr(eg, "dynamic_hazards", None))
-            )
+        _spatio_nav = next(
+            (s for s in state.skill_registry if s.skill_name == "spatiotemporal"), None
+        )
+        has_dynamic_hazards = _spatio_nav is not None and (
+            bool(getattr(_spatio_nav, "hazard_features", None))
+            or bool(getattr(eg, "dynamic_hazards", None))
         )
         curr_step = getattr(state, "step_count", getattr(state, "step_counter", 0))
         effective_barriers = set(eg.barriers)
@@ -3773,7 +3230,7 @@ class CognitiveBlackbox:
             )
 
         if has_dynamic_hazards:
-            safe_path = state.spatiotemporal_skills.plan_space_time_path(
+            safe_path = _spatio_nav.plan_space_time_path(
                 start=avatar_pos,
                 goal=target_pos,
                 current_t=curr_step,
@@ -3797,11 +3254,8 @@ class CognitiveBlackbox:
             # Dynamic safety verification at next time step t+1
             if (
                 has_dynamic_hazards
-                and hasattr(state, "spatiotemporal_skills")
-                and state.spatiotemporal_skills
-                and not state.spatiotemporal_skills.is_cell_safe_at_time(
-                    next_cell[0], next_cell[1], curr_step + 1
-                )
+                and _spatio_nav is not None
+                and not _spatio_nav.is_cell_safe_at_time(next_cell[0], next_cell[1], curr_step + 1)
             ):
                 next_cell = avatar_pos  # wait while dynamic hazard crosses
 

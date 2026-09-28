@@ -65,26 +65,9 @@ __all__ = [
     "SWITCH",
     "REFILL",
     "EXIT",
-    # --- Skill Acquisition ---
-    "AutonomousTrajectoryModel",
-    "CoupledControllableSkillAcquisition",
     "GF2LinearSolver",
-    "KinematicMomentumSkillAcquisition",
-    "MorphologicalProgramSynthesis",
-    "PermutationAlgebraSkillAcquisition",
-    "RelationalAffordanceSkillAcquisition",
-    "SpatiotemporalSkillAcquisition",
 ]
 
-from hbllm.hcir.skills import (
-    AutonomousTrajectoryModel,
-    CoupledControllableSkillAcquisition,
-    GF2LinearSolver,
-    KinematicMomentumSkillAcquisition,
-    MorphologicalProgramSynthesis,
-    PermutationAlgebraSkillAcquisition,
-    RelationalAffordanceSkillAcquisition,
-    SpatiotemporalSkillAcquisition,
-)
+from hbllm.hcir.skills import GF2LinearSolver
 
 __hcir_version__ = "1.2.0"
