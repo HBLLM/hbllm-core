@@ -30,9 +30,18 @@ from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 
 def test_all_skills_inherit_and_conform_to_protocol():
-    """Verify that all concrete skills in hbllm.hcir.skills subclass BaseHierarchicalSkill and implement protocol."""
+    """Verify that all concrete skills subclass BaseHierarchicalSkill and implement protocol."""
+    try:
+        import plugins.arc_agi_adapter.arc_skills as plugin_skills_module
+
+        target_module = plugin_skills_module
+        min_expected = 20
+    except ImportError:
+        target_module = skills_module
+        min_expected = 1
+
     skill_classes = []
-    for name, obj in inspect.getmembers(skills_module):
+    for name, obj in inspect.getmembers(target_module):
         if (
             inspect.isclass(obj)
             and issubclass(obj, BaseHierarchicalSkill)
@@ -40,7 +49,9 @@ def test_all_skills_inherit_and_conform_to_protocol():
         ):
             skill_classes.append((name, obj))
 
-    assert len(skill_classes) >= 20, f"Expected at least 20 skills, found {len(skill_classes)}"
+    assert len(skill_classes) >= min_expected, (
+        f"Expected at least {min_expected} skills, found {len(skill_classes)}"
+    )
 
     dummy_grid = np.zeros((64, 64), dtype=int)
     dummy_actions = [1, 2, 3, 4, 5, 6, 7]

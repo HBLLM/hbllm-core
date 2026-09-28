@@ -13,69 +13,76 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     PerceptualClusterDetector,
     RemoteActuator,
+)
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    EntityBoundingBoxPredicate,
+    GridDimensionPredicate,
+    PanelConstraint,
+    SkillEvaluationContext,
+    SubgoalSequence,
+    SymbolicSubgoal,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class TopologyTransformationSkillAcquisition(BaseHierarchicalSkill):
+class TopologyTransformationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces topological restructuring rules and plans remote actuation navigation."""
 
     skill_name: str = "topology_transformation_remote_actuation"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # 1. Declarative Neuro-Symbolic Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_col_ratio=40.0 / 64.0,  # Right margin console panel (x >= 40)
+            contains_entities=EntityBoundingBoxPredicate(
+                min_width=10,
+                max_width=22,
+                min_height=4,
+                max_height=12,
+                min_count=2,
+            ),
+        ),
+    )
+
+    # 2. Declarative Intent Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ACTUATE,
+            target_query={"role": "switch_b", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "corridor"},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ACTUATE,
+            target_query={"role": "switch_a", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "goal"},
+        ),
+    )
 
     @classmethod
     def is_topology_transformation_grid(
         cls, grid: np.ndarray, available_actions: list[int]
     ) -> bool:
         """Detect whether the grid contains a dynamic topology transformation puzzle."""
-        # dc22 signature: actions {1, 2, 3, 4, 6}
-        if set(available_actions) != {1, 2, 3, 4, 6}:
-            return False
-
-        if grid.ndim == 3:
-            grid = grid[-1]
-
-        H, W = grid.shape
-        if H != 64 or W != 64:
-            return False
-
-        # Structural signature:
-        # 1. Available actions are navigation {1, 2, 3, 4} + remote interaction {6}
-        # 2. Right panel (x >= 40) contains discrete interactive console switch buttons (w: 10..22, h: 4..12)
-        panel = grid[:, 40:]
-        bg_panel = int(np.bincount(panel.flatten().astype(np.int64)).argmax())
-        visited = np.zeros_like(panel, dtype=bool)
-        buttons = 0
-        for y in range(panel.shape[0]):
-            for x in range(panel.shape[1]):
-                if not visited[y, x] and panel[y, x] != bg_panel:
-                    q = [(y, x)]
-                    visited[y, x] = True
-                    comp = []
-                    while q:
-                        cy, cx = q.pop()
-                        comp.append((cy, cx))
-                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                            ny, nx = cy + dy, cx + dx
-                            if 0 <= ny < panel.shape[0] and 0 <= nx < panel.shape[1]:
-                                if not visited[ny, nx] and panel[ny, nx] != bg_panel:
-                                    visited[ny, nx] = True
-                                    q.append((ny, nx))
-                    w = max(p[1] for p in comp) - min(p[1] for p in comp) + 1
-                    h = max(p[0] for p in comp) - min(p[0] for p in comp) + 1
-                    if 10 <= w <= 22 and 4 <= h <= 12:
-                        buttons += 1
-                        if buttons >= 2:
-                            return True
-
-        return buttons >= 2
+        ctx = SkillEvaluationContext(grid=grid, available_actions=available_actions)
+        return cls.signature.evaluate(ctx)
 
     @classmethod
     def plan_topology_transformation_grid(
