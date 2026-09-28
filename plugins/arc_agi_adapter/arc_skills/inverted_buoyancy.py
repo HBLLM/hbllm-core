@@ -13,15 +13,43 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import DiscreteVectorTranslator, RemoteActuator
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class InvertedBuoyancySkillAcquisition(BaseHierarchicalSkill):
+class InvertedBuoyancySkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces excavation and upward buoyant navigation plans."""
+
+    skill_name: str = "inverted_buoyancy_excavation"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={3, 4, 6, 7}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "excavate_overhead", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "summit_goal"},
+        ),
+    )
 
     @classmethod
     def is_buoyancy_excavation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
@@ -129,9 +157,6 @@ class InvertedBuoyancySkillAcquisition(BaseHierarchicalSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    skill_name: str = "inverted_buoyancy_excavation"
-    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     def can_handle(
         self,

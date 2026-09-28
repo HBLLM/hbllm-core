@@ -13,17 +13,45 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    AnyOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class OpticalMirrorReflectionSkillAcquisition(BaseHierarchicalSkill):
+class OpticalMirrorReflectionSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces optical mirror reflection alignments and multi-entity positioning."""
 
     skill_name: str = "optical_mirror_reflection"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.ALIGN
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={5, 7}),
+        AnyOf(
+            ActionAffordancePredicate(required={1}),
+            ActionAffordancePredicate(required={2}),
+            ActionAffordancePredicate(required={3}),
+            ActionAffordancePredicate(required={4}),
+        ),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ALIGN,
+            target_query={"role": "mirror_reflection_symmetry"},
+        )
+    )
 
     @classmethod
     def is_optical_mirror_reflection_grid(

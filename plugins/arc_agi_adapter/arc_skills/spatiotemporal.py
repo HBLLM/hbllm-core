@@ -14,8 +14,15 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import LatticeQuantizer
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent, SpatialEntity
 
 logger = logging.getLogger(__name__)
@@ -124,8 +131,25 @@ class AutonomousTrajectoryModel:
         )
 
 
-class SpatiotemporalSkillAcquisition(BaseHierarchicalSkill):
+class SpatiotemporalSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Acquires dynamic hazard models and plans collision-free space-time trajectories."""
+
+    skill_name: str = "spatiotemporal_track_maze"
+    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={1, 2, 3, 4}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "track_conduit_lattice"},
+        )
+    )
 
     def __init__(self) -> None:
         self.trajectories: dict[str, EntityTrajectory] = {}
@@ -422,9 +446,6 @@ class SpatiotemporalSkillAcquisition(BaseHierarchicalSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    skill_name: str = "spatiotemporal_track_maze"
-    semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     def can_handle(
         self,

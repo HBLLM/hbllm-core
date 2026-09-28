@@ -16,17 +16,42 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class VisualCanvasSkillAcquisition(BaseHierarchicalSkill):
+class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces stencil stamping mechanics, sector alignment, and swatch switching."""
 
     skill_name: str = "visual_canvas_stencil_stamping"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={5, 6}, forbidden={7}),
+        GridDimensionPredicate(min_height=40, min_width=40),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "palette_swatch", "action": 5},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "stencil_stamp", "action": 6},
+        ),
+    )
 
     def __init__(self) -> None:
         self.ring_coords: dict[int, tuple[int, int]] = {

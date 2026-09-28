@@ -13,18 +13,51 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import DiscreteVectorTranslator
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    PanelConstraint,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class TemporalEchoSkillAcquisition(BaseHierarchicalSkill):
+class TemporalEchoSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces temporal echo recording and concurrent ghost-replay plans."""
 
     skill_name: str = "temporal_echo_ghost"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={1, 2, 3, 4, 5}, forbidden={6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_row_ratio=0.0,
+            max_row_ratio=5.0 / 64.0,
+            min_col_ratio=0.0,
+            max_col_ratio=10.0 / 64.0,
+            min_distinct_colors=2,
+        ),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ACTUATE,
+            target_query={"role": "ghost_switch_pressure", "action": 5},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "echo_goal"},
+        ),
+    )
 
     @classmethod
     def is_temporal_echo_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

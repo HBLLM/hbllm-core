@@ -14,7 +14,14 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
@@ -30,11 +37,29 @@ class CoupledControllableModel:
     confidence: float = 0.5
 
 
-class CoupledControllableSkillAcquisition(BaseHierarchicalSkill):
+class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Discovers coupled/mirrored avatars and executes joint configuration planning."""
 
     skill_name: str = "coupled_controllable_convergence"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={1, 2, 3, 4, 6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ALIGN,
+            target_query={"role": "symmetric_mirror_avatars"},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "convergence_point"},
+        ),
+    )
 
     def __init__(self) -> None:
         self.model = CoupledControllableModel()

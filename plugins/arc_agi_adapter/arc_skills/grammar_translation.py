@@ -15,17 +15,47 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    PanelConstraint,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class GrammarTranslationSkillAcquisition(BaseHierarchicalSkill):
+class GrammarTranslationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces formal rewrite grammars and plans symbol sequence transformations."""
 
     skill_name: str = "grammar_translation_rewrite"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={1, 2, 3, 4}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_row_ratio=35.0 / 64.0,
+            max_row_ratio=60.0 / 64.0,
+        ),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "symbol_sequence_rewrite"},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "grammar_terminal"},
+        ),
+    )
 
     @classmethod
     def is_grammar_translation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

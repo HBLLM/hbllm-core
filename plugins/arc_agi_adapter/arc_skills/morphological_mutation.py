@@ -17,17 +17,42 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class MorphologicalMutationSkillAcquisition(BaseHierarchicalSkill):
+class MorphologicalMutationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces morphological attribute mutation requirements and plans gate attunement."""
 
     skill_name: str = "morphological_state_mutation"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={1, 2, 3, 4}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "attribute_mutation_pad"},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "attuned_gate"},
+        ),
+    )
 
     @classmethod
     def is_morphological_mutation_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

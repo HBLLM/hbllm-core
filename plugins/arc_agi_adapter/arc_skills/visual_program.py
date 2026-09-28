@@ -16,17 +16,42 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class VisualProgramSynthesisSkillAcquisition(BaseHierarchicalSkill):
+class VisualProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces visual program / routine slot assembly plans."""
 
     skill_name: str = "visual_program_synthesis"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={5, 6, 7}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "routine_slots", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ACTUATE,
+            target_query={"role": "execution_trigger", "action": 5},
+        ),
+    )
 
     @classmethod
     def is_visual_program_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

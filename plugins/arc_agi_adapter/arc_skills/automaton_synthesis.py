@@ -13,18 +13,50 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import RemoteActuator
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
+    GridDimensionPredicate,
+    PanelConstraint,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class AutomatonProgramSynthesisSkillAcquisition(BaseHierarchicalSkill):
+class AutomatonProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces automaton programming models, register bit assignments, and execution."""
 
     skill_name: str = "automaton_program_synthesis"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_row_ratio=30.0 / 64.0,
+            max_row_ratio=50.0 / 64.0,
+            contains_entities=EntityCountPredicate(min_count=8, min_area=3, max_area=3),
+        ),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "register_bits", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ACTUATE,
+            target_query={"role": "execute_trigger", "action": 6},
+        ),
+    )
 
     @classmethod
     def is_automaton_synthesis_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

@@ -12,8 +12,15 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import GF2LinearSolver, RemoteActuator
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
@@ -45,11 +52,25 @@ class ToggleIncidenceModel:
         return res
 
 
-class PermutationAlgebraSkillAcquisition(BaseHierarchicalSkill):
+class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Learns action incidence patterns and inverts combinatorial grid permutations."""
 
     skill_name: str = "permutation_algebra_lights_out"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "toggle_tiles", "action": 6},
+        )
+    )
 
     def __init__(self) -> None:
         self.toggle_model = ToggleIncidenceModel()

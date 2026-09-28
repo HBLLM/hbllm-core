@@ -16,17 +16,38 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class KinematicLinkageSolver(BaseHierarchicalSkill):
+class KinematicLinkageSolver(DeclarativeNeuroSymbolicSkill):
     """Solves multi-link articulated arm slider puzzles (e.g. s5i5) via free-space waypoint kinematic deformation."""
 
     skill_name: str = "kinematic_arm_linkage"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "articulated_arm_sliders", "action": 6},
+        )
+    )
 
     def __init__(self) -> None:
         self.action_queue: list[tuple[int, dict[str, int]]] = []

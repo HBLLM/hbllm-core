@@ -13,17 +13,42 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class ReticleSuperpositionSkillAcquisition(BaseHierarchicalSkill):
+class ReticleSuperpositionSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces multi-reticle alignment plans for crosshair superposition puzzles."""
 
     skill_name: str = "reticle_superposition_crosshair"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.ALIGN
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={1, 2, 3, 4, 5}, forbidden={6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ALIGN,
+            target_query={"role": "crosshair_reticle"},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "target_dot"},
+        ),
+    )
 
     @classmethod
     def is_reticle_superposition_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

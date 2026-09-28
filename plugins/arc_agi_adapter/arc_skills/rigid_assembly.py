@@ -14,21 +14,46 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     RemoteActuator,
+)
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
 
 
-class RigidAssemblySkillAcquisition(BaseHierarchicalSkill):
+class RigidAssemblySkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Induces rotational and translational assembly plans for rigid pieces."""
 
     skill_name: str = "rigid_body_assembly"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={1, 2, 3, 4, 5, 6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "tangram_piece", "action": 5},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.ALIGN,
+            target_query={"role": "assembly_slot", "action": 6},
+        ),
+    )
 
     @classmethod
     def is_rigid_assembly_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:

@@ -13,7 +13,14 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent, SpatialEntity
 
 logger = logging.getLogger(__name__)
@@ -31,11 +38,25 @@ class RelationalAffordanceRule:
     times_observed: int = 0
 
 
-class RelationalAffordanceSkillAcquisition(BaseHierarchicalSkill):
+class RelationalAffordanceSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Discovers and evaluates relational entity-entity interactions."""
 
     skill_name: str = "relational_affordance_solitaire"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 6, 7}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "peg_jump", "action": 6},
+        )
+    )
 
     def __init__(self) -> None:
         self.rules: dict[tuple[str, str, str], RelationalAffordanceRule] = {}

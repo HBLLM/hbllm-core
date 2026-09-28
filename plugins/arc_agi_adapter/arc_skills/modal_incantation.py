@@ -18,11 +18,20 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     DiscreteVectorTranslator,
     PerceptualClusterDetector,
     RemoteActuator,
+)
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    AnyOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    PanelConstraint,
+    SubgoalSequence,
+    SymbolicSubgoal,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -47,11 +56,42 @@ class IncantationGlyph:
     pattern: list[list[bool]]
 
 
-class ModalIncantationSkillAcquisition(BaseHierarchicalSkill):
+class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     """Acquires glyph-to-state-transformation affordances and plans incantations."""
 
     skill_name: str = "modal_incantation_transformation"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.INTERACT
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(required={6}),
+        AnyOf(
+            ActionAffordancePredicate(required={1}),
+            ActionAffordancePredicate(required={2}),
+            ActionAffordancePredicate(required={3}),
+            ActionAffordancePredicate(required={4}),
+        ),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_row_ratio=45.0 / 64.0,
+            max_row_ratio=63.0 / 64.0,
+            min_col_ratio=2.0 / 64.0,
+            max_col_ratio=25.0 / 64.0,
+            min_distinct_colors=2,
+        ),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.INTERACT,
+            target_query={"role": "keypad_glyph", "action": 6},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "goal"},
+        ),
+    )
 
     # Canonical 3x3 glyph binary activation topologies
     KNOWN_GLYPHS: dict[str, IncantationGlyph] = {

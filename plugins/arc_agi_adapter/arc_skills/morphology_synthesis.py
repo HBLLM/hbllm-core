@@ -15,7 +15,14 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    AllOf,
+    DeclarativeNeuroSymbolicSkill,
+    GridDimensionPredicate,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
 logger = logging.getLogger(__name__)
@@ -31,11 +38,29 @@ class MorphologicalTransformation:
     confidence: float = 1.0
 
 
-class MorphologicalProgramSynthesis(BaseHierarchicalSkill):
+class MorphologicalProgramSynthesis(DeclarativeNeuroSymbolicSkill):
     """Induces geometric analogy transformations between source and canvas grids."""
 
     skill_name: str = "morphological_gravity_spill"
     semantic_intent: SpatialActionIntent = SpatialActionIntent.MANIPULATE
+
+    # Declarative Invariant Signature
+    signature = AllOf(
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6}),
+        GridDimensionPredicate(exact_shape=(64, 64)),
+    )
+
+    # Declarative Program (Compilable to HCIR Bytecode Stream)
+    program = SubgoalSequence(
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.MANIPULATE,
+            target_query={"role": "gravity_spill_platform", "action": 5},
+        ),
+        SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"role": "receptacle_basin"},
+        ),
+    )
 
     OPERATIONS = [
         ("IDENTITY", lambda a: a),
