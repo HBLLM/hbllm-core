@@ -49,9 +49,24 @@ class EpistemicPhase(StrEnum):
     REPLANNING = "replanning"  # Recovering from unexpected contradiction
 
 
+class FrameDiffType(StrEnum):
+    """Categorization of visual changes resulting from an action."""
+
+    NO_CHANGE = "NO_CHANGE"
+    TRANSLATION = "TRANSLATION"
+    IN_PLACE_MUTATION = "IN_PLACE_MUTATION"
+    INDEX_CYCLE = "INDEX_CYCLE"
+    CANVAS_TRANSFORMATION = "CANVAS_TRANSFORMATION"
+    GLOBAL_TRANSITION = "GLOBAL_TRANSITION"
+
+
 @dataclass
 class EpistemicObservationDiff:
-    """Detailed structural difference between consecutive observation frames."""
+    """Detailed structural difference between consecutive observation frames.
+
+    Enriched with rigid-body translation detection, bounding box, and
+    diff classification migrated from the plugin's FrameDiffAnalyzer.
+    """
 
     changed_pixel_count: int = 0
     changed_mask: np.ndarray | None = None
@@ -61,6 +76,13 @@ class EpistemicObservationDiff:
     )  # (r, c, old_val, new_val)
     disappeared_features: set[int] = field(default_factory=set)
     appeared_features: set[int] = field(default_factory=set)
+
+    # Enriched frame diff metrics (migrated from plugin FrameDiffAnalyzer)
+    diff_type: FrameDiffType = FrameDiffType.NO_CHANGE
+    bounding_box: tuple[int, int, int, int] | None = None  # (min_r, max_r, min_c, max_c)
+    translation_delta: tuple[int, int] | None = None  # (dr, dc) if rigid translation detected
+    moved_object_feature: int | None = None  # feature/color of the translated object
+    moved_object_size: int = 0  # pixel count of the translated object
 
 
 @dataclass
@@ -183,6 +205,115 @@ class AutonomousEpistemicEngine:
         return (self.avatar_feature is not None or bool(self.avatar_features)) and any(
             dyn.confidence >= 0.7 for dyn in self.action_dynamics.values()
         )
+
+    # ── Adaptive Exploration Budget ───────────────────────────────────────
+
+    MIN_PROBES_PER_ACTION: int = 3
+
+    def compute_exploration_budget(self, n_actions: int) -> int:
+        """Adaptive budget: more probing when more unknowns exist.
+
+        Once motor grounding is achieved, the budget shrinks to focus only
+        on unexplored interaction actions. This replaces the fixed 150-step
+        budget that was too generous for simple games and too stingy for complex ones.
+        """
+        if self.is_motor_grounded():
+            unknown = max(1, n_actions - len(self.action_dynamics))
+            return max(3, unknown * 4)
+        return max(6, n_actions * 4)
+
+    def is_action_sufficiently_probed(self, action_id: int) -> bool:
+        """Check if an action has been tested enough times to have a reliable dynamics model."""
+        dyn = self.action_dynamics.get(action_id)
+        if dyn is None:
+            return False
+        probes = getattr(dyn, "probes_tested", 0)
+        return probes >= self.MIN_PROBES_PER_ACTION
+
+    # ── Pre-Goal Structural Detection ─────────────────────────────────────
+
+    def detect_structural_goals(self, grid: np.ndarray) -> list[dict[str, Any]]:
+        """Infer goal zones from initial grid structure before solving.
+
+        Identifies likely goal locations from structural cues:
+        1. Target zones: medium-sized non-border rectangular entities
+        2. Exit markers: small edge-touching entities
+        3. Symmetry-based goals: high symmetry score suggests completion goals
+
+        Returns list of goal hypotheses with positions and confidence.
+        """
+        from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
+
+        H, W = grid.shape
+        bg = self.estimate_background(grid)
+        goals: list[dict[str, Any]] = []
+
+        # 1. Detect target zones (medium-sized non-border rectangular entities)
+        for feat in np.unique(grid):
+            feat_int = int(feat)
+            if feat_int == bg or feat_int == 0:
+                continue
+            pts = np.argwhere(grid == feat_int)
+            if len(pts) < 4 or len(pts) > H * W * 0.3:
+                continue
+
+            min_r, min_c = pts.min(axis=0)
+            max_r, max_c = pts.max(axis=0)
+
+            # Check if this is an interior rectangular zone (not a border frame)
+            is_interior = min_r > 1 and max_r < H - 2 and min_c > 1 and max_c < W - 2
+            rect_area = (max_r - min_r + 1) * (max_c - min_c + 1)
+            fill_ratio = len(pts) / max(1, rect_area)
+
+            if is_interior and fill_ratio > 0.7 and 4 <= len(pts) <= H * W * 0.15:
+                centroid = (int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1])))
+                goals.append(
+                    {
+                        "type": "target_zone",
+                        "position": centroid,
+                        "feature": feat_int,
+                        "size": len(pts),
+                        "bounds": (int(min_r), int(max_r), int(min_c), int(max_c)),
+                        "confidence": min(1.0, fill_ratio),
+                    }
+                )
+
+        # 2. Detect edge exit markers
+        for feat in np.unique(grid):
+            feat_int = int(feat)
+            if feat_int == bg or feat_int == 0:
+                continue
+            pts = np.argwhere(grid == feat_int)
+            if len(pts) < 1 or len(pts) > 4:
+                continue
+
+            touches_edge = any(r == 0 or r == H - 1 or c == 0 or c == W - 1 for r, c in pts)
+            if touches_edge:
+                centroid = (int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1])))
+                goals.append(
+                    {
+                        "type": "exit_marker",
+                        "position": centroid,
+                        "feature": feat_int,
+                        "size": len(pts),
+                        "confidence": 0.6,
+                    }
+                )
+
+        # 3. Check for symmetry-completion goal
+        sym_type, sym_score = VisualSymmetryAnalyzer.find_dominant_symmetry(grid)
+        if 0.6 < sym_score < 0.95:
+            # Near-symmetric grid suggests completing the symmetry is the goal
+            goals.append(
+                {
+                    "type": "symmetry_completion",
+                    "symmetry_axis": sym_type,
+                    "symmetry_score": sym_score,
+                    "confidence": sym_score * 0.8,
+                }
+            )
+
+        return goals
 
     # ─────────────────────────────────────────────────────────────────────────
     # 1. Perception & Structural Difference Analysis
@@ -322,29 +453,122 @@ class AutonomousEpistemicEngine:
     def compute_frame_diff(
         self, prev_grid: np.ndarray, curr_grid: np.ndarray
     ) -> EpistemicObservationDiff:
-        """Compute structural difference between two observation frames."""
+        """Compute structural difference between two observation frames.
+
+        Enriched with rigid-body translation detection, diff classification,
+        and bounding box computation for the changed region.
+        """
+        if prev_grid.shape != curr_grid.shape:
+            return EpistemicObservationDiff(
+                changed_pixel_count=curr_grid.size,
+                diff_type=FrameDiffType.GLOBAL_TRANSITION,
+            )
+
         diff_mask = prev_grid != curr_grid
         changed_count = int(np.sum(diff_mask))
 
-        diff = EpistemicObservationDiff(
-            changed_pixel_count=changed_count,
-            changed_mask=diff_mask,
-        )
         if changed_count == 0:
-            return diff
+            return EpistemicObservationDiff(
+                changed_pixel_count=0,
+                changed_mask=diff_mask,
+                diff_type=FrameDiffType.NO_CHANGE,
+            )
 
-        H, W = curr_grid.shape
-        for r in range(H):
-            for c in range(W):
-                if diff_mask[r, c]:
-                    diff.mutated_pixels.append((r, c, int(prev_grid[r, c]), int(curr_grid[r, c])))
+        total_pixels = prev_grid.size
+        H, W = prev_grid.shape
+
+        # Global transition: too many pixels changed
+        if changed_count > total_pixels * 0.45:
+            return EpistemicObservationDiff(
+                changed_pixel_count=changed_count,
+                changed_mask=diff_mask,
+                diff_type=FrameDiffType.GLOBAL_TRANSITION,
+            )
+
+        rows, cols = np.where(diff_mask)
+        min_r, max_r = int(np.min(rows)), int(np.max(rows))
+        min_c, max_c = int(np.min(cols)), int(np.max(cols))
+        bbox = (min_r, max_r, min_c, max_c)
+
+        # Ignore peripheral margin-only changes (step counter, HUD timer, outer frame)
+        # Only applies to large grids (e.g., 64×64 ARC-AGI); small grids don't have HUD artifacts
+        if H >= 32 and W >= 32:
+            is_all_margin = all(
+                (r <= 1 or r >= H - 2 or c <= 1 or c >= W - 2) for r, c in zip(rows, cols)
+            )
+            if is_all_margin and changed_count <= 4:
+                return EpistemicObservationDiff(
+                    changed_pixel_count=0,
+                    changed_mask=diff_mask,
+                    diff_type=FrameDiffType.NO_CHANGE,
+                )
+
+        # Collect mutated pixel details
+        mutated: list[tuple[int, int, int, int]] = []
+        for r, c in zip(rows, cols):
+            mutated.append((int(r), int(c), int(prev_grid[r, c]), int(curr_grid[r, c])))
 
         prev_features = set(int(v) for v in np.unique(prev_grid))
         curr_features = set(int(v) for v in np.unique(curr_grid))
-        diff.disappeared_features = prev_features - curr_features
-        diff.appeared_features = curr_features - prev_features
 
-        return diff
+        # ── Rigid-body translation detection ──────────────────────────────
+        bg = int(np.bincount(prev_grid.flatten()).argmax())
+        translation_candidates: list[tuple[int, int, int, int]] = []  # (feature, size, dr, dc)
+
+        for feat in np.unique(prev_grid):
+            feat_int = int(feat)
+            if feat_int == 0 or feat_int == bg:
+                continue
+            prev_pts = np.where(prev_grid == feat_int)
+            curr_pts = np.where(curr_grid == feat_int)
+            np_p, np_c = len(prev_pts[0]), len(curr_pts[0])
+            if (
+                0 < np_p < int(total_pixels * 0.25)
+                and 0 < np_c < int(total_pixels * 0.25)
+                and abs(np_p - np_c) <= 2
+            ):
+                if np.any(diff_mask[prev_pts]) or np.any(diff_mask[curr_pts]):
+                    dr_f = float(np.mean(curr_pts[0]) - np.mean(prev_pts[0]))
+                    dc_f = float(np.mean(curr_pts[1]) - np.mean(prev_pts[1]))
+                    if abs(dr_f) > 0.5 or abs(dc_f) > 0.5:
+                        dr = int(round(dr_f))
+                        dc = int(round(dc_f))
+                        if abs(dr) <= 12 and abs(dc) <= 12:
+                            translation_candidates.append((feat_int, np_c, dr, dc))
+
+        if translation_candidates:
+            translation_candidates.sort(key=lambda x: x[1])
+            best_feat, best_size, dr, dc = translation_candidates[0]
+            return EpistemicObservationDiff(
+                changed_pixel_count=changed_count,
+                changed_mask=diff_mask,
+                mutated_pixels=mutated,
+                disappeared_features=prev_features - curr_features,
+                appeared_features=curr_features - prev_features,
+                diff_type=FrameDiffType.TRANSLATION,
+                bounding_box=bbox,
+                translation_delta=(dr, dc),
+                moved_object_feature=best_feat,
+                moved_object_size=best_size,
+            )
+
+        # Classify remaining diff types
+        if changed_count <= 8:
+            diff_type = FrameDiffType.INDEX_CYCLE
+        elif min_r > 0 and max_r < H - 1 and min_c > 0 and max_c < W - 1 and changed_count >= 5:
+            diff_type = FrameDiffType.CANVAS_TRANSFORMATION
+        else:
+            diff_type = FrameDiffType.IN_PLACE_MUTATION
+
+        return EpistemicObservationDiff(
+            changed_pixel_count=changed_count,
+            changed_mask=diff_mask,
+            mutated_pixels=mutated,
+            disappeared_features=prev_features - curr_features,
+            appeared_features=curr_features - prev_features,
+            diff_type=diff_type,
+            bounding_box=bbox,
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # 2. Epistemic Assimilation & Bayesian Hypothesis Updating

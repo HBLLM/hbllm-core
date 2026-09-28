@@ -924,9 +924,16 @@ class ARC3SpatialCognitiveAgent:
         """Import cross-game knowledge."""
         self.cross_game_memory.import_dict(data)
 
-    def save_knowledge(self, path_or_dir: str | Path, game_id: str = "arc_agi") -> Path:
+    def save_knowledge(
+        self,
+        path_or_dir: str | Path,
+        game_id: str = "arc_agi",
+        levels_completed: int = 0,
+    ) -> Path:
         """Persist learned KnowledgeGraph to disk via CognitiveBlackbox."""
-        return self.blackbox.save_knowledge(path_or_dir, source_id=game_id)
+        return self.blackbox.save_knowledge(
+            path_or_dir, source_id=game_id, levels_completed=levels_completed
+        )
 
     def load_knowledge(self, path_or_dir: str | Path, game_id: str = "arc_agi") -> bool:
         """Load persistent KnowledgeGraph from disk into CognitiveBlackbox."""

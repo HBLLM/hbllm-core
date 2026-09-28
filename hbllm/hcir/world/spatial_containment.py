@@ -1,15 +1,19 @@
 """Spatial Containment & Transport Engine for HCIR World Kernel.
 
 Implements domain-agnostic spatial relation detection (INSIDE, NEAR, ON),
-synchronous containment transport schema induction, and object permanence tracking.
+synchronous containment transport schema induction, object permanence tracking,
+and room topology extraction with doorway detection.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
@@ -227,3 +231,123 @@ class BaseSpatialContainmentEngine:
             return None
 
         return backtrack(0, set())
+
+
+# ── Room Topology Extraction ──────────────────────────────────────────────────
+
+
+@dataclass
+class RoomDoor:
+    """A doorway connecting two rooms detected from wall gaps."""
+
+    door_coord: tuple[int, int] = (0, 0)
+    connects_rooms: tuple[int, int] = (0, 0)
+
+
+class RoomTopologyExtractor:
+    """Decomposes walkable space into chambers/rooms and detects connecting doorways.
+
+    Domain-agnostic: works on any boolean occupancy grid (True = walkable, False = wall).
+    """
+
+    @staticmethod
+    def extract_rooms_and_doors(
+        occupancy_grid: np.ndarray,
+        min_room_size: int = 4,
+    ) -> tuple[dict[int, list[tuple[int, int]]], list[RoomDoor]]:
+        """Partitions occupancy grid into rooms separated by walls and identifies connecting doorways.
+
+        Args:
+            occupancy_grid: Boolean 2D grid where True = walkable, False = wall.
+            min_room_size: Minimum number of cells for a region to be considered a room.
+
+        Returns:
+            Tuple of (rooms dict mapping room_id to cell coordinates, list of RoomDoor instances).
+        """
+        H, W = occupancy_grid.shape
+        door_coords: set[tuple[int, int]] = set()
+
+        # Detect doorways: walkable cells flanked by walls on two opposite sides
+        for r in range(1, H - 1):
+            for c in range(1, W - 1):
+                if not occupancy_grid[r, c]:
+                    continue
+                h_door = (
+                    not occupancy_grid[r - 1, c]
+                    and not occupancy_grid[r + 1, c]
+                    and occupancy_grid[r, c - 1]
+                    and occupancy_grid[r, c + 1]
+                )
+                v_door = (
+                    not occupancy_grid[r, c - 1]
+                    and not occupancy_grid[r, c + 1]
+                    and occupancy_grid[r - 1, c]
+                    and occupancy_grid[r + 1, c]
+                )
+                if h_door or v_door:
+                    door_coords.add((r, c))
+
+        # Remove door cells to separate rooms into distinct connected components
+        room_grid = occupancy_grid.copy()
+        for dr, dc in door_coords:
+            room_grid[dr, dc] = False
+
+        visited = np.zeros((H, W), dtype=bool)
+        rooms: dict[int, list[tuple[int, int]]] = {}
+        room_id_map: dict[tuple[int, int], int] = {}
+        room_counter = 0
+
+        for r in range(H):
+            for c in range(W):
+                if not room_grid[r, c] or visited[r, c]:
+                    continue
+                room_counter += 1
+                queue = deque([(r, c)])
+                visited[r, c] = True
+                coords: list[tuple[int, int]] = []
+
+                while queue:
+                    cr, cc = queue.popleft()
+                    coords.append((cr, cc))
+                    room_id_map[(cr, cc)] = room_counter
+                    for offset_r, offset_c in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = cr + offset_r, cc + offset_c
+                        if (
+                            0 <= nr < H
+                            and 0 <= nc < W
+                            and room_grid[nr, nc]
+                            and not visited[nr, nc]
+                        ):
+                            visited[nr, nc] = True
+                            queue.append((nr, nc))
+
+                if len(coords) >= min_room_size or room_counter not in rooms:
+                    rooms[room_counter] = coords
+
+        # Resolve which rooms each door connects
+        doors: list[RoomDoor] = []
+        for dr, dc in door_coords:
+            adjacent_rooms: set[int] = set()
+            for off_r, off_c in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = dr + off_r, dc + off_c
+                if (nr, nc) in room_id_map:
+                    adjacent_rooms.add(room_id_map[(nr, nc)])
+            if len(adjacent_rooms) == 2:
+                r_list = sorted(list(adjacent_rooms))
+                doors.append(RoomDoor(door_coord=(dr, dc), connects_rooms=(r_list[0], r_list[1])))
+
+        return rooms, doors
+
+    @staticmethod
+    def build_adjacency_graph(
+        rooms: dict[int, list[tuple[int, int]]],
+        doors: list[RoomDoor],
+    ) -> dict[int, list[int]]:
+        """Builds topological graph of room adjacencies."""
+        adj: dict[int, set[int]] = {r: set() for r in rooms}
+        for door in doors:
+            ra, rb = door.connects_rooms
+            if ra in adj and rb in adj:
+                adj[ra].add(rb)
+                adj[rb].add(ra)
+        return {r: sorted(list(neighbors)) for r, neighbors in adj.items()}

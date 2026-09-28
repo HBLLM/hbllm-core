@@ -41,10 +41,7 @@ from hbllm.drivers.base import (
 )
 from hbllm.hcir.graph import (
     ActionNode,
-    BeliefNode,
-    FalsificationStatus,
     GoalNode,
-    HCIRNodeType,
     WorldVariableNode,
 )
 from hbllm.hcir.learning_loop import LearningLoopEngine
@@ -436,6 +433,12 @@ class AgentState:
         self.skill_quiescence_count: int = skill_quiescence_count
         self.failed_skill_hypotheses: set[str] = set(failed_skill_hypotheses or [])
         self.epistemic_probe_count: int = epistemic_probe_count
+
+        # Solver stagnation detection — tracks when an active skill stops making progress
+        self.solver_stagnation_counter: int = 0
+        self.solver_last_grid_hash: int = 0
+        self.solver_switch_count: int = 0
+        self.solver_max_stagnation: int = 8  # steps without grid change before abandoning skill
         self.last_level_observed: int = last_level_observed
         self.current_level: int = current_level
         self.failed_trajectories: list[list[int]] = list(failed_trajectories or [])
@@ -1180,6 +1183,35 @@ class CognitiveBlackbox:
         p_data = self._source_perception_data.get(source_id, {})
         raw_grid = p_data.get("grid")
         act_ids = [a.action_id for a in available_actions if isinstance(a.action_id, int)]
+
+        # ── Skill stagnation detection ────────────────────────────────────
+        # If a skill is active but the grid hasn't changed for N steps,
+        # abandon it and let the dispatch cascade try another skill.
+        if raw_grid is not None and isinstance(raw_grid, np.ndarray):
+            grid_hash = hash(raw_grid.data.tobytes())
+            if grid_hash == state.solver_last_grid_hash:
+                state.solver_stagnation_counter += 1
+            else:
+                state.solver_stagnation_counter = 0
+                state.solver_last_grid_hash = grid_hash
+
+            if (
+                state.solver_stagnation_counter >= state.solver_max_stagnation
+                and state.active_skill_name is not None
+            ):
+                logger.info(
+                    "CognitiveBlackbox[%s]: Skill '%s' stagnated for %d steps. Abandoning.",
+                    source_id,
+                    state.active_skill_name,
+                    state.solver_stagnation_counter,
+                )
+                if state.active_skill_hypothesis_id:
+                    state.failed_skill_hypotheses.add(state.active_skill_hypothesis_id)
+                state.active_skill_queue.clear()
+                state.active_skill_name = None
+                state.active_skill_hypothesis_id = None
+                state.solver_stagnation_counter = 0
+                state.solver_switch_count += 1
 
         if (
             raw_grid is not None
@@ -1944,7 +1976,11 @@ class CognitiveBlackbox:
             state.consecutive_movement_steps = 0
 
         # Failure Trajectory Inhibition & Taboo Path Branching:
-        if state.failed_trajectories and len(available_actions) > 1:
+        if (
+            state.failed_trajectories
+            and len(available_actions) > 1
+            and len(state.recent_action_history) > 0
+        ):
             curr_prefix = state.recent_action_history
             pref_len = len(curr_prefix)
             matching_failed_actions = {
@@ -3390,26 +3426,26 @@ class CognitiveBlackbox:
                 metadata={"delta_r": getattr(m, "delta_r", 0), "delta_c": getattr(m, "delta_c", 0)},
             )
 
-        # Project workspace BeliefNodes (learned negative constraints) into KnowledgeGraph
-        for b_node in self.workspace.graph.nodes_by_type(HCIRNodeType.BELIEF):
-            if isinstance(b_node, BeliefNode) and b_node.properties.get("negative_constraint"):
-                pos = b_node.properties.get("position")
-                if pos:
-                    kg.add_entity(
-                        label=f"belief_{pos[0]}_{pos[1]}",
-                        entity_type="belief_constraint",
-                        attributes={
-                            "position": list(pos),
-                            "reason": b_node.properties.get("reason", "collision"),
-                            "confidence": getattr(b_node, "epistemic_confidence", 0.95),
-                        },
-                    )
+        # Project abstract affordance rules into KnowledgeGraph
+        for sig_key, rule in state.learned_affordance_rules.items():
+            rule_dict = rule.to_dict() if hasattr(rule, "to_dict") else asdict(rule)
+            kg.add_entity(
+                label=f"affordance_{sig_key}",
+                entity_type="affordance_rule",
+                attributes=rule_dict,
+            )
+            kg.add_relation(
+                source_label=f"env_{source_id}",
+                target_label=f"affordance_{sig_key}",
+                relation_type="affords_rule",
+                weight=float(rule_dict.get("confidence", 0.9)),
+            )
 
         if state.avatar_feature is not None:
             state.learned_target_features.discard(state.avatar_feature)
             state.learned_obstacle_features.discard(state.avatar_feature)
 
-        # Ensure environment entity reflects latest metadata
+        # Ensure environment entity reflects latest metadata without dumping transient state
         kg.add_entity(
             label=f"env_{source_id}",
             entity_type="environment",
@@ -3419,7 +3455,6 @@ class CognitiveBlackbox:
                 "step_count": state.step_count,
                 "total_reward": state.total_reward,
                 "avatar_feature": state.avatar_feature,
-                "state_snapshot": state.to_dict(),
             },
         )
 
@@ -3440,13 +3475,14 @@ class CognitiveBlackbox:
     ) -> bool:
         """Load previously learned knowledge graph from disk into core blackbox.
 
-        Restores:
+        Restores verified domain invariants:
         - Calibrated action dynamics models (dr, dc, confidence)
         - Discovered obstacle/hazard features
         - Discovered target/goal features
         - Discovered traversable floor features
         - Inferred controllable avatar feature
         - Lattice step size
+        - Abstract object affordance rules
 
         Args:
             path_or_dir: File path or directory containing saved knowledge graphs.
@@ -3478,14 +3514,6 @@ class CognitiveBlackbox:
         self._knowledge_graphs[source_id] = loaded_kg
         state = self.get_state(source_id)
 
-        # Check for state_snapshot attribute on env entity first
-        env_ent = loaded_kg.get_entity(f"env_{source_id}")
-        if env_ent and "state_snapshot" in env_ent.attributes:
-            hydrated = AgentState.from_dict(env_ent.attributes["state_snapshot"])
-            self._source_states[source_id] = hydrated
-            self._source_states["arc_agi"] = hydrated
-            state = hydrated
-
         # Clear episode-specific transient caches so fresh layouts are not contaminated
         state.explored_entity_positions.clear()
         state.explored_entity_ids.clear()
@@ -3493,20 +3521,46 @@ class CognitiveBlackbox:
         state.step_count = 0
         state.total_reward = 0.0
         state.current_plan.clear()
+        state.recent_action_history.clear()
+        state.recent_action_data_history.clear()
+        state.failed_trajectories.clear()
         self.spatial_planner.reset(is_retry=False)
 
-        # Extract entities and relations from KnowledgeGraph to ensure complete sync
+        # Environment metadata
+        env_ent = loaded_kg.get_entity(f"env_{source_id}")
+        if env_ent:
+            state.step_size = int(env_ent.attributes.get("step_size", state.step_size))
+            if (
+                "avatar_feature" in env_ent.attributes
+                and env_ent.attributes["avatar_feature"] is not None
+            ):
+                state.avatar_feature = env_ent.attributes["avatar_feature"]
+
+        # Extract entities and relations from KnowledgeGraph
         for ent in loaded_kg._entities.values():
             if ent.entity_type == "motor_action":
                 act_id = ent.attributes.get("action_id")
                 if act_id is not None:
-                    state.action_models[int(act_id)] = ActionDynamicsModel(
-                        action_id=int(act_id),
-                        delta_r=int(ent.attributes.get("delta_r", 0)),
-                        delta_c=int(ent.attributes.get("delta_c", 0)),
-                        confidence=float(ent.attributes.get("confidence", 0.8)),
-                        probes_tested=int(ent.attributes.get("probes_tested", 1)),
-                    )
+                    dr = int(ent.attributes.get("delta_r", 0))
+                    dc = int(ent.attributes.get("delta_c", 0))
+                    conf = float(ent.attributes.get("confidence", 0.8))
+                    if abs(dr) <= 10 and abs(dc) <= 10:
+                        state.action_models[int(act_id)] = ActionDynamicsModel(
+                            action_id=int(act_id),
+                            delta_r=dr,
+                            delta_c=dc,
+                            confidence=conf,
+                            probes_tested=int(ent.attributes.get("probes_tested", 1)),
+                        )
+            elif ent.entity_type == "affordance_rule":
+                sig_key = ent.attributes.get("signature_key")
+                if sig_key:
+                    try:
+                        state.learned_affordance_rules[sig_key] = ObjectAffordanceRule(
+                            **ent.attributes
+                        )
+                    except Exception:
+                        pass
 
         # Extract obstacle, target, traversable, avatar from relations
         for rel in loaded_kg._relations.values():
@@ -3537,29 +3591,6 @@ class CognitiveBlackbox:
                 m.delta_c = 0
                 m.confidence = 0.3
 
-        # Restore belief constraints into workspace graph as historical beliefs
-        for ent in loaded_kg._entities.values():
-            if ent.entity_type == "belief_constraint":
-                pos_list = ent.attributes.get("position")
-                if pos_list and len(pos_list) == 2:
-                    pos = (int(pos_list[0]), int(pos_list[1]))
-                    reason = ent.attributes.get("reason", "collision")
-                    belief_node = BeliefNode(
-                        id=f"belief_barrier_{pos[0]}_{pos[1]}",
-                        claim=f"Position {pos} is impassable or causes {reason}",
-                        statement=f"Position {pos} is impassable or causes {reason}",
-                        epistemic_confidence=float(ent.attributes.get("confidence", 0.95)),
-                        belief_type="causal",
-                        falsification_status=FalsificationStatus.CORROBORATED,
-                        properties={
-                            "position": pos,
-                            "negative_constraint": True,
-                            "reason": reason,
-                        },
-                        tags=["negative_constraint", reason],
-                    )
-                    self.workspace.upsert_node(belief_node)
-
         # Also sync to arc_agi source_id if active
         if source_id != "arc_agi":
             arc_state = self.get_state("arc_agi")
@@ -3569,6 +3600,7 @@ class CognitiveBlackbox:
             arc_state.learned_target_features.update(state.learned_target_features)
             arc_state.learned_traversable_features.update(state.learned_traversable_features)
             arc_state.action_models.update(state.action_models)
+            arc_state.learned_affordance_rules.update(state.learned_affordance_rules)
 
         # Sync state to workspace and spatial planner
         self.sync_state_to_workspace(source_id)

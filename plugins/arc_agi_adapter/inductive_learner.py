@@ -2243,10 +2243,11 @@ class SpatialResourceNavigator:
         H, W = grid.shape
         if H != 64 or W != 64:
             return False
+        if current_level < 1:
+            return False
         # In ls20, the bottom UI bar (row 60..63) has a step counter bar (color 11) and lives dots (color 8)
         has_step_bar = bool(np.any(grid[60:64, 40:55] == 11))
-        # Active in Level 2 (current_level >= 1)
-        return has_step_bar and current_level >= 1
+        return has_step_bar
 
     def get_actions(self) -> list[int]:
         """Sequence of actions executing the optimal topological path for Level 1."""
@@ -2956,10 +2957,19 @@ class InductiveHCIRAgent:
         self.spatial_cognitive_agent.trial_memory = self.trial_memory
         self.goal_inductor: GoalStateInductor = GoalStateInductor()
         self.step_counter: int = 0
-        self.epistemic_probe_budget: int = 6  # initial exploration steps
+        self.epistemic_probe_budget: int = 20  # adaptive exploration budget
         # Loop detection: track recent positions to detect navigation circles
         self.visited_positions: deque[tuple[int, int]] = deque(maxlen=30)
         self.visit_counts: dict[tuple[int, int], int] = {}
+        # Solver stagnation tracking for mid-episode solver switching
+        self.solver_stagnation_counter: int = 0
+        self.solver_last_grid_hash: int = 0
+        self.solver_switch_count: int = 0
+        self.solver_max_switches: int = 3
+        # Pre-solution goal detection cache
+        self._inferred_goal_zone: tuple[int, int, int, int] | None = None
+        self._inferred_goal_type: str | None = None
+        self._initial_grid_analyzed: bool = False
 
     def reset_episode(self, retain_dynamics: bool = False, is_retry: bool = False) -> None:
         """Reset internal step state while preserving cross-level knowledge."""
@@ -2997,6 +3007,12 @@ class InductiveHCIRAgent:
         self.causal_engine.reset_episode()
         self.autonomous_engine.reset_episode(retain_dynamics=retain_dynamics)
         self.active_solver_name = None
+        self.solver_stagnation_counter = 0
+        self.solver_last_grid_hash = 0
+        self.solver_switch_count = 0
+        self._initial_grid_analyzed = False
+        self._inferred_goal_zone = None
+        self._inferred_goal_type = None
         if not retain_dynamics:
             self._effective_colors.clear()
             self._quiescent_targets.clear()
@@ -3038,38 +3054,85 @@ class InductiveHCIRAgent:
                         probes_tested=aff.times_tested,
                     )
 
-            # If core blackbox has grounded motor models, bypass exploratory probing
+            # Adaptive exploration budget: scale with action space, reduce on later levels
             if len(state.action_models) >= 4 and all(
-                getattr(m, "confidence", 0) >= 0.5 for m in state.action_models.values()
+                getattr(m, "confidence", 0) >= 0.6 for m in state.action_models.values()
             ):
-                self.epistemic_probe_budget = 0
+                # Fully grounded motor models: minimal probing for new level variations
+                self.epistemic_probe_budget = max(3, 8 - self.current_level * 2)
             else:
-                self.epistemic_probe_budget = max(1, 4 - self.current_level * 2)
+                # Partially grounded: scale budget with unknown actions
+                unknown_actions = max(1, 7 - len(state.action_models))
+                self.epistemic_probe_budget = max(6, unknown_actions * 4)
 
-    def save_knowledge(self, knowledge_dir: Path | str, game_id: str) -> Path:
+        # Reset click-game stagnation tracker for each new level
+        self._core_click_stagnation = 0
+        self._core_click_gave_up = False
+
+    def save_knowledge(
+        self,
+        knowledge_dir: Path | str,
+        game_id: str,
+        levels_completed: int = 0,
+    ) -> Path:
         """Persist accumulated knowledge to disk via core KnowledgeGraph."""
-        return self.spatial_cognitive_agent.save_knowledge(knowledge_dir, game_id=game_id)
+        return self.spatial_cognitive_agent.save_knowledge(
+            knowledge_dir, game_id=game_id, levels_completed=levels_completed
+        )
 
     def load_knowledge(self, knowledge_dir: Path | str, game_id: str) -> bool:
         """Load persistent KnowledgeGraph from disk using core KnowledgeGraph."""
         loaded = self.spatial_cognitive_agent.load_knowledge(knowledge_dir, game_id=game_id)
         if loaded:
             state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
-            if len(state.action_models) >= 4:
-                self.epistemic_probe_budget = 0
+            # Always maintain an epistemic exploration floor!
+            # Never set probe budget to 0, because each level must empirically
+            # verify motor models and ground the avatar sprite.
+            if len(state.action_models) >= 4 and all(
+                getattr(m, "confidence", 0) >= 0.7 for m in state.action_models.values()
+            ):
+                self.epistemic_probe_budget = max(4, 8 - self.current_level * 2)
+            else:
+                unknown_actions = max(1, 7 - len(state.action_models))
+                self.epistemic_probe_budget = max(6, unknown_actions * 4)
             logger.info(
-                "[CORE KNOWLEDGE GRAPH] Hydrated CognitiveBlackbox for game '%s': avatar=%s, %d action models, %d obstacles, %d targets",
+                "[CORE KNOWLEDGE GRAPH] Hydrated CognitiveBlackbox for game '%s': avatar=%s, %d action models, %d obstacles, %d targets (probe budget=%d)",
                 game_id,
                 state.avatar_feature,
                 len(state.action_models),
                 len(state.learned_obstacle_features),
                 len(state.learned_target_features),
+                self.epistemic_probe_budget,
             )
         return loaded
 
     def _dispatch_active_solver(
         self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
+        # Mid-episode stagnation detection: if solver makes no visual progress, switch
+        curr_hash = hash(curr_grid.tobytes())
+        if curr_hash == self.solver_last_grid_hash:
+            self.solver_stagnation_counter += 1
+        else:
+            self.solver_stagnation_counter = max(0, self.solver_stagnation_counter - 1)
+            self.solver_last_grid_hash = curr_hash
+
+        if (
+            self.solver_stagnation_counter >= 12
+            and self.solver_switch_count < self.solver_max_switches
+        ):
+            logger.info(
+                "Solver '%s' stagnant for %d steps — forcing re-evaluation (switch %d/%d)",
+                self.active_solver_name,
+                self.solver_stagnation_counter,
+                self.solver_switch_count + 1,
+                self.solver_max_switches,
+            )
+            self.active_solver_name = None
+            self.solver_stagnation_counter = 0
+            self.solver_switch_count += 1
+            return self._plan_hcir_step(curr_grid, available_actions)
+
         name = self.active_solver_name
         action_data: dict[str, int] | None = None
         action: int
@@ -3156,6 +3219,67 @@ class InductiveHCIRAgent:
         self.last_action = action
         return action, conf
 
+    def _detect_goal_from_structure(self, grid: np.ndarray) -> None:
+        """Analyze initial grid to infer goal zones and objectives before solving.
+
+        Detects common goal signatures:
+        1. Bordered target zones (rectangular regions of uniform color)
+        2. Exit markers (small entities at grid edges)
+        3. Template-canvas pairs (for pattern matching puzzles)
+        """
+        if self._initial_grid_analyzed:
+            return
+        self._initial_grid_analyzed = True
+
+        H, W = grid.shape
+        bg = int(np.bincount(grid.flatten()).argmax())
+        entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors={bg, 0})
+
+        # 1. Detect target zones: medium-sized non-border rectangular regions
+        zone_candidates: list[tuple[int, Any]] = []
+        for e in entities:
+            min_r, max_r, min_c, max_c = e.bounding_box
+            width = max_c - min_c + 1
+            height = max_r - min_r + 1
+            if 4 <= width <= 30 and 4 <= height <= 30 and e.size >= 10 and not e.is_border:
+                zone_candidates.append((e.size, e))
+
+        if zone_candidates:
+            zone_candidates.sort(key=lambda x: x[0], reverse=True)
+            best_ent = zone_candidates[0][1]
+            self._inferred_goal_zone = best_ent.bounding_box
+            self._inferred_goal_type = "target_zone"
+            logger.info(
+                "Pre-goal detected: target zone at %s color=%d area=%d",
+                best_ent.bounding_box,
+                best_ent.color,
+                best_ent.size,
+            )
+            return
+
+        # 2. Detect exit markers: small entities at edges
+        for e in entities:
+            if e.size <= 16 and e.is_border and e.color not in {bg, 0}:
+                self._inferred_goal_zone = e.bounding_box
+                self._inferred_goal_type = "exit_marker"
+                logger.info(
+                    "Pre-goal detected: exit marker at %s color=%d",
+                    e.bounding_box,
+                    e.color,
+                )
+                return
+
+        # 3. Detect symmetry-based goals
+        sym_scores = VisualSymmetryAnalyzer.compute_symmetry_scores(grid)
+        max_sym_name, max_sym_val = max(sym_scores.items(), key=lambda item: item[1])
+        if max_sym_val > 0.85:
+            self._inferred_goal_type = "symmetry_completion"
+            logger.info(
+                "Pre-goal detected: symmetry completion (%s=%.2f)",
+                max_sym_name,
+                max_sym_val,
+            )
+
     def _plan_hcir_step(
         self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
@@ -3207,6 +3331,16 @@ class InductiveHCIRAgent:
         # Feed frame to goal inductor for future hypothesis generation
         self.goal_inductor.observe_frame(curr_grid)
 
+        # Pre-solution goal detection: analyze initial grid structure
+        self._detect_goal_from_structure(curr_grid)
+
+        # Feed inferred goal zone to HCIR agent if available
+        if self._inferred_goal_zone and not self.current_target_pos:
+            zone = self._inferred_goal_zone
+            center_r = (zone[0] + zone[1]) // 2
+            center_c = (zone[2] + zone[3]) // 2
+            self.current_target_pos = (center_r, center_c)
+
         # 2. Synchronize controllable signature, barrier colors, and affordances
         if self.knowledge_base.controllable_signature.color is not None:
             self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
@@ -3228,45 +3362,65 @@ class InductiveHCIRAgent:
             for color in self.knowledge_base.barrier_colors:
                 self.hcir_agent.known_barriers[curr_grid == color] = True
 
-        # 3. Systematic exploration phase — discover ALL available actions
-        # On Level 1 (or when world model isn't grounded), systematically try
-        # each available action at least once so we learn what 5/6/7 do.
+        # 3. Multi-probe exploration phase — test each action 3+ times at varied positions
+        # to learn state-dependent effects reliably (wall vs open, near object vs not)
+        min_probes_per_action = 3
         if self.current_level == 0 or not self.knowledge_base.is_world_model_grounded(
             available_actions
         ):
-            untested_actions = [
+            under_probed_actions = [
                 a
                 for a in available_actions
                 if a not in self.knowledge_base.action_affordances
-                or self.knowledge_base.action_affordances[a].times_tested == 0
+                or self.knowledge_base.action_affordances[a].times_tested < min_probes_per_action
             ]
-            if untested_actions and self.step_counter <= self.epistemic_probe_budget + len(
-                available_actions
-            ):
-                # Prioritize directional movement actions (1-4) first so the avatar
-                # position, color, and motor models are grounded before non-movement probing
-                directional_untested = [a for a in untested_actions if a in [1, 2, 3, 4]]
-                probe_action = (
-                    directional_untested[0] if directional_untested else untested_actions[0]
-                )
+            if under_probed_actions and self.step_counter <= self.epistemic_probe_budget:
+                # Phase 1: Prioritize directional movement actions (1-4) to ground avatar
+                directional = [a for a in under_probed_actions if a in [1, 2, 3, 4]]
+                interaction = [a for a in under_probed_actions if a in [5, 6, 7]]
+
+                if directional:
+                    # Rotate through directional actions for diverse probing
+                    probe_action = directional[self.step_counter % len(directional)]
+                elif interaction:
+                    probe_action = interaction[0]
+                else:
+                    probe_action = under_probed_actions[0]
+
                 logger.debug(
-                    f"Exploration phase (step {self.step_counter}): "
-                    f"testing action {probe_action}, untested={untested_actions}"
+                    f"Multi-probe exploration (step {self.step_counter}): "
+                    f"testing action {probe_action}, under-probed={under_probed_actions}"
                 )
                 self.prev_grid = curr_grid.copy()
                 self.last_action = probe_action
 
-                # For click-type actions (6, 7), provide action_data with
-                # click coordinates at avatar position or grid center
+                # For click-type actions (6, 7), vary click position across probes
                 if probe_action >= 6:
-                    if self.current_actor_pos:
+                    probe_count = self.knowledge_base.action_affordances.get(
+                        probe_action, ActionAffordance(probe_action)
+                    ).times_tested
+                    H, W = curr_grid.shape
+                    if self.current_actor_pos and probe_count == 0:
+                        # First probe: click at avatar position
                         self.last_action_data = {
                             "x": self.current_actor_pos[1],
                             "y": self.current_actor_pos[0],
                         }
-                    else:
-                        H, W = curr_grid.shape
+                    elif probe_count == 1:
+                        # Second probe: click at grid center
                         self.last_action_data = {"x": W // 2, "y": H // 2}
+                    else:
+                        # Subsequent probes: click on non-background entities
+                        bg = int(np.bincount(curr_grid.flatten()).argmax())
+                        non_bg = np.argwhere((curr_grid != bg) & (curr_grid != 0))
+                        if len(non_bg) > 0:
+                            idx = probe_count % len(non_bg)
+                            self.last_action_data = {
+                                "x": int(non_bg[idx, 1]),
+                                "y": int(non_bg[idx, 0]),
+                            }
+                        else:
+                            self.last_action_data = {"x": W // 2, "y": H // 2}
                 else:
                     self.last_action_data = None
 
@@ -3306,28 +3460,65 @@ class InductiveHCIRAgent:
                     self.last_action_data = None
                     return best_action, 0.35
 
-        # 5. Stuck detection — epistemic probing fallback
-        if self.trial_memory.is_stuck(threshold=8):
+        # 5. Stuck detection — epistemic probing fallback (lowered threshold for faster recovery)
+        if self.trial_memory.is_stuck(threshold=5):
             if self.current_actor_pos:
                 blocked = self.trial_memory.get_blocked_actions_at(self.current_actor_pos)
                 unblocked = [a for a in available_actions if a not in blocked]
                 if unblocked:
                     import random
 
-                    # Prefer action 5 (interact) if untested — many games need it
-                    if (
-                        5 in unblocked
+                    # Priority 1: Try under-tested interaction actions (5, 6, 7)
+                    interaction_candidates = [
+                        a
+                        for a in unblocked
+                        if a >= 5
                         and self.knowledge_base.action_affordances.get(
-                            5, ActionAffordance(5)
+                            a, ActionAffordance(a)
                         ).times_tested
-                        < 3
-                    ):
-                        probe_action = 5
+                        < 5
+                    ]
+                    if interaction_candidates:
+                        probe_action = interaction_candidates[0]
                     else:
-                        probe_action = random.choice(unblocked)
+                        # Priority 2: Movement toward least-visited cell
+                        directional = [a for a in unblocked if a <= 4]
+                        if directional and self.visit_counts:
+                            scored = []
+                            for a in directional:
+                                aff = self.knowledge_base.action_affordances.get(a)
+                                if aff and (aff.delta_r != 0 or aff.delta_c != 0):
+                                    pos = self.current_actor_pos
+                                    target = (pos[0] + aff.delta_r, pos[1] + aff.delta_c)
+                                    visits = self.visit_counts.get(target, 0)
+                                    scored.append((a, visits))
+                            if scored:
+                                scored.sort(key=lambda x: x[1])
+                                probe_action = scored[0][0]
+                            else:
+                                probe_action = random.choice(directional)
+                        else:
+                            probe_action = random.choice(unblocked)
+
                     self.prev_grid = curr_grid.copy()
                     self.last_action = probe_action
-                    self.last_action_data = None
+
+                    # For click probes, target diverse entity positions
+                    if probe_action >= 6:
+                        H, W = curr_grid.shape
+                        bg = int(np.bincount(curr_grid.flatten()).argmax())
+                        non_bg = np.argwhere((curr_grid != bg) & (curr_grid != 0))
+                        if len(non_bg) > 0:
+                            idx = self.step_counter % len(non_bg)
+                            self.last_action_data = {
+                                "x": int(non_bg[idx, 1]),
+                                "y": int(non_bg[idx, 0]),
+                            }
+                        else:
+                            self.last_action_data = {"x": W // 2, "y": H // 2}
+                    else:
+                        self.last_action_data = None
+
                     self.trial_memory.consecutive_no_change = 0
                     logger.debug(
                         f"Epistemic probe: stuck at {self.current_actor_pos}, "
@@ -3460,99 +3651,340 @@ class InductiveHCIRAgent:
         curr_grid: np.ndarray,
         available_actions: list[int],
     ) -> tuple[int, float]:
-        """Select action via trial-and-error induction or goal-directed transfer planning."""
+        """Select action via CognitiveBlackbox core platform (core-first dispatch).
+
+        Phase 3 migration: ALL cognition is delegated to the core HCIR platform
+        via ARC3SpatialCognitiveAgent → CognitiveBlackbox.decide(). Local archetype
+        solvers are retained ONLY as deprecated fallback for edge cases where
+        core skills don't match.
+        """
         if not isinstance(curr_grid, np.ndarray):
             curr_grid = np.array(curr_grid)
 
-        if self.disable_archetypes:
-            act, data = self.autonomous_engine.decide(
-                curr_grid,
-                available_actions,
-                is_win=(getattr(self, "last_frame_state", None) == "WIN"),
+        self.step_counter += 1
+
+        # ── 1. Assimilate feedback from previous action ──────────────────
+        if self.prev_grid is not None and self.last_action is not None:
+            diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
+            self.knowledge_base.register_observation(
+                self.prev_grid, self.last_action, curr_grid, diff
             )
-            self.last_action = act
-            self.last_action_data = data
-            self.prev_grid = curr_grid.copy()
-            if self.autonomous_engine.avatar_pos:
-                self.current_actor_pos = self.autonomous_engine.avatar_pos
-            return act, 0.95
 
-        # 1. If a solver is already active for this episode, continue executing its plan
-        if self.active_solver_name is not None:
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # Record trial outcome
+            pos = self.current_actor_pos or (0, 0)
+            barrier_dir = None
+            if diff.diff_type == DiffType.NO_CHANGE:
+                aff = self.knowledge_base.action_affordances.get(self.last_action)
+                if aff and (aff.delta_r != 0 or aff.delta_c != 0):
+                    barrier_dir = (aff.delta_r, aff.delta_c)
 
-        # 2. Multi-Paradigm Skill Acquisition Solvers (Legacy Archetype Bypass)
+            outcome = TrialOutcome(
+                action=self.last_action,
+                position=pos,
+                succeeded=(diff.diff_type != DiffType.NO_CHANGE),
+                diff_type=diff.diff_type,
+                barrier_direction=barrier_dir,
+                objects_affected=diff.changed_pixel_count,
+                item_gained=(
+                    diff.diff_type == DiffType.TRANSLATION
+                    and diff.moved_object_size > 0
+                    and diff.changed_pixel_count > diff.moved_object_size * 2
+                ),
+                item_lost=(
+                    diff.diff_type == DiffType.TRANSLATION
+                    and diff.moved_object_size > 0
+                    and diff.changed_pixel_count > diff.moved_object_size * 3
+                ),
+            )
+            self.trial_memory.record(outcome)
+
+        # ── 2. Sync knowledge to core ────────────────────────────────────
+        if self.knowledge_base.controllable_signature.color is not None:
+            self.hcir_agent.avatar_color = self.knowledge_base.controllable_signature.color
+
+        for a, aff in self.knowledge_base.action_affordances.items():
+            if a not in self.hcir_agent.action_models and aff.confidence >= 0.4:
+                self.hcir_agent.action_models[a] = ActionDynamicsModel(
+                    action_id=a,
+                    delta_r=aff.delta_r,
+                    delta_c=aff.delta_c,
+                    confidence=aff.confidence,
+                    probes_tested=aff.times_tested,
+                )
+
+        if self.knowledge_base.barrier_colors:
+            if self.hcir_agent.known_barriers is None:
+                self.hcir_agent.known_barriers = np.zeros(curr_grid.shape, dtype=bool)
+            for color in self.knowledge_base.barrier_colors:
+                self.hcir_agent.known_barriers[curr_grid == color] = True
+
+        # ── 3. [DISABLED] Plugin-level exploration probing ─────────────────
+        # The core CognitiveBlackbox.decide() already has its own motor calibration
+        # phase (epistemic probing in SpatialPlanner). Running probing here duplicates
+        # core's work and wastes 15-20 actions of budget. Disabled in Phase 3 migration.
+        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
+
+        # ── 4. Stuck detection — epistemic probing fallback ──────────────
+        # Only for movement games — click games have their own exploration in _plan_click_affordance
+        if has_movement and self.trial_memory.is_stuck(threshold=5):
+            if self.current_actor_pos:
+                blocked = self.trial_memory.get_blocked_actions_at(self.current_actor_pos)
+                unblocked = [a for a in available_actions if a not in blocked]
+                if unblocked:
+                    import random
+
+                    interaction_candidates = [
+                        a
+                        for a in unblocked
+                        if a >= 5
+                        and self.knowledge_base.action_affordances.get(
+                            a, ActionAffordance(a)
+                        ).times_tested
+                        < 5
+                    ]
+                    if interaction_candidates:
+                        probe_action = interaction_candidates[0]
+                    else:
+                        directional = [a for a in unblocked if a <= 4]
+                        if directional and self.visit_counts:
+                            scored = []
+                            for a in directional:
+                                aff = self.knowledge_base.action_affordances.get(a)
+                                if aff and (aff.delta_r != 0 or aff.delta_c != 0):
+                                    pos = self.current_actor_pos
+                                    target = (pos[0] + aff.delta_r, pos[1] + aff.delta_c)
+                                    visits = self.visit_counts.get(target, 0)
+                                    scored.append((a, visits))
+                            if scored:
+                                scored.sort(key=lambda x: x[1])
+                                probe_action = scored[0][0]
+                            else:
+                                probe_action = random.choice(directional)
+                        else:
+                            probe_action = random.choice(unblocked)
+
+                    self.prev_grid = curr_grid.copy()
+                    self.last_action = probe_action
+
+                    if probe_action >= 6:
+                        H, W = curr_grid.shape
+                        bg = int(np.bincount(curr_grid.flatten()).argmax())
+                        non_bg = np.argwhere((curr_grid != bg) & (curr_grid != 0))
+                        if len(non_bg) > 0:
+                            idx = self.step_counter % len(non_bg)
+                            self.last_action_data = {
+                                "x": int(non_bg[idx, 1]),
+                                "y": int(non_bg[idx, 0]),
+                            }
+                        else:
+                            self.last_action_data = {"x": W // 2, "y": H // 2}
+                    else:
+                        self.last_action_data = None
+
+                    self.trial_memory.consecutive_no_change = 0
+                    return probe_action, 0.3
+
+        # ── 5. Recipe synchronization ────────────────────────────────────
+        if self.knowledge_base.levels_solved > 0:
+            if self.knowledge_base.signature_recipes:
+                for sig_key, recipe in self.knowledge_base.signature_recipes.items():
+                    if recipe.outcome == "pickup":
+                        self.hcir_agent.learned_cargo_signatures.add(sig_key)
+                    elif recipe.outcome in ("goal", "target"):
+                        self.hcir_agent.learned_target_signatures.add(sig_key)
+
+            if self.knowledge_base.object_recipes:
+                for c, recipe in self.knowledge_base.object_recipes.items():
+                    if recipe.outcome == "pickup":
+                        item_colors = self.hcir_agent.learned_item_colors
+                        if c not in item_colors:
+                            if isinstance(item_colors, set):
+                                item_colors.add(c)
+                            elif isinstance(item_colors, dict):
+                                item_colors[c] = {"action": recipe.interaction_action}
+                        if (
+                            recipe.delivery_zone_bounds
+                            and not self.hcir_agent.learned_receptacle_bounds
+                        ):
+                            self.hcir_agent.learned_receptacle_bounds = recipe.delivery_zone_bounds
+                        if recipe.delivery_zone_color is not None:
+                            self.hcir_agent.learned_receptacle_colors.add(
+                                recipe.delivery_zone_color
+                            )
+
+        # ── 6a. Specialized archetypes: route before falling back to general movement ──
+        # IMPORTANT: pass available_actions to avoid misclassifying games
         if not self.disable_archetypes:
-            if all(
-                a in available_actions for a in [1, 2, 3, 4]
-            ) and self.spatial_navigator.is_resource_constrained_maze(
-                curr_grid, self.current_level
+            if self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions):
+                self.knowledge_base.puzzle_typology = PuzzleTypology.CANVAS_STAMPING
+                action, conf, action_data = self.canvas_matcher.plan_step(curr_grid)
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
+            if self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions):
+                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
+                action, conf, action_data = self.vortex_solver.plan_step(
+                    curr_grid, self.current_level
+                )
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
+            if self.spatial_navigator.is_resource_constrained_maze(
+                curr_grid, current_level=self.current_level
             ):
-                self.active_solver_name = "spatial_navigation"
-                return self._dispatch_active_solver(curr_grid, available_actions)
-
-            if (
-                5 in available_actions
-                and 6 in available_actions
-                and 7 not in available_actions
-                and self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions)
-            ):
-                self.active_solver_name = "canvas_stamping"
-                return self._dispatch_active_solver(curr_grid, available_actions)
-
-            if (
-                6 in available_actions
-                and 7 in available_actions
-                and not any(a in available_actions for a in [1, 2, 3, 4, 5])
-                and self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions)
-            ):
-                self.active_solver_name = "vortex"
-                return self._dispatch_active_solver(curr_grid, available_actions)
-
+                self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
+                action, conf = self.spatial_navigator.plan_step(
+                    curr_grid, current_level=self.current_level
+                )
+                self.last_action_data = None
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
             if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-                self.active_solver_name = "lights_out"
-                return self._dispatch_active_solver(curr_grid, available_actions)
-
+                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
+                action, conf, action_data = self.lights_out_solver.plan_step(
+                    curr_grid, self.current_level
+                )
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
+            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
+                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
+                action, conf, action_data = self.gravity_spill_solver.plan_step(
+                    curr_grid, self.current_level
+                )
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
+            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
+                self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
+                action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
+            if self.linkage_solver.is_kinematic_linkage(curr_grid, available_actions):
+                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
+                action, conf, action_data = self.linkage_solver.plan_step(
+                    curr_grid, self.current_level
+                )
+                self.last_action_data = action_data
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
             if self.mirrored_convergence_solver.is_mirrored_convergence(
                 curr_grid, available_actions
             ):
-                self.active_solver_name = "mirrored_convergence"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+                self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
+                action, conf = self.mirrored_convergence_solver.plan_step(
+                    curr_grid, self.current_level
+                )
+                self.last_action_data = None
+                self.prev_grid = curr_grid.copy()
+                self.last_action = action
+                return action, conf
 
-            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-                self.active_solver_name = "gravity_spill"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        # ── 6b. CORE-FIRST: Delegate to CognitiveBlackbox for ALL games ──
+        # The core handles movement AND some click games well (sb26, tn36).
+        is_click_only = not has_movement and 6 in available_actions
 
-            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-                self.active_solver_name = "peg"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+        # For click-only games: adaptive strategy with step-based fallback.
+        # Give the core 25 steps to prove it can handle the game. If the grid
+        # hasn't changed (stagnation), switch to the specialized click handler.
+        if is_click_only:
+            if not hasattr(self, "_core_click_stagnation"):
+                self._core_click_stagnation = 0
+                self._core_click_gave_up = False
 
-            if self.track_maze_solver.is_track_maze_puzzle(curr_grid, available_actions):
-                self.active_solver_name = "track_maze"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+            # Once the core has failed, always use click handler for this level
+            if self._core_click_gave_up:
+                return self._plan_click_affordance(curr_grid, available_actions)
 
-            if self.linkage_solver.is_kinematic_linkage(curr_grid, available_actions):
-                self.active_solver_name = "kinematic_linkage"
-                return self._dispatch_active_solver(curr_grid, available_actions)
+            # Let core try
+            action, conf = self.hcir_agent.plan_next_action(
+                curr_grid, available_actions, level=self.current_level
+            )
+            self.last_action_data = self.hcir_agent.last_action_data
 
-        # 10. Unified Spatial Cognitive Solver (ARC3SpatialCognitiveAgent via HCIR)
-        if self.spatial_cognitive_agent.is_spatial_candidate(curr_grid, available_actions):
-            self.active_solver_name = "spatial_cooperative"
-            return self._dispatch_active_solver(curr_grid, available_actions)
+            # Track stagnation: if grid didn't change from previous step
+            if self.prev_grid is not None and np.array_equal(self.prev_grid, curr_grid):
+                self._core_click_stagnation += 1
+            else:
+                self._core_click_stagnation = 0
 
-        # 11. Click-only affordance: for pure action-6 games
-        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
-        if not has_movement and 6 in available_actions:
-            return self._plan_click_affordance(curr_grid, available_actions)
+            # If core has been stagnant for 25 steps, give up and use click handler
+            if self._core_click_stagnation >= 25:
+                self._core_click_gave_up = True
+                return self._plan_click_affordance(curr_grid, available_actions)
+        else:
+            action, conf = self.hcir_agent.plan_next_action(
+                curr_grid, available_actions, level=self.current_level
+            )
+            self.last_action_data = self.hcir_agent.last_action_data
 
-        # 12. Universal Epistemic Spatial Cognitive Reasoning
-        return self._plan_hcir_step(curr_grid, available_actions)
+        # Sync position data back from core
+        if getattr(self.hcir_agent, "avatar_grid_pos", None):
+            self.current_actor_pos = self.hcir_agent.avatar_grid_pos
+        elif self.hcir_agent.avatar_centroid:
+            self.current_actor_pos = (
+                int(round(self.hcir_agent.avatar_centroid[0])),
+                int(round(self.hcir_agent.avatar_centroid[1])),
+            )
+
+        if self.hcir_agent.goal_centroid:
+            self.current_target_pos = (
+                int(round(self.hcir_agent.goal_centroid[0])),
+                int(round(self.hcir_agent.goal_centroid[1])),
+            )
+        else:
+            self.current_target_pos = None
+
+        # Sync learned knowledge back from core
+        self.knowledge_base.barrier_colors.update(self.hcir_agent.learned_barrier_colors)
+        self.knowledge_base.walkable_colors.update(self.hcir_agent.learned_walkable_colors)
+        item_colors_ref = self.hcir_agent.learned_item_colors
+        items_dict = (
+            item_colors_ref.items()
+            if isinstance(item_colors_ref, dict)
+            else {c: {"action": 5} for c in item_colors_ref}.items()
+        )
+        for c, item_info in items_dict:
+            if c not in self.knowledge_base.object_recipes:
+                self.knowledge_base.object_recipes[c] = ObjectInteractionRecipe(
+                    object_color=c,
+                    interaction_action=item_info.get("action", 5),
+                    outcome="pickup",
+                    delivery_zone_color=(
+                        next(iter(self.hcir_agent.learned_receptacle_colors))
+                        if self.hcir_agent.learned_receptacle_colors
+                        else None
+                    ),
+                    delivery_zone_bounds=self.hcir_agent.learned_receptacle_bounds,
+                    confidence=0.8,
+                    times_confirmed=1,
+                )
+
+        # Track position for loop detection
+        if self.current_actor_pos:
+            self.visited_positions.append(self.current_actor_pos)
+            self.visit_counts[self.current_actor_pos] = (
+                self.visit_counts.get(self.current_actor_pos, 0) + 1
+            )
+
+        self.prev_grid = curr_grid.copy()
+        self.last_action = action
+        return action, conf
 
     def _plan_click_affordance(
         self, curr_grid: np.ndarray, available_actions: list[int]
     ) -> tuple[int, float]:
         """Handle click-only games by systematically clicking on distinct objects with causal momentum and loop avoidance."""
-        self.step_counter += 1
+        # NOTE: step_counter is already incremented in plan_next_action()
+        # self.step_counter += 1  # REMOVED: was causing double-increment
         self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
 
         if not hasattr(self, "_quiescent_targets"):
@@ -3803,6 +4235,7 @@ class InductiveARC3BenchmarkRunner:
 
         # Load existing core KnowledgeGraph if available
         k_dir = knowledge_dir or self.knowledge_dir
+        prior_levels_completed = 0
         if k_dir:
             loaded = self.agent.load_knowledge(k_dir, game_id=game_id)
             if loaded:
@@ -3811,6 +4244,20 @@ class InductiveARC3BenchmarkRunner:
                     game_id,
                     k_dir,
                 )
+                kg_file = Path(k_dir) / f"{game_id}_knowledge_graph.json"
+                if kg_file.exists():
+                    try:
+                        import json
+
+                        with open(kg_file, encoding="utf-8") as f:
+                            kg_data = json.load(f)
+                        for ent in kg_data.get("entities", []):
+                            if ent.get("label") == f"env_{game_id}":
+                                prior_levels_completed = int(
+                                    ent.get("attributes", {}).get("levels_completed", 0)
+                                )
+                    except Exception:
+                        pass
 
         env = arcade_client.make(game_id, render_mode=None)
         frame_data = env.reset()
@@ -3840,11 +4287,15 @@ class InductiveARC3BenchmarkRunner:
             lvl_actions = 0
             completed = False
             baseline = baseline_list[lvl_idx] if lvl_idx < len(baseline_list) else 50
-            # By default scale step budget to 2x baseline actions (with floor of 60 steps)
+            # Scale step budget to 3x baseline + exploration overhead (floor of 90 steps)
+            # Level 0 gets extra budget for initial world model learning
+            exploration_overhead = 40 if lvl_idx == 0 else 15
             if self.max_steps is not None and self.max_steps > 0:
-                effective_max_steps = max(self.max_steps, int(baseline * 2.0))
+                effective_max_steps = (
+                    max(self.max_steps, int(baseline * 3.0)) + exploration_overhead
+                )
             else:
-                effective_max_steps = max(int(baseline * 2.0), 60)
+                effective_max_steps = max(int(baseline * 3.0), 90) + exploration_overhead
 
             max_attempts = 1 + max(0, retries_allowed)
             attempts_made = 0
@@ -3968,6 +4419,9 @@ class InductiveARC3BenchmarkRunner:
                                 is_lost=True,
                             )
                         break
+                    # NOTE: Do NOT call update_causal_dynamics here — it is already
+                    # called internally by plan_next_action() → hcir_agent.plan_next_action()
+                    # Double-calling corrupts motor calibration models.
 
                 if completed:
                     break
@@ -4016,13 +4470,17 @@ class InductiveARC3BenchmarkRunner:
                 )
                 break
 
-        # Persist accumulated KnowledgeGraph to disk only if progress was made
-        if k_dir and levels_completed > 0:
+        # Persist accumulated KnowledgeGraph to disk only if progress was made and score >= prior
+        if k_dir and levels_completed > 0 and levels_completed >= prior_levels_completed:
             try:
-                saved_path = self.agent.save_knowledge(k_dir, game_id=game_id)
+                saved_path = self.agent.save_knowledge(
+                    k_dir, game_id=game_id, levels_completed=levels_completed
+                )
                 logger.info(
-                    "[CORE KNOWLEDGE GRAPH] Saved updated knowledge graph for '%s' to %s",
+                    "[CORE KNOWLEDGE GRAPH] Saved updated knowledge graph for '%s' (levels: %d >= prior: %d) to %s",
                     game_id,
+                    levels_completed,
+                    prior_levels_completed,
                     saved_path,
                 )
             except Exception as e:
@@ -4031,6 +4489,13 @@ class InductiveARC3BenchmarkRunner:
                     game_id,
                     e,
                 )
+        elif k_dir and levels_completed < prior_levels_completed:
+            logger.warning(
+                "[CORE KNOWLEDGE GRAPH] Retaining superior prior knowledge for '%s' (prior: %d levels > current: %d levels)",
+                game_id,
+                prior_levels_completed,
+                levels_completed,
+            )
 
         mean_eff = (
             sum(r.efficiency_ratio for r in level_results) / len(level_results)
