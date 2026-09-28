@@ -2759,6 +2759,7 @@ class CognitiveBlackbox:
         self,
         path_or_dir: str | Path,
         source_id: str = "default",
+        **metadata: Any,
     ) -> Path:
         """Persist learned knowledge graph and state for a domain/environment.
 
@@ -2913,6 +2914,7 @@ class CognitiveBlackbox:
                 "step_count": state.step_count,
                 "total_reward": state.total_reward,
                 "avatar_feature": state.avatar_feature,
+                **metadata,
             },
         )
 

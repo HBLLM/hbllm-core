@@ -46,8 +46,10 @@ class KineticCouplingSkillAcquisition(BaseHierarchicalSkill):
             return False
 
         # Exclude dc22 (topology transformation) and sc25 (modal incantation)
-        from hbllm.hcir.skills.modal_incantation import ModalIncantationSkillAcquisition
-        from hbllm.hcir.skills.topology_transformation import (
+        from plugins.arc_agi_adapter.arc_skills.modal_incantation import (
+            ModalIncantationSkillAcquisition,
+        )
+        from plugins.arc_agi_adapter.arc_skills.topology_transformation import (
             TopologyTransformationSkillAcquisition,
         )
 

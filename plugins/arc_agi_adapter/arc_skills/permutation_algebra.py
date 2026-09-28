@@ -217,7 +217,7 @@ class PermutationAlgebraSkillAcquisition(BaseHierarchicalSkill):
         if grid.ndim == 3:
             grid = grid[-1]
 
-        from hbllm.hcir.skills.automaton_synthesis import (
+        from plugins.arc_agi_adapter.arc_skills.automaton_synthesis import (
             AutomatonProgramSynthesisSkillAcquisition,
         )
 
