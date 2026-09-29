@@ -213,6 +213,7 @@ class InductiveHCIRAgent:
         self.solver_last_grid_hash: int = 0
         self.solver_switch_count: int = 0
         self.solver_max_switches: int = 3
+        self._tried_stagnation_actions: set[int] = set()
         # Pre-solution goal detection cache
         self._inferred_goal_zone: tuple[int, int, int, int] | None = None
         self._inferred_goal_type: str | None = None
@@ -257,6 +258,9 @@ class InductiveHCIRAgent:
         self.solver_stagnation_counter = 0
         self.solver_last_grid_hash = 0
         self.solver_switch_count = 0
+        self._declarative_action_queue = []
+        self._declarative_failed_skills: set[str] = set()
+        self._declarative_plan_grid_hash = None
         self._initial_grid_analyzed = False
         self._inferred_goal_zone = None
         self._inferred_goal_type = None
@@ -385,39 +389,29 @@ class InductiveHCIRAgent:
         action: int
         conf: float
 
-        if name == "canvas_stamping":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.CANVAS_STAMPING
-            action, conf, action_data = self.canvas_matcher.plan_step(curr_grid)
-        elif name == "spatial_navigation":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            action, conf = self.spatial_navigator.plan_step(
-                curr_grid, current_level=self.current_level
-            )
-        elif name == "vortex":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.vortex_solver.plan_step(curr_grid, self.current_level)
-        elif name == "peg":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-            action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
-        elif name == "track_maze":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            action, conf = self.track_maze_solver.plan_step(curr_grid)
-        elif name == "lights_out":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.lights_out_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "mirrored_convergence":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-            action, conf = self.mirrored_convergence_solver.plan_step(curr_grid, self.current_level)
-        elif name == "gravity_spill":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.gravity_spill_solver.plan_step(
-                curr_grid, self.current_level
-            )
-        elif name == "kinematic_linkage":
-            self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-            action, conf, action_data = self.linkage_solver.plan_step(curr_grid, self.current_level)
+        if name and name.startswith("declarative:"):
+            # Declarative skill continuation — drain queued actions or re-plan
+            if hasattr(self, "_declarative_action_queue") and self._declarative_action_queue:
+                action, action_data = self._declarative_action_queue.pop(0)
+                conf = 0.9
+            else:
+                # Queue exhausted — check if plan was effective
+                skill_name = name.split(":", 1)[1]
+                curr_hash = hash(curr_grid.tobytes())
+                plan_hash = getattr(self, "_declarative_plan_grid_hash", None)
+                if plan_hash is not None and curr_hash == plan_hash:
+                    # Grid unchanged after full plan — skill's plan was ineffective
+                    if not hasattr(self, "_declarative_failed_skills"):
+                        self._declarative_failed_skills = set()
+                    self._declarative_failed_skills.add(skill_name)
+                    logger.info(
+                        "Declarative skill '%s' blacklisted — plan produced no grid change",
+                        skill_name,
+                    )
+                # Re-evaluate via _plan_hcir_step
+                self.active_solver_name = None
+                self.solver_stagnation_counter = 0
+                return self._plan_hcir_step(curr_grid, available_actions)
         elif name == "spatial_cooperative":
             self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
             if self.prev_grid is not None and self.last_action is not None:
@@ -532,6 +526,14 @@ class InductiveHCIRAgent:
     ) -> tuple[int, float]:
         """Execute autonomous cognitive reasoning via the HCIR Engine."""
         self.step_counter += 1
+
+        # 0. Drain queued actions from a declarative skill's multi-step plan
+        if hasattr(self, "_declarative_action_queue") and self._declarative_action_queue:
+            action, action_data = self._declarative_action_queue.pop(0)
+            self.last_action_data = action_data
+            self.prev_grid = curr_grid.copy()
+            self.last_action = action
+            return action, 0.9
 
         # 1. Assimilate feedback from previous action if available
         if self.prev_grid is not None and self.last_action is not None:
@@ -910,6 +912,16 @@ class InductiveHCIRAgent:
 
         self.step_counter += 1
 
+        # Track mid-episode stagnation based on visual frame changes
+        curr_hash = hash(curr_grid.tobytes())
+        if hasattr(self, "solver_last_grid_hash") and curr_hash == self.solver_last_grid_hash:
+            self.solver_stagnation_counter += 1
+        else:
+            self.solver_stagnation_counter = max(0, self.solver_stagnation_counter - 1)
+            self.solver_last_grid_hash = curr_hash
+            if hasattr(self, "_tried_stagnation_actions"):
+                self._tried_stagnation_actions.clear()
+
         # ── 1. Assimilate feedback from previous action ──────────────────
         if self.prev_grid is not None and self.last_action is not None:
             diff = FrameDiffAnalyzer.analyze(self.prev_grid, self.last_action, curr_grid)
@@ -1059,111 +1071,207 @@ class InductiveHCIRAgent:
                                 recipe.delivery_zone_color
                             )
 
-        # ── 6a. Specialized archetypes: route before falling back to general movement ──
-        # IMPORTANT: pass available_actions to avoid misclassifying games
-        if not self.disable_archetypes:
-            if self.canvas_matcher.is_canvas_stamping_puzzle(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.CANVAS_STAMPING
-                action, conf, action_data = self.canvas_matcher.plan_step(curr_grid)
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.vortex_solver.is_vortex_attractor_puzzle(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-                action, conf, action_data = self.vortex_solver.plan_step(
-                    curr_grid, self.current_level
-                )
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.spatial_navigator.is_resource_constrained_maze(
-                curr_grid, current_level=self.current_level
-            ):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-                action, conf = self.spatial_navigator.plan_step(
-                    curr_grid, current_level=self.current_level
-                )
-                self.last_action_data = None
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-                action, conf, action_data = self.lights_out_solver.plan_step(
-                    curr_grid, self.current_level
-                )
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.gravity_spill_solver.is_gravity_spill(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-                action, conf, action_data = self.gravity_spill_solver.plan_step(
-                    curr_grid, self.current_level
-                )
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.peg_solver.is_peg_solitaire(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.DISCRETE_PERMUTATION
-                action, conf, action_data = self.peg_solver.plan_step(curr_grid, self.current_level)
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.linkage_solver.is_kinematic_linkage(curr_grid, available_actions):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.AFFORDANCE_CLICK
-                action, conf, action_data = self.linkage_solver.plan_step(
-                    curr_grid, self.current_level
-                )
-                self.last_action_data = action_data
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
-            if self.mirrored_convergence_solver.is_mirrored_convergence(
-                curr_grid, available_actions
-            ):
-                self.knowledge_base.puzzle_typology = PuzzleTypology.SPATIAL_NAVIGATION
-                action, conf = self.mirrored_convergence_solver.plan_step(
-                    curr_grid, self.current_level
-                )
-                self.last_action_data = None
-                self.prev_grid = curr_grid.copy()
-                self.last_action = action
-                return action, conf
+        # If a declarative skill has queued actions in-flight, continue executing the plan
+        if hasattr(self, "_declarative_action_queue") and self._declarative_action_queue:
+            action, action_data = self._declarative_action_queue.pop(0)
+            self.last_action_data = action_data
+            self.prev_grid = curr_grid.copy()
+            self.last_action = action
+            return action, 0.9
 
-        # ── 6b. CORE-FIRST: Delegate to CognitiveBlackbox for ALL games ──
-        # The core handles movement AND some click games well (sb26, tn36).
+        # ── 6a. Core-first exploration window ─────────────────────────────
+        # Give the CognitiveBlackbox EXPLORATION_WINDOW steps to learn dynamics.
+        # Only activate declarative skills after the window expires AND core is stagnating
+        # or lacks viable dynamics models.
+        # Note: Motor exploration applies specifically to movement puzzles on Level 0.
+        EXPLORATION_WINDOW = 8
+        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
+
+        if has_movement and self.current_level == 0 and self.step_counter <= EXPLORATION_WINDOW:
+            return self._execute_core_step(curr_grid, available_actions)
+
+        # After exploration window, check if core has learned enough dynamics
+        core_has_model = self.spatial_cognitive_agent.has_viable_model(
+            min_models=min(2, len(available_actions)),
+            min_confidence=0.6,
+        )
+
+        # If core has viable models and is making progress, keep using it
+        if core_has_model and self.solver_stagnation_counter < 5:
+            return self._execute_core_step(curr_grid, available_actions)
+
+        # ── 6b. Declarative Skill Dispatch via SkillRegistry ──────────────
+        # Only NOW try declarative skills as acceleration (if core lacks models or stagnates)
+        if not self.disable_archetypes:
+            # Track which skills have been tried and failed for stagnation detection
+            if not hasattr(self, "_declarative_failed_skills"):
+                self._declarative_failed_skills = set()
+                self._declarative_plan_grid_hash = None
+
+            curr_hash = hash(curr_grid.tobytes())
+            skill_metadata = {
+                "knowledge_base": self.knowledge_base,
+                "step_counter": self.step_counter,
+                "current_level": self.current_level,
+                "avatar_color": getattr(self.hcir_agent, "avatar_color", None),
+            }
+            blackbox_state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+            for skill in blackbox_state.skill_registry:
+                if skill.skill_name in self._declarative_failed_skills:
+                    continue
+                try:
+                    if skill.can_handle(curr_grid, available_actions, metadata=skill_metadata):
+                        plan_result = skill.plan(
+                            curr_grid,
+                            current_level=self.current_level,
+                            metadata=skill_metadata,
+                        )
+                        if plan_result:
+                            # Extract first action from plan
+                            first = plan_result[0]
+                            if isinstance(first, tuple):
+                                action, action_data = first[0], first[1]
+                            else:
+                                action, action_data = int(first), None
+                            self.active_solver_name = f"declarative:{skill.skill_name}"
+                            self.last_action_data = action_data
+                            self.prev_grid = curr_grid.copy()
+                            self.last_action = action
+                            self._declarative_plan_grid_hash = curr_hash
+                            # Enqueue remaining planned actions
+                            self._declarative_action_queue = []
+                            for remaining in plan_result[1:]:
+                                if isinstance(remaining, tuple):
+                                    self._declarative_action_queue.append(remaining)
+                                else:
+                                    self._declarative_action_queue.append((int(remaining), None))
+                            logger.info(
+                                "Declarative skill '%s' matched — planned %d actions (first=%d)",
+                                skill.skill_name,
+                                len(plan_result),
+                                action,
+                            )
+                            return action, 0.9
+                except Exception:
+                    logger.debug(
+                        "Declarative skill '%s' error in dispatch",
+                        skill.skill_name,
+                        exc_info=True,
+                    )
+
+        # ── 6c. Phase 4: Counterfactual Planning on Stagnation ────────────
+        if self.solver_stagnation_counter >= 5:
+            from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+
+            if not hasattr(self, "_tried_stagnation_actions"):
+                self._tried_stagnation_actions = set()
+
+            state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+            avatar_col = getattr(state, "avatar_feature", None) or getattr(
+                self.hcir_agent, "avatar_color", None
+            )
+            for action_id in available_actions:
+                if action_id not in self._tried_stagnation_actions:
+                    predicted_grid = CounterfactualPlanner.predict_outcome(
+                        curr_grid,
+                        action_id,
+                        state.action_models.get(action_id),
+                        avatar_color=avatar_col,
+                    )
+                    novelty = int(np.sum(predicted_grid != curr_grid))
+                    if novelty > 0:
+                        self._tried_stagnation_actions.add(action_id)
+                        self.prev_grid = curr_grid.copy()
+                        self.last_action = action_id
+                        self.last_action_data = None
+                        logger.info(
+                            "Counterfactual recovery: action %d predicted novelty=%d",
+                            action_id,
+                            novelty,
+                        )
+                        return action_id, 0.4
+
+        # ── 6d. Phase 5: Cross-Game Structural Transfer ───────────────────
+        if not self.disable_archetypes and self.solver_stagnation_counter >= 3:
+            try:
+                from plugins.arc_agi_adapter.arc_skills.structural_fingerprint import (
+                    StructuralFingerprint,
+                    get_global_transfer_registry,
+                )
+
+                transfer_reg = get_global_transfer_registry()
+                curr_fp = StructuralFingerprint.from_grid(curr_grid, available_actions)
+                matches = transfer_reg.find_similar(curr_fp, threshold=0.65)
+                for sim, transferred_skill, source_game in matches:
+                    if getattr(transferred_skill, "skill_name", "") in getattr(
+                        self, "_declarative_failed_skills", set()
+                    ):
+                        continue
+                    try:
+                        plan_result = transferred_skill.plan(
+                            curr_grid,
+                            current_level=self.current_level,
+                            metadata={
+                                "knowledge_base": self.knowledge_base,
+                                "step_counter": self.step_counter,
+                                "avatar_color": getattr(self.hcir_agent, "avatar_color", None),
+                            },
+                        )
+                        if plan_result:
+                            first = plan_result[0]
+                            if isinstance(first, tuple):
+                                action, action_data = first[0], first[1]
+                            else:
+                                action, action_data = int(first), None
+                            self.active_solver_name = f"transfer:{transferred_skill.skill_name}"
+                            self.last_action_data = action_data
+                            self.prev_grid = curr_grid.copy()
+                            self.last_action = action
+                            self._declarative_action_queue = [
+                                r if isinstance(r, tuple) else (int(r), None)
+                                for r in plan_result[1:]
+                            ]
+                            logger.info(
+                                "Structural transfer: applied skill '%s' from '%s' (sim=%.2f, actions=%d)",
+                                transferred_skill.skill_name,
+                                source_game,
+                                sim,
+                                len(plan_result),
+                            )
+                            return action, 0.85
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug("Structural transfer lookup error: %s", e)
+
+        # ── 6e. Fallback to CognitiveBlackbox ─────────────────────────────
+        return self._execute_core_step(curr_grid, available_actions)
+
+    def _execute_core_step(
+        self, curr_grid: np.ndarray, available_actions: list[int]
+    ) -> tuple[int, float]:
+        """Execute a cognitive step via the core HCIR agent / CognitiveBlackbox, with full state sync."""
+        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
         is_click_only = not has_movement and 6 in available_actions
 
-        # For click-only games: adaptive strategy with step-based fallback.
-        # Give the core 25 steps to prove it can handle the game. If the grid
-        # hasn't changed (stagnation), switch to the specialized click handler.
         if is_click_only:
             if not hasattr(self, "_core_click_stagnation"):
                 self._core_click_stagnation = 0
                 self._core_click_gave_up = False
 
-            # Once the core has failed, always use click handler for this level
             if self._core_click_gave_up:
                 return self._plan_click_affordance(curr_grid, available_actions)
 
-            # Let core try
             action, conf = self.hcir_agent.plan_next_action(
                 curr_grid, available_actions, level=self.current_level
             )
             self.last_action_data = self.hcir_agent.last_action_data
 
-            # Track stagnation: if grid didn't change from previous step
             if self.prev_grid is not None and np.array_equal(self.prev_grid, curr_grid):
                 self._core_click_stagnation += 1
             else:
                 self._core_click_stagnation = 0
 
-            # If core has been stagnant for 25 steps, give up and use click handler
             if self._core_click_stagnation >= 25:
                 self._core_click_gave_up = True
                 return self._plan_click_affordance(curr_grid, available_actions)
@@ -1250,13 +1358,35 @@ class InductiveHCIRAgent:
         is_revisit = grid_bytes in self._click_visited_states
         self._click_visited_states.add(grid_bytes)
 
-        # Discrete Permutation / Lights Out solver
-        if self.lights_out_solver.is_lights_out_puzzle(curr_grid, available_actions):
-            act, conf, data = self.lights_out_solver.plan_step(curr_grid, self.current_level)
-            self.prev_grid = curr_grid.copy()
-            self.last_action = act
-            self.last_action_data = data
-            return act, conf
+        # Declarative skill dispatch for click puzzles (e.g. lights-out, kinematic linkage)
+        blackbox_state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+        for skill in blackbox_state.skill_registry:
+            try:
+                if skill.can_handle(curr_grid, available_actions):
+                    plan_result = skill.plan(
+                        curr_grid,
+                        current_level=self.current_level,
+                        metadata={"knowledge_base": self.knowledge_base},
+                    )
+                    if plan_result:
+                        first = plan_result[0]
+                        act = first[0] if isinstance(first, tuple) else int(first)
+                        data = first[1] if isinstance(first, tuple) else None
+                        self.prev_grid = curr_grid.copy()
+                        self.last_action = act
+                        self.last_action_data = data
+                        # Queue remaining
+                        if len(plan_result) > 1:
+                            if not hasattr(self, "_declarative_action_queue"):
+                                self._declarative_action_queue = []
+                            for remaining in plan_result[1:]:
+                                if isinstance(remaining, tuple):
+                                    self._declarative_action_queue.append(remaining)
+                                else:
+                                    self._declarative_action_queue.append((int(remaining), None))
+                        return act, 0.9
+            except Exception:
+                pass
 
         # Interleave non-click actions (e.g. Action 7 submit/commit) if present
         other_actions = [a for a in available_actions if a != 6]
@@ -1567,6 +1697,8 @@ class InductiveARC3BenchmarkRunner:
                 curr_grid = (
                     frame_data.frame[-1] if frame_data and frame_data.frame else np.zeros((16, 16))
                 )
+                initial_attempt_grid = curr_grid.copy()
+                attempt_actions: list[tuple[int, dict[str, int] | None]] = []
 
                 for _ in range(effective_max_steps):
                     available_actions = getattr(frame_data, "available_actions", [1, 2, 3, 4])
@@ -1611,6 +1743,8 @@ class InductiveARC3BenchmarkRunner:
                                 "y": max(0, min(H - 1, fallback_y)),
                             }
 
+                    attempt_actions.append((action_int, action_data))
+
                     prev_grid = curr_grid
                     if action_data:
                         try:
@@ -1652,6 +1786,13 @@ class InductiveARC3BenchmarkRunner:
                                 [action_int],
                                 is_win=True,
                             )
+                        self._on_level_solved(
+                            initial_attempt_grid,
+                            attempt_actions,
+                            available_actions,
+                            game_id,
+                            lvl_idx,
+                        )
                         break
 
                     if getattr(frame_data, "state", None) == ARCGameState.GAME_OVER:
@@ -1758,3 +1899,45 @@ class InductiveARC3BenchmarkRunner:
             mean_efficiency=mean_eff,
             level_results=level_results,
         )
+
+    def _on_level_solved(
+        self,
+        initial_grid: np.ndarray,
+        actions_taken: list[tuple[int, dict[str, int] | None]],
+        available_actions: list[int],
+        game_id: str,
+        level: int,
+    ) -> None:
+        """Called when a level is completed — induce and register a reusable declarative skill."""
+        try:
+            from plugins.arc_agi_adapter.arc_skills.inductive_skill_factory import (
+                InductiveSkillFactory,
+            )
+
+            factory = InductiveSkillFactory()
+            new_skill = factory.induce_skill(
+                initial_grid, actions_taken, available_actions, game_id, level
+            )
+            if new_skill and hasattr(self.agent, "spatial_cognitive_agent"):
+                state = self.agent.spatial_cognitive_agent.blackbox.get_state("arc_agi")
+                state.skill_registry.append(new_skill)
+                logger.info(
+                    "Induced and registered new skill '%s' (%d actions) from solved level",
+                    new_skill.skill_name,
+                    len(actions_taken),
+                )
+                try:
+                    from plugins.arc_agi_adapter.arc_skills.structural_fingerprint import (
+                        StructuralFingerprint,
+                        get_global_transfer_registry,
+                    )
+
+                    transfer_reg = get_global_transfer_registry()
+                    fp = StructuralFingerprint.from_grid(initial_grid, available_actions)
+                    transfer_reg.register_success(f"{game_id}_L{level}", fp, new_skill)
+                except Exception as ex:
+                    logger.debug("Failed to register structural fingerprint: %s", ex)
+        except Exception as e:
+            logger.warning(
+                "Failed to induce skill from solved level %d of %s: %s", level, game_id, e
+            )

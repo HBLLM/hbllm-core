@@ -192,6 +192,13 @@ class ARC3SpatialCognitiveAgent:
     def action_models(self, value: dict[int, Any]) -> None:
         self.blackbox.get_state("arc_agi").action_models = dict(value)
 
+    def has_viable_model(self, min_models: int = 2, min_confidence: float = 0.6) -> bool:
+        """Check whether CognitiveBlackbox has induced viable dynamics models."""
+        models = self.action_models
+        if not models or len(models) < min_models:
+            return False
+        return any(getattr(m, "confidence", 0) >= min_confidence for m in models.values())
+
     @property
     def learned_barrier_colors(self) -> set[int]:
         """Proxy to blackbox learned obstacle features."""
@@ -377,6 +384,9 @@ class ARC3SpatialCognitiveAgent:
             ReticleSuperpositionSkillAcquisition,
         )
         from plugins.arc_agi_adapter.arc_skills.rigid_assembly import RigidAssemblySkillAcquisition
+        from plugins.arc_agi_adapter.arc_skills.spatial_resource_navigation import (
+            SpatialResourceNavigationSkillAcquisition,
+        )
         from plugins.arc_agi_adapter.arc_skills.spatiotemporal import SpatiotemporalSkillAcquisition
         from plugins.arc_agi_adapter.arc_skills.temporal_echo import TemporalEchoSkillAcquisition
         from plugins.arc_agi_adapter.arc_skills.topology_transformation import (
@@ -395,6 +405,7 @@ class ARC3SpatialCognitiveAgent:
             RelationalAffordanceSkillAcquisition(),
             PermutationAlgebraSkillAcquisition(),
             SpatiotemporalSkillAcquisition(),
+            SpatialResourceNavigationSkillAcquisition(),
             MorphologicalProgramSynthesis(),
             ModalIncantationSkillAcquisition(),
             HierarchicalPatternGrammarSkillAcquisition(),

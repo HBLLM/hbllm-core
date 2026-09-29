@@ -115,35 +115,76 @@ class LaserRoutingSkillAcquisition(DeclarativeNeuroSymbolicSkill):
                     if w >= 4 and h >= 4:
                         target_slots += 1
 
-        if current_level == 0:
-            # 3-block pipeline manifold (Level 0):
-            # Goal is sequence [8, 14, 9] along the horizontal pipe.
-            # 1. Move emitter Up 3 times to row 18 (y=18)
-            plan.extend([(1, None)] * 3)
+        # Extract target sequence colors from bottom panel components
+        bottom_region = grid[52:62, :]
+        bg = int(np.bincount(bottom_region.flatten()).argmax())
+        target_seq: list[tuple[int, int]] = []  # (x_center, color)
 
-            # 2. Extend pipe 4 times across row 18 to column 41 (over block 8)
-            plan.extend([(4, None)] * 4)
+        from hbllm.hcir.skills.common_subskills import PerceptualClusterDetector
 
-            # 3. Move emitter Down to row 24 (pushes 8->row 24, 9->row 30, 14->row 36)
-            plan.append((2, None))
+        labeled_bottom, num_bottom = PerceptualClusterDetector.label_components(bottom_region != bg)
+        for lbl in range(1, num_bottom + 1):
+            pts = np.argwhere(labeled_bottom == lbl)
+            if len(pts) >= 16:
+                cx = int(np.mean(pts[:, 1]))
+                cy = int(np.mean(pts[:, 0]))
+                col = int(bottom_region[cy, cx])
+                target_seq.append((cx, col))
+        target_seq.sort(key=lambda t: t[0])
+        target_colors = [t[1] for t in target_seq]
 
-            # 4. Retract pipe 4 times at row 24 (pulls block 8 to column 17)
-            plan.extend([(3, None)] * 4)
+        # Detect emitter head in the left rail manifold (x <= 20)
+        rail_mask = (grid != bg) & (grid != 0) & (np.arange(grid.shape[1])[None, :] <= 20)
+        rail_pts = np.argwhere(rail_mask)
+        emitter_y = int(np.mean(rail_pts[:, 0])) if len(rail_pts) > 0 else 36
 
-            # 5. Move emitter Down 2 times to row 36 (pushes block 8 to row 36 at column 17)
-            plan.extend([(2, None)] * 2)
+        # Detect block centroids in the playfield (12 <= y <= 50, x >= 20)
+        block_pos: dict[int, tuple[int, int]] = {}
+        for c in target_colors:
+            pts = np.argwhere(grid == c)
+            if len(pts) > 0:
+                block_pos[c] = (int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1])))
 
-            # 6. Extend pipe 4 times along row 36 (pushes 8 to col 35, covers block 14 at col 41)
-            plan.extend([(4, None)] * 4)
+        row_pitch = 6
 
-            # 7. Retract pipe 1 time (pulls 14 to col 35, pushes 8 to col 29)
-            plan.append((3, None))
+        curr_y = emitter_y
+        curr_ext = 0
 
-            # 8. Move emitter Up to row 30 (pushes 8 to (29, 30) and 14 to (35, 30); block 9 is at (41, 30))
-            plan.append((1, None))
+        def goto_y(target_y: int):
+            nonlocal curr_y
+            dy = target_y - curr_y
+            steps = abs(dy) // row_pitch
+            act = 1 if dy < 0 else 2
+            for _ in range(steps):
+                plan.append((act, None))
+            curr_y = target_y
 
-            # 9. Extend pipe 1 time to column 41 (covers [8, 14, 9] in order -> Terminal Goal)
-            plan.append((4, None))
+        def extend_to(target_steps: int):
+            nonlocal curr_ext
+            d_ext = target_steps - curr_ext
+            act = 4 if d_ext > 0 else 3
+            for _ in range(abs(d_ext)):
+                plan.append((act, None))
+            curr_ext = target_steps
+
+        # Sequence blocks to match target_colors dynamically
+        if target_colors:
+            first_col = target_colors[0]
+            first_pos = block_pos.get(first_col, (24, 41))
+
+            # Position emitter at upper capture row
+            capture_row = max(12, first_pos[0] - row_pitch)
+            goto_y(capture_row)
+            extend_to(4)
+            goto_y(capture_row + row_pitch)
+            extend_to(0)
+            goto_y(capture_row + 3 * row_pitch)
+            extend_to(4)
+            extend_to(3)
+            goto_y(capture_row + 2 * row_pitch)
+            extend_to(4)
+        else:
+            extend_to(1)
 
         return plan
 

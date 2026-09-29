@@ -1,70 +1,171 @@
 # Inductive HCIR Learner Benchmark Report
-**Duration**: 117.62s across 9 game(s)
-**Total Score**: **16/18 (88.9%)**
+**Duration**: 574.20s across 25 game(s)
+**Total Score**: **14/183 (7.7%)**
 
 | Environment | Levels Completed | Total Actions | Total Baseline | Mean Efficiency |
 |---|---|---|---|---|
-| `dc22` | 2/2 | 76 | 161 | **238.6%** |
-| `ka59` | 2/2 | 61 | 137 | **236.3%** |
-| `tn36` | 2/2 | 16 | 104 | **628.6%** |
-| `bp35` | 2/2 | 61 | 69 | **116.3%** |
-| `su15` | 2/2 | 30 | 64 | **213.3%** |
-| `re86` | 2/2 | 56 | 68 | **123.3%** |
-| `tr87` | 2/2 | 39 | 112 | **308.9%** |
-| `ft09` | 1/2 | 100 | 55 | **537.5%** |
-| `sb26` | 1/2 | 324 | 46 | **100.0%** |
+| `ar25` | 2/8 | 605 | 157 | **38.9%** |
+| `bp35` | 0/9 | 46 | 21 | **0.0%** |
+| `cd82` | 0/6 | 200 | 55 | **0.0%** |
+| `cn04` | 0/6 | 150 | 29 | **0.0%** |
+| `dc22` | 1/6 | 358 | 161 | **105.4%** |
+| `ft09` | 0/6 | 338 | 43 | **0.0%** |
+| `g50t` | 0/7 | 260 | 78 | **0.0%** |
+| `ka59` | 0/7 | 200 | 28 | **0.0%** |
+| `lf52` | 0/10 | 138 | 32 | **0.0%** |
+| `lp85` | 0/8 | 260 | 17 | **0.0%** |
+| `ls20` | 1/7 | 153 | 145 | **52.4%** |
+| `m0r0` | 0/6 | 260 | 30 | **0.0%** |
+| `r11l` | 0/6 | 120 | 22 | **0.0%** |
+| `re86` | 0/8 | 200 | 26 | **0.0%** |
+| `s5i5` | 0/8 | 100 | 20 | **0.0%** |
+| `sb26` | 4/8 | 286 | 114 | **113.6%** |
+| `sc25` | 0/6 | 153 | 36 | **0.0%** |
+| `sk48` | 1/8 | 1119 | 238 | **113.0%** |
+| `sp80` | 1/6 | 102 | 97 | **162.5%** |
+| `su15` | 0/9 | 64 | 22 | **0.0%** |
+| `tn36` | 1/7 | 129 | 104 | **228.6%** |
+| `tr87` | 3/6 | 324 | 197 | **167.0%** |
+| `tu93` | 0/9 | 100 | 19 | **0.0%** |
+| `vc33` | 0/7 | 100 | 7 | **0.0%** |
+| `wa30` | 0/9 | 400 | 71 | **0.0%** |
 
 ## Level-by-Level Breakdown
-### Environment: `dc22`
+### Environment: `ar25`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 20 | 59 | 295.0% | 0 |
-| Level 2 | **PASSED** | 56 | 102 | 182.1% | 0 |
-
-### Environment: `ka59`
-| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
-|---|---|---|---|---|---|
-| Level 1 | **PASSED** | 11 | 28 | 254.5% | 0 |
-| Level 2 | **PASSED** | 50 | 109 | 218.0% | 0 |
-
-### Environment: `tn36`
-| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
-|---|---|---|---|---|---|
-| Level 1 | **PASSED** | 7 | 32 | 457.1% | 0 |
-| Level 2 | **PASSED** | 9 | 72 | 800.0% | 0 |
+| Level 1 | **PASSED** | 83 | 32 | 38.6% | 0 |
+| Level 2 | **PASSED** | 64 | 50 | 78.1% | 0 |
+| Level 3 | ACTIVE | 458 | 75 | 0.0% | 0 |
 
 ### Environment: `bp35`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 17 | 21 | 123.5% | 0 |
-| Level 2 | **PASSED** | 44 | 48 | 109.1% | 0 |
+| Level 1 | ACTIVE | 46 | 21 | 0.0% | 0 |
 
-### Environment: `su15`
+### Environment: `cd82`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 15 | 22 | 146.7% | 0 |
-| Level 2 | **PASSED** | 15 | 42 | 280.0% | 0 |
+| Level 1 | ACTIVE | 200 | 55 | 0.0% | 0 |
 
-### Environment: `re86`
+### Environment: `cn04`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 20 | 26 | 130.0% | 0 |
-| Level 2 | **PASSED** | 36 | 42 | 116.7% | 0 |
+| Level 1 | ACTIVE | 150 | 29 | 0.0% | 0 |
 
-### Environment: `tr87`
+### Environment: `dc22`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 14 | 54 | 385.7% | 0 |
-| Level 2 | **PASSED** | 25 | 58 | 232.0% | 0 |
+| Level 1 | **PASSED** | 28 | 59 | 210.7% | 0 |
+| Level 2 | ACTIVE | 330 | 102 | 0.0% | 0 |
 
 ### Environment: `ft09`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
-| Level 1 | **PASSED** | 4 | 43 | 1075.0% | 0 |
-| Level 2 | ACTIVE | 96 | 12 | 0.0% | 0 |
+| Level 1 | ACTIVE | 338 | 43 | 0.0% | 0 |
+
+### Environment: `g50t`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 260 | 78 | 0.0% | 0 |
+
+### Environment: `ka59`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 200 | 28 | 0.0% | 0 |
+
+### Environment: `lf52`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 138 | 32 | 0.0% | 0 |
+
+### Environment: `lp85`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 260 | 17 | 0.0% | 0 |
+
+### Environment: `ls20`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 21 | 22 | 104.8% | 0 |
+| Level 2 | ACTIVE | 132 | 123 | 0.0% | 0 |
+
+### Environment: `m0r0`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 260 | 30 | 0.0% | 0 |
+
+### Environment: `r11l`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 120 | 22 | 0.0% | 0 |
+
+### Environment: `re86`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 200 | 26 | 0.0% | 0 |
+
+### Environment: `s5i5`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 100 | 20 | 0.0% | 0 |
 
 ### Environment: `sb26`
 | Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
 |---|---|---|---|---|---|
 | Level 1 | **PASSED** | 9 | 18 | 200.0% | 0 |
-| Level 2 | ACTIVE | 315 | 28 | 0.0% | 0 |
+| Level 2 | **PASSED** | 15 | 28 | 186.7% | 0 |
+| Level 3 | **PASSED** | 15 | 18 | 120.0% | 0 |
+| Level 4 | **PASSED** | 31 | 19 | 61.3% | 0 |
+| Level 5 | ACTIVE | 216 | 31 | 0.0% | 0 |
+
+### Environment: `sc25`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 153 | 36 | 0.0% | 0 |
+
+### Environment: `sk48`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 27 | 61 | 225.9% | 0 |
+| Level 2 | ACTIVE | 1092 | 177 | 0.0% | 0 |
+
+### Environment: `sp80`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 12 | 39 | 325.0% | 0 |
+| Level 2 | ACTIVE | 90 | 58 | 0.0% | 0 |
+
+### Environment: `su15`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 64 | 22 | 0.0% | 0 |
+
+### Environment: `tn36`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 7 | 32 | 457.1% | 0 |
+| Level 2 | ACTIVE | 122 | 72 | 0.0% | 0 |
+
+### Environment: `tr87`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | **PASSED** | 22 | 54 | 245.5% | 0 |
+| Level 2 | **PASSED** | 25 | 58 | 232.0% | 0 |
+| Level 3 | **PASSED** | 21 | 40 | 190.5% | 0 |
+| Level 4 | ACTIVE | 256 | 45 | 0.0% | 0 |
+
+### Environment: `tu93`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 100 | 19 | 0.0% | 0 |
+
+### Environment: `vc33`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 100 | 7 | 0.0% | 0 |
+
+### Environment: `wa30`
+| Level | Completed | Actions | Baseline | Efficiency | Epistemic Probes |
+|---|---|---|---|---|---|
+| Level 1 | ACTIVE | 400 | 71 | 0.0% | 0 |

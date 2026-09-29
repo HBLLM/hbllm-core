@@ -43,6 +43,9 @@ from plugins.arc_agi_adapter.arc_skills.grammar_translation import (
 from plugins.arc_agi_adapter.arc_skills.hierarchical_pattern_grammar import (
     HierarchicalPatternGrammarSkillAcquisition,
 )
+from plugins.arc_agi_adapter.arc_skills.inductive_skill_factory import (
+    InductiveSkillFactory,
+)
 from plugins.arc_agi_adapter.arc_skills.inverted_buoyancy import (
     InvertedBuoyancySkillAcquisition,
 )
@@ -74,6 +77,9 @@ from plugins.arc_agi_adapter.arc_skills.morphology_synthesis import (
 from plugins.arc_agi_adapter.arc_skills.optical_mirror_reflection import (
     OpticalMirrorReflectionSkillAcquisition,
 )
+from plugins.arc_agi_adapter.arc_skills.perceptual_context import (
+    PerceptualSkillContext,
+)
 from plugins.arc_agi_adapter.arc_skills.permutation_algebra import (
     PermutationAlgebraSkillAcquisition,
     ToggleIncidenceModel,
@@ -88,10 +94,18 @@ from plugins.arc_agi_adapter.arc_skills.reticle_superposition import (
 from plugins.arc_agi_adapter.arc_skills.rigid_assembly import (
     RigidAssemblySkillAcquisition,
 )
+from plugins.arc_agi_adapter.arc_skills.spatial_resource_navigation import (
+    SpatialResourceNavigationSkillAcquisition,
+)
 from plugins.arc_agi_adapter.arc_skills.spatiotemporal import (
     AutonomousTrajectoryModel,
     EntityTrajectory,
     SpatiotemporalSkillAcquisition,
+)
+from plugins.arc_agi_adapter.arc_skills.structural_fingerprint import (
+    StructuralFingerprint,
+    StructuralTransferRegistry,
+    get_global_transfer_registry,
 )
 from plugins.arc_agi_adapter.arc_skills.temporal_echo import (
     TemporalEchoSkillAcquisition,
@@ -112,6 +126,12 @@ from plugins.arc_agi_adapter.arc_skills.vortex_attractor import (
 __all__ = [
     # Base protocol
     "BaseHierarchicalSkill",
+    # Perceptual and transfer layers
+    "PerceptualSkillContext",
+    "InductiveSkillFactory",
+    "StructuralFingerprint",
+    "StructuralTransferRegistry",
+    "get_global_transfer_registry",
     # Common subskills
     "BlockPushPlanner",
     "ColorCluster",
@@ -149,6 +169,7 @@ __all__ = [
     "RelationalAffordanceSkillAcquisition",
     "ReticleSuperpositionSkillAcquisition",
     "RigidAssemblySkillAcquisition",
+    "SpatialResourceNavigationSkillAcquisition",
     "SpatiotemporalSkillAcquisition",
     "TemporalEchoSkillAcquisition",
     "ToggleIncidenceModel",

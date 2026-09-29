@@ -27,6 +27,7 @@ from hbllm.hcir.skills.declarative import (
     SymbolicSubgoal,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from plugins.arc_agi_adapter.arc_skills.perceptual_context import PerceptualSkillContext
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,71 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         self._last_tpl_bytes = None
 
     @classmethod
+    def extract_panels(
+        cls, grid: np.ndarray
+    ) -> tuple[
+        np.ndarray | None,
+        np.ndarray | None,
+        tuple[int, int, int, int] | None,
+        tuple[int, int, int, int] | None,
+    ]:
+        """Perceptually locate template patch (top-left) and canvas patch (center)."""
+        if grid.ndim == 3:
+            grid = grid[-1]
+        pctx = PerceptualSkillContext.from_grid(grid)
+        H, W = grid.shape
+
+        # Candidate panels: rectangular entities or distinct subgrids
+        # Template is in the upper-left quadrant (r < H//2, c < W//2) with size >= 8x8
+        # Canvas is in the lower-middle quadrant (r >= H//3) with size >= 8x8
+        t_box = None
+        c_box = None
+
+        # Look for entities with 8 <= width <= 16 and 8 <= height <= 16
+        rect_entities = [
+            e for e in pctx.entities if 8 <= e.width <= 16 and 8 <= e.height <= 16 and e.area >= 50
+        ]
+
+        for e in rect_entities:
+            if e.centroid[0] < H // 2 and e.centroid[1] < W // 2:
+                if t_box is None or e.area > (t_box[2] - t_box[0]) * (t_box[3] - t_box[1]):
+                    t_box = (e.min_r, e.min_c, e.max_r + 1, e.max_c + 1)
+            elif e.centroid[0] >= H // 3:
+                if c_box is None or e.area > (c_box[2] - c_box[0]) * (c_box[3] - c_box[1]):
+                    c_box = (e.min_r, e.min_c, e.max_r + 1, e.max_c + 1)
+
+        # If distinct framed entities not detected, infer from quadrant clusters
+        if t_box is None:
+            tl_mask = (grid[: H // 2, : W // 2] != pctx.bg_color) & (grid[: H // 2, : W // 2] != 0)
+            pts = np.argwhere(tl_mask)
+            if len(pts) >= 16:
+                t_box = (
+                    int(np.min(pts[:, 0])),
+                    int(np.min(pts[:, 1])),
+                    int(np.max(pts[:, 0])) + 1,
+                    int(np.max(pts[:, 1])) + 1,
+                )
+
+        if c_box is None:
+            c_mask = (grid[H // 4 : 3 * H // 4, W // 4 : 3 * W // 4] != pctx.bg_color) & (
+                grid[H // 4 : 3 * H // 4, W // 4 : 3 * W // 4] != 0
+            )
+            pts = np.argwhere(c_mask)
+            if len(pts) >= 16:
+                pts[:, 0] += H // 4
+                pts[:, 1] += W // 4
+                c_box = (
+                    int(np.min(pts[:, 0])),
+                    int(np.min(pts[:, 1])),
+                    int(np.max(pts[:, 0])) + 1,
+                    int(np.max(pts[:, 1])) + 1,
+                )
+
+        t_patch = grid[t_box[0] : t_box[2], t_box[1] : t_box[3]] if t_box else None
+        c_patch = grid[c_box[0] : c_box[2], c_box[1] : c_box[3]] if c_box else None
+        return t_patch, c_patch, t_box, c_box
+
+    @classmethod
     def is_canvas_stamping_grid(
         cls, grid: np.ndarray, available_actions: list[int] | None = None
     ) -> bool:
@@ -145,32 +211,31 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         H, W = grid.shape[-2:]
         if H < 40 or W < 40:
             return False
-        t_patch = grid[3:13, 3:13]
-        c_patch = grid[34:44, 27:37]
-        if not (
-            t_patch.shape == (10, 10) and c_patch.shape == (10, 10) and len(np.unique(t_patch)) >= 2
-        ):
+
+        t_patch, c_patch, _, _ = cls.extract_panels(grid)
+        if t_patch is None or c_patch is None:
+            return False
+        if not (t_patch.shape == c_patch.shape and len(np.unique(t_patch)) >= 2):
             return False
         return len(cls.detect_swatches(grid)) >= 2
 
     @classmethod
     def detect_swatches(cls, grid: np.ndarray) -> list[dict[str, Any]]:
-        """Detect palette swatch buttons along row 2 dynamically."""
+        """Detect palette swatch buttons along top rows dynamically using perception."""
         if grid.ndim == 3:
             grid = grid[-1]
-        _, W = grid.shape
+        pctx = PerceptualSkillContext.from_grid(grid)
         swatches = []
-        for c in range(W - 4):
-            patch = grid[2:7, c : c + 5]
-            if patch.shape == (5, 5):
-                # 5x5 box with uniform 1-pixel border and distinct uniform 3x3 interior
-                border = np.concatenate([patch[0, :], patch[4, :], patch[:, 0], patch[:, 4]])
-                if len(np.unique(border)) == 1:
-                    interior = patch[1:4, 1:4]
-                    if len(np.unique(interior)) == 1 and interior[0, 0] != border[0]:
-                        col = int(interior[0, 0])
-                        if not any(s["color"] == col for s in swatches):
-                            swatches.append({"color": col, "coord": (c + 2, 4)})
+        H, W = grid.shape[-2:]
+        # Find small button entities in the header region (min_r <= H // 6)
+        for e in pctx.entities:
+            if e.min_r <= H // 6 and 3 <= e.width <= 8 and 3 <= e.height <= 8:
+                cr = int(round(e.centroid[0]))
+                cc = int(round(e.centroid[1]))
+                col = int(grid[cr, cc])
+                if col != pctx.bg_color and not any(s["color"] == col for s in swatches):
+                    swatches.append({"color": col, "coord": (cc, cr)})
+
         return swatches
 
     def detect_basket_pos(self, grid: np.ndarray) -> int:
@@ -244,8 +309,20 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         if grid.ndim == 3:
             grid = grid[-1]
 
-        template = grid[3:13, 3:13]
-        canvas = grid[34:44, 27:37]
+        template, canvas, t_box, c_box = self.extract_panels(grid)
+        if template is None or canvas is None:
+            return 5, 0.5, None
+
+        # Dynamically scale masks if canvas size is different from 10x10
+        ch, cw = canvas.shape
+        if ch != 10 or cw != 10:
+            from scipy.ndimage import zoom
+
+            for k in list(self.masks.keys()):
+                self.masks[k] = (
+                    zoom(self.masks[k].astype(float), (ch / 10.0, cw / 10.0), order=0) > 0.5
+                )
+            self.valid_mask = np.ones((ch, cw), dtype=bool)
 
         # Detect level transition
         tpl_bytes = template.tobytes()
@@ -319,6 +396,17 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
 
+    def can_handle(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Canvas stamping puzzles have actions {5, 6} (swatch + stencil stamp) and H, W >= 40."""
+        if set(available_actions) == {5, 6} and grid.shape[-2] >= 40 and grid.shape[-1] >= 40:
+            return True
+        return super().can_handle(grid, available_actions, metadata)
+
     def plan(
         self,
         grid: np.ndarray,
@@ -326,5 +414,9 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         metadata: dict[str, Any] | None = None,
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Standardized interface plan generation for visual canvas stencil stamping puzzles."""
+        if metadata and "knowledge_base" in metadata and metadata["knowledge_base"] is not None:
+            from plugins.arc_agi_adapter.arc_solvers.knowledge_base import PuzzleTypology
+
+            metadata["knowledge_base"].puzzle_typology = PuzzleTypology.CANVAS_STAMPING
         act, _, params = self.plan_canvas_stamping_step(grid)
         return [(act, params)]

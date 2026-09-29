@@ -285,8 +285,15 @@ class MorphologicalProgramSynthesis(DeclarativeNeuroSymbolicSkill):
                 for _ in range(abs(num_moves)):
                     plan.append((move_act, None))
         elif len(platforms) >= 2:
-            # Multi-platform cascade alignment
-            targets = [4, 8, 13]
+            # Multi-platform cascade alignment derived from liquid drop and spill edges
+            targets: list[int] = []
+            curr_cascade_x = drop_x // scale
+            for p in platforms:
+                # Align platform to catch the cascade from above and spill to the right
+                target_x = max(0, curr_cascade_x - 1)
+                targets.append(target_x)
+                curr_cascade_x = target_x + p["w"]
+
             for idx, (p, target_x) in enumerate(zip(platforms, targets)):
                 if idx > 0:
                     plan.append((6, {"x": p["cx"], "y": p["cy"]}))

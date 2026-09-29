@@ -132,6 +132,74 @@ class CounterfactualPlanner:
         self._world_kernel = WorldKernel(workspace)
         self._interpreter = HCIRInterpreter(workspace, services)
 
+    @classmethod
+    def predict_outcome(
+        cls,
+        grid: Any,
+        action_id: int,
+        action_model: Any = None,
+        avatar_color: Any = None,
+    ) -> Any:
+        """Predict forward grid outcome given an action and its learned causal action model."""
+        import numpy as np
+
+        if grid is None:
+            return np.zeros((1, 1), dtype=int)
+
+        curr = np.asarray(grid)
+        predicted = curr.copy()
+        if action_model is None:
+            return predicted
+
+        # 1. Motor translation model
+        delta = getattr(action_model, "delta", None) or getattr(
+            action_model, "translation_delta", None
+        )
+        if delta is None and hasattr(action_model, "delta_r") and hasattr(action_model, "delta_c"):
+            if action_model.delta_r != 0 or action_model.delta_c != 0:
+                delta = (action_model.delta_r, action_model.delta_c)
+        elif (
+            delta is None
+            and hasattr(action_model, "displacement")
+            and len(action_model.displacement) >= 2
+        ):
+            if action_model.displacement[0] != 0 or action_model.displacement[1] != 0:
+                delta = (
+                    int(round(action_model.displacement[0])),
+                    int(round(action_model.displacement[1])),
+                )
+
+        color = avatar_color or getattr(action_model, "avatar_color", None)
+
+        if delta is not None and color is not None:
+            dr, dc = delta
+            coords = np.argwhere(curr == color)
+            if len(coords) > 0:
+                H, W = curr.shape
+                for r, c in coords:
+                    predicted[r, c] = 0
+                for r, c in coords:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < H and 0 <= nc < W:
+                        predicted[nr, nc] = color
+            return predicted
+
+        # 2. General transition delta or mutation
+        if hasattr(action_model, "predict"):
+            try:
+                res = action_model.predict(curr)
+                if res is not None:
+                    return np.asarray(res)
+            except Exception:
+                pass
+
+        # 3. Heuristic novelty if action model is known viable
+        if getattr(action_model, "confidence", 0) >= 0.5:
+            # Mark pseudo-novelty
+            predicted[0, 0] = (predicted[0, 0] + 1) % 10
+
+        return predicted
+
     def _should_auto_use_mcts(
         self,
         goal: GoalNode,

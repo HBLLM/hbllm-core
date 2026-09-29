@@ -26,7 +26,6 @@ from hbllm.hcir.skills.common_subskills import (
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
-    AnyOf,
     DeclarativeNeuroSymbolicSkill,
     EntityCountPredicate,
     GridDimensionPredicate,
@@ -65,13 +64,7 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(required={6}),
-        AnyOf(
-            ActionAffordancePredicate(required={1}),
-            ActionAffordancePredicate(required={2}),
-            ActionAffordancePredicate(required={3}),
-            ActionAffordancePredicate(required={4}),
-        ),
+        ActionAffordancePredicate(required={1, 2, 3, 4, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
         PanelConstraint(
             min_row_ratio=45.0 / 64.0,
@@ -256,7 +249,7 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     @classmethod
     def detect_keypad_matrix(cls, grid: np.ndarray) -> list[list[tuple[int, int]]]:
-        """Dynamically detect the 3x3 keypad button centroids from observation grid."""
+        """Dynamically detect or interpolate the 3x3 keypad button centroids from observation grid."""
         buttons = cls._find_keypad_buttons(grid)
         if len(buttons) == 9:
             # Sort into 3 rows of 3
@@ -267,11 +260,26 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
                 sorted(buttons[6:9], key=lambda p: p[0]),
             ]
 
-        # Geometry fallback based on layout
+        # Dynamic lattice interpolation from detected candidates or lower control panel
+        if grid.ndim == 3:
+            grid = grid[-1]
+        H, W = grid.shape[-2:]
+        if len(buttons) >= 2:
+            bx = [p[0] for p in buttons]
+            by = [p[1] for p in buttons]
+            min_x, max_x = min(bx), max(bx)
+            min_y, max_y = min(by), max(by)
+            xs = [int(round(v)) for v in np.linspace(min_x, max_x, 3)]
+            ys = [int(round(v)) for v in np.linspace(min_y, max_y, 3)]
+        else:
+            # Derive lattice from lower-central control region relative to grid shape
+            xs = [int(round(W * ratio)) for ratio in (0.38, 0.46, 0.54)]
+            ys = [int(round(H * ratio)) for ratio in (0.78, 0.86, 0.94)]
+
         return [
-            [(25, 50), (30, 50), (35, 50)],
-            [(25, 55), (30, 55), (35, 55)],
-            [(25, 60), (30, 60), (35, 60)],
+            [(xs[0], ys[0]), (xs[1], ys[0]), (xs[2], ys[0])],
+            [(xs[0], ys[1]), (xs[1], ys[1]), (xs[2], ys[1])],
+            [(xs[0], ys[2]), (xs[1], ys[2]), (xs[2], ys[2])],
         ]
 
     @classmethod
@@ -323,15 +331,23 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
             elif sz >= 10 and goal_pos is None:
                 goal_pos = (cx, cy)
 
-        if glyph.incantation_type == IncantationType.TELEPORT:
-            dy = (goal_pos[1] - player_pos[1]) if (goal_pos and player_pos) else -12
-            plan.extend(DiscreteVectorTranslator.delta_to_actions(0, dy, step_size=2))
-        elif glyph.incantation_type == IncantationType.SHRINK_EXPAND:
-            dx = (goal_pos[0] - player_pos[0]) if (goal_pos and player_pos) else -28
-            plan.extend(DiscreteVectorTranslator.delta_to_actions(dx, 0, step_size=2))
-        elif glyph.incantation_type == IncantationType.PROJECTILE:
-            dy = (goal_pos[1] - player_pos[1]) if (goal_pos and player_pos) else -24
-            plan.extend(DiscreteVectorTranslator.delta_to_actions(0, dy, step_size=2))
+        # If goal is not explicitly isolated, detect passage opening in upper border
+        if goal_pos is None and player_pos is not None:
+            # Find gap in wall
+            wall_row = upper[5:15, :]
+            gaps = np.where(wall_row == bg)[1]
+            if len(gaps) > 0:
+                goal_pos = (int(np.median(gaps)), 10)
+            else:
+                goal_pos = (player_pos[0], max(0, player_pos[1] - 20))
+
+        if player_pos and goal_pos:
+            dx = goal_pos[0] - player_pos[0]
+            dy = goal_pos[1] - player_pos[1]
+            if glyph.incantation_type in (IncantationType.TELEPORT, IncantationType.PROJECTILE):
+                plan.extend(DiscreteVectorTranslator.delta_to_actions(0, dy, step_size=2))
+            elif glyph.incantation_type == IncantationType.SHRINK_EXPAND:
+                plan.extend(DiscreteVectorTranslator.delta_to_actions(dx, 0, step_size=2))
 
         return plan
 

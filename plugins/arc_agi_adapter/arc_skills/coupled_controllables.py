@@ -25,6 +25,7 @@ from hbllm.hcir.skills.declarative import (
     SymmetryPredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from plugins.arc_agi_adapter.arc_skills.perceptual_context import PerceptualSkillContext
 
 logger = logging.getLogger(__name__)
 
@@ -182,69 +183,61 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         return cls.signature.evaluate(ctx)
 
     @classmethod
-    def plan_mirrored_convergence_grid(cls, grid: Any) -> list[int]:
+    def plan_mirrored_convergence_grid(
+        cls,
+        grid: Any,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[int]:
         """Compute the joint convergence plan for mirrored multi-agent configuration."""
-        import numpy as np
+        if grid.ndim == 3:
+            grid = grid[-1]
 
-        bg_counts = np.bincount(grid.flatten())
-        top_colors = set(np.argsort(bg_counts)[-3:])
-        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
-            VisualTopologyExtractor,
-        )
+        pctx = PerceptualSkillContext.from_grid(grid, available_actions=[1, 2, 3, 4, 5, 6])
 
-        entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
-
+        # Find candidate mirrored avatars: 2 or 4 identical entities of the same color
         avatar_entities = []
-        for col in set(e.color for e in entities):
-            col_ents = [e for e in entities if e.color == col]
-            if len(col_ents) in (2, 4) and all(9 <= e.size <= 36 for e in col_ents):
-                avatar_entities = col_ents
-                break
+        for col, col_ents in pctx.entity_by_color.items():
+            if len(col_ents) in (2, 4) and all(4 <= e.area <= 64 for e in col_ents):
+                h0, w0 = col_ents[0].height, col_ents[0].width
+                if all(abs(e.height - h0) <= 1 and abs(e.width - w0) <= 1 for e in col_ents):
+                    avatar_entities = col_ents
+                    break
 
         if not avatar_entities or len(avatar_entities) <= 1:
             return []
 
-        scale = int(round(np.sqrt(avatar_entities[0].size)))
-        first_e = avatar_entities[0]
-        min_r, _, min_c, _ = first_e.bounding_box
-        offset_c = min_c % scale
-        offset_r = min_r % scale
+        scale = (
+            pctx.lattice_stride
+            if pctx.lattice_stride > 1
+            else max(avatar_entities[0].height, avatar_entities[0].width)
+        )
+        scale = max(1, scale)
 
-        grid_w = (grid.shape[1] - offset_c) // scale
-        grid_h = (grid.shape[0] - offset_r) // scale
+        offset_r = min(e.min_r for e in avatar_entities) % scale
+        offset_c = min(e.min_c for e in avatar_entities) % scale
 
-        inferred_grid_w = int(round(64 / scale))
-        if inferred_grid_w % 2 == 0 and inferred_grid_w > 11:
-            inferred_grid_w = 13
-        centered_offset_c = (64 - inferred_grid_w * scale) // 2
-        centered_offset_r = (64 - inferred_grid_w * scale) // 2
-
-        if (min_c - centered_offset_c) % scale == 0:
-            offset_c = centered_offset_c
-            offset_r = centered_offset_r
-            grid_w = inferred_grid_w
-            grid_h = inferred_grid_w
+        H, W = grid.shape
+        grid_w = max(1, (W - offset_c) // scale)
+        grid_h = max(1, (H - offset_r) // scale)
 
         avatars = []
         for e in sorted(avatar_entities, key=lambda x: x.centroid[1]):
-            min_r_e, _, min_c_e, _ = e.bounding_box
-            gx = (min_c_e - offset_c) // scale
-            gy = (min_r_e - offset_r) // scale
+            gx = (e.min_c - offset_c) // scale
+            gy = (e.min_r - offset_r) // scale
             avatars.append((gx, gy))
 
         # Dynamically determine walkable floor colors vs boundary walls
-        vals, counts = np.unique(grid, return_counts=True)
-        bg = vals[np.argmax(counts)]
+        bg = pctx.bg_color
         avatar_color = avatar_entities[0].color
 
-        # Floor colors are the dominant colors within the playable grid area
-        play_area = grid[offset_r : offset_r + grid_h * scale, offset_c : offset_c + grid_w * scale]
+        play_area = grid[
+            offset_r : offset_r + grid_h * scale,
+            offset_c : offset_c + grid_w * scale,
+        ]
         p_vals, p_counts = np.unique(play_area, return_counts=True)
-        # Top 2 most frequent colors in play area are floor colors
-        floor_candidates = set(p_vals[np.argsort(p_counts)[-3:]]) - {avatar_color}
+        top_play_colors = set(p_vals[np.argsort(p_counts)[-4:]]) - {avatar_color}
 
         walls = set()
-        spikes = set()
         for gy in range(grid_h):
             for gx in range(grid_w):
                 cell = grid[
@@ -252,11 +245,9 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
                     offset_c + gx * scale : offset_c + (gx + 1) * scale,
                 ]
                 cell_colors = set(np.unique(cell))
-                # If cell is predominantly floor or avatar, it is walkable
-                if cell_colors.issubset(floor_candidates | {avatar_color}):
+                if cell_colors.issubset(top_play_colors | {avatar_color}):
                     continue
-                # If cell contains boundary / outer background, it is a wall
-                if bg in cell_colors or len(cell_colors - floor_candidates - {avatar_color}) >= 1:
+                if bg in cell_colors or len(cell_colors - top_play_colors - {avatar_color}) >= 1:
                     walls.add((gx, gy))
 
         actions = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
@@ -266,31 +257,31 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
         mults = [(1, 1), (-1, 1)] if len(avatars) == 2 else [(1, 1), (-1, 1), (1, -1), (-1, -1)]
         found_path: list[int] | None = None
-        while queue:
+        max_expansions = 4000
+        max_depth = 35
+        expansions = 0
+
+        while queue and expansions < max_expansions:
+            expansions += 1
             state, path = queue.popleft()
             if len(state) <= 1:
                 found_path = path
                 break
 
+            if len(path) >= max_depth:
+                continue
+
             for act, (dx, dy) in actions.items():
                 new_pos = []
-                fatal = False
                 for i, (ax, ay) in enumerate(state):
-                    mx, my = mults[i]
+                    mx, my = mults[i] if i < len(mults) else (1, 1)
                     nx = ax + dx * mx
                     ny = ay + dy * my
                     if nx < 0 or nx >= grid_w or ny < 0 or ny >= grid_h or (nx, ny) in walls:
                         final_pos = (ax, ay)
                     else:
                         final_pos = (nx, ny)
-
-                    if final_pos in spikes:
-                        fatal = True
-                        break
                     new_pos.append(final_pos)
-
-                if fatal:
-                    continue
 
                 merged = list(new_pos)
                 for i in range(len(state)):
@@ -315,6 +306,9 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
                     visited.add(new_state)
                     queue.append((new_state, path + [act]))
 
+            if found_path is not None:
+                break
+
         return found_path or []
 
     # ═══════════════════════════════════════════════════════════════════════
@@ -328,4 +322,4 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         metadata: dict[str, Any] | None = None,
     ) -> list[int]:
         """Standardized interface plan generation for coupled controllable convergence."""
-        return self.plan_mirrored_convergence_grid(grid)
+        return self.plan_mirrored_convergence_grid(grid, metadata=metadata)

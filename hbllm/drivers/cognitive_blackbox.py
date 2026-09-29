@@ -1128,33 +1128,42 @@ class CognitiveBlackbox:
             and not state.active_skill_queue
         ):
             # ── Generic SkillRegistry Dispatch ──────────────────────────
-            # All domain-specific skills are registered via register_skill()
-            # and dispatched through the standardized BaseHierarchicalSkill protocol.
-            for skill in state.skill_registry:
-                try:
-                    if skill.can_handle(raw_grid, act_ids):
-                        plan = skill.plan_as_driver_actions(
-                            raw_grid,
-                            current_level=getattr(state, "current_level", 0),
-                        )
-                        if plan:
-                            state.active_skill_queue = list(plan)
-                            state.active_skill_name = skill.skill_name
-                            logger.info(
-                                "CognitiveBlackbox[%s]: SkillRegistry dispatched '%s' (%d actions)",
-                                source_id,
-                                skill.skill_name,
-                                len(plan),
+            # Core-first: give CognitiveBlackbox EXPLORATION_WINDOW steps to induce
+            # motor dynamics before any declarative skills intervene.
+            EXPLORATION_WINDOW = 8
+            core_has_model = len(state.action_models) >= min(2, len(act_ids)) and any(
+                getattr(m, "confidence", 0) >= 0.6 for m in state.action_models.values()
+            )
+            allow_skill_dispatch = state.step_count > EXPLORATION_WINDOW and (
+                not core_has_model or state.solver_stagnation_counter >= 5
+            )
+
+            if allow_skill_dispatch:
+                for skill in state.skill_registry:
+                    try:
+                        if skill.can_handle(raw_grid, act_ids):
+                            plan = skill.plan_as_driver_actions(
+                                raw_grid,
+                                current_level=getattr(state, "current_level", 0),
                             )
-                            return state.active_skill_queue.pop(0)
-                except Exception as e:
-                    logger.debug(
-                        "CognitiveBlackbox[%s]: Skill '%s' raised %s: %s",
-                        source_id,
-                        getattr(skill, "skill_name", "unknown"),
-                        type(e).__name__,
-                        e,
-                    )
+                            if plan:
+                                state.active_skill_queue = list(plan)
+                                state.active_skill_name = skill.skill_name
+                                logger.info(
+                                    "CognitiveBlackbox[%s]: SkillRegistry dispatched '%s' (%d actions)",
+                                    source_id,
+                                    skill.skill_name,
+                                    len(plan),
+                                )
+                                return state.active_skill_queue.pop(0)
+                    except Exception as e:
+                        logger.debug(
+                            "CognitiveBlackbox[%s]: Skill '%s' raised %s: %s",
+                            source_id,
+                            getattr(skill, "skill_name", "unknown"),
+                            type(e).__name__,
+                            e,
+                        )
 
         # Forward Mental Simulation & Epistemic World Planning (Domain-Agnostic)
         if (
@@ -1520,9 +1529,9 @@ class CognitiveBlackbox:
         other_actions = [a for a in available_actions if a.action_id != 6]
         if other_actions:
             should_try_other = False
-            if state.step_count > 0 and state.step_count % 8 == 0:
+            if state.solver_stagnation_counter >= 4 and state.step_count % 4 == 0:
                 should_try_other = True
-            elif state.quiescent_click_targets and state.step_count % 4 == 0:
+            elif len(state.quiescent_click_targets) > 5 and state.step_count % 4 == 0:
                 should_try_other = True
 
             if should_try_other:

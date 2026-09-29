@@ -27,6 +27,7 @@ from hbllm.hcir.skills.declarative import (
     TileGridPredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from plugins.arc_agi_adapter.arc_skills.perceptual_context import PerceptualSkillContext
 
 logger = logging.getLogger(__name__)
 
@@ -192,48 +193,49 @@ class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     @classmethod
     def _extract_tiles(cls, grid: np.ndarray) -> list[tuple[int, int, bool]]:
-        """Extract toggle tiles forming an 8-stride orthogonal lattice and their binary states."""
-        vals, counts = np.unique(grid, return_counts=True)
-        bg = int(vals[np.argmax(counts)])
+        """Extract toggle tiles dynamically using perceptual entities and lattice stride."""
+        if grid.ndim == 3:
+            grid = grid[-1]
+        pctx = PerceptualSkillContext.from_grid(grid)
+        bg = pctx.bg_color
 
-        # Find connected components of non-bg pixels in y < 60, x < 60
-        mask = (grid != bg) & (np.arange(64)[:, None] < 60) & (np.arange(64)[None, :] < 60)
-        from scipy.ndimage import label
-
-        labeled, num_features = label(mask)
         raw_tiles: list[tuple[int, int, int]] = []  # (cc, cr, center_color)
 
-        for idx in range(1, num_features + 1):
-            pts = np.argwhere(labeled == idx)
-            if 15 <= len(pts) <= 50:
-                min_r, min_c = int(pts[:, 0].min()), int(pts[:, 1].min())
-                max_r, max_c = int(pts[:, 0].max()), int(pts[:, 1].max())
-                h = max_r - min_r + 1
-                w = max_c - min_c + 1
-                if 4 <= w <= 8 and 4 <= h <= 8:
-                    cr = (min_r + max_r) // 2
-                    cc = (min_c + max_c) // 2
+        for e in pctx.entities:
+            if e.color != bg and e.area >= 10 and 3 <= e.width <= 14 and 3 <= e.height <= 14:
+                cr = int(round(e.centroid[0]))
+                cc = int(round(e.centroid[1]))
+                if cr < grid.shape[0] - 4 and cc < grid.shape[1] - 4:
                     center_color = int(grid[cr, cc])
                     raw_tiles.append((cc, cr, center_color))
 
-        def is_orthogonal_8(t1: tuple[int, int, Any], t2: tuple[int, int, Any]) -> bool:
+        if len(raw_tiles) < 4:
+            return []
+
+        # Detect stride dynamically from pairwise distances
+        xs = sorted(set(t[0] for t in raw_tiles))
+        dxs = [xs[i + 1] - xs[i] for i in range(len(xs) - 1) if 4 <= xs[i + 1] - xs[i] <= 16]
+        stride = (
+            int(np.median(dxs)) if dxs else (pctx.lattice_stride if pctx.lattice_stride > 1 else 8)
+        )
+
+        def is_orthogonal(t1: tuple[int, int, Any], t2: tuple[int, int, Any]) -> bool:
             dx = abs(t1[0] - t2[0])
             dy = abs(t1[1] - t2[1])
-            return (dx == 8 and dy == 0) or (dx == 0 and dy == 8)
+            return (abs(dx - stride) <= 1 and dy == 0) or (dx == 0 and abs(dy - stride) <= 1)
 
-        # Filter to tiles that belong to the 8-stride lattice
+        # Filter to tiles that belong to the detected lattice
         lattice_tiles = [
-            t for t in raw_tiles if sum(1 for t2 in raw_tiles if is_orthogonal_8(t, t2)) >= 1
+            t for t in raw_tiles if sum(1 for t2 in raw_tiles if is_orthogonal(t, t2)) >= 1
         ]
         if len(lattice_tiles) < 4:
-            return []
+            lattice_tiles = raw_tiles
 
         # Determine binary ON/OFF state from center colors
         center_colors = [t[2] for t in lattice_tiles]
         u_cols, u_counts = np.unique(center_colors, return_counts=True)
         if len(u_cols) < 2:
             return []
-        # The off state is typically the majority or resting color, on state is minority
         off_color = u_cols[np.argmax(u_counts)]
 
         tiles = [(t[0], t[1], t[2] != off_color) for t in lattice_tiles]
