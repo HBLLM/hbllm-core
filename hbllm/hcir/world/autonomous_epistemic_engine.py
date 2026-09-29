@@ -1003,7 +1003,19 @@ class AutonomousEpistemicEngine:
                     movable_actions.append((act, dr, dc))
 
         if not movable_actions:
-            for act, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
+            stride = 1
+            try:
+                from hbllm.hcir.skills.common_subskills import LatticeQuantizer
+
+                stride = LatticeQuantizer.detect_lattice_stride(curr_grid, bg_color=bg)
+            except Exception:
+                pass
+            for act, (dr, dc) in {
+                1: (-stride, 0),
+                2: (stride, 0),
+                3: (0, -stride),
+                4: (0, stride),
+            }.items():
                 if act in available_actions:
                     movable_actions.append((act, dr, dc))
 
