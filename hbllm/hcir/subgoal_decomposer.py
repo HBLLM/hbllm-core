@@ -416,6 +416,74 @@ class HierarchicalGoalDecomposer:
                 )
                 return frontier_subgoal
 
+        # 4. Obstacle clearance precondition synthesis:
+        # If path to goal is occluded by barrier cells, synthesize an interaction subgoal at the blocking cell
+        goal_pos = primary_goal.properties.get("target_position")
+        if goal_pos is not None:
+            gr, gc = int(goal_pos[0]), int(goal_pos[1])
+            free_path = PhysicsPredictor.compute_geodesic_path(
+                start=avatar_pos,
+                goal=(gr, gc),
+                barrier_cells=set(),
+                grid_shape=grid_shape,
+                step_size=step_size,
+            )
+            if free_path:
+                for pr, pc in free_path:
+                    if (pr, pc) in barrier_cells:
+                        clear_subgoal_id = f"clear_barrier_{pr}_{pc}"
+                        if clear_subgoal_id not in self.completed_subgoals:
+                            adj_cells = [
+                                (pr - step_size, pc),
+                                (pr + step_size, pc),
+                                (pr, pc - step_size),
+                                (pr, pc + step_size),
+                            ]
+                            for ar, ac in adj_cells:
+                                if (
+                                    0 <= ar < grid_shape[0]
+                                    and 0 <= ac < grid_shape[1]
+                                    and (ar, ac) not in barrier_cells
+                                ):
+                                    adj_path = PhysicsPredictor.compute_geodesic_path(
+                                        start=avatar_pos,
+                                        goal=(ar, ac),
+                                        barrier_cells=barrier_cells,
+                                        grid_shape=grid_shape,
+                                        step_size=step_size,
+                                    )
+                                    if adj_path:
+                                        clear_subgoal = GoalNode(
+                                            id=clear_subgoal_id,
+                                            description=f"Clear obstructing barrier at {(pr, pc)}",
+                                            priority=min(
+                                                1.0, max(0.0, float(primary_goal.priority))
+                                            ),
+                                            resolved=False,
+                                            properties={
+                                                "target_position": (ar, ac),
+                                                "interaction_target": (pr, pc),
+                                                "affordance": "INTERACTION",
+                                                "action": 6,
+                                            },
+                                        )
+                                        workspace.upsert_node(clear_subgoal)
+                                        dep_edge = HCIREdge(
+                                            edge_type=HCIREdgeType.DEPENDS_ON,
+                                            sources=[primary_goal.id],
+                                            targets=[clear_subgoal_id],
+                                            weight=1.0,
+                                        )
+                                        workspace.graph.add_edge(dep_edge)
+                                        logger.info(
+                                            "HierarchicalGoalDecomposer: Obstructed goal '%s' synthesized obstacle clearance '%s' at (%d, %d)",
+                                            primary_goal.id,
+                                            clear_subgoal_id,
+                                            pr,
+                                            pc,
+                                        )
+                                        return clear_subgoal
+
         return primary_goal
 
     def decompose_compound_preconditions(

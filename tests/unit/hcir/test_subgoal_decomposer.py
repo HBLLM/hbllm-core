@@ -151,3 +151,40 @@ def test_decomposer_with_skills() -> None:
     dep_edges = [e for e in edges if e.edge_type == HCIREdgeType.DEPENDS_ON]
     assert len(dep_edges) == 1
     assert subgoals[0].id in dep_edges[0].targets
+
+
+def test_decompose_obstructed_goal_synthesizes_barrier_clearance() -> None:
+    """Verify that HierarchicalGoalDecomposer synthesizes an obstacle clearance subgoal when path is blocked."""
+    decomposer = HierarchicalGoalDecomposer()
+    ws = HCIRWorkspaceState()
+
+    primary_goal = GoalNode(
+        id="goal_reach_chest",
+        description="Reach the treasure chest",
+        priority=1.0,
+        resolved=False,
+        properties={"target_position": (0, 4)},
+    )
+    ws.upsert_node(primary_goal)
+
+    # Path from (0, 0) to (0, 4) is blocked by a wall of barriers dividing column 2
+    barrier_cells = {(r, 2) for r in range(5)}
+    grid_shape = (5, 5)
+
+    subgoal = decomposer.decompose_goal(
+        workspace=ws,
+        primary_goal=primary_goal,
+        avatar_pos=(0, 0),
+        barrier_cells=barrier_cells,
+        grid_shape=grid_shape,
+        step_size=1,
+    )
+
+    assert subgoal.id == "clear_barrier_0_2"
+    assert subgoal.properties["interaction_target"] == (0, 2)
+    assert subgoal.properties["target_position"] == (0, 1)  # Stance cell adjacent to barrier
+    # Verify primary goal now depends on the clearance subgoal
+    edges = ws.graph.edges_from(primary_goal.id)
+    dep_edges = [e for e in edges if e.edge_type == HCIREdgeType.DEPENDS_ON]
+    assert len(dep_edges) == 1
+    assert "clear_barrier_0_2" in dep_edges[0].targets

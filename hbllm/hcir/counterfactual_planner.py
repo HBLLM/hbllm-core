@@ -139,6 +139,10 @@ class CounterfactualPlanner:
         action_id: int,
         action_model: Any = None,
         avatar_color: Any = None,
+        action_data: dict[str, int] | None = None,
+        movable_colors: set[int] | None = None,
+        destructible_colors: set[int] | None = None,
+        gravity: tuple[int, int] | None = None,
     ) -> Any:
         """Predict forward grid outcome given an action and its learned causal action model."""
         import numpy as np
@@ -148,10 +152,43 @@ class CounterfactualPlanner:
 
         curr = np.asarray(grid)
         predicted = curr.copy()
+        H, W = curr.shape[-2:]
+        if curr.ndim == 3:
+            curr = curr[-1]
+            predicted = curr.copy()
+
+        # Identify background color (mode)
+        vals, counts = np.unique(curr, return_counts=True)
+        bg = int(vals[np.argmax(counts)])
+
+        # ── 1. Click-destruction and impulse mechanics (Action 6) ─────────────
+        if action_id == 6:
+            tx = action_data.get("x") if action_data else None
+            ty = action_data.get("y") if action_data else None
+            if tx is not None and ty is not None and 0 <= ty < H and 0 <= tx < W:
+                target_col = int(curr[ty, tx])
+                # Destruction: if clicked cell is non-background and destructible or obstacle
+                if target_col != bg and (
+                    destructible_colors is None or target_col in destructible_colors
+                ):
+                    predicted[ty, tx] = bg
+                # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward click
+                if movable_colors:
+                    for r in range(max(0, ty - 8), min(H, ty + 9)):
+                        for c in range(max(0, tx - 8), min(W, tx + 9)):
+                            if int(curr[r, c]) in movable_colors and (r, c) != (ty, tx):
+                                dr = 1 if ty > r else (-1 if ty < r else 0)
+                                dc = 1 if tx > c else (-1 if tx < c else 0)
+                                nr, nc = r + dr, c + dc
+                                if 0 <= nr < H and 0 <= nc < W and predicted[nr, nc] in (bg, 0):
+                                    predicted[nr, nc] = curr[r, c]
+                                    predicted[r, c] = bg
+                return predicted
+
         if action_model is None:
             return predicted
 
-        # 1. Motor translation model
+        # ── 2. Motor translation with collision and push dynamics ────────────
         delta = getattr(action_model, "delta", None) or getattr(
             action_model, "translation_delta", None
         )
@@ -175,16 +212,57 @@ class CounterfactualPlanner:
             dr, dc = delta
             coords = np.argwhere(curr == color)
             if len(coords) > 0:
-                H, W = curr.shape
-                for r, c in coords:
-                    predicted[r, c] = 0
+                can_move = True
+                push_displacements: list[tuple[int, int, int, int, int]] = []
+
                 for r, c in coords:
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < H and 0 <= nc < W:
-                        predicted[nr, nc] = color
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        can_move = False
+                        break
+                    dest_col = int(curr[nr, nc])
+                    if dest_col == color or dest_col == bg or dest_col == 0:
+                        continue
+                    # Check movable push dynamics
+                    if movable_colors and dest_col in movable_colors:
+                        nnr, nnc = nr + dr, nc + dc
+                        if 0 <= nnr < H and 0 <= nnc < W and curr[nnr, nnc] in (bg, 0):
+                            push_displacements.append((nr, nc, nnr, nnc, dest_col))
+                        else:
+                            can_move = False
+                            break
+                    # Check destructible affordance
+                    elif destructible_colors and dest_col in destructible_colors:
+                        # Destructible obstacle cleared upon moving into it
+                        pass
+                    else:
+                        can_move = False
+                        break
+
+                if can_move:
+                    for onr, onc, nnr, nnc, d_col in push_displacements:
+                        predicted[nnr, nnc] = d_col
+                    for r, c in coords:
+                        predicted[r, c] = bg
+                    for r, c in coords:
+                        predicted[r + dr, c + dc] = color
+
+            # ── 3. Cellular gravity / buoyancy settling ───────────────────────
+            if gravity is not None and movable_colors:
+                g_dr, g_dc = gravity
+                if g_dr > 0:  # Downward gravity
+                    for r in range(H - 2, -1, -1):
+                        for c in range(W):
+                            if int(predicted[r, c]) in movable_colors:
+                                curr_r = r
+                                while curr_r + 1 < H and predicted[curr_r + 1, c] in (bg, 0):
+                                    predicted[curr_r + 1, c] = predicted[curr_r, c]
+                                    predicted[curr_r, c] = bg
+                                    curr_r += 1
+
             return predicted
 
-        # 2. General transition delta or mutation
+        # ── 4. General transition delta or mutation ──────────────────────────
         if hasattr(action_model, "predict"):
             try:
                 res = action_model.predict(curr)
@@ -193,9 +271,8 @@ class CounterfactualPlanner:
             except Exception:
                 pass
 
-        # 3. Heuristic novelty if action model is known viable
+        # ── 5. Heuristic novelty if action model is known viable ─────────────
         if getattr(action_model, "confidence", 0) >= 0.5:
-            # Mark pseudo-novelty
             predicted[0, 0] = (predicted[0, 0] + 1) % 10
 
         return predicted

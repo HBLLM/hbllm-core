@@ -140,3 +140,71 @@ async def test_spatial_counterfactual_planner_prunes_deadlock() -> None:
     assert best is not None
     # act_push_up should have been penalized heavily due to corner deadlock
     assert best.action.id == "act_move_right"
+
+
+def test_predict_outcome_click_destruction() -> None:
+    """Verify CounterfactualPlanner.predict_outcome clears clicked obstacles on Action 6."""
+    import numpy as np
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 2] = 4  # Obstacle
+
+    out = CounterfactualPlanner.predict_outcome(
+        grid=grid,
+        action_id=6,
+        action_data={"x": 2, "y": 2},
+        destructible_colors={4},
+    )
+
+    assert out[2, 2] == 0  # Cleared to background
+
+
+def test_predict_outcome_push_dynamics() -> None:
+    """Verify CounterfactualPlanner.predict_outcome displaces movable objects when pushed."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 1] = 1  # Avatar
+    grid[2, 2] = 2  # Movable box
+    # (2, 3) is 0 (empty)
+
+    action_model = SimpleNamespace(delta=(0, 1), confidence=0.9)
+
+    out = CounterfactualPlanner.predict_outcome(
+        grid=grid,
+        action_id=4,  # Move right
+        action_model=action_model,
+        avatar_color=1,
+        movable_colors={2},
+    )
+
+    assert out[2, 1] == 0  # Old avatar pos empty
+    assert out[2, 2] == 1  # Avatar moved here
+    assert out[2, 3] == 2  # Box pushed here
+
+
+def test_predict_outcome_cellular_gravity() -> None:
+    """Verify CounterfactualPlanner.predict_outcome settles unsupported movable pixels downward."""
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[1, 2] = 3  # Falling sand/block
+    # Rows 2, 3, 4 are 0 (empty)
+
+    action_model = SimpleNamespace(delta=(0, 0), confidence=0.8)
+
+    out = CounterfactualPlanner.predict_outcome(
+        grid=grid,
+        action_id=0,
+        action_model=action_model,
+        avatar_color=1,
+        movable_colors={3},
+        gravity=(1, 0),
+    )
+
+    assert out[1, 2] == 0  # Fell from row 1
+    assert out[4, 2] == 3  # Settled at floor (row 4)
