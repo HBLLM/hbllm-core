@@ -8,26 +8,62 @@ from typing import Any
 
 import numpy as np
 
-# Ensure HBLLM Core is on sys.path (Kaggle dataset or local checkout)
-for root, dirs, _ in os.walk("/kaggle/input"):
-    if "hbllm" in dirs:
-        if root not in sys.path:
-            sys.path.insert(0, root)
+# ─────────────────────────────────────────────────────────────────────────
+# CRITICAL: Ensure HBLLM Core is importable BEFORE any other import.
+# On Kaggle, the dataset zip extracts to /kaggle/input/<dataset-slug>/
+# and we need the ROOT of the extracted zip on sys.path so that
+# `from hbllm.xxx import yyy` and `from plugins.xxx import yyy` both work.
+# ─────────────────────────────────────────────────────────────────────────
+
+_hbllm_resolved = False
+
+# 1. Fast explicit path check (covers 99% of Kaggle cases)
+_KAGGLE_DATASET_CANDIDATES = [
+    "/kaggle/input/hbllm-kaggle-dataset",
+    "/kaggle/input/hbllm-core",
+    "/kaggle/input/hbllm",
+    "/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset",
+]
+
+for _cand in _KAGGLE_DATASET_CANDIDATES:
+    if os.path.isdir(os.path.join(_cand, "hbllm")):
+        if _cand not in sys.path:
+            sys.path.insert(0, _cand)
+        _hbllm_resolved = True
+        print(f"[HBLLM] Resolved core from: {_cand}", flush=True)
         break
 
-# Portable local development fallback
-_here = Path(__file__).resolve().parent
-for cand in [_here.parent, _here.parent.parent, Path.cwd()]:
-    if (cand / "hbllm").exists() and str(cand) not in sys.path:
-        sys.path.insert(0, str(cand))
-        break
+# 2. Recursive fallback: walk /kaggle/input (limited depth to avoid slowness)
+if not _hbllm_resolved:
+    for _root, _dirs, _ in os.walk("/kaggle/input"):
+        if _root.count(os.sep) - "/kaggle/input".count(os.sep) > 2:
+            _dirs.clear()  # Don't descend too deep
+            continue
+        if "hbllm" in _dirs and "plugins" in _dirs:
+            if _root not in sys.path:
+                sys.path.insert(0, _root)
+            _hbllm_resolved = True
+            print(f"[HBLLM] Resolved core from walk: {_root}", flush=True)
+            break
 
-# Locate ARC-AGI-3-Agents framework if present
-for root, dirs, _ in os.walk("/kaggle"):
-    if "ARC-AGI-3-Agents" in dirs:
-        p = os.path.join(root, "ARC-AGI-3-Agents")
-        if p not in sys.path:
-            sys.path.insert(0, p)
+# 3. Local development fallback
+if not _hbllm_resolved:
+    _here = Path(__file__).resolve().parent
+    for _cand_local in [_here.parent, _here.parent.parent, Path.cwd()]:
+        if (_cand_local / "hbllm").exists() and str(_cand_local) not in sys.path:
+            sys.path.insert(0, str(_cand_local))
+            _hbllm_resolved = True
+            break
+
+# 4. Locate ARC-AGI-3-Agents framework if present
+for _root, _dirs, _ in os.walk("/kaggle"):
+    if _root.count(os.sep) > 5:
+        _dirs.clear()
+        continue
+    if "ARC-AGI-3-Agents" in _dirs:
+        _p = os.path.join(_root, "ARC-AGI-3-Agents")
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
         break
 
 try:
@@ -80,7 +116,19 @@ except ImportError:
 logging.getLogger("hbllm").setLevel(logging.ERROR)
 logging.getLogger("arc_agi").setLevel(logging.ERROR)
 
-from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
+# CRITICAL: This import MUST succeed or the agent is dead.
+# Print explicit diagnostics if it fails.
+try:
+    from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
+except ImportError as _ie:
+    print(f"[HBLLM FATAL] Cannot import InductiveHCIRAgent: {_ie}", file=sys.stderr, flush=True)
+    print(f"[HBLLM FATAL] sys.path = {sys.path}", file=sys.stderr, flush=True)
+    print(
+        f"[HBLLM FATAL] /kaggle/input contents: {os.listdir('/kaggle/input') if os.path.exists('/kaggle/input') else 'N/A'}",
+        file=sys.stderr,
+        flush=True,
+    )
+    raise
 
 
 class MyAgent(Agent):

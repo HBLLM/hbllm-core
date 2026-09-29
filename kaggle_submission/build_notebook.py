@@ -163,9 +163,32 @@ def build() -> dict:
         \"\"\")
             print("✓ Configured .env for gateway sidecar with ONLY_RESET_LEVELS=true.")
 
-            # 6. Run the competition tournament! The gateway records actions and emits submission.parquet.
+            # 6. Discover HBLLM dataset root and add to PYTHONPATH for framework subprocess
+            hbllm_dataset_root = None
+            for cand in [
+                '/kaggle/input/hbllm-kaggle-dataset',
+                '/kaggle/input/hbllm-core',
+                '/kaggle/input/hbllm',
+                '/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset',
+            ]:
+                if os.path.isdir(os.path.join(cand, 'hbllm')):
+                    hbllm_dataset_root = cand
+                    break
+            if hbllm_dataset_root is None:
+                # Fallback: search /kaggle/input for hbllm dir
+                for root, dirs, _ in os.walk('/kaggle/input'):
+                    if 'hbllm' in dirs and 'plugins' in dirs:
+                        hbllm_dataset_root = root
+                        break
+            if hbllm_dataset_root is None:
+                hbllm_dataset_root = '/kaggle/input/hbllm-kaggle-dataset'
+                print(f"⚠️ Could not find HBLLM dataset, defaulting to: {hbllm_dataset_root}")
+            print(f"✓ HBLLM dataset root: {hbllm_dataset_root}")
+
+            # 7. Run the competition tournament! The gateway records actions and emits submission.parquet.
             print("🎮 Launching MyAgent tournament against gateway sidecar...")
             !cd /kaggle/working/ARC-AGI-3-Agents && \\
+                PYTHONPATH="{hbllm_dataset_root}:$PYTHONPATH" \\
                 MPLBACKEND=agg \\
                 ONLY_RESET_LEVELS=true \\
                 python main.py --agent myagent
