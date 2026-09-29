@@ -21,6 +21,7 @@ from hbllm.hcir.skills.declarative import (
     SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
+    TileFramePredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -200,3 +201,24 @@ def test_declarative_neuro_symbolic_skill(sample_grid: np.ndarray) -> None:
     assert driver_actions[0].action_id == 6
     assert driver_actions[0].parameters == {"x": 50, "y": 12}
     assert driver_actions[1].action_id == 1
+
+
+def test_tile_frame_predicate() -> None:
+    grid = np.zeros((30, 30), dtype=int)
+    # Add two 7x7 wireframe tiles with color 3
+    # Tile 1 at (5, 5)
+    grid[5, 5:12] = 3
+    grid[11, 5:12] = 3
+    grid[5:12, 5] = 3
+    grid[5:12, 11] = 3
+
+    # Tile 2 at (5, 18)
+    grid[5, 18:25] = 3
+    grid[11, 18:25] = 3
+    grid[5:12, 18] = 3
+    grid[5:12, 24] = 3
+
+    ctx = SkillEvaluationContext(grid=grid, available_actions=[1])
+    assert TileFramePredicate(frame_size=7, min_frames=2).evaluate(ctx) is True
+    assert TileFramePredicate(frame_size=7, min_frames=3).evaluate(ctx) is False
+    assert TileFramePredicate(frame_size=5, min_frames=1).evaluate(ctx) is False

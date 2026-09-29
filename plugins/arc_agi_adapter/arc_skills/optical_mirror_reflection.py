@@ -16,8 +16,8 @@ import numpy as np
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
-    AnyOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityBoundingBoxPredicate,
     GridDimensionPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
@@ -35,14 +35,9 @@ class OpticalMirrorReflectionSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(required={5, 7}),
-        AnyOf(
-            ActionAffordancePredicate(required={1}),
-            ActionAffordancePredicate(required={2}),
-            ActionAffordancePredicate(required={3}),
-            ActionAffordancePredicate(required={4}),
-        ),
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6, 7}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        EntityBoundingBoxPredicate(min_height=30, max_width=3, min_count=1),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -178,15 +173,6 @@ class OpticalMirrorReflectionSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for optical mirror reflection puzzles."""
-        return self.is_optical_mirror_reflection_grid(grid, available_actions)
 
     def plan(
         self,

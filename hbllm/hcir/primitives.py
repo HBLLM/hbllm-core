@@ -61,13 +61,15 @@ class EntityComponent:
 
 
 def detect_background_color(grid: Grid) -> int:
-    """Detect dominant border/background color (defaulting to 0 if present)."""
+    """Detect dominant border/background color."""
     h, w = grid.shape
-    if 0 in grid:
-        return 0
     border = list(grid[0, :]) + list(grid[h - 1, :]) + list(grid[:, 0]) + list(grid[:, w - 1])
     if border:
-        return int(Counter(border).most_common(1)[0][0])
+        most_common, count = Counter(border).most_common(1)[0]
+        if count >= len(border) * 0.25:
+            return int(most_common)
+    if 0 in grid:
+        return 0
     return int(Counter(grid.flatten()).most_common(1)[0][0])
 
 

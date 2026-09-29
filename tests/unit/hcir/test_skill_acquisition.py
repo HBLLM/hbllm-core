@@ -13,17 +13,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from hbllm.hcir.skills import (
+from hbllm.hcir.skills import GF2LinearSolver
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from plugins.arc_agi_adapter.arc_skills import (
     AutonomousTrajectoryModel,
     CoupledControllableSkillAcquisition,
-    GF2LinearSolver,
     KinematicMomentumSkillAcquisition,
     MorphologicalProgramSynthesis,
     PermutationAlgebraSkillAcquisition,
     RelationalAffordanceSkillAcquisition,
     SpatiotemporalSkillAcquisition,
 )
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Spatiotemporal Dynamics & Periodic Phase

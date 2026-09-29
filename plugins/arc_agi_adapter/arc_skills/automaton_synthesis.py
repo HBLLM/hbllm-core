@@ -21,6 +21,7 @@ from hbllm.hcir.skills.declarative import (
     EntityCountPredicate,
     GridDimensionPredicate,
     PanelConstraint,
+    SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -42,7 +43,7 @@ class AutomatonProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         PanelConstraint(
             min_row_ratio=30.0 / 64.0,
             max_row_ratio=50.0 / 64.0,
-            contains_entities=EntityCountPredicate(min_count=8, min_area=3, max_area=3),
+            contains_entities=EntityCountPredicate(min_count=6, min_area=3, max_area=3),
         ),
     )
 
@@ -61,52 +62,8 @@ class AutomatonProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     @classmethod
     def is_automaton_synthesis_grid(cls, grid: np.ndarray, available_actions: list[int]) -> bool:
         """Detect whether the grid contains an automaton programming synthesis puzzle."""
-        # tn36 signature: click action [6] only
-        if set(available_actions) != {6}:
-            return False
-
-        if grid.ndim == 3:
-            grid = grid[-1]
-
-        H, W = grid.shape
-        if H != 64 or W != 64:
-            return False
-
-        # Detect automaton synthesis puzzle dynamically:
-        # 1. Click-only interface (action 6)
-        # 2. Contains linear 3-pixel register bits in the programming band (y in [30, 50])
-        # 3. Contains bottom control / execution buttons (y >= 45)
-        subgrid = grid[30:50, :]
-        visited = np.zeros_like(subgrid, dtype=bool)
-        three_pixel_count = 0
-
-        for y in range(subgrid.shape[0]):
-            for x in range(subgrid.shape[1]):
-                if not visited[y, x]:
-                    c = subgrid[y, x]
-                    q = [(y, x)]
-                    visited[y, x] = True
-                    comp = []
-                    while q:
-                        cy, cx = q.pop()
-                        comp.append((cy, cx))
-                        for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                            ny, nx = cy + dy, cx + dx
-                            if 0 <= ny < subgrid.shape[0] and 0 <= nx < subgrid.shape[1]:
-                                if not visited[ny, nx] and subgrid[ny, nx] == c:
-                                    visited[ny, nx] = True
-                                    q.append((ny, nx))
-                    if len(comp) == 3:
-                        min_y = min(p[0] for p in comp)
-                        max_y = max(p[0] for p in comp)
-                        min_x = min(p[1] for p in comp)
-                        max_x = max(p[1] for p in comp)
-                        if (max_y - min_y == 2 and min_x == max_x) or (
-                            max_x - min_x == 2 and min_y == max_y
-                        ):
-                            three_pixel_count += 1
-
-        return three_pixel_count >= 8
+        ctx = SkillEvaluationContext(grid=grid, available_actions=available_actions)
+        return cls.signature.evaluate(ctx)
 
     @classmethod
     def plan_automaton_synthesis_grid(
@@ -226,15 +183,6 @@ class AutomatonProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for automaton programming synthesis puzzles."""
-        return self.is_automaton_synthesis_grid(grid, available_actions)
 
     def plan(
         self,

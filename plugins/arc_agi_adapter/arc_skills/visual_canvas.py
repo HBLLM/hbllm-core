@@ -20,7 +20,9 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityBoundingBoxPredicate,
     GridDimensionPredicate,
+    PanelConstraint,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -39,6 +41,20 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(required={5, 6}, forbidden={7}),
         GridDimensionPredicate(min_height=40, min_width=40),
+        PanelConstraint(
+            min_row_ratio=3.0 / 64.0,
+            max_row_ratio=13.0 / 64.0,
+            min_col_ratio=3.0 / 64.0,
+            max_col_ratio=13.0 / 64.0,
+            min_distinct_colors=2,
+        ),
+        PanelConstraint(
+            min_row_ratio=2.0 / 64.0,
+            max_row_ratio=7.0 / 64.0,
+            contains_entities=EntityBoundingBoxPredicate(
+                min_width=4, max_width=6, min_height=4, max_height=6, min_count=2
+            ),
+        ),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -302,15 +318,6 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for visual canvas stencil stamping puzzles."""
-        return self.is_canvas_stamping_grid(grid, available_actions)
 
     def plan(
         self,

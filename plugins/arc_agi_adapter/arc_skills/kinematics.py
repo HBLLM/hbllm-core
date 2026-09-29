@@ -18,6 +18,7 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    MetadataPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -47,6 +48,7 @@ class KinematicMomentumSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(required={1, 2, 3, 4}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        MetadataPredicate(key="is_sliding", expected_value=True),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -186,18 +188,9 @@ class KinematicMomentumSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
 
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for kinematic sliding environment recognition."""
-        if self.model.is_sliding_environment:
-            return True
-        if metadata and metadata.get("is_sliding"):
-            return True
-        return False
+    def get_metadata(self) -> dict[str, Any]:
+        """Contribute learned sliding state to declarative context metadata."""
+        return {"is_sliding": self.model.is_sliding_environment}
 
     def plan(
         self,

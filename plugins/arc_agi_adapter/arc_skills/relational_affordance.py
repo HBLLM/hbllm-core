@@ -17,7 +17,9 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
     GridDimensionPredicate,
+    PixelDensityPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -48,6 +50,8 @@ class RelationalAffordanceSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={1, 2, 3, 4, 6, 7}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        PixelDensityPredicate(min_row_ratio=52.0 / 64.0, max_row_ratio=62.0 / 64.0, max_count=19),
+        EntityCountPredicate(min_count=4, min_area=6, max_area=25),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -288,15 +292,6 @@ class RelationalAffordanceSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for peg solitaire relational affordances."""
-        return self.is_peg_solitaire_grid(grid, available_actions)
 
     def plan(
         self,

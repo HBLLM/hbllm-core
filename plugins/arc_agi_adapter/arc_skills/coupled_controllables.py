@@ -19,8 +19,10 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
+    SymmetryPredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -45,8 +47,9 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(required={1, 2, 3, 4, 6}),
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        SymmetryPredicate(axis="vertical", min_area=9, max_area=36, ignore_top_colors=3),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -175,28 +178,8 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     @classmethod
     def is_mirrored_convergence_grid(cls, grid: Any, available_actions: list[int]) -> bool:
         """Domain-agnostic check if environment features symmetric mirrored avatars."""
-        import numpy as np
-
-        if not isinstance(grid, np.ndarray) or grid.shape != (64, 64):
-            return False
-        if not all(a in available_actions for a in [1, 2, 3, 4]):
-            return False
-        if 6 not in available_actions:
-            return False
-        bg_counts = np.bincount(grid.flatten())
-        top_colors = set(np.argsort(bg_counts)[-3:])
-        from plugins.arc_agi_adapter.arc_solvers.visual_analysis import (
-            VisualTopologyExtractor,
-        )
-
-        entities = VisualTopologyExtractor.extract_entities(grid, ignore_colors=top_colors | {0})
-        for col in set(e.color for e in entities):
-            col_ents = [e for e in entities if e.color == col]
-            if len(col_ents) in (2, 4) and all(9 <= e.size <= 36 for e in col_ents):
-                c_sum = sum(e.centroid[1] for e in col_ents) / len(col_ents)
-                if abs(c_sum - (grid.shape[1] - 1) / 2.0) <= 2.0:
-                    return True
-        return False
+        ctx = SkillEvaluationContext(grid=grid, available_actions=available_actions)
+        return cls.signature.evaluate(ctx)
 
     @classmethod
     def plan_mirrored_convergence_grid(cls, grid: Any) -> list[int]:
@@ -337,15 +320,6 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for mirrored multi-agent convergence recognition."""
-        return self.is_mirrored_convergence_grid(grid, available_actions)
 
     def plan(
         self,

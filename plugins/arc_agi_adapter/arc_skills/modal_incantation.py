@@ -28,6 +28,7 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     AnyOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
     GridDimensionPredicate,
     PanelConstraint,
     SubgoalSequence,
@@ -78,6 +79,13 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
             min_col_ratio=2.0 / 64.0,
             max_col_ratio=25.0 / 64.0,
             min_distinct_colors=2,
+        ),
+        PanelConstraint(
+            min_row_ratio=42.0 / 64.0,
+            max_row_ratio=63.0 / 64.0,
+            min_col_ratio=15.0 / 64.0,
+            max_col_ratio=50.0 / 64.0,
+            contains_entities=EntityCountPredicate(min_count=9, min_area=4, max_area=9),
         ),
     )
 
@@ -330,15 +338,6 @@ class ModalIncantationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for modal incantation keypad puzzles."""
-        return self.is_incantation_grid(grid, available_actions)
 
     def plan(
         self,

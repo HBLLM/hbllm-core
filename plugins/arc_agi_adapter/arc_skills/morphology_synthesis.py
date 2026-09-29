@@ -19,7 +19,10 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
     GridDimensionPredicate,
+    PanelConstraint,
+    PixelDensityPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -48,6 +51,13 @@ class MorphologicalProgramSynthesis(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        PixelDensityPredicate(max_row_ratio=10.0 / 64.0, min_count=1),
+        PixelDensityPredicate(min_row_ratio=50.0 / 64.0, min_count=20),
+        PanelConstraint(
+            min_row_ratio=14.0 / 64.0,
+            max_row_ratio=48.0 / 64.0,
+            contains_entities=EntityCountPredicate(min_count=1, min_area=8),
+        ),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -294,15 +304,6 @@ class MorphologicalProgramSynthesis(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for morphological gravity spill puzzles."""
-        return self.is_gravity_spill_grid(grid, available_actions)
 
     def plan(
         self,

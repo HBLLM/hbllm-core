@@ -17,9 +17,14 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
     GridDimensionPredicate,
+    Not,
+    PanelConstraint,
+    SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
+    TileGridPredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -62,6 +67,14 @@ class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        TileGridPredicate(min_tiles=4, min_tile_size=3),
+        Not(
+            PanelConstraint(
+                min_row_ratio=30.0 / 64.0,
+                max_row_ratio=50.0 / 64.0,
+                contains_entities=EntityCountPredicate(min_count=6, min_area=3, max_area=3),
+            )
+        ),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -230,25 +243,14 @@ class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     @classmethod
     def is_lights_out_grid(cls, grid: Any, available_actions: list[int]) -> bool:
         """Domain-agnostic check if environment represents a Lights Out toggle grid."""
-        if set(available_actions) != {6}:
-            return False
-        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
-            return False
-
-        if grid.ndim == 3:
-            grid = grid[-1]
-
+        ctx = SkillEvaluationContext(grid=grid, available_actions=available_actions)
         from plugins.arc_agi_adapter.arc_skills.automaton_synthesis import (
             AutomatonProgramSynthesisSkillAcquisition,
         )
 
-        if AutomatonProgramSynthesisSkillAcquisition.is_automaton_synthesis_grid(
-            grid, available_actions
-        ):
+        if AutomatonProgramSynthesisSkillAcquisition.signature.evaluate(ctx):
             return False
-
-        tiles = cls._extract_tiles(grid)
-        return len(tiles) >= 4
+        return cls.signature.evaluate(ctx)
 
     @classmethod
     def plan_lights_out_grid(
@@ -293,15 +295,6 @@ class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for Lights Out GF(2) algebraic puzzles."""
-        return self.is_lights_out_grid(grid, available_actions)
 
     def plan(
         self,

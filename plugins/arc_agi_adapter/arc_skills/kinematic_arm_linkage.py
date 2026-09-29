@@ -20,6 +20,7 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityCountPredicate,
     GridDimensionPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
@@ -39,6 +40,7 @@ class KinematicLinkageSolver(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        EntityCountPredicate(min_count=2, is_frame=True, min_area=30, max_area=40),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -262,15 +264,6 @@ class KinematicLinkageSolver(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for articulated arm linkage puzzles."""
-        return self.is_kinematic_linkage(grid, available_actions)
 
     def plan(
         self,

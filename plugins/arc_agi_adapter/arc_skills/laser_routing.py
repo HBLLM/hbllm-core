@@ -151,15 +151,6 @@ class LaserRoutingSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
 
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for laser routing and pipe extension puzzles."""
-        return self.is_laser_routing_grid(grid, available_actions)
-
     def plan(
         self,
         grid: np.ndarray,

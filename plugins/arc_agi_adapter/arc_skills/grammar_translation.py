@@ -23,6 +23,7 @@ from hbllm.hcir.skills.declarative import (
     PanelConstraint,
     SubgoalSequence,
     SymbolicSubgoal,
+    TileFramePredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -40,8 +41,8 @@ class GrammarTranslationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         ActionAffordancePredicate(exact={1, 2, 3, 4}),
         GridDimensionPredicate(exact_shape=(64, 64)),
         PanelConstraint(
-            min_row_ratio=35.0 / 64.0,
-            max_row_ratio=60.0 / 64.0,
+            max_row_ratio=35.0 / 64.0,
+            contains_entities=TileFramePredicate(frame_size=7, min_frames=2, y_stride=9, y_start=4),
         ),
     )
 
@@ -308,15 +309,6 @@ class GrammarTranslationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for formal rewrite grammar translation puzzles."""
-        return self.is_grammar_translation_grid(grid, available_actions)
 
     def plan(
         self,

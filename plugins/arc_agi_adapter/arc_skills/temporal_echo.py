@@ -19,6 +19,7 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    HomogeneousRegionPredicate,
     PanelConstraint,
     SubgoalSequence,
     SymbolicSubgoal,
@@ -45,6 +46,7 @@ class TemporalEchoSkillAcquisition(DeclarativeNeuroSymbolicSkill):
             max_col_ratio=10.0 / 64.0,
             min_distinct_colors=2,
         ),
+        HomogeneousRegionPredicate(min_row_ratio=63.0 / 64.0),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -169,15 +171,6 @@ class TemporalEchoSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for temporal echo ghost loop puzzles."""
-        return self.is_temporal_echo_grid(grid, available_actions)
 
     def plan(
         self,

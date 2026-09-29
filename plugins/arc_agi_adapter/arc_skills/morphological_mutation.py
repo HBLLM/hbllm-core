@@ -22,8 +22,11 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    Not,
+    PanelConstraint,
     SubgoalSequence,
     SymbolicSubgoal,
+    TileFramePredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -40,6 +43,14 @@ class MorphologicalMutationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={1, 2, 3, 4}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        Not(
+            PanelConstraint(
+                max_row_ratio=35.0 / 64.0,
+                contains_entities=TileFramePredicate(
+                    frame_size=7, min_frames=2, y_stride=9, y_start=4
+                ),
+            )
+        ),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -231,15 +242,6 @@ class MorphologicalMutationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for morphological mutation and attribute-gated mazes."""
-        return self.is_morphological_mutation_grid(grid, available_actions)
 
     def plan(
         self,

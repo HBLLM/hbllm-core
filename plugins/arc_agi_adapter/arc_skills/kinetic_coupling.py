@@ -27,6 +27,7 @@ from hbllm.hcir.skills.declarative import (
     GridDimensionPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
+    SymmetryPredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 
@@ -43,6 +44,7 @@ class KineticCouplingSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={1, 2, 3, 4, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        SymmetryPredicate(axis="vertical", min_area=9, max_area=36, ignore_top_colors=3),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -196,15 +198,6 @@ class KineticCouplingSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for kinetic coupling controllable launch puzzles."""
-        return self.is_kinetic_coupling_grid(grid, available_actions)
 
     def plan(
         self,

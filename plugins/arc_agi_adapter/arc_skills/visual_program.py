@@ -21,6 +21,7 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    PanelConstraint,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -39,6 +40,11 @@ class VisualProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     signature = AllOf(
         ActionAffordancePredicate(exact={5, 6, 7}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        PanelConstraint(
+            min_row_ratio=1.0 / 64.0,
+            max_row_ratio=2.0 / 64.0,
+            min_distinct_colors=3,
+        ),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -167,15 +173,6 @@ class VisualProgramSynthesisSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for visual program slot assembly puzzles."""
-        return self.is_visual_program_grid(grid, available_actions)
 
     def plan(
         self,

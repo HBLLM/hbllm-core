@@ -168,15 +168,6 @@ class TopologyTransformationSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
 
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for dynamic topology transformation puzzles."""
-        return self.is_topology_transformation_grid(grid, available_actions)
-
     def plan(
         self,
         grid: np.ndarray,

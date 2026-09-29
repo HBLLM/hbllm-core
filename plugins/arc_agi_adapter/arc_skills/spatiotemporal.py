@@ -20,6 +20,9 @@ from hbllm.hcir.skills.declarative import (
     AllOf,
     DeclarativeNeuroSymbolicSkill,
     GridDimensionPredicate,
+    HomogeneousRegionPredicate,
+    LatticeConduitPredicate,
+    SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -139,8 +142,10 @@ class SpatiotemporalSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(required={1, 2, 3, 4}),
+        ActionAffordancePredicate(exact={1, 2, 3, 4}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        HomogeneousRegionPredicate(max_row_ratio=14.0 / 64.0),
+        LatticeConduitPredicate(stride=6, min_conduits=15),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -338,38 +343,8 @@ class SpatiotemporalSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     @classmethod
     def is_track_maze_grid(cls, grid: Any, available_actions: list[int] | None = None) -> bool:
         """Domain-agnostic check if environment features a high-density track lattice (e.g. tu93)."""
-        import numpy as np
-
-        if not isinstance(grid, np.ndarray) or grid.shape[-2:] != (64, 64):
-            return False
-        if available_actions is not None:
-            if set(available_actions) != {1, 2, 3, 4}:
-                return False
-
-        if grid.ndim == 3:
-            grid = grid[-1]
-
-        vals, counts = np.unique(grid, return_counts=True)
-        bg = vals[np.argmax(counts)]
-
-        # Top 14 rows are open margin in tu93 track lattice
-        if not bool(np.all(grid[:14, :] == bg)):
-            return False
-
-        # Sample bridges on 6-stride lattice with dynamic anchor detection
-        anchor = LatticeQuantizer.detect_lattice_anchor(grid, stride=6, patch_size=3)
-        off_y, off_x = anchor
-        H, W = grid.shape
-        bridges = 0
-        for y in range(off_y, H - 6, 6):
-            for x in range(off_x, W - 6, 6):
-                if x + 6 <= W and grid[y + 1, x + 3] != bg:
-                    bridges += 1
-                if y + 6 <= H and grid[y + 3, x + 1] != bg:
-                    bridges += 1
-
-        # tu93 lattice contains > 15 active conduit bridges
-        return bridges >= 15
+        ctx = SkillEvaluationContext(grid=grid, available_actions=available_actions or [1, 2, 3, 4])
+        return cls.signature.evaluate(ctx)
 
     @classmethod
     def plan_track_maze_grid(cls, grid: Any) -> list[int]:
@@ -446,15 +421,6 @@ class SpatiotemporalSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for spatiotemporal track maze recognition."""
-        return self.is_track_maze_grid(grid, available_actions)
 
     def plan(
         self,

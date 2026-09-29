@@ -470,6 +470,253 @@ class CutSetPredicate(SymbolicPredicate):
         return f"CutSetPredicate(min_partitions={self.min_partitions})"
 
 
+class HomogeneousRegionPredicate(SymbolicPredicate):
+    """Evaluates whether a specified subgrid region is completely homogeneous (all background)."""
+
+    def __init__(
+        self,
+        min_row_ratio: float = 0.0,
+        max_row_ratio: float = 1.0,
+        min_col_ratio: float = 0.0,
+        max_col_ratio: float = 1.0,
+        require_background: bool = True,
+    ) -> None:
+        self.min_row_ratio = min_row_ratio
+        self.max_row_ratio = max_row_ratio
+        self.min_col_ratio = min_col_ratio
+        self.max_col_ratio = max_col_ratio
+        self.require_background = require_background
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        h, w = ctx.height, ctx.width
+        r_min = int(round(self.min_row_ratio * h))
+        r_max = int(round(self.max_row_ratio * h))
+        c_min = int(round(self.min_col_ratio * w))
+        c_max = int(round(self.max_col_ratio * w))
+
+        if r_min >= r_max or c_min >= c_max:
+            return False
+
+        sub = ctx.grid[r_min:r_max, c_min:c_max]
+        if sub.size == 0:
+            return False
+
+        if self.require_background:
+            return bool(np.all(sub == ctx.background_color))
+        first = sub.flat[0]
+        return bool(np.all(sub == first))
+
+    def __repr__(self) -> str:
+        return (
+            f"HomogeneousRegionPredicate(r=[{self.min_row_ratio:.2f}, {self.max_row_ratio:.2f}], "
+            f"c=[{self.min_col_ratio:.2f}, {self.max_col_ratio:.2f}])"
+        )
+
+
+class LatticeConduitPredicate(SymbolicPredicate):
+    """Evaluates whether the grid contains a high-density periodic lattice conduit network."""
+
+    def __init__(self, stride: int = 6, min_conduits: int = 15, patch_size: int = 3) -> None:
+        self.stride = stride
+        self.min_conduits = min_conduits
+        self.patch_size = patch_size
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        from hbllm.hcir.skills.common_subskills import LatticeQuantizer
+
+        anchor = LatticeQuantizer.detect_lattice_anchor(
+            ctx.grid, stride=self.stride, patch_size=self.patch_size
+        )
+        off_y, off_x = anchor
+        h, w = ctx.height, ctx.width
+        bg = ctx.background_color
+        bridges = 0
+        for y in range(off_y, h - self.stride, self.stride):
+            for x in range(off_x, w - self.stride, self.stride):
+                if x + self.stride <= w and ctx.grid[y + 1, x + 3] != bg:
+                    bridges += 1
+                if y + self.stride <= h and ctx.grid[y + 3, x + 1] != bg:
+                    bridges += 1
+        return bridges >= self.min_conduits
+
+    def __repr__(self) -> str:
+        return f"LatticeConduitPredicate(stride={self.stride}, min_conduits={self.min_conduits})"
+
+
+class SymmetryPredicate(SymbolicPredicate):
+    """Evaluates bilateral or rotational symmetry across segmented entities or grid."""
+
+    def __init__(
+        self,
+        axis: str = "vertical",
+        max_deviation: float = 2.0,
+        min_entities: int = 2,
+        min_area: int = 9,
+        max_area: int = 36,
+        ignore_top_colors: int = 3,
+    ) -> None:
+        self.axis = axis
+        self.max_deviation = max_deviation
+        self.min_entities = min_entities
+        self.min_area = min_area
+        self.max_area = max_area
+        self.ignore_top_colors = ignore_top_colors
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        hist = ctx.color_histogram
+        sorted_colors = sorted(hist.keys(), key=lambda c: hist[c], reverse=True)
+        ignored = set(sorted_colors[: self.ignore_top_colors]) | {0, ctx.background_color}
+
+        entities = [
+            e
+            for e in ctx.get_entities()
+            if e.color not in ignored and self.min_area <= e.area <= self.max_area
+        ]
+        if len(entities) < self.min_entities:
+            return False
+
+        colors = {e.color for e in entities}
+        mid = (ctx.width - 1) / 2.0 if self.axis == "vertical" else (ctx.height - 1) / 2.0
+        for c in colors:
+            col_ents = [e for e in entities if e.color == c]
+            if len(col_ents) in (2, 4):
+                if self.axis == "vertical":
+                    c_mean = sum(e.centroid[1] for e in col_ents) / len(col_ents)
+                else:
+                    c_mean = sum(e.centroid[0] for e in col_ents) / len(col_ents)
+                if abs(c_mean - mid) <= self.max_deviation:
+                    return True
+        return False
+
+    def __repr__(self) -> str:
+        return f"SymmetryPredicate(axis={self.axis}, max_dev={self.max_deviation})"
+
+
+class TileGridPredicate(SymbolicPredicate):
+    """Evaluates whether the grid contains an array of regular interactive tiles."""
+
+    def __init__(self, min_tiles: int = 4, min_tile_size: int = 3) -> None:
+        self.min_tiles = min_tiles
+        self.min_tile_size = min_tile_size
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        entities = ctx.get_entities()
+        tiles = [
+            e
+            for e in entities
+            if e.width >= self.min_tile_size
+            and e.height >= self.min_tile_size
+            and abs(e.width - e.height) <= 2
+        ]
+        return len(tiles) >= self.min_tiles
+
+    def __repr__(self) -> str:
+        return f"TileGridPredicate(min_tiles={self.min_tiles})"
+
+
+class MetadataPredicate(SymbolicPredicate):
+    """Evaluates conditions on contextual observation or agent metadata."""
+
+    def __init__(self, key: str, expected_value: Any = True) -> None:
+        self.key = key
+        self.expected_value = expected_value
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        if not ctx.metadata:
+            return False
+        return ctx.metadata.get(self.key) == self.expected_value
+
+    def __repr__(self) -> str:
+        return f"MetadataPredicate({self.key}={self.expected_value})"
+
+
+class PixelDensityPredicate(SymbolicPredicate):
+    """Evaluates non-background pixel count within a region."""
+
+    def __init__(
+        self,
+        min_count: int = 1,
+        max_count: int | None = None,
+        min_row_ratio: float = 0.0,
+        max_row_ratio: float = 1.0,
+        min_col_ratio: float = 0.0,
+        max_col_ratio: float = 1.0,
+    ) -> None:
+        self.min_count = min_count
+        self.max_count = max_count
+        self.min_row_ratio = min_row_ratio
+        self.max_row_ratio = max_row_ratio
+        self.min_col_ratio = min_col_ratio
+        self.max_col_ratio = max_col_ratio
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        h, w = ctx.height, ctx.width
+        r_min = int(round(self.min_row_ratio * h))
+        r_max = int(round(self.max_row_ratio * h))
+        c_min = int(round(self.min_col_ratio * w))
+        c_max = int(round(self.max_col_ratio * w))
+        sub = ctx.grid[r_min:r_max, c_min:c_max]
+        non_bg = int(np.sum(sub != ctx.background_color))
+        if non_bg < self.min_count:
+            return False
+        if self.max_count is not None and non_bg > self.max_count:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"PixelDensityPredicate(min_count={self.min_count})"
+
+
+class TileFramePredicate(SymbolicPredicate):
+    """Evaluates whether a region contains periodic wireframe or square tile frames."""
+
+    def __init__(
+        self,
+        frame_size: int = 7,
+        min_frames: int = 2,
+        y_stride: int = 1,
+        y_start: int = 0,
+        x_stride: int = 1,
+        x_start: int = 0,
+    ) -> None:
+        self.frame_size = frame_size
+        self.min_frames = min_frames
+        self.y_stride = y_stride
+        self.y_start = y_start
+        self.x_stride = x_stride
+        self.x_start = x_start
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        grid = ctx.grid
+        bg = ctx.background_color
+        H, W = grid.shape[-2:]
+        sz = self.frame_size
+        found = 0
+        visited_origins: set[tuple[int, int]] = set()
+        for y in range(self.y_start, H - sz + 1, self.y_stride):
+            for x in range(self.x_start, W - sz + 1, self.x_stride):
+                if any(abs(y - vy) < sz and abs(x - vx) < sz for vy, vx in visited_origins):
+                    continue
+                c = grid[y, x]
+                if (
+                    c != bg
+                    and grid[y + sz - 1, x] == c
+                    and grid[y, x + sz - 1] == c
+                    and grid[y + sz - 1, x + sz - 1] == c
+                ):
+                    found += 1
+                    visited_origins.add((y, x))
+                    if found >= self.min_frames:
+                        return True
+        return found >= self.min_frames
+
+    def __repr__(self) -> str:
+        return (
+            f"TileFramePredicate(size={self.frame_size}, min={self.min_frames}, "
+            f"y_stride={self.y_stride}, y_start={self.y_start})"
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Declarative Subgoal Programs & Bytecode Compilation
 # ═══════════════════════════════════════════════════════════════════════════
@@ -576,6 +823,10 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
     signature: SymbolicPredicate = AllOf()
     program: SubgoalSequence | None = None
 
+    def get_metadata(self) -> dict[str, Any]:
+        """Optional hook for skill instances to contribute dynamic state to evaluation context."""
+        return {}
+
     def can_handle(
         self,
         grid: np.ndarray,
@@ -583,10 +834,11 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
         metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Evaluate invariant recognition using the declarative symbolic signature."""
+        meta = {**self.get_metadata(), **(metadata or {})}
         ctx = SkillEvaluationContext(
             grid=grid,
             available_actions=available_actions,
-            metadata=metadata,
+            metadata=meta,
         )
         try:
             return bool(self.signature.evaluate(ctx))

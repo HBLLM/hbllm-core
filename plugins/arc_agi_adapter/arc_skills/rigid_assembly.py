@@ -22,7 +22,12 @@ from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
     DeclarativeNeuroSymbolicSkill,
+    EntityBoundingBoxPredicate,
     GridDimensionPredicate,
+    HomogeneousRegionPredicate,
+    Not,
+    PanelConstraint,
+    PixelDensityPredicate,
     SubgoalSequence,
     SymbolicSubgoal,
 )
@@ -39,8 +44,26 @@ class RigidAssemblySkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(required={1, 2, 3, 4, 5, 6}),
+        ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
+        HomogeneousRegionPredicate(max_row_ratio=2.0 / 64.0),
+        PanelConstraint(
+            min_row_ratio=10.0 / 64.0,
+            max_row_ratio=54.0 / 64.0,
+            min_col_ratio=10.0 / 64.0,
+            max_col_ratio=54.0 / 64.0,
+            min_distinct_colors=3,
+        ),
+        Not(
+            PanelConstraint(
+                min_row_ratio=2.0 / 64.0,
+                max_row_ratio=7.0 / 64.0,
+                contains_entities=EntityBoundingBoxPredicate(
+                    min_width=4, max_width=6, min_height=4, max_height=6, min_count=2
+                ),
+            )
+        ),
+        Not(PixelDensityPredicate(max_row_ratio=10.0 / 64.0, min_count=5)),
     )
 
     # Declarative Program (Compilable to HCIR Bytecode Stream)
@@ -140,15 +163,6 @@ class RigidAssemblySkillAcquisition(DeclarativeNeuroSymbolicSkill):
     # ═══════════════════════════════════════════════════════════════════════
     # BaseHierarchicalSkill Standardized Protocol Implementation
     # ═══════════════════════════════════════════════════════════════════════
-
-    def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        """Standardized interface check for rigid body assembly / tangram puzzles."""
-        return self.is_rigid_assembly_grid(grid, available_actions)
 
     def plan(
         self,
