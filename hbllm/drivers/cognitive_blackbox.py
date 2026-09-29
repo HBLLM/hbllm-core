@@ -1718,6 +1718,51 @@ class CognitiveBlackbox:
                 best_eid = "fallback_center"
         else:
             candidates.sort(key=lambda x: x[4], reverse=True)
+
+            # Counterfactual click evaluation: predict which click produces the most grid change
+            if len(candidates) >= 2:
+                try:
+                    from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+
+                    top_n = min(8, len(candidates))
+                    best_cf_idx = 0
+                    best_cf_novelty = -1.0
+                    for ci in range(top_n):
+                        cr, cc, col, eid, sc = candidates[ci]
+                        try:
+                            pred = CounterfactualPlanner.predict_outcome(
+                                grid,
+                                action_id=click_action.action_id or 6,
+                                action_data={"x": cc, "y": cr},
+                            )
+                            if isinstance(pred, np.ndarray) and pred.shape == grid.shape:
+                                novelty = float(np.sum(pred != grid))
+                                if novelty > best_cf_novelty:
+                                    best_cf_novelty = novelty
+                                    best_cf_idx = ci
+                        except Exception:
+                            pass
+
+                    if best_cf_novelty > 0 and best_cf_idx != 0:
+                        # Promote the counterfactually best candidate
+                        candidates[best_cf_idx] = (
+                            candidates[best_cf_idx][0],
+                            candidates[best_cf_idx][1],
+                            candidates[best_cf_idx][2],
+                            candidates[best_cf_idx][3],
+                            candidates[best_cf_idx][4] + 200.0,
+                        )
+                        candidates.sort(key=lambda x: x[4], reverse=True)
+                        logger.debug(
+                            "CognitiveBlackbox[%s]: Counterfactual promoted click at (%d,%d) with novelty=%.0f",
+                            source_id,
+                            candidates[0][0],
+                            candidates[0][1],
+                            best_cf_novelty,
+                        )
+                except Exception:
+                    pass
+
             best_r, best_c, best_col, best_eid, _ = candidates[0]
 
         state.click_target_usage[(best_r, best_c)] = (

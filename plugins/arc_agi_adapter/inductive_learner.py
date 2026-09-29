@@ -1079,24 +1079,22 @@ class InductiveHCIRAgent:
             self.last_action = action
             return action, 0.9
 
-        # ── 6a. Core-first exploration window ─────────────────────────────
-        # Give the CognitiveBlackbox EXPLORATION_WINDOW steps to learn dynamics.
-        # Only activate declarative skills after the window expires AND core is stagnating
-        # or lacks viable dynamics models.
-        # Note: Motor exploration applies specifically to movement puzzles on Level 0.
-        EXPLORATION_WINDOW = 8
-        has_movement = any(a in available_actions for a in [1, 2, 3, 4])
+        # ── 6a. Adaptive core-skill interleaving ──────────────────────────
+        # The core ALWAYS learns from observations (action models, barriers, etc.)
+        # regardless of who chose the action. Skills can act from step 0 if they
+        # match. The core only takes over when:
+        #   (a) No skill matches, OR
+        #   (b) The core has learned viable models and isn't stagnating.
+        #
+        # This replaces the old fixed EXPLORATION_WINDOW which wasted steps.
 
-        if has_movement and self.current_level == 0 and self.step_counter <= EXPLORATION_WINDOW:
-            return self._execute_core_step(curr_grid, available_actions)
-
-        # After exploration window, check if core has learned enough dynamics
+        # After some steps, check if core has learned enough dynamics to self-navigate
         core_has_model = self.spatial_cognitive_agent.has_viable_model(
             min_models=min(2, len(available_actions)),
             min_confidence=0.6,
         )
 
-        # If core has viable models and is making progress, keep using it
+        # If core has viable models and is making progress, use it
         if core_has_model and self.solver_stagnation_counter < 5:
             return self._execute_core_step(curr_grid, available_actions)
 
