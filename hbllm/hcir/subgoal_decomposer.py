@@ -870,6 +870,60 @@ class HierarchicalGoalDecomposer:
         matched_pairs.sort(key=pair_priority)
         return matched_pairs
 
+    @classmethod
+    def induce_macro_actions(
+        cls,
+        path: list[tuple[int, int]],
+        step_size: int = 1,
+    ) -> list[tuple[tuple[int, int], int]]:
+        """Compress a discrete waypoint path into direction-run macro chunks.
+
+        Returns a list of ((delta_r, delta_c), run_length) describing straight-line
+        corridor segments without intermediate directional branchings.
+        """
+        if len(path) < 2:
+            return []
+
+        runs: list[tuple[tuple[int, int], int]] = []
+        curr_dir: tuple[int, int] | None = None
+        curr_count = 0
+
+        for i in range(len(path) - 1):
+            dr = path[i + 1][0] - path[i][0]
+            dc = path[i + 1][1] - path[i][1]
+            if (dr, dc) == curr_dir:
+                curr_count += 1
+            else:
+                if curr_dir is not None:
+                    runs.append((curr_dir, curr_count))
+                curr_dir = (dr, dc)
+                curr_count = 1
+
+        if curr_dir is not None:
+            runs.append((curr_dir, curr_count))
+
+        return runs
+
+    @classmethod
+    def extract_corridor_waypoints(
+        cls,
+        path: list[tuple[int, int]],
+    ) -> list[tuple[int, int]]:
+        """Extract inflection/corner points along a path, pruning redundant collinear cells."""
+        if len(path) <= 2:
+            return list(path)
+
+        waypoints = [path[0]]
+        for i in range(1, len(path) - 1):
+            dr_prev = path[i][0] - path[i - 1][0]
+            dc_prev = path[i][1] - path[i - 1][1]
+            dr_next = path[i + 1][0] - path[i][0]
+            dc_next = path[i + 1][1] - path[i][1]
+            if (dr_prev, dc_prev) != (dr_next, dc_next):
+                waypoints.append(path[i])
+        waypoints.append(path[-1])
+        return waypoints
+
 
 @dataclass
 class HCIRSkill:

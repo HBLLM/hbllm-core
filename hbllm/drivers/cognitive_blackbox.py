@@ -48,6 +48,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.learning_loop import LearningLoopEngine
 from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.skills.base import BaseHierarchicalSkill
+from hbllm.hcir.skills.common_subskills import LatticeQuantizer
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
     EntityRole,
@@ -967,6 +968,16 @@ class CognitiveBlackbox:
             raw_step_size = driver_input.metadata.get("step_size", state.step_size)
             if state.step_size <= 1:
                 state.step_size = max(1, raw_step_size)
+                grid = perception_data.get("grid")
+                if (
+                    state.step_size <= 1
+                    and grid is not None
+                    and isinstance(grid, np.ndarray)
+                    and grid.ndim == 2
+                ):
+                    detected_stride = LatticeQuantizer.detect_lattice_stride(grid)
+                    if detected_stride > 1:
+                        state.step_size = detected_stride
             elif raw_step_size > 0:
                 state.step_size = math.gcd(state.step_size, raw_step_size)
 
@@ -980,6 +991,8 @@ class CognitiveBlackbox:
                 state.step_size = min(calibrated_steps)
 
             effective_step_size = max(1, state.step_size)
+            if hasattr(self.spatial_planner, "step_size"):
+                self.spatial_planner.step_size = effective_step_size
 
             eg = self.spatial_planner.construct_entity_graph(
                 entities=entities,
@@ -1273,6 +1286,15 @@ class CognitiveBlackbox:
                 for e in eg.entities.values()
                 if e.role in (EntityRole.GOAL, EntityRole.RECEPTACLE)
             ]
+            if not goals:
+                hypo_goals = self._infer_hypothetical_goals(
+                    eg=eg, state=state, perception_data=p_data
+                )
+                if hypo_goals:
+                    goals = hypo_goals
+                    for hg in hypo_goals:
+                        eg.entities[hg.id] = hg
+
             if goals:
                 primary_goal_ent = min(
                     goals,
@@ -1710,6 +1732,119 @@ class CognitiveBlackbox:
             semantic_intent=SpatialActionIntent.INTERACT,
             parameters={"x": best_c, "y": best_r},
         )
+
+    def _infer_hypothetical_goals(
+        self,
+        eg: EntityGraph,
+        state: AgentState,
+        perception_data: dict[str, Any],
+    ) -> list[SpatialEntity]:
+        """Information-theoretic goal hypothesizer for Level 0 when no explicit targets exist.
+
+        Deduces candidate goals from Gestalt principles:
+        1. Incomplete reflective symmetry axes (filling missing mirror coordinates).
+        2. Boundary clearance targets (destructible barriers / cut-set obstacles).
+        3. Visual saliency singletons (rare, isolated foreground components).
+        """
+        grid = perception_data.get("grid")
+        if grid is None or not isinstance(grid, np.ndarray) or grid.ndim != 2:
+            return []
+
+        H, W = grid.shape
+        vals, counts = np.unique(grid, return_counts=True)
+        bg = int(vals[np.argmax(counts)]) if len(vals) > 0 else 0
+        hypothetical_goals: list[SpatialEntity] = []
+
+        # 1. Gestalt Symmetry Incompleteness Detection
+        missing_mirror_cells: list[tuple[int, int]] = []
+        sym_matches = 0
+        total_fg = 0
+        for r in range(H):
+            for c in range(W // 2):
+                mc = W - 1 - c
+                v1, v2 = int(grid[r, c]), int(grid[r, mc])
+                if v1 != bg or v2 != bg:
+                    total_fg += 1
+                    if v1 == v2:
+                        sym_matches += 1
+                    elif v1 != bg and v2 == bg:
+                        missing_mirror_cells.append((r, mc))
+                    elif v1 == bg and v2 != bg:
+                        missing_mirror_cells.append((r, c))
+
+        if total_fg > 0 and (sym_matches / total_fg >= 0.45) and missing_mirror_cells:
+            for mr, mc in missing_mirror_cells[:4]:
+                ent = SpatialEntity(
+                    id=f"hypo_sym_{mr}_{mc}",
+                    role=EntityRole.GOAL,
+                    centroid=(float(mr), float(mc)),
+                    grid_pos=(mr, mc),
+                    area=1,
+                    bounding_box=(mr, mr, mc, mc),
+                    feature_id=bg,
+                    properties={"hypothesis": "symmetry_completion", "cell": (mr, mc)},
+                )
+                hypothetical_goals.append(ent)
+
+        # 2. Boundary Clearance Targets (destructible barriers / cut-set)
+        if not hypothetical_goals and eg.barriers and eg.avatar:
+            cand_barriers: list[tuple[int, int]] = []
+            for br, bc in eg.barriers:
+                if 1 <= br < H - 1 and 1 <= bc < W - 1:
+                    adj_open = any(
+                        (br + dr, bc + dc) not in eg.barriers
+                        and 0 <= br + dr < H
+                        and 0 <= bc + dc < W
+                        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    )
+                    if adj_open:
+                        cand_barriers.append((br, bc))
+
+            if cand_barriers:
+                cand_barriers.sort(
+                    key=lambda b: math.hypot(
+                        b[0] - eg.avatar.grid_pos[0], b[1] - eg.avatar.grid_pos[1]
+                    )
+                )
+                for br, bc in cand_barriers[:3]:
+                    ent = SpatialEntity(
+                        id=f"hypo_barrier_{br}_{bc}",
+                        role=EntityRole.GOAL,
+                        centroid=(float(br), float(bc)),
+                        grid_pos=(br, bc),
+                        area=1,
+                        bounding_box=(br, br, bc, bc),
+                        feature_id=int(grid[br, bc]),
+                        properties={"hypothesis": "boundary_clearance", "cell": (br, bc)},
+                    )
+                    hypothetical_goals.append(ent)
+
+        # 3. Visual Saliency / Singleton foreground entities
+        if not hypothetical_goals:
+            singletons = [
+                e
+                for e in eg.entities.values()
+                if e.id != "agent"
+                and e.area <= max(16, int(H * W * 0.05))
+                and e.grid_pos not in eg.barriers
+            ]
+            if singletons:
+                singletons.sort(
+                    key=lambda s: (
+                        s.area,
+                        math.hypot(
+                            s.grid_pos[0] - eg.avatar.grid_pos[0],
+                            s.grid_pos[1] - eg.avatar.grid_pos[1],
+                        )
+                        if eg.avatar
+                        else 0.0,
+                    )
+                )
+                for s in singletons[:2]:
+                    s.role = EntityRole.GOAL
+                    hypothetical_goals.append(s)
+
+        return hypothetical_goals
 
     def _decide_exploratory_action(
         self,
@@ -3289,6 +3424,27 @@ class CognitiveBlackbox:
                     condition=state.get_active_condition(),
                 )
                 if action_id is not None:
+                    # Dynamic Action Macro Induction (Phase D):
+                    # If this straight run continues along a corridor without hazards or turning,
+                    # chunk remaining straight steps into state.active_skill_queue.
+                    if (
+                        len(safe_path) > 2
+                        and not has_dynamic_hazards
+                        and not state.active_skill_queue
+                    ):
+                        runs = HierarchicalGoalDecomposer.induce_macro_actions(
+                            safe_path, step_size=eg.step_size
+                        )
+                        if runs and runs[0][1] > 1:
+                            macro_len = min(runs[0][1], 8)
+                            match_act = next(
+                                (a for a in available_actions if a.action_id == action_id), None
+                            )
+                            if match_act is not None:
+                                for _ in range(macro_len - 1):
+                                    state.active_skill_queue.append(match_act)
+                                return match_act
+
                     for a in available_actions:
                         if a.action_id == action_id:
                             return a

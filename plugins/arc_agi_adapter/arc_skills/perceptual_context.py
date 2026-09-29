@@ -117,9 +117,7 @@ class PerceptualSkillContext:
         # Detect lattice stride
         stride = 1
         try:
-            anchor = LatticeQuantizer.detect_lattice_anchor(grid, bg)
-            if anchor and anchor > 1:
-                stride = anchor
+            stride = LatticeQuantizer.detect_lattice_stride(grid, bg_color=bg)
         except Exception:
             pass
 

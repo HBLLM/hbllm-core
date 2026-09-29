@@ -188,3 +188,16 @@ def test_decompose_obstructed_goal_synthesizes_barrier_clearance() -> None:
     dep_edges = [e for e in edges if e.edge_type == HCIREdgeType.DEPENDS_ON]
     assert len(dep_edges) == 1
     assert "clear_barrier_0_2" in dep_edges[0].targets
+
+
+def test_induce_macro_actions_and_waypoints() -> None:
+    """Verify macro action induction compresses straight corridors and extracts corners."""
+    # Path: straight right 4 steps, down 3 steps
+    path = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 4), (2, 4), (3, 4)]
+    runs = HierarchicalGoalDecomposer.induce_macro_actions(path)
+    assert len(runs) == 2
+    assert runs[0] == ((0, 1), 4)  # 4 steps right
+    assert runs[1] == ((1, 0), 3)  # 3 steps down
+
+    waypoints = HierarchicalGoalDecomposer.extract_corridor_waypoints(path)
+    assert waypoints == [(0, 0), (0, 4), (3, 4)]  # Start, Corner, End

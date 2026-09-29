@@ -342,6 +342,69 @@ class LatticeQuantizer:
         return result
 
     @classmethod
+    def detect_lattice_stride(
+        cls,
+        grid: np.ndarray,
+        bg_color: int | None = None,
+        max_stride: int = 16,
+    ) -> int:
+        """Detect the fundamental lattice stride S >= 2, or 1 if no discrete lattice."""
+        arr = PerceptualClusterDetector.normalize_grid(grid)
+        H, W = arr.shape
+        if bg_color is None:
+            vals, counts = np.unique(arr, return_counts=True)
+            bg = int(vals[np.argmax(counts)]) if len(vals) > 0 else 0
+        else:
+            bg = bg_color
+
+        fg_mask = arr != bg
+        if not np.any(fg_mask):
+            return 1
+
+        candidate_strides = [
+            s for s in (2, 3, 4, 5, 6, 7, 8, 10, 12, 16) if s <= max_stride and s < min(H, W) // 2
+        ]
+        if not candidate_strides:
+            return 1
+
+        # 1. Connected components analysis
+        labeled, num_features = PerceptualClusterDetector.label_components(fg_mask, connectivity=4)
+        if num_features >= 2:
+            comp_boxes: list[tuple[int, int, int, int]] = []
+            for comp_idx in range(1, num_features + 1):
+                ys, xs = np.where(labeled == comp_idx)
+                if len(ys) > 0:
+                    comp_boxes.append((int(ys.min()), int(ys.max()), int(xs.min()), int(xs.max())))
+
+            # Check if component dimensions or offsets align to candidate stride
+            for s in candidate_strides:
+                for off_y in range(s):
+                    for off_x in range(s):
+                        aligned = sum(
+                            1
+                            for min_y, _, min_x, _ in comp_boxes
+                            if (min_y - off_y) % s == 0 and (min_x - off_x) % s == 0
+                        )
+                        if aligned >= max(3, int(len(comp_boxes) * 0.7)):
+                            return s
+
+        # 2. Autocorrelation periodicity on binary foreground mask
+        best_stride = 1
+        best_corr = 0.0
+        fg_float = fg_mask.astype(float)
+        fg_sum = float(np.sum(fg_float))
+        if fg_sum >= 4:
+            for s in candidate_strides:
+                vert = float(np.sum(fg_float[:-s, :] * fg_float[s:, :]))
+                horiz = float(np.sum(fg_float[:, :-s] * fg_float[:, s:]))
+                corr = (vert + horiz) / (2.0 * fg_sum)
+                if corr > 0.45 and corr > best_corr:
+                    best_corr = corr
+                    best_stride = s
+
+        return best_stride
+
+    @classmethod
     def detect_lattice_anchor(
         cls,
         grid: np.ndarray,

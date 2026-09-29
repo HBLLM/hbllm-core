@@ -275,3 +275,37 @@ def test_find_lattice_track_path() -> None:
         patch_size=3,
     )
     assert fail_path is None
+
+
+def test_detect_lattice_stride() -> None:
+    """Verify LatticeQuantizer accurately detects periodic lattice strides S >= 2."""
+    from hbllm.hcir.skills.common_subskills import LatticeQuantizer
+
+    grid = np.zeros((30, 30), dtype=int)
+    # Stride of 5
+    for r in range(0, 30, 5):
+        for c in range(0, 30, 5):
+            grid[r : r + 2, c : c + 2] = 3
+
+    detected = LatticeQuantizer.detect_lattice_stride(grid)
+    assert detected == 5
+
+
+def test_compute_geodesic_path_lattice_stride() -> None:
+    """Verify compute_geodesic_path respects step_size quantization."""
+    # Start at (0, 0), goal at (10, 10), step_size = 5
+    path = PhysicsPredictor.compute_geodesic_path(
+        start=(0, 0),
+        goal=(10, 10),
+        barrier_cells=set(),
+        grid_shape=(15, 15),
+        step_size=5,
+    )
+    assert len(path) > 1
+    assert path[0] == (0, 0)
+    assert path[-1] == (10, 10)
+    # Every step must be exactly step_size (5) distance
+    for i in range(len(path) - 1):
+        dr = abs(path[i + 1][0] - path[i][0])
+        dc = abs(path[i + 1][1] - path[i][1])
+        assert (dr == 5 and dc == 0) or (dr == 0 and dc == 5)

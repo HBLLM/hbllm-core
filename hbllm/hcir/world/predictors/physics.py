@@ -9,6 +9,7 @@ Supports:
 
 from __future__ import annotations
 
+import heapq
 import logging
 import math
 import re
@@ -517,36 +518,68 @@ class PhysicsPredictor:
                     return False
             return True
 
-        queue: deque[tuple[int, int, list[tuple[int, int]]]] = deque(
-            [(start_r, start_c, [(start_r, start_c)])]
-        )
-        visited = {(start_r, start_c)}
-        delta = [(-step_size, 0), (step_size, 0), (0, -step_size), (0, step_size)]
+        step = max(1, step_size)
+        delta = [(-step, 0), (step, 0), (0, -step), (0, step)]
+
+        # Lattice-aware goal snapping for multi-pixel stride grids
+        if step > 1:
+            snap_goal_r = start_r + int(round((goal_r - start_r) / step)) * step
+            snap_goal_c = start_c + int(round((goal_c - start_c) / step)) * step
+            snap_goal_r = max(0, min(H - 1, snap_goal_r))
+            snap_goal_c = max(0, min(W - 1, snap_goal_c))
+        else:
+            snap_goal_r, snap_goal_c = goal_r, goal_c
+
+        def heuristic(r: int, c: int) -> float:
+            return math.hypot(snap_goal_r - r, snap_goal_c - c)
+
+        counter = 0
+        h0 = heuristic(start_r, start_c)
+        open_set: list[tuple[float, float, int, int, int, list[tuple[int, int]]]] = [
+            (h0, 0.0, counter, start_r, start_c, [(start_r, start_c)])
+        ]
+        g_scores: dict[tuple[int, int], float] = {(start_r, start_c): 0.0}
 
         best_partial_path = [(start_r, start_c)]
         min_dist_to_goal = math.hypot(goal_r - start_r, goal_c - start_c)
         iters = 0
-        max_iterations = 2500
+        max_iterations = 3500
 
-        while queue and iters < max_iterations:
+        while open_set and iters < max_iterations:
             iters += 1
-            r, c, path = queue.popleft()
+            f, g, _, r, c, path = heapq.heappop(open_set)
 
             dist = math.hypot(goal_r - r, goal_c - c)
             if dist < min_dist_to_goal:
                 min_dist_to_goal = dist
                 best_partial_path = path
 
-            if math.hypot(goal_r - r, goal_c - c) <= (step_size * 0.9):
-                if is_footprint_valid(goal_r, goal_c):
-                    return path + [(goal_r, goal_c)]
+            # Check arrival at goal
+            if (r, c) == (goal_r, goal_c):
+                return path
+
+            if (r, c) == (snap_goal_r, snap_goal_c) or dist <= (step * 0.9):
+                if is_footprint_valid(r, c):
+                    if (
+                        step == 1
+                        and (r, c) != (goal_r, goal_c)
+                        and is_footprint_valid(goal_r, goal_c)
+                    ):
+                        return path + [(goal_r, goal_c)]
+                    return path
 
             for dr, dc in delta:
                 nr, nc = r + dr, c + dc
-                if (nr, nc) not in visited:
-                    visited.add((nr, nc))
-                    if is_footprint_valid(nr, nc):
-                        queue.append((nr, nc, path + [(nr, nc)]))
+                if 0 <= nr < H and 0 <= nc < W and is_footprint_valid(nr, nc):
+                    tentative_g = g + step
+                    if (nr, nc) not in g_scores or tentative_g < g_scores[(nr, nc)]:
+                        g_scores[(nr, nc)] = tentative_g
+                        counter += 1
+                        h = heuristic(nr, nc)
+                        heapq.heappush(
+                            open_set,
+                            (tentative_g + h, tentative_g, counter, nr, nc, path + [(nr, nc)]),
+                        )
 
         return best_partial_path
 
