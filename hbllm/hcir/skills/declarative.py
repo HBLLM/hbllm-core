@@ -59,6 +59,8 @@ class SkillEvaluationContext:
         available_actions: list[int],
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        if not isinstance(grid, np.ndarray):
+            grid = np.asarray(grid)
         if grid.ndim == 3:
             grid = grid[-1]
         self.grid: Grid = grid

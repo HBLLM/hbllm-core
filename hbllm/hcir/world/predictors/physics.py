@@ -757,7 +757,9 @@ class PhysicsPredictor:
         ]
         while queue:
             cr, cc, path = queue.popleft()
-            if (cr, cc) == (goal_pos[0], goal_pos[1]):
+            if (cr, cc) == (goal_pos[0], goal_pos[1]) or math.hypot(
+                cr - goal_pos[0], cc - goal_pos[1]
+            ) < stride * 0.9:
                 return path
             for dr, dc, br_dr, br_dc, act in moves:
                 nr, nc = cr + dr, cc + dc

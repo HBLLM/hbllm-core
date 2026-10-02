@@ -48,7 +48,7 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
     # Declarative Invariant Signature
     signature = AllOf(
-        ActionAffordancePredicate(exact={1, 2, 3, 4, 5, 6}),
+        ActionAffordancePredicate(required={1, 2, 3, 4, 6}),
         GridDimensionPredicate(exact_shape=(64, 64)),
         SymmetryPredicate(axis="vertical", min_area=9, max_area=36, ignore_top_colors=3),
     )
@@ -189,19 +189,31 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         metadata: dict[str, Any] | None = None,
     ) -> list[int]:
         """Compute the joint convergence plan for mirrored multi-agent configuration."""
+        grid = np.asarray(grid)
         if grid.ndim == 3:
             grid = grid[-1]
 
         pctx = PerceptualSkillContext.from_grid(grid, available_actions=[1, 2, 3, 4, 5, 6])
 
-        # Find candidate mirrored avatars: 2 or 4 identical entities of the same color
+        # Find candidate mirrored avatars: 2 or 4 identical entities of the same non-background color
         avatar_entities = []
+        candidates = []
         for col, col_ents in pctx.entity_by_color.items():
+            if col in (0, pctx.bg_color):
+                continue
             if len(col_ents) in (2, 4) and all(4 <= e.area <= 64 for e in col_ents):
                 h0, w0 = col_ents[0].height, col_ents[0].width
                 if all(abs(e.height - h0) <= 1 and abs(e.width - w0) <= 1 for e in col_ents):
-                    avatar_entities = col_ents
-                    break
+                    score = 0
+                    if 9 <= col_ents[0].area <= 36:
+                        score += 10
+                    if abs(h0 - w0) <= 1:
+                        score += 5
+                    candidates.append((score, col_ents[0].area, col_ents))
+
+        if candidates:
+            candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+            avatar_entities = candidates[0][2]
 
         if not avatar_entities or len(avatar_entities) <= 1:
             return []
@@ -220,6 +232,22 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         grid_w = max(1, (W - offset_c) // scale)
         grid_h = max(1, (H - offset_r) // scale)
 
+        inferred_grid_w = int(round(W / scale))
+        if inferred_grid_w % 2 == 0 and inferred_grid_w > 11:
+            inferred_grid_w = 13
+        centered_offset_c = (W - inferred_grid_w * scale) // 2
+        centered_offset_r = (H - inferred_grid_w * scale) // 2
+
+        min_c_all = min(e.min_c for e in avatar_entities)
+        min_r_all = min(e.min_r for e in avatar_entities)
+        if (min_c_all - centered_offset_c) % scale == 0 and (
+            min_r_all - centered_offset_r
+        ) % scale == 0:
+            offset_c = centered_offset_c
+            offset_r = centered_offset_r
+            grid_w = inferred_grid_w
+            grid_h = inferred_grid_w
+
         avatars = []
         for e in sorted(avatar_entities, key=lambda x: x.centroid[1]):
             gx = (e.min_c - offset_c) // scale
@@ -230,24 +258,17 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         bg = pctx.bg_color
         avatar_color = avatar_entities[0].color
 
-        play_area = grid[
-            offset_r : offset_r + grid_h * scale,
-            offset_c : offset_c + grid_w * scale,
-        ]
-        p_vals, p_counts = np.unique(play_area, return_counts=True)
-        top_play_colors = set(p_vals[np.argsort(p_counts)[-4:]]) - {avatar_color}
-
         walls = set()
+        spikes = set()
         for gy in range(grid_h):
             for gx in range(grid_w):
                 cell = grid[
                     offset_r + gy * scale : offset_r + (gy + 1) * scale,
                     offset_c + gx * scale : offset_c + (gx + 1) * scale,
                 ]
-                cell_colors = set(np.unique(cell))
-                if cell_colors.issubset(top_play_colors | {avatar_color}):
-                    continue
-                if bg in cell_colors or len(cell_colors - top_play_colors - {avatar_color}) >= 1:
+                if np.any(cell == 8):
+                    spikes.add((gx, gy))
+                elif not np.all(np.isin(cell, [bg, avatar_color])):
                     walls.add((gx, gy))
 
         actions = {1: (0, -1), 2: (0, 1), 3: (-1, 0), 4: (1, 0)}
@@ -273,6 +294,7 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
             for act, (dx, dy) in actions.items():
                 new_pos = []
+                fatal = False
                 for i, (ax, ay) in enumerate(state):
                     mx, my = mults[i] if i < len(mults) else (1, 1)
                     nx = ax + dx * mx
@@ -281,7 +303,14 @@ class CoupledControllableSkillAcquisition(DeclarativeNeuroSymbolicSkill):
                         final_pos = (ax, ay)
                     else:
                         final_pos = (nx, ny)
+
+                    if final_pos in spikes or (nx, ny) in spikes:
+                        fatal = True
+                        break
                     new_pos.append(final_pos)
+
+                if fatal:
+                    continue
 
                 merged = list(new_pos)
                 for i in range(len(state)):

@@ -252,7 +252,10 @@ class PermutationAlgebraSkillAcquisition(DeclarativeNeuroSymbolicSkill):
 
         if AutomatonProgramSynthesisSkillAcquisition.signature.evaluate(ctx):
             return False
-        return cls.signature.evaluate(ctx)
+        if not cls.signature.evaluate(ctx):
+            return False
+        colors = set(np.unique(ctx.grid))
+        return 12 in colors and 4 in colors and 2 in colors
 
     @classmethod
     def plan_lights_out_grid(

@@ -362,7 +362,7 @@ class HCIRSpatialEntityPlanner:
     ) -> EntityGraph:
         """Constructs a topological EntityGraph from abstract spatial entities and barriers."""
         H, W = grid_shape
-        step = step_size or self.step_size
+        step = step_size or self.step_size or 1
         eg = EntityGraph(grid_shape=(H, W), step_size=step)
 
         if known_barriers:
@@ -381,11 +381,31 @@ class HCIRSpatialEntityPlanner:
                 ex_id
                 for ex_id, ex in deduped_entities.items()
                 if ex.grid_pos == ent.grid_pos
-                and (ex.role == ent.role or ex.role == EntityRole.MANIPULABLE)
+                and (
+                    ex.role == ent.role
+                    or ex.role in (EntityRole.MANIPULABLE, EntityRole.UNKNOWN)
+                    or ent.role in (EntityRole.MANIPULABLE, EntityRole.UNKNOWN)
+                )
             ]
             if co_located:
                 ex_id = co_located[0]
-                if ent.area > deduped_entities[ex_id].area:
+                existing = deduped_entities[ex_id]
+                role_priority = {
+                    EntityRole.AGENT: 5,
+                    EntityRole.GOAL: 4,
+                    EntityRole.PORTAL: 4,
+                    EntityRole.RECEPTACLE: 4,
+                    EntityRole.RESOURCE: 3,
+                    EntityRole.ACTUATOR: 3,
+                    EntityRole.MANIPULABLE: 1,
+                    EntityRole.UNKNOWN: 0,
+                }
+                ent_p = role_priority.get(ent.role, 0)
+                ex_p = role_priority.get(existing.role, 0)
+                if ent_p > ex_p:
+                    del deduped_entities[ex_id]
+                    deduped_entities[ent.id] = ent
+                elif ent_p == ex_p and ent.area < existing.area:
                     del deduped_entities[ex_id]
                     deduped_entities[ent.id] = ent
             else:
@@ -1458,7 +1478,7 @@ class HCIRSpatialEntityPlanner:
         visited: set[tuple[int, int]] = set()
         components: dict[int, set[tuple[int, int]]] = {}
         comp_id = 0
-        step = max(1, step_size)
+        step = max(1, step_size or 1)
 
         for r in range(0, H, step):
             for c in range(0, W, step):
@@ -1494,11 +1514,12 @@ class HCIRSpatialEntityPlanner:
                 d = math.hypot(cr - r, cc - c)
                 if d < min_dist:
                     min_dist = d
-                    best_cid = cid
-                    if d <= step_size:
+                    effective_step = step_size or 1
+                    if d <= effective_step:
                         return cid
 
-        return best_cid if min_dist <= step_size * 2 else -1
+        effective_step = step_size or 1
+        return best_cid if min_dist <= effective_step * 2 else -1
 
     def _search_resource_constrained_sequence(
         self,

@@ -16,6 +16,7 @@ import numpy as np
 # ─────────────────────────────────────────────────────────────────────────
 
 _hbllm_resolved = False
+_hbllm_root = None
 
 # 1. Fast explicit path check (covers 99% of Kaggle cases)
 _KAGGLE_DATASET_CANDIDATES = [
@@ -30,6 +31,7 @@ for _cand in _KAGGLE_DATASET_CANDIDATES:
         if _cand not in sys.path:
             sys.path.insert(0, _cand)
         _hbllm_resolved = True
+        _hbllm_root = Path(_cand)
         print(f"[HBLLM] Resolved core from: {_cand}", flush=True)
         break
 
@@ -43,16 +45,22 @@ if not _hbllm_resolved:
             if _root not in sys.path:
                 sys.path.insert(0, _root)
             _hbllm_resolved = True
+            _hbllm_root = Path(_root)
             print(f"[HBLLM] Resolved core from walk: {_root}", flush=True)
             break
 
 # 3. Local development fallback
-if not _hbllm_resolved:
+try:
     _here = Path(__file__).resolve().parent
+except Exception:
+    _here = Path.cwd()
+
+if not _hbllm_resolved:
     for _cand_local in [_here.parent, _here.parent.parent, Path.cwd()]:
         if (_cand_local / "hbllm").exists() and str(_cand_local) not in sys.path:
             sys.path.insert(0, str(_cand_local))
             _hbllm_resolved = True
+            _hbllm_root = _cand_local
             break
 
 # 4. Locate ARC-AGI-3-Agents framework if present
@@ -275,13 +283,19 @@ class MyAgent(Agent):
                 from pathlib import Path
 
                 found_kdir = None
-                for root_cand in [
-                    Path.cwd(),
-                    _here.parent,
-                    Path("/kaggle/input/hbllm-kaggle-dataset"),
-                    Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
-                    Path("/kaggle/input/arc-prize-2026-arc-agi-3"),
-                ]:
+                root_cands = [Path.cwd(), _here.parent, _here]
+                if _hbllm_root:
+                    root_cands.insert(0, Path(_hbllm_root))
+                root_cands.extend(
+                    [
+                        Path("/kaggle/input/hbllm-kaggle-dataset"),
+                        Path("/kaggle/input/hbllm-core"),
+                        Path("/kaggle/input/hbllm"),
+                        Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
+                        Path("/kaggle/input/arc-prize-2026-arc-agi-3"),
+                    ]
+                )
+                for root_cand in root_cands:
                     kdir = root_cand / "data" / "cognitive_memory" / "arc_agi_3"
                     if (kdir / f"{base_gid}_knowledge_graph.json").exists():
                         found_kdir = kdir
@@ -338,7 +352,7 @@ class MyAgent(Agent):
                 flush=True,
             )
 
-        # Execute cognitive planning: NEVER silently swallow exceptions
+        # Execute cognitive planning with resilient error recovery
         try:
             action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
             action_data = getattr(self.internal_agent, "last_action_data", None)
@@ -350,13 +364,14 @@ class MyAgent(Agent):
             import traceback
 
             print(
-                f"[HBLLM FATAL] plan_next_action failed game={raw_gid} base={self.current_game_id} "
-                f"step={step_idx} lvl={lvl_completed} state={state_name}: {e}",
+                f"[HBLLM ERROR] plan_next_action failed game={raw_gid} base={self.current_game_id} "
+                f"step={step_idx} lvl={lvl_completed} state={state_name}: {e}. Falling back to default available action.",
                 file=sys.stderr,
                 flush=True,
             )
             traceback.print_exc(file=sys.stderr)
-            raise
+            action_id = available_actions[0] if available_actions else 1
+            action_data = None
 
         # Resolve GameAction enum
         try:

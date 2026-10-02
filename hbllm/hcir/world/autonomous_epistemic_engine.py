@@ -33,6 +33,7 @@ from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
 )
+from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -1119,6 +1120,26 @@ class AutonomousEpistemicEngine:
                     b_set.remove((nr, nc))
                     b_set.add((pushed_r, pushed_c))
                     new_blocks = frozenset(b_set)
+
+                    # PhysicsPredictor Deadlock Pruning: reject pushing block into non-goal deadlocks
+                    if (pushed_r, pushed_c) not in goals:
+                        effective_barriers = (set(static_barriers) - set(cur_open)) | (
+                            set(new_blocks) - {(pushed_r, pushed_c)}
+                        )
+                        if PhysicsPredictor.is_corner_deadlock(
+                            entity_pos=(pushed_r, pushed_c),
+                            barrier_cells=effective_barriers,
+                            target_positions=set(goals),
+                            grid_shape=(H, W),
+                            step_size=getattr(self, "step_size", 1),
+                        ) or PhysicsPredictor.is_line_deadlock(
+                            entity_pos=(pushed_r, pushed_c),
+                            barrier_cells=effective_barriers,
+                            target_positions=set(goals),
+                            grid_shape=(H, W),
+                            step_size=getattr(self, "step_size", 1),
+                        ):
+                            continue
 
                 # Check state mutations (did new_pos or pushed block trigger a switch?)
                 new_open = cur_open

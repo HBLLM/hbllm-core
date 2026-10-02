@@ -192,6 +192,13 @@ class MorphologicalProgramSynthesis(DeclarativeNeuroSymbolicSkill):
         if grid.ndim == 3:
             grid = grid[-1]
 
+        from plugins.arc_agi_adapter.arc_skills.visual_canvas import (
+            VisualCanvasSkillAcquisition,
+        )
+
+        if VisualCanvasSkillAcquisition.is_canvas_stamping_grid(grid, available_actions):
+            return False
+
         vals, counts = np.unique(grid, return_counts=True)
         bg = int(vals[np.argmax(counts)])
 

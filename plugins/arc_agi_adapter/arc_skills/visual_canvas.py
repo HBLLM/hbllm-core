@@ -122,16 +122,23 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         self.curr_pos: int = 0
         self.active_color: int | None = 15
         self._last_tpl_bytes: bytes | None = None
+        self.canvas_box: tuple[int, int, int, int] | None = None
+        self.template_box: tuple[int, int, int, int] | None = None
 
     def reset(self) -> None:
         """Reset episode state."""
         self.curr_pos = 0
-        self.active_color = None
+        self.active_color = 15
         self._last_tpl_bytes = None
+        self.canvas_box = None
+        self.template_box = None
 
     @classmethod
     def extract_panels(
-        cls, grid: np.ndarray
+        cls,
+        grid: np.ndarray,
+        cached_c_box: tuple[int, int, int, int] | None = None,
+        cached_t_box: tuple[int, int, int, int] | None = None,
     ) -> tuple[
         np.ndarray | None,
         np.ndarray | None,
@@ -141,54 +148,42 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         """Perceptually locate template patch (top-left) and canvas patch (center)."""
         if grid.ndim == 3:
             grid = grid[-1]
-        pctx = PerceptualSkillContext.from_grid(grid)
         H, W = grid.shape
 
-        # Candidate panels: rectangular entities or distinct subgrids
-        # Template is in the upper-left quadrant (r < H//2, c < W//2) with size >= 8x8
-        # Canvas is in the lower-middle quadrant (r >= H//3) with size >= 8x8
-        t_box = None
+        if cached_c_box is not None and cached_t_box is not None:
+            tb = cached_t_box
+            cb = cached_c_box
+            return grid[tb[0] : tb[2], tb[1] : tb[3]], grid[cb[0] : cb[2], cb[1] : cb[3]], tb, cb
+
+        pctx = PerceptualSkillContext.from_grid(grid)
+
+        # 1. Canvas is a square rectangular patch in the lower-middle quadrant
         c_box = None
+        for e in pctx.entities:
+            if (
+                e.centroid[0] >= H // 3
+                and 8 <= e.width <= 16
+                and 8 <= e.height <= 16
+                and abs(e.width - e.height) <= 1
+            ):
+                c_box = (e.min_r, e.min_c, e.max_r + 1, e.max_c + 1)
+                break
 
-        # Look for entities with 8 <= width <= 16 and 8 <= height <= 16
-        rect_entities = [
-            e for e in pctx.entities if 8 <= e.width <= 16 and 8 <= e.height <= 16 and e.area >= 50
-        ]
-
-        for e in rect_entities:
-            if e.centroid[0] < H // 2 and e.centroid[1] < W // 2:
-                if t_box is None or e.area > (t_box[2] - t_box[0]) * (t_box[3] - t_box[1]):
-                    t_box = (e.min_r, e.min_c, e.max_r + 1, e.max_c + 1)
-            elif e.centroid[0] >= H // 3:
-                if c_box is None or e.area > (c_box[2] - c_box[0]) * (c_box[3] - c_box[1]):
-                    c_box = (e.min_r, e.min_c, e.max_r + 1, e.max_c + 1)
-
-        # If distinct framed entities not detected, infer from quadrant clusters
-        if t_box is None:
-            tl_mask = (grid[: H // 2, : W // 2] != pctx.bg_color) & (grid[: H // 2, : W // 2] != 0)
-            pts = np.argwhere(tl_mask)
-            if len(pts) >= 16:
-                t_box = (
-                    int(np.min(pts[:, 0])),
-                    int(np.min(pts[:, 1])),
-                    int(np.max(pts[:, 0])) + 1,
-                    int(np.max(pts[:, 1])) + 1,
-                )
-
-        if c_box is None:
-            c_mask = (grid[H // 4 : 3 * H // 4, W // 4 : 3 * W // 4] != pctx.bg_color) & (
-                grid[H // 4 : 3 * H // 4, W // 4 : 3 * W // 4] != 0
-            )
-            pts = np.argwhere(c_mask)
-            if len(pts) >= 16:
-                pts[:, 0] += H // 4
-                pts[:, 1] += W // 4
-                c_box = (
-                    int(np.min(pts[:, 0])),
-                    int(np.min(pts[:, 1])),
-                    int(np.max(pts[:, 0])) + 1,
-                    int(np.max(pts[:, 1])) + 1,
-                )
+        # 2. Template is a matching (c_h, c_w) patch in upper-left quadrant
+        t_box = None
+        if c_box is not None:
+            c_h = c_box[2] - c_box[0]
+            c_w = c_box[3] - c_box[1]
+            vals, counts = np.unique(grid, return_counts=True)
+            bg = vals[np.argmax(counts)]
+            for r in range(0, H // 2 - c_h + 1):
+                for c in range(0, W // 2 - c_w + 1):
+                    patch = grid[r : r + c_h, c : c + c_w]
+                    if not np.any(patch == bg) and len(np.unique(patch)) >= 2:
+                        t_box = (r, c, r + c_h, c + c_w)
+                        break
+                if t_box is not None:
+                    break
 
         t_patch = grid[t_box[0] : t_box[2], t_box[1] : t_box[3]] if t_box else None
         c_patch = grid[c_box[0] : c_box[2], c_box[1] : c_box[3]] if c_box else None
@@ -309,20 +304,15 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
         if grid.ndim == 3:
             grid = grid[-1]
 
-        template, canvas, t_box, c_box = self.extract_panels(grid)
+        template, canvas, t_box, c_box = self.extract_panels(
+            grid, cached_c_box=self.canvas_box, cached_t_box=self.template_box
+        )
         if template is None or canvas is None:
             return 5, 0.5, None
 
-        # Dynamically scale masks if canvas size is different from 10x10
-        ch, cw = canvas.shape
-        if ch != 10 or cw != 10:
-            from scipy.ndimage import zoom
-
-            for k in list(self.masks.keys()):
-                self.masks[k] = (
-                    zoom(self.masks[k].astype(float), (ch / 10.0, cw / 10.0), order=0) > 0.5
-                )
-            self.valid_mask = np.ones((ch, cw), dtype=bool)
+        if t_box is not None and c_box is not None:
+            self.template_box = t_box
+            self.canvas_box = c_box
 
         # Detect level transition
         tpl_bytes = template.tobytes()
@@ -346,7 +336,7 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
             if np.array_equal(c[self.valid_mask], template[self.valid_mask]):
                 sol = seq
                 break
-            if len(seq) >= 4:
+            if len(seq) >= 5:
                 continue
             for s_idx in range(8):
                 m = self.masks[s_idx]
@@ -399,13 +389,18 @@ class VisualCanvasSkillAcquisition(DeclarativeNeuroSymbolicSkill):
     def can_handle(
         self,
         grid: np.ndarray,
-        available_actions: list[int],
+        available_actions: list[int] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Canvas stamping puzzles have actions {5, 6} (swatch + stencil stamp) and H, W >= 40."""
-        if set(available_actions) == {5, 6} and grid.shape[-2] >= 40 and grid.shape[-1] >= 40:
+        """Canvas stamping puzzles have actions {5, 6} and H, W >= 40."""
+        if available_actions is not None:
+            if not (
+                5 in available_actions and 6 in available_actions and 7 not in available_actions
+            ):
+                return False
+        if self.canvas_box is not None and self.template_box is not None:
             return True
-        return super().can_handle(grid, available_actions, metadata)
+        return self.is_canvas_stamping_grid(grid, available_actions)
 
     def plan(
         self,

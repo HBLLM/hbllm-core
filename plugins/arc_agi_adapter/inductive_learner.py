@@ -346,14 +346,52 @@ class InductiveHCIRAgent:
             else:
                 unknown_actions = max(1, 7 - len(state.action_models))
                 self.epistemic_probe_budget = max(6, unknown_actions * 4)
+
+            # Propagate prior success to knowledge_base so dispatch knows
+            # the core has proven prior knowledge for this game
+            prior_levels = 0
+            # Read levels_completed directly from the KG JSON file
+            import json
+            from pathlib import Path as _Path
+
+            kg_path = _Path(knowledge_dir) / f"{game_id}_knowledge_graph.json"
+            if kg_path.exists():
+                try:
+                    with open(kg_path) as _f:
+                        kg_data = json.load(_f)
+                    for ent in kg_data.get("entities", []):
+                        if ent.get("type") == "concept":
+                            lc = ent.get("attributes", {}).get("levels_completed", 0)
+                            if isinstance(lc, int) and lc > prior_levels:
+                                prior_levels = lc
+                except Exception:
+                    pass
+            if prior_levels > 0:
+                self.knowledge_base.levels_solved = prior_levels
+
+            # Also hydrate action affordances from the KG into the knowledge_base
+            for aid, model in state.action_models.items():
+                if aid not in self.knowledge_base.action_affordances:
+                    from plugins.arc_agi_adapter.arc_solvers.knowledge_base import (
+                        ActionAffordance,
+                    )
+
+                    self.knowledge_base.action_affordances[aid] = ActionAffordance(
+                        action_id=aid,
+                        delta_r=getattr(model, "delta_r", 0),
+                        delta_c=getattr(model, "delta_c", 0),
+                        confidence=getattr(model, "confidence", 0.5),
+                    )
+
             logger.info(
-                "[CORE KNOWLEDGE GRAPH] Hydrated CognitiveBlackbox for game '%s': avatar=%s, %d action models, %d obstacles, %d targets (probe budget=%d)",
+                "[CORE KNOWLEDGE GRAPH] Hydrated CognitiveBlackbox for game '%s': avatar=%s, %d action models, %d obstacles, %d targets (probe budget=%d, prior_levels=%d)",
                 game_id,
                 state.avatar_feature,
                 len(state.action_models),
                 len(state.learned_obstacle_features),
                 len(state.learned_target_features),
                 self.epistemic_probe_budget,
+                prior_levels,
             )
         return loaded
 
@@ -399,14 +437,23 @@ class InductiveHCIRAgent:
                 skill_name = name.split(":", 1)[1]
                 curr_hash = hash(curr_grid.tobytes())
                 plan_hash = getattr(self, "_declarative_plan_grid_hash", None)
-                if plan_hash is not None and curr_hash == plan_hash:
-                    # Grid unchanged after full plan — skill's plan was ineffective
+                if not hasattr(self, "_declarative_skill_plan_counts"):
+                    self._declarative_skill_plan_counts = {}
+                self._declarative_skill_plan_counts[skill_name] = (
+                    self._declarative_skill_plan_counts.get(skill_name, 0) + 1
+                )
+                # Suppress skill if grid was unchanged OR if it executed >= 3 plans without solving level
+                if (plan_hash is not None and curr_hash == plan_hash) or (
+                    self._declarative_skill_plan_counts[skill_name] >= 3
+                ):
                     if not hasattr(self, "_declarative_failed_skills"):
                         self._declarative_failed_skills = set()
                     self._declarative_failed_skills.add(skill_name)
                     logger.info(
-                        "Declarative skill '%s' blacklisted — plan produced no grid change",
+                        "Declarative skill '%s' suppressed — ineffective after %d plans (grid_unchanged=%s)",
                         skill_name,
+                        self._declarative_skill_plan_counts[skill_name],
+                        curr_hash == plan_hash,
                     )
                 # Re-evaluate via _plan_hcir_step
                 self.active_solver_name = None
@@ -1079,27 +1126,33 @@ class InductiveHCIRAgent:
             self.last_action = action
             return action, 0.9
 
-        # ── 6a. Adaptive core-skill interleaving ──────────────────────────
-        # The core ALWAYS learns from observations (action models, barriers, etc.)
-        # regardless of who chose the action. Skills can act from step 0 if they
-        # match. The core only takes over when:
-        #   (a) No skill matches, OR
-        #   (b) The core has learned viable models and isn't stagnating.
-        #
-        # This replaces the old fixed EXPLORATION_WINDOW which wasted steps.
+        # Queue is empty: evaluate completed plan outcome and suppress stagnated skills
+        if self.active_solver_name and self.active_solver_name.startswith("declarative:"):
+            skill_name = self.active_solver_name.split(":", 1)[1]
+            if not hasattr(self, "_declarative_skill_plan_counts"):
+                self._declarative_skill_plan_counts = {}
+            self._declarative_skill_plan_counts[skill_name] = (
+                self._declarative_skill_plan_counts.get(skill_name, 0) + 1
+            )
+            plan_hash = getattr(self, "_declarative_plan_grid_hash", None)
+            if (plan_hash is not None and curr_hash == plan_hash) or (
+                self._declarative_skill_plan_counts[skill_name] >= 2
+            ):
+                if not hasattr(self, "_declarative_failed_skills"):
+                    self._declarative_failed_skills = set()
+                self._declarative_failed_skills.add(skill_name)
+                logger.info(
+                    "Declarative skill '%s' suppressed — ineffective after %d plans (grid_unchanged=%s)",
+                    skill_name,
+                    self._declarative_skill_plan_counts[skill_name],
+                    curr_hash == plan_hash,
+                )
+            self.active_solver_name = None
 
-        # After some steps, check if core has learned enough dynamics to self-navigate
-        core_has_model = self.spatial_cognitive_agent.has_viable_model(
-            min_models=min(2, len(available_actions)),
-            min_confidence=0.6,
-        )
-
-        # If core has viable models and is making progress, use it
-        if core_has_model and self.solver_stagnation_counter < 5:
-            return self._execute_core_step(curr_grid, available_actions)
-
-        # ── 6b. Declarative Skill Dispatch via SkillRegistry ──────────────
-        # Only NOW try declarative skills as acceleration (if core lacks models or stagnates)
+        # ── 6a. Declarative Skill Dispatch via SkillRegistry ──────────────
+        # Check declarative neuro-symbolic skills first. If a domain skill matches
+        # the invariant signature and provides a plan, execute it while the core
+        # continues learning observations in parallel.
         if not self.disable_archetypes:
             # Track which skills have been tried and failed for stagnation detection
             if not hasattr(self, "_declarative_failed_skills"):
@@ -1114,7 +1167,18 @@ class InductiveHCIRAgent:
                 "avatar_color": getattr(self.hcir_agent, "avatar_color", None),
             }
             blackbox_state = self.spatial_cognitive_agent.blackbox.get_state("arc_agi")
-            for skill in blackbox_state.skill_registry:
+            # Cognitive Commitment: If an active declarative skill is in progress and not suppressed,
+            # give it priority to plan subsequent subgoals before scanning other skills.
+            candidate_skills = list(blackbox_state.skill_registry)
+            if self.active_solver_name and self.active_solver_name.startswith("declarative:"):
+                active_name = self.active_solver_name.split(":", 1)[1]
+                active_matches = [s for s in candidate_skills if s.skill_name == active_name]
+                if active_matches and active_name not in self._declarative_failed_skills:
+                    candidate_skills = active_matches + [
+                        s for s in candidate_skills if s.skill_name != active_name
+                    ]
+
+            for skill in candidate_skills:
                 if skill.skill_name in self._declarative_failed_skills:
                     continue
                 try:
@@ -1156,6 +1220,16 @@ class InductiveHCIRAgent:
                         skill.skill_name,
                         exc_info=True,
                     )
+
+        # ── 6b. Core Cognitive Dynamics Execution ─────────────────────────
+        # When no declarative skill matches (or matching skill stagnated),
+        # use the core spatial cognitive model if viable models exist.
+        core_has_model = self.spatial_cognitive_agent.has_viable_model(
+            min_models=min(2, len(available_actions)),
+            min_confidence=0.6,
+        )
+        if core_has_model and self.solver_stagnation_counter < 5:
+            return self._execute_core_step(curr_grid, available_actions)
 
         # ── 6c. Phase 4: Counterfactual Planning on Stagnation ────────────
         if self.solver_stagnation_counter >= 5:
@@ -1253,26 +1327,7 @@ class InductiveHCIRAgent:
         is_click_only = not has_movement and 6 in available_actions
 
         if is_click_only:
-            if not hasattr(self, "_core_click_stagnation"):
-                self._core_click_stagnation = 0
-                self._core_click_gave_up = False
-
-            if self._core_click_gave_up:
-                return self._plan_click_affordance(curr_grid, available_actions)
-
-            action, conf = self.hcir_agent.plan_next_action(
-                curr_grid, available_actions, level=self.current_level
-            )
-            self.last_action_data = self.hcir_agent.last_action_data
-
-            if self.prev_grid is not None and np.array_equal(self.prev_grid, curr_grid):
-                self._core_click_stagnation += 1
-            else:
-                self._core_click_stagnation = 0
-
-            if self._core_click_stagnation >= 25:
-                self._core_click_gave_up = True
-                return self._plan_click_affordance(curr_grid, available_actions)
+            return self._plan_click_affordance(curr_grid, available_actions)
         else:
             action, conf = self.hcir_agent.plan_next_action(
                 curr_grid, available_actions, level=self.current_level
