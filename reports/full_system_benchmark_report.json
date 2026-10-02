@@ -1,0 +1,225 @@
+{
+  "arc_agi_3": {
+    "status": "PASSED",
+    "environments": 2,
+    "completion_rate": 1.0,
+    "mean_efficiency": 1.1616568914956011,
+    "brier_error": 0.014509197144202405,
+    "details": {
+      "ls20": {
+        "levels_completed": 1,
+        "win_rate": 1.0,
+        "actions": 31,
+        "efficiency": 0.7096774193548387
+      },
+      "wa30": {
+        "levels_completed": 1,
+        "win_rate": 1.0,
+        "actions": 44,
+        "efficiency": 1.6136363636363635
+      }
+    }
+  },
+  "sokoban": {
+    "status": "PASSED",
+    "overall_success_rate": 1.0,
+    "ci_95": [
+      0.867,
+      1.0
+    ],
+    "mean_steps": 11.4,
+    "total_episodes": 25,
+    "tiers": {
+      "tier_1_direct_push": {
+        "tier": "tier_1_direct_push",
+        "episodes": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 2.0,
+        "deadlock_count": 0
+      },
+      "tier_2_obstacle_navigation": {
+        "tier": "tier_2_obstacle_navigation",
+        "episodes": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 7.0,
+        "deadlock_count": 0
+      },
+      "tier_3_corner_deadlock_avoidance": {
+        "tier": "tier_3_corner_deadlock_avoidance",
+        "episodes": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 7.0,
+        "deadlock_count": 0
+      },
+      "tier_4_multi_box_assignment": {
+        "tier": "tier_4_multi_box_assignment",
+        "episodes": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 12.0,
+        "deadlock_count": 0
+      },
+      "tier_5_combinatorial_maze": {
+        "tier": "tier_5_combinatorial_maze",
+        "episodes": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.566,
+          1.0
+        ],
+        "mean_steps": 29.0,
+        "deadlock_count": 0
+      }
+    }
+  },
+  "overcooked": {
+    "status": "PASSED",
+    "overall_success_rate": 0.8,
+    "ci_95": [
+      0.548,
+      0.93
+    ],
+    "mean_steps": 65.6,
+    "mean_soups": 0.0,
+    "total_episodes": 15,
+    "tiers": {
+      "tier_1_cramped_room_solo": {
+        "tier": "tier_1_cramped_room_solo",
+        "episodes": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.438,
+          1.0
+        ],
+        "mean_steps": 35.0,
+        "mean_soups_delivered": 1.0
+      },
+      "tier_2_asymmetric_coordination": {
+        "tier": "tier_2_asymmetric_coordination",
+        "episodes": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.438,
+          1.0
+        ],
+        "mean_steps": 49.0,
+        "mean_soups_delivered": 1.0
+      },
+      "tier_3_corridor_contention": {
+        "tier": "tier_3_corridor_contention",
+        "episodes": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.438,
+          1.0
+        ],
+        "mean_steps": 47.0,
+        "mean_soups_delivered": 1.0
+      },
+      "tier_4_dynamic_partner_adaptation": {
+        "tier": "tier_4_dynamic_partner_adaptation",
+        "episodes": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "ci_95": [
+          0.438,
+          1.0
+        ],
+        "mean_steps": 47.0,
+        "mean_soups_delivered": 1.0
+      },
+      "tier_5_multi_order_surge": {
+        "tier": "tier_5_multi_order_surge",
+        "episodes": 3,
+        "successes": 0,
+        "success_rate": 0.0,
+        "ci_95": [
+          0.0,
+          0.562
+        ],
+        "mean_steps": 150.0,
+        "mean_soups_delivered": 1.0
+      }
+    }
+  },
+  "developmental_cohorts": {
+    "status": "PASSED",
+    "cohorts": {
+      "Scripted": {
+        "identified_rule": true,
+        "n_tau": 1,
+        "wasted": 0,
+        "acc_l1": 1.0,
+        "acc_l2": 1.0,
+        "acc_l3": 1.0,
+        "brier": 0.0001
+      },
+      "NeuralLearner": {
+        "identified_rule": false,
+        "n_tau": 20,
+        "wasted": 9,
+        "acc_l1": 0.5,
+        "acc_l2": 0.3333,
+        "acc_l3": 0.5,
+        "brier": 0.4194
+      },
+      "PassiveHCIR": {
+        "identified_rule": true,
+        "n_tau": 2,
+        "wasted": 2,
+        "acc_l1": 1.0,
+        "acc_l2": 1.0,
+        "acc_l3": 1.0,
+        "brier": 0.0025
+      },
+      "ActiveHCIR": {
+        "identified_rule": true,
+        "n_tau": 2,
+        "wasted": 0,
+        "acc_l1": 1.0,
+        "acc_l2": 1.0,
+        "acc_l3": 1.0,
+        "brier": 0.0025
+      },
+      "MatureHCIR": {
+        "identified_rule": true,
+        "n_tau": 1,
+        "wasted": 0,
+        "acc_l1": 1.0,
+        "acc_l2": 1.0,
+        "acc_l3": 1.0,
+        "brier": 0.0001
+      }
+    }
+  },
+  "arc_agi_static": {
+    "status": "PASSED",
+    "passed": 3,
+    "total": 3,
+    "rate": 1.0
+  },
+  "total_elapsed_seconds": 298.78
+}

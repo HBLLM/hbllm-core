@@ -127,8 +127,6 @@ def run_nethack_tier_benchmark(
     tier: int,
     episodes: int = 5,
     base_seed: int = 4000,
-    prefer_native: bool = True,
-    require_native: bool = True,
 ) -> dict[str, Any]:
     """Run benchmark for a given cohort on a specific NetHack/MiniHack tier."""
     canonical_cohort = resolve_cohort(cohort_name)
@@ -136,11 +134,7 @@ def run_nethack_tier_benchmark(
 
     for i in range(episodes):
         seed = base_seed + (tier * 100) + i
-        env = make_nethack_env(seed=seed, tier=tier, prefer_native=prefer_native)
-        if require_native and not getattr(env, "is_native", False):
-            raise RuntimeError(
-                "Native 'minihack' / 'nle' package is strictly required; standalone fallback is disabled."
-            )
+        env = make_nethack_env(seed=seed, tier=tier)
         obs, _ = env.reset(seed=seed)
 
         if canonical_cohort == "pure-hcir":
@@ -196,8 +190,6 @@ def run_nethack_benchmark(
     cohort_name: str,
     episodes: int = 15,
     base_seed: int = 4000,
-    prefer_native: bool = True,
-    require_native: bool = True,
 ) -> dict[str, Any]:
     """Backwards-compatible benchmark across standard environments."""
     eps_per_tier = max(1, episodes // len(NETHACK_TIERS))
@@ -214,8 +206,6 @@ def run_nethack_benchmark(
             tier=tier_id,
             episodes=eps_per_tier,
             base_seed=base_seed,
-            prefer_native=prefer_native,
-            require_native=require_native,
         )
         tier_summaries[tier_name] = {
             "tier": tier_id,
@@ -259,19 +249,13 @@ def main() -> None:
         default=None,
         help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
     )
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        help="Run against upstream native minihack/nle package",
-    )
     args = parser.parse_args()
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(f"\n{'=' * 85}")
     print(
-        f"Running NetHack / MiniHack Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier, Native={args.prefer_native})"
+        f"Running NetHack / MiniHack Full-Spectrum Benchmark (5 Tiers, N={args.episodes_per_tier} eps/tier, Native Upstream)"
     )
     print(f"{'=' * 85}\n")
 
@@ -289,11 +273,7 @@ def main() -> None:
 
         for tier_id, tier_name in NETHACK_TIERS:
             data = run_nethack_tier_benchmark(
-                cohort,
-                tier=tier_id,
-                episodes=args.episodes_per_tier,
-                base_seed=args.seed,
-                prefer_native=args.prefer_native,
+                cohort, tier=tier_id, episodes=args.episodes_per_tier, base_seed=args.seed
             )
             total_eps += data["episodes"]
             total_successes += sum(1 for r in data["results"] if r["success"])

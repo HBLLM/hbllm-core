@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class EvidenceSource(str, Enum):
@@ -40,6 +41,8 @@ class EpistemicState:
     )
     certainty: CertaintyLevel = CertaintyLevel.OBSERVATION
     last_verified: float = field(default_factory=time.time)
+    spatial_observability_mask: Any = None
+    information_gain: float = 0.0
 
     def is_empirically_grounded(self) -> bool:
         """Return True if evidence includes direct empirical sensor observation."""

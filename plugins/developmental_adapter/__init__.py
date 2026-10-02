@@ -10,6 +10,20 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+# Backward-compatibility re-exports (canonical home: plugins.arc_agi_adapter)
+from plugins.arc_agi_adapter import (
+    ActionDynamicsModel,
+    ARC3BenchmarkReport,
+    ARC3BenchmarkRunner,
+    ARC3InteractiveAgent,
+    ARCBenchmarkReport,
+    ARCGrid,
+    ARCRelationalSolver,
+    ARCTaskResult,
+    GridObject,
+    GridTopologyExtractor,
+)
+
 from .a20_transfer_bridge import A20RelationalTransferBridge
 from .action import DevelopmentalActionAdapter
 from .affordance_discovery import AffordanceDiscoveryEngine
@@ -31,6 +45,19 @@ from .continual_development import ContinualDevelopmentEngine
 from .cross_transfer import CrossTransferEngine
 from .curiosity import EpistemicCuriosityEngine
 from .curriculum import CURRICULUM_SPECS, CurriculumStageId, CurriculumStageSpec
+from .diagram_grounding import (
+    CrossModalVerificationReport,
+    CrossModalVerifier,
+    DiagramPrimitive,
+    DiagramPrimitiveType,
+    ScientificDiagramParser,
+)
+from .dictionary_store import DictionaryEntry, LanguageDictionary, SemanticRole
+from .downstream_benchmarks import (
+    BenchmarkTaskResult,
+    DownstreamBenchmarkReport,
+    DownstreamBenchmarkRunner,
+)
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -40,12 +67,23 @@ from .metrics import (
     DevelopmentalMetricsTracker,
     DevelopmentalTelemetryEmitter,
 )
+from .multilingual import MultilingualLexiconRegistry, SupportedLanguage
 from .perception import (
     DevelopmentalPerceptionAdapter,
     SemanticLeakageViolationError,
 )
 from .school import CognitiveSchool, GraduationTranscript
+from .self_directed_learner import (
+    EpistemicKnowledgeGap,
+    InformationGainReport,
+    KnowledgeGapDetector,
+    KnowledgeGapType,
+    SelfDirectedReadingEngine,
+    SelfDirectedReadingPlan,
+    binary_entropy,
+)
 from .spatial_containment import SpatialContainmentEngine
+from .taxonomy import TaxonNode, TaxonomyHierarchyEngine
 from .teacher import (
     GradeAssessment,
     GradeLevel,
@@ -119,6 +157,14 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 __all__ = [
     "A20RelationalTransferBridge",
+    "ARC3BenchmarkReport",
+    "ARC3BenchmarkRunner",
+    "ARC3InteractiveAgent",
+    "ARCBenchmarkReport",
+    "ARCGrid",
+    "ARCRelationalSolver",
+    "ARCTaskResult",
+    "ActionDynamicsModel",
     "ActiveDevelopmentalHCIRCohort",
     "AffordanceDiscoveryEngine",
     "AffordanceHypothesis",
@@ -130,6 +176,7 @@ __all__ = [
     "BaseDevelopmentalCohort",
     "BeliefTransitionEvent",
     "BeliefTransitionType",
+    "BenchmarkTaskResult",
     "BlankBrainSubstrate",
     "CURRICULUM_SPECS",
     "CausalHypothesis",
@@ -140,11 +187,32 @@ __all__ = [
     "ConceptAbstractionEngine",
     "ConceptCluster",
     "ContinualDevelopmentEngine",
+    "CrossModalVerificationReport",
+    "CrossModalVerifier",
     "CrossTransferEngine",
     "CrossTransferEvaluation",
     "CurriculumStageId",
     "CurriculumStageSpec",
     "DevelopmentalActionAdapter",
+    "DiagramPrimitive",
+    "DiagramPrimitiveType",
+    "DictionaryEntry",
+    "DownstreamBenchmarkReport",
+    "DownstreamBenchmarkRunner",
+    "EpistemicKnowledgeGap",
+    "GridObject",
+    "GridTopologyExtractor",
+    "InformationGainReport",
+    "KnowledgeGapDetector",
+    "KnowledgeGapType",
+    "LanguageDictionary",
+    "MultilingualLexiconRegistry",
+    "ScientificDiagramParser",
+    "SelfDirectedReadingEngine",
+    "SelfDirectedReadingPlan",
+    "binary_entropy",
+    "SemanticRole",
+    "SupportedLanguage",
     "CohortStatisticalSummary",
     "DevelopmentalMetricsTracker",
     "DevelopmentalTelemetryEmitter",
@@ -178,6 +246,8 @@ __all__ = [
     "SpatialContainmentEngine",
     "SpatialRelationFact",
     "StudentProfile",
+    "TaxonNode",
+    "TaxonomyHierarchyEngine",
     "ToolLearningEngine",
     "Vector2D",
     "create_blank_brain_substrate",

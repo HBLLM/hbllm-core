@@ -27,7 +27,9 @@ import logging
 import time
 import uuid
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from hbllm.hcir.graph import (
     GoalNode,
@@ -119,12 +121,33 @@ class TaskFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Interruption Checkpoint & Goal Stack
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class InterruptionCheckpoint(BaseModel):
+    """Snapshot of a suspended task frame when preempted by an urgent interrupt or higher-priority goal."""
+
+    checkpoint_id: str = Field(default_factory=lambda: f"ckpt_{uuid.uuid4().hex[:8]}")
+    parent_goal_id: str
+    parent_frame_id: str
+    interrupt_goal_id: str
+    interrupt_frame_id: str
+    target_conditions: list[str] = Field(default_factory=list)
+    unsatisfied_conditions: list[str] = Field(default_factory=list)
+    in_flight_action: str | None = None
+    step_index: int = 0
+    timestamp: float = Field(default_factory=time.time)
+    context_data: dict[str, Any] = Field(default_factory=dict)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Working Workspace — manages multiple task frames
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class WorkingWorkspace:
-    """Working tier: manages a collection of active task frames.
+    """Working tier: manages a collection of active task frames and hierarchical goal interruptions.
 
     Each frame scopes scratch reasoning to a specific goal.
     Frames persist across conversational turns and are closed when
@@ -134,6 +157,100 @@ class WorkingWorkspace:
     def __init__(self, max_frames: int = 10) -> None:
         self._frames: dict[str, TaskFrame] = {}
         self._max_frames = max_frames
+        self._interruption_stack: list[InterruptionCheckpoint] = []
+
+    @property
+    def interruption_stack(self) -> list[InterruptionCheckpoint]:
+        """Return the current stack of active interruption checkpoints."""
+        return list(self._interruption_stack)
+
+    @property
+    def has_active_interruptions(self) -> bool:
+        """Check whether there are active interrupted goal checkpoints pending resumption."""
+        return len(self._interruption_stack) > 0
+
+    def push_interruption(
+        self,
+        parent_frame_id: str,
+        interrupt_goal_id: str,
+        target_conditions: list[str] | None = None,
+        unsatisfied_conditions: list[str] | None = None,
+        in_flight_action: str | None = None,
+        step_index: int = 0,
+        context_data: dict[str, Any] | None = None,
+    ) -> tuple[TaskFrame, InterruptionCheckpoint]:
+        """Suspend an active parent frame, spawn an interrupt frame, and push checkpoint to stack."""
+        parent_frame = self._frames.get(parent_frame_id)
+        parent_goal = parent_frame.goal_id if parent_frame else "unknown_goal"
+
+        interrupt_frame = self.create_frame(interrupt_goal_id)
+
+        checkpoint = InterruptionCheckpoint(
+            parent_goal_id=parent_goal,
+            parent_frame_id=parent_frame_id,
+            interrupt_goal_id=interrupt_goal_id,
+            interrupt_frame_id=interrupt_frame.frame_id,
+            target_conditions=target_conditions or [],
+            unsatisfied_conditions=unsatisfied_conditions or [],
+            in_flight_action=in_flight_action,
+            step_index=step_index,
+            context_data=context_data or {},
+        )
+        self._interruption_stack.append(checkpoint)
+        logger.info(
+            "Pushed interruption checkpoint %s: parent_goal=%s -> interrupt_goal=%s (stack depth=%d)",
+            checkpoint.checkpoint_id,
+            parent_goal,
+            interrupt_goal_id,
+            len(self._interruption_stack),
+        )
+        return interrupt_frame, checkpoint
+
+    def pop_interruption(
+        self,
+        interrupt_frame_id: str | None = None,
+        reason: str = "completed",
+    ) -> InterruptionCheckpoint | None:
+        """Close current interrupt frame and restore parent checkpoint from stack."""
+        if not self._interruption_stack:
+            return None
+
+        if interrupt_frame_id is not None:
+            idx = next(
+                (
+                    i
+                    for i, ckpt in enumerate(reversed(self._interruption_stack))
+                    if ckpt.interrupt_frame_id == interrupt_frame_id
+                ),
+                None,
+            )
+            if idx is not None:
+                actual_idx = len(self._interruption_stack) - 1 - idx
+                checkpoint = self._interruption_stack.pop(actual_idx)
+            else:
+                checkpoint = self._interruption_stack.pop()
+        else:
+            checkpoint = self._interruption_stack.pop()
+
+        self.close_frame(checkpoint.interrupt_frame_id, reason=reason)
+        logger.info(
+            "Popped interruption checkpoint %s: resumed parent_goal=%s (remaining depth=%d)",
+            checkpoint.checkpoint_id,
+            checkpoint.parent_goal_id,
+            len(self._interruption_stack),
+        )
+        return checkpoint
+
+    def get_active_checkpoint(self, goal_id: str | None = None) -> InterruptionCheckpoint | None:
+        """Get the topmost active checkpoint, optionally matching goal_id."""
+        if not self._interruption_stack:
+            return None
+        if goal_id is None:
+            return self._interruption_stack[-1]
+        for ckpt in reversed(self._interruption_stack):
+            if ckpt.parent_goal_id == goal_id or ckpt.interrupt_goal_id == goal_id:
+                return ckpt
+        return None
 
     @property
     def active_frames(self) -> list[TaskFrame]:
@@ -280,7 +397,7 @@ class TieredWorkspace:
         self._snapshot_interval = snapshot_interval
         self._commits_since_snapshot: int = 0
 
-    # ── Task Frame Management ────────────────────────────────────────
+    # ── Task Frame & Interruption Management ─────────────────────────
 
     def create_task_frame(self, goal_id: str) -> TaskFrame:
         """Create a new task frame in the working tier."""
@@ -289,6 +406,49 @@ class TieredWorkspace:
     def close_task_frame(self, frame_id: str, reason: str = "completed") -> bool:
         """Close a task frame in the working tier."""
         return self.working.close_frame(frame_id, reason)
+
+    def push_interruption(
+        self,
+        parent_frame_id: str,
+        interrupt_goal_id: str,
+        target_conditions: list[str] | None = None,
+        unsatisfied_conditions: list[str] | None = None,
+        in_flight_action: str | None = None,
+        step_index: int = 0,
+        context_data: dict[str, Any] | None = None,
+    ) -> tuple[TaskFrame, InterruptionCheckpoint]:
+        """Suspend an active parent frame and push an interrupt checkpoint."""
+        return self.working.push_interruption(
+            parent_frame_id=parent_frame_id,
+            interrupt_goal_id=interrupt_goal_id,
+            target_conditions=target_conditions,
+            unsatisfied_conditions=unsatisfied_conditions,
+            in_flight_action=in_flight_action,
+            step_index=step_index,
+            context_data=context_data,
+        )
+
+    def pop_interruption(
+        self,
+        interrupt_frame_id: str | None = None,
+        reason: str = "completed",
+    ) -> InterruptionCheckpoint | None:
+        """Close interrupt frame and restore parent checkpoint from stack."""
+        return self.working.pop_interruption(interrupt_frame_id=interrupt_frame_id, reason=reason)
+
+    def get_active_checkpoint(self, goal_id: str | None = None) -> InterruptionCheckpoint | None:
+        """Get the topmost active checkpoint, optionally matching goal_id."""
+        return self.working.get_active_checkpoint(goal_id=goal_id)
+
+    @property
+    def interruption_stack(self) -> list[InterruptionCheckpoint]:
+        """Return the current stack of active interruption checkpoints."""
+        return self.working.interruption_stack
+
+    @property
+    def has_active_interruptions(self) -> bool:
+        """Check whether there are active interrupted goal checkpoints pending resumption."""
+        return self.working.has_active_interruptions
 
     # ── Tier Access ──────────────────────────────────────────────────
 

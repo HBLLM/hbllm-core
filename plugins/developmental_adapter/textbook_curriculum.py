@@ -12,17 +12,20 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
 
-from .blank_brain import BlankBrainSubstrate
+if TYPE_CHECKING:
+    from .teacher import StudentProfile
+from .dictionary_store import LanguageDictionary
 from .types import (
     BabyActionType,
     BabyObjectState,
     BabyObjectType,
     BabyRelationType,
     ExamQuestionResult,
+    LexicalCategory,
     PredicateGoal,
     Vector2D,
 )
@@ -185,14 +188,20 @@ class TextbookParser:
 
         elif sec_type == TextbookSectionType.ANALOGY_SCHEMA:
             # Extract source and target domain descriptions
-            payload["source_domain"] = "Tabletop Container / Lever"
-            payload["target_domain"] = "Industrial Ore Hopper"
+            m_src = re.search(r"Source Domain:\s*([^\n]+)", text, re.IGNORECASE)
+            m_tgt = re.search(r"Target Domain:\s*([^\n]+)", text, re.IGNORECASE)
+            payload["source_domain"] = (
+                m_src.group(1).strip() if m_src else "Tabletop Container / Lever"
+            )
+            payload["target_domain"] = m_tgt.group(1).strip() if m_tgt else "Industrial Ore Hopper"
             payload["schema_type"] = "containment"
             payload["is_applicable"] = True
 
         elif sec_type == TextbookSectionType.EXAM_CHALLENGE:
             payload["has_trick_question"] = (
-                "mystery" in text.lower() or "unobserved" in text.lower()
+                "mystery" in text.lower()
+                or "unobserved" in text.lower()
+                or "abstain" in text.lower()
             )
 
         return payload
@@ -206,15 +215,29 @@ class TextbookSimulationCompiler:
         """Transform a worked problem section into an executable simulation state."""
         payload = section.structured_payload
         instruction = payload.get("instruction", "pull green ball inside box")
+        inst_low = instruction.lower()
+
+        target_color = "green"
+        if "red" in inst_low:
+            target_color = "red"
+        elif "blue" in inst_low:
+            target_color = "blue"
+        elif "yellow" in inst_low:
+            target_color = "yellow"
+
+        is_block = "block" in inst_low or payload.get("subject_shape") == "block"
+        subject_shape = BabyObjectType.BLOCK if is_block else BabyObjectType.BALL
+        subject_id = f"target_{target_color}_{'block' if is_block else 'ball'}"
 
         # Create physical entities described in the textbook problem
-        target_ball = BabyObjectState(
-            id="target_green_ball",
-            object_type=BabyObjectType.BALL,
-            color="green",
+        target_entity = BabyObjectState(
+            id=subject_id,
+            object_type=subject_shape,
+            color=target_color,
             mass=0.5,
             position=Vector2D(1.2, 0.4),  # Distant / out of direct arm reach
             size=Vector2D(0.2, 0.2),
+            rollable=(subject_shape == BabyObjectType.BALL),
         )
 
         reach_stick = BabyObjectState(
@@ -224,6 +247,8 @@ class TextbookSimulationCompiler:
             mass=1.0,
             position=Vector2D(0.3, 0.1),  # Within reach of agent
             size=Vector2D(0.8, 0.1),  # Elongated tool
+            is_tool=True,
+            tool_length=0.8,
         )
 
         storage_box = BabyObjectState(
@@ -234,17 +259,40 @@ class TextbookSimulationCompiler:
             position=Vector2D(0.0, 0.6),  # Container
             size=Vector2D(0.5, 0.5),
             is_open=True,
+            is_container=True,
         )
 
         objects = {
-            "target_green_ball": target_ball,
+            subject_id: target_entity,
             "reach_stick": reach_stick,
             "storage_box": storage_box,
         }
 
+        # Include ambient counterpart object so sensory observation includes both balls and blocks
+        if is_block:
+            objects["ambient_ball"] = BabyObjectState(
+                id="ambient_ball",
+                object_type=BabyObjectType.BALL,
+                color="green",
+                mass=0.5,
+                position=Vector2D(0.8, 0.8),
+                size=Vector2D(0.2, 0.2),
+                rollable=True,
+            )
+        else:
+            objects["ambient_block"] = BabyObjectState(
+                id="ambient_block",
+                object_type=BabyObjectType.BLOCK,
+                color="red",
+                mass=0.5,
+                position=Vector2D(0.8, 0.8),
+                size=Vector2D(0.2, 0.2),
+                rollable=False,
+            )
+
         goal = PredicateGoal(
             predicate=BabyRelationType.INSIDE,
-            subject_id="target_green_ball",
+            subject_id=subject_id,
             target_id="storage_box",
         )
 
@@ -259,7 +307,7 @@ class TextbookSimulationCompiler:
 
     @staticmethod
     def verify_student_solution(
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         puzzle: CompiledSimulationPuzzle,
     ) -> dict[str, Any]:
         """Load puzzle into student's environment, execute planned solution, and assess outcome."""
@@ -316,10 +364,13 @@ class TextbookAnalogyCompiler:
             )
         )
 
+        source_name = section.structured_payload.get("source_domain", "Tabletop Box & Ball")
+        target_name = section.structured_payload.get("target_domain", "Industrial Ore Hopper")
+
         return CompiledAnalogyTask(
             task_id=f"analogy_{section.section_id}",
-            source_domain_name="Tabletop Box & Ball",
-            target_domain_name="Industrial Ore Hopper",
+            source_domain_name=source_name,
+            target_domain_name=target_name,
             source_schema_type="containment",
             target_graph=target_hopper,
             expected_mapping_status="APPLICABLE",
@@ -330,14 +381,15 @@ class TextbookAnalogyCompiler:
 class TextbookCurriculumCurator:
     """High-level curriculum curator that teaches and evaluates students using textbooks."""
 
-    def __init__(self) -> None:
+    def __init__(self, dictionary: LanguageDictionary | None = None) -> None:
         self.parser = TextbookParser()
         self.sim_compiler = TextbookSimulationCompiler()
         self.analogy_compiler = TextbookAnalogyCompiler()
+        self.dictionary = dictionary or LanguageDictionary.get_instance()
 
     def teach_chapter(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         chapter: TextbookChapter,
     ) -> dict[str, Any]:
         """Deliver chapter lessons: lexical concepts, physical simulation puzzles, and analogies."""
@@ -348,31 +400,119 @@ class TextbookCurriculumCurator:
         if def_sec:
             glossary = def_sec.structured_payload.get("glossary", {})
             for term, explanation in glossary.items():
-                # Formulate paired demonstrations for lexical categories
                 context = {"concept": term, "explanation": explanation}
-                if "container" in term or "box" in term:
-                    context["entity_type"] = BabyObjectType.BOX
-                elif "tool" in term or "stick" in term or "lever" in term:
-                    context["entity_type"] = BabyObjectType.TOOL
-                elif "fulcrum" in term or "pivot" in term:
-                    context["entity_type"] = BabyObjectType.SURFACE
-                elif "pull" in term:
-                    context["action"] = BabyActionType.PULL
-                elif "push" in term:
-                    context["action"] = BabyActionType.PUSH
-                elif "advantage" in term:
-                    context["property"] = "mechanical_advantage"
+                term_clean = term.strip().lower()
+
+                # Autonomous lexical lookup via authoritative Language Dictionary
+                entry = self.dictionary.lookup(term_clean)
+                if entry is not None:
+                    if entry.category == LexicalCategory.NOUN:
+                        if entry.is_container:
+                            context["entity_type"] = BabyObjectType.BOX
+                        elif entry.is_tool:
+                            context["entity_type"] = BabyObjectType.TOOL
+                        elif entry.semantic_role == "BALL":
+                            context["entity_type"] = BabyObjectType.BALL
+                        else:
+                            context["entity_type"] = BabyObjectType.BLOCK
+                    elif entry.category == LexicalCategory.VERB:
+                        if entry.semantic_role == "PULL":
+                            context["action"] = BabyActionType.PULL
+                        elif entry.semantic_role == "ROLL":
+                            context["action"] = BabyActionType.ROLL
+                        elif entry.semantic_role == "GRASP":
+                            context["action"] = BabyActionType.GRASP
+                        else:
+                            context["action"] = BabyActionType.PUSH
+                    elif entry.category == LexicalCategory.PREPOSITION:
+                        if entry.semantic_role == "NEAR":
+                            context["relation"] = BabyRelationType.NEAR
+                        else:
+                            context["relation"] = BabyRelationType.INSIDE
+                    elif entry.category == LexicalCategory.ADJECTIVE:
+                        context["property"] = term_clean
+                else:
+                    # Autonomous registration for novel terms based on definitional semantics
+                    inferred_entry = self.dictionary.register_entry(
+                        word=term_clean,
+                        category=(
+                            "noun"
+                            if any(
+                                k in explanation.lower()
+                                for k in (
+                                    "substance",
+                                    "matter",
+                                    "object",
+                                    "body",
+                                    "entity",
+                                    "organism",
+                                    "device",
+                                    "structure",
+                                    "element",
+                                    "material",
+                                )
+                            )
+                            else "adjective"
+                        ),
+                        definition=explanation,
+                    )
+                    if inferred_entry.category == LexicalCategory.NOUN:
+                        context["entity_type"] = (
+                            BabyObjectType.BOX
+                            if inferred_entry.is_container
+                            else BabyObjectType.TOOL
+                            if inferred_entry.is_tool
+                            else BabyObjectType.BLOCK
+                        )
+                    else:
+                        context["property"] = term_clean
+
                 student.grounding_engine.observe_paired_demonstration(term, context)
             results["glossary_count"] = len(glossary)
+            results["grounded_concepts"] = list(glossary.keys())
             results["sections_processed"] += 1
 
-        # 2. Process Worked Problems -> BabyWorld Simulation
+        # 2. Process Worked Problems -> BabyWorld Simulation & Active Causal Discovery
         prob_sec = chapter.get_section(TextbookSectionType.WORKED_PROBLEM)
         if prob_sec:
             puzzle = self.sim_compiler.compile_puzzle(prob_sec)
             sim_eval = self.sim_compiler.verify_student_solution(student, puzzle)
             results["simulation_puzzle"] = sim_eval
             results["sections_processed"] += 1
+
+            # Step 2b: Active Causal Invariance Induction
+            if hasattr(student, "causal_engine") and student.causal_engine:
+                if len(student.substrate.causal_rules) < 10:
+                    try:
+                        obs = student.env.get_sensory_observation()
+                        demos = student.env.generate_observational_demonstrations()
+                        student.causal_engine.observe_and_generate_hypotheses(
+                            obs, episodes_data=demos
+                        )
+                        cand_ids = list(student.env.objects.keys())
+                        if cand_ids:
+                            for _ in range(2):
+                                active_hyps = [
+                                    h for h in student.causal_engine.hypotheses if not h.falsified
+                                ]
+                                if not active_hyps:
+                                    break
+                                target_id, hyp = student.causal_engine.select_active_intervention(
+                                    cand_ids, active_hyps
+                                )
+                                student.causal_engine.execute_interventional_probe(
+                                    target_id, action=hyp.action
+                                )
+                    except Exception as e:
+                        logger.debug(f"Causal discovery interventional probe skipped: {e}")
+
+            # Step 2c: Active Tool & Shape Affordance Discovery
+            if hasattr(student, "affordance_engine") and student.affordance_engine:
+                if len(student.substrate.affordances) < 5:
+                    try:
+                        student.affordance_engine.discover_affordances(max_interventions=3)
+                    except Exception as e:
+                        logger.debug(f"Affordance discovery probe skipped: {e}")
 
         # 3. Process Analogy Schemas -> A20 Structure Mapping
         analogy_sec = chapter.get_section(TextbookSectionType.ANALOGY_SCHEMA)
@@ -389,30 +529,49 @@ class TextbookCurriculumCurator:
 
     def conduct_chapter_examination(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile | Any,
         chapter: TextbookChapter,
+        vocab_probes: int = 1,
     ) -> list[ExamQuestionResult]:
         """Administer an un-mocked Socratic examination based directly on textbook contents."""
         q_results: list[ExamQuestionResult] = []
 
-        # Question 1: Vocabulary Recall from Chapter Definitions
+        # Question 1: Multi-term Vocabulary Recall from Chapter Definitions
         def_sec = chapter.get_section(TextbookSectionType.DEFINITIONS)
         if def_sec:
-            sample_term = next(iter(def_sec.structured_payload.get("glossary", {})), "box")
-            entry = student.grounding_engine.lexicon.get(sample_term)
-            is_corr = entry is not None
-            conf = entry.confidence if entry else 0.20
-            brier = (conf - 1.0) ** 2 if is_corr else conf**2
-            q_results.append(
-                ExamQuestionResult(
-                    question_text=f"Textbook Glossary Recall: Define '{sample_term}'",
-                    student_response=f"Symbol({entry.grounded_symbol})" if entry else "None",
-                    ground_truth=f"Symbol({sample_term})",
-                    is_correct=is_corr,
-                    confidence=round(conf, 3),
-                    brier_error=round(brier, 4),
+            glossary = def_sec.structured_payload.get("glossary", {})
+            glossary_terms = list(glossary.keys())
+            if not glossary_terms:
+                glossary_terms = ["box"]
+
+            if vocab_probes <= 1:
+                probe_indices = [0]
+            else:
+                probe_indices = [0]
+                if len(glossary_terms) > 2:
+                    probe_indices.append(len(glossary_terms) // 2)
+                if len(glossary_terms) > 1:
+                    probe_indices.append(len(glossary_terms) - 1)
+                probe_indices = probe_indices[:vocab_probes]
+
+            unique_indices = list(dict.fromkeys(probe_indices))
+
+            for p_idx in unique_indices:
+                sample_term = glossary_terms[p_idx]
+                entry = student.grounding_engine.lexicon.get(sample_term)
+                is_corr = entry is not None
+                conf = entry.confidence if entry else 0.20
+                brier = (conf - 1.0) ** 2 if is_corr else conf**2
+                q_results.append(
+                    ExamQuestionResult(
+                        question_text=f"Textbook Glossary Recall: Define '{sample_term}'",
+                        student_response=f"Symbol({entry.grounded_symbol})" if entry else "None",
+                        ground_truth=f"Symbol({sample_term})",
+                        is_correct=is_corr,
+                        confidence=round(conf, 3),
+                        brier_error=round(brier, 4),
+                    )
                 )
-            )
 
         # Question 2: Physical Problem Solving via Simulation Execution
         prob_sec = chapter.get_section(TextbookSectionType.WORKED_PROBLEM)
@@ -457,7 +616,7 @@ class TextbookCurriculumCurator:
         has_trick = (
             exam_sec.structured_payload.get("has_trick_question", True) if exam_sec else True
         )
-        if has_trick:
+        if has_trick and hasattr(student, "metacognitive_engine") and student.metacognitive_engine:
             mystery_goal = PredicateGoal(
                 predicate="LEVITATE", subject_id="unobserved_quantum_particle"
             )

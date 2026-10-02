@@ -92,9 +92,15 @@ class DigitalTwinRegistry:
     def create_snapshot(self) -> WorldStateSnapshot:
         """Create an immutable snapshot of current empirical digital twin state."""
         entity_states = {e_id: e.status for e_id, e in self._entities.items()}
+        variables = dict(self._variables)
+        if self._entities and "spatial_entities" not in variables:
+            variables["spatial_entities"] = {
+                e_id: {"name": e.entity_name, "status": e.status, **e.telemetry}
+                for e_id, e in self._entities.items()
+            }
         return WorldStateSnapshot(
             world_id=self.world_id,
             timestamp=time.time(),
-            variables=dict(self._variables),
+            variables=variables,
             entity_states=entity_states,
         )

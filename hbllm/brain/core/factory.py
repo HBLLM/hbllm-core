@@ -176,6 +176,8 @@ class BrainConfig(BaseModel):
     inject_autonomy_manager: bool = True
     inject_temporal: bool = True
     inject_swarm: bool = True
+    inject_driver_manager: bool = True  # PnP Peripheral & Device Manager (Cognitive USB)
+    watch_devices: bool = True  # Background watcher for hot-plugged USB/hardware devices
 
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
@@ -1654,6 +1656,46 @@ class BrainFactory:
             except Exception as e:
                 logger.warning("Failed to start IoT node: %s", e)
 
+        # Driver Manager & Hardware PnP Gateway Node (Cognitive USB)
+        driver_manager = None
+        driver_node = None
+        device_discovery = None
+        tool_registry = None
+        try:
+            from hbllm.actions.tool_registry import ToolRegistry
+
+            tool_registry = ToolRegistry(bus=message_bus)
+        except Exception as e:
+            logger.debug("ToolRegistry init skipped: %s", e)
+
+        if cfg.inject_driver_manager:
+            try:
+                from hbllm.drivers.discovery import DeviceDiscoveryEngine
+                from hbllm.drivers.manager import DriverManager
+                from hbllm.drivers.node import DriverManagerNode
+
+                driver_manager = DriverManager()
+                driver_node = DriverManagerNode(
+                    node_id="driver_manager",
+                    driver_manager=driver_manager,
+                    tool_registry=tool_registry,
+                )
+                await _register_node(registry, driver_node)
+                await driver_node.start(message_bus)
+                nodes.append(driver_node)
+
+                # Initialize physical port discovery engine
+                device_discovery = DeviceDiscoveryEngine(
+                    driver_manager=driver_manager,
+                    enable_physical_scan=getattr(cfg, "watch_devices", True),
+                )
+                await device_discovery.start()
+                logger.info(
+                    "DriverManagerNode & DeviceDiscoveryEngine (Cognitive USB / PnP Gateway) wired"
+                )
+            except Exception as e:
+                logger.warning("DriverManagerNode init failed (non-critical): %s", e)
+
         # Live World State Engine (environment graph)
         if cfg.inject_world_state:
             from hbllm.brain.world.world_state import WorldStateEngine
@@ -2244,6 +2286,12 @@ class BrainFactory:
             )
             brain.reality_graph = reality_graph
             logger.info("RealityGraph wired — unified world model facade active")
+
+        if driver_manager is not None:
+            brain.driver_manager = driver_manager
+            brain.driver_node = driver_node
+            brain.device_discovery = device_discovery
+        brain.tool_registry = tool_registry
 
         logger.info(
             "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",

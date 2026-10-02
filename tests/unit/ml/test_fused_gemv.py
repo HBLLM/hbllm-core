@@ -2,6 +2,7 @@
 Test for Rust Fused 4-bit GEMV Correctness vs PyTorch Linear.
 """
 
+import pytest
 import torch
 
 from hbllm.model.quantization import QuantizedLinear
@@ -48,6 +49,10 @@ def test_fused_gemv_correctness():
 
     # Evaluate using Rust fast-path fused kernel (if available)
     if original_engine is not None and hasattr(original_engine, "gemv_4bit_simd"):
+        try:
+            x.numpy()
+        except RuntimeError:
+            pytest.skip("PyTorch-NumPy bridge not available in this environment")
         q_mod.rust_engine = original_engine
         y_rust = layer(x)
 
