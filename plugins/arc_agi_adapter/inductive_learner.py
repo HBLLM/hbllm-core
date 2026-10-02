@@ -1118,9 +1118,18 @@ class InductiveHCIRAgent:
                                 recipe.delivery_zone_color
                             )
 
+        # ── Autonomous Epistemic Core Delegation (General Brain Faculty) ──────
+        if self.disable_archetypes:
+            action, action_data = self.autonomous_engine.decide(curr_grid, available_actions)
+            self.last_action_data = action_data
+            self.prev_grid = curr_grid.copy()
+            self.last_action = action
+            return action, 0.95
+
         # If a declarative skill has queued actions in-flight, continue executing the plan
         if hasattr(self, "_declarative_action_queue") and self._declarative_action_queue:
             action, action_data = self._declarative_action_queue.pop(0)
+
             self.last_action_data = action_data
             self.prev_grid = curr_grid.copy()
             self.last_action = action

@@ -434,6 +434,89 @@ class PhysicsPredictor:
         return False
 
     @classmethod
+    def is_2x2_deadlock(
+        cls,
+        entity_pos: tuple[int, int] | None = None,
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        block_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
+    ) -> bool:
+        """Detect if pushable blocks form an irreversible 2x2 square with static barriers.
+
+        In intuitive physics / Sokoban dynamics, a 2x2 block cluster containing at least one
+        non-target block is completely unmovable and permanently frozen.
+        """
+        pos = entity_pos
+        if pos is None:
+            return False
+        if pos in target_positions:
+            return False
+
+        H, W = grid_shape
+        r, c = pos
+        impassable = set(barrier_cells) | set(block_cells) | {pos}
+
+        # 4 possible 2x2 squares containing (r, c):
+        # 1. Top-Left: (r-1, c-1), (r-1, c), (r, c-1), (r, c)
+        # 2. Top-Right: (r-1, c), (r-1, c+1), (r, c), (r, c+1)
+        # 3. Bottom-Left: (r, c-1), (r, c), (r+1, c-1), (r+1, c)
+        # 4. Bottom-Right: (r, c), (r, c+1), (r+1, c), (r+1, c+1)
+        square_offsets = [
+            [(-1, -1), (-1, 0), (0, -1), (0, 0)],
+            [(-1, 0), (-1, 1), (0, 0), (0, 1)],
+            [(0, -1), (0, 0), (1, -1), (1, 0)],
+            [(0, 0), (0, 1), (1, 0), (1, 1)],
+        ]
+
+        for sq in square_offsets:
+            cells = [(r + dr, c + dc) for dr, dc in sq]
+            # All cells in the square must be within bounds or impassable
+            all_impassable = True
+            blocks_in_sq: list[tuple[int, int]] = []
+            for cr, cc in cells:
+                if not (0 <= cr < H and 0 <= cc < W):
+                    # Out of bounds is an impassable barrier
+                    continue
+                if (cr, cc) in impassable:
+                    if (cr, cc) in block_cells or (cr, cc) == pos:
+                        blocks_in_sq.append((cr, cc))
+                else:
+                    all_impassable = False
+                    break
+
+            if all_impassable and blocks_in_sq:
+                # If any block in this 2x2 cluster is not on a target, it is an irreversible deadlock
+                if any(b not in target_positions for b in blocks_in_sq):
+                    return True
+
+        return False
+
+    @classmethod
+    def is_tunnel_deadlock(
+        cls,
+        entity_pos: tuple[int, int] | None = None,
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
+        step_size: int = 1,
+    ) -> bool:
+        """Detect if an object is pushed into a 1-wide dead-end tunnel (3 impassable sides)."""
+        if entity_pos is None or entity_pos in target_positions:
+            return False
+
+        r, c = entity_pos
+        H, W = grid_shape
+        blocked_up = (r - step_size < 0) or ((r - step_size, c) in barrier_cells)
+        blocked_down = (r + step_size >= H) or ((r + step_size, c) in barrier_cells)
+        blocked_left = (c - step_size < 0) or ((r, c - step_size) in barrier_cells)
+        blocked_right = (c + step_size >= W) or ((r, c + step_size) in barrier_cells)
+
+        num_blocked = sum([blocked_up, blocked_down, blocked_left, blocked_right])
+        # 3 or 4 sides blocked means it cannot be pushed through or bypassed
+        return num_blocked >= 3
+
+    @classmethod
     def simulate_joint_displacement(
         cls,
         avatar_pos: tuple[int, int],
@@ -582,6 +665,120 @@ class PhysicsPredictor:
                         )
 
         return best_partial_path
+
+    @classmethod
+    def compute_spatiotemporal_path(
+        cls,
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int = 1,
+        hazard_schedule: dict[int, set[tuple[int, int]]] | None = None,
+        period: int | None = None,
+        allow_wait: bool = True,
+        max_time: int = 120,
+    ) -> list[tuple[int, int, int]] | None:
+        """Spatiotemporal 4D geodesic pathfinding (r, c, t) with temporal waiting affordance.
+
+        Modeled on mammalian hippocampal place/grid cell phase precession:
+        Integrates spatial location with temporal phase (t mod T). Enables biological hesitation
+        / waiting impulses when a safe cell allows periodic moving hazards to cycle away.
+        """
+        H, W = grid_shape
+        start_r, start_c = start
+        goal_r, goal_c = goal
+
+        if start == goal:
+            return [(start_r, start_c, 0)]
+
+        effective_barriers = set(barrier_cells)
+        effective_barriers.discard((goal_r, goal_c))
+        hazards = hazard_schedule or {}
+
+        def is_hazard(r: int, c: int, t: int) -> bool:
+            if not (0 <= r < H and 0 <= c < W):
+                return True
+            if (r, c) in effective_barriers:
+                return True
+            t_key = (t % period) if period and period > 0 else t
+            if t_key in hazards and (r, c) in hazards[t_key]:
+                return True
+            return False
+
+        if is_hazard(start_r, start_c, 0):
+            return None
+
+        step = max(1, step_size)
+        movement_deltas = [(-step, 0), (step, 0), (0, -step), (0, step)]
+        if allow_wait:
+            # Stationary wait affordance (hesitation impulse)
+            movement_deltas.append((0, 0))
+
+        def heuristic(r: int, c: int) -> float:
+            return float(abs(goal_r - r) + abs(goal_c - c))
+
+        # A* over (f_score, g_cost, counter, r, c, t, path)
+        counter = 0
+        h0 = heuristic(start_r, start_c)
+        open_set: list[tuple[float, float, int, int, int, int, list[tuple[int, int, int]]]] = [
+            (h0, 0.0, counter, start_r, start_c, 0, [(start_r, start_c, 0)])
+        ]
+
+        visited_spatiotemporal: set[tuple[int, int, int]] = set()
+        max_iterations = 5000
+
+        while open_set and max_iterations > 0:
+            max_iterations -= 1
+            f, g, _, r, c, t, path = heapq.heappop(open_set)
+
+            if (r, c) == (goal_r, goal_c):
+                return path
+
+            if t >= max_time:
+                continue
+
+            state_phase = (t % period) if period and period > 0 else t
+            state_key = (r, c, state_phase)
+            if state_key in visited_spatiotemporal:
+                continue
+            visited_spatiotemporal.add(state_key)
+
+            for dr, dc in movement_deltas:
+                nr, nc = r + dr, c + dc
+                nt = t + 1
+
+                # Check spatial bounds
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+
+                # Check if cell at nt is blocked by static barrier or dynamic hazard
+                if is_hazard(nr, nc, nt):
+                    continue
+
+                # Check trajectory edge-swap collision (moving entity swapping places with agent)
+                if (dr != 0 or dc != 0) and is_hazard(r, c, nt) and is_hazard(nr, nc, t):
+                    continue
+
+                # Waiting has a slight cost penalty to prefer moving forward when safe
+                step_cost = 1.2 if (dr == 0 and dc == 0) else 1.0
+                tentative_g = g + step_cost
+                h_val = heuristic(nr, nc)
+                counter += 1
+                heapq.heappush(
+                    open_set,
+                    (
+                        tentative_g + h_val,
+                        tentative_g,
+                        counter,
+                        nr,
+                        nc,
+                        nt,
+                        path + [(nr, nc, nt)],
+                    ),
+                )
+
+        return None
 
     @staticmethod
     def find_solitaire_jump_sequence(

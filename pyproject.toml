@@ -177,8 +177,11 @@ exclude = [
     "^plugins/(?!developmental_adapter)",
     "^experiments/",
     "^scratch/",
+    "^kaggle_submission/",
+    "^environment_files/",
     "hbllm/hcir/primitives.py",
 ]
+
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 

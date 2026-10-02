@@ -34,6 +34,9 @@ from hbllm.hcir.world.motor_calibration import (
     StateMutationModel,
 )
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
+from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
+from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +162,11 @@ class AutonomousEpistemicEngine:
         # Mental Imagination & Precomputed Execution Queue
         self.mental_plan: deque[MentalSimulationStep] = deque()
 
+        # General Biological Brain Faculties
+        self.saccadic_attention: SaccadicAttentionSystem = SaccadicAttentionSystem()
+        self.hazard_tracker: SpatiotemporalHazardTracker = SpatiotemporalHazardTracker()
+        self.working_memory: PrefrontalWorkingMemory = PrefrontalWorkingMemory()
+
         # Epistemic probe counters
         self.level_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
@@ -176,6 +184,8 @@ class AutonomousEpistemicEngine:
         self.probe_target_steps = 0
         self.recent_positions.clear()
         self.level_epistemic_probes = 0
+        self.hazard_tracker.reset_episode()
+        self.working_memory.reset_episode(retain_long_term=retain_dynamics)
 
         if not retain_dynamics:
             self.total_epistemic_probes = 0
@@ -586,8 +596,14 @@ class AutonomousEpistemicEngine:
         if self.prev_grid is None or self.last_action is None:
             return
 
+        # Update biological hazard tracker with current temporal frame
+        self.hazard_tracker.record_frame(
+            self.step_counter, curr_grid, background_feature=self.bg_feature
+        )
+
         diff = self.compute_frame_diff(self.prev_grid, curr_grid)
         action = self.last_action
+
         action_data = self.last_action_data
 
         # Track quiescent (ineffective) actions
@@ -881,8 +897,34 @@ class AutonomousEpistemicEngine:
         if is_lost:
             if self.avatar_pos is not None:
                 self.learned_barriers.add(self.avatar_pos)
+                if (
+                    self.prev_grid is not None
+                    and 0 <= self.avatar_pos[0] < H
+                    and 0 <= self.avatar_pos[1] < W
+                ):
+                    dead_feat = int(self.prev_grid[self.avatar_pos[0], self.avatar_pos[1]])
+                    if dead_feat != self.bg_feature:
+                        self.hazard_tracker.register_lethal_feature(dead_feat)
             if self.active_hypothesis:
                 self.active_hypothesis.confidence = 0.0
+
+        # Check latent item acquisition (prefrontal object permanence into working memory)
+        if self.avatar_pos is not None:
+            av_feats = self.avatar_features or (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
+            for pe in unmatched_prev:
+                if pe.feature_id not in av_feats and pe.feature_id != bg:
+                    dist_to_av = abs(pe.grid_pos[0] - self.avatar_pos[0]) + abs(
+                        pe.grid_pos[1] - self.avatar_pos[1]
+                    )
+                    if dist_to_av <= 1:
+                        self.working_memory.acquire_item(
+                            feature_id=pe.feature_id,
+                            role=pe.role.value,
+                            step=self.step_counter,
+                            position=pe.grid_pos,
+                        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # 3. Forward Mental Simulation (Planning in Imagination)
@@ -1099,6 +1141,11 @@ class AutonomousEpistemicEngine:
                 if (nr, nc) in static_barriers and (nr, nc) not in cur_open:
                     continue
 
+                # Spatiotemporal projection: check if cell is hazardous at simulated time step
+                sim_step = len(path) + 1
+                if self.hazard_tracker.is_hazard_at(nr, nc, sim_step, bg):
+                    continue
+
                 new_blocks = cur_blocks
                 new_pos = (nr, nc)
 
@@ -1114,6 +1161,8 @@ class AutonomousEpistemicEngine:
                         continue
                     if (pushed_r, pushed_c) in cur_blocks:
                         continue
+                    if self.hazard_tracker.is_hazard_at(pushed_r, pushed_c, sim_step, bg):
+                        continue
 
                     # Valid push! Update block positions
                     b_set = set(cur_blocks)
@@ -1126,18 +1175,35 @@ class AutonomousEpistemicEngine:
                         effective_barriers = (set(static_barriers) - set(cur_open)) | (
                             set(new_blocks) - {(pushed_r, pushed_c)}
                         )
-                        if PhysicsPredictor.is_corner_deadlock(
-                            entity_pos=(pushed_r, pushed_c),
-                            barrier_cells=effective_barriers,
-                            target_positions=set(goals),
-                            grid_shape=(H, W),
-                            step_size=getattr(self, "step_size", 1),
-                        ) or PhysicsPredictor.is_line_deadlock(
-                            entity_pos=(pushed_r, pushed_c),
-                            barrier_cells=effective_barriers,
-                            target_positions=set(goals),
-                            grid_shape=(H, W),
-                            step_size=getattr(self, "step_size", 1),
+                        if (
+                            PhysicsPredictor.is_corner_deadlock(
+                                entity_pos=(pushed_r, pushed_c),
+                                barrier_cells=effective_barriers,
+                                target_positions=set(goals),
+                                grid_shape=(H, W),
+                                step_size=getattr(self, "step_size", 1),
+                            )
+                            or PhysicsPredictor.is_line_deadlock(
+                                entity_pos=(pushed_r, pushed_c),
+                                barrier_cells=effective_barriers,
+                                target_positions=set(goals),
+                                grid_shape=(H, W),
+                                step_size=getattr(self, "step_size", 1),
+                            )
+                            or PhysicsPredictor.is_2x2_deadlock(
+                                entity_pos=(pushed_r, pushed_c),
+                                barrier_cells=set(static_barriers) - set(cur_open),
+                                block_cells=set(new_blocks) - {(pushed_r, pushed_c)},
+                                target_positions=set(goals),
+                                grid_shape=(H, W),
+                            )
+                            or PhysicsPredictor.is_tunnel_deadlock(
+                                entity_pos=(pushed_r, pushed_c),
+                                barrier_cells=effective_barriers,
+                                target_positions=set(goals),
+                                grid_shape=(H, W),
+                                step_size=getattr(self, "step_size", 1),
+                            )
                         ):
                             continue
 
@@ -1260,10 +1326,47 @@ class AutonomousEpistemicEngine:
                     candidate_triggers.append((tr_pos, tr_path, len(unopened)))
 
             if not candidate_triggers:
-                # No accessible switch found that can unlock any barrier
+                # Prefrontal Working Memory & Affordance Search:
+                # 1. If holding an item, check if moving adjacent to an obstructing barrier can unlock it
+                if self.working_memory.held_items:
+                    adjacent_barrier_cells: set[tuple[int, int]] = set()
+                    for br, bc in effective_barriers:
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            ar, ac = br + dr, bc + dc
+                            if (ar, ac) not in effective_barriers and 0 <= ar < H and 0 <= ac < W:
+                                adjacent_barrier_cells.add((ar, ac))
+                    if adjacent_barrier_cells:
+                        approach_path = find_shortest_path(
+                            cur_pos, adjacent_barrier_cells, effective_barriers
+                        )
+                        if approach_path:
+                            accumulated_plan.extend(approach_path)
+                            return accumulated_plan
+
+                # 2. Check if reachable tool/key items exist on the map to acquire first
+                bg = self.estimate_background(curr_grid)
+                entities = self.extract_entities(curr_grid, bg)
+                av_feats = self.avatar_features or (
+                    {self.avatar_feature} if self.avatar_feature is not None else set()
+                )
+                candidate_tools = [
+                    e.grid_pos
+                    for e in entities
+                    if e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE, EntityRole.UNKNOWN)
+                    and 1 <= e.area <= 4
+                    and e.feature_id not in av_feats
+                    and e.grid_pos not in goals
+                ]
+                for t_pos in candidate_tools:
+                    t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
+                    if t_path is not None:
+                        candidate_triggers.append((t_pos, t_path, 1))
+
+            if not candidate_triggers:
+                # No accessible switch or tool found
                 break
 
-            # Prioritize switch that opens the most barriers or is closest
+            # Prioritize switch/tool that opens the most barriers or is closest
             candidate_triggers.sort(key=lambda x: (len(x[1]), -x[2]))
             chosen_pos, switch_path, _ = candidate_triggers[0]
 
@@ -1338,18 +1441,33 @@ class AutonomousEpistemicEngine:
             and e.area <= 100
         ]
 
-        # Click Affordance Exploration (e.g. for action 6 games)
+        # Click Affordance Exploration (General Biological Saccadic Foveation)
         if 6 in available_actions and not any(a in available_actions for a in [1, 2, 3, 4]):
+            fixations = self.saccadic_attention.extract_fixations(
+                grid=curr_grid,
+                prev_grid=self.prev_grid,
+                background_feature=bg,
+                top_k=24,
+            )
             click_candidates: list[tuple[int, int, float]] = []
-            for e in unknown_entities:
-                cr, cc = e.grid_pos
+            for f in fixations:
+                cr, cc = f.r, f.c
                 if (cr, cc) in self.quiescent_click_targets:
                     continue
-                # Score candidate by novelty and effective history
-                saliency = 100.0 / math.log2(2 + e.area)
-                usage_pen = float(self.entity_visit_counts.get(e.id, 0)) * 25.0
-                cand_score = saliency - usage_pen
+                visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+                usage_pen = float(visit_count) * 0.35
+                cand_score = f.salience - usage_pen
                 click_candidates.append((cr, cc, cand_score))
+
+            # Fallback to unknown entities if no fixations
+            if not click_candidates:
+                for e in unknown_entities:
+                    cr, cc = e.grid_pos
+                    if (cr, cc) in self.quiescent_click_targets:
+                        continue
+                    saliency = 100.0 / math.log2(2 + e.area)
+                    usage_pen = float(self.entity_visit_counts.get(e.id, 0)) * 25.0
+                    click_candidates.append((cr, cc, saliency - usage_pen))
 
             if click_candidates:
                 click_candidates.sort(key=lambda x: x[2], reverse=True)
