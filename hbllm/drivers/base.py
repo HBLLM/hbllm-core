@@ -15,6 +15,18 @@ from enum import StrEnum
 from typing import Any
 
 
+class DriverStreamType(StrEnum):
+    """Execution and observation streaming paradigm of the driver."""
+
+    POLL = "poll"  # Discrete step-based polling (e.g. ARC, turn-based games)
+    INTERRUPT_EVENT = (
+        "interrupt_event"  # Asynchronous interrupt events (e.g. door opened, key pressed)
+    )
+    CONTINUOUS_STREAM = (
+        "continuous_stream"  # Real-time continuous stream (e.g. camera, audio PCM, IMU)
+    )
+
+
 class DriverCapability(StrEnum):
     """Capabilities supported by connected drivers."""
 
@@ -37,6 +49,53 @@ class DriverModality(StrEnum):
     TEXT = "text"  # Terminal, chat
     PROPRIOCEPTION = "proprioception"  # Robot joint states
     STRUCTURED = "structured"  # JSON/API responses
+    EVENT_STREAM = "event_stream"  # Real-time discrete/continuous events
+
+
+@dataclass
+class SynapticDeviceDescriptor:
+    """Standardized 'Cognitive USB' descriptor for plug-and-play peripherals.
+
+    Exposes peripheral capabilities, modalities, sample rates, and action schemas
+    so the HBLLM Brain can dynamically mount and route inputs/outputs without restarting.
+    """
+
+    device_id: str
+    vendor_id: str = ""
+    product_id: str = ""
+    version: str = "1.0.0"
+    device_type: str = "bidirectional"  # "afferent" | "efferent" | "bidirectional"
+    modalities: list[DriverModality] = field(default_factory=list)
+    stream_type: DriverStreamType = DriverStreamType.POLL
+    sample_rate_hz: float = 0.0  # 0.0 for event/poll, >0 for continuous stream
+    salience_base_weight: float = 0.5  # Base priority in AttentionSystem (0.0 to 1.0)
+    action_schema: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # Declared actions & parameter specs
+    is_reversible: bool = True  # Whether actions can be safely undone via rollback
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "device_id": self.device_id,
+            "vendor_id": self.vendor_id,
+            "product_id": self.product_id,
+            "version": self.version,
+            "device_type": self.device_type,
+            "modalities": [
+                m.value if isinstance(m, DriverModality) else str(m) for m in self.modalities
+            ],
+            "stream_type": (
+                self.stream_type.value
+                if isinstance(self.stream_type, DriverStreamType)
+                else str(self.stream_type)
+            ),
+            "sample_rate_hz": self.sample_rate_hz,
+            "salience_base_weight": self.salience_base_weight,
+            "action_schema": self.action_schema,
+            "is_reversible": self.is_reversible,
+            "metadata": self.metadata,
+        }
 
 
 @dataclass
@@ -89,11 +148,32 @@ class BaseDriver(ABC):
     5. Feedback Observation: process_feedback() -> DriverFeedback
     """
 
-    def __init__(self, name: str, capabilities: set[DriverCapability] | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        capabilities: set[DriverCapability] | None = None,
+        descriptor: SynapticDeviceDescriptor | None = None,
+    ) -> None:
         self.name: str = name
         self.capabilities: set[DriverCapability] = capabilities or set()
         self.is_connected: bool = False
         self._target: Any = None
+        if descriptor is not None:
+            self.descriptor = descriptor
+        else:
+            stream_type = (
+                DriverStreamType.CONTINUOUS_STREAM
+                if DriverCapability.STREAMING_OBSERVATIONS in self.capabilities
+                else (
+                    DriverStreamType.INTERRUPT_EVENT
+                    if DriverCapability.ASYNC_EVENT_DRIVEN in self.capabilities
+                    else DriverStreamType.POLL
+                )
+            )
+            self.descriptor = SynapticDeviceDescriptor(
+                device_id=self.name,
+                stream_type=stream_type,
+            )
 
     @abstractmethod
     def connect(self, target: Any) -> bool:
@@ -124,6 +204,32 @@ class BaseDriver(ABC):
     def process_feedback(self, raw_result: Any) -> DriverFeedback:
         """Normalize raw device output/signals into standardized DriverFeedback."""
         ...
+
+    async def connect_async(self, target: Any) -> bool:
+        """Establish connection asynchronously (defaults to synchronous connect)."""
+        return self.connect(target)
+
+    async def disconnect_async(self) -> None:
+        """Tear down connection asynchronously (defaults to synchronous disconnect)."""
+        self.disconnect()
+
+    async def get_inputs_async(self) -> DriverInput:
+        """Retrieve inputs asynchronously (defaults to synchronous get_inputs)."""
+        return self.get_inputs()
+
+    async def handle_action(self, action: DriverAction) -> DriverFeedback:
+        """Execute an action asynchronously and return standardized feedback."""
+        raw_result = self.send_output(action)
+        return self.process_feedback(raw_result)
+
+    async def stream_inputs(self) -> Any:
+        """Yield streaming observations if supported.
+
+        By default, yields the current input if connected.
+        Drivers with continuous streams or event-driven sources can override this.
+        """
+        if self.is_connected:
+            yield self.get_inputs()
 
     def get_perception_data(self, inputs: DriverInput) -> dict[str, Any]:
         """Return raw structured perception data for the core to interpret.

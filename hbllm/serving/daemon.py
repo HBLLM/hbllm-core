@@ -226,6 +226,13 @@ class CognitiveDaemon:
 
         # Shutdown Brain (persists state, drains requests)
         if self._brain:
+            # Stop DeviceDiscoveryEngine if active
+            if getattr(self._brain, "device_discovery", None):
+                try:
+                    await self._brain.device_discovery.stop()
+                except Exception as e:
+                    logger.debug("Error stopping device discovery: %s", e)
+
             # Stop OfflineManager
             if getattr(self._brain, "offline_manager", None):
                 await self._brain.offline_manager.stop()

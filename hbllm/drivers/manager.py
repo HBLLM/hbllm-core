@@ -12,10 +12,18 @@ Drivers never touch HCIR internals. All interpretation happens in the core black
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
-from hbllm.drivers.base import BaseDriver, DriverAction, DriverFeedback, DriverInput
+from hbllm.drivers.base import (
+    BaseDriver,
+    DriverAction,
+    DriverFeedback,
+    DriverInput,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +35,10 @@ class DriverManager:
     ensuring that internal cognitive and planning models remain completely decoupled
     from the specifics of any connected hardware, game environment, mobile device, or web interface.
 
-    Supports two operation modes:
+    Supports three operation modes:
         1. Single-driver (legacy): bind() + execute_cognitive_step(agent)
         2. MIMO multi-driver: bind_concurrent() + execute_mimo_step()
+        3. Event-driven streaming & hot-plug: attach_driver(), start_streaming(), dispatch_action_async()
     """
 
     def __init__(self) -> None:
@@ -40,6 +49,13 @@ class DriverManager:
         self._active_drivers: dict[str, BaseDriver] = {}  # Concurrent active drivers
         self._primary_driver: str | None = None  # Default source for single-output
         self._cognitive_engine: Any | None = None  # Embedded CognitiveBlackbox
+
+        # Hot-plug & streaming event hooks
+        self._on_device_attached_callbacks: list[Callable[[BaseDriver], Any]] = []
+        self._on_device_detached_callbacks: list[Callable[[str], Any]] = []
+        self._on_driver_input_callbacks: list[Callable[[DriverInput], Any]] = []
+        self._streaming_tasks: dict[str, asyncio.Task[None]] = {}
+        self._streaming_active: bool = False
 
     @property
     def active_driver(self) -> BaseDriver | None:
@@ -58,6 +74,167 @@ class DriverManager:
             for driver in self._drivers.values():
                 engine.register_driver(driver)
         logger.info("Embedded CognitiveBlackbox into DriverManager")
+
+    # ── Callback Management ───────────────────────────────────────────────
+
+    def add_on_attached_callback(self, callback: Callable[[BaseDriver], Any]) -> None:
+        """Register a callback invoked when a driver/device is attached."""
+        self._on_device_attached_callbacks.append(callback)
+
+    def add_on_detached_callback(self, callback: Callable[[str], Any]) -> None:
+        """Register a callback invoked when a driver/device is detached."""
+        self._on_device_detached_callbacks.append(callback)
+
+    def add_on_input_callback(self, callback: Callable[[DriverInput], Any]) -> None:
+        """Register a callback invoked when an active driver produces an observation."""
+        self._on_driver_input_callbacks.append(callback)
+
+    # ── Async Hot-Plug & Streaming ────────────────────────────────────────
+
+    async def attach_driver(self, driver: BaseDriver, target: Any = None) -> bool:
+        """Asynchronously connect, register, and activate a driver with hot-plug notifications."""
+        success = await driver.connect_async(target)
+        if not success:
+            logger.warning("Failed to connect driver '%s'", driver.name)
+            return False
+
+        self.register(driver)
+        self._active_drivers[driver.name] = driver
+        if self._primary_driver is None:
+            self._primary_driver = driver.name
+
+        # Trigger hot-plug callbacks
+        for cb in self._on_device_attached_callbacks:
+            try:
+                res = cb(driver)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as e:
+                logger.error("Error in on_device_attached callback: %s", e)
+
+        # Launch streaming if streaming engine is active
+        if self._streaming_active:
+            self._start_driver_stream_task(driver)
+
+        logger.info(
+            "Attached driver '%s' (Total active: %d)", driver.name, len(self._active_drivers)
+        )
+        return True
+
+    async def detach_driver(self, name: str) -> bool:
+        """Asynchronously disconnect and unbind a driver with hot-plug notifications."""
+        driver = self._active_drivers.pop(name, None)
+        if driver and driver.is_connected:
+            await driver.disconnect_async()
+
+        task = self._streaming_tasks.pop(name, None)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        if self._primary_driver == name:
+            self._primary_driver = next(iter(self._active_drivers), None)
+
+        # Trigger detach callbacks
+        for cb in self._on_device_detached_callbacks:
+            try:
+                res = cb(name)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as e:
+                logger.error("Error in on_device_detached callback: %s", e)
+
+        logger.info("Detached driver '%s'", name)
+        return True
+
+    async def start_streaming(self, poll_interval_s: float = 0.05) -> None:
+        """Start background streaming observation loops for all active drivers."""
+        self._streaming_active = True
+        for driver in self._active_drivers.values():
+            if (
+                driver.name not in self._streaming_tasks
+                or self._streaming_tasks[driver.name].done()
+            ):
+                self._start_driver_stream_task(driver, poll_interval_s=poll_interval_s)
+
+    async def stop_streaming(self) -> None:
+        """Stop all background streaming observation loops."""
+        self._streaming_active = False
+        for name, task in list(self._streaming_tasks.items()):
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._streaming_tasks.clear()
+
+    def _start_driver_stream_task(self, driver: BaseDriver, poll_interval_s: float = 0.05) -> None:
+        """Spawn background coroutine to stream inputs from driver."""
+        task = asyncio.create_task(
+            self._driver_stream_loop(driver, poll_interval_s=poll_interval_s),
+            name=f"stream_{driver.name}",
+        )
+        self._streaming_tasks[driver.name] = task
+
+    async def _driver_stream_loop(self, driver: BaseDriver, poll_interval_s: float = 0.05) -> None:
+        """Continuous stream / event consumer loop for an active driver."""
+        logger.debug("Starting stream loop for driver '%s'", driver.name)
+        try:
+            while self._streaming_active and driver.is_connected:
+                # Check if driver supports continuous async stream iterator
+                if hasattr(driver, "stream_inputs"):
+                    async for inp in driver.stream_inputs():
+                        if not self._streaming_active or not driver.is_connected:
+                            break
+                        if inp.timestamp == 0.0:
+                            inp.timestamp = time.time()
+                        inp.source_id = inp.source_id or driver.name
+                        await self._dispatch_driver_input(inp)
+                else:
+                    inp = await driver.get_inputs_async()
+                    if inp.timestamp == 0.0:
+                        inp.timestamp = time.time()
+                    inp.source_id = inp.source_id or driver.name
+                    await self._dispatch_driver_input(inp)
+
+                # Backoff / interval
+                interval = (
+                    1.0 / driver.descriptor.sample_rate_hz
+                    if driver.descriptor and driver.descriptor.sample_rate_hz > 0
+                    else poll_interval_s
+                )
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Error in driver '%s' stream loop: %s", driver.name, e)
+
+    async def _dispatch_driver_input(self, inp: DriverInput) -> None:
+        """Notify all registered callbacks of an incoming driver observation."""
+        for cb in self._on_driver_input_callbacks:
+            try:
+                res = cb(inp)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as e:
+                logger.error("Error in on_driver_input callback: %s", e)
+
+    async def dispatch_action_async(self, driver_name: str, action: DriverAction) -> DriverFeedback:
+        """Asynchronously dispatch an action to a connected driver and record feedback."""
+        driver = self.get_driver(driver_name)
+        if not driver.is_connected:
+            raise RuntimeError(f"Driver '{driver_name}' is not connected.")
+
+        feedback = await driver.handle_action(action)
+
+        if self._cognitive_engine is not None and hasattr(self._cognitive_engine, "update"):
+            self._cognitive_engine.update(action, feedback, source_id=driver_name)
+
+        return feedback
 
     # ── Driver Registration & Lifecycle ───────────────────────────────────
 

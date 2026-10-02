@@ -299,8 +299,10 @@ def main():
 
     # Interactive developer agent subcommands
     from hbllm.cli.agent import register_subcommands
+    from hbllm.cli.daemon import register_daemon_subcommands
 
     register_subcommands(subparsers)
+    register_daemon_subcommands(subparsers)
 
     args = parser.parse_args()
 
@@ -315,6 +317,23 @@ def main():
 
         run_code(a)
 
+    def _run_daemon(a):
+        from hbllm.cli.daemon import (
+            install_service,
+            run_foreground,
+            status_service,
+            uninstall_service,
+        )
+
+        if a.daemon_action == "run":
+            run_foreground(a)
+        elif a.daemon_action == "install":
+            install_service(a)
+        elif a.daemon_action == "uninstall":
+            uninstall_service(a)
+        elif a.daemon_action == "status":
+            status_service(a)
+
     dispatch = {
         "data": run_pipeline,
         "train": run_train,
@@ -324,6 +343,7 @@ def main():
         "plugin": run_plugin,
         "agent": _run_agent,
         "code": _run_code,
+        "daemon": _run_daemon,
     }
     dispatch[args.command](args)
 
