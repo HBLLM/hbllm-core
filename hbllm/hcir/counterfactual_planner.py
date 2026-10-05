@@ -161,29 +161,34 @@ class CounterfactualPlanner:
         vals, counts = np.unique(curr, return_counts=True)
         bg = int(vals[np.argmax(counts)])
 
-        # ── 1. Click-destruction and impulse mechanics (Action 6) ─────────────
-        if action_id == 6:
-            tx = action_data.get("x") if action_data else None
-            ty = action_data.get("y") if action_data else None
-            if tx is not None and ty is not None and 0 <= ty < H and 0 <= tx < W:
-                target_col = int(curr[ty, tx])
-                # Destruction: if clicked cell is non-background and destructible or obstacle
-                if target_col != bg and (
-                    destructible_colors is None or target_col in destructible_colors
-                ):
-                    predicted[ty, tx] = bg
-                # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward click
-                if movable_colors:
-                    for r in range(max(0, ty - 8), min(H, ty + 9)):
-                        for c in range(max(0, tx - 8), min(W, tx + 9)):
-                            if int(curr[r, c]) in movable_colors and (r, c) != (ty, tx):
-                                dr = 1 if ty > r else (-1 if ty < r else 0)
-                                dc = 1 if tx > c else (-1 if tx < c else 0)
-                                nr, nc = r + dr, c + dc
-                                if 0 <= nr < H and 0 <= nc < W and predicted[nr, nc] in (bg, 0):
-                                    predicted[nr, nc] = curr[r, c]
-                                    predicted[r, c] = bg
-                return predicted
+        # ── 1. Spatial target effector simulation (allocentric click/destruction/impulse) ────
+        is_spatial_action = False
+        tx, ty = None, None
+        if action_data and isinstance(action_data, dict):
+            tx = action_data.get("x", action_data.get("col", action_data.get("c")))
+            ty = action_data.get("y", action_data.get("row", action_data.get("r")))
+            if tx is not None and ty is not None:
+                is_spatial_action = True
+
+        if is_spatial_action and tx is not None and ty is not None and 0 <= ty < H and 0 <= tx < W:
+            target_col = int(curr[ty, tx])
+            # Destruction: if clicked cell is non-background and destructible or obstacle
+            if target_col != bg and (
+                destructible_colors is None or target_col in destructible_colors
+            ):
+                predicted[ty, tx] = bg
+            # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward click
+            if movable_colors:
+                for r in range(max(0, ty - 8), min(H, ty + 9)):
+                    for c in range(max(0, tx - 8), min(W, tx + 9)):
+                        if int(curr[r, c]) in movable_colors and (r, c) != (ty, tx):
+                            dr = 1 if ty > r else (-1 if ty < r else 0)
+                            dc = 1 if tx > c else (-1 if tx < c else 0)
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < H and 0 <= nc < W and predicted[nr, nc] in (bg, 0):
+                                predicted[nr, nc] = curr[r, c]
+                                predicted[r, c] = bg
+            return predicted
 
         if action_model is None:
             return predicted

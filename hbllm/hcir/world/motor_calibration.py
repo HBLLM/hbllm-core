@@ -50,6 +50,11 @@ class ActionDynamicsModel:
         dyn = self.get_dynamics(condition)
         return dyn.delta_r, dyn.delta_c
 
+    def is_displacement_action(self, condition: str | None = None) -> bool:
+        """True if empirical testing demonstrates spatial translation of the body."""
+        dr, dc = self.get_displacement(condition)
+        return dr != 0 or dc != 0
+
     def update_from_trial(
         self,
         observed_delta: tuple[int | float, ...],

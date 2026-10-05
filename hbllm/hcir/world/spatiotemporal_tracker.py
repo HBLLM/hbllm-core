@@ -63,8 +63,14 @@ class SpatiotemporalHazardTracker:
         step: int,
         grid: np.ndarray,
         background_feature: int = 0,
+        avatar_features: set[int] | None = None,
     ) -> None:
-        """Assimilate a new temporal frame into sensory history and update phase periodicity models."""
+        if not isinstance(grid, np.ndarray):
+            if isinstance(grid, (list, tuple)) and len(grid) > 0:
+                grid = grid[-1]
+            grid = np.asarray(grid, dtype=int)
+        if grid.ndim == 3 and len(grid) > 0:
+            grid = grid[-1]
         self.grid_history.append(grid.copy())
         self.step_history.append(step)
 
@@ -85,6 +91,7 @@ class SpatiotemporalHazardTracker:
             return
 
         discovered_periods: list[int] = []
+        av_set = avatar_features or set()
 
         for r, c in fluctuating_indices:
             r_idx, c_idx = int(r), int(c)
@@ -95,18 +102,28 @@ class SpatiotemporalHazardTracker:
                 # Cycle values over the period
                 cycle = series[-best_period:]
                 # Determine which values in this cycle are hazardous:
-                # Any value in known_lethal_features, or non-background values that appear periodically
+                # Known lethal features or periodic non-background environmental features (excluding avatar)
                 haz_vals = {
-                    v for v in cycle if v in self.known_lethal_features or v != background_feature
+                    v
+                    for v in cycle
+                    if v in self.known_lethal_features
+                    or (
+                        v != background_feature
+                        and v not in av_set
+                        and not self.known_lethal_features
+                    )
                 }
-                self.periodic_cells[(r_idx, c_idx)] = DynamicCellPhase(
-                    r=r_idx,
-                    c=c_idx,
-                    period=best_period,
-                    cycle_values=cycle,
-                    hazardous_values=haz_vals,
-                )
-                discovered_periods.append(best_period)
+                if haz_vals:
+                    self.periodic_cells[(r_idx, c_idx)] = DynamicCellPhase(
+                        r=r_idx,
+                        c=c_idx,
+                        period=best_period,
+                        cycle_values=cycle,
+                        hazardous_values=haz_vals,
+                    )
+                    discovered_periods.append(best_period)
+                else:
+                    self.periodic_cells.pop((r_idx, c_idx), None)
             else:
                 self.periodic_cells.pop((r_idx, c_idx), None)
 
@@ -145,6 +162,7 @@ class SpatiotemporalHazardTracker:
         c: int,
         future_relative_step: int,
         background_feature: int = 0,
+        avatar_features: set[int] | None = None,
     ) -> bool:
         """Predict whether coordinate (r, c) will be lethal or impassable at t_current + future_relative_step."""
         if (r, c) not in self.periodic_cells:
@@ -155,6 +173,8 @@ class SpatiotemporalHazardTracker:
         # Predicted index in cycle_values
         idx = (future_relative_step - 1) % T
         predicted_val = cell_phase.cycle_values[idx]
+        if avatar_features and predicted_val in avatar_features:
+            return False
         return predicted_val in cell_phase.hazardous_values
 
     def get_hazard_schedule(
