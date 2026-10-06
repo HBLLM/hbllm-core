@@ -161,6 +161,7 @@ class MyAgent(Agent):
         self.record = record
         self.arc_env = arc_env
         self.disable_archetypes = disable_archetypes
+        self.instructions = instructions
         self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
         self.internal_agent = self.internal_engine
         self.last_grid: np.ndarray | None = None
@@ -169,6 +170,7 @@ class MyAgent(Agent):
 
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
+        self.instructions = instructions
         if hasattr(self.internal_engine, "load_instructions"):
             self.internal_engine.load_instructions(instructions)
 
@@ -278,10 +280,9 @@ class MyAgent(Agent):
                 )
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
-                self.internal_agent.reset_episode(retain_dynamics=False)
+                self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
+                self.internal_agent = self.internal_engine
                 self.last_grid = None
-                if hasattr(self.internal_agent, "prev_grid"):
-                    self.internal_agent.prev_grid = None
 
         grid = self._extract_grid(latest_frame, frames)
         available_actions = self._extract_available_actions(latest_frame)

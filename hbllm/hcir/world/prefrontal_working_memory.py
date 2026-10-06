@@ -107,7 +107,6 @@ class PrefrontalWorkingMemory:
         self.constraint_solver.reset_episode()
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
-            self.executive_directives.clear()
 
     def register_cardinality_constraint(
         self,

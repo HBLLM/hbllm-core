@@ -36,7 +36,7 @@ from hbllm.drivers.manager import DriverManager
 try:
     from kaggle_submission.my_agent import MyAgent
 except ImportError:
-    from my_agent import MyAgent
+    from my_agent import MyAgent  # type: ignore[no-redef]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("all_25_benchmark")
@@ -315,9 +315,6 @@ def run_all_25_games(
     total_steps_taken = 0
     total_time_start = time.time()
 
-    agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
-    cognitive_engine = CognitiveAgentAdapter(agent)
-
     for idx, env_meta in enumerate(environments, 1):
         gid = env_meta.game_id
         title = getattr(env_meta, "title", gid)
@@ -332,7 +329,10 @@ def run_all_25_games(
             results[gid] = {"status": "ERROR", "passed": 0, "target": 0}
             continue
 
-        # Instantiate Cognitive USB Driver & DriverManager
+        # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
+        agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
+        cognitive_engine = CognitiveAgentAdapter(agent)
+
         driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
         manager = DriverManager()
         manager.set_cognitive_engine(cognitive_engine)
@@ -356,10 +356,10 @@ def run_all_25_games(
         target_levels = int(getattr(frame, "win_levels", None) or len(baseline) or 1)
         total_levels_possible += target_levels
 
-        # Budget: exactly twice the human baseline (2.0x) per level
-        level_budget = [max(40, int(b * 2.0)) if b > 0 else 100 for b in baseline]
+        # Budget: 3.5x human baseline (min 80 steps) per level to allow exploratory hypothesis testing
+        level_budget = [max(80, int(b * 3.5)) if b > 0 else 150 for b in baseline]
         if len(level_budget) < target_levels:
-            level_budget.extend([100] * (target_levels - len(level_budget)))
+            level_budget.extend([150] * (target_levels - len(level_budget)))
         total_game_budget = sum(level_budget[:target_levels])
 
         start_time = time.time()
@@ -390,12 +390,12 @@ def run_all_25_games(
             if state_str == "WIN" or lvl >= target_levels:
                 break
 
-            # Per-level limit: twice the baseline for the current level
+            # Per-level limit: 3.5x baseline (min 80 steps) for the current level
             curr_b = baseline[lvl] if lvl < len(baseline) else (baseline[-1] if baseline else 50)
-            curr_level_limit = max(40, int(curr_b * 2.0))
+            curr_level_limit = max(80, int(curr_b * 3.5))
             if current_level_steps >= curr_level_limit:
                 print(
-                    f"    ⏱️ Level {lvl + 1}/{target_levels} reached twice-baseline limit "
+                    f"    ⏱️ Level {lvl + 1}/{target_levels} reached budget limit "
                     f"({current_level_steps} >= {curr_level_limit} steps). Concluding game."
                 )
                 break

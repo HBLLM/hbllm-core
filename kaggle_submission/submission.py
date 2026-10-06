@@ -890,6 +890,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         self.disable_archetypes = disable_archetypes
+        self.instructions = instructions
         self.internal_agent: AutonomousEpistemicEngine = AutonomousEpistemicEngine(
             instructions=instructions
         )
@@ -902,6 +903,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
+        self.instructions = instructions
         if hasattr(self.internal_agent, "load_instructions"):
             self.internal_agent.load_instructions(instructions)
 
@@ -1019,6 +1021,20 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
             self.internal_agent.reset_episode(retain_dynamics=True)
             self.last_grid = None
             return getattr(GameAction, "RESET", GameAction.ACTION1)
+
+        # Game ID extraction and internal cognitive management BEFORE planning
+        raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
+        if raw_gid in ("default_game", "", None):
+            raw_gid = getattr(latest_frame, "game_id", None)
+        if raw_gid and isinstance(raw_gid, str):
+            base_gid = raw_gid.split("-")[0].strip()
+            if self.current_game_id != base_gid:
+                self.current_game_id = base_gid
+                self.current_levels_completed = 0
+                from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+                self.internal_agent = AutonomousEpistemicEngine(instructions=self.instructions)
+                self.last_grid = None
 
         grid = self._extract_grid(latest_frame, frames)
         available_actions = self._extract_available_actions(latest_frame)
