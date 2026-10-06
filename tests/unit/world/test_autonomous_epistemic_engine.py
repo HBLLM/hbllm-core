@@ -266,22 +266,29 @@ def test_hierarchical_subgoal_decomposition_multi_stage_switches() -> None:
 
 
 def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
-    """Verify InductiveHCIRAgent with disable_archetypes=True routes via AutonomousEpistemicEngine."""
-    from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
+    """Verify MyAgent with disable_archetypes=True routes via AutonomousEpistemicEngine."""
+    from kaggle_submission.my_agent import GameAction, MyAgent
 
-    agent = InductiveHCIRAgent(disable_archetypes=True)
-    assert hasattr(agent, "autonomous_engine")
-    assert agent.autonomous_engine is not None
+    agent = MyAgent(disable_archetypes=True)
+    assert hasattr(agent, "internal_engine")
+    assert agent.internal_engine is not None
 
     # Test decision routing
     grid = np.zeros((5, 5), dtype=int)
     grid[2, 2] = 1
     available_actions = [1, 2, 3, 4]
 
-    act, conf = agent.plan_next_action(grid, available_actions)
-    assert act in available_actions
-    assert conf > 0.9
-    assert agent.prev_grid is not None
+    class MockFrame:
+        def __init__(self) -> None:
+            self.state = None
+            self.frame = grid
+            self.available_actions = available_actions
+            self.levels_completed = 0
+            self.win_levels = 1
+
+    frame = MockFrame()
+    act = agent.choose_action([frame], frame)
+    assert act.value in available_actions or act == GameAction.RESET
 
 
 def test_curiosity_oscillation_loop_breaking() -> None:
@@ -444,3 +451,113 @@ def test_hud_status_bar_filtering() -> None:
     engine.assimilate_feedback(grid_1, [1, 2, 3, 4])
 
     assert len(engine.state_mutations) == 0
+
+
+def test_room_topology_doorway_subgoal_wiring() -> None:
+    """Verify RoomTopologyExtractor partitions rooms and sets doorway coordinates as macro-subgoals."""
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (2, 2)
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # 10x12 grid:
+    # Column 5 is a vertical wall (color 2, barrier) except a doorway at (3, 5).
+    # Room 1: cols 0..4, Room 2: cols 6..11.
+    grid = np.zeros((10, 12), dtype=int)
+    grid[:, 5] = 2  # Wall barrier
+    grid[3, 5] = 0  # Doorway passage!
+    grid[2, 2] = 1  # Avatar
+    engine.symbolic_theory.induce_barrier(2)
+
+    # All cells in Room 1 have already been visited
+    for r in range(10):
+        for c in range(5):
+            engine.position_visit_counts[(r, c)] = 5
+
+    # Run plan_epistemic_probe
+    act, _ = engine.plan_epistemic_probe(grid, [1, 2, 3, 4])
+
+    # Topology extraction should have identified the doorway at (3, 5)
+    door_coords = [d.door_coord for d in engine.topology_doors]
+    assert (3, 5) in door_coords
+
+    # The doorway should be selected as the macro probe target
+    assert engine.active_probe_target == (3, 5)
+    assert (3, 5) in engine.working_memory.topological_subgoals
+    assert engine.working_memory.active_macro_goal is not None
+
+
+def test_surprise_engine_divergence_and_orienting_reflex_wiring() -> None:
+    """Verify SurpriseEngine computes confidence-scaled surprise, invalidates plan, and shifts orienting focus."""
+    from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 5)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # Establish forward mental plan
+    engine.mental_plan.extend(
+        [
+            MentalSimulationStep(action=4, predicted_avatar_pos=(5, 6)),
+            MentalSimulationStep(action=4, predicted_avatar_pos=(5, 7)),
+        ]
+    )
+    engine.last_predicted_pos = (5, 6)
+
+    # Previous frame
+    prev_grid = np.zeros((10, 10), dtype=int)
+    prev_grid[5, 5] = 1
+    engine.prev_grid = prev_grid
+    engine.last_action = 4
+
+    # Current frame: avatar blocked at (5, 5), but an unexpected mutation occurs at (1, 8)
+    curr_grid = prev_grid.copy()
+    curr_grid[1, 8] = 9  # Surprising unexpected visual change
+
+    engine.assimilate_feedback(curr_grid, [1, 2, 3, 4])
+
+    # Surprise engine should record surprise
+    assert engine.last_surprise > 0.15
+    assert engine.last_surprise_eval is not None
+    assert engine.last_surprise_eval.is_surprising is True
+
+    # Plan should be invalidated due to sensory discrepancy
+    assert len(engine.mental_plan) == 0
+    assert engine.phase == EpistemicPhase.REPLANNING
+
+    # Involuntary orienting reflex should have shifted attention to mutation centroid (1, 8)
+    assert engine.working_memory.focal_attention_point == (1, 8)
+
+
+def test_active_inference_action_selection_wiring() -> None:
+    """Verify ActiveInferenceEngine balances epistemic information gain, risk, and cost for action selection."""
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (4, 4)
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[4, 4] = 1
+    # Target goal probe to the right
+    engine.active_probe_target = (4, 7)
+
+    # Penalize moving UP or LEFT with prior visits
+    engine.position_visit_counts[(3, 4)] = 10
+    engine.position_visit_counts[(4, 3)] = 10
+    engine.position_visit_counts[(5, 4)] = 5
+
+    # Action 4 (RIGHT) moves towards (4, 7) with 0 visits -> highest information gain + lowest cost
+    act, _ = engine.plan_epistemic_probe(grid, [1, 2, 3, 4])
+    assert act == 4

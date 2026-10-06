@@ -142,6 +142,7 @@ class MyAgent(Agent):
         arc_env: Any = None,
         *args: Any,
         disable_archetypes: bool = False,
+        instructions: Any = None,
         **kwargs: Any,
     ) -> None:
         try:
@@ -160,11 +161,16 @@ class MyAgent(Agent):
         self.record = record
         self.arc_env = arc_env
         self.disable_archetypes = disable_archetypes
-        self.internal_engine = AutonomousEpistemicEngine()
+        self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
         self.internal_agent = self.internal_engine
         self.last_grid: np.ndarray | None = None
         self.current_game_id: str | None = None
         self.current_levels_completed: int = 0
+
+    def load_instructions(self, instructions: Any) -> None:
+        """Load executive cognitive directives into the agent's internal epistemic engine."""
+        if hasattr(self.internal_engine, "load_instructions"):
+            self.internal_engine.load_instructions(instructions)
 
     def reset_episode(self, retain_dynamics: bool = False, is_new_level: bool = False) -> None:
         self.last_grid = None
@@ -240,6 +246,13 @@ class MyAgent(Agent):
             return GameAction.RESET
 
         if state_obj is GameState.GAME_OVER or state_name == "GAME_OVER":
+            grid = self._extract_grid(latest_frame, frames)
+            avail = self._extract_available_actions(latest_frame)
+            if (
+                hasattr(self.internal_engine, "assimilate_feedback")
+                and getattr(self.internal_engine, "prev_grid", None) is not None
+            ):
+                self.internal_engine.assimilate_feedback(grid, avail, is_lost=True)
             # Per competition semantics with ONLY_RESET_LEVELS=true,
             # reset retries the same level: retain learned dynamics and lethal memories
             self.reset_episode(retain_dynamics=True, is_new_level=False)
@@ -252,7 +265,7 @@ class MyAgent(Agent):
             if hasattr(self.internal_agent, "prev_grid"):
                 self.internal_agent.prev_grid = None
 
-        # Game ID extraction and knowledge hydration BEFORE planning
+        # Game ID extraction and internal cognitive management BEFORE planning
         raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
         if raw_gid in ("default_game", "", None):
             raw_gid = getattr(latest_frame, "game_id", None)
@@ -270,65 +283,6 @@ class MyAgent(Agent):
                 if hasattr(self.internal_agent, "prev_grid"):
                     self.internal_agent.prev_grid = None
 
-                import glob
-                from pathlib import Path
-
-                found_kdir = None
-                root_cands = [Path.cwd(), _here.parent, _here]
-                if _hbllm_root:
-                    root_cands.insert(0, Path(_hbllm_root))
-                root_cands.extend(
-                    [
-                        Path("/kaggle/input/hbllm-kaggle-dataset"),
-                        Path("/kaggle/input/hbllm-core"),
-                        Path("/kaggle/input/hbllm"),
-                        Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
-                        Path("/kaggle/input/arc-prize-2026-arc-agi-3"),
-                    ]
-                )
-                for root_cand in root_cands:
-                    kdir = root_cand / "data" / "cognitive_memory" / "arc_agi_3"
-                    if (kdir / f"{base_gid.lower()}_knowledge_graph.json").exists():
-                        found_kdir = kdir
-                        base_gid = base_gid.lower()
-                        break
-                    elif (kdir / f"{base_gid}_knowledge_graph.json").exists():
-                        found_kdir = kdir
-                        break
-                if found_kdir is None:
-                    matches = glob.glob("/kaggle/input/**/arc_agi_3", recursive=True)
-                    for m in matches:
-                        cand_path = Path(m)
-                        if (cand_path / f"{base_gid.lower()}_knowledge_graph.json").exists():
-                            found_kdir = cand_path
-                            base_gid = base_gid.lower()
-                            break
-                        elif (cand_path / f"{base_gid}_knowledge_graph.json").exists():
-                            found_kdir = cand_path
-                            break
-                if found_kdir and (
-                    (found_kdir / f"{base_gid}_knowledge_graph.json").exists()
-                    or (found_kdir / f"{base_gid.lower()}_knowledge_graph.json").exists()
-                ):
-                    kg_file = (
-                        f"{base_gid}_knowledge_graph.json"
-                        if (found_kdir / f"{base_gid}_knowledge_graph.json").exists()
-                        else f"{base_gid.lower()}_knowledge_graph.json"
-                    )
-                    print(
-                        f"[ARC] Hydrated knowledge graph for {base_gid} from {found_kdir / kg_file}",
-                        flush=True,
-                    )
-                    if hasattr(self.internal_agent, "load_knowledge"):
-                        self.internal_agent.load_knowledge(found_kdir, game_id=base_gid)
-                    elif hasattr(self.internal_agent, "load_cognitive_memory"):
-                        self.internal_agent.load_cognitive_memory(base_gid)
-                else:
-                    print(
-                        f"[ARC] Note: No offline knowledge graph found for {base_gid} (pure inductive reasoning)",
-                        flush=True,
-                    )
-
         grid = self._extract_grid(latest_frame, frames)
         available_actions = self._extract_available_actions(latest_frame)
 
@@ -340,6 +294,11 @@ class MyAgent(Agent):
                     f"[ARC] Level completed: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,
                 )
+                if (
+                    hasattr(self.internal_engine, "assimilate_feedback")
+                    and getattr(self.internal_engine, "prev_grid", None) is not None
+                ):
+                    self.internal_engine.assimilate_feedback(grid, available_actions, is_win=True)
             else:
                 print(
                     f"[ARC] Game reset to level: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",

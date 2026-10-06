@@ -23,37 +23,47 @@ class VisualSymmetryAnalyzer:
     """Analyzes geometric symmetries (reflectional, rotational, diagonal) across visual grids."""
 
     @staticmethod
-    def compute_symmetry_scores(grid: np.ndarray) -> dict[str, float]:
-        """Calculates matching ratio (0.0 to 1.0) for horizontal, vertical, diagonal, and rotational symmetries."""
+    def compute_symmetry_scores(grid: np.ndarray, background_color: int = 0) -> dict[str, float]:
+        """Calculates matching ratio (0.0 to 1.0) of foreground patterns for symmetries."""
         H, W = grid.shape
         scores: dict[str, float] = {}
 
+        def _calc_sym(t_grid: np.ndarray) -> float:
+            fg_mask = (grid != background_color) | (t_grid != background_color)
+            total_fg = int(np.sum(fg_mask))
+            if total_fg == 0:
+                return 0.0
+            matching_fg = int(np.sum((grid == t_grid) & fg_mask))
+            return float(matching_fg / total_fg)
+
         # Horizontal symmetry (reflection across horizontal midline)
         h_flipped = np.flipud(grid)
-        scores["horizontal"] = float(np.mean(grid == h_flipped))
+        scores["horizontal"] = _calc_sym(h_flipped)
 
         # Vertical symmetry (reflection across vertical midline)
         v_flipped = np.fliplr(grid)
-        scores["vertical"] = float(np.mean(grid == v_flipped))
+        scores["vertical"] = _calc_sym(v_flipped)
 
         # Diagonal and rotational symmetries (square grids)
         if H == W:
-            scores["main_diagonal"] = float(np.mean(grid == grid.T))
-            scores["anti_diagonal"] = float(np.mean(grid == np.flipud(np.fliplr(grid.T))))
-            scores["rotational_90"] = float(np.mean(grid == np.rot90(grid, 1)))
-            scores["rotational_180"] = float(np.mean(grid == np.rot90(grid, 2)))
+            scores["main_diagonal"] = _calc_sym(grid.T)
+            scores["anti_diagonal"] = _calc_sym(np.flipud(np.fliplr(grid.T)))
+            scores["rotational_90"] = _calc_sym(np.rot90(grid, 1))
+            scores["rotational_180"] = _calc_sym(np.rot90(grid, 2))
         else:
             scores["main_diagonal"] = 0.0
             scores["anti_diagonal"] = 0.0
             scores["rotational_90"] = 0.0
-            scores["rotational_180"] = float(np.mean(grid == np.flipud(np.fliplr(grid))))
+            scores["rotational_180"] = _calc_sym(np.flipud(np.fliplr(grid)))
 
         return scores
 
     @staticmethod
-    def find_dominant_symmetry(grid: np.ndarray) -> tuple[str, float]:
-        """Identifies the symmetry axis with the highest matching score."""
-        scores = VisualSymmetryAnalyzer.compute_symmetry_scores(grid)
+    def find_dominant_symmetry(grid: np.ndarray, background_color: int = 0) -> tuple[str, float]:
+        """Identifies the symmetry axis with the highest matching score on foreground."""
+        scores = VisualSymmetryAnalyzer.compute_symmetry_scores(
+            grid, background_color=background_color
+        )
         return max(scores.items(), key=lambda item: item[1])
 
     @staticmethod
@@ -124,13 +134,16 @@ class VisualSymmetryAnalyzer:
     def is_near_symmetric(
         grid: np.ndarray,
         threshold: float = 0.85,
+        background_color: int = 0,
     ) -> tuple[bool, str | None]:
         """Check if the grid is near-symmetric along any axis.
 
         Returns:
             Tuple of (is_symmetric, best_axis_name) or (False, None).
         """
-        scores = VisualSymmetryAnalyzer.compute_symmetry_scores(grid)
+        scores = VisualSymmetryAnalyzer.compute_symmetry_scores(
+            grid, background_color=background_color
+        )
         best_axis, best_score = max(scores.items(), key=lambda item: item[1])
         if best_score >= threshold:
             return True, best_axis

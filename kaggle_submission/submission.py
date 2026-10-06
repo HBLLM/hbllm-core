@@ -879,18 +879,31 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
     MAX_ACTIONS: int = 1000
 
-    def __init__(self, *args: Any, disable_archetypes: bool = False, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        disable_archetypes: bool = False,
+        instructions: Any = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
-        from plugins.arc_agi_adapter.inductive_learner import InductiveHCIRAgent
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         self.disable_archetypes = disable_archetypes
-        self.internal_agent: InductiveHCIRAgent = InductiveHCIRAgent(
-            disable_archetypes=disable_archetypes
+        self.internal_agent: AutonomousEpistemicEngine = AutonomousEpistemicEngine(
+            instructions=instructions
         )
+        if instructions and hasattr(self.internal_agent, "load_instructions"):
+            self.internal_agent.load_instructions(instructions)
         self.step_count: int = 0
         self.last_grid: np.ndarray | None = None
         self.current_game_id: str | None = None
         self.current_levels_completed: int = 0
+
+    def load_instructions(self, instructions: Any) -> None:
+        """Load executive cognitive directives into the agent's internal epistemic engine."""
+        if hasattr(self.internal_agent, "load_instructions"):
+            self.internal_agent.load_instructions(instructions)
 
     def is_done(self, frames: Any, latest_frame: Any) -> bool:
         """Stop once all levels are won."""
@@ -1031,28 +1044,30 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         if hasattr(self.internal_agent, "current_level"):
             self.internal_agent.current_level = lvl_completed
 
-        # Automatically hydrate game-specific knowledge if available
+        # Synchronize game identity
         game_id = getattr(self, "game_id", None) or getattr(latest_frame, "game_id", None)
         if game_id and isinstance(game_id, str):
             base_gid = game_id.split("-")[0].strip()
             if getattr(self, "current_game_id", None) != base_gid:
                 self.current_game_id = base_gid
-                from pathlib import Path
-
-                for root_candidate in [
-                    Path.cwd(),
-                    Path(__file__).resolve().parent.parent,
-                    Path("/kaggle/input/hbllm-kaggle-dataset"),
-                    Path("/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset"),
-                ]:
-                    kdir = root_candidate / "data" / "cognitive_memory" / "arc_agi_3"
-                    if (kdir / f"{base_gid}_knowledge_graph.json").exists():
-                        self.internal_agent.load_knowledge(kdir, game_id=base_gid)
-                        break
 
         try:
-            action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
-            action_data = getattr(self.internal_agent, "last_action_data", None)
+            _arc_schema = [
+                {"action_id": 1, "name": "MOVE_UP"},
+                {"action_id": 2, "name": "MOVE_DOWN"},
+                {"action_id": 3, "name": "MOVE_LEFT"},
+                {"action_id": 4, "name": "MOVE_RIGHT"},
+                {"action_id": 5, "name": "INTERACT"},
+                {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+                {"action_id": 7, "name": "ACTION7", "parameters": {"x": "int", "y": "int"}},
+            ]
+            if hasattr(self.internal_agent, "decide"):
+                action_id, action_data = self.internal_agent.decide(
+                    grid, available_actions, action_schemas=_arc_schema
+                )
+            else:
+                action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
+                action_data = getattr(self.internal_agent, "last_action_data", None)
         except Exception:
             # Fully resilient fallback: never crash the competition evaluation loop!
             action_id = available_actions[0] if available_actions else 1

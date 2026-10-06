@@ -173,3 +173,117 @@ def test_prefrontal_working_memory_schema_formulation() -> None:
     # Expending item
     assert wm.expend_item(4) is True
     assert not wm.is_holding(4)
+
+
+def test_deadlock_detection_in_mental_simulation() -> None:
+    """Verify MentalSimulationPlanner identifies corner deadlocks and wall deadlocks."""
+    from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationPlanner
+
+    goals = {(5, 5)}
+    static_barriers = {(1, 2), (2, 1)}  # Walls at North and West of (2, 2)
+    H, W = 10, 10
+
+    # (2, 2) has barriers to North (1, 2) and West (2, 1) -> corner deadlock
+    assert MentalSimulationPlanner.is_corner_deadlock((2, 2), goals, static_barriers, H, W) is True
+
+    # (2, 3) only has barrier to West (2, 2 is empty/free) -> not a corner deadlock
+    assert MentalSimulationPlanner.is_corner_deadlock((2, 3), goals, static_barriers, H, W) is False
+
+    # Goal cell is never a deadlock even in a corner
+    assert (
+        MentalSimulationPlanner.is_corner_deadlock((5, 5), {(5, 5)}, static_barriers, H, W) is False
+    )
+
+    # Outer wall boundary deadlock: row 0 has no goals -> any cargo at row 0 is trapped
+    assert MentalSimulationPlanner.is_wall_deadlock((0, 3), goals, H, W) is True
+    # If a goal is on row 0, it's not a dead wall
+    assert MentalSimulationPlanner.is_wall_deadlock((0, 3), {(0, 4)}, H, W) is False
+
+
+def test_visual_symmetry_structural_goal_induction() -> None:
+    """Verify PerceptionEngine detects dominant visual symmetry and derives exact missing coordinates."""
+    from hbllm.hcir.world.autonomous_epistemic_engine import PerceptionEngine
+
+    # Create a 6x6 vertically symmetric pattern where right side is missing one pixel at (2, 4)
+    grid = np.zeros((6, 6), dtype=int)
+    grid[1:4, 1] = 3
+    grid[1, 4] = 3
+    grid[3, 4] = 3
+    # Missing: grid[2, 4] should be 3 to complete symmetry with grid[2, 1]
+
+    goals = PerceptionEngine.detect_structural_goals(grid, bg=0)
+    sym_goals = [g for g in goals if g.get("type") == "symmetry_completion"]
+
+    assert len(sym_goals) >= 1
+    # Check that (2, 4) was synthesized as a completion goal with feature 3
+    target_coords = {g["position"] for g in sym_goals}
+    assert (2, 4) in target_coords
+    for g in sym_goals:
+        if g["position"] == (2, 4):
+            assert g["feature"] == 3
+            assert g["confidence"] > 0.5
+
+
+def test_intuitive_physics_gravity_and_fall_projection() -> None:
+    """Verify IntuitivePhysicsEngine infers environmental gravity and simulates falling descent."""
+    from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
+
+    physics = IntuitivePhysicsEngine()
+    assert not physics.has_gravity
+
+    # Simulate 2 transitions where horizontal move caused downward displacement (gravity drift)
+    physics.record_transition(
+        prev_pos=(2, 2), curr_pos=(3, 3), is_displacement_action=True, commanded_delta=(0, 1)
+    )
+    physics.record_transition(
+        prev_pos=(3, 3), curr_pos=(4, 4), is_displacement_action=True, commanded_delta=(0, 1)
+    )
+
+    assert physics.has_gravity is True
+    assert physics.gravity_vector == (1, 0)
+
+    # Project falling trajectory in a 10x10 grid with a platform at row 7
+    grid = np.zeros((10, 10), dtype=int)
+    barrier_feats = {1}
+    grid[7, :] = 1  # solid floor at row 7
+
+    # Entity released at (2, 5) falls until resting on platform at (6, 5)
+    landing_pos, trajectory, is_lethal = physics.project_fall(
+        start_r=2,
+        start_c=5,
+        grid=grid,
+        barrier_features=barrier_feats,
+    )
+    assert landing_pos == (6, 5)
+    assert not is_lethal
+    assert len(trajectory) == 4  # rows 3, 4, 5, 6
+
+
+def test_symbolic_constraint_solver_unit_propagation() -> None:
+    """Verify SymbolicConstraintSolver deductively isolates safe cells and hazards without guessing."""
+    from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
+    from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
+
+    solver = SymbolicConstraintSolver()
+
+    # In a 3x3 grid: center at (1, 1). Center reveals count=1.
+    # Suppose we already know (0, 0) is a hazard.
+    solver.known_hazard_cells.add((0, 0))
+    solver.register_observation(center=(1, 1), count=1, grid_shape=(3, 3), radius=1)
+
+    # Since needed hazards is 1 and (0, 0) is already known, remaining needed = 0.
+    # Unit propagation MUST deduce all remaining 7 neighbors are 100% safe!
+    new_safe, new_hazards = solver.propagate_constraints()
+
+    assert (0, 1) in new_safe
+    assert (1, 0) in new_safe
+    assert (2, 2) in new_safe
+    assert len(new_safe) == 7
+    assert len(new_hazards) == 0
+
+    # Also test PrefrontalWorkingMemory integration
+    wm = PrefrontalWorkingMemory()
+    wm.register_cardinality_constraint(center=(1, 1), count=0, grid_shape=(3, 3), radius=1)
+    unrevealed_safe = wm.get_unrevealed_safe_cells()
+    # If count was 0, all 8 neighbors are guaranteed safe
+    assert len(unrevealed_safe) == 8

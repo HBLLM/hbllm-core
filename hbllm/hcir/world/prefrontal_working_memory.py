@@ -66,6 +66,9 @@ class SubgoalSchema:
         return self.current_stage_idx >= len(self.stages)
 
 
+from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
+
+
 class PrefrontalWorkingMemory:
     """Biologically-modeled Prefrontal Working Memory (dlPFC) for latent state and subgoal reasoning."""
 
@@ -75,6 +78,22 @@ class PrefrontalWorkingMemory:
         self.unlocked_barriers: set[tuple[int, int]] = set()
         self.tool_barrier_affinities: dict[int, set[int]] = {}  # tool_feat -> set(barrier_feat)
         self.activated_triggers: set[tuple[int, int]] = set()
+        self.topological_subgoals: list[tuple[int, int]] = []
+        self.active_macro_goal: str | None = None
+        self.focal_attention_point: tuple[int, int] | None = None
+        self.constraint_solver: SymbolicConstraintSolver = SymbolicConstraintSolver()
+        self.executive_directives: list[str] = []
+
+    def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
+        """Store executive directives in working memory to guide cognitive policies."""
+        if not instructions:
+            return
+        if isinstance(instructions, str):
+            lines = [l.strip() for l in instructions.strip().split("\n") if l.strip()]
+        else:
+            lines = [str(l).strip() for l in instructions if str(l).strip()]
+        self.executive_directives = lines
+        logger.info("PrefrontalWorkingMemory: Loaded %d executive directives.", len(lines))
 
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient working memory for a new trial while optionally retaining cross-trial tool affinities."""
@@ -82,8 +101,37 @@ class PrefrontalWorkingMemory:
         self.active_schema = None
         self.unlocked_barriers.clear()
         self.activated_triggers.clear()
+        self.topological_subgoals.clear()
+        self.active_macro_goal = None
+        self.focal_attention_point = None
+        self.constraint_solver.reset_episode()
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
+            self.executive_directives.clear()
+
+    def register_cardinality_constraint(
+        self,
+        center: tuple[int, int],
+        count: int,
+        grid_shape: tuple[int, int],
+        radius: int = 1,
+    ) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+        """Register a local numerical count constraint and run unit propagation."""
+        self.constraint_solver.register_observation(center, count, grid_shape, radius)
+        return self.constraint_solver.propagate_constraints()
+
+    def get_unrevealed_safe_cells(self) -> set[tuple[int, int]]:
+        """Query cells deduced by prefrontal constraint solver to be guaranteed safe."""
+        return self.constraint_solver.get_unrevealed_safe_cells()
+
+    def register_topological_doorway(self, door_coord: tuple[int, int], target_room: int) -> None:
+        """Register a doorway transition as an active macro-subgoal in prefrontal memory."""
+        self.topological_subgoals.append(door_coord)
+        self.active_macro_goal = f"doorway_to_room_{target_room}"
+
+    def orient_attention(self, coord: tuple[int, int]) -> None:
+        """Orient prefrontal attentional focus to surprising or salient coordinates."""
+        self.focal_attention_point = coord
 
     def acquire_item(
         self,

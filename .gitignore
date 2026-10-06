@@ -85,6 +85,7 @@ test_*_output.txt
 .envrc
 scratch/audit_grades_real.py
 /environment_files
+kaggle_submission/environment_files/
 /plugins/developmental_adapter/reports
 /scratch/
 /kaggle_arc2_submission/
