@@ -199,13 +199,23 @@ class CognitiveAgentAdapter:
         self.history: list[Any] = []
         self.last_frame: Any = None
 
-    def reset_episode(self, retain_dynamics: bool = False, is_new_level: bool = False) -> None:
+    def reset_episode(
+        self,
+        retain_dynamics: bool = False,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
         self.history.clear()
         self.last_frame = None
         try:
-            self.agent.reset_episode(retain_dynamics=retain_dynamics, is_new_level=is_new_level)
+            self.agent.reset_episode(
+                retain_dynamics=retain_dynamics, is_new_level=is_new_level, level=level
+            )
         except TypeError:
-            self.agent.reset_episode(retain_dynamics=retain_dynamics)
+            try:
+                self.agent.reset_episode(retain_dynamics=retain_dynamics, is_new_level=is_new_level)
+            except TypeError:
+                self.agent.reset_episode(retain_dynamics=retain_dynamics)
 
     def observe(self, driver_input: DriverInput, perception_data: Any = None) -> None:
         self.last_frame = driver_input.metadata.get("frame_obj")
@@ -340,6 +350,10 @@ def run_all_25_games(
         attempts_taken = 0
         total_game_steps_all = 0
 
+        # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
+        agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
+        cognitive_engine = CognitiveAgentAdapter(agent)
+
         for attempt in range(retries + 1):
             attempts_taken += 1
             if attempt > 0:
@@ -349,10 +363,6 @@ def run_all_25_games(
             if env is None:
                 print(f"    ⚠️ Could not make game environment for {gid}")
                 continue
-
-            # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-            agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
-            cognitive_engine = CognitiveAgentAdapter(agent)
 
             driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
             manager = DriverManager()
@@ -368,10 +378,13 @@ def run_all_25_games(
                 except Exception:
                     pass
 
-            agent.game_id = gid
-            agent.current_game_id = gid
+            base_gid = gid.split("-")[0].strip()
+            agent.game_id = base_gid
+            agent.current_game_id = base_gid
             driver.set_frame(frame)
-            cognitive_engine.reset_episode(retain_dynamics=False)
+            cognitive_engine.reset_episode(
+                retain_dynamics=(attempt > 0), is_new_level=False, level=0
+            )
 
             # Evaluate ALL levels (no capping)
             target_levels = int(getattr(frame, "win_levels", None) or len(baseline) or 1)
@@ -398,11 +411,15 @@ def run_all_25_games(
                     )
                     completed_prev = lvl
                     current_level_steps = 0
-                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
+                    cognitive_engine.reset_episode(
+                        retain_dynamics=True, is_new_level=True, level=lvl
+                    )
                 elif lvl < completed_prev:
                     completed_prev = lvl
                     current_level_steps = 0
-                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
+                    cognitive_engine.reset_episode(
+                        retain_dynamics=True, is_new_level=True, level=lvl
+                    )
 
                 state_str = str(info.get("state", "RUNNING"))
                 if state_str == "WIN" or lvl >= target_levels:
@@ -417,7 +434,9 @@ def run_all_25_games(
                     break
                 elif feedback.terminated or state_str == "GAME_OVER":
                     print(f"    ⚠️ Level retry / death at step {step}, retaining dynamics...")
-                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=False)
+                    cognitive_engine.reset_episode(
+                        retain_dynamics=True, is_new_level=False, level=lvl
+                    )
                     try:
                         reset_frame = env.step(0)
                     except Exception:

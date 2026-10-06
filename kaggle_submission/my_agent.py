@@ -174,15 +174,25 @@ class MyAgent(Agent):
         if hasattr(self.internal_engine, "load_instructions"):
             self.internal_engine.load_instructions(instructions)
 
-    def reset_episode(self, retain_dynamics: bool = False, is_new_level: bool = False) -> None:
+    def reset_episode(
+        self,
+        retain_dynamics: bool = False,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
         self.last_grid = None
         if hasattr(self.internal_agent, "reset_episode"):
             try:
                 self.internal_agent.reset_episode(
-                    retain_dynamics=retain_dynamics, is_new_level=is_new_level
+                    retain_dynamics=retain_dynamics, is_new_level=is_new_level, level=level
                 )
             except TypeError:
-                self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
+                try:
+                    self.internal_agent.reset_episode(
+                        retain_dynamics=retain_dynamics, is_new_level=is_new_level
+                    )
+                except TypeError:
+                    self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
         if hasattr(self.internal_agent, "prev_grid"):
             self.internal_agent.prev_grid = None
 
@@ -257,7 +267,9 @@ class MyAgent(Agent):
                 self.internal_engine.assimilate_feedback(grid, avail, is_lost=True)
             # Per competition semantics with ONLY_RESET_LEVELS=true,
             # reset retries the same level: retain learned dynamics and lethal memories
-            self.reset_episode(retain_dynamics=True, is_new_level=False)
+            self.reset_episode(
+                retain_dynamics=True, is_new_level=False, level=self.current_levels_completed
+            )
             return GameAction.RESET
 
         # Check full_reset signal from ARC-AGI environment
@@ -273,7 +285,8 @@ class MyAgent(Agent):
             raw_gid = getattr(latest_frame, "game_id", None)
         if raw_gid and isinstance(raw_gid, str):
             base_gid = raw_gid.split("-")[0].strip()
-            if self.current_game_id != base_gid:
+            curr_base = self.current_game_id.split("-")[0].strip() if self.current_game_id else None
+            if curr_base != base_gid:
                 print(
                     f"[ARC] Switching game: {self.current_game_id} -> {base_gid} (raw={raw_gid})",
                     flush=True,
@@ -306,7 +319,9 @@ class MyAgent(Agent):
                     flush=True,
                 )
             self.current_levels_completed = lvl_completed
-            self.reset_episode(retain_dynamics=True, is_new_level=True)
+            if hasattr(self.internal_agent, "current_level"):
+                self.internal_agent.current_level = lvl_completed
+            self.reset_episode(retain_dynamics=True, is_new_level=True, level=lvl_completed)
 
         self.last_grid = grid.copy()
 

@@ -1630,7 +1630,9 @@ class EpistemicFeedbackAssimilator:
                 engine.active_hypothesis.confidence = 1.0
 
             # Level transition: cleanly reset episodic spatial memory for the next level
-            engine.reset_episode(retain_dynamics=True, is_new_level=True)
+            engine.reset_episode(
+                retain_dynamics=True, is_new_level=True, level=engine.current_level + 1
+            )
             return
         elif engine.avatar_pos is not None and not is_lost:
             engine.exhausted_candidate_goals.add(engine.avatar_pos)
@@ -1674,6 +1676,21 @@ class EpistemicFeedbackAssimilator:
                     candidate_cells = set(np.unique(curr_grid[r0:r1, c0:c1])).union(
                         set(np.unique(engine.prev_grid[r0:r1, c0:c1]))
                     )
+                    # Also inspect unobstructed cardinal line-of-sight rays for remote turrets/projectiles
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        curr_r, curr_c = target_pos[0] + dr, target_pos[1] + dc
+                        while 0 <= curr_r < H and 0 <= curr_c < W:
+                            val = int(engine.prev_grid[curr_r, curr_c])
+                            if engine.symbolic_theory.is_barrier(val):
+                                break
+                            if (
+                                val != engine.bg_feature
+                                and val not in av_feats
+                                and not engine.symbolic_theory.is_walkable(val)
+                            ):
+                                candidate_cells.add(val)
+                            curr_r += dr
+                            curr_c += dc
                     for cand_feat in candidate_cells:
                         cand_feat_int = int(cand_feat)
                         if (
@@ -3300,15 +3317,22 @@ class AutonomousEpistemicEngine:
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
 
-        # Episodic Ground Facts (Layout coordinates, wiped on level transition)
-        self.learned_barriers: set[tuple[int, int]] = set()
+        # Episodic Ground Facts (Layout coordinates, preserved per-level across attempts)
+        self._current_level: int = 0
+        self.level_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
+        self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
+        self.learned_barriers: set[tuple[int, int]] = self.level_learned_barriers.setdefault(
+            0, set()
+        )
         self.learned_goal_positions: set[tuple[int, int]] = set()
         self.learned_receptacle_positions: set[tuple[int, int]] = set()
 
         # Mental simulation plan
         self.mental_plan: deque[MentalSimulationStep] = deque()
         self.active_hypothesis: CausalHypothesis | None = None
-        self.failed_transitions: set[tuple[tuple[int, int], int]] = set()
+        self.failed_transitions: set[tuple[tuple[int, int], int]] = (
+            self.level_failed_transitions.setdefault(0, set())
+        )
 
         # Theory of Mind: creature kinds observed to patrol autonomously
         # (feature-level concept, retained across levels like a human would).
@@ -3645,10 +3669,31 @@ class AutonomousEpistemicEngine:
         """Load executive cognitive directives into working memory to guide epistemic policies."""
         self.working_memory.load_instructions(instructions)
 
+    @property
+    def current_level(self) -> int:
+        return self._current_level
+
+    @current_level.setter
+    def current_level(self, level: int) -> None:
+        self.set_current_level(level)
+
+    def set_current_level(self, level: int) -> None:
+        if self._current_level != level:
+            self._current_level = level
+            self.failed_transitions = self.level_failed_transitions.setdefault(level, set())
+            self.learned_barriers = self.level_learned_barriers.setdefault(level, set())
+
     # ── Episodic State Management ─────────────────────────────────────────────
 
-    def reset_episode(self, retain_dynamics: bool = True, is_new_level: bool = False) -> None:
+    def reset_episode(
+        self,
+        retain_dynamics: bool = True,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
         """Reset episodic state upon level transition or death."""
+        if level is not None:
+            self.set_current_level(level)
         self.prev_grid = None
         self._prev_oriented_threats = []
         self.avatar_pos = None
@@ -3669,14 +3714,20 @@ class AutonomousEpistemicEngine:
         self.current_simulated_goal = None
         self._feedback_assimilated = False
 
-        if not retain_dynamics or is_new_level:
+        if not retain_dynamics:
+            self.level_failed_transitions.clear()
+            self.level_learned_barriers.clear()
+            self._current_level = 0 if level is None else level
+            self.failed_transitions = self.level_failed_transitions.setdefault(
+                self._current_level, set()
+            )
+            self.learned_barriers = self.level_learned_barriers.setdefault(
+                self._current_level, set()
+            )
             self.hazard_tracker.reset_episode()
             self.physics_engine.reset_episode()
             self.exhausted_candidate_goals.clear()
             self.tested_action_positions.clear()
-            self.failed_transitions.clear()
-            # Episodic spatial coordinates are layout-specific and MUST be cleared between levels
-            self.learned_barriers.clear()
             self.learned_goal_positions.clear()
             self.learned_receptacle_positions.clear()
             self.topology_rooms.clear()
@@ -3686,9 +3737,29 @@ class AutonomousEpistemicEngine:
             self.surprise_engine.reset_ledger()
             self.last_surprise = 0.0
             self.last_surprise_eval = None
-        elif retain_dynamics and not is_new_level:
-            # On death/retry within the same level, the game clock resets to t=0.
-            # Clear frame history to prevent autocorrelation phase discontinuity.
+        elif is_new_level:
+            # Level transition: point episodic spatial memory to the target level
+            self.failed_transitions = self.level_failed_transitions.setdefault(
+                self._current_level, set()
+            )
+            self.learned_barriers = self.level_learned_barriers.setdefault(
+                self._current_level, set()
+            )
+            self.hazard_tracker.reset_episode()
+            self.physics_engine.reset_episode()
+            self.exhausted_candidate_goals.clear()
+            self.tested_action_positions.clear()
+            self.learned_goal_positions.clear()
+            self.learned_receptacle_positions.clear()
+            self.topology_rooms.clear()
+            self.topology_doors.clear()
+            self.room_adjacency.clear()
+            self.current_room_id = None
+            self.surprise_engine.reset_ledger()
+            self.last_surprise = 0.0
+            self.last_surprise_eval = None
+        else:
+            # Same level retry on death
             self.hazard_tracker.grid_history.clear()
             self.hazard_tracker.step_history.clear()
             self.tested_action_positions.clear()
@@ -4264,10 +4335,13 @@ class AutonomousEpistemicEngine:
         predicted_pos: tuple[int, int] | None = None
 
         # Prefrontal Affordance Panel Sequence Chunking:
-        # If an interactive control panel has unvisited pop-out/minority items, commit to completing the pattern
+        # If an interactive control panel has unvisited pop-out/minority items, commit to completing the pattern.
+        # CRITICAL GUARD: Only trigger panel clicking if there are NO active displacement actions (i.e. pure click games),
+        # so physical avatar navigation is never hijacked by decorative background panels.
         active_panel_target: tuple[int, int] | None = None
+        has_displacement_actions = any(self.is_displacement_action(a) for a in available_actions)
         spatial_effector_actions = [a for a in available_actions if self.is_spatial_effector(a)]
-        if spatial_effector_actions and self.step_counter > 1:
+        if spatial_effector_actions and not has_displacement_actions and self.step_counter > 1:
             bg = self.estimate_background(curr_grid)
             entities = self.extract_entities(curr_grid, bg)
             panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
