@@ -292,6 +292,7 @@ class ObjectStateGraphPlanner:
         grid_shape: tuple[int, int],
         curr_grid: np.ndarray,
         patroller_cells: set[tuple[int, int]] | None = None,
+        failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
     ) -> list[Any] | None:
         """Find the shortest deterministic path of primitive motor actions to any target stance."""
         if start_pos in target_stances:
@@ -309,6 +310,8 @@ class ObjectStateGraphPlanner:
                 return list(path)
 
             for act, dr, dc in movable_actions:
+                if failed_transitions and (cur_pos, act) in failed_transitions:
+                    continue
                 nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W):
                     continue
@@ -380,6 +383,7 @@ class ObjectStateGraphPlanner:
                     static_barriers.add((r, c))
 
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
+        failed_transitions = set(getattr(engine, "failed_transitions", set()))
 
         # Detect patroller / dynamic threat positions
         patroller_cells: set[tuple[int, int]] = set()
@@ -413,6 +417,7 @@ class ObjectStateGraphPlanner:
                 grid_shape=(H, W),
                 curr_grid=curr_grid,
                 patroller_cells=patroller_cells,
+                failed_transitions=failed_transitions,
             )
             if path_to_exit is not None and len(path_to_exit) > 0:
                 logger.info(
@@ -448,6 +453,7 @@ class ObjectStateGraphPlanner:
                 grid_shape=(H, W),
                 curr_grid=curr_grid,
                 patroller_cells=patroller_cells,
+                failed_transitions=failed_transitions,
             )
             if path is not None:
                 reachable_objects.append((obj, path))

@@ -155,6 +155,7 @@ known-first-party = ["hbllm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 timeout = 300
 timeout_method = "thread"

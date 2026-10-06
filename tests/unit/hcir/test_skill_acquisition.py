@@ -12,9 +12,13 @@ Tests all 6 skill acquisition architectures:
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from hbllm.hcir.skills import GF2LinearSolver
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+pytest.importorskip(
+    "plugins.arc_agi_adapter.arc_skills",
+    reason="Legacy arc_skills were purged in favor of Cognitive USB driver",
+)
+
 from plugins.arc_agi_adapter.arc_skills import (
     AutonomousTrajectoryModel,
     CoupledControllableSkillAcquisition,
@@ -24,6 +28,9 @@ from plugins.arc_agi_adapter.arc_skills import (
     RelationalAffordanceSkillAcquisition,
     SpatiotemporalSkillAcquisition,
 )
+
+from hbllm.hcir.skills import GF2LinearSolver
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Spatiotemporal Dynamics & Periodic Phase

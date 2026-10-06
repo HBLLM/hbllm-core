@@ -10,19 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-# Backward-compatibility re-exports (canonical home: plugins.arc_agi_adapter)
-from plugins.arc_agi_adapter import (
-    ActionDynamicsModel,
-    ARC3BenchmarkReport,
-    ARC3BenchmarkRunner,
-    ARC3InteractiveAgent,
-    ARCBenchmarkReport,
-    ARCGrid,
-    ARCRelationalSolver,
-    ARCTaskResult,
-    GridObject,
-    GridTopologyExtractor,
-)
+# Backward-compatibility re-exports (canonical home: hbllm.hcir.world.motor_calibration)
+from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
 from .a20_transfer_bridge import A20RelationalTransferBridge
 from .action import DevelopmentalActionAdapter
@@ -157,13 +146,6 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 __all__ = [
     "A20RelationalTransferBridge",
-    "ARC3BenchmarkReport",
-    "ARC3BenchmarkRunner",
-    "ARC3InteractiveAgent",
-    "ARCBenchmarkReport",
-    "ARCGrid",
-    "ARCRelationalSolver",
-    "ARCTaskResult",
     "ActionDynamicsModel",
     "ActiveDevelopmentalHCIRCohort",
     "AffordanceDiscoveryEngine",
@@ -200,8 +182,6 @@ __all__ = [
     "DownstreamBenchmarkReport",
     "DownstreamBenchmarkRunner",
     "EpistemicKnowledgeGap",
-    "GridObject",
-    "GridTopologyExtractor",
     "InformationGainReport",
     "KnowledgeGapDetector",
     "KnowledgeGapType",

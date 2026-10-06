@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytest.importorskip(
+    "plugins.arc_agi_adapter.inductive_learner",
+    reason="Legacy inductive_learner was purged in favor of Cognitive USB driver",
+)
 
 from plugins.arc_agi_adapter.inductive_learner import (
     CoupledMIMOIdentifier,
