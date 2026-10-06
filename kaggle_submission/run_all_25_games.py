@@ -274,6 +274,8 @@ def run_all_25_games(
     disable_archetypes: bool = True,
     scorecard_file: str = "all_25_games_scorecard.json",
     instructions: list[str] | str | None = None,
+    max_steps_per_game: int = 1000,
+    max_level_steps: int | None = None,
 ) -> None:
     if instructions is None:
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
@@ -299,6 +301,12 @@ def run_all_25_games(
     print(
         f"   Mode: {'Pure AutonomousEpistemicEngine (No Archetypes)' if disable_archetypes else 'Hybrid Competitive (Inductive HCIR + Epistemic Brain)'}"
     )
+    limit_desc = (
+        f"No Per-Level Limit (Full Runway: {max_steps_per_game} steps/game)"
+        if max_level_steps is None
+        else f"Per-Level Limit: {max_level_steps} steps (Max Game Steps: {max_steps_per_game})"
+    )
+    print(f"   Step Limit: {limit_desc}")
     print(f"   Scorecard Target: {scorecard_file}")
     if instructions:
         inst_list = [instructions] if isinstance(instructions, str) else list(instructions)
@@ -356,11 +364,8 @@ def run_all_25_games(
         target_levels = int(getattr(frame, "win_levels", None) or len(baseline) or 1)
         total_levels_possible += target_levels
 
-        # Budget: 3.5x human baseline (min 80 steps) per level to allow exploratory hypothesis testing
-        level_budget = [max(80, int(b * 3.5)) if b > 0 else 150 for b in baseline]
-        if len(level_budget) < target_levels:
-            level_budget.extend([150] * (target_levels - len(level_budget)))
-        total_game_budget = sum(level_budget[:target_levels])
+        # Competition budget: full action runway (default 1000 steps per game) without artificial per-level cutoff
+        total_game_budget = max_steps_per_game if max_steps_per_game > 0 else 10000
 
         start_time = time.time()
         completed_prev = 0
@@ -390,13 +395,11 @@ def run_all_25_games(
             if state_str == "WIN" or lvl >= target_levels:
                 break
 
-            # Per-level limit: 3.5x baseline (min 80 steps) for the current level
-            curr_b = baseline[lvl] if lvl < len(baseline) else (baseline[-1] if baseline else 50)
-            curr_level_limit = max(80, int(curr_b * 3.5))
-            if current_level_steps >= curr_level_limit:
+            # Optional per-level step limit if explicitly configured by user
+            if max_level_steps is not None and current_level_steps >= max_level_steps:
                 print(
-                    f"    ⏱️ Level {lvl + 1}/{target_levels} reached budget limit "
-                    f"({current_level_steps} >= {curr_level_limit} steps). Concluding game."
+                    f"    ⏱️ Level {lvl + 1}/{target_levels} reached per-level limit "
+                    f"({current_level_steps} >= {max_level_steps} steps). Concluding game."
                 )
                 break
             elif feedback.terminated or state_str == "GAME_OVER":
@@ -520,6 +523,19 @@ if __name__ == "__main__":
         action="store_true",
         help="List all 25 ARC-AGI-3 games and exit.",
     )
+    parser.add_argument(
+        "--max-steps",
+        "-s",
+        type=int,
+        default=1000,
+        help="Maximum total actions allowed per game (competition standard: 1000). Set to 0 for unlimited (10000).",
+    )
+    parser.add_argument(
+        "--max-level-steps",
+        type=int,
+        default=None,
+        help="Optional maximum steps per individual level (default: None, completely unlimited per level).",
+    )
 
     args = parser.parse_args()
 
@@ -543,4 +559,6 @@ if __name__ == "__main__":
         disable_archetypes=not args.enable_archetypes,
         scorecard_file=args.output,
         instructions=custom_inst,
+        max_steps_per_game=args.max_steps,
+        max_level_steps=args.max_level_steps,
     )
