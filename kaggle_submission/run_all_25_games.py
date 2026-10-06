@@ -276,6 +276,7 @@ def run_all_25_games(
     instructions: list[str] | str | None = None,
     max_steps_per_game: int = 1000,
     max_level_steps: int | None = None,
+    retries: int = 0,
 ) -> None:
     if instructions is None:
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
@@ -331,121 +332,158 @@ def run_all_25_games(
         print(f"\n[{idx:2d}/{len(environments)}] 🎮 Game: {title} ({gid})")
         print(f"    Baseline Actions: {baseline} | Tags: {getattr(env_meta, 'tags', [])}")
 
-        env = arcade.make(gid)
-        if env is None:
-            print(f"    ⚠️ Could not make game environment for {gid}")
-            results[gid] = {"status": "ERROR", "passed": 0, "target": 0}
-            continue
+        best_completed = 0
+        best_target = len(baseline) or 1
+        best_is_win = False
+        best_game_steps = 0
+        best_elapsed = 0.0
+        attempts_taken = 0
+        total_game_steps_all = 0
 
-        # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-        agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
-        cognitive_engine = CognitiveAgentAdapter(agent)
+        for attempt in range(retries + 1):
+            attempts_taken += 1
+            if attempt > 0:
+                print(f"\n    🔁 [Retry {attempt}/{retries}] for failed game {title} ({gid})...")
 
-        driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
-        manager = DriverManager()
-        manager.set_cognitive_engine(cognitive_engine)
+            env = arcade.make(gid)
+            if env is None:
+                print(f"    ⚠️ Could not make game environment for {gid}")
+                continue
 
-        manager.register(driver)
-        manager.bind("arc_console", target=env)
+            # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
+            agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
+            cognitive_engine = CognitiveAgentAdapter(agent)
 
-        frame = env.reset()
-        if not hasattr(frame, "game_id") or getattr(frame, "game_id", None) is None:
-            try:
-                frame.game_id = gid
-            except Exception:
-                pass
+            driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
+            manager = DriverManager()
+            manager.set_cognitive_engine(cognitive_engine)
 
-        agent.game_id = gid
-        agent.current_game_id = gid
-        driver.set_frame(frame)
-        cognitive_engine.reset_episode(retain_dynamics=False)
+            manager.register(driver)
+            manager.bind("arc_console", target=env)
 
-        # Evaluate ALL levels (no capping)
-        target_levels = int(getattr(frame, "win_levels", None) or len(baseline) or 1)
-        total_levels_possible += target_levels
-
-        # Competition budget: full action runway (default 1000 steps per game) without artificial per-level cutoff
-        total_game_budget = max_steps_per_game if max_steps_per_game > 0 else 10000
-
-        start_time = time.time()
-        completed_prev = 0
-        game_steps = 0
-        current_level_steps = 0
-
-        for step in range(1, total_game_budget + 1):
-            feedback = manager.execute_cognitive_step()
-            game_steps += 1
-            current_level_steps += 1
-            info = feedback.info
-            lvl = int(info.get("levels_completed", 0))
-
-            if lvl > completed_prev:
-                print(
-                    f"    🎉 Level {lvl}/{target_levels} PASSED at step {step} (in {current_level_steps} steps)!"
-                )
-                completed_prev = lvl
-                current_level_steps = 0
-                cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
-            elif lvl < completed_prev:
-                completed_prev = lvl
-                current_level_steps = 0
-                cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
-
-            state_str = str(info.get("state", "RUNNING"))
-            if state_str == "WIN" or lvl >= target_levels:
-                break
-
-            # Optional per-level step limit if explicitly configured by user
-            if max_level_steps is not None and current_level_steps >= max_level_steps:
-                print(
-                    f"    ⏱️ Level {lvl + 1}/{target_levels} reached per-level limit "
-                    f"({current_level_steps} >= {max_level_steps} steps). Concluding game."
-                )
-                break
-            elif feedback.terminated or state_str == "GAME_OVER":
-                print(f"    ⚠️ Level retry / death at step {step}, retaining dynamics...")
-                cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=False)
+            frame = env.reset()
+            if not hasattr(frame, "game_id") or getattr(frame, "game_id", None) is None:
                 try:
-                    reset_frame = env.step(0)
+                    frame.game_id = gid
                 except Exception:
-                    try:
-                        reset_frame = env.reset()
-                    except Exception:
-                        break
-                reset_state = getattr(
-                    getattr(reset_frame, "state", None),
-                    "name",
-                    str(getattr(reset_frame, "state", "")),
-                )
-                if reset_state == "GAME_OVER":
-                    print(f"    ❌ GAME_OVER terminal at step {step}")
+                    pass
+
+            agent.game_id = gid
+            agent.current_game_id = gid
+            driver.set_frame(frame)
+            cognitive_engine.reset_episode(retain_dynamics=False)
+
+            # Evaluate ALL levels (no capping)
+            target_levels = int(getattr(frame, "win_levels", None) or len(baseline) or 1)
+            best_target = target_levels
+
+            # Step budget for this attempt
+            total_game_budget = max_steps_per_game if max_steps_per_game > 0 else 10000
+
+            start_time = time.time()
+            completed_prev = 0
+            game_steps = 0
+            current_level_steps = 0
+
+            for step in range(1, total_game_budget + 1):
+                feedback = manager.execute_cognitive_step()
+                game_steps += 1
+                current_level_steps += 1
+                info = feedback.info
+                lvl = int(info.get("levels_completed", 0))
+
+                if lvl > completed_prev:
+                    print(
+                        f"    🎉 Level {lvl}/{target_levels} PASSED at step {step} (in {current_level_steps} steps)!"
+                    )
+                    completed_prev = lvl
+                    current_level_steps = 0
+                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
+                elif lvl < completed_prev:
+                    completed_prev = lvl
+                    current_level_steps = 0
+                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=True)
+
+                state_str = str(info.get("state", "RUNNING"))
+                if state_str == "WIN" or lvl >= target_levels:
                     break
-                driver.set_frame(reset_frame)
 
-        elapsed = time.time() - start_time
-        total_steps_taken += game_steps
-        total_levels_passed += completed_prev
+                # Optional per-level step limit if explicitly configured by user
+                if max_level_steps is not None and current_level_steps >= max_level_steps:
+                    print(
+                        f"    ⏱️ Level {lvl + 1}/{target_levels} reached per-level limit "
+                        f"({current_level_steps} >= {max_level_steps} steps). Concluding attempt."
+                    )
+                    break
+                elif feedback.terminated or state_str == "GAME_OVER":
+                    print(f"    ⚠️ Level retry / death at step {step}, retaining dynamics...")
+                    cognitive_engine.reset_episode(retain_dynamics=True, is_new_level=False)
+                    try:
+                        reset_frame = env.step(0)
+                    except Exception:
+                        try:
+                            reset_frame = env.reset()
+                        except Exception:
+                            break
+                    reset_state = getattr(
+                        getattr(reset_frame, "state", None),
+                        "name",
+                        str(getattr(reset_frame, "state", "")),
+                    )
+                    if reset_state == "GAME_OVER":
+                        print(f"    ❌ GAME_OVER terminal at step {step}")
+                        break
+                    driver.set_frame(reset_frame)
 
-        is_win = completed_prev >= target_levels
+            elapsed = time.time() - start_time
+            total_game_steps_all += game_steps
+
+            is_win = completed_prev >= target_levels
+            if (
+                completed_prev > best_completed
+                or (completed_prev == best_completed and attempts_taken == 1)
+                or (completed_prev == best_completed and game_steps < best_game_steps)
+            ):
+                best_completed = completed_prev
+                best_is_win = is_win
+                best_game_steps = game_steps
+                best_elapsed = round(elapsed, 2)
+
+            if is_win:
+                break
+            elif attempt < retries:
+                print(
+                    f"    ⚠️ Game {gid} incomplete ({completed_prev}/{target_levels} levels, {game_steps} steps). Scheduling retry."
+                )
+
+        total_steps_taken += total_game_steps_all
+        total_levels_passed += best_completed
+        total_levels_possible += best_target
+
         status_label = (
             "✅ WON ALL LEVELS"
-            if is_win
+            if best_is_win
             else (
-                f"⚠️ {completed_prev}/{target_levels} levels"
-                if completed_prev > 0
+                f"⚠️ {best_completed}/{best_target} levels"
+                if best_completed > 0
                 else "❌ INCOMPLETE"
             )
         )
 
-        print(f"    🏁 Result: {status_label} in {elapsed:.2f}s ({game_steps} steps)")
+        print(
+            f"    🏁 Result: {status_label} in {best_elapsed:.2f}s "
+            f"({best_game_steps} steps in best run, {total_game_steps_all} total steps across {attempts_taken} attempt(s))"
+        )
 
         results[gid] = {
             "title": title,
-            "levels_passed": completed_prev,
-            "target_levels": target_levels,
-            "won": is_win,
-            "steps": game_steps,
-            "elapsed_seconds": round(elapsed, 2),
+            "levels_passed": best_completed,
+            "target_levels": best_target,
+            "won": best_is_win,
+            "steps": best_game_steps,
+            "total_steps": total_game_steps_all,
+            "attempts": attempts_taken,
+            "elapsed_seconds": best_elapsed,
             "baseline": baseline,
         }
 
@@ -536,6 +574,13 @@ if __name__ == "__main__":
         default=None,
         help="Optional maximum steps per individual level (default: None, completely unlimited per level).",
     )
+    parser.add_argument(
+        "--retries",
+        "-r",
+        type=int,
+        default=0,
+        help="Number of retries for failed games (default: 0).",
+    )
 
     args = parser.parse_args()
 
@@ -561,4 +606,5 @@ if __name__ == "__main__":
         instructions=custom_inst,
         max_steps_per_game=args.max_steps,
         max_level_steps=args.max_level_steps,
+        retries=args.retries,
     )
