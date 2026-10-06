@@ -37,6 +37,7 @@ from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
 )
+from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
@@ -3328,6 +3329,9 @@ class AutonomousEpistemicEngine:
 
         # Room topology & doorway subgoal reasoning (spatial containment)
         self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
+
+        # Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
+        self.object_planner: ObjectStateGraphPlanner = ObjectStateGraphPlanner()
         self.topology_rooms: dict[int, list[tuple[int, int]]] = {}
         self.topology_doors: list[RoomDoor] = []
         self.room_adjacency: dict[int, list[int]] = {}
@@ -3777,6 +3781,9 @@ class AutonomousEpistemicEngine:
                 if self.is_motor_grounded()
                 else EpistemicPhase.MOTOR_GROUNDING
             )
+
+        if hasattr(self, "object_planner"):
+            self.object_planner.reset_episode(is_new_level=is_new_level)
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions."""
@@ -4303,6 +4310,16 @@ class AutonomousEpistemicEngine:
         # 3. Check active mental plan during EXPLOITATION phase
         elif self.phase == EpistemicPhase.EXPLOITATION and self.mental_plan:
             next_step = self.mental_plan.popleft()
+            if (
+                not self.mental_plan
+                and hasattr(self, "object_planner")
+                and self.object_planner.active_target_object_id
+            ):
+                self.object_planner.ledger.record_interaction(
+                    self.object_planner.active_target_object_id,
+                    next_step.predicted_avatar_pos or self.avatar_pos or (0, 0),
+                )
+                self.object_planner.active_target_object_id = None
 
             # ── Reactive Safety Check ──────────────────────────────────────
             # Before executing each plan step, validate safety with TWO
@@ -4449,9 +4466,22 @@ class AutonomousEpistemicEngine:
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
                 else:
-                    chosen_action, chosen_data = self.plan_epistemic_probe(
-                        curr_grid, available_actions
+                    macro_plan = (
+                        self.object_planner.plan_macro_option(self, curr_grid, available_actions)
+                        if hasattr(self, "object_planner")
+                        else None
                     )
+                    if macro_plan:
+                        self.phase = EpistemicPhase.EXPLOITATION
+                        self.mental_plan = deque(macro_plan)
+                        next_step = self.mental_plan.popleft()
+                        chosen_action = next_step.action
+                        chosen_data = next_step.action_data
+                        predicted_pos = next_step.predicted_avatar_pos
+                    else:
+                        chosen_action, chosen_data = self.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
             elif next_step.action in available_actions:
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
@@ -4461,29 +4491,53 @@ class AutonomousEpistemicEngine:
                 self.phase = EpistemicPhase.REPLANNING
                 chosen_action, chosen_data = self.plan_epistemic_probe(curr_grid, available_actions)
 
-        # 4. If motor grounded, attempt Forward Mental Simulation
+        # 4. If motor grounded, attempt Object-Centric Planning or Forward Simulation
         elif self.is_motor_grounded():
-            simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
-            if simulated_plan:
+            # Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
+            macro_plan = (
+                self.object_planner.plan_macro_option(self, curr_grid, available_actions)
+                if hasattr(self, "object_planner")
+                else None
+            )
+            if macro_plan:
                 self.phase = EpistemicPhase.EXPLOITATION
-                self.mental_plan = deque(simulated_plan)
+                self.mental_plan = deque(macro_plan)
                 next_step = self.mental_plan.popleft()
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos
-            else:
-                spatial_effector_actions = [
-                    a for a in available_actions if self.is_spatial_effector(a)
-                ]
-                if spatial_effector_actions and self.step_counter % 2 == 0:
-                    chosen_action = spatial_effector_actions[0]
-                    chosen_data = self.ground_effector_action(curr_grid, chosen_action)
-                    self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                else:
-                    self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    chosen_action, chosen_data = self.plan_epistemic_probe(
-                        curr_grid, available_actions
+                if (
+                    not self.mental_plan
+                    and hasattr(self, "object_planner")
+                    and self.object_planner.active_target_object_id
+                ):
+                    self.object_planner.ledger.record_interaction(
+                        self.object_planner.active_target_object_id,
+                        predicted_pos or self.avatar_pos or (0, 0),
                     )
+                    self.object_planner.active_target_object_id = None
+            else:
+                simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
+                if simulated_plan:
+                    self.phase = EpistemicPhase.EXPLOITATION
+                    self.mental_plan = deque(simulated_plan)
+                    next_step = self.mental_plan.popleft()
+                    chosen_action = next_step.action
+                    chosen_data = next_step.action_data
+                    predicted_pos = next_step.predicted_avatar_pos
+                else:
+                    spatial_effector_actions = [
+                        a for a in available_actions if self.is_spatial_effector(a)
+                    ]
+                    if spatial_effector_actions and self.step_counter % 2 == 0:
+                        chosen_action = spatial_effector_actions[0]
+                        chosen_data = self.ground_effector_action(curr_grid, chosen_action)
+                        self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    else:
+                        self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                        chosen_action, chosen_data = self.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
 
         # 5. Fallback to Epistemic Curiosity Probing
         else:
