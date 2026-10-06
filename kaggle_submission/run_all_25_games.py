@@ -510,7 +510,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--enable-archetypes",
         action="store_true",
-        help="Enable legacy heuristic archetypes (default: disabled, 100% pure AutonomousEpistemicEngine).",
+        help="Enable legacy heuristic archetypes (default: disabled, 100 percent pure AutonomousEpistemicEngine).",
     )
     parser.add_argument(
         "--instructions",
