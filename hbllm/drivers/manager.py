@@ -58,6 +58,11 @@ class DriverManager:
         self._streaming_active: bool = False
 
     @property
+    def is_streaming(self) -> bool:
+        """Whether background streaming observation loops are currently active."""
+        return self._streaming_active
+
+    @property
     def active_driver(self) -> BaseDriver | None:
         """The currently bound active driver (legacy single-driver mode)."""
         return self._active_driver
@@ -102,6 +107,8 @@ class DriverManager:
         self._active_drivers[driver.name] = driver
         if self._primary_driver is None:
             self._primary_driver = driver.name
+        if self._active_driver is None:
+            self._active_driver = driver
 
         # Trigger hot-plug callbacks
         for cb in self._on_device_attached_callbacks:
@@ -134,6 +141,9 @@ class DriverManager:
                 await task
             except asyncio.CancelledError:
                 pass
+
+        if self._active_driver and self._active_driver.name == name:
+            self._active_driver = next(iter(self._active_drivers.values()), None)
 
         if self._primary_driver == name:
             self._primary_driver = next(iter(self._active_drivers), None)
@@ -174,6 +184,9 @@ class DriverManager:
 
     def _start_driver_stream_task(self, driver: BaseDriver, poll_interval_s: float = 0.05) -> None:
         """Spawn background coroutine to stream inputs from driver."""
+        old_task = self._streaming_tasks.get(driver.name)
+        if old_task and not old_task.done():
+            old_task.cancel()
         task = asyncio.create_task(
             self._driver_stream_loop(driver, poll_interval_s=poll_interval_s),
             name=f"stream_{driver.name}",
@@ -185,21 +198,38 @@ class DriverManager:
         logger.debug("Starting stream loop for driver '%s'", driver.name)
         try:
             while self._streaming_active and driver.is_connected:
-                # Check if driver supports continuous async stream iterator
-                if hasattr(driver, "stream_inputs"):
-                    async for inp in driver.stream_inputs():
-                        if not self._streaming_active or not driver.is_connected:
-                            break
-                        if inp.timestamp == 0.0:
-                            inp.timestamp = time.time()
-                        inp.source_id = inp.source_id or driver.name
-                        await self._dispatch_driver_input(inp)
-                else:
-                    inp = await driver.get_inputs_async()
-                    if inp.timestamp == 0.0:
-                        inp.timestamp = time.time()
-                    inp.source_id = inp.source_id or driver.name
-                    await self._dispatch_driver_input(inp)
+                try:
+                    # Check if driver supports continuous async stream iterator
+                    stream_obj = (
+                        driver.stream_inputs() if hasattr(driver, "stream_inputs") else None
+                    )
+                    if stream_obj is not None and hasattr(stream_obj, "__aiter__"):
+                        async for inp in stream_obj:
+                            if not self._streaming_active or not driver.is_connected:
+                                break
+                            if inp is None:
+                                continue
+                            if getattr(inp, "timestamp", 0.0) == 0.0:
+                                inp.timestamp = time.time()
+                            if hasattr(inp, "source_id"):
+                                inp.source_id = inp.source_id or driver.name
+                            await self._dispatch_driver_input(inp)
+                    else:
+                        inp = await driver.get_inputs_async()
+                        if inp is not None:
+                            if getattr(inp, "timestamp", 0.0) == 0.0:
+                                inp.timestamp = time.time()
+                            if hasattr(inp, "source_id"):
+                                inp.source_id = inp.source_id or driver.name
+                            await self._dispatch_driver_input(inp)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as inner_err:
+                    logger.warning(
+                        "Transient error in driver '%s' observation iteration: %s",
+                        driver.name,
+                        inner_err,
+                    )
 
                 # Backoff / interval
                 interval = (
@@ -211,7 +241,7 @@ class DriverManager:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error("Error in driver '%s' stream loop: %s", driver.name, e)
+            logger.error("Fatal error in driver '%s' stream loop: %s", driver.name, e)
 
     async def _dispatch_driver_input(self, inp: DriverInput) -> None:
         """Notify all registered callbacks of an incoming driver observation."""
@@ -232,7 +262,9 @@ class DriverManager:
         feedback = await driver.handle_action(action)
 
         if self._cognitive_engine is not None and hasattr(self._cognitive_engine, "update"):
-            self._cognitive_engine.update(action, feedback, source_id=driver_name)
+            res = self._cognitive_engine.update(action, feedback, source_id=driver_name)
+            if asyncio.iscoroutine(res):
+                await res
 
         return feedback
 
@@ -277,17 +309,23 @@ class DriverManager:
         self._active_drivers[name] = driver
         if self._primary_driver is None:
             self._primary_driver = name
+        if self._streaming_active:
+            self._start_driver_stream_task(driver)
         logger.info("Bound and connected active driver: '%s'", name)
         return driver
 
     def unbind(self) -> None:
         """Disconnect and unbind the active driver."""
         if self._active_driver and self._active_driver.is_connected:
+            name = self._active_driver.name
+            task = self._streaming_tasks.pop(name, None)
+            if task and not task.done():
+                task.cancel()
             self._active_driver.disconnect()
             # Remove from concurrent active set
-            for name, drv in list(self._active_drivers.items()):
+            for d_name, drv in list(self._active_drivers.items()):
                 if drv is self._active_driver:
-                    del self._active_drivers[name]
+                    del self._active_drivers[d_name]
                     break
         self._active_driver = None
 
@@ -303,6 +341,10 @@ class DriverManager:
         self._active_drivers[name] = driver
         if self._primary_driver is None:
             self._primary_driver = name
+        if self._active_driver is None:
+            self._active_driver = driver
+        if self._streaming_active:
+            self._start_driver_stream_task(driver)
         logger.info(
             "Bound concurrent driver: '%s' (total active: %d)", name, len(self._active_drivers)
         )
@@ -310,15 +352,40 @@ class DriverManager:
 
     def unbind_concurrent(self, name: str) -> None:
         """Disconnect a single driver without affecting others."""
+        task = self._streaming_tasks.pop(name, None)
+        if task and not task.done():
+            task.cancel()
         driver = self._active_drivers.pop(name, None)
         if driver and driver.is_connected:
             driver.disconnect()
+        if self._active_driver and self._active_driver.name == name:
+            self._active_driver = next(iter(self._active_drivers.values()), None)
         if self._primary_driver == name:
             self._primary_driver = next(iter(self._active_drivers), None)
 
     def get_active_drivers(self) -> dict[str, BaseDriver]:
         """Get all currently active concurrent drivers."""
         return dict(self._active_drivers)
+
+    def list_active_drivers(self) -> list[str]:
+        """List all currently active connected driver names."""
+        return list(self._active_drivers.keys())
+
+    def is_driver_active(self, name: str) -> bool:
+        """Check if a driver is currently active and connected."""
+        return name in self._active_drivers and self._active_drivers[name].is_connected
+
+    async def shutdown(self) -> None:
+        """Stop all streaming and disconnect all active drivers."""
+        await self.stop_streaming()
+        for name, driver in list(self._active_drivers.items()):
+            try:
+                if driver.is_connected:
+                    await driver.disconnect_async()
+            except Exception as e:
+                logger.warning("Error disconnecting driver '%s' during shutdown: %s", name, e)
+        self._active_drivers.clear()
+        self._active_driver = None
 
     # ── Cognitive Step Execution ──────────────────────────────────────────
 

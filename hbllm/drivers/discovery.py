@@ -11,6 +11,7 @@ import asyncio
 import glob
 import logging
 import platform
+import re
 from typing import Any
 
 from hbllm.drivers.base import (
@@ -23,6 +24,13 @@ from hbllm.drivers.network_driver import NetworkDeviceDriver
 from hbllm.drivers.serial_driver import SerialDeviceDriver
 
 logger = logging.getLogger(__name__)
+
+
+def _port_to_device_id(port: str) -> str:
+    """Derive a standardized alphanumeric device_id from a serial/USB port string."""
+    clean = port.replace("\\", "/").split("/")[-1]
+    clean = re.sub(r"[^a-zA-Z0-9_]", "_", clean)
+    return f"usb_{clean}"
 
 
 class DeviceDiscoveryEngine:
@@ -43,6 +51,8 @@ class DeviceDiscoveryEngine:
 
     async def start(self) -> None:
         """Start the background hot-plug discovery loop."""
+        if self._running:
+            return
         self._running = True
         self._known_ports = set(self._scan_available_ports())
         self._scan_task = asyncio.create_task(self._discovery_loop(), name="device_discovery_loop")
@@ -54,6 +64,8 @@ class DeviceDiscoveryEngine:
 
     async def stop(self) -> None:
         """Stop discovery loop."""
+        if not self._running and self._scan_task is None:
+            return
         self._running = False
         if self._scan_task and not self._scan_task.done():
             self._scan_task.cancel()
@@ -61,6 +73,7 @@ class DeviceDiscoveryEngine:
                 await self._scan_task
             except asyncio.CancelledError:
                 pass
+            self._scan_task = None
         logger.info("DeviceDiscoveryEngine stopped.")
 
     def _scan_available_ports(self) -> list[str]:
@@ -115,7 +128,7 @@ class DeviceDiscoveryEngine:
 
     async def _handle_port_attached(self, port: str) -> None:
         """Create and attach driver when a new physical port is detected."""
-        device_id = f"usb_{port.split('/')[-1].replace('.', '_')}"
+        device_id = _port_to_device_id(port)
         logger.info("Detected new physical device at '%s' -> device_id: '%s'", port, device_id)
 
         descriptor = SynapticDeviceDescriptor(
@@ -130,9 +143,9 @@ class DeviceDiscoveryEngine:
 
     async def _handle_port_detached(self, port: str) -> None:
         """Detach driver when a physical port is removed."""
-        device_id = f"usb_{port.split('/')[-1].replace('.', '_')}"
+        device_id = _port_to_device_id(port)
         logger.info("Physical device disconnected from '%s' -> device_id: '%s'", port, device_id)
-        if device_id in self.driver_manager.get_active_drivers():
+        if self.driver_manager.is_driver_active(device_id):
             await self.driver_manager.detach_driver(device_id)
 
     # ── Network Device PnP Registration ───────────────────────────────────

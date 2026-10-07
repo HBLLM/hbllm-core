@@ -95,6 +95,34 @@ class NetworkDeviceDriver(BaseDriver):
         )
         await self._input_queue.put(inp)
 
+    def ingest_network_payload_sync(
+        self, raw_payload: Any, metadata: dict[str, Any] | None = None
+    ) -> None:
+        """Synchronously enqueue an incoming network observation packet."""
+        if not self.is_connected:
+            return
+
+        now = time.time()
+        self._last_observation = raw_payload
+        modality = (
+            self.descriptor.modalities[0]
+            if self.descriptor and self.descriptor.modalities
+            else DriverModality.STRUCTURED
+        )
+        inp = DriverInput(
+            raw_data=raw_payload,
+            timestamp=now,
+            metadata=metadata or {},
+            source_id=self.name,
+            modality=modality,
+        )
+        try:
+            self._input_queue.put_nowait(inp)
+        except Exception as e:
+            logger.warning(
+                "Failed to synchronously enqueue network payload for '%s': %s", self.name, e
+            )
+
     def get_inputs(self) -> DriverInput:
         """Return the latest cached observation."""
         modality = (
@@ -149,17 +177,25 @@ class NetworkDeviceDriver(BaseDriver):
     async def handle_action(self, action: DriverAction) -> DriverFeedback:
         """Asynchronously dispatch action across network socket."""
         raw_res = None
-        if self._action_sink is not None:
-            if asyncio.iscoroutinefunction(self._action_sink):
-                raw_res = await self._action_sink(action)
-            elif callable(self._action_sink):
-                raw_res = self._action_sink(action)
-            elif hasattr(self._action_sink, "send"):
-                send_method = self._action_sink.send
-                if asyncio.iscoroutinefunction(send_method):
-                    raw_res = await send_method(action)
-                else:
-                    raw_res = send_method(action)
+        try:
+            if self._action_sink is not None:
+                if asyncio.iscoroutinefunction(self._action_sink):
+                    raw_res = await self._action_sink(action)
+                elif callable(self._action_sink):
+                    raw_res = self._action_sink(action)
+                elif hasattr(self._action_sink, "send"):
+                    send_method = self._action_sink.send
+                    if asyncio.iscoroutinefunction(send_method):
+                        raw_res = await send_method(action)
+                    else:
+                        raw_res = send_method(action)
+        except Exception as e:
+            logger.error("Error dispatching action to network device '%s': %s", self.name, e)
+            return DriverFeedback(
+                success=False,
+                raw_response={"error": str(e)},
+                info={"network_target": str(self._target), "error": str(e)},
+            )
 
         return self.process_feedback(raw_res or {"status": "ok", "action_id": action.action_id})
 

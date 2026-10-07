@@ -128,6 +128,24 @@ class SynapseGateway:
             "Edge device connected: tenant=%s user=%s device=%s", tenant_id, user_id, device_id
         )
 
+        if self.bus:
+            reg_msg = Message(
+                type=MessageType.EVENT,
+                source_node_id="synapse_gateway",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                device_id=device_id,
+                topic="device.register",
+                payload={
+                    "device_id": device_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "device_type": "mobile",
+                    "capabilities": [],
+                },
+            )
+            await self.bus.publish("device.register", reg_msg)
+
         if self.audit_log:
             self.audit_log.log(
                 action="auth.ws_connect",
@@ -174,6 +192,27 @@ class SynapseGateway:
         logger.info(
             "Edge device disconnected: tenant=%s user=%s device=%s", tenant_id, user_id, device_id
         )
+
+        if self.bus:
+
+            async def _pub_unreg() -> None:
+                try:
+                    await self.bus.publish(
+                        "device.unregister",
+                        Message(
+                            type=MessageType.EVENT,
+                            source_node_id="synapse_gateway",
+                            tenant_id=tenant_id,
+                            user_id=user_id,
+                            device_id=device_id,
+                            topic="device.unregister",
+                            payload={"device_id": device_id, "tenant_id": tenant_id},
+                        ),
+                    )
+                except Exception as err:
+                    logger.debug("Failed to publish device.unregister: %s", err)
+
+            asyncio.create_task(_pub_unreg())
 
         if self.audit_log:
             self.audit_log.log(
@@ -350,6 +389,25 @@ class SynapseGateway:
                 self.device_nodes[(tenant_id, user_id, device_id)] = new_nodes
                 logger.info("Device %s registered tools: %s", device_id, tools)
 
+                if self.bus:
+                    reg_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id="synapse_gateway",
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        device_id=device_id,
+                        topic="device.register",
+                        payload={
+                            "device_id": device_id,
+                            "tenant_id": tenant_id,
+                            "user_id": user_id,
+                            "device_type": metadata.get("device_type", "mobile"),
+                            "capabilities": tools,
+                            "metadata": metadata,
+                        },
+                    )
+                    await self.bus.publish("device.register", reg_msg)
+
                 if self.audit_log:
                     self.audit_log.log(
                         action="edge.capability_registered",
@@ -358,6 +416,28 @@ class SynapseGateway:
                         device_id=device_id,
                         resource=f"device:{device_id}",
                         details={"tools": tools},
+                    )
+
+            elif msg_type == "heartbeat":
+                # Presence keepalive
+                if self.bus:
+                    hb_msg = Message(
+                        type=MessageType.EVENT,
+                        source_node_id=f"edge_{device_id}",
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        device_id=device_id,
+                        topic="device.heartbeat",
+                        payload={"device_id": device_id, "tenant_id": tenant_id},
+                    )
+                    await self.bus.publish("device.heartbeat", hb_msg)
+
+                ws = self.active_connections.get((tenant_id, user_id, device_id))
+                if ws:
+                    import time
+
+                    await ws.send_text(
+                        _json_dumps({"type": "heartbeat_ack", "timestamp": time.time()})
                     )
 
             elif msg_type == "tool_result":

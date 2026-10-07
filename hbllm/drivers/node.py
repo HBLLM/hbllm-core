@@ -72,8 +72,16 @@ class DriverManagerNode(Node):
         logger.info("DriverManagerNode started and listening on bus.")
 
     async def on_stop(self) -> None:
-        """Stop background streaming tasks when node shuts down."""
+        """Stop background streaming tasks and unmount dynamic tools when node shuts down."""
         await self.driver_manager.stop_streaming()
+        if self.tool_registry is not None:
+            for name, tools in list(self._mounted_tools.items()):
+                for tool_name in tools:
+                    try:
+                        self.tool_registry.unregister(tool_name)
+                    except Exception:
+                        pass
+        self._mounted_tools.clear()
         logger.info("DriverManagerNode stopped.")
 
     async def handle_message(self, message: Message) -> Message | None:
@@ -104,12 +112,12 @@ class DriverManagerNode(Node):
 
         # Dynamically mount tools into ToolRegistry if present
         if self.tool_registry is not None and driver.descriptor and driver.descriptor.action_schema:
+            import re
+
             mounted = []
             for schema in driver.descriptor.action_schema:
                 action_name = schema.get("name") or str(schema.get("action_id", "act"))
-                clean_name = f"device_{driver.name}_{action_name}".replace(".", "_").replace(
-                    "-", "_"
-                )
+                clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", f"device_{driver.name}_{action_name}")
                 desc_text = (
                     schema.get("description")
                     or f"Execute action '{action_name}' on device '{driver.name}'"
@@ -211,6 +219,22 @@ class DriverManagerNode(Node):
         )
         await self.publish("reality.event", reality_msg)
 
+        # 3. Normalized perception for WorldStateEngine
+        norm_msg = Message(
+            type=MessageType.EVENT,
+            source_node_id=self.node_id,
+            target_node_id="*",
+            topic="perception.normalized",
+            payload={
+                "entity_id": driver_input.source_id,
+                "event_type": "update",
+                "state": driver_input.raw_data,
+                "confidence": 1.0,
+                "timestamp": driver_input.timestamp,
+            },
+        )
+        await self.publish("perception.normalized", norm_msg)
+
     async def _handle_action_dispatch(self, message: Message) -> None:
         """Execute motor command from cognitive brain to physical/virtual device."""
         driver_name = message.payload.get("driver_name") or message.payload.get("device_id")
@@ -227,6 +251,19 @@ class DriverManagerNode(Node):
         )
 
         try:
+            # Resolve semantic action intent if action_id is not yet concrete
+            if action.action_id is None and action.semantic_intent:
+                try:
+                    driver = self.driver_manager.get_driver(driver_name)
+                    avail = driver.get_action_list(driver.get_inputs())
+                    resolved = driver.resolve_action(action.semantic_intent, avail)
+                    if resolved:
+                        action.action_id = resolved.action_id
+                        if not action.parameters and resolved.parameters:
+                            action.parameters = resolved.parameters
+                except Exception as res_err:
+                    logger.debug("Action intent resolution fallback: %s", res_err)
+
             feedback: DriverFeedback = await self.driver_manager.dispatch_action_async(
                 driver_name, action
             )
@@ -250,6 +287,23 @@ class DriverManagerNode(Node):
             await self.publish(reply_topic, feedback_msg)
         except Exception as e:
             logger.error("Failed to execute action on driver '%s': %s", driver_name, e)
+            reply_topic = message.payload.get("reply_topic") or "action.driver.feedback"
+            feedback_msg = Message(
+                type=MessageType.FEEDBACK,
+                source_node_id=self.node_id,
+                target_node_id=message.source_node_id,
+                topic=reply_topic,
+                correlation_id=message.id,
+                payload={
+                    "driver_name": driver_name,
+                    "action_id": action.action_id,
+                    "success": False,
+                    "reward": 0.0,
+                    "terminated": False,
+                    "error": str(e),
+                },
+            )
+            await self.publish(reply_topic, feedback_msg)
 
     async def _handle_hotplug_attach(self, message: Message) -> None:
         """Handle request to dynamically attach a registered driver."""

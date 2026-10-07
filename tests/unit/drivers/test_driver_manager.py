@@ -395,3 +395,56 @@ async def test_dynamic_tool_mounting_with_tool_registry() -> None:
 
     await node.stop()
     await bus.stop()
+
+
+@pytest.mark.asyncio
+async def test_driver_manager_lifecycle_shutdown() -> None:
+    manager = DriverManager()
+    driver1 = MockDeviceDriver(name="dev_1")
+    driver2 = MockDeviceDriver(name="dev_2")
+
+    await manager.attach_driver(driver1, target={"port": 1})
+    await manager.attach_driver(driver2, target={"port": 2})
+
+    assert manager.is_driver_active("dev_1") is True
+    assert manager.is_driver_active("dev_2") is True
+    assert set(manager.list_active_drivers()) == {"dev_1", "dev_2"}
+
+    await manager.start_streaming()
+    assert manager.is_streaming is True
+
+    await manager.shutdown()
+    assert manager.is_streaming is False
+    assert len(manager.list_active_drivers()) == 0
+    assert driver1.is_connected is False
+    assert driver2.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_driver_manager_hcir_blackbox_integration() -> None:
+    """Verify DriverManager properly drives HCIR CognitiveBlackbox observation, decision, and learning."""
+    from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
+    from hbllm.hcir.workspace import HCIRWorkspaceState
+
+    hcir_ws = HCIRWorkspaceState()
+    blackbox = CognitiveBlackbox(workspace=hcir_ws)
+
+    manager = DriverManager()
+    manager.set_cognitive_engine(blackbox)
+    assert manager.cognitive_engine is blackbox
+
+    driver = MockDeviceDriver(name="hcir_test_dev")
+    await manager.attach_driver(driver, target={"init": True})
+
+    # Execute cognitive step through DriverManager -> CognitiveBlackbox
+    feedback = manager.execute_cognitive_step()
+    assert feedback.success is True
+    assert len(driver.dispatched_actions) == 1
+
+    # Verify HCIR blackbox state was updated
+    state = blackbox.get_state("hcir_test_dev")
+    assert state.step_count >= 1
+    assert state.last_action_id is not None
+    assert state.total_reward >= 0.0
+
+    await manager.shutdown()

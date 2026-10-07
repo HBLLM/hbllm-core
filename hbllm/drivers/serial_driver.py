@@ -126,7 +126,14 @@ class SerialDeviceDriver(BaseDriver):
             try:
                 # If physical serial is active and has bytes waiting
                 if self._serial is not None and getattr(self._serial, "in_waiting", 0) > 0:
-                    line = self._serial.readline().decode("utf-8", errors="replace").strip()
+
+                    def _read_line() -> str:
+                        try:
+                            return self._serial.readline().decode("utf-8", errors="replace").strip()
+                        except Exception:
+                            return ""
+
+                    line = await asyncio.to_thread(_read_line)
                     if line:
                         await self.simulate_incoming_line(line)
 
