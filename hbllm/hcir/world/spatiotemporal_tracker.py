@@ -42,13 +42,22 @@ class SpatiotemporalHazardTracker:
         self.periodic_cells: dict[tuple[int, int], DynamicCellPhase] = {}
         self.environmental_period: int = 1
         self.known_lethal_features: set[int] = set()
+        self.static_lethal_positions: set[tuple[int, int]] = set()
 
     def reset_episode(self) -> None:
-        """Reset temporal observation history while preserving learned lethal feature identities."""
+        """Reset temporal observation history while preserving learned lethal feature identities and static lethal positions."""
         self.grid_history.clear()
         self.step_history.clear()
         self.periodic_cells.clear()
         self.environmental_period = 1
+
+    def register_lethal_position(self, pos: tuple[int, int]) -> None:
+        """Register a coordinate that resulted in avatar destruction/death upon entry."""
+        self.static_lethal_positions.add((int(pos[0]), int(pos[1])))
+
+    def clear_lethal_positions(self) -> None:
+        """Clear recorded static lethal positions."""
+        self.static_lethal_positions.clear()
 
     def register_lethal_feature(self, feature_id: int) -> None:
         """Register a feature value that resulted in avatar destruction/death upon contact."""
@@ -165,6 +174,8 @@ class SpatiotemporalHazardTracker:
         avatar_features: set[int] | None = None,
     ) -> bool:
         """Predict whether coordinate (r, c) will be lethal or impassable at t_current + future_relative_step."""
+        if (r, c) in self.static_lethal_positions:
+            return True
         if (r, c) not in self.periodic_cells:
             return False
 
@@ -185,7 +196,7 @@ class SpatiotemporalHazardTracker:
         """Generate a schedule mapping relative future step -> set of hazardous coordinates."""
         schedule: dict[int, set[tuple[int, int]]] = {}
         for dt in range(horizon + 1):
-            haz_set: set[tuple[int, int]] = set()
+            haz_set: set[tuple[int, int]] = set(self.static_lethal_positions)
             for (r, c), cell_phase in self.periodic_cells.items():
                 T = cell_phase.period
                 idx = (dt - 1) % T if dt > 0 else -1

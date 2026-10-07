@@ -560,6 +560,23 @@ class PerceptionEngine:
                         "confidence": min(1.0, fill_ratio),
                     }
                 )
+            # Gestalt Receptacle Outline / Hollow Container Frame:
+            # Interior entity forming a hollow boundary or container surrounding an interior cavity
+            elif is_interior and 0.04 <= fill_ratio <= 0.60 and 8 <= rect_area <= H * W * 0.25:
+                subgrid = grid[min_r : max_r + 1, min_c : max_c + 1]
+                if np.any(subgrid != feat_int):
+                    centroid = (int(np.mean(pts[:, 0])), int(np.mean(pts[:, 1])))
+                    goals.append(
+                        {
+                            "type": "receptacle_slot",
+                            "position": centroid,
+                            "feature": feat_int,
+                            "size": len(pts),
+                            "bounds": (int(min_r), int(max_r), int(min_c), int(max_c)),
+                            "cells": [(int(p[0]), int(p[1])) for p in pts],
+                            "confidence": 0.85,
+                        }
+                    )
 
         # 2. Detect edge exit markers
         for feat in np.unique(grid):
@@ -632,7 +649,7 @@ class PerceptionEngine:
         from collections import defaultdict
 
         small_entities = [e for e in entities if 2 <= e.area <= 64 and e.feature_id != bg]
-        if len(small_entities) < 3:
+        if len(small_entities) < 2:
             return []
 
         by_dim: dict[tuple[int, int], list[SpatialEntity]] = defaultdict(list)
@@ -643,7 +660,7 @@ class PerceptionEngine:
 
         panels: list[dict[str, Any]] = []
         for (h, w), group in by_dim.items():
-            if len(group) < 3:
+            if len(group) < 2:
                 continue
 
             feat_counts: dict[int, int] = defaultdict(int)
@@ -904,45 +921,98 @@ class EpistemicFeedbackAssimilator:
 
         if diff.changed_pixel_count == 0:
             engine.consecutive_quiescent_actions += 1
-            if target_coord is not None and getattr(engine, "step_counter", 0) > 2:
+            engine.consecutive_effective_clicks = 0
+            engine.last_effective_click_coord = None
+            engine.active_goal_converging_coord = None
+            engine.consecutive_goal_converging_clicks = 0
+            if target_coord is not None:
                 engine.quiescent_click_targets.add(target_coord)
+                engine.effective_click_targets.discard(target_coord)
             if action is not None:
-                engine.inhibited_actions[action] = 2
+                prev_inh = engine.inhibited_actions.get(action, 0)
+                engine.inhibited_actions[action] = max(prev_inh + 2, 3)
 
-            if (
-                not is_win
-                and not is_lost
-                and not is_known_displacement
-                and bool(engine.action_dynamics)
-            ):
+            if not is_win and not is_lost:
                 return
-
-        engine.consecutive_quiescent_actions = 0
-        if target_coord is not None:
-            engine.effective_click_targets.add(target_coord)
-            engine.quiescent_click_targets.discard(target_coord)
-            if engine.prev_grid is not None:
-                r, c = target_coord
-                if 0 <= r < engine.prev_grid.shape[0] and 0 <= c < engine.prev_grid.shape[1]:
-                    target_feat = int(engine.prev_grid[r, c])
-                    engine.effective_features.add(target_feat)
-            if diff.changed_mask is not None:
-                mut_cells = [(int(r), int(c)) for r, c in zip(*np.where(diff.changed_mask))]
-                engine.click_affordances[target_coord] = mut_cells
-            # Numerical / cardinality constraint discovery (e.g. Minesweeper / local count grids):
-            tr, tc = target_coord
-            if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
-                new_feat = int(curr_grid[tr, tc])
-                if 0 <= new_feat <= 8 and new_feat != engine.bg_feature:
-                    new_safe, new_hazards = engine.working_memory.register_cardinality_constraint(
-                        center=target_coord,
-                        count=new_feat,
-                        grid_shape=curr_grid.shape,
-                        radius=1,
+        else:
+            engine.consecutive_quiescent_actions = 0
+            if target_coord is not None:
+                if getattr(engine, "last_effective_click_coord", None) == target_coord:
+                    engine.consecutive_effective_clicks = (
+                        getattr(engine, "consecutive_effective_clicks", 0) + 1
                     )
-                    for hz in new_hazards:
-                        engine.hazard_tracker.register_lethal_feature(int(curr_grid[hz[0], hz[1]]))
-                        engine.learned_barriers.add(hz)
+                else:
+                    engine.last_effective_click_coord = target_coord
+                    engine.consecutive_effective_clicks = 1
+                engine.effective_click_targets.add(target_coord)
+                engine.quiescent_click_targets.discard(target_coord)
+                if engine.prev_grid is not None:
+                    r, c = target_coord
+                    if 0 <= r < engine.prev_grid.shape[0] and 0 <= c < engine.prev_grid.shape[1]:
+                        target_feat = int(engine.prev_grid[r, c])
+                        engine.effective_features.add(target_feat)
+                if diff.changed_mask is not None:
+                    mut_cells = [(int(r), int(c)) for r, c in zip(*np.where(diff.changed_mask))]
+                    engine.click_affordances[target_coord] = mut_cells
+
+                # Dorsal Visual Stream (V4/MT): Object motion tracking & Teleological Distance Gradient
+                if diff.changed_mask is not None and engine.prev_grid is not None:
+                    bg = engine.bg_feature if engine.bg_feature is not None else 0
+                    disappeared_pts = np.argwhere(diff.changed_mask & (engine.prev_grid != bg))
+                    appeared_pts = np.argwhere(diff.changed_mask & (curr_grid != bg))
+                    if 1 <= len(disappeared_pts) <= 36 and 1 <= len(appeared_pts) <= 36:
+                        p_old = np.mean(disappeared_pts, axis=0)
+                        p_new = np.mean(appeared_pts, axis=0)
+                        goal_positions: list[tuple[int, int]] = list(engine.learned_goal_positions)
+                        for g in PerceptionEngine.detect_structural_goals(curr_grid, bg=bg):
+                            if "position" in g:
+                                goal_positions.append(g["position"])
+                        for gf in engine.learned_goal_features:
+                            g_pts = np.argwhere(curr_grid == gf)
+                            if len(g_pts) > 0:
+                                goal_positions.append(
+                                    (int(np.mean(g_pts[:, 0])), int(np.mean(g_pts[:, 1])))
+                                )
+                        if goal_positions:
+                            min_d_old = min(
+                                abs(p_old[0] - gp[0]) + abs(p_old[1] - gp[1])
+                                for gp in goal_positions
+                            )
+                            min_d_new = min(
+                                abs(p_new[0] - gp[0]) + abs(p_new[1] - gp[1])
+                                for gp in goal_positions
+                            )
+                            if min_d_new < min_d_old:
+                                engine.active_goal_converging_coord = target_coord
+                                engine.consecutive_goal_converging_clicks = (
+                                    getattr(engine, "consecutive_goal_converging_clicks", 0) + 1
+                                )
+                            elif min_d_new > min_d_old:
+                                if (
+                                    getattr(engine, "active_goal_converging_coord", None)
+                                    == target_coord
+                                ):
+                                    engine.active_goal_converging_coord = None
+                                    engine.consecutive_goal_converging_clicks = 0
+
+                # Numerical / cardinality constraint discovery (e.g. Minesweeper / local count grids):
+                tr, tc = target_coord
+                if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
+                    new_feat = int(curr_grid[tr, tc])
+                    if 0 <= new_feat <= 8 and new_feat != engine.bg_feature:
+                        new_safe, new_hazards = (
+                            engine.working_memory.register_cardinality_constraint(
+                                center=target_coord,
+                                count=new_feat,
+                                grid_shape=curr_grid.shape,
+                                radius=1,
+                            )
+                        )
+                        for hz in new_hazards:
+                            engine.hazard_tracker.register_lethal_feature(
+                                int(curr_grid[hz[0], hz[1]])
+                            )
+                            engine.learned_barriers.add(hz)
 
         # ── Intuitive Physics Transition Tracking ────────────────────────────
         engine.physics_engine.record_transition(
@@ -1256,18 +1326,8 @@ class EpistemicFeedbackAssimilator:
 
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_win:
-                if diff.changed_pixel_count > 0:
-                    # HCIR Causal Transition: Internal state mutation / orientation transition detected
-                    logger.debug(
-                        "AutonomousEpistemicEngine: Internal state mutation / orientation transition detected (pixels changed: %d). Not a collision.",
-                        diff.changed_pixel_count,
-                    )
-                elif (
-                    diff.changed_pixel_count == 0
-                    and act_dyn is not None
-                    and act_dyn.is_displacement_action()
-                ):
-                    # True quiescent wall collision: no pixel changed anywhere in the environment
+                if act_dyn is not None and act_dyn.is_displacement_action():
+                    # Motor command failed to displace avatar! Ground obstacle cell regardless of other background motion
                     exp_dr, exp_dc = act_dyn.get_displacement()
                     step_r = int(np.sign(exp_dr))
                     step_c = int(np.sign(exp_dc))
@@ -1331,7 +1391,16 @@ class EpistemicFeedbackAssimilator:
 
                     if engine.last_action is not None and prev_avatar_pos is not None:
                         engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
-                        engine.inhibited_actions[engine.last_action] = 2
+                        prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
+
+                if prev_avatar_pos is not None and engine.avatar_pos is not None:
+                    if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
+                        engine.consecutive_stuck_steps += 1
+                    else:
+                        engine.consecutive_stuck_steps = 0
+            else:
+                engine.consecutive_stuck_steps = 0
 
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (
@@ -1413,13 +1482,10 @@ class EpistemicFeedbackAssimilator:
                     engine.working_memory.orient_attention((sal_r, sal_c))
 
             if discrepancy:
-                if (
-                    engine.last_action is not None
-                    and prev_avatar_pos is not None
-                    and diff.changed_pixel_count == 0
-                ):
+                if engine.last_action is not None and prev_avatar_pos is not None:
                     engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
-                    engine.inhibited_actions[engine.last_action] = 2
+                    prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                    engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
                 if engine.mental_plan:
                     logger.debug(
                         "AutonomousEpistemicEngine: Sensory discrepancy/surprise detected (pred=%s, actual=%s, surprise=%.3f). Invalidating %d-step mental plan.",
@@ -1712,14 +1778,32 @@ class EpistemicFeedbackAssimilator:
                             )
                     engine.exhausted_candidate_goals.add(target_pos)
 
-                    dead_feat = int(engine.prev_grid[target_pos[0], target_pos[1]])
-                    if (
-                        not engine.symbolic_theory.is_walkable(dead_feat)
-                        and dead_feat != engine.bg_feature
-                        and dead_feat not in av_feats
-                    ):
-                        # Only mark spatial coordinate as a static barrier if it was an impassable solid obstacle
-                        engine.learned_barriers.add(target_pos)
+                    # Trajectory-level aversive conditioning:
+                    # The destination cell target_pos resulted in catastrophic loss/death.
+                    # Ground it as a static lethal position and barrier so neither mental simulation
+                    # nor exploratory probes step into this coordinate again!
+                    engine.hazard_tracker.register_lethal_position(target_pos)
+                    engine.learned_barriers.add(target_pos)
+                    engine.level_learned_barriers.setdefault(engine.current_level, set()).add(
+                        target_pos
+                    )
+                    engine.level_lethal_positions.setdefault(engine.current_level, set()).add(
+                        target_pos
+                    )
+
+                    # Blacklist all cardinal incoming moves into target_pos from immediate neighbors
+                    for m_dr, m_dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nbr = (target_pos[0] - m_dr, target_pos[1] - m_dc)
+                        if 0 <= nbr[0] < H and 0 <= nbr[1] < W:
+                            for cand_a, dyn in engine.action_dynamics.items():
+                                if dyn.is_displacement_action() and dyn.get_displacement() == (
+                                    m_dr,
+                                    m_dc,
+                                ):
+                                    engine.failed_transitions.add((nbr, cand_a))
+
+            if action is not None:
+                engine.inhibited_actions[action] = 5
 
             if engine.active_hypothesis:
                 engine.active_hypothesis.confidence = 0.0
@@ -1852,6 +1936,13 @@ class MentalSimulationPlanner:
             ):
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
+                    engine.learned_goal_positions.add(e.grid_pos)
+
+        # Object Permanence: Retain known goal positions if currently occluded by mobile entities
+        for gp in engine.learned_goal_positions:
+            if 0 <= gp[0] < H and 0 <= gp[1] < W and gp != engine.avatar_pos:
+                if gp not in confirmed_goals:
+                    confirmed_goals.append(gp)
 
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
@@ -1986,7 +2077,11 @@ class MentalSimulationPlanner:
         )
         engine.symbolic_theory.goal_features.difference_update(av_feats)
         if engine.avatar_pos is not None:
-            goals = [g for g in goals if g != engine.avatar_pos and g not in panel_coords]
+            goals = [
+                g
+                for g in goals
+                if g != engine.avatar_pos and (g in confirmed_goals or g not in panel_coords)
+            ]
 
         unexhausted_goals = [g for g in goals if g not in engine.exhausted_candidate_goals]
         if unexhausted_goals:
@@ -2023,7 +2118,15 @@ class MentalSimulationPlanner:
         ]
 
         # 3. Static barriers
-        static_barriers: set[tuple[int, int]] = set(engine.learned_barriers)
+        static_barriers: set[tuple[int, int]] = set()
+        for r, c in engine.learned_barriers:
+            if 0 <= r < H and 0 <= c < W:
+                val = int(curr_grid[r, c])
+                if (r, c) in engine.hazard_tracker.static_lethal_positions or (
+                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                ):
+                    static_barriers.add((r, c))
+
         u_vals, u_counts = np.unique(curr_grid, return_counts=True)
         feat_counts = dict(zip(u_vals, u_counts))
         for r in range(H):
@@ -2903,11 +3006,7 @@ class EpistemicCuriosityExplorer:
             should_probe_effector = (
                 not displacement_actions
                 or (engine.avatar_pos is None and engine.level_epistemic_probes > 12)
-                or (
-                    engine.avatar_pos is not None
-                    and engine.recent_positions.count(engine.avatar_pos) >= 2
-                )
-                or (engine.level_epistemic_probes % 3 == 0)
+                or (engine.avatar_pos is not None and engine.consecutive_stuck_steps >= 4)
             )
             if should_probe_effector:
                 chosen_eff = spatial_effector_actions[0]
@@ -2940,11 +3039,12 @@ class EpistemicCuriosityExplorer:
                     engine.active_probe_id = None
                     engine.probe_target_steps = 0
 
-            # Oscillation Loop Breaking
-            is_oscillating = engine.recent_positions.count(engine.avatar_pos) >= 3
+            # Oscillation & Attractor Loop Breaking
+            is_stuck = engine.consecutive_stuck_steps >= 2
+            is_oscillating = engine.recent_positions.count(engine.avatar_pos) >= 3 or is_stuck
             if is_oscillating:
                 logger.debug(
-                    "AutonomousEpistemicEngine: Oscillation detected at %s! Breaking loop...",
+                    "AutonomousEpistemicEngine: Attractor loop/stuck state detected at %s! Breaking loop...",
                     engine.avatar_pos,
                 )
                 engine.active_probe_target = None
@@ -2964,7 +3064,7 @@ class EpistemicCuriosityExplorer:
                     act = untested_here[0]
                     engine.tested_action_positions.add((act, engine.avatar_pos))
                     return act, None
-                best_act = available_actions[0]
+                best_act = None
                 min_visits = float("inf")
                 disp_actions = [
                     (act, engine.action_dynamics[act].get_displacement())
@@ -2973,12 +3073,18 @@ class EpistemicCuriosityExplorer:
                     and engine.action_dynamics[act].is_displacement_action()
                 ]
                 for act, (dr_cal, dc_cal) in disp_actions:
+                    if engine.inhibited_actions.get(act, 0) > 0:
+                        continue
+                    if (engine.avatar_pos, act) in engine.failed_transitions:
+                        continue
                     nr = engine.avatar_pos[0] + dr_cal
                     nc = engine.avatar_pos[1] + dc_cal
                     if not (0 <= nr < H and 0 <= nc < W):
                         continue
-                    if (nr, nc) in engine.learned_barriers or engine.symbolic_theory.is_barrier(
-                        int(curr_grid[nr, nc])
+                    if (
+                        (nr, nc) in engine.hazard_tracker.static_lethal_positions
+                        or (nr, nc) in engine.learned_barriers
+                        or engine.symbolic_theory.is_barrier(int(curr_grid[nr, nc]))
                     ):
                         continue
                     # Known-lethal features are hard-blocked; unverified features
@@ -2993,12 +3099,12 @@ class EpistemicCuriosityExplorer:
                     if total_score < min_visits:
                         min_visits = total_score
                         best_act = act
-                if spatial_effector_actions and (
-                    min_visits == float("inf") or engine.level_epistemic_probes % 2 == 0
-                ):
+                if best_act is not None:
+                    return best_act, None
+                if spatial_effector_actions and min_visits == float("inf"):
                     chosen_eff = spatial_effector_actions[0]
                     return chosen_eff, engine.ground_effector_action(curr_grid, chosen_eff)
-                return best_act, None
+                return available_actions[0], None
 
             # 3a. Update room topology and extract topological subgoals
             engine.update_room_topology(curr_grid)
@@ -3154,24 +3260,29 @@ class EpistemicCuriosityExplorer:
             if best_action is not None:
                 return best_action, None
 
-            # Metacognitive Refractory Relaxation: if uninhibited actions were all blocked, try unblocked candidate
+            # Metacognitive Refractory Relaxation: if uninhibited actions were all blocked, try candidate with lowest inhibition
             if best_action is None:
-                for act, (dr_cal, dc_cal) in disp_actions:
+                sorted_disp = sorted(
+                    disp_actions, key=lambda x: engine.inhibited_actions.get(x[0], 0)
+                )
+                for act, (dr_cal, dc_cal) in sorted_disp:
                     if (engine.avatar_pos, act) in engine.failed_transitions:
                         continue
                     nr = engine.avatar_pos[0] + dr_cal
                     nc = engine.avatar_pos[1] + dc_cal
                     if 0 <= nr < H and 0 <= nc < W:
-                        if not (
-                            (nr, nc) in engine.learned_barriers
+                        if (
+                            (nr, nc) in engine.hazard_tracker.static_lethal_positions
+                            or (nr, nc) in engine.learned_barriers
                             or engine.symbolic_theory.is_barrier(int(curr_grid[nr, nc]))
                         ):
-                            if (
-                                int(curr_grid[nr, nc])
-                                not in engine.hazard_tracker.known_lethal_features
-                            ):
-                                best_action = act
-                                break
+                            continue
+                        if (
+                            int(curr_grid[nr, nc])
+                            not in engine.hazard_tracker.known_lethal_features
+                        ):
+                            best_action = act
+                            break
 
             if best_action is not None:
                 return best_action, None
@@ -3321,6 +3432,7 @@ class AutonomousEpistemicEngine:
         self._current_level: int = 0
         self.level_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
         self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
+        self.level_lethal_positions: dict[int, set[tuple[int, int]]] = {}
         self.learned_barriers: set[tuple[int, int]] = self.level_learned_barriers.setdefault(
             0, set()
         )
@@ -3339,6 +3451,7 @@ class AutonomousEpistemicEngine:
         self.mobile_threat_features: set[int] = set()
         self._prev_oriented_threats: list[OrientedThreat] = []
         self.consecutive_plan_failures: int = 0
+        self.consecutive_stuck_steps: int = 0
         self.exploration_cooldown: int = 0
         self.current_simulated_goal: tuple[int, int] | None = None
         self.last_predicted_pos: tuple[int, int] | None = None
@@ -3386,7 +3499,12 @@ class AutonomousEpistemicEngine:
         self.exhausted_candidate_goals: set[tuple[int, int]] = set()
         self.quiescent_click_targets: set[tuple[int, int]] = set()
         self.effective_click_targets: set[tuple[int, int]] = set()
+        self.last_effective_click_coord: tuple[int, int] | None = None
+        self.consecutive_effective_clicks: int = 0
         self.click_affordances: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self.last_effector_target_step: dict[tuple[int, int], int] = {}
+        self.active_goal_converging_coord: tuple[int, int] | None = None
+        self.consecutive_goal_converging_clicks: int = 0
 
         # Feature-level interventional causal falsification (Piagetian Stage D3)
         self.quiescent_features: set[int] = set()
@@ -3682,6 +3800,9 @@ class AutonomousEpistemicEngine:
             self._current_level = level
             self.failed_transitions = self.level_failed_transitions.setdefault(level, set())
             self.learned_barriers = self.level_learned_barriers.setdefault(level, set())
+            self.hazard_tracker.static_lethal_positions = self.level_lethal_positions.setdefault(
+                level, set()
+            )
 
     # ── Episodic State Management ─────────────────────────────────────────────
 
@@ -3701,6 +3822,9 @@ class AutonomousEpistemicEngine:
         self.last_action_data = None
         self.last_predicted_pos = None
         self.consecutive_quiescent_actions = 0
+        self.consecutive_stuck_steps = 0
+        self.last_effective_click_coord = None
+        self.consecutive_effective_clicks = 0
         self.mental_plan.clear()
         self.active_hypothesis = None
         self.active_probe_target = None
@@ -3717,6 +3841,7 @@ class AutonomousEpistemicEngine:
         if not retain_dynamics:
             self.level_failed_transitions.clear()
             self.level_learned_barriers.clear()
+            self.level_lethal_positions.clear()
             self._current_level = 0 if level is None else level
             self.failed_transitions = self.level_failed_transitions.setdefault(
                 self._current_level, set()
@@ -3724,6 +3849,7 @@ class AutonomousEpistemicEngine:
             self.learned_barriers = self.level_learned_barriers.setdefault(
                 self._current_level, set()
             )
+            self.hazard_tracker.clear_lethal_positions()
             self.hazard_tracker.reset_episode()
             self.physics_engine.reset_episode()
             self.exhausted_candidate_goals.clear()
@@ -3743,6 +3869,9 @@ class AutonomousEpistemicEngine:
                 self._current_level, set()
             )
             self.learned_barriers = self.level_learned_barriers.setdefault(
+                self._current_level, set()
+            )
+            self.hazard_tracker.static_lethal_positions = self.level_lethal_positions.setdefault(
                 self._current_level, set()
             )
             self.hazard_tracker.reset_episode()
@@ -3798,7 +3927,10 @@ class AutonomousEpistemicEngine:
             self.effective_click_targets.clear()
             self.click_affordances.clear()
             self.quiescent_features.clear()
-            self.effective_features.clear()
+            self.last_effector_target_step.clear()
+            self.active_goal_converging_coord = None
+            self.consecutive_goal_converging_clicks = 0
+            # self.effective_features is retained as semantic affordance prior across levels
             self.consecutive_quiescent_actions = 0
             self.inhibited_actions.clear()
 
@@ -3906,14 +4038,18 @@ class AutonomousEpistemicEngine:
     ) -> EpistemicObservationDiff:
         return PerceptionEngine.compute_frame_diff(prev_grid, curr_grid)
 
-    def detect_structural_goals(self, grid: np.ndarray) -> list[dict[str, Any]]:
+    def detect_structural_goals(
+        self, grid: np.ndarray, bg: int | None = None, **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        bg_val = bg if bg is not None else self.bg_feature
         return PerceptionEngine.detect_structural_goals(
             grid,
-            bg=self.bg_feature,
+            bg=bg_val,
             avatar_features=self.avatar_features,
             avatar_feature=self.avatar_feature,
             barrier_features=self.symbolic_theory.barrier_features,
             known_lethal_features=self.hazard_tracker.known_lethal_features,
+            **kwargs,
         )
 
     def assimilate_feedback(
@@ -4099,7 +4235,11 @@ class AutonomousEpistemicEngine:
                 mr, mc = m_item.grid_pos
                 if (mr, mc) not in self.quiescent_click_targets and 0 <= mr < H and 0 <= mc < W:
                     visit_count = self.entity_visit_counts.get(f"click_{mr}_{mc}", 0)
-                    score = 220.0 - float(visit_count) * 20.0
+                    last_step = getattr(self, "last_effector_target_step", {}).get((mr, mc), -999)
+                    delta_t = max(1, getattr(self, "step_counter", 0) - last_step)
+                    refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
+                    visit_damping = min(30.0, float(visit_count) * 4.0)
+                    score = 220.0 - refractory - visit_damping
                     click_candidates.append((mr, mc, score))
 
             # Other panel items (+120.0 or +160.0 if confirmed effective)
@@ -4108,30 +4248,49 @@ class AutonomousEpistemicEngine:
                 if (ir, ic) not in self.quiescent_click_targets and 0 <= ir < H and 0 <= ic < W:
                     visit_count = self.entity_visit_counts.get(f"click_{ir}_{ic}", 0)
                     bonus = 160.0 if has_effective_item else 120.0
-                    score = bonus - float(visit_count) * (5.0 if has_effective_item else 15.0)
+                    feat_bonus = 40.0 if item.feature_id in self.effective_features else 0.0
+                    last_step = getattr(self, "last_effector_target_step", {}).get((ir, ic), -999)
+                    delta_t = max(1, getattr(self, "step_counter", 0) - last_step)
+                    is_goal_converging = (ir, ic) == getattr(
+                        self, "active_goal_converging_coord", None
+                    ) and getattr(self, "consecutive_goal_converging_clicks", 0) < 12
+                    is_active_momentum = (ir, ic) == getattr(
+                        self, "last_effective_click_coord", None
+                    ) and getattr(self, "consecutive_effective_clicks", 0) < 6
+                    if is_goal_converging:
+                        momentum_bonus = 120.0
+                        ior_penalty = 0.0
+                    elif is_active_momentum:
+                        momentum_bonus = 60.0
+                        ior_penalty = 0.0
+                    else:
+                        momentum_bonus = 0.0
+                        refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
+                        visit_damping = min(30.0, float(visit_count) * 4.0)
+                        ior_penalty = refractory + visit_damping
+                    score = bonus + feat_bonus + momentum_bonus - ior_penalty
                     click_candidates.append((ir, ic, score))
 
-        for e in entities:
-            if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
-                continue
-            cr, cc = e.grid_pos
-            if (cr, cc) in self.quiescent_click_targets:
-                continue
-            visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-            saliency = 100.0 / math.log2(2 + max(1, e.area))
-            affordance_bonus = 60.0 if (cr, cc) in self.effective_click_targets else 0.0
-            feat_bias = 0.0
-            if e.feature_id in self.quiescent_features:
-                feat_bias -= 80.0
-            elif e.feature_id in self.effective_features:
-                feat_bias += 40.0
-            cand_score = (
-                saliency
-                + affordance_bonus
-                + feat_bias
-                - float(visit_count) * (5.0 if affordance_bonus > 0 else 20.0)
-            )
-            click_candidates.append((cr, cc, cand_score))
+        # Control Panel Primacy: If viable candidates exist in affordance panels,
+        # focus execution strictly within the control interface! Do NOT dilute with background/walls!
+        if not click_candidates:
+            for e in entities:
+                if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
+                    continue
+                cr, cc = e.grid_pos
+                if (cr, cc) in self.quiescent_click_targets:
+                    continue
+                visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+                saliency = 100.0 / math.log2(2 + max(1, e.area))
+                affordance_bonus = 60.0 if (cr, cc) in self.effective_click_targets else 0.0
+                feat_bias = 0.0
+                if e.feature_id in self.quiescent_features:
+                    feat_bias -= 80.0
+                elif e.feature_id in self.effective_features:
+                    feat_bias += 40.0
+                ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
+                cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
+                click_candidates.append((cr, cc, cand_score))
 
         if not click_candidates:
             fixations = self.saccadic_attention.extract_fixations(
@@ -4192,6 +4351,9 @@ class AutonomousEpistemicEngine:
                 self.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
             )
             target_r, target_c = int(best_r), int(best_c)
+            if not hasattr(self, "last_effector_target_step"):
+                self.last_effector_target_step = {}
+            self.last_effector_target_step[(target_r, target_c)] = getattr(self, "step_counter", 0)
         else:
             # Fallback when all known candidates are quiescent: find any unprobed coordinate
             unprobed = [
@@ -4320,11 +4482,20 @@ class AutonomousEpistemicEngine:
             self.inhibited_actions.pop(act, None)
 
         # Visual avatar localization
-        known_av_feats = self.avatar_features or (
-            {self.avatar_feature} if self.avatar_feature is not None else set()
-        )
+        known_av_feats = set(self.avatar_features) if self.avatar_features else set()
+        if self.avatar_feature is not None:
+            known_av_feats.add(self.avatar_feature)
+        elif self.prior_avatar_feature is not None:
+            known_av_feats.add(self.prior_avatar_feature)
         if known_av_feats:
             self._update_avatar_position_from_grid(curr_grid, known_av_feats)
+            if (
+                self.avatar_pos is not None
+                and self.avatar_feature is None
+                and self.prior_avatar_feature is not None
+            ):
+                self.avatar_feature = self.prior_avatar_feature
+                self.avatar_features.add(self.prior_avatar_feature)
 
         # Observe creature motion: oriented entities that translated since the
         # previous frame are autonomous patrollers, not stationary sentries.
@@ -4413,9 +4584,6 @@ class AutonomousEpistemicEngine:
             H, W = curr_grid.shape
             bg = self.estimate_background(curr_grid)
             all_future_steps = [next_step] + list(self.mental_plan)
-            cur_r, cur_c = self.avatar_pos if self.avatar_pos is not None else (-1, -1)
-            nr, nc = next_step.predicted_avatar_pos
-            dr, dc = nr - cur_r, nc - cur_c
 
             # (A) Static feature check along the planned path
             for future_step in all_future_steps:
@@ -4429,24 +4597,6 @@ class AutonomousEpistemicEngine:
                     if feat in self.hazard_tracker.known_lethal_features:
                         plan_safe = False
                         break
-                    if self.is_feature_unverified(feat, bg):
-                        # An unverified entity threatens the plan if it lies ahead
-                        # in the SAME corridor that the avatar is currently advancing along
-                        # (beyond the immediate destination step).
-                        in_corridor_ahead = (
-                            dr != 0
-                            and fc == cur_c
-                            and (fr - cur_r) * dr > 0
-                            and (fr, fc) != (nr, nc)
-                        ) or (
-                            dc != 0
-                            and fr == cur_r
-                            and (fc - cur_c) * dc > 0
-                            and (fr, fc) != (nr, nc)
-                        )
-                        if in_corridor_ahead:
-                            plan_safe = False
-                            break
 
             # (B) Dynamic patrol trajectory simulation
             #     Re-detect current patroller positions and forward-simulate
@@ -4526,12 +4676,14 @@ class AutonomousEpistemicEngine:
             if not plan_safe:
                 self.mental_plan.clear()
                 self.phase = EpistemicPhase.REPLANNING
-                # The immediate next step leads towards the detected danger zone.
-                # In order to replan an alternative safe route, block this dangerous corridor step!
-                danger_cells = {next_step.predicted_avatar_pos}
-                simulated_plan = self.simulate_in_mind(
-                    curr_grid, available_actions, blocked_cells=danger_cells
-                )
+                # Attempt forward simulation from current state with updated patroller positions
+                simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
+                if not simulated_plan:
+                    # If direct path fails, try blocking the immediate hazardous step to seek an alternative branch
+                    danger_cells = {next_step.predicted_avatar_pos}
+                    simulated_plan = self.simulate_in_mind(
+                        curr_grid, available_actions, blocked_cells=danger_cells
+                    )
                 if simulated_plan:
                     self.phase = EpistemicPhase.EXPLOITATION
                     self.mental_plan = deque(simulated_plan)
@@ -4565,53 +4717,46 @@ class AutonomousEpistemicEngine:
                 self.phase = EpistemicPhase.REPLANNING
                 chosen_action, chosen_data = self.plan_epistemic_probe(curr_grid, available_actions)
 
-        # 4. If motor grounded, attempt Object-Centric Planning or Forward Simulation
+        # 4. If motor grounded, attempt Forward Mental Simulation first (direct verified path to goal)
         elif self.is_motor_grounded():
-            # Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
-            macro_plan = (
-                self.object_planner.plan_macro_option(self, curr_grid, available_actions)
-                if hasattr(self, "object_planner")
-                else None
-            )
-            if macro_plan:
+            simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
+            if simulated_plan:
                 self.phase = EpistemicPhase.EXPLOITATION
-                self.mental_plan = deque(macro_plan)
+                self.mental_plan = deque(simulated_plan)
                 next_step = self.mental_plan.popleft()
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos
-                if (
-                    not self.mental_plan
-                    and hasattr(self, "object_planner")
-                    and self.object_planner.active_target_object_id
-                ):
-                    self.object_planner.ledger.record_interaction(
-                        self.object_planner.active_target_object_id,
-                        predicted_pos or self.avatar_pos or (0, 0),
-                    )
-                    self.object_planner.active_target_object_id = None
             else:
-                simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
-                if simulated_plan:
+                # Direct path to goal blocked or goals not yet reachable;
+                # consult Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
+                macro_plan = (
+                    self.object_planner.plan_macro_option(self, curr_grid, available_actions)
+                    if hasattr(self, "object_planner")
+                    else None
+                )
+                if macro_plan:
                     self.phase = EpistemicPhase.EXPLOITATION
-                    self.mental_plan = deque(simulated_plan)
+                    self.mental_plan = deque(macro_plan)
                     next_step = self.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
-                else:
-                    spatial_effector_actions = [
-                        a for a in available_actions if self.is_spatial_effector(a)
-                    ]
-                    if spatial_effector_actions and self.step_counter % 2 == 0:
-                        chosen_action = spatial_effector_actions[0]
-                        chosen_data = self.ground_effector_action(curr_grid, chosen_action)
-                        self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    else:
-                        self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                        chosen_action, chosen_data = self.plan_epistemic_probe(
-                            curr_grid, available_actions
+                    if (
+                        not self.mental_plan
+                        and hasattr(self, "object_planner")
+                        and self.object_planner.active_target_object_id
+                    ):
+                        self.object_planner.ledger.record_interaction(
+                            self.object_planner.active_target_object_id,
+                            predicted_pos or self.avatar_pos or (0, 0),
                         )
+                        self.object_planner.active_target_object_id = None
+                else:
+                    self.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    chosen_action, chosen_data = self.plan_epistemic_probe(
+                        curr_grid, available_actions
+                    )
 
         # 5. Fallback to Epistemic Curiosity Probing
         else:

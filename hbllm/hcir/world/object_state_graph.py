@@ -137,7 +137,14 @@ class ObjectStateGraphPlanner:
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
         )
         barrier_features = engine.symbolic_theory.barrier_features
-        static_barriers = set(engine.learned_barriers)
+        static_barriers: set[tuple[int, int]] = set()
+        for r, c in engine.learned_barriers:
+            if 0 <= r < H and 0 <= c < W:
+                val = int(curr_grid[r, c])
+                if (r, c) in engine.hazard_tracker.static_lethal_positions or (
+                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                ):
+                    static_barriers.add((r, c))
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
 
         # Supplement static_barriers with known barrier features
@@ -375,7 +382,14 @@ class ObjectStateGraphPlanner:
 
         # Build barrier and lethal sets
         barrier_features = engine.symbolic_theory.barrier_features
-        static_barriers = set(engine.learned_barriers)
+        static_barriers: set[tuple[int, int]] = set()
+        for r, c in engine.learned_barriers:
+            if 0 <= r < H and 0 <= c < W:
+                val = int(curr_grid[r, c])
+                if (r, c) in engine.hazard_tracker.static_lethal_positions or (
+                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                ):
+                    static_barriers.add((r, c))
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
@@ -496,6 +510,17 @@ class ObjectStateGraphPlanner:
                 engine, chosen_obj, chosen_path, available_actions, movable_actions
             )
 
+        # Identify features of barriers blocking access or adjacent to exit
+        blocking_barrier_feats: set[int] = set()
+        for eo in exit_objects:
+            for er, ec in eo.cells:
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    ar, ac = er + dr, ec + dc
+                    if 0 <= ar < H and 0 <= ac < W:
+                        aval = int(curr_grid[ar, ac])
+                        if aval in barrier_features or engine.symbolic_theory.is_barrier(aval):
+                            blocking_barrier_feats.add(aval)
+
         # ── DIRECTIVE 5: If not, play with it (interact) and see what is the outcome. ───
         scored_candidates: list[tuple[SalientObject, list[Any], float]] = []
         for obj, path in reachable_objects:
@@ -504,7 +529,14 @@ class ObjectStateGraphPlanner:
             recency_penalty = 15.0 * float(visit_count)
             distance_penalty = float(len(path)) * 0.5
             small_item_bonus = 20.0 if obj.category == ObjectCategory.KEY else 0.0
-            score = untouched_bonus + small_item_bonus - recency_penalty - distance_penalty
+            color_affinity_bonus = 80.0 if obj.feature_id in blocking_barrier_feats else 0.0
+            score = (
+                untouched_bonus
+                + small_item_bonus
+                + color_affinity_bonus
+                - recency_penalty
+                - distance_penalty
+            )
             scored_candidates.append((obj, path, score))
 
         scored_candidates.sort(key=lambda x: x[2], reverse=True)
