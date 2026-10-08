@@ -27,12 +27,22 @@ import numpy as np
 from hbllm.hcir.graph import ActionNode
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+from hbllm.hcir.world.bilateral_coordination import (
+    BilateralCoordinateIntegrator,
+    BilateralState,
+)
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
     CausalHypothesis,
     CausalPredicate,
 )
+from hbllm.hcir.world.cerebellar_phase_clock import (
+    CerebellarPhaseClock,
+)
 from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
+from hbllm.hcir.world.kinetic_stream import (
+    DorsalKineticStream,
+)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -877,6 +887,13 @@ class EpistemicFeedbackAssimilator:
                 background_feature=engine.bg_feature,
                 avatar_features=engine.avatar_features,
             )
+            # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
+            engine.cerebellar_clock.record_step(engine.step_counter, curr_grid, is_reset=is_lost)
+            if engine.cerebellar_clock.detected_macro_period is not None:
+                engine.hazard_tracker.environmental_period = max(
+                    engine.hazard_tracker.environmental_period,
+                    engine.cerebellar_clock.detected_macro_period,
+                )
 
         diff = engine.compute_frame_diff(engine.prev_grid, curr_grid)
         action = engine.last_action
@@ -932,7 +949,7 @@ class EpistemicFeedbackAssimilator:
                 prev_inh = engine.inhibited_actions.get(action, 0)
                 engine.inhibited_actions[action] = max(prev_inh + 2, 3)
 
-            if not is_win and not is_lost:
+            if is_effector_action and not is_win and not is_lost:
                 return
         else:
             engine.consecutive_quiescent_actions = 0
@@ -1068,6 +1085,35 @@ class EpistemicFeedbackAssimilator:
                 matched_ce = unmatched_curr.pop(best_ce_id)
                 moved_entities.append((pe, matched_ce, best_delta))
 
+        # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
+        if len(moved_entities) >= 2:
+            moved_summary = [
+                (pe.grid_pos, delta, ce.feature_id)
+                for pe, ce, delta in moved_entities
+                if ce.area <= 64
+            ]
+            bilat_state = engine.bilateral_integrator.detect_bilateral_pairing(
+                moved_summary, (H, W)
+            )
+            if bilat_state is not None:
+                engine.bilateral_state = bilat_state
+        elif engine.bilateral_state is not None:
+            f_list = list(engine.bilateral_state.features)
+            if f_list:
+                f1 = f_list[0]
+                f2 = f_list[1] if len(f_list) > 1 else f_list[0]
+                pts1 = np.argwhere(curr_grid == f1)
+                pts2 = np.argwhere(curr_grid == f2)
+                if len(pts1) > 0 and len(pts2) > 0:
+                    engine.bilateral_state.pos1 = (
+                        int(np.mean(pts1[:, 0])),
+                        int(np.mean(pts1[:, 1])),
+                    )
+                    engine.bilateral_state.pos2 = (
+                        int(np.mean(pts2[:, 0])),
+                        int(np.mean(pts2[:, 1])),
+                    )
+
         def _are_adjacent(e1: SpatialEntity, e2: SpatialEntity) -> bool:
             bb1 = e1.bounding_box
             bb2 = e2.bounding_box
@@ -1181,6 +1227,53 @@ class EpistemicFeedbackAssimilator:
                             best_score,
                             len(engine._avatar_controllability_evidence),
                         )
+
+        # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
+        cmd_delta = act_dyn.get_displacement() if act_dyn else None
+        kinetic_res = engine.dorsal_kinetic_stream.segregate_motion(
+            prev_grid=engine.prev_grid,
+            curr_grid=curr_grid,
+            commanded_delta=cmd_delta,
+            background_feature=bg,
+            known_avatar_features=engine.avatar_features,
+        )
+        if kinetic_res.external_agents:
+            for ext in kinetic_res.external_agents:
+                if ext.velocity != (0.0, 0.0):
+                    engine.mobile_threat_features.update(ext.features)
+
+        if (
+            not is_win
+            and not is_effector_action
+            and not engine.avatar_features
+            and engine.avatar_feature is None
+            and kinetic_res.self_avatar is not None
+            and kinetic_res.self_avatar.confidence >= 0.70
+        ):
+            engine.avatar_features.update(kinetic_res.self_avatar.features)
+            engine.avatar_feature = next(iter(engine.avatar_features))
+            engine.avatar_size = kinetic_res.self_avatar.area
+            engine.avatar_pos = (
+                int(round(kinetic_res.self_avatar.centroid[0])),
+                int(round(kinetic_res.self_avatar.centroid[1])),
+            )
+            if kinetic_res.raw_delta is not None and action is not None:
+                dr, dc = kinetic_res.raw_delta
+                EpistemicFeedbackAssimilator._record_safe_traversal(
+                    engine, kinetic_res.self_avatar.cells, (dr, dc), H, W
+                )
+                if action not in engine.action_dynamics:
+                    engine.action_dynamics[action] = ActionDynamicsModel(
+                        action_id=action, delta_r=dr, delta_c=dc, confidence=0.75, probes_tested=1
+                    )
+                else:
+                    engine.action_dynamics[action].update_from_trial((dr, dc), success=True)
+            logger.info(
+                "AutonomousEpistemicEngine: Avatar segregated via MT/V5 kinetic stream (feats=%s, size=%d)",
+                engine.avatar_features,
+                engine.avatar_size,
+            )
+
         elif not is_effector_action or bool(
             engine.avatar_features or engine.avatar_feature is not None
         ):
@@ -2095,6 +2188,46 @@ class MentalSimulationPlanner:
             )
             goals = goals[:8]
 
+        # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
+        if engine.bilateral_state is not None and len(engine.action_dynamics) >= 2:
+            passable_mask = np.ones((H, W), dtype=bool)
+            for r in range(H):
+                for c in range(W):
+                    feat = int(curr_grid[r, c])
+                    if (
+                        engine.symbolic_theory.is_barrier(feat)
+                        or feat in engine.hazard_tracker.known_lethal_features
+                        or (r, c) in engine.learned_barriers
+                    ):
+                        passable_mask[r, c] = False
+
+            action_deltas = {
+                act: dyn.get_displacement()
+                for act, dyn in engine.action_dynamics.items()
+                if dyn.is_displacement_action()
+            }
+            bilateral_plan = engine.bilateral_integrator.plan_convergence_sequence(
+                pos1=engine.bilateral_state.pos1,
+                pos2=engine.bilateral_state.pos2,
+                axis=engine.bilateral_state.symmetry_axis,
+                passable_mask=passable_mask,
+                action_deltas=action_deltas,
+                target_positions=goals if goals else None,
+            )
+            if bilateral_plan:
+                logger.info(
+                    "MentalSimulationPlanner: Formulated Bilateral Callosal Convergence plan (%d steps)",
+                    len(bilateral_plan),
+                )
+                return [
+                    MentalSimulationStep(
+                        action=act,
+                        predicted_avatar_pos=engine.avatar_pos or engine.bilateral_state.pos1,
+                        expected_mutation="bilateral_convergence",
+                    )
+                    for act in bilateral_plan
+                ]
+
         if not goals:
             return None
 
@@ -2440,28 +2573,22 @@ class MentalSimulationPlanner:
             and engine.hazard_tracker.environmental_period >= 2
         )
         has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
-        max_expansions = 1500 if not has_temporal else 5000
+        if getattr(engine, "consecutive_simulation_failures", 0) > 0:
+            max_expansions = 1200
+        else:
+            max_expansions = 1500 if not has_temporal else 3000
 
-        # When patrollers or periodic hazards are present, add a NO_OP "wait" action.
-        # A human watching an oscillating hazard or patroller knows to WAIT for it to clear.
-        wait_action: Any | None = None
+        # Cerebellar Forward Hesitation: Identify available zero-displacement actions (e.g. interact 5 or calibrated no-ops).
+        non_disp_wait_action: Any | None = None
         if has_temporal:
             for a in available_actions:
                 if a in engine.action_dynamics:
                     if not engine.action_dynamics[a].is_displacement_action():
-                        wait_action = a
+                        non_disp_wait_action = a
                         break
                 elif a == 5:
-                    wait_action = 5
+                    non_disp_wait_action = 5
                     break
-            if wait_action is None and movable_actions:
-                for act, dr, dc in movable_actions:
-                    adj_r, adj_c = start_pos[0] + dr, start_pos[1] + dc
-                    if (adj_r, adj_c) in static_barriers or not (0 <= adj_r < H and 0 <= adj_c < W):
-                        wait_action = act
-                        break
-                if wait_action is None:
-                    wait_action = movable_actions[0][0]
 
         while open_set and max_expansions > 0:
             max_expansions -= 1
@@ -2511,10 +2638,10 @@ class MentalSimulationPlanner:
                 engine.current_simulated_goal = list(goals)[0] if goals else None
                 return path
 
-            # ── Candidate actions: regular moves + optional wait ────────────
+            # ── Candidate actions: regular moves + optional Cerebellar wait ────────────
             candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
-            # Add the wait option when patrollers or periodic hazards are present,
-            # and cap consecutive waits so the planner doesn't idle forever.
+            # Add Cerebellar hesitation when patrollers or periodic hazards are present.
+            # Bounded by environmental oscillation period T to allow phase-locking.
             consecutive_waits = 0
             if path:
                 for s in reversed(path):
@@ -2522,25 +2649,25 @@ class MentalSimulationPlanner:
                         consecutive_waits += 1
                     else:
                         break
-            if wait_action is not None and (cur_patrols or has_periodic) and consecutive_waits < 4:
+            max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
+            if (cur_patrols or has_periodic) and consecutive_waits < max_consecutive_waits:
                 candidate_actions.append(("__WAIT__", 0, 0))  # sentinel ID
 
             for act, dr, dc in candidate_actions:
                 is_wait = act == "__WAIT__"
                 if is_wait:
-                    if 5 in available_actions and (
-                        5 not in engine.action_dynamics
-                        or not engine.action_dynamics[5].is_displacement_action()
-                    ):
-                        real_act = 5
-                    else:
-                        bump_act = None
+                    real_act = non_disp_wait_action
+                    if real_act is None:
+                        # Harmless boundary or obstacle bump that maintains cur_pos
                         for act_cand, mdr, mdc in movable_actions:
                             br, bc = cur_pos[0] + mdr, cur_pos[1] + mdc
                             if (br, bc) in static_barriers or not (0 <= br < H and 0 <= bc < W):
-                                bump_act = act_cand
+                                real_act = act_cand
                                 break
-                        real_act = bump_act if bump_act is not None else wait_action
+                    # If neither a non-displacement action nor a boundary bump is physically realizable at cur_pos,
+                    # the avatar cannot physically pause here; prune branch.
+                    if real_act is None:
+                        continue
                 else:
                     real_act = act
                 if not is_wait and (cur_pos, act) in engine.failed_transitions:
@@ -3003,14 +3130,32 @@ class EpistemicCuriosityExplorer:
 
         # A. Non-displacement or Spatial Effector Environments
         if spatial_effector_actions:
+            # Parietal Affordance Competition (Cisek's Hypothesis):
+            # When manual reach effectors (e.g. CLICK_CELL) are available, evaluate whether manual reach
+            # should gate over locomotion.
+            is_stuck_or_looping = engine.consecutive_stuck_steps >= 2 or (
+                engine.avatar_pos is not None
+                and engine.recent_positions.count(engine.avatar_pos) >= 2
+            )
+            has_effective_target = any(
+                p not in engine.quiescent_click_targets
+                and engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0) < 3
+                for p in engine.effective_click_targets
+            )
+            interleaved_reach = engine.level_epistemic_probes % 4 == 0
+
             should_probe_effector = (
                 not displacement_actions
-                or (engine.avatar_pos is None and engine.level_epistemic_probes > 12)
-                or (engine.avatar_pos is not None and engine.consecutive_stuck_steps >= 4)
+                or (engine.avatar_pos is None and engine.level_epistemic_probes > 4)
+                or is_stuck_or_looping
+                or has_effective_target
+                or interleaved_reach
             )
             if should_probe_effector:
                 chosen_eff = spatial_effector_actions[0]
-                return chosen_eff, engine.ground_effector_action(curr_grid, chosen_eff)
+                action_data = engine.ground_effector_action(curr_grid, chosen_eff)
+                if action_data is not None:
+                    return chosen_eff, action_data
 
         # 3. Spatial Movement Curiosity with Target Commitment & Loop Breaking
         if engine.avatar_pos is not None:
@@ -3064,6 +3209,11 @@ class EpistemicCuriosityExplorer:
                     act = untested_here[0]
                     engine.tested_action_positions.add((act, engine.avatar_pos))
                     return act, None
+                if discrete_transform_actions and (is_stuck or is_oscillating):
+                    disc_act = discrete_transform_actions[
+                        engine.level_epistemic_probes % len(discrete_transform_actions)
+                    ]
+                    return disc_act, None
                 best_act = None
                 min_visits = float("inf")
                 disp_actions = [
@@ -3453,6 +3603,10 @@ class AutonomousEpistemicEngine:
         self.consecutive_plan_failures: int = 0
         self.consecutive_stuck_steps: int = 0
         self.exploration_cooldown: int = 0
+        self.consecutive_simulation_failures: int = 0
+        self.simulation_cooldown: int = 0
+        self._last_sim_goal_count: int = 0
+        self._last_sim_barrier_count: int = 0
         self.current_simulated_goal: tuple[int, int] | None = None
         self.last_predicted_pos: tuple[int, int] | None = None
 
@@ -3463,6 +3617,17 @@ class AutonomousEpistemicEngine:
         self.hazard_tracker: SpatiotemporalHazardTracker = SpatiotemporalHazardTracker()
         self.saccadic_attention: SaccadicAttentionSystem = SaccadicAttentionSystem()
         self.physics_engine: IntuitivePhysicsEngine = IntuitivePhysicsEngine()
+
+        # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
+        self.dorsal_kinetic_stream: DorsalKineticStream = DorsalKineticStream()
+
+        # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
+        self.bilateral_integrator: BilateralCoordinateIntegrator = BilateralCoordinateIntegrator()
+        self.bilateral_state: BilateralState | None = None
+
+        # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
+        self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
+        self.pending_phase_wait_steps: int = 0
 
         # Room topology & doorway subgoal reasoning (spatial containment)
         self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
@@ -3821,7 +3986,10 @@ class AutonomousEpistemicEngine:
         self.last_action = None
         self.last_action_data = None
         self.last_predicted_pos = None
+        self.bilateral_state = None
+        self.pending_phase_wait_steps = 0
         self.consecutive_quiescent_actions = 0
+
         self.consecutive_stuck_steps = 0
         self.last_effective_click_coord = None
         self.consecutive_effective_clicks = 0
@@ -3835,6 +4003,10 @@ class AutonomousEpistemicEngine:
         self.working_memory.reset_episode(retain_long_term=retain_dynamics)
         self.consecutive_plan_failures = 0
         self.exploration_cooldown = 0
+        self.consecutive_simulation_failures = 0
+        self.simulation_cooldown = 0
+        self._last_sim_goal_count = 0
+        self._last_sim_barrier_count = 0
         self.current_simulated_goal = None
         self._feedback_assimilated = False
 
@@ -4474,7 +4646,20 @@ class AutonomousEpistemicEngine:
             self.assimilate_feedback(curr_grid, available_actions, is_win=is_win, is_lost=is_lost)
         self._feedback_assimilated = False
 
+        # Phasic Salience Reset: Environmental discovery or high surprise awakens deliberate forward search
+        if (
+            len(self.learned_goal_positions) > self._last_sim_goal_count
+            or len(self.learned_barriers) != self._last_sim_barrier_count
+            or self.last_surprise >= 0.4
+        ):
+            self.simulation_cooldown = 0
+            self.consecutive_simulation_failures = 0
+            self._last_sim_goal_count = len(self.learned_goal_positions)
+            self._last_sim_barrier_count = len(self.learned_barriers)
+
         # Metacognitive Refractory Inhibition: decay refractory timers
+        if self.simulation_cooldown > 0:
+            self.simulation_cooldown -= 1
         to_uninhibited = [act for act, timer in self.inhibited_actions.items() if timer <= 1]
         for act in self.inhibited_actions:
             self.inhibited_actions[act] -= 1
@@ -4501,18 +4686,39 @@ class AutonomousEpistemicEngine:
         # previous frame are autonomous patrollers, not stationary sentries.
         self._observe_oriented_threat_motion(curr_grid, available_actions, known_av_feats)
 
+        # Faculty E: Basal Ganglia Motor Gating & Phase Entrainment
+        if self.pending_phase_wait_steps > 0:
+            self.pending_phase_wait_steps -= 1
+            non_disp = [
+                a
+                for a in available_actions
+                if not self.is_displacement_action(a) and not self.is_spatial_effector(a)
+            ]
+            if non_disp:
+                return non_disp[0], None
+
         chosen_action: Any
         chosen_data: dict[str, Any] | None = None
         predicted_pos: tuple[int, int] | None = None
 
         # Prefrontal Affordance Panel Sequence Chunking:
         # If an interactive control panel has unvisited pop-out/minority items, commit to completing the pattern.
-        # CRITICAL GUARD: Only trigger panel clicking if there are NO active displacement actions (i.e. pure click games),
-        # so physical avatar navigation is never hijacked by decorative background panels.
+        # Parietal Affordance Gating: Trigger if:
+        # 1. Pure click environment (no displacement actions).
+        # 2. Hybrid environment where avatar is not yet grounded or is trapped in a stuck/oscillation loop.
         active_panel_target: tuple[int, int] | None = None
         has_displacement_actions = any(self.is_displacement_action(a) for a in available_actions)
         spatial_effector_actions = [a for a in available_actions if self.is_spatial_effector(a)]
-        if spatial_effector_actions and not has_displacement_actions and self.step_counter > 1:
+        is_stuck_or_looping = (
+            self.consecutive_stuck_steps >= 2
+            or (self.avatar_pos is not None and self.recent_positions.count(self.avatar_pos) >= 2)
+            or (self.avatar_pos is None and self.step_counter > 4)
+        )
+        if (
+            spatial_effector_actions
+            and (not has_displacement_actions or is_stuck_or_looping)
+            and self.step_counter > 1
+        ):
             bg = self.estimate_background(curr_grid)
             entities = self.extract_entities(curr_grid, bg)
             panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
@@ -4685,6 +4891,8 @@ class AutonomousEpistemicEngine:
                         curr_grid, available_actions, blocked_cells=danger_cells
                     )
                 if simulated_plan:
+                    self.consecutive_simulation_failures = 0
+                    self.simulation_cooldown = 0
                     self.phase = EpistemicPhase.EXPLOITATION
                     self.mental_plan = deque(simulated_plan)
                     next_step = self.mental_plan.popleft()
@@ -4692,6 +4900,10 @@ class AutonomousEpistemicEngine:
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
                 else:
+                    self.consecutive_simulation_failures += 1
+                    self.simulation_cooldown = min(
+                        12, 2 ** min(self.consecutive_simulation_failures, 4)
+                    )
                     macro_plan = (
                         self.object_planner.plan_macro_option(self, curr_grid, available_actions)
                         if hasattr(self, "object_planner")
@@ -4717,18 +4929,36 @@ class AutonomousEpistemicEngine:
                 self.phase = EpistemicPhase.REPLANNING
                 chosen_action, chosen_data = self.plan_epistemic_probe(curr_grid, available_actions)
 
-        # 4. If motor grounded, attempt Forward Mental Simulation first (direct verified path to goal)
+        # 4. If motor grounded, attempt Forward Mental Simulation or Habitual Exploration
         elif self.is_motor_grounded():
-            simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
-            if simulated_plan:
-                self.phase = EpistemicPhase.EXPLOITATION
-                self.mental_plan = deque(simulated_plan)
-                next_step = self.mental_plan.popleft()
-                chosen_action = next_step.action
-                chosen_data = next_step.action_data
-                predicted_pos = next_step.predicted_avatar_pos
-            else:
-                # Direct path to goal blocked or goals not yet reachable;
+            # Deliberate-to-Habitual Search Backoff (Daw, Niv, & Dayan; Dolan & Dayan):
+            # When deliberate forward simulation previously failed to find a valid goal path,
+            # back off for K steps. Executive control shifts to habitual exploration (object-centric
+            # macro planning and curiosity-driven epistemic probing) instead of burning search budgets.
+            can_simulate = self.simulation_cooldown == 0
+            simulated_plan = None
+            if can_simulate:
+                simulated_plan = self.simulate_in_mind(curr_grid, available_actions)
+                if simulated_plan:
+                    self.consecutive_simulation_failures = 0
+                    self.simulation_cooldown = 0
+                    self.phase = EpistemicPhase.EXPLOITATION
+                    self.mental_plan = deque(simulated_plan)
+                    next_step = self.mental_plan.popleft()
+                    chosen_action = next_step.action
+                    chosen_data = next_step.action_data
+                    predicted_pos = next_step.predicted_avatar_pos
+                else:
+                    self.consecutive_simulation_failures += 1
+                    # Bounded exponential backoff: 2, 4, 8, max 12 steps of habitual exploration
+                    self.simulation_cooldown = min(
+                        12, 2 ** min(self.consecutive_simulation_failures, 4)
+                    )
+                    self._last_sim_goal_count = len(self.learned_goal_positions)
+                    self._last_sim_barrier_count = len(self.learned_barriers)
+
+            if simulated_plan is None:
+                # Direct path to goal blocked or simulation backed off;
                 # consult Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
                 macro_plan = (
                     self.object_planner.plan_macro_option(self, curr_grid, available_actions)
