@@ -148,3 +148,32 @@ class VisualSymmetryAnalyzer:
         if best_score >= threshold:
             return True, best_axis
         return False, None
+
+    @staticmethod
+    def extract_discrepancy_targets(
+        grid: np.ndarray,
+        background_color: int = 0,
+        threshold: float = 0.55,
+    ) -> list[tuple[int, int, int, float]]:
+        """Extract spatial coordinates and expected features where the grid violates dominant symmetry.
+
+        Returns:
+            List of (r, c, expected_feature, confidence) tuples for coordinates that should be completed.
+        """
+        sym_type, sym_score = VisualSymmetryAnalyzer.find_dominant_symmetry(
+            grid, background_color=background_color
+        )
+        if sym_score < threshold or sym_score >= 0.999:
+            return []
+
+        completed = VisualSymmetryAnalyzer.predict_symmetric_completion(
+            grid, symmetry_type=sym_type, background_color=background_color
+        )
+        diff_mask = (grid != completed) & (completed != background_color)
+        pts = np.argwhere(diff_mask)
+        targets: list[tuple[int, int, int, float]] = []
+        for p in pts:
+            r, c = int(p[0]), int(p[1])
+            expected_feat = int(completed[r, c])
+            targets.append((r, c, expected_feat, sym_score))
+        return targets

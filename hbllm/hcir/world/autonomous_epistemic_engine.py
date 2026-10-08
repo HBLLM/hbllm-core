@@ -39,6 +39,9 @@ from hbllm.hcir.world.causal_discovery import (
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
 )
+from hbllm.hcir.world.counterfactual_simulation import (
+    CounterfactualDeadlockDetector,
+)
 from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
@@ -50,8 +53,10 @@ from hbllm.hcir.world.motor_calibration import (
 from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
+from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
+from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
 logger = logging.getLogger(__name__)
@@ -879,6 +884,7 @@ class EpistemicFeedbackAssimilator:
         prev_avatar_pos = engine.avatar_pos
 
         curr_grid = engine.normalize_sensory_input(curr_grid)
+        H, W = curr_grid.shape
 
         if not is_win:
             engine.hazard_tracker.record_frame(
@@ -945,6 +951,13 @@ class EpistemicFeedbackAssimilator:
             if target_coord is not None:
                 engine.quiescent_click_targets.add(target_coord)
                 engine.effective_click_targets.discard(target_coord)
+                tr, tc = target_coord
+                if 0 <= tr < H and 0 <= tc < W:
+                    engine.working_memory.visuospatial.record_probe(
+                        pos=target_coord,
+                        feature_id=int(curr_grid[tr, tc]),
+                        step=engine.step_counter,
+                    )
             if action is not None:
                 prev_inh = engine.inhibited_actions.get(action, 0)
                 engine.inhibited_actions[action] = max(prev_inh + 2, 3)
@@ -954,6 +967,13 @@ class EpistemicFeedbackAssimilator:
         else:
             engine.consecutive_quiescent_actions = 0
             if target_coord is not None:
+                tr, tc = target_coord
+                if 0 <= tr < H and 0 <= tc < W:
+                    engine.working_memory.visuospatial.record_probe(
+                        pos=target_coord,
+                        feature_id=int(curr_grid[tr, tc]),
+                        step=engine.step_counter,
+                    )
                 if getattr(engine, "last_effective_click_coord", None) == target_coord:
                     engine.consecutive_effective_clicks = (
                         getattr(engine, "consecutive_effective_clicks", 0) + 1
@@ -971,6 +991,9 @@ class EpistemicFeedbackAssimilator:
                 if diff.changed_mask is not None:
                     mut_cells = [(int(r), int(c)) for r, c in zip(*np.where(diff.changed_mask))]
                     engine.click_affordances[target_coord] = mut_cells
+                    engine.working_memory.visuospatial.record_diff_stencil(
+                        target_coord, set(mut_cells)
+                    )
 
                 # Dorsal Visual Stream (V4/MT): Object motion tracking & Teleological Distance Gradient
                 if diff.changed_mask is not None and engine.prev_grid is not None:
@@ -1241,6 +1264,19 @@ class EpistemicFeedbackAssimilator:
             for ext in kinetic_res.external_agents:
                 if ext.velocity != (0.0, 0.0):
                     engine.mobile_threat_features.update(ext.features)
+
+        # Premotor Collision Cones: Update forward space-time trajectories
+        static_walls = set(engine.learned_barriers)
+        for r_w in range(H):
+            for c_w in range(W):
+                if int(curr_grid[r_w, c_w]) in engine.symbolic_theory.barrier_features:
+                    static_walls.add((r_w, c_w))
+        engine.collision_cones.update_trajectories(
+            kinetic_entities=kinetic_res.external_agents,
+            static_barriers=static_walls,
+            grid_shape=(H, W),
+            horizon=12,
+        )
 
         if (
             not is_win
@@ -1938,24 +1974,10 @@ class MentalSimulationPlanner:
         H: int,
         W: int,
     ) -> bool:
-        """Check whether a cargo block at pos is trapped in an irreversible corner deadlock.
-
-        In push-delivery / Sokoban dynamics, when a block is placed into a corner
-        formed by two orthogonal immovable barriers and is not already on a goal target,
-        it can never be extracted or redirected. Pruning this state prevents thousands
-        of fruitless search expansions.
-        """
-        if pos in goals:
-            return False
-        r, c = pos
-        blocked_up = (r - 1 < 0) or ((r - 1, c) in static_barriers)
-        blocked_down = (r + 1 >= H) or ((r + 1, c) in static_barriers)
-        blocked_left = (c - 1 < 0) or ((r, c - 1) in static_barriers)
-        blocked_right = (c + 1 >= W) or ((r, c + 1) in static_barriers)
-
-        if (blocked_up or blocked_down) and (blocked_left or blocked_right):
-            return True
-        return False
+        """Check whether a cargo block at pos is trapped in an irreversible corner deadlock."""
+        return CounterfactualDeadlockDetector.is_corner_deadlock(
+            pos, goals, static_barriers, (H, W)
+        )
 
     @staticmethod
     def is_wall_deadlock(
@@ -1965,18 +1987,7 @@ class MentalSimulationPlanner:
         W: int,
     ) -> bool:
         """Check whether a cargo block is trapped along a boundary wall with no goals on it."""
-        if pos in goals:
-            return False
-        r, c = pos
-        if r == 0 and not any(g[0] == 0 for g in goals):
-            return True
-        if r == H - 1 and not any(g[0] == H - 1 for g in goals):
-            return True
-        if c == 0 and not any(g[1] == 0 for g in goals):
-            return True
-        if c == W - 1 and not any(g[1] == W - 1 for g in goals):
-            return True
-        return False
+        return CounterfactualDeadlockDetector.is_wall_deadlock(pos, goals, set(), (H, W))
 
     @staticmethod
     def simulate_in_mind(
@@ -2687,9 +2698,14 @@ class MentalSimulationPlanner:
                 for k in range(1, dist + 1):
                     kr = cur_pos[0] + step_r * k
                     kc = cur_pos[1] + step_c * k
-                    if (kr, kc) in static_barriers and (kr, kc) not in cur_open:
-                        ray_blocked = True
-                        break
+                    is_barrier_cell = (kr, kc) in static_barriers and (kr, kc) not in cur_open
+                    if is_barrier_cell:
+                        cell_feat = int(curr_grid[kr, kc]) if 0 <= kr < H and 0 <= kc < W else -1
+                        if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
+                            pass  # Permeable with held tool
+                        else:
+                            ray_blocked = True
+                            break
                 if ray_blocked:
                     continue
 
@@ -2697,6 +2713,9 @@ class MentalSimulationPlanner:
                 if engine.hazard_tracker.is_hazard_at(
                     nr, nc, sim_step, bg, avatar_features=av_feats
                 ):
+                    continue
+                # Premotor Spatiotemporal Collision Cones: Avoid kinetic moving threats
+                if engine.collision_cones.is_collision_hazard(nr, nc, sim_step):
                     continue
                 if (
                     sim_step <= 1
@@ -2855,22 +2874,19 @@ class MentalSimulationPlanner:
                             pushed_r, pushed_c = land_b
 
                     # Irreversibility & Deadlock Detection:
-                    # Prune branches where cargo is shoved into a non-goal corner or dead wall
+                    # Prune branches where cargo is shoved into a non-goal corner, dead wall, 2x2 square, or line freeze
                     if is_block_delivery and (pushed_r, pushed_c) not in goals:
-                        if MentalSimulationPlanner.is_corner_deadlock(
+                        candidate_block_set = (set(cur_blocks) - {(nr, nc)}) | {
+                            (pushed_r, pushed_c)
+                        }
+                        dl_eval = CounterfactualDeadlockDetector.evaluate_deadlock(
                             (pushed_r, pushed_c),
                             set(goals),
                             static_barriers,
-                            H,
-                            W,
-                        ):
-                            continue
-                        if MentalSimulationPlanner.is_wall_deadlock(
-                            (pushed_r, pushed_c),
-                            set(goals),
-                            H,
-                            W,
-                        ):
+                            candidate_block_set,
+                            (H, W),
+                        )
+                        if dl_eval.is_deadlock:
                             continue
 
                     block_set = set(cur_blocks)
@@ -3363,11 +3379,32 @@ class EpistemicCuriosityExplorer:
                 if (nr, nc) in engine.learned_barriers or engine.symbolic_theory.is_barrier(
                     int(curr_grid[nr, nc])
                 ):
-                    continue
+                    cell_barrier_feat = int(curr_grid[nr, nc])
+                    if not engine.working_memory.body_schema.is_barrier_permeable(
+                        cell_barrier_feat
+                    ):
+                        continue
 
                 cell_feat = int(curr_grid[nr, nc])
                 if cell_feat in engine.hazard_tracker.known_lethal_features:
                     continue
+
+                # Premotor Collision Cones: Avoid stepping into oncoming kinetic hazards
+                if engine.collision_cones.is_collision_hazard(nr, nc, 1):
+                    continue
+
+                # OFC Deadlock Pruning: If stepping onto a cargo block pushes it into an irreversible deadlock, prune!
+                if cell_feat in engine.learned_cargo_features:
+                    pushed_r, pushed_c = nr + dr_cal, nc + dc_cal
+                    dl_res = CounterfactualDeadlockDetector.evaluate_deadlock(
+                        (pushed_r, pushed_c),
+                        set(engine.learned_goal_positions),
+                        engine.learned_barriers,
+                        {(pushed_r, pushed_c)},
+                        (H, W),
+                    )
+                    if dl_res.is_deadlock:
+                        continue
 
                 # Epistemic information gain
                 visit_count = engine.position_visit_counts.get((nr, nc), 0)
@@ -3628,6 +3665,12 @@ class AutonomousEpistemicEngine:
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
         self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
         self.pending_phase_wait_steps: int = 0
+
+        # Faculty: Premotor Spatiotemporal Collision Cones & Trajectory Extrapolation
+        self.collision_cones: SpatiotemporalCollisionCones = SpatiotemporalCollisionCones()
+
+        # Faculty: Orbitofrontal Cortex (OFC) Counterfactual Deadlock Detector
+        self.deadlock_detector: CounterfactualDeadlockDetector = CounterfactualDeadlockDetector()
 
         # Room topology & doorway subgoal reasoning (spatial containment)
         self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
@@ -4001,6 +4044,7 @@ class AutonomousEpistemicEngine:
         self.recent_positions.clear()
         self.level_epistemic_probes = 0
         self.working_memory.reset_episode(retain_long_term=retain_dynamics)
+        self.collision_cones.reset_episode()
         self.consecutive_plan_failures = 0
         self.exploration_cooldown = 0
         self.consecutive_simulation_failures = 0
@@ -4362,6 +4406,32 @@ class AutonomousEpistemicEngine:
         )
 
         click_candidates: list[tuple[int, int, float]] = []
+
+        # dlPFC Working Memory Pattern Completion: Match newly revealed card/tile with remembered partner
+        last_probed = self.working_memory.visuospatial.last_probed_coord
+        last_feat = self.working_memory.visuospatial.last_probed_feature
+        if last_probed is not None and last_feat is not None and last_feat != bg and last_feat != 0:
+            pair_target = self.working_memory.visuospatial.find_matching_pair(
+                last_probed, last_feat
+            )
+            if (
+                pair_target is not None
+                and pair_target not in self.quiescent_click_targets
+                and 0 <= pair_target[0] < H
+                and 0 <= pair_target[1] < W
+            ):
+                click_candidates.append((pair_target[0], pair_target[1], 450.0))
+
+        # LOC Ventral Stream Geometric Symmetry Discrepancies
+        sym_discrepancies = VisualSymmetryAnalyzer.extract_discrepancy_targets(
+            curr_grid, background_color=bg, threshold=0.55
+        )
+        for dr, dc, expected_feat, sym_conf in sym_discrepancies:
+            if (dr, dc) not in self.quiescent_click_targets and 0 <= dr < H and 0 <= dc < W:
+                v_count = self.entity_visit_counts.get(f"click_{dr}_{dc}", 0)
+                if v_count < 3:
+                    cand_score = 320.0 + (sym_conf * 40.0) - float(v_count) * 15.0
+                    click_candidates.append((dr, dc, cand_score))
 
         # dlPFC Constraint Propagation: Target guaranteed safe cells
         deduced_safe = self.working_memory.get_unrevealed_safe_cells()

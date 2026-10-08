@@ -66,7 +66,9 @@ class SubgoalSchema:
         return self.current_stage_idx >= len(self.stages)
 
 
+from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
+from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
 
 
 class PrefrontalWorkingMemory:
@@ -83,6 +85,8 @@ class PrefrontalWorkingMemory:
         self.focal_attention_point: tuple[int, int] | None = None
         self.constraint_solver: SymbolicConstraintSolver = SymbolicConstraintSolver()
         self.executive_directives: list[str] = []
+        self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
+        self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
 
     def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
         """Store executive directives in working memory to guide cognitive policies."""
@@ -105,6 +109,8 @@ class PrefrontalWorkingMemory:
         self.active_macro_goal = None
         self.focal_attention_point = None
         self.constraint_solver.reset_episode()
+        self.visuospatial.reset_episode(retain_long_term=retain_long_term)
+        self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
 
@@ -152,6 +158,7 @@ class PrefrontalWorkingMemory:
                     properties=properties or {},
                 )
             )
+            self.body_schema.acquire_tool(feature_id=feature_id, step=step, role=role)
             logger.info(
                 "WorkingMemory: Acquired item [feature=%d, role=%s] into latent store at step %d.",
                 feature_id,
@@ -161,6 +168,7 @@ class PrefrontalWorkingMemory:
 
     def expend_item(self, feature_id: int) -> bool:
         """Remove a consumable item from working memory when applied to a barrier."""
+        self.body_schema.expend_tool(feature_id)
         for i, item in enumerate(self.held_items):
             if item.feature_id == feature_id:
                 self.held_items.pop(i)
@@ -175,6 +183,7 @@ class PrefrontalWorkingMemory:
     def register_tool_unlock(self, tool_feature: int, barrier_feature: int) -> None:
         """Learn causal resonance: tool_feature unlocks barriers of barrier_feature."""
         self.tool_barrier_affinities.setdefault(tool_feature, set()).add(barrier_feature)
+        self.body_schema.register_resonance(tool_feature, barrier_feature)
         logger.info(
             "WorkingMemory: Learned tool-barrier resonance: Tool %d unlocks Barrier %d.",
             tool_feature,
