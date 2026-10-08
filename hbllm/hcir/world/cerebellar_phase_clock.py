@@ -17,6 +17,7 @@ import hashlib
 import logging
 from collections import deque
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -176,3 +177,48 @@ class CerebellarPhaseClock:
                 )
 
         return PhaseGateDecision(should_wait=False)
+
+    def evaluate_motion_hazard_gate(
+        self,
+        current_step: int,
+        avatar_pos: tuple[int, int] | None,
+        target_pos: tuple[int, int],
+        hazard_tracker: Any,
+    ) -> PhaseGateDecision:
+        """Evaluate if basal ganglia should hesitate before entering target_pos due to cyclic hazard phase.
+
+        If target_pos is periodic and entering next step is hazardous, but waiting k steps
+        allows safe passage and avatar_pos is safe during the wait, recommends motor hesitation.
+        """
+        if not hasattr(hazard_tracker, "periodic_cells") or not avatar_pos:
+            return PhaseGateDecision(should_wait=False)
+
+        cell_phase = hazard_tracker.periodic_cells.get(target_pos)
+        if cell_phase is None:
+            return PhaseGateDecision(should_wait=False)
+
+        period = cell_phase.period
+        cycle_vals = cell_phase.cycle_values
+        haz_vals = cell_phase.hazardous_values
+
+        safe_vals = {v for v in cycle_vals if v not in haz_vals}
+        if not safe_vals:
+            return PhaseGateDecision(should_wait=False)
+
+        decision = self.evaluate_phase_gate(
+            current_step=current_step,
+            travel_steps_to_hazard=1,
+            hazard_period=period,
+            hazard_cycle_values=cycle_vals,
+            safe_values=safe_vals,
+        )
+
+        if decision.should_wait:
+            # Verify avatar_pos is safe to wait on during the recommended delay
+            for w in range(1, decision.wait_steps_recommended + 1):
+                if hazard_tracker.is_hazard_at(
+                    avatar_pos[0], avatar_pos[1], future_relative_step=w
+                ):
+                    return PhaseGateDecision(should_wait=False)
+
+        return decision

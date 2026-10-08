@@ -67,6 +67,11 @@ class SubgoalSchema:
 
 
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
+from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
+from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
+from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
 
@@ -87,6 +92,11 @@ class PrefrontalWorkingMemory:
         self.executive_directives: list[str] = []
         self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
         self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
+        self.subgoal_stack: FrontopolarSubgoalStack = FrontopolarSubgoalStack()
+        self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
+        self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
+        self.optical_projector: OpticalRayProjector = OpticalRayProjector()
+        self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
 
     def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
         """Store executive directives in working memory to guide cognitive policies."""
@@ -111,8 +121,11 @@ class PrefrontalWorkingMemory:
         self.constraint_solver.reset_episode()
         self.visuospatial.reset_episode(retain_long_term=retain_long_term)
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
+        self.subgoal_stack.reset_episode()
+        self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
+            self.habenular_ior = HabenularEpisodicIOR()
 
     def register_cardinality_constraint(
         self,

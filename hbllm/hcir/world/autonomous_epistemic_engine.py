@@ -42,6 +42,13 @@ from hbllm.hcir.world.cerebellar_phase_clock import (
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualDeadlockDetector,
 )
+from hbllm.hcir.world.frontopolar_subgoal_stack import (
+    FrontopolarSubgoalStack,
+)
+from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.inferotemporal_segmentation import (
+    InferotemporalSegmentationEngine,
+)
 from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
@@ -51,7 +58,13 @@ from hbllm.hcir.world.motor_calibration import (
     StateMutationModel,
 )
 from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
+from hbllm.hcir.world.optical_ray_projection import (
+    OpticalRayProjector,
+)
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
+from hbllm.hcir.world.remote_causal_attribution import (
+    RemoteCausalAttributor,
+)
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
@@ -905,6 +918,14 @@ class EpistemicFeedbackAssimilator:
         action = engine.last_action
         action_data = engine.last_action_data
 
+        # Faculty: Anterior Mid-Cingulate & Habenula Episodic IOR Transition Tracing
+        engine.working_memory.habenular_ior.record_step(
+            step=engine.step_counter,
+            avatar_pos=prev_avatar_pos,
+            action=action,
+            action_data=action_data,
+        )
+
         aff = engine.action_affordances.get(action)
         if aff is not None:
             is_effector_action = aff.requires_spatial_target
@@ -995,46 +1016,6 @@ class EpistemicFeedbackAssimilator:
                         target_coord, set(mut_cells)
                     )
 
-                # Dorsal Visual Stream (V4/MT): Object motion tracking & Teleological Distance Gradient
-                if diff.changed_mask is not None and engine.prev_grid is not None:
-                    bg = engine.bg_feature if engine.bg_feature is not None else 0
-                    disappeared_pts = np.argwhere(diff.changed_mask & (engine.prev_grid != bg))
-                    appeared_pts = np.argwhere(diff.changed_mask & (curr_grid != bg))
-                    if 1 <= len(disappeared_pts) <= 36 and 1 <= len(appeared_pts) <= 36:
-                        p_old = np.mean(disappeared_pts, axis=0)
-                        p_new = np.mean(appeared_pts, axis=0)
-                        goal_positions: list[tuple[int, int]] = list(engine.learned_goal_positions)
-                        for g in PerceptionEngine.detect_structural_goals(curr_grid, bg=bg):
-                            if "position" in g:
-                                goal_positions.append(g["position"])
-                        for gf in engine.learned_goal_features:
-                            g_pts = np.argwhere(curr_grid == gf)
-                            if len(g_pts) > 0:
-                                goal_positions.append(
-                                    (int(np.mean(g_pts[:, 0])), int(np.mean(g_pts[:, 1])))
-                                )
-                        if goal_positions:
-                            min_d_old = min(
-                                abs(p_old[0] - gp[0]) + abs(p_old[1] - gp[1])
-                                for gp in goal_positions
-                            )
-                            min_d_new = min(
-                                abs(p_new[0] - gp[0]) + abs(p_new[1] - gp[1])
-                                for gp in goal_positions
-                            )
-                            if min_d_new < min_d_old:
-                                engine.active_goal_converging_coord = target_coord
-                                engine.consecutive_goal_converging_clicks = (
-                                    getattr(engine, "consecutive_goal_converging_clicks", 0) + 1
-                                )
-                            elif min_d_new > min_d_old:
-                                if (
-                                    getattr(engine, "active_goal_converging_coord", None)
-                                    == target_coord
-                                ):
-                                    engine.active_goal_converging_coord = None
-                                    engine.consecutive_goal_converging_clicks = 0
-
                 # Numerical / cardinality constraint discovery (e.g. Minesweeper / local count grids):
                 tr, tc = target_coord
                 if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
@@ -1053,6 +1034,55 @@ class EpistemicFeedbackAssimilator:
                                 int(curr_grid[hz[0], hz[1]])
                             )
                             engine.learned_barriers.add(hz)
+
+            # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attribution
+            act_locus = target_coord or prev_avatar_pos
+            if act_locus is not None and engine.prev_grid is not None:
+                engine.working_memory.remote_causal.record_transition(
+                    prev_grid=engine.prev_grid,
+                    curr_grid=curr_grid,
+                    action_pos=act_locus,
+                    background_feature=engine.bg_feature,
+                    avatar_features=engine.avatar_features,
+                )
+
+            # Dorsal Visual Stream (V4/MT): Object motion tracking & Teleological Distance Gradient
+            if diff.changed_mask is not None and engine.prev_grid is not None:
+                bg = engine.bg_feature if engine.bg_feature is not None else 0
+                disappeared_pts = np.argwhere(diff.changed_mask & (engine.prev_grid != bg))
+                appeared_pts = np.argwhere(diff.changed_mask & (curr_grid != bg))
+                if 1 <= len(disappeared_pts) <= 36 and 1 <= len(appeared_pts) <= 36:
+                    p_old = np.mean(disappeared_pts, axis=0)
+                    p_new = np.mean(appeared_pts, axis=0)
+                    goal_positions: list[tuple[int, int]] = list(engine.learned_goal_positions)
+                    for g in PerceptionEngine.detect_structural_goals(curr_grid, bg=bg):
+                        if "position" in g:
+                            goal_positions.append(g["position"])
+                    for gf in engine.learned_goal_features:
+                        g_pts = np.argwhere(curr_grid == gf)
+                        if len(g_pts) > 0:
+                            goal_positions.append(
+                                (int(np.mean(g_pts[:, 0])), int(np.mean(g_pts[:, 1])))
+                            )
+                    if goal_positions and target_coord is not None:
+                        min_d_old = min(
+                            abs(p_old[0] - gp[0]) + abs(p_old[1] - gp[1]) for gp in goal_positions
+                        )
+                        min_d_new = min(
+                            abs(p_new[0] - gp[0]) + abs(p_new[1] - gp[1]) for gp in goal_positions
+                        )
+                        if min_d_new < min_d_old:
+                            engine.active_goal_converging_coord = target_coord
+                            engine.consecutive_goal_converging_clicks = (
+                                getattr(engine, "consecutive_goal_converging_clicks", 0) + 1
+                            )
+                        elif min_d_new > min_d_old:
+                            if (
+                                getattr(engine, "active_goal_converging_coord", None)
+                                == target_coord
+                            ):
+                                engine.active_goal_converging_coord = None
+                                engine.consecutive_goal_converging_clicks = 0
 
         # ── Intuitive Physics Transition Tracking ────────────────────────────
         engine.physics_engine.record_transition(
@@ -1833,6 +1863,12 @@ class EpistemicFeedbackAssimilator:
             engine.exhausted_candidate_goals.add(engine.avatar_pos)
 
         if is_lost:
+            # Faculty: Lateral Habenula & aMCC Fatal Prefix Backpropagation & Negative Valence
+            engine.working_memory.habenular_ior.record_catastrophe(
+                final_step=engine.step_counter,
+                is_lost=True,
+            )
+
             if prev_avatar_pos is not None and action is not None:
                 engine.failed_transitions.add((prev_avatar_pos, action))
                 logger.info(
@@ -2319,6 +2355,16 @@ class MentalSimulationPlanner:
                     for c in range(W):
                         if int(curr_grid[r, c]) == m.trigger_feature:
                             mutation_triggers.setdefault((r, c), set()).update(opened_cells)
+
+        # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Triggers
+        for trig_pos, aff_list in engine.working_memory.remote_causal.trigger_registry.items():
+            for aff in aff_list:
+                if (
+                    aff.confidence >= 0.70
+                    and 0 <= aff.remote_pos[0] < H
+                    and 0 <= aff.remote_pos[1] < W
+                ):
+                    mutation_triggers.setdefault(trig_pos, set()).add(aff.remote_pos)
 
         # 4. Available directional movements in mental model
         movable_actions: list[tuple[Any, int, int]] = []
@@ -3672,6 +3718,21 @@ class AutonomousEpistemicEngine:
         # Faculty: Orbitofrontal Cortex (OFC) Counterfactual Deadlock Detector
         self.deadlock_detector: CounterfactualDeadlockDetector = CounterfactualDeadlockDetector()
 
+        # Faculty: Brodmann Area 10 (aPFC) Hierarchical Subgoal Stack & Cognitive Branching
+        self.subgoal_stack: FrontopolarSubgoalStack = self.working_memory.subgoal_stack
+
+        # Faculty: Anterior Mid-Cingulate Cortex (aMCC) & Lateral Habenula Episodic IOR
+        self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
+
+        # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attributor
+        self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
+
+        # Faculty: Parieto-Occipital Mental Imagery (V6/MST) Optical Ray Projector
+        self.optical_projector: OpticalRayProjector = self.working_memory.optical_projector
+
+        # Faculty: Inferotemporal Cortex (IT / Ventral Stream) Affordance Centroid Segmentation
+        self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
+
         # Room topology & doorway subgoal reasoning (spatial containment)
         self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
 
@@ -4534,6 +4595,21 @@ class AutonomousEpistemicEngine:
                 cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
                 click_candidates.append((cr, cc, cand_score))
 
+        # Faculty: Inferotemporal Cortex (IT / Ventral Stream) Affordance Centroid Segmentation
+        if not click_candidates:
+            it_anchors = InferotemporalSegmentationEngine.extract_affordance_anchors(
+                grid=curr_grid,
+                background_feature=bg,
+                avatar_features=av_feats,
+                quiescent_coords=self.quiescent_click_targets,
+                effective_coords=self.effective_click_targets,
+                quiescent_features=self.quiescent_features,
+                effective_features=self.effective_features,
+                visit_counts=self.entity_visit_counts,
+            )
+            for ar, ac, score in it_anchors:
+                click_candidates.append((ar, ac, score))
+
         if not click_candidates:
             fixations = self.saccadic_attention.extract_fixations(
                 grid=curr_grid,
@@ -4735,6 +4811,11 @@ class AutonomousEpistemicEngine:
             self.inhibited_actions[act] -= 1
         for act in to_uninhibited:
             self.inhibited_actions.pop(act, None)
+
+        # Anterior Mid-Cingulate & Lateral Habenula: Limit Cycle / Oscillation Detection
+        osc_act = self.working_memory.habenular_ior.detect_action_oscillation()
+        if osc_act is not None:
+            self.inhibited_actions[osc_act] = max(self.inhibited_actions.get(osc_act, 0), 4)
 
         # Visual avatar localization
         known_av_feats = set(self.avatar_features) if self.avatar_features else set()
@@ -4948,6 +5029,31 @@ class AutonomousEpistemicEngine:
                             sim_patrols = frozenset(new_patrol_set)
                 except Exception:
                     pass  # If patrol simulation fails, rely on the static check
+
+            # Habenular Episodic Gating: Avoid repeating known fatal actions at this state
+            if plan_safe and self.working_memory.habenular_ior.is_action_inhibited(
+                self.avatar_pos, next_step.action
+            ):
+                plan_safe = False
+
+            # Cerebellar Phase Gating & Rhythm-Locked Safe Windows
+            if plan_safe and next_step.predicted_avatar_pos is not None:
+                phase_gate = self.cerebellar_clock.evaluate_motion_hazard_gate(
+                    current_step=self.step_counter,
+                    avatar_pos=self.avatar_pos,
+                    target_pos=next_step.predicted_avatar_pos,
+                    hazard_tracker=self.hazard_tracker,
+                )
+                if phase_gate.should_wait:
+                    self.mental_plan.appendleft(next_step)
+                    self.pending_phase_wait_steps = phase_gate.wait_steps_recommended
+                    non_disp = [
+                        a
+                        for a in available_actions
+                        if not self.is_displacement_action(a) and not self.is_spatial_effector(a)
+                    ]
+                    if non_disp:
+                        return non_disp[0], None
 
             if not plan_safe:
                 self.mental_plan.clear()
