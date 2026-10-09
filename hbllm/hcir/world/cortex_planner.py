@@ -674,6 +674,14 @@ class MentalSimulationPlanner:
 
         acc_monitor = getattr(getattr(engine, "working_memory", None), "acc_conflict", None)
         acc_weight = acc_monitor.compute_heuristic_weight(1.0) if acc_monitor else 1.0
+        # Precompute Vectorized 2D Distance Field Matrix for O(1) heuristic lookup
+        grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
+        if goals and not is_block_delivery:
+            r_indices = np.arange(H, dtype=np.int32)[:, None]
+            c_indices = np.arange(W, dtype=np.int32)[None, :]
+            for gr, gc in goals:
+                d_mat = np.abs(r_indices - gr) + np.abs(c_indices - gc)
+                grid_dist_field = np.minimum(grid_dist_field, d_mat)
 
         def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
             if is_block_delivery and blocks:
@@ -683,8 +691,10 @@ class MentalSimulationPlanner:
                     goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
                 avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
                 base_h = float(goal_dist * 2.0 + avatar_to_b)
+            elif goals:
+                base_h = float(grid_dist_field[pos[0], pos[1]])
             else:
-                base_h = float(min(abs(g[0] - pos[0]) + abs(g[1] - pos[1]) for g in goals))
+                base_h = 0.0
 
             if acc_monitor and acc_monitor.active_conflict:
                 choke_pen = acc_monitor.get_chokepoint_penalty(pos)
