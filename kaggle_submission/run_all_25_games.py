@@ -287,6 +287,7 @@ def run_all_25_games(
     max_steps_per_game: int = 1000,
     max_level_steps: int | None = None,
     retries: int = 0,
+    resume: bool = True,
 ) -> None:
     if instructions is None:
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
@@ -342,13 +343,24 @@ def run_all_25_games(
     total_steps_taken = 0
     total_time_start = time.time()
 
-    if scorecard_path.exists():
+    if resume and scorecard_path.exists():
         try:
             saved_data = json.loads(scorecard_path.read_text())
             results = saved_data.get("games", {})
             total_levels_passed = int(saved_data.get("total_levels_passed", 0))
             total_levels_possible = int(saved_data.get("total_levels_possible", 0))
-            print(f"   ⏩ Resuming benchmark: {len(results)} games already completed in existing scorecard.\n")
+            print(
+                f"   ⏩ Resuming benchmark: {len(results)} games already completed in existing scorecard.\n"
+            )
+        except Exception:
+            pass
+    elif not resume and scorecard_path.exists():
+        backup_path = scorecard_path.with_name(
+            f"{scorecard_path.stem}_backup_{int(time.time())}.json"
+        )
+        try:
+            backup_path.write_text(scorecard_path.read_text())
+            print(f"   💾 Backed up previous scorecard to: {backup_path}\n")
         except Exception:
             pass
 
@@ -358,7 +370,9 @@ def run_all_25_games(
         baseline = getattr(env_meta, "baseline_actions", None) or [100]
 
         if gid in results:
-            print(f"[{idx:2d}/{len(environments)}] ⏩ Skipping already completed game {title} ({gid}) ({results[gid].get('levels_passed', 0)}/{results[gid].get('target_levels', len(baseline))} levels)")
+            print(
+                f"[{idx:2d}/{len(environments)}] ⏩ Skipping already completed game {title} ({gid}) ({results[gid].get('levels_passed', 0)}/{results[gid].get('target_levels', len(baseline))} levels)"
+            )
             continue
 
         print(f"\n[{idx:2d}/{len(environments)}] 🎮 Game: {title} ({gid})")
@@ -622,6 +636,11 @@ if __name__ == "__main__":
         default=0,
         help="Number of retries for failed games (default: 0).",
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Restart entire benchmark from Game 1, backing up any prior scorecard.",
+    )
 
     args = parser.parse_args()
 
@@ -650,4 +669,5 @@ if __name__ == "__main__":
         max_steps_per_game=args.max_steps,
         max_level_steps=args.max_level_steps,
         retries=args.retries,
+        resume=not args.fresh,
     )
