@@ -139,6 +139,26 @@ class FrontopolarSubgoalStack:
             return avatar_pos == dest
         return False
 
+    def spawn_causal_unlock_subgoal(
+        self,
+        barrier_pos: tuple[int, int],
+        barrier_feat: int,
+        trigger_pos: tuple[int, int],
+        trigger_feat: int,
+    ) -> FrontopolarSubgoal:
+        """Spawn a high-priority frontopolar unlock subgoal to clear a causal prerequisite barrier."""
+        unlock_id = f"unlock_{barrier_feat}_via_{trigger_feat}_{trigger_pos[0]}_{trigger_pos[1]}"
+        subgoal = FrontopolarSubgoal(
+            subgoal_id=unlock_id,
+            subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+            target_entity_pos=trigger_pos,
+            target_destination=trigger_pos,
+            required_feature=trigger_feat,
+            priority=2.0,
+        )
+        self.push_subgoal(subgoal)
+        return subgoal
+
     @staticmethod
     def find_safe_holding_bay(
         entity_pos: tuple[int, int],

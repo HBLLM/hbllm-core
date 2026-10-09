@@ -19,6 +19,11 @@ import numpy as np
 from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
 from hbllm.hcir.world.cortex_causal import CausalInductionCortex
 from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
+from hbllm.hcir.world.cortex_hypothesis import (
+    HypothesisStatus,
+    HypothesisType,
+    InductiveHypothesisEngine,
+)
 from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
@@ -725,3 +730,115 @@ class TestMotorCortexEffector:
         assert "x" in coords and "y" in coords
         assert 0 <= coords["x"] < 10
         assert 0 <= coords["y"] < 10
+
+
+class TestInductiveHypothesisEngine:
+    """Test Prefrontal Cortex Inductive Logic, Relational Hypotheses & Counterexample Refutation."""
+
+    def test_remote_mechanism_hypothesis_and_confirmation(self) -> None:
+        hyp_engine = InductiveHypothesisEngine(min_support_to_confirm=2)
+
+        # Transition 1: Avatar steps from (2, 2) onto switch at (2, 3) (feat 3).
+        # A barrier of feat 5 at (8, 8) disappears (becomes 0).
+        prev_grid = np.zeros((10, 10), dtype=int)
+        prev_grid[2, 3] = 3  # switch
+        prev_grid[8, 8] = 5  # barrier
+
+        curr_grid = np.zeros((10, 10), dtype=int)
+        curr_grid[2, 3] = 3  # switch remains
+
+        rules = hyp_engine.observe_transition(
+            prev_grid=prev_grid,
+            action=4,
+            curr_grid=curr_grid,
+            prev_avatar_pos=(2, 2),
+            curr_avatar_pos=(2, 3),
+            background_feature=0,
+        )
+
+        assert len(rules) >= 1
+        rule = hyp_engine.get_rule_for_barrier(5)
+        assert rule is not None
+        assert rule.rule_type == HypothesisType.REMOTE_MECHANISM
+        assert rule.premise_feature == 3
+        assert rule.target_feature == 5
+        assert rule.status == HypothesisStatus.TENTATIVE
+
+        # Transition 2: In another room, avatar steps onto switch 3 again, clearing another barrier 5
+        prev_grid2 = np.zeros((10, 10), dtype=int)
+        prev_grid2[4, 4] = 3
+        prev_grid2[1, 1] = 5
+        curr_grid2 = np.zeros((10, 10), dtype=int)
+        curr_grid2[4, 4] = 3
+
+        hyp_engine.observe_transition(
+            prev_grid=prev_grid2,
+            action=2,
+            curr_grid=curr_grid2,
+            prev_avatar_pos=(4, 3),
+            curr_avatar_pos=(4, 4),
+            background_feature=0,
+        )
+
+        # Now confirmed!
+        confirmed = hyp_engine.get_confirmed_rules()
+        assert len(confirmed) == 1
+        assert confirmed[0].status == HypothesisStatus.CONFIRMED
+        assert confirmed[0].confidence > 0.7
+
+    def test_popperian_counterexample_refutation(self) -> None:
+        hyp_engine = InductiveHypothesisEngine()
+
+        # Step 1: initial tentative rule
+        prev_grid = np.zeros((10, 10), dtype=int)
+        prev_grid[1, 1] = 4
+        prev_grid[9, 9] = 7
+        curr_grid = np.zeros((10, 10), dtype=int)
+        curr_grid[1, 1] = 4
+
+        hyp_engine.observe_transition(
+            prev_grid=prev_grid,
+            action=1,
+            curr_grid=curr_grid,
+            prev_avatar_pos=(1, 0),
+            curr_avatar_pos=(1, 1),
+            background_feature=0,
+        )
+        assert hyp_engine.get_rule_for_barrier(7) is not None
+
+        # Step 2: Avatar steps onto 4 again, but barrier 7 remains intact!
+        prev_grid2 = np.zeros((10, 10), dtype=int)
+        prev_grid2[3, 3] = 4
+        prev_grid2[9, 9] = 7
+        curr_grid2 = np.zeros((10, 10), dtype=int)
+        curr_grid2[3, 3] = 4
+        curr_grid2[9, 9] = 7  # Not cleared!
+
+        hyp_engine.observe_transition(
+            prev_grid=prev_grid2,
+            action=1,
+            curr_grid=curr_grid2,
+            prev_avatar_pos=(3, 2),
+            curr_avatar_pos=(3, 3),
+            background_feature=0,
+        )
+
+        # Falsified by counterexample!
+        assert hyp_engine.get_rule_for_barrier(7) is None
+        rule = hyp_engine.hypotheses.get("remote_mech_4_clears_7")
+        assert rule is not None
+        assert rule.status == HypothesisStatus.REFUTED
+        assert rule.counterexamples == 1
+
+    def test_frontopolar_spawn_causal_unlock(self) -> None:
+        stack = FrontopolarSubgoalStack()
+        subgoal = stack.spawn_causal_unlock_subgoal(
+            barrier_pos=(8, 8),
+            barrier_feat=5,
+            trigger_pos=(2, 3),
+            trigger_feat=3,
+        )
+        assert subgoal.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM
+        assert subgoal.target_destination == (2, 3)
+        assert subgoal.required_feature == 3
+        assert stack.current_subgoal == subgoal

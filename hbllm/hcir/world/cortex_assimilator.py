@@ -1435,3 +1435,16 @@ class EpistemicFeedbackAssimilator:
                 curr_grid=curr_grid,
                 bg_feature=engine.bg_feature,
             )
+
+        # Faculty: Prefrontal Inductive Hypothesis Testing & Relational Rule Discovery
+        if hasattr(engine.working_memory, "hypothesis_engine") and engine.prev_grid is not None:
+            engine.working_memory.hypothesis_engine.observe_transition(
+                prev_grid=engine.prev_grid,
+                action=action,
+                curr_grid=curr_grid,
+                prev_avatar_pos=prev_avatar_pos,
+                curr_avatar_pos=engine.avatar_pos,
+                is_dead=is_lost,
+                is_won=is_win,
+                background_feature=engine.bg_feature,
+            )
