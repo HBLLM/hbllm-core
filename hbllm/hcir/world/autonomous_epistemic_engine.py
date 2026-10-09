@@ -14,7 +14,6 @@ Implements the fundamental cognitive loop:
 from __future__ import annotations
 
 import logging
-import math
 from collections import deque
 from collections.abc import Sequence
 from typing import Any
@@ -67,7 +66,6 @@ from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
-from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
 logger = logging.getLogger(__name__)
@@ -93,6 +91,7 @@ from hbllm.hcir.world.cortex_episodic import (
 from hbllm.hcir.world.cortex_motor import (
     ACCConflictMonitor,
     EpistemicCuriosityExplorer,
+    MotorCortexEffector,
 )
 from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
@@ -340,57 +339,7 @@ class AutonomousEpistemicEngine:
             self.action_affordances[aff.action_id] = aff
 
     def _parse_action_spec(self, spec: Any) -> ActionAffordance:
-        if isinstance(spec, ActionAffordance):
-            return spec
-        if isinstance(spec, dict):
-            aid = spec.get("action_id", spec.get("id", spec.get("name", 0)))
-            name = str(spec.get("name", aid))
-            params = spec.get("parameters") or {}
-            param_keys = tuple(params.keys()) if isinstance(params, dict) else ("x", "y")
-            req_spatial = bool(
-                isinstance(params, dict)
-                and any(
-                    k in params
-                    for k in (
-                        "x",
-                        "y",
-                        "col",
-                        "row",
-                        "lat",
-                        "lon",
-                        "azimuth",
-                        "elevation",
-                        "distance",
-                        "c",
-                        "r",
-                    )
-                )
-            )
-            name_upper = name.upper()
-            is_disp = any(
-                k in name_upper
-                for k in (
-                    "MOVE",
-                    "UP",
-                    "DOWN",
-                    "LEFT",
-                    "RIGHT",
-                    "NORTH",
-                    "SOUTH",
-                    "EAST",
-                    "WEST",
-                    "STEP",
-                    "WALK",
-                )
-            )
-            return ActionAffordance(
-                action_id=aid,
-                name=name,
-                is_displacement=is_disp,
-                requires_spatial_target=req_spatial,
-                target_param_keys=param_keys if param_keys else ("x", "y"),
-            )
-        return ActionAffordance(action_id=spec, name=str(spec))
+        return MotorCortexEffector.parse_action_spec(spec)
 
     def is_spatial_effector(self, action: Any) -> bool:
         """Returns True if the action is configured or observed to accept spatial coordinates."""
@@ -415,93 +364,8 @@ class AutonomousEpistemicEngine:
 
     @staticmethod
     def normalize_sensory_input(raw: Any) -> np.ndarray:
-        """Normalize arbitrary sensory observations (camera, depth, lidar, 2D grid) into a spatial 2D array.
-
-        Supports:
-        - 2D integer grids (e.g. ARC, Roguelike, Atari RAM/grid)
-        - 2D float arrays (e.g. Depth maps, LiDAR range grids) -> quantized to perceptual levels
-        - 3D arrays (e.g. RGB camera (H, W, 3), LiDAR multi-channel, or temporal stack (T, H, W))
-        - Objects with .frame, .grid, .image, or .raw_data
-        """
-        if raw is None:
-            return np.zeros((1, 1), dtype=int)
-
-        if hasattr(raw, "raw_data") and raw.raw_data is not None:
-            raw = raw.raw_data
-        elif hasattr(raw, "frame") and raw.frame is not None:
-            raw = raw.frame
-        elif hasattr(raw, "grid") and raw.grid is not None:
-            raw = raw.grid
-        elif hasattr(raw, "image") and raw.image is not None:
-            raw = raw.image
-
-        if isinstance(raw, (list, tuple)):
-            if len(raw) == 0:
-                return np.zeros((1, 1), dtype=int)
-            raw = np.asarray(raw)
-
-        if not isinstance(raw, np.ndarray):
-            try:
-                raw = np.asarray(raw)
-            except Exception:
-                return np.zeros((1, 1), dtype=int)
-
-        if raw.ndim == 3 and raw.shape[0] < min(raw.shape[1], raw.shape[2]):
-            raw = raw[-1]
-
-        if raw.ndim == 3 and raw.shape[2] in (1, 3, 4):
-            if raw.shape[2] == 1:
-                raw = raw[:, :, 0]
-            elif raw.shape[2] in (3, 4):
-                r = raw[:, :, 0].astype(float)
-                g = raw[:, :, 1].astype(float)
-                b = raw[:, :, 2].astype(float)
-                lum = 0.299 * r + 0.587 * g + 0.114 * b
-                raw = np.digitize(lum, np.linspace(0, 255, 16)).astype(int)
-
-        if raw.ndim == 2 and np.issubdtype(raw.dtype, np.floating):
-            min_v, max_v = float(np.nanmin(raw)), float(np.nanmax(raw))
-            if max_v > min_v:
-                raw = np.digitize(raw, np.linspace(min_v, max_v, 16)).astype(int)
-            else:
-                raw = np.zeros(raw.shape, dtype=int)
-
-        # 1D LiDAR range arrays (N,) -> (1, N) range profile
-        if raw.ndim == 1:
-            if np.issubdtype(raw.dtype, np.floating):
-                min_v, max_v = float(np.nanmin(raw)), float(np.nanmax(raw))
-                if max_v > min_v:
-                    raw = np.digitize(raw, np.linspace(min_v, max_v, 16)).astype(int)
-                else:
-                    raw = np.zeros(raw.shape, dtype=int)
-            raw = raw.reshape((1, -1))
-
-        # 3D Point Cloud (N, 3) (x, y, z) -> 2D Bird's-Eye View (BEV) occupancy grid
-        elif raw.ndim == 2 and raw.shape[1] == 3 and raw.shape[0] > 3:
-            xs, ys, _zs = raw[:, 0], raw[:, 1], raw[:, 2]
-            grid_res = 32
-            min_x, max_x = float(np.min(xs)), float(np.max(xs))
-            min_y, max_y = float(np.min(ys)), float(np.max(ys))
-            if max_x > min_x and max_y > min_y:
-                xi = np.clip(
-                    np.digitize(xs, np.linspace(min_x, max_x, grid_res)) - 1, 0, grid_res - 1
-                )
-                yi = np.clip(
-                    np.digitize(ys, np.linspace(min_y, max_y, grid_res)) - 1, 0, grid_res - 1
-                )
-                bev = np.zeros((grid_res, grid_res), dtype=int)
-                bev[yi, xi] = 1
-                raw = bev
-            else:
-                raw = np.zeros((grid_res, grid_res), dtype=int)
-
-        if raw.ndim != 2:
-            if raw.ndim > 2:
-                raw = raw.reshape((raw.shape[0], -1))
-            else:
-                raw = np.zeros((1, 1), dtype=int)
-
-        return raw.astype(int)
+        """Normalize arbitrary sensory observations (camera, depth, lidar, 2D grid) into a spatial 2D array."""
+        return PerceptionEngine.normalize_sensory_input(raw)
 
     # ── Property Pass-Throughs to HCIRSymbolicWorldTheory ─────────────────────
 
@@ -1045,278 +909,14 @@ class AutonomousEpistemicEngine:
             self.avatar_pos = best_pos
 
     def ground_effector_action(self, curr_grid: np.ndarray, action: Any = None) -> dict[str, Any]:
-        """Spatially ground an allocentric effector command onto salient affordances.
-
-        Dynamically maps targeting parameters based on the action's declared affordance
-        (e.g. 'x', 'y' for cell/pixel clicks, or 'azimuth', 'elevation' for directional sensors).
-        """
-        curr_grid = self.normalize_sensory_input(curr_grid)
-        H, W = curr_grid.shape
-        aff = self.action_affordances.get(action)
-        param_keys = aff.target_param_keys if aff else ("x", "y")
-
-        bg = self.estimate_background(curr_grid)
-        entities = self.extract_entities(curr_grid, bg)
-        av_feats = self.avatar_features or (
-            {self.avatar_feature} if self.avatar_feature is not None else set()
-        )
-
-        click_candidates: list[tuple[int, int, float]] = []
-
-        # dlPFC Working Memory Pattern Completion: Match newly revealed card/tile with remembered partner
-        last_probed = self.working_memory.visuospatial.last_probed_coord
-        last_feat = self.working_memory.visuospatial.last_probed_feature
-        if last_probed is not None and last_feat is not None and last_feat != bg and last_feat != 0:
-            pair_target = self.working_memory.visuospatial.find_matching_pair(
-                last_probed, last_feat
-            )
-            if (
-                pair_target is not None
-                and pair_target not in self.quiescent_click_targets
-                and 0 <= pair_target[0] < H
-                and 0 <= pair_target[1] < W
-            ):
-                click_candidates.append((pair_target[0], pair_target[1], 450.0))
-
-        # LOC Ventral Stream Geometric Symmetry Discrepancies
-        sym_discrepancies = VisualSymmetryAnalyzer.extract_discrepancy_targets(
-            curr_grid, background_color=bg, threshold=0.55
-        )
-        for dr, dc, expected_feat, sym_conf in sym_discrepancies:
-            if (dr, dc) not in self.quiescent_click_targets and 0 <= dr < H and 0 <= dc < W:
-                v_count = self.entity_visit_counts.get(f"click_{dr}_{dc}", 0)
-                if v_count < 3:
-                    cand_score = 320.0 + (sym_conf * 40.0) - float(v_count) * 15.0
-                    click_candidates.append((dr, dc, cand_score))
-
-        # dlPFC Constraint Propagation: Target guaranteed safe cells
-        deduced_safe = self.working_memory.get_unrevealed_safe_cells()
-        for sr, sc in deduced_safe:
-            if (sr, sc) not in self.quiescent_click_targets and 0 <= sr < H and 0 <= sc < W:
-                visit_count = self.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
-                if visit_count == 0:
-                    cand_score = 300.0  # Top priority! Guaranteed safe progress!
-                    click_candidates.append((sr, sc, cand_score))
-
-        # Visual Symmetry: Target asymmetric completion coordinates
-        structural_goals = PerceptionEngine.detect_structural_goals(
-            curr_grid,
-            bg=bg,
-            avatar_features=av_feats,
-            avatar_feature=self.avatar_feature,
-            barrier_features=self.symbolic_theory.barrier_features,
-            known_lethal_features=self.hazard_tracker.known_lethal_features,
-        )
-        optical_goals = [
-            g
-            for g in structural_goals
-            if g.get("type")
-            in ("relational_alignment", "optical_mirror_target", "reflection_target")
-            and g.get("position") is not None
-        ]
-        for og in optical_goals:
-            op = og["position"]
-            if op not in self.quiescent_click_targets and 0 <= op[0] < H and 0 <= op[1] < W:
-                v_count = self.entity_visit_counts.get(f"click_{op[0]}_{op[1]}", 0)
-                if v_count < 3:
-                    cand_score = 350.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
-                    click_candidates.append((op[0], op[1], cand_score))
-
-        sym_goals = [
-            g
-            for g in structural_goals
-            if g.get("type") == "symmetry_completion" and g.get("position") is not None
-        ]
-        for sg in sym_goals:
-            sp = sg["position"]
-            if sp not in self.quiescent_click_targets and 0 <= sp[0] < H and 0 <= sp[1] < W:
-                visit_count = self.entity_visit_counts.get(f"click_{sp[0]}_{sp[1]}", 0)
-                if visit_count < 3:
-                    cand_score = (
-                        250.0 + (sg.get("confidence", 0.8) * 50.0) - float(visit_count) * 20.0
-                    )
-                    click_candidates.append((sp[0], sp[1], cand_score))
-
-        # Gestalt Affordance Panels: Prioritize regular interactive arrays & pop-out targets
-        panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
-        for panel in panels:
-            panel_coords = set(panel["item_coords"])
-            has_effective_item = any(p in self.effective_click_targets for p in panel_coords)
-
-            # Minority pop-out items are top priority targets (+220.0)
-            for m_item in panel["minority_items"]:
-                mr, mc = m_item.grid_pos
-                if (mr, mc) not in self.quiescent_click_targets and 0 <= mr < H and 0 <= mc < W:
-                    visit_count = self.entity_visit_counts.get(f"click_{mr}_{mc}", 0)
-                    last_step = getattr(self, "last_effector_target_step", {}).get((mr, mc), -999)
-                    delta_t = max(1, getattr(self, "step_counter", 0) - last_step)
-                    refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
-                    visit_damping = min(30.0, float(visit_count) * 4.0)
-                    score = 220.0 - refractory - visit_damping
-                    click_candidates.append((mr, mc, score))
-
-            # Other panel items (+120.0 or +160.0 if confirmed effective)
-            for item in panel["items"]:
-                ir, ic = item.grid_pos
-                if (ir, ic) not in self.quiescent_click_targets and 0 <= ir < H and 0 <= ic < W:
-                    visit_count = self.entity_visit_counts.get(f"click_{ir}_{ic}", 0)
-                    bonus = 160.0 if has_effective_item else 120.0
-                    feat_bonus = 40.0 if item.feature_id in self.effective_features else 0.0
-                    last_step = getattr(self, "last_effector_target_step", {}).get((ir, ic), -999)
-                    delta_t = max(1, getattr(self, "step_counter", 0) - last_step)
-                    is_goal_converging = (ir, ic) == getattr(
-                        self, "active_goal_converging_coord", None
-                    ) and getattr(self, "consecutive_goal_converging_clicks", 0) < 12
-                    is_active_momentum = (ir, ic) == getattr(
-                        self, "last_effective_click_coord", None
-                    ) and getattr(self, "consecutive_effective_clicks", 0) < 6
-                    if is_goal_converging:
-                        momentum_bonus = 120.0
-                        ior_penalty = 0.0
-                    elif is_active_momentum:
-                        momentum_bonus = 60.0
-                        ior_penalty = 0.0
-                    else:
-                        momentum_bonus = 0.0
-                        refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
-                        visit_damping = min(30.0, float(visit_count) * 4.0)
-                        ior_penalty = refractory + visit_damping
-                    score = bonus + feat_bonus + momentum_bonus - ior_penalty
-                    click_candidates.append((ir, ic, score))
-
-        # Control Panel Primacy: If viable candidates exist in affordance panels,
-        # focus execution strictly within the control interface! Do NOT dilute with background/walls!
-        if not click_candidates:
-            for e in entities:
-                if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
-                    continue
-                cr, cc = e.grid_pos
-                if (cr, cc) in self.quiescent_click_targets:
-                    continue
-                visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                saliency = 100.0 / math.log2(2 + max(1, e.area))
-                affordance_bonus = 60.0 if (cr, cc) in self.effective_click_targets else 0.0
-                feat_bias = 0.0
-                if e.feature_id in self.quiescent_features:
-                    feat_bias -= 80.0
-                elif e.feature_id in self.effective_features:
-                    feat_bias += 40.0
-                ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
-                cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
-                click_candidates.append((cr, cc, cand_score))
-
-        # Faculty: Inferotemporal Cortex (IT / Ventral Stream) Affordance Centroid Segmentation
-        if not click_candidates:
-            it_anchors = InferotemporalSegmentationEngine.extract_affordance_anchors(
-                grid=curr_grid,
-                background_feature=bg,
-                avatar_features=av_feats,
-                quiescent_coords=self.quiescent_click_targets,
-                effective_coords=self.effective_click_targets,
-                quiescent_features=self.quiescent_features,
-                effective_features=self.effective_features,
-                visit_counts=self.entity_visit_counts,
-            )
-            for ar, ac, score in it_anchors:
-                click_candidates.append((ar, ac, score))
-
-        if not click_candidates:
-            fixations = self.saccadic_attention.extract_fixations(
-                grid=curr_grid,
-                prev_grid=self.prev_grid,
-                background_feature=bg,
-                top_k=24,
-            )
-            for f in fixations:
-                cr, cc = f.r, f.c
-                feat = int(curr_grid[cr, cc])
-                if (cr, cc) in self.quiescent_click_targets or feat == bg:
-                    continue
-                visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                affordance_bonus = 60.0 if (cr, cc) in self.effective_click_targets else 0.0
-                feat_bias = 0.0
-                if feat in self.quiescent_features:
-                    feat_bias -= 80.0
-                elif feat in self.effective_features:
-                    feat_bias += 40.0
-                cand_score = (
-                    f.salience
-                    + affordance_bonus
-                    + feat_bias
-                    - float(visit_count) * (0.1 if affordance_bonus > 0 else 0.35)
-                )
-                click_candidates.append((cr, cc, cand_score))
-
-        # Fallback: scan any unvisited non-background cells not in quiescent targets
-        if not click_candidates:
-            non_bg = np.argwhere(curr_grid != bg)
-            for r, c in non_bg:
-                cr, cc = int(r), int(c)
-                feat = int(curr_grid[cr, cc])
-                if (cr, cc) in self.quiescent_click_targets or (cr, cc) in av_feats:
-                    continue
-                visit_count = self.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                feat_bias = 0.0
-                if feat in self.quiescent_features:
-                    feat_bias -= 80.0
-                elif feat in self.effective_features:
-                    feat_bias += 40.0
-                cand_score = 20.0 + feat_bias - float(visit_count) * 2.0
-                click_candidates.append((cr, cc, cand_score))
-
-        # Fallback: re-probe confirmed effective targets
-        if not click_candidates and self.effective_click_targets:
-            eff_sorted = sorted(
-                self.effective_click_targets,
-                key=lambda p: self.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0),
-            )
-            click_candidates.append((eff_sorted[0][0], eff_sorted[0][1], 50.0))
-
-        if click_candidates:
-            click_candidates.sort(key=lambda x: x[2], reverse=True)
-            best_r, best_c, _ = click_candidates[0]
-            self.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
-                self.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
-            )
-            target_r, target_c = int(best_r), int(best_c)
-            if not hasattr(self, "last_effector_target_step"):
-                self.last_effector_target_step = {}
-            self.last_effector_target_step[(target_r, target_c)] = getattr(self, "step_counter", 0)
-        else:
-            # Fallback when all known candidates are quiescent: find any unprobed coordinate
-            unprobed = [
-                (r, c)
-                for r in range(H)
-                for c in range(W)
-                if (r, c) not in self.quiescent_click_targets
-            ]
-            if unprobed:
-                target_r, target_c = unprobed[0]
-            else:
-                self.quiescent_click_targets.clear()
-                target_r, target_c = H // 2, W // 2
-
-        coords: dict[str, Any] = {}
-        for k in param_keys:
-            if k in ("x", "col", "c", "column", "azimuth"):
-                coords[k] = target_c
-            elif k in ("y", "row", "r", "elevation", "distance"):
-                coords[k] = target_r
-            else:
-                coords[k] = 0
-        return coords
+        """Spatially ground an allocentric effector command onto salient affordances."""
+        return MotorCortexEffector.ground_effector_action(self, curr_grid, action)
 
     # ── Theory of Mind: Creature Motion Observation ──────────────────────────
 
     def infer_motor_step_size(self, available_actions: Sequence[Any]) -> int:
         """Largest calibrated displacement quantum (the world's 'cell' size)."""
-        step = 1
-        for act in available_actions:
-            dyn = self.action_dynamics.get(act)
-            if dyn is not None and dyn.is_displacement_action():
-                dr, dc = dyn.get_displacement()
-                step = max(step, abs(dr), abs(dc))
-        return step
+        return MotorCortexEffector.infer_motor_step_size(available_actions, self.action_dynamics)
 
     def _observe_oriented_threat_motion(
         self,

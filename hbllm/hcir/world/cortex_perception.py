@@ -15,7 +15,6 @@ Biological Modeling:
 from __future__ import annotations
 
 import logging
-import math
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -76,7 +75,16 @@ class PerceptionEngine:
 
     @staticmethod
     def normalize_sensory_input(raw: Any) -> np.ndarray:
-        """Normalize arbitrary sensory observations into a spatial 2D array."""
+        """Normalize arbitrary sensory observations (camera, depth, lidar, 2D grid) into a spatial 2D array.
+
+        Supports:
+        - 2D integer grids (e.g. ARC, Roguelike, Atari RAM/grid)
+        - 2D float arrays (e.g. Depth maps, LiDAR range grids) -> quantized to perceptual levels
+        - 3D arrays (e.g. RGB camera (H, W, 3), LiDAR multi-channel, or temporal stack (T, H, W))
+        - 3D Point Cloud (N, 3) (x, y, z) -> 2D Bird's-Eye View (BEV) occupancy grid
+        - 1D LiDAR range arrays (N,) -> (1, N) range profile
+        - Objects with .frame, .grid, .image, or .raw_data
+        """
         if raw is None:
             return np.zeros((1, 1), dtype=int)
 
@@ -89,36 +97,73 @@ class PerceptionEngine:
         elif hasattr(raw, "image") and raw.image is not None:
             raw = raw.image
 
-        if isinstance(raw, np.ndarray):
-            if raw.ndim == 2:
-                if np.issubdtype(raw.dtype, np.floating):
-                    u_vals = np.unique(raw)
-                    if len(u_vals) <= 32:
-                        return np.round(raw).astype(int)
-                    bins = np.linspace(float(raw.min()), float(raw.max()), 16)
-                    return np.digitize(raw, bins).astype(int)
-                return raw.astype(int)
-            elif raw.ndim == 3:
-                H, W, C = raw.shape
-                if C == 3:
-                    # Grayscale luminance quantization (Rec. 601)
-                    gray = 0.299 * raw[:, :, 0] + 0.587 * raw[:, :, 1] + 0.114 * raw[:, :, 2]
-                    return (gray / 25.5).astype(int)
-                return raw[:, :, 0].astype(int)
-            elif raw.ndim == 1:
-                side = int(math.isqrt(raw.size))
-                if side * side == raw.size:
-                    return raw.reshape((side, side)).astype(int)
-                return raw.reshape((1, -1)).astype(int)
-
         if isinstance(raw, (list, tuple)):
-            try:
-                arr = np.array(raw)
-                return PerceptionEngine.normalize_sensory_input(arr)
-            except Exception:
-                pass
+            if len(raw) == 0:
+                return np.zeros((1, 1), dtype=int)
+            raw = np.asarray(raw)
 
-        return np.zeros((1, 1), dtype=int)
+        if not isinstance(raw, np.ndarray):
+            try:
+                raw = np.asarray(raw)
+            except Exception:
+                return np.zeros((1, 1), dtype=int)
+
+        if raw.ndim == 3 and raw.shape[0] < min(raw.shape[1], raw.shape[2]):
+            raw = raw[-1]
+
+        if raw.ndim == 3 and raw.shape[2] in (1, 3, 4):
+            if raw.shape[2] == 1:
+                raw = raw[:, :, 0]
+            elif raw.shape[2] in (3, 4):
+                r = raw[:, :, 0].astype(float)
+                g = raw[:, :, 1].astype(float)
+                b = raw[:, :, 2].astype(float)
+                lum = 0.299 * r + 0.587 * g + 0.114 * b
+                raw = np.digitize(lum, np.linspace(0, 255, 16)).astype(int)
+
+        if raw.ndim == 2 and np.issubdtype(raw.dtype, np.floating):
+            min_v, max_v = float(np.nanmin(raw)), float(np.nanmax(raw))
+            if max_v > min_v:
+                raw = np.digitize(raw, np.linspace(min_v, max_v, 16)).astype(int)
+            else:
+                raw = np.zeros(raw.shape, dtype=int)
+
+        # 1D LiDAR range arrays (N,) -> (1, N) range profile
+        if raw.ndim == 1:
+            if np.issubdtype(raw.dtype, np.floating):
+                min_v, max_v = float(np.nanmin(raw)), float(np.nanmax(raw))
+                if max_v > min_v:
+                    raw = np.digitize(raw, np.linspace(min_v, max_v, 16)).astype(int)
+                else:
+                    raw = np.zeros(raw.shape, dtype=int)
+            raw = raw.reshape((1, -1))
+
+        # 3D Point Cloud (N, 3) (x, y, z) -> 2D Bird's-Eye View (BEV) occupancy grid
+        elif raw.ndim == 2 and raw.shape[1] == 3 and raw.shape[0] > 3:
+            xs, ys, _zs = raw[:, 0], raw[:, 1], raw[:, 2]
+            grid_res = 32
+            min_x, max_x = float(np.min(xs)), float(np.max(xs))
+            min_y, max_y = float(np.min(ys)), float(np.max(ys))
+            if max_x > min_x and max_y > min_y:
+                xi = np.clip(
+                    np.digitize(xs, np.linspace(min_x, max_x, grid_res)) - 1, 0, grid_res - 1
+                )
+                yi = np.clip(
+                    np.digitize(ys, np.linspace(min_y, max_y, grid_res)) - 1, 0, grid_res - 1
+                )
+                bev = np.zeros((grid_res, grid_res), dtype=int)
+                bev[yi, xi] = 1
+                raw = bev
+            else:
+                raw = np.zeros((grid_res, grid_res), dtype=int)
+
+        if raw.ndim != 2:
+            if raw.ndim > 2:
+                raw = raw.reshape((raw.shape[0], -1))
+            else:
+                raw = np.zeros((1, 1), dtype=int)
+
+        return raw.astype(int)
 
     @staticmethod
     def estimate_background(

@@ -19,6 +19,7 @@ import numpy as np
 from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
 from hbllm.hcir.world.cortex_causal import CausalInductionCortex
 from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
+from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
@@ -652,3 +653,75 @@ class TestAnteriorCingulateConflictMonitor:
         # Now collect_key is completed; sg_door prerequisites are satisfied!
         assert sg_door.are_prerequisites_met(completed_ids=set(stack.completed_subgoals)) is True
         assert stack.current_subgoal == sg_door
+
+
+class TestMotorCortexEffector:
+    """Test Motor Cortex Affordance Parsing, Motor Quantum Calibration, and Allocentric Targeting."""
+
+    def test_parse_action_spec_variants(self) -> None:
+        # 1. Bare int
+        aff_bare = MotorCortexEffector.parse_action_spec(1)
+        assert aff_bare.action_id == 1
+        assert aff_bare.is_displacement is False
+        assert aff_bare.requires_spatial_target is False
+
+        # 2. Displacement dict
+        aff_move = MotorCortexEffector.parse_action_spec({"action_id": 2, "name": "MOVE_UP"})
+        assert aff_move.action_id == 2
+        assert aff_move.is_displacement is True
+        assert aff_move.requires_spatial_target is False
+
+        # 3. Spatial effector click dict
+        aff_click = MotorCortexEffector.parse_action_spec(
+            {
+                "action_id": 6,
+                "name": "CLICK_CELL",
+                "parameters": {"x": "int", "y": "int"},
+            }
+        )
+        assert aff_click.action_id == 6
+        assert aff_click.requires_spatial_target is True
+        assert aff_click.target_param_keys == ("x", "y")
+
+    def test_infer_motor_step_size(self) -> None:
+        class DummyDyn:
+            def __init__(self, dr: int, dc: int, is_disp: bool = True):
+                self.dr = dr
+                self.dc = dc
+                self._is_disp = is_disp
+
+            def is_displacement_action(self) -> bool:
+                return self._is_disp
+
+            def get_displacement(self) -> tuple[int, int]:
+                return (self.dr, self.dc)
+
+        dynamics = {
+            1: DummyDyn(-1, 0),
+            2: DummyDyn(3, 0),  # Leap of 3
+            3: DummyDyn(0, 0, is_disp=False),
+        }
+        step = MotorCortexEffector.infer_motor_step_size([1, 2, 3], dynamics)
+        assert step == 3
+
+    def test_ground_effector_action_via_engine(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine()
+        engine.register_action_space(
+            [
+                {"action_id": 1, "name": "MOVE_UP"},
+                {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+            ]
+        )
+        assert engine.is_spatial_effector(6) is True
+        assert engine.is_displacement_action(1) is True
+
+        grid = np.zeros((10, 10), dtype=int)
+        # Put an entity at (4, 7)
+        grid[4, 7] = 3
+
+        coords = engine.ground_effector_action(grid, action=6)
+        assert "x" in coords and "y" in coords
+        assert 0 <= coords["x"] < 10
+        assert 0 <= coords["y"] < 10
