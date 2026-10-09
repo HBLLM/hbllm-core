@@ -267,7 +267,7 @@ def test_hierarchical_subgoal_decomposition_multi_stage_switches() -> None:
 
 def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
     """Verify MyAgent with disable_archetypes=True routes via AutonomousEpistemicEngine."""
-    from kaggle_submission.my_agent import GameAction, MyAgent
+    from kaggle_submission.my_agent import FrameData, GameAction, MyAgent
 
     agent = MyAgent(disable_archetypes=True)
     assert hasattr(agent, "internal_engine")
@@ -278,15 +278,13 @@ def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
     grid[2, 2] = 1
     available_actions = [1, 2, 3, 4]
 
-    class MockFrame:
-        def __init__(self) -> None:
-            self.state = None
-            self.frame = grid
-            self.available_actions = available_actions
-            self.levels_completed = 0
-            self.win_levels = 1
+    frame = FrameData()
+    frame.state = None
+    frame.frame = grid
+    frame.available_actions = available_actions
+    frame.levels_completed = 0
+    frame.win_levels = 1
 
-    frame = MockFrame()
     act = agent.choose_action([frame], frame)
     assert act.value in available_actions or act == GameAction.RESET
 
@@ -561,3 +559,113 @@ def test_active_inference_action_selection_wiring() -> None:
     # Action 4 (RIGHT) moves towards (4, 7) with 0 visits -> highest information gain + lowest cost
     act, _ = engine.plan_epistemic_probe(grid, [1, 2, 3, 4])
     assert act == 4
+
+
+def test_plan_epistemic_probe_uncalibrated_guard() -> None:
+    """Verify plan_epistemic_probe does not raise KeyError when actions are uncalibrated in dynamics."""
+    from hbllm.hcir.world.autonomous_epistemic_engine import ActionAffordance
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 5)
+
+    # Action 3 is flagged as displacement in affordances, but NOT calibrated in action_dynamics
+    engine.action_affordances[3] = ActionAffordance(action_id=3, is_displacement=True)
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[5, 5] = 1
+
+    # Should not raise KeyError: 3; should safely return an action
+    chosen_act, _ = engine.plan_epistemic_probe(grid, [3])
+    assert chosen_act == 3
+
+
+def test_gestalt_relational_affordances_and_maze_isolation() -> None:
+    """Verify Gestalt relational affordance detection avoids misclassifying maze walls as mirror targets."""
+    from hbllm.hcir.world.autonomous_epistemic_engine import PerceptionEngine
+
+    grid = np.zeros((30, 30), dtype=int)
+    # Long straight vertical maze wall (h_span = 24, w_span = 1, len = 24)
+    grid[3:27, 10] = 8  # Wall feature 8
+
+    # Small salient key/switch item at (15, 5)
+    grid[15, 5] = 3
+
+    goals = PerceptionEngine.detect_structural_goals(grid, bg=0, barrier_features={8})
+
+    # The maze wall (feature 8) must NEVER be returned as a relational alignment target or optical mirror
+    wall_goals = [g for g in goals if g.get("feature") == 8]
+    assert len(wall_goals) == 0
+
+
+def test_vmpfc_remote_causal_and_ba10_subgoal_integration() -> None:
+    """Verify vmPFC remote causal learning correlates actions with distal transitions and drives BA10 subgoals."""
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (2, 2)
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # Frame 0: Avatar at (2, 2), remote switch at (2, 3), locked door at (8, 8)
+    prev_grid = np.zeros((10, 10), dtype=int)
+    prev_grid[2, 2] = 1
+    prev_grid[2, 3] = 6  # Pressure switch
+    prev_grid[8, 8] = 9  # Barrier door
+
+    engine.prev_grid = prev_grid
+    engine.last_action = 4  # Avatar steps RIGHT onto switch at (2, 3)
+
+    # Frame 1: Avatar now at (2, 3), distant door at (8, 8) opened (changed to 0)
+    curr_grid = prev_grid.copy()
+    curr_grid[2, 2] = 0
+    curr_grid[2, 3] = 1  # Avatar on switch
+    curr_grid[8, 8] = 0  # Door disappeared
+
+    engine.avatar_pos = (2, 3)
+    engine.learned_barriers.add((8, 8))
+
+    engine.assimilate_feedback(curr_grid, [1, 2, 3, 4])
+
+    # vmPFC should correlate trigger at (2, 3) with opening cell (8, 8)
+    aff = engine.working_memory.remote_causal.get_trigger_for_barrier((8, 8))
+    assert aff is not None
+    assert aff.trigger_pos == (2, 3)
+
+    # Barrier at (8, 8) should be cleared
+    assert (8, 8) not in engine.learned_barriers
+
+    # Trigger at (2, 3) should be registered in activated triggers
+    assert (2, 3) in engine.working_memory.activated_triggers
+
+
+def test_acc_conflict_monitoring_general_discrete_action() -> None:
+    """Verify ACC conflict accumulator selects uninhibited discrete actions (e.g. 9) when looping without hardcoding."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 5)
+
+    # Simulate stuck/looping state
+    engine.consecutive_stuck_steps = 3
+    engine.recent_positions.extend([(5, 5), (5, 5), (5, 5)])
+
+    # Available actions include displacement 1, 2, 3, 4 and custom discrete interaction action 9
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[5, 5] = 1
+
+    # Action 9 is a discrete interaction action (not 5!)
+    available_actions = [1, 2, 3, 4, 9]
+
+    chosen_act, _ = engine.decide(grid, available_actions)
+    # The ACC conflict accumulator should trigger an exploratory surge on discrete action 9
+    assert chosen_act == 9

@@ -18,6 +18,8 @@ import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -253,4 +255,54 @@ class OpticalRayProjector:
                         )
                     )
 
+        return hypotheses
+
+    @staticmethod
+    def detect_and_solve_optical_paths(
+        grid: np.ndarray,
+        background_feature: int,
+        receptors: list[tuple[int, int]],
+        barriers: set[tuple[int, int]],
+        min_beam_length: int = 2,
+    ) -> list[MirrorPlacementHypothesis]:
+        """Detect active optical ray beams in grid and solve required mirror placement for receptors."""
+        H, W = grid.shape
+        hypotheses: list[MirrorPlacementHypothesis] = []
+        if not receptors:
+            return hypotheses
+
+        visited_beams: set[tuple[int, int, int, int]] = set()
+
+        for r in range(H):
+            for c in range(W):
+                feat = int(grid[r, c])
+                if feat == background_feature or (r, c) in barriers:
+                    continue
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    if (r, c, dr, dc) in visited_beams:
+                        continue
+                    beam_cells: list[tuple[int, int]] = [(r, c)]
+                    cr, cc = r + dr, c + dc
+                    while (
+                        0 <= cr < H
+                        and 0 <= cc < W
+                        and int(grid[cr, cc]) == feat
+                        and (cr, cc) not in barriers
+                    ):
+                        beam_cells.append((cr, cc))
+                        cr += dr
+                        cc += dc
+                    if len(beam_cells) >= min_beam_length:
+                        for br, bc in beam_cells:
+                            visited_beams.add((br, bc, dr, dc))
+                        emitter_pos = beam_cells[-1]
+                        for rec_pos in receptors:
+                            solved = OpticalRayProjector.solve_mirror_placement(
+                                emitter_pos=emitter_pos,
+                                emitter_dir=(dr, dc),
+                                receptor_pos=rec_pos,
+                                grid_shape=(H, W),
+                                barriers=barriers,
+                            )
+                            hypotheses.extend(solved)
         return hypotheses

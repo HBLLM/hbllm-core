@@ -80,6 +80,10 @@ class BilateralCoordinateIntegrator:
                 dr1, dc1 = delta1
                 dr2, dc2 = delta2
 
+                # Two components of the same sprite or adjacent cells cannot be bilateral agents
+                if abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1]) <= 3:
+                    continue
+
                 if (dr1, dc1) == (0, 0) and (dr2, dc2) == (0, 0):
                     continue
 

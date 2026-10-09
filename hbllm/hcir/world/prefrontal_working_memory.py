@@ -125,7 +125,9 @@ class PrefrontalWorkingMemory:
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
-            self.habenular_ior = HabenularEpisodicIOR()
+            self.habenular_ior.reset()
+        else:
+            self.habenular_ior.reset_episode(retain_long_term=True)
 
     def register_cardinality_constraint(
         self,

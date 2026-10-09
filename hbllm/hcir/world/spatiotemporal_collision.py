@@ -42,11 +42,14 @@ class SpatiotemporalCollisionCones:
         self.projected_trajectories: list[ProjectedTrajectory] = []
         # (time_step) -> set of occupied positions
         self.step_occupied_cells: dict[int, set[tuple[int, int]]] = {}
+        # (feature_id, time_step) -> set of occupied positions
+        self.step_occupied_by_feat: dict[int, dict[int, set[tuple[int, int]]]] = {}
 
     def reset_episode(self) -> None:
         """Clear all active trajectory projections for a new trial."""
         self.projected_trajectories.clear()
         self.step_occupied_cells.clear()
+        self.step_occupied_by_feat.clear()
 
     def update_trajectories(
         self,
@@ -60,6 +63,7 @@ class SpatiotemporalCollisionCones:
         T = horizon or self.default_horizon
         self.projected_trajectories.clear()
         self.step_occupied_cells.clear()
+        self.step_occupied_by_feat.clear()
 
         for t in range(1, T + 1):
             self.step_occupied_cells[t] = set()
@@ -70,10 +74,19 @@ class SpatiotemporalCollisionCones:
             if vr == 0 and vc == 0:
                 continue
 
+            feat_id = next(iter(entity.features)) if entity.features else 0
             curr_r = int(round(entity.centroid[0]))
             curr_c = int(round(entity.centroid[1]))
             cur_vr, cur_vc = vr, vc
             simulated_positions: list[tuple[int, int]] = []
+
+            # Compute relative offsets of all cells comprising the entity footprint
+            rel_offsets: list[tuple[int, int]] = []
+            if entity.cells:
+                for cr, cc in entity.cells:
+                    rel_offsets.append((cr - curr_r, cc - curr_c))
+            else:
+                rel_offsets = [(0, 0)]
 
             for step in range(1, T + 1):
                 next_r = curr_r + cur_vr
@@ -100,11 +113,19 @@ class SpatiotemporalCollisionCones:
                 next_c = max(0, min(W - 1, next_c))
 
                 simulated_positions.append((next_r, next_c))
-                self.step_occupied_cells[step].add((next_r, next_c))
+
+                # Add all cells in the simulated physical footprint
+                for dr_o, dc_o in rel_offsets:
+                    cell_r = next_r + dr_o
+                    cell_c = next_c + dc_o
+                    if 0 <= cell_r < H and 0 <= cell_c < W:
+                        self.step_occupied_cells[step].add((cell_r, cell_c))
+                        self.step_occupied_by_feat.setdefault(feat_id, {}).setdefault(
+                            step, set()
+                        ).add((cell_r, cell_c))
 
                 curr_r, curr_c = next_r, next_c
 
-            feat_id = next(iter(entity.features)) if entity.features else 0
             proj = ProjectedTrajectory(
                 entity_id=f"kinetic_{idx}",
                 feature_id=feat_id,
@@ -114,9 +135,32 @@ class SpatiotemporalCollisionCones:
             )
             self.projected_trajectories.append(proj)
 
-    def is_collision_hazard(self, r: int, c: int, time_step: int) -> bool:
-        """Check whether (r, c) is projected to be occupied by a kinetic entity at time_step."""
-        return (r, c) in self.step_occupied_cells.get(time_step, set())
+    def is_collision_hazard(
+        self,
+        r: int,
+        c: int,
+        time_step: int,
+        clearance: int = 0,
+        ignored_features: set[int] | None = None,
+    ) -> bool:
+        """Check whether (r, c) or its clearance neighborhood is projected to be occupied by a kinetic entity at time_step."""
+        if ignored_features:
+            occupied: set[tuple[int, int]] = set()
+            for feat, steps in self.step_occupied_by_feat.items():
+                if feat not in ignored_features:
+                    occupied.update(steps.get(time_step, set()))
+        else:
+            occupied = self.step_occupied_cells.get(time_step, set())
+
+        if not occupied:
+            return False
+        if clearance == 0:
+            return (r, c) in occupied
+        for dr in range(-clearance, clearance + 1):
+            for dc in range(-clearance, clearance + 1):
+                if (r + dr, c + dc) in occupied:
+                    return True
+        return False
 
     def get_collision_cone_at_step(self, time_step: int) -> set[tuple[int, int]]:
         """Return all space-time positions projected to be occupied at future time_step."""

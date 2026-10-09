@@ -372,6 +372,16 @@ class ObjectStateGraphPlanner:
         for act in available_actions:
             if engine.is_spatial_effector(act):
                 continue
+            if (
+                getattr(engine, "immobile_entity_actions", None)
+                and act in engine.immobile_entity_actions
+            ):
+                continue
+            if (
+                getattr(engine, "inhibited_actions", None)
+                and engine.inhibited_actions.get(act, 0) > 0
+            ):
+                continue
             dyn = engine.action_dynamics.get(act)
             if dyn is not None and dyn.is_displacement_action():
                 dr, dc = dyn.get_displacement()

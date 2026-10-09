@@ -110,7 +110,11 @@ class FrontopolarSubgoalStack:
         dest = subgoal.target_destination
         if subgoal.subgoal_type in (SubgoalType.PARK_IN_HOLDING_BAY, SubgoalType.DELIVER_TO_GOAL):
             return dest in current_entity_positions
-        if subgoal.subgoal_type == SubgoalType.TRANSIT_CORRIDOR:
+        if subgoal.subgoal_type in (
+            SubgoalType.TRANSIT_CORRIDOR,
+            SubgoalType.UNLOCK_REMOTE_MECHANISM,
+            SubgoalType.ALIGN_OPTICAL_REFLECTOR,
+        ):
             return avatar_pos == dest
         return False
 

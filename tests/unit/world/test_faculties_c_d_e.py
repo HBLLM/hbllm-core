@@ -199,3 +199,140 @@ def test_deliberate_to_habitual_search_backoff() -> None:
     engine.decide(grid, available_actions)
     # The new goal was detected, resetting cooldown and attempting simulation
     assert engine.simulation_cooldown <= 2  # Salience triggered, simulation attempted and updated
+
+
+def test_faculty_c_large_stride_kinetic_segregation() -> None:
+    """Test MT/V5 kinetic segregation when movement step size exceeds sprite dimensions."""
+    stream = DorsalKineticStream()
+    H, W = 30, 30
+    prev_grid = np.zeros((H, W), dtype=int)
+    curr_grid = np.zeros((H, W), dtype=int)
+
+    # 3x3 Avatar at (10, 10): features {2, 3}
+    for r in range(9, 12):
+        for c in range(9, 12):
+            prev_grid[r, c] = 2
+    prev_grid[10, 10] = 3
+
+    # 3x3 Sentry patroller at (20, 5): features {7, 8}
+    for r in range(19, 22):
+        for c in range(4, 7):
+            prev_grid[r, c] = 7
+    prev_grid[20, 5] = 8
+
+    # Action moves avatar RIGHT by 6 cells (dr=0, dc=6) -> new pos (10, 16)
+    for r in range(9, 12):
+        for c in range(15, 18):
+            curr_grid[r, c] = 2
+    curr_grid[10, 16] = 3
+
+    # Sentry patrols DOWN by 5 cells (dr=5, dc=0) -> new pos (25, 5)
+    for r in range(24, 27):
+        for c in range(4, 7):
+            curr_grid[r, c] = 7
+    curr_grid[25, 5] = 8
+
+    res = stream.segregate_motion(
+        prev_grid=prev_grid,
+        curr_grid=curr_grid,
+        commanded_delta=(0, 6),
+        background_feature=0,
+    )
+
+    # Corollary discharge correctly isolates self avatar
+    assert res.self_avatar is not None
+    assert res.self_avatar.is_self is True
+    assert np.isclose(res.self_avatar.velocity[0], 0.0)
+    assert np.isclose(res.self_avatar.velocity[1], 6.0)
+    assert {2, 3}.issubset(res.self_avatar.features)
+
+    # Sentry correctly segregated with velocity (5, 0)
+    assert len(res.external_agents) == 1
+    sentry = res.external_agents[0]
+    assert sentry.is_self is False
+    assert np.isclose(sentry.velocity[0], 5.0)
+    assert np.isclose(sentry.velocity[1], 0.0)
+    assert {7, 8}.issubset(sentry.features)
+
+
+def test_spatiotemporal_collision_cone_footprint() -> None:
+    """Test premotor collision cones project full physical entity footprint."""
+    from hbllm.hcir.world.kinetic_stream import KineticEntity
+    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
+
+    cones = SpatiotemporalCollisionCones()
+    # 3x3 entity moving RIGHT with velocity (0, 2)
+    cells = [(r, c) for r in range(9, 12) for c in range(9, 12)]
+    entity = KineticEntity(
+        centroid=(10.0, 10.0),
+        velocity=(0.0, 2.0),
+        cells=cells,
+        bounding_box=(9, 11, 9, 11),
+        area=9,
+        features={7},
+    )
+
+    cones.update_trajectories(
+        kinetic_entities=[entity],
+        static_barriers=set(),
+        grid_shape=(30, 30),
+        horizon=5,
+    )
+
+    # At step 1, centroid is at (10, 12), footprint spans r in 9..11, c in 11..13
+    assert cones.is_collision_hazard(10, 12, time_step=1)
+    assert cones.is_collision_hazard(9, 11, time_step=1)  # corner of footprint
+    assert cones.is_collision_hazard(11, 13, time_step=1)  # opposite corner
+    assert not cones.is_collision_hazard(10, 15, time_step=1)
+
+    # At step 2, centroid is at (10, 14), footprint spans r in 9..11, c in 13..15
+    assert cones.is_collision_hazard(10, 14, time_step=2)
+    assert cones.is_collision_hazard(9, 13, time_step=2)
+
+
+def test_optical_ray_mental_imagery() -> None:
+    """Test Kosslyn optical mental imagery ray projection and mirror solving."""
+    from hbllm.hcir.world.optical_ray_projection import MirrorOrientation, OpticalRayProjector
+
+    grid = np.zeros((20, 20), dtype=int)
+    # Emitter beam propagating RIGHT from (5, 2) to (5, 5) with feature 4
+    grid[5, 2] = 4
+    grid[5, 3] = 4
+    grid[5, 4] = 4
+    grid[5, 5] = 4
+
+    # Target receptor at (12, 10)
+    receptors = [(12, 10)]
+
+    hyps = OpticalRayProjector.detect_and_solve_optical_paths(
+        grid=grid,
+        background_feature=0,
+        receptors=receptors,
+        barriers=set(),
+    )
+
+    # Expected mirror at (5, 10): redirects rightward ray (0, 1) downward (1, 0)
+    assert len(hyps) >= 1
+    best_hyp = hyps[0]
+    assert best_hyp.mirror_pos == (5, 10)
+    assert best_hyp.required_orientation == MirrorOrientation.BACKSLASH
+    assert best_hyp.incoming_dir == (0, 1)
+    assert best_hyp.outgoing_dir == (1, 0)
+
+
+def test_peripheral_hud_filtering() -> None:
+    """Test that peripheral HUD border lines are not confused with avatars."""
+    engine = AutonomousEpistemicEngine()
+    grid = np.zeros((30, 30), dtype=int)
+
+    # 1-pixel-wide HUD energy line along column 29
+    for r in range(30):
+        grid[r, 29] = 2
+
+    # True avatar inside room at (15, 15)
+    grid[14:17, 14:17] = 2
+
+    engine._update_avatar_position_from_grid(grid, known_av_feats={2})
+    # Should localize to interior avatar (15, 15), not the HUD border (c=29)
+    assert engine.avatar_pos is not None
+    assert engine.avatar_pos == (15, 15)

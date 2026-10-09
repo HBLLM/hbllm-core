@@ -86,6 +86,8 @@ class DorsalKineticStream:
         labeled_diff, num_features = label(diff_mask)
 
         candidates: list[KineticEntity] = []
+        vacated_clusters: list[dict] = []
+        occupied_clusters: list[dict] = []
 
         for feat_id in range(1, num_features + 1):
             cluster_coords = np.argwhere(labeled_diff == feat_id)
@@ -109,9 +111,87 @@ class DorsalKineticStream:
                 if curr_grid[r, c] != background_feature and prev_grid[r, c] == background_feature
             ]
 
-            # If pure color swap without clear background appearance, inspect feature counts
-            if not vacated or not occupied:
-                # Direct centroid comparison of previous vs current non-background points in cluster
+            # If background_feature did not capture the substrate (e.g. floor substrate is 0 while bg is canvas color):
+            if not vacated and not occupied:
+                prev_unique = {int(prev_grid[r, c]) for r, c in cells}
+                curr_unique = {int(curr_grid[r, c]) for r, c in cells}
+                if len(curr_unique) == 1 and len(prev_unique) > 1:
+                    vacated = cells
+                elif len(prev_unique) == 1 and len(curr_unique) > 1:
+                    occupied = cells
+
+            if vacated and occupied:
+                # Overlapping footprint (e.g. 1-cell step with overlapping area)
+                c_vacated = (
+                    float(np.mean([p[0] for p in vacated])),
+                    float(np.mean([p[1] for p in vacated])),
+                )
+                c_occupied = (
+                    float(np.mean([p[0] for p in occupied])),
+                    float(np.mean([p[1] for p in occupied])),
+                )
+                velocity = (c_occupied[0] - c_vacated[0], c_occupied[1] - c_vacated[1])
+                curr_cells = occupied
+                feats = {
+                    int(curr_grid[r, c])
+                    for r, c in curr_cells
+                    if curr_grid[r, c] != background_feature
+                } or {int(curr_grid[r, c]) for r, c in curr_cells}
+                cand = KineticEntity(
+                    centroid=c_occupied,
+                    velocity=velocity,
+                    cells=curr_cells,
+                    bounding_box=bbox,
+                    area=len(curr_cells),
+                    features=feats,
+                )
+                candidates.append(cand)
+            elif vacated and not occupied:
+                c_vac = (
+                    float(np.mean([p[0] for p in vacated])),
+                    float(np.mean([p[1] for p in vacated])),
+                )
+                feats = {
+                    int(prev_grid[r, c])
+                    for r, c in vacated
+                    if prev_grid[r, c] != background_feature
+                } or {int(prev_grid[r, c]) for r, c in vacated}
+                sub_feats = {int(curr_grid[r, c]) for r, c in vacated}
+                vacated_clusters.append(
+                    {
+                        "id": feat_id,
+                        "centroid": c_vac,
+                        "cells": vacated,
+                        "bbox": bbox,
+                        "area": len(vacated),
+                        "features": feats,
+                        "substrate": sub_feats,
+                    }
+                )
+            elif occupied and not vacated:
+                c_occ = (
+                    float(np.mean([p[0] for p in occupied])),
+                    float(np.mean([p[1] for p in occupied])),
+                )
+                feats = {
+                    int(curr_grid[r, c])
+                    for r, c in occupied
+                    if curr_grid[r, c] != background_feature
+                } or {int(curr_grid[r, c]) for r, c in occupied}
+                sub_feats = {int(prev_grid[r, c]) for r, c in occupied}
+                occupied_clusters.append(
+                    {
+                        "id": feat_id,
+                        "centroid": c_occ,
+                        "cells": occupied,
+                        "bbox": bbox,
+                        "area": len(occupied),
+                        "features": feats,
+                        "substrate": sub_feats,
+                    }
+                )
+            else:
+                # Direct centroid comparison or single color change
                 prev_non_bg = [(r, c) for r, c in cells if prev_grid[r, c] != background_feature]
                 curr_non_bg = [(r, c) for r, c in cells if curr_grid[r, c] != background_feature]
                 if prev_non_bg and curr_non_bg:
@@ -125,41 +205,115 @@ class DorsalKineticStream:
                     )
                     velocity = (c_curr[0] - c_prev[0], c_curr[1] - c_prev[1])
                     curr_cells = curr_non_bg
+                    feats = {
+                        int(curr_grid[r, c])
+                        for r, c in curr_cells
+                        if curr_grid[r, c] != background_feature
+                    } or {int(curr_grid[r, c]) for r, c in cells}
+                    candidates.append(
+                        KineticEntity(
+                            centroid=c_curr,
+                            velocity=velocity,
+                            cells=curr_cells,
+                            bounding_box=bbox,
+                            area=len(curr_cells),
+                            features=feats,
+                        )
+                    )
                 else:
-                    c_curr = (
+                    c_mid = (
                         float(np.mean(cluster_coords[:, 0])),
                         float(np.mean(cluster_coords[:, 1])),
                     )
-                    velocity = (0.0, 0.0)
-                    curr_cells = cells
-            else:
-                c_vacated = (
-                    float(np.mean([p[0] for p in vacated])),
-                    float(np.mean([p[1] for p in vacated])),
-                )
-                c_occupied = (
-                    float(np.mean([p[0] for p in occupied])),
-                    float(np.mean([p[1] for p in occupied])),
-                )
-                velocity = (c_occupied[0] - c_vacated[0], c_occupied[1] - c_vacated[1])
-                c_curr = c_occupied
-                curr_cells = occupied
+                    p_feats = {int(prev_grid[r, c]) for r, c in cells}
+                    c_feats = {int(curr_grid[r, c]) for r, c in cells}
+                    vacated_clusters.append(
+                        {
+                            "id": feat_id,
+                            "centroid": c_mid,
+                            "cells": cells,
+                            "bbox": bbox,
+                            "area": len(cells),
+                            "features": p_feats,
+                            "substrate": c_feats,
+                        }
+                    )
+                    occupied_clusters.append(
+                        {
+                            "id": feat_id,
+                            "centroid": c_mid,
+                            "cells": cells,
+                            "bbox": bbox,
+                            "area": len(cells),
+                            "features": c_feats,
+                            "substrate": p_feats,
+                        }
+                    )
 
-            feats = {
-                int(curr_grid[r, c]) for r, c in curr_cells if curr_grid[r, c] != background_feature
-            }
-            if not feats:
-                feats = {int(curr_grid[r, c]) for r, c in cells}
+        # Match disjoint vacated clusters to occupied clusters (stride / jump motion >= entity size)
+        used_vac: set[int] = set()
+        used_occ: set[int] = set()
 
-            cand = KineticEntity(
-                centroid=c_curr,
-                velocity=velocity,
-                cells=curr_cells,
-                bounding_box=bbox,
-                area=len(curr_cells),
-                features=feats,
-            )
-            candidates.append(cand)
+        for o_idx, occ in enumerate(occupied_clusters):
+            best_v_idx: int | None = None
+            min_cost = float("inf")
+            for v_idx, vac in enumerate(vacated_clusters):
+                if v_idx in used_vac or vac["id"] == occ["id"]:
+                    continue
+                common_feats = occ["features"] & vac["features"]
+                if not common_feats:
+                    continue
+                area_diff = abs(occ["area"] - vac["area"])
+                if area_diff > max(3, int(0.5 * max(occ["area"], vac["area"]))):
+                    continue
+                dr = occ["centroid"][0] - vac["centroid"][0]
+                dc = occ["centroid"][1] - vac["centroid"][1]
+                dist = (dr**2 + dc**2) ** 0.5
+                if dist < 0.5:
+                    continue
+                common_sub = occ["substrate"] & vac["substrate"]
+                sub_bonus = 20.0 if common_sub else 0.0
+                cost = dist + 5.0 * area_diff - 10.0 * len(common_feats) - sub_bonus
+                if cost < min_cost:
+                    min_cost = cost
+                    best_v_idx = v_idx
+
+            if best_v_idx is not None:
+                vac = vacated_clusters[best_v_idx]
+                used_vac.add(best_v_idx)
+                used_occ.add(o_idx)
+                velocity = (
+                    occ["centroid"][0] - vac["centroid"][0],
+                    occ["centroid"][1] - vac["centroid"][1],
+                )
+                cand = KineticEntity(
+                    centroid=occ["centroid"],
+                    velocity=velocity,
+                    cells=occ["cells"],
+                    bounding_box=occ["bbox"],
+                    area=occ["area"],
+                    features=occ["features"],
+                )
+                candidates.append(cand)
+
+        # Unmatched occupied clusters: stationary or unlinked entities
+        for o_idx, occ in enumerate(occupied_clusters):
+            if o_idx not in used_occ:
+                already_covered = any(
+                    abs(c.centroid[0] - occ["centroid"][0]) < 0.5
+                    and abs(c.centroid[1] - occ["centroid"][1]) < 0.5
+                    for c in candidates
+                )
+                if not already_covered:
+                    cand = KineticEntity(
+                        centroid=occ["centroid"],
+                        velocity=(0.0, 0.0),
+                        cells=occ["cells"],
+                        bounding_box=occ["bbox"],
+                        area=occ["area"],
+                        features=occ["features"],
+                    )
+                    candidates.append(cand)
 
         # Corollary Discharge Matching:
         self_avatar: KineticEntity | None = None
@@ -170,13 +324,21 @@ class DorsalKineticStream:
             best_match_idx: int | None = None
             min_err = float("inf")
 
+            # Ventral body schema gating: if known_avatar_features is established,
+            # prioritize candidates that possess the avatar's visual features
+            has_feat_match = known_avatar_features and any(
+                bool(cand.features & known_avatar_features) for cand in candidates
+            )
+
             for i, cand in enumerate(candidates):
+                if has_feat_match and not (cand.features & known_avatar_features):
+                    continue
+
                 err = abs(cand.velocity[0] - exp_dr) + abs(cand.velocity[1] - exp_dc)
-                # Feature prior bonus if matching known avatar
                 if known_avatar_features and (cand.features & known_avatar_features):
                     err *= 0.5
 
-                if err <= self.velocity_tolerance:
+                if err <= self.velocity_tolerance or has_feat_match:
                     if err < min_err:
                         min_err = err
                         best_match_idx = i

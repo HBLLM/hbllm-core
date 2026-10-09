@@ -73,6 +73,7 @@ class SpatiotemporalHazardTracker:
         grid: np.ndarray,
         background_feature: int = 0,
         avatar_features: set[int] | None = None,
+        walkable_features: set[int] | None = None,
     ) -> None:
         if not isinstance(grid, np.ndarray):
             if isinstance(grid, (list, tuple)) and len(grid) > 0:
@@ -101,6 +102,11 @@ class SpatiotemporalHazardTracker:
 
         discovered_periods: list[int] = []
         av_set = avatar_features or set()
+        safe_features = {0, background_feature}
+        if walkable_features:
+            safe_features.update(walkable_features)
+        if av_set:
+            safe_features.update(av_set)
 
         for r, c in fluctuating_indices:
             r_idx, c_idx = int(r), int(c)
@@ -111,16 +117,12 @@ class SpatiotemporalHazardTracker:
                 # Cycle values over the period
                 cycle = series[-best_period:]
                 # Determine which values in this cycle are hazardous:
-                # Known lethal features or periodic non-background environmental features (excluding avatar)
+                # Known lethal features or periodic non-background environmental features (excluding avatar and safe/walkable features)
                 haz_vals = {
                     v
                     for v in cycle
                     if v in self.known_lethal_features
-                    or (
-                        v != background_feature
-                        and v not in av_set
-                        and not self.known_lethal_features
-                    )
+                    or (v not in safe_features and not self.known_lethal_features)
                 }
                 if haz_vals:
                     self.periodic_cells[(r_idx, c_idx)] = DynamicCellPhase(
@@ -172,6 +174,7 @@ class SpatiotemporalHazardTracker:
         future_relative_step: int,
         background_feature: int = 0,
         avatar_features: set[int] | None = None,
+        walkable_features: set[int] | None = None,
     ) -> bool:
         """Predict whether coordinate (r, c) will be lethal or impassable at t_current + future_relative_step."""
         if (r, c) in self.static_lethal_positions:
@@ -184,7 +187,11 @@ class SpatiotemporalHazardTracker:
         # Predicted index in cycle_values
         idx = (future_relative_step - 1) % T
         predicted_val = cell_phase.cycle_values[idx]
+        if predicted_val == 0 or predicted_val == background_feature:
+            return False
         if avatar_features and predicted_val in avatar_features:
+            return False
+        if walkable_features and predicted_val in walkable_features:
             return False
         return predicted_val in cell_phase.hazardous_values
 
@@ -192,16 +199,20 @@ class SpatiotemporalHazardTracker:
         self,
         horizon: int = 24,
         background_feature: int = 0,
+        walkable_features: set[int] | None = None,
     ) -> dict[int, set[tuple[int, int]]]:
         """Generate a schedule mapping relative future step -> set of hazardous coordinates."""
         schedule: dict[int, set[tuple[int, int]]] = {}
+        safe_features = {0, background_feature}
+        if walkable_features:
+            safe_features.update(walkable_features)
         for dt in range(horizon + 1):
             haz_set: set[tuple[int, int]] = set(self.static_lethal_positions)
             for (r, c), cell_phase in self.periodic_cells.items():
                 T = cell_phase.period
                 idx = (dt - 1) % T if dt > 0 else -1
                 val = cell_phase.cycle_values[idx]
-                if val in cell_phase.hazardous_values:
+                if val not in safe_features and val in cell_phase.hazardous_values:
                     haz_set.add((r, c))
             if haz_set:
                 schedule[dt] = haz_set

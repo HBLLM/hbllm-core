@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 
 from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
+from hbllm.hcir.world.cortex_causal import CausalInductionCortex
+from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
@@ -336,6 +338,70 @@ class TestHabenularEpisodicIOR:
         osc_act = ior.detect_action_oscillation()
         assert osc_act == 5
 
+    def test_reset_and_reset_episode(self) -> None:
+        ior = HabenularEpisodicIOR()
+        ior.record_step(1, avatar_pos=(1, 1), action=1)
+        ior.record_step(2, avatar_pos=(1, 2), action=2)
+        record = ior.record_catastrophe(final_step=2, is_lost=True)
+        assert record is not None
+        assert len(ior.repulsion_table) > 0
+        assert len(ior.fatal_prefixes) > 0
+        assert ior.is_action_inhibited((1, 2), 2) is True
+
+        # Transient episode reset retaining long term memory
+        ior.reset_episode(retain_long_term=True)
+        assert len(ior.episode_trace) == 0
+        assert len(ior.recent_actions) == 0
+        assert len(ior.active_inhibitions) == 0
+        # Learned repulsion and fatal records should be retained
+        assert len(ior.repulsion_table) > 0
+        assert len(ior.fatal_prefixes) > 0
+
+        # Full reset
+        ior.reset()
+        assert len(ior.repulsion_table) == 0
+        assert len(ior.fatal_prefixes) == 0
+        assert len(ior.active_inhibitions) == 0
+        assert len(ior.episode_trace) == 0
+        assert len(ior.recent_actions) == 0
+
+
+class TestHippocampalEpisodicCortex:
+    """Test Hippocampal episodic memory, SWR replay, and reset mechanics."""
+
+    def test_reset_clears_all_memories_and_habenular_ior(self) -> None:
+        cortex = HippocampalEpisodicCortex()
+        cortex.record_transition(
+            step=1,
+            avatar_pos=(2, 3),
+            action=4,
+            reward=0.0,
+            is_lost=False,
+        )
+        cortex.record_transition(
+            step=2,
+            avatar_pos=(2, 4),
+            action=2,
+            reward=-10.0,
+            is_lost=True,
+        )
+        cortex.trigger_sharp_wave_ripple_replay(is_lost=True, is_win=False)
+
+        assert len(cortex.catastrophic_replays) > 0
+        assert len(cortex.grounded_lethal_transitions) > 0
+        assert len(cortex.habenular_ior.repulsion_table) > 0
+
+        # Full reset should clear everything including the underlying HabenularEpisodicIOR
+        cortex.reset()
+        assert len(cortex.current_episode) == 0
+        assert len(cortex.past_episodes) == 0
+        assert len(cortex.successful_trajectories) == 0
+        assert len(cortex.catastrophic_replays) == 0
+        assert len(cortex.grounded_lethal_transitions) == 0
+        assert len(cortex.discovered_lethal_features) == 0
+        assert len(cortex.habenular_ior.repulsion_table) == 0
+        assert len(cortex.habenular_ior.fatal_prefixes) == 0
+
 
 class TestCerebellarMotorPhaseGating:
     """Test Cerebellar interval timer and basal ganglia motor phase gating."""
@@ -457,3 +523,43 @@ class TestRemoteCausalAttributor:
         assert aff.trigger_pos == (2, 2)
         assert aff.trigger_feature == 3
         assert aff.confidence >= 0.7
+
+        # Test alias method
+        aff_alias = attributor.get_remote_trigger_for_barrier((8, 8), barrier_feature=8)
+        assert aff_alias == aff
+
+    def test_causal_induction_cortex_query_barrier_clearance(self) -> None:
+        cortex = CausalInductionCortex()
+        prev_grid = np.zeros((10, 10), dtype=int)
+        prev_grid[2, 2] = 3
+        prev_grid[8, 8] = 8
+
+        curr_grid = prev_grid.copy()
+        curr_grid[8, 8] = 0
+
+        # Register distal transition
+        for _ in range(2):
+            cortex.causal_attributor.record_transition(
+                prev_grid=prev_grid,
+                curr_grid=curr_grid,
+                action_pos=(2, 2),
+                background_feature=0,
+            )
+
+        # Query barrier clearance via cortex
+        trig_pos, req_tool = cortex.query_barrier_clearance(barrier_pos=(8, 8), barrier_feature=8)
+        assert trig_pos == (2, 2)
+        assert req_tool is None
+
+        # Test reset_episode with retain_dynamics=False
+        cortex.reset_episode(retain_dynamics=False)
+        trig_pos_after, _ = cortex.query_barrier_clearance(barrier_pos=(8, 8), barrier_feature=8)
+        assert trig_pos_after is None
+
+        # Test attributor.reset()
+        cortex.causal_attributor.co_occurrence_evidence[(((2, 2)), ((8, 8)))] = 5
+        cortex.causal_attributor.reset()
+        assert len(cortex.causal_attributor.co_occurrence_evidence) == 0
+
+        # Test cortex.reset()
+        cortex.reset()

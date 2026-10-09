@@ -292,7 +292,15 @@ def run_all_25_games(
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
 
     arcade = Arcade()
-    environments = arcade.get_environments()
+    raw_environments = arcade.get_environments()
+
+    # Deduplicate environments by unique game_id preserving order
+    seen_ids = set()
+    environments = []
+    for e in raw_environments:
+        if e.game_id not in seen_ids:
+            seen_ids.add(e.game_id)
+            environments.append(e)
 
     if selected_games:
         selected_lower = [g.strip().lower() for g in selected_games if g.strip()]
@@ -606,8 +614,10 @@ if __name__ == "__main__":
     if args.list:
         arcade = Arcade()
         envs = arcade.get_environments()
-        print(f"Available ARC-AGI-3 games ({len(envs)} total):")
-        for i, e in enumerate(envs, 1):
+        seen = set()
+        deduped_envs = [e for e in envs if not (e.game_id in seen or seen.add(e.game_id))]
+        print(f"Available ARC-AGI-3 games ({len(deduped_envs)} total):")
+        for i, e in enumerate(deduped_envs, 1):
             print(f"  {i:2d}. {e.game_id:<12} | Title: {getattr(e, 'title', e.game_id)}")
         sys.exit(0)
 

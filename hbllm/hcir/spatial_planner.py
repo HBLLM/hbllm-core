@@ -79,12 +79,12 @@ EXIT = EntityRole.GOAL
 class SpatialEntity:
     """A lifted entity in the cognitive spatial graph."""
 
-    id: str
-    role: EntityRole
-    centroid: tuple[float, float]
-    grid_pos: tuple[int, int]
-    area: int
-    bounding_box: tuple[int, int, int, int]  # (min_r, max_r, min_c, max_c)
+    id: str = ""
+    role: EntityRole = EntityRole.UNKNOWN
+    centroid: tuple[float, float] = (0.0, 0.0)
+    grid_pos: tuple[int, int] = (0, 0)
+    area: int = 1
+    bounding_box: tuple[int, int, int, int] = (0, 0, 0, 0)  # (min_r, max_r, min_c, max_c)
     component_id: int = -1
     is_deliverable: bool = False
     is_delivered: bool = False
@@ -93,12 +93,12 @@ class SpatialEntity:
 
     def __init__(
         self,
-        id: str,
-        role: EntityRole,
-        centroid: tuple[float, float],
-        grid_pos: tuple[int, int],
-        area: int,
-        bounding_box: tuple[int, int, int, int],
+        id: str = "",
+        role: EntityRole = EntityRole.UNKNOWN,
+        centroid: tuple[float, float] | None = None,
+        grid_pos: tuple[int, int] = (0, 0),
+        area: int = 1,
+        bounding_box: tuple[int, int, int, int] | None = None,
         feature_id: Any | None = None,
         color: int | None = None,
         component_id: int = -1,
@@ -108,12 +108,18 @@ class SpatialEntity:
         properties: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        self.id = id
+        self.id = id or f"ent_{grid_pos[0]}_{grid_pos[1]}"
         self.role = role
-        self.centroid = centroid
         self.grid_pos = grid_pos
+        self.centroid = (
+            centroid if centroid is not None else (float(grid_pos[0]), float(grid_pos[1]))
+        )
         self.area = area
-        self.bounding_box = bounding_box
+        self.bounding_box = (
+            bounding_box
+            if bounding_box is not None
+            else (grid_pos[0], grid_pos[0], grid_pos[1], grid_pos[1])
+        )
         self.component_id = component_id
         self.is_deliverable = is_deliverable
         self.is_delivered = is_delivered

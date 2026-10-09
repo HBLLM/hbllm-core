@@ -65,6 +65,10 @@ class RemoteCausalAttributor:
             self.trigger_registry.clear()
             self.co_occurrence_evidence.clear()
 
+    def reset(self) -> None:
+        """Reset all causal affordances and evidence."""
+        self.reset_episode(retain_long_term=False)
+
     def record_transition(
         self,
         prev_grid: np.ndarray,
@@ -124,8 +128,8 @@ class RemoteCausalAttributor:
             count = self.co_occurrence_evidence[pair_key]
 
             # Compute causal confidence: rises with repeated observations
-            # 1 obs -> 0.55, 2 obs -> 0.85, 3+ obs -> 0.95
-            conf = min(0.98, 0.40 + 0.25 * count)
+            # 1 obs -> 0.75, 2 obs -> 0.98
+            conf = min(0.98, 0.50 + 0.25 * count)
 
             # Check if this affordance is already registered
             existing = [
@@ -185,10 +189,15 @@ class RemoteCausalAttributor:
 
         # Sort by highest causal confidence
         viable = [c for c in candidates if c.confidence >= self.confidence_threshold]
+        if not viable and candidates:
+            viable = [c for c in candidates if c.confidence >= 0.50]
         if viable:
             viable.sort(key=lambda a: a.confidence, reverse=True)
             return viable[0]
         return None
+
+    # Alias for API compatibility across cortex subsystems
+    get_remote_trigger_for_barrier = get_trigger_for_barrier
 
     def get_all_remote_triggers(self) -> list[tuple[int, int]]:
         """Return list of coordinates identified as functional remote triggers."""

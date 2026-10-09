@@ -199,3 +199,20 @@ class HabenularEpisodicIOR:
             )
             return acts[-1]
         return None
+
+    def reset_episode(self, retain_long_term: bool = True) -> None:
+        """Reset transient episode traces while optionally preserving learned negative valence.
+
+        Args:
+            retain_long_term: If True, preserves repulsion table and fatal prefixes across episodes.
+        """
+        self.episode_trace.clear()
+        self.recent_actions.clear()
+        self.active_inhibitions.clear()
+        if not retain_long_term:
+            self.repulsion_table.clear()
+            self.fatal_prefixes.clear()
+
+    def reset(self) -> None:
+        """Full reset of Habenular episodic memory and inhibition state."""
+        self.reset_episode(retain_long_term=False)

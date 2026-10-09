@@ -184,6 +184,9 @@ class CerebellarPhaseClock:
         avatar_pos: tuple[int, int] | None,
         target_pos: tuple[int, int],
         hazard_tracker: Any,
+        background_feature: int = 0,
+        avatar_features: set[int] | None = None,
+        walkable_features: set[int] | None = None,
     ) -> PhaseGateDecision:
         """Evaluate if basal ganglia should hesitate before entering target_pos due to cyclic hazard phase.
 
@@ -217,7 +220,12 @@ class CerebellarPhaseClock:
             # Verify avatar_pos is safe to wait on during the recommended delay
             for w in range(1, decision.wait_steps_recommended + 1):
                 if hazard_tracker.is_hazard_at(
-                    avatar_pos[0], avatar_pos[1], future_relative_step=w
+                    avatar_pos[0],
+                    avatar_pos[1],
+                    future_relative_step=w,
+                    background_feature=background_feature,
+                    avatar_features=avatar_features,
+                    walkable_features=walkable_features,
                 ):
                     return PhaseGateDecision(should_wait=False)
 
