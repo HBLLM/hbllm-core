@@ -342,10 +342,24 @@ def run_all_25_games(
     total_steps_taken = 0
     total_time_start = time.time()
 
+    if scorecard_path.exists():
+        try:
+            saved_data = json.loads(scorecard_path.read_text())
+            results = saved_data.get("games", {})
+            total_levels_passed = int(saved_data.get("total_levels_passed", 0))
+            total_levels_possible = int(saved_data.get("total_levels_possible", 0))
+            print(f"   ⏩ Resuming benchmark: {len(results)} games already completed in existing scorecard.\n")
+        except Exception:
+            pass
+
     for idx, env_meta in enumerate(environments, 1):
         gid = env_meta.game_id
         title = getattr(env_meta, "title", gid)
         baseline = getattr(env_meta, "baseline_actions", None) or [100]
+
+        if gid in results:
+            print(f"[{idx:2d}/{len(environments)}] ⏩ Skipping already completed game {title} ({gid}) ({results[gid].get('levels_passed', 0)}/{results[gid].get('target_levels', len(baseline))} levels)")
+            continue
 
         print(f"\n[{idx:2d}/{len(environments)}] 🎮 Game: {title} ({gid})")
         print(f"    Baseline Actions: {baseline} | Tags: {getattr(env_meta, 'tags', [])}")
