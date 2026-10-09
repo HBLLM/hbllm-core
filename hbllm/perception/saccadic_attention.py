@@ -94,6 +94,17 @@ class SaccadicAttentionSystem:
             motion_mask = grid != prev_grid
             saliency[motion_mask] += 0.40
 
+        # 4. Lateral Occipital Complex (LOC) Morphological Saliency
+        try:
+            from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
+
+            morph_sal = MorphologicalSaliencyEngine.compute_morphological_saliency(
+                grid, background_feature=background_feature
+            )
+            saliency += morph_sal * 0.30
+        except Exception:
+            pass
+
         # Normalize saliency map to [0.0, 1.0]
         max_val = float(np.max(saliency))
         if max_val > 0.0:
@@ -186,6 +197,28 @@ class SaccadicAttentionSystem:
                     and any(grid[pr, pc] != prev_grid[pr, pc] for pr, pc in component_pixels)
                 ):
                     reason = "dynamic_motion_entity"
+
+                # Morphological primitive modulation
+                try:
+                    from hbllm.hcir.world.cortex_morphology import (
+                        MorphologicalSaliencyEngine,
+                        MorphologyPrimitiveType,
+                    )
+
+                    prims = MorphologicalSaliencyEngine.extract_morphological_primitives(
+                        grid, background_feature=background_feature
+                    )
+                    prim_map = {p.feature_id: p for p in prims}
+                    p_info = prim_map.get(val)
+                    if p_info is not None:
+                        if p_info.primitive_type == MorphologyPrimitiveType.HOLLOW_CONTAINER:
+                            final_salience += 0.25
+                            reason = "morphological_hollow_container"
+                        elif p_info.primitive_type == MorphologyPrimitiveType.SINGLETON:
+                            final_salience += 0.20
+                            reason = "morphological_popout_singleton"
+                except Exception:
+                    pass
 
                 entity_fixations.append(
                     FovealFixation(

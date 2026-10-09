@@ -972,3 +972,65 @@ class TestPrefrontalDeliberationEngine:
         safe, should_wait, wait_steps = delib.validate_plan_safety(engine, grid, [1, 2, 3, 4], step)
         assert safe is False
         assert should_wait is False
+
+
+class TestParietalCoordinateTransformer:
+    """Test Posterior Parietal Cortex coordinate conversion and spatial symmetry projector."""
+
+    def test_allo_to_ego_and_ego_to_allo(self) -> None:
+        from hbllm.hcir.world.parietal_coordinate_transform import (
+            ParietalCoordinateTransformer,
+            SpatialEgoVector,
+        )
+
+        avatar_pos = (5, 5)
+        target_pos = (3, 7)  # 2 north, 2 east -> NE, dist 4
+
+        ego_vec = ParietalCoordinateTransformer.allo_to_ego(target_pos, avatar_pos)
+        assert isinstance(ego_vec, SpatialEgoVector)
+        assert ego_vec.delta_r == -2
+        assert ego_vec.delta_c == 2
+        assert ego_vec.manhattan_dist == 4
+        assert ego_vec.bearing == "NE"
+
+        # Invert back to allocentric
+        recovered_allo = ParietalCoordinateTransformer.ego_to_allo(ego_vec, avatar_pos)
+        assert recovered_allo == target_pos
+
+    def test_dihedral_projections(self) -> None:
+        from hbllm.hcir.world.parietal_coordinate_transform import ParietalCoordinateTransformer
+
+        shape = (10, 10)
+        pos = (2, 3)
+
+        refl_h = ParietalCoordinateTransformer.project_dihedral_transform(
+            pos, shape, "reflect_horizontal"
+        )
+        assert refl_h == (2, 6)
+
+        refl_v = ParietalCoordinateTransformer.project_dihedral_transform(
+            pos, shape, "reflect_vertical"
+        )
+        assert refl_v == (7, 3)
+
+        rot_180 = ParietalCoordinateTransformer.project_dihedral_transform(pos, shape, "rotate_180")
+        assert rot_180 == (7, 6)
+
+    def test_symmetry_inference_and_subgoal_transfer(self) -> None:
+        from hbllm.hcir.world.parietal_coordinate_transform import ParietalCoordinateTransformer
+
+        # Symmetrical grid with horizontal reflection symmetry
+        grid = np.zeros((8, 8), dtype=int)
+        grid[2:6, 1] = 4
+        grid[2:6, 6] = 4  # symmetric counterpart
+
+        planes = ParietalCoordinateTransformer.infer_symmetry_planes(grid, background_feature=0)
+        assert planes["horizontal"] == 1.0
+
+        transferred = ParietalCoordinateTransformer.transfer_subgoal_across_symmetry(
+            subgoal_pos=(3, 1),
+            grid_shape=(8, 8),
+            grid=grid,
+            background_feature=0,
+        )
+        assert transferred == (3, 6)

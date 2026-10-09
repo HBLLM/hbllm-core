@@ -22,12 +22,16 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
 logger = logging.getLogger(__name__)
 
@@ -288,3 +292,214 @@ class HippocampalEpisodicCortex:
         self.grounded_lethal_transitions.clear()
         self.discovered_lethal_features.clear()
         self.habenular_ior.reset()
+
+    def consolidate_schema_and_reset(
+        self,
+        engine: AutonomousEpistemicEngine,
+        retain_dynamics: bool = True,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
+        """Consolidate episodic schemas and coordinate multi-faculty memory reset.
+        Handles three distinct cognitive transitions:
+        1. Same-level retry on death (retain dynamics, barriers, lethal features).
+        2. Cross-stage level progression (transfer semantic & motor priors, point to new level map).
+        3. Cross-game environment reset (strict zero-leakage cognitive isolation).
+        """
+        # SWR Trajectory Consolidation: Archive any winning sequences
+        if self.current_episode and any(t.is_win for t in self.current_episode):
+            self.successful_trajectories.append(list(self.current_episode))
+        self.current_episode.clear()
+
+        if level is not None:
+            engine.set_current_level(level)
+        engine.prev_grid = None
+        engine._prev_oriented_threats = []
+        engine.avatar_pos = None
+        engine.last_action = None
+        engine.last_action_data = None
+        engine.last_predicted_pos = None
+        engine.bilateral_state = None
+        engine.pending_phase_wait_steps = 0
+        engine.consecutive_quiescent_actions = 0
+
+        engine.consecutive_stuck_steps = 0
+        engine.entity_action_failed_positions = {}
+        engine.immobile_entity_actions = set()
+        engine.last_effective_click_coord = None
+        engine.consecutive_effective_clicks = 0
+        engine.mental_plan.clear()
+        engine.active_hypothesis = None
+        engine.active_probe_target = None
+        engine.active_probe_id = None
+        engine.probe_target_steps = 0
+        engine.recent_positions.clear()
+        if hasattr(engine, "recent_actions"):
+            engine.recent_actions.clear()
+        engine.level_epistemic_probes = 0
+        engine.working_memory.reset_episode(retain_long_term=retain_dynamics)
+        engine.collision_cones.reset_episode()
+        engine.consecutive_plan_failures = 0
+        engine.exploration_cooldown = 0
+        engine.consecutive_simulation_failures = 0
+        engine.simulation_cooldown = 0
+        engine._last_sim_goal_count = 0
+        engine._last_sim_barrier_count = 0
+        engine._last_sim_action_count = 0
+        engine.current_simulated_goal = None
+        engine._feedback_assimilated = False
+
+        if not retain_dynamics:
+            engine.level_failed_transitions.clear()
+            engine.level_learned_barriers.clear()
+            engine.level_lethal_positions.clear()
+            engine._current_level = 0 if level is None else level
+            engine.failed_transitions = engine.level_failed_transitions.setdefault(
+                engine._current_level, set()
+            )
+            engine.learned_barriers = engine.level_learned_barriers.setdefault(
+                engine._current_level, set()
+            )
+            engine.hazard_tracker.clear_lethal_positions()
+            engine.hazard_tracker.reset_episode()
+            engine.physics_engine.reset_episode()
+            engine.exhausted_candidate_goals.clear()
+            engine.tested_action_positions.clear()
+            engine.learned_goal_positions.clear()
+            engine.learned_receptacle_positions.clear()
+            engine.topology_rooms.clear()
+            engine.topology_doors.clear()
+            engine.room_adjacency.clear()
+            engine.current_room_id = None
+            engine.surprise_engine.reset_ledger()
+            engine.last_surprise = 0.0
+            engine.last_surprise_eval = None
+        elif is_new_level:
+            # Level transition: point episodic spatial memory to the target level
+            engine.failed_transitions = engine.level_failed_transitions.setdefault(
+                engine._current_level, set()
+            )
+            engine.learned_barriers = engine.level_learned_barriers.setdefault(
+                engine._current_level, set()
+            )
+            engine.hazard_tracker.static_lethal_positions = (
+                engine.level_lethal_positions.setdefault(engine._current_level, set())
+            )
+            engine.hazard_tracker.reset_episode()
+            engine.physics_engine.reset_episode()
+            engine.exhausted_candidate_goals.clear()
+            engine.tested_action_positions.clear()
+            engine.learned_goal_positions.clear()
+            engine.learned_receptacle_positions.clear()
+            engine.topology_rooms.clear()
+            engine.topology_doors.clear()
+            engine.room_adjacency.clear()
+            engine.current_room_id = None
+            engine.surprise_engine.reset_ledger()
+            engine.last_surprise = 0.0
+            engine.last_surprise_eval = None
+            engine.collision_cones.reset_episode()
+            engine.mobile_threat_features.clear()
+            engine._prev_oriented_threats = []
+            engine.prev_grid = None
+            engine.last_action = None
+            engine.last_predicted_pos = None
+            engine.mental_plan.clear()
+            engine.consecutive_simulation_failures = 0
+            engine.simulation_cooldown = 0
+        else:
+            # Same level retry on death
+            engine.hazard_tracker.grid_history.clear()
+            engine.hazard_tracker.step_history.clear()
+            engine.tested_action_positions.clear()
+            engine.last_surprise = 0.0
+            engine.last_surprise_eval = None
+            engine.collision_cones.reset_episode()
+            engine.prev_grid = None
+            engine.last_action = None
+            engine.last_predicted_pos = None
+            engine.mental_plan.clear()
+            engine._prev_oriented_threats = []
+
+        if is_new_level and retain_dynamics:
+            # Carry forward hypotheses & semantics as priors
+            if engine.avatar_feature is not None:
+                engine.prior_avatar_feature = engine.avatar_feature
+            engine._avatar_controllability_evidence.clear()
+            engine.state_mutations.clear()
+            engine.bilateral_state = None
+            if hasattr(engine, "bilateral_integrator"):
+                engine.bilateral_integrator.active_bilateral_state = None
+
+            engine.entity_visit_counts.clear()
+            engine.probed_entity_ids.clear()
+            engine.quiescent_click_targets.clear()
+            engine.effective_click_targets.clear()
+            engine.click_affordances.clear()
+            engine.quiescent_features.clear()
+            engine.last_effector_target_step.clear()
+            engine.active_goal_converging_coord = None
+            engine.consecutive_goal_converging_clicks = 0
+            engine.consecutive_quiescent_actions = 0
+            engine.inhibited_actions.clear()
+            engine.phase = (
+                EpistemicPhase.MENTAL_SIMULATION
+                if engine.is_motor_grounded()
+                else EpistemicPhase.MOTOR_GROUNDING
+            )
+
+        elif not retain_dynamics:
+            # Full Cross-Game Isolation: Zero cross-game leakage
+            engine.total_epistemic_probes = 0
+            engine.avatar_feature = None
+            engine.avatar_features.clear()
+            engine.prior_avatar_feature = None
+            engine._avatar_controllability_evidence.clear()
+            engine.verified_safe_features.clear()
+            engine.avatar_pos = None
+            engine.action_dynamics.clear()
+            engine.action_affordances.clear()
+            engine.tested_actions.clear()
+            engine.symbolic_theory.clear()
+            engine.state_mutations.clear()
+            engine.entity_visit_counts.clear()
+            engine.position_visit_counts.clear()
+            engine.probed_entity_ids.clear()
+            engine.quiescent_click_targets.clear()
+            engine.effective_click_targets.clear()
+            engine.click_affordances.clear()
+            engine.quiescent_features.clear()
+            engine.effective_features.clear()
+            engine.consecutive_quiescent_actions = 0
+            engine.inhibited_actions.clear()
+            engine.topology_rooms.clear()
+            engine.topology_doors.clear()
+            engine.room_adjacency.clear()
+            engine.current_room_id = None
+            engine.surprise_engine.reset_ledger()
+            engine.last_surprise = 0.0
+            engine.last_surprise_eval = None
+            engine.hazard_tracker.known_lethal_features.clear()
+            engine.hazard_tracker.periodic_cells.clear()
+            engine.mobile_threat_features.clear()
+            engine.phase = EpistemicPhase.MOTOR_GROUNDING
+        else:
+            engine.phase = (
+                EpistemicPhase.MENTAL_SIMULATION
+                if engine.is_motor_grounded()
+                else EpistemicPhase.MOTOR_GROUNDING
+            )
+
+        if hasattr(engine, "object_planner"):
+            engine.object_planner.reset_episode(is_new_level=is_new_level)
+
+        # Cortical faculties reset
+        if not retain_dynamics:
+            self.reset()
+        else:
+            self.reset_episode(retain_dynamics=True)
+
+        if hasattr(engine, "causal_cortex"):
+            engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
+        if hasattr(engine, "acc_conflict_monitor"):
+            engine.acc_conflict_monitor.reset()
