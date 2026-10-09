@@ -24,6 +24,10 @@ from hbllm.hcir.world.cortex_hypothesis import (
     HypothesisType,
     InductiveHypothesisEngine,
 )
+from hbllm.hcir.world.cortex_morphology import (
+    MorphologicalSaliencyEngine,
+    MorphologyPrimitiveType,
+)
 from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
@@ -842,3 +846,85 @@ class TestInductiveHypothesisEngine:
         assert subgoal.target_destination == (2, 3)
         assert subgoal.required_feature == 3
         assert stack.current_subgoal == subgoal
+
+
+class TestMorphologicalSaliencyEngine:
+    """Test Lateral Occipital Complex Morphological Primitives, Enclosure, and Saliency."""
+
+    def test_compute_saliency_map(self) -> None:
+        grid = np.zeros((10, 10), dtype=int)
+        # Add a rare focal point (feat 7)
+        grid[5, 5] = 7
+
+        saliency = MorphologicalSaliencyEngine.compute_saliency_map(grid, background_feature=0)
+        assert saliency.shape == (10, 10)
+        assert 0.0 <= np.min(saliency) and np.max(saliency) <= 1.0
+        # The rare feature at (5, 5) must have higher salience than flat background
+        assert saliency[5, 5] > saliency[0, 0]
+
+    def test_extract_morphological_primitives(self) -> None:
+        grid = np.zeros((12, 12), dtype=int)
+
+        # 1. Hollow container (5x5 border of feat 4 with empty 3x3 interior)
+        grid[1:6, 1] = 4
+        grid[1:6, 5] = 4
+        grid[1, 1:6] = 4
+        grid[5, 1:6] = 4
+
+        # 2. Linear structure (1x6 bar of feat 2)
+        grid[8, 1:7] = 2
+
+        # 3. Singleton (feat 9 at (10, 10))
+        grid[10, 10] = 9
+
+        # 4. Solid blob (2x2 square of feat 3)
+        grid[8:10, 8:10] = 3
+
+        primitives = MorphologicalSaliencyEngine.extract_morphological_primitives(
+            grid, background_feature=0
+        )
+        types_by_feat = {p.feature_id: p.primitive_type for p in primitives}
+
+        assert types_by_feat.get(4) == MorphologyPrimitiveType.HOLLOW_CONTAINER
+        assert types_by_feat.get(2) == MorphologyPrimitiveType.LINEAR_STRUCTURE
+        assert types_by_feat.get(9) == MorphologyPrimitiveType.SINGLETON
+        assert types_by_feat.get(3) == MorphologyPrimitiveType.SOLID_BLOB
+
+    def test_detect_enclosure(self) -> None:
+        grid = np.zeros((10, 10), dtype=int)
+        # Ring of barrier feature 8 enclosing (5, 5)
+        for r in range(3, 8):
+            grid[r, 3] = 8
+            grid[r, 7] = 8
+        for c in range(3, 8):
+            grid[3, c] = 8
+            grid[7, c] = 8
+
+        # (5, 5) is completely enclosed inside the ring
+        assert (
+            MorphologicalSaliencyEngine.detect_enclosure(grid, (5, 5), barrier_features={8}) is True
+        )
+
+        # (1, 1) is outside the ring
+        assert (
+            MorphologicalSaliencyEngine.detect_enclosure(grid, (1, 1), barrier_features={8})
+            is False
+        )
+
+    def test_filter_salt_pepper_noise(self) -> None:
+        grid = np.zeros((8, 8), dtype=int)
+        # Add single isolated noise pixels
+        grid[1, 1] = 2
+        grid[6, 2] = 2
+
+        # Add a 2x2 solid block of feat 3 (area 4)
+        grid[3:5, 3:5] = 3
+
+        cleaned = MorphologicalSaliencyEngine.filter_salt_pepper_noise(
+            grid, background_feature=0, min_component_area=2
+        )
+        # Noise speckles should be erased
+        assert cleaned[1, 1] == 0
+        assert cleaned[6, 2] == 0
+        # Multi-cell entity must be preserved
+        assert np.all(cleaned[3:5, 3:5] == 3)

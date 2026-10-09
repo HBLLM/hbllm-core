@@ -68,6 +68,7 @@ class SubgoalSchema:
 
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
+from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
@@ -101,6 +102,7 @@ class PrefrontalWorkingMemory:
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
         self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
         self.hypothesis_engine: InductiveHypothesisEngine = InductiveHypothesisEngine()
+        self.morphology: MorphologicalSaliencyEngine = MorphologicalSaliencyEngine()
 
     def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
         """Store executive directives in working memory to guide cognitive policies."""
