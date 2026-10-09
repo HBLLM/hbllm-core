@@ -672,6 +672,9 @@ class MentalSimulationPlanner:
             )
         )
 
+        acc_monitor = getattr(getattr(engine, "working_memory", None), "acc_conflict", None)
+        acc_weight = acc_monitor.compute_heuristic_weight(1.0) if acc_monitor else 1.0
+
         def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
             if is_block_delivery and blocks:
                 b_list = list(blocks)
@@ -679,9 +682,19 @@ class MentalSimulationPlanner:
                 for g in goals:
                     goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
                 avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
-                return float(goal_dist * 2.0 + avatar_to_b)
+                base_h = float(goal_dist * 2.0 + avatar_to_b)
             else:
-                return float(min(abs(g[0] - pos[0]) + abs(g[1] - pos[1]) for g in goals))
+                base_h = float(min(abs(g[0] - pos[0]) + abs(g[1] - pos[1]) for g in goals))
+
+            if acc_monitor and acc_monitor.active_conflict:
+                choke_pen = acc_monitor.get_chokepoint_penalty(pos)
+                detour = acc_monitor.detour_target
+                detour_dist = (abs(detour[0] - pos[0]) + abs(detour[1] - pos[1])) if detour else 0.0
+                return float(base_h * acc_weight + choke_pen + detour_dist * 1.5)
+            elif acc_monitor:
+                choke_pen = acc_monitor.get_chokepoint_penalty(pos)
+                return float(base_h + choke_pen)
+            return base_h
 
         counter = 0
         open_set: list[

@@ -563,3 +563,92 @@ class TestRemoteCausalAttributor:
 
         # Test cortex.reset()
         cortex.reset()
+
+
+class TestAnteriorCingulateConflictMonitor:
+    """Test Anterior Cingulate Cortex (ACC) conflict monitoring, frustration scaling, and detour routing."""
+
+    def test_frustration_scaling_on_recurring_cluster_deaths(self) -> None:
+        from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
+
+        acc = AnteriorCingulateConflictMonitor(cluster_radius=3.0, frustration_threshold=0.5)
+
+        # Single death: no active conflict
+        f1 = acc.register_death_event((5.0, 5.0), step=10, last_action=2)
+        assert f1 == 0.0
+        assert acc.active_conflict is False
+        assert acc.compute_heuristic_weight(1.0) == 1.0
+        assert acc.get_chokepoint_penalty((5, 5)) == 0.0
+
+        # Second death in immediate vicinity (5.0, 6.0): recurrence count = 2
+        f2 = acc.register_death_event((5.0, 6.0), step=20, last_action=2)
+        assert f2 >= 0.5
+        assert acc.active_conflict is True
+        assert acc.compute_heuristic_weight(1.0) <= 0.55
+
+        # Chokepoint penalty should be positive near cluster center
+        penalty = acc.get_chokepoint_penalty((5, 5))
+        assert penalty > 15.0
+
+        # Cells far away have zero penalty
+        far_penalty = acc.get_chokepoint_penalty((15, 15))
+        assert far_penalty == 0.0
+
+    def test_synthesize_perimeter_detour(self) -> None:
+        from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
+
+        acc = AnteriorCingulateConflictMonitor(cluster_radius=2.5)
+        # Induce conflict at (5, 5)
+        acc.register_death_event((5.0, 5.0), step=10, last_action=1)
+        acc.register_death_event((5.0, 5.0), step=20, last_action=1)
+        assert acc.active_conflict is True
+
+        traversable = {
+            (5, 5),
+            (5, 6),
+            (5, 4),  # In lethal cone
+            (2, 5),
+            (8, 5),
+            (5, 1),
+            (5, 9),  # Safe perimeter cells
+        }
+        detour = acc.synthesize_perimeter_detour(
+            current_pos=(5, 3),
+            goal_pos=(5, 8),
+            grid_shape=(10, 10),
+            traversable=traversable,
+        )
+        assert detour is not None
+        # Detour must NOT be in the lethal cone
+        assert detour not in {(5, 5), (5, 6), (5, 4)}
+
+    def test_frontopolar_subgoal_causal_prerequisite_dag(self) -> None:
+        stack = FrontopolarSubgoalStack(max_depth=4)
+        sg_key = FrontopolarSubgoal(
+            subgoal_id="collect_key",
+            subgoal_type=SubgoalType.DELIVER_TO_GOAL,
+            target_entity_pos=(2, 2),
+            target_destination=(2, 2),
+        )
+        sg_door = FrontopolarSubgoal(
+            subgoal_id="unlock_door",
+            subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+            target_entity_pos=(8, 8),
+            target_destination=(8, 8),
+            prerequisite_subgoal_ids=["collect_key"],
+        )
+
+        stack.push_subgoal(sg_door)
+        stack.push_subgoal(sg_key)
+
+        # sg_door prerequisites are not met yet
+        assert sg_door.are_prerequisites_met(completed_ids=set()) is False
+        assert sg_key.are_prerequisites_met(completed_ids=set()) is True
+
+        # Stack executes top goal (sg_key) first
+        assert stack.current_subgoal == sg_key
+        stack.pop_subgoal()
+
+        # Now collect_key is completed; sg_door prerequisites are satisfied!
+        assert sg_door.are_prerequisites_met(completed_ids=set(stack.completed_subgoals)) is True
+        assert stack.current_subgoal == sg_door

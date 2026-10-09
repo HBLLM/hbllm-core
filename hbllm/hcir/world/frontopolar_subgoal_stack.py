@@ -43,7 +43,22 @@ class FrontopolarSubgoal:
     required_feature: int | None = None
     priority: float = 1.0
     is_terminal: bool = False
+    prerequisite_subgoal_ids: list[str] = field(default_factory=list)
+    prerequisite_features: set[int] = field(default_factory=set)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def are_prerequisites_met(
+        self,
+        completed_ids: set[str],
+        held_features: set[int] | None = None,
+    ) -> bool:
+        """Verify whether all causal prerequisite subgoals and affordance features are fulfilled."""
+        if any(req_id not in completed_ids for req_id in self.prerequisite_subgoal_ids):
+            return False
+        if held_features is not None:
+            if any(feat not in held_features for feat in self.prerequisite_features):
+                return False
+        return True
 
 
 class FrontopolarSubgoalStack:
@@ -63,8 +78,14 @@ class FrontopolarSubgoalStack:
 
     @property
     def current_subgoal(self) -> FrontopolarSubgoal | None:
-        """Return the active top-of-stack subgoal being executed."""
-        return self.stack[-1] if self.stack else None
+        """Return the active top-of-stack subgoal being executed whose prerequisites are satisfied."""
+        if not self.stack:
+            return None
+        completed_set = set(self.completed_subgoals)
+        for sg in reversed(self.stack):
+            if sg.are_prerequisites_met(completed_set):
+                return sg
+        return self.stack[-1]
 
     @property
     def has_pending_goals(self) -> bool:

@@ -66,6 +66,7 @@ class SubgoalSchema:
         return self.current_stage_idx >= len(self.stages)
 
 
+from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
@@ -97,6 +98,7 @@ class PrefrontalWorkingMemory:
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
         self.optical_projector: OpticalRayProjector = OpticalRayProjector()
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
+        self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
 
     def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
         """Store executive directives in working memory to guide cognitive policies."""
@@ -123,6 +125,7 @@ class PrefrontalWorkingMemory:
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         self.subgoal_stack.reset_episode()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
+        self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
         if not retain_long_term:
             self.tool_barrier_affinities.clear()
             self.habenular_ior.reset()

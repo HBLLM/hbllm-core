@@ -1263,6 +1263,15 @@ class EpistemicFeedbackAssimilator:
                 final_step=engine.step_counter,
                 is_lost=True,
             )
+            # Faculty: Anterior Cingulate Cortex Conflict & Frustration Monitor
+            if hasattr(engine.working_memory, "acc_conflict"):
+                actor = prev_avatar_pos or engine.avatar_pos
+                if actor is not None:
+                    engine.working_memory.acc_conflict.register_death_event(
+                        actor_pos=(float(actor[0]), float(actor[1])),
+                        step=engine.step_counter,
+                        last_action=action,
+                    )
             # Faculty: Hippocampal Sharp-Wave Ripple (SWR) Backward Negative Replay
             if hasattr(engine, "episodic_cortex"):
                 engine.episodic_cortex.trigger_sharp_wave_ripple_replay(
