@@ -928,3 +928,47 @@ class TestMorphologicalSaliencyEngine:
         assert cleaned[6, 2] == 0
         # Multi-cell entity must be preserved
         assert np.all(cleaned[3:5, 3:5] == 3)
+
+
+class TestPrefrontalDeliberationEngine:
+    """Test Prefrontal Cortex Deliberation Engine & Cognitive Arbitration."""
+
+    def test_deliberation_engine_delegation(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+
+        engine = AutonomousEpistemicEngine()
+        assert hasattr(engine, "deliberation_engine")
+        assert isinstance(engine.deliberation_engine, PrefrontalDeliberationEngine)
+
+        # Basic decision step with blank grid
+        grid = np.zeros((10, 10), dtype=int)
+        grid[2, 2] = 1  # avatar
+        actions = [1, 2, 3, 4]
+        action, data = engine.decide(grid, actions)
+        assert action in actions
+        assert engine.step_counter == 1
+
+    def test_validate_plan_safety_hazard_detection(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        delib = PrefrontalDeliberationEngine()
+        engine = AutonomousEpistemicEngine()
+        engine.avatar_pos = (5, 5)
+
+        # Mark feature 9 as lethal
+        engine.hazard_tracker.known_lethal_features.add(9)
+
+        grid = np.zeros((10, 10), dtype=int)
+        grid[5, 6] = 9  # lethal hazard
+
+        step = MentalSimulationStep(
+            action=2,
+            predicted_avatar_pos=(5, 6),
+        )
+
+        safe, should_wait, wait_steps = delib.validate_plan_safety(engine, grid, [1, 2, 3, 4], step)
+        assert safe is False
+        assert should_wait is False
