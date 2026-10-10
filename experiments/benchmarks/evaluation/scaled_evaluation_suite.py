@@ -258,3 +258,92 @@ class ScaledGeneralizationBenchmark:
             latency_profile=latency_profile,
             traces=traces,
         )
+
+
+@dataclass
+class DepthScorecard:
+    """Evaluation summary for a specific composition depth."""
+
+    depth: int
+    total_tasks: int
+    solved_tasks: int
+    exact_match_pct: float
+    confidence_interval_95: tuple[float, float]
+    mean_latency_ms: float
+    traces: list[ScaledTaskTrace] = field(default_factory=list)
+
+
+class DeepCompositionBenchmark:
+    """Milestone M4.6 Stage 2: Compositional Generalization across Depths D=1..5."""
+
+    @classmethod
+    def evaluate_depth_scaling(
+        cls,
+        seed: int = 42,
+        max_depth: int = 5,
+        tasks_per_depth: int = 5,
+    ) -> dict[int, DepthScorecard]:
+        """Evaluate procedural compositional generalization across depths 1 through max_depth."""
+        generator = ProceduralTaskGenerator(seed=seed)
+        scorecards: dict[int, DepthScorecard] = {}
+
+        for d in range(1, max_depth + 1):
+            d_traces: list[ScaledTaskTrace] = []
+            d_solved = 0
+
+            for i in range(tasks_per_depth):
+                task = generator.generate_random_task(
+                    task_id=f"depth_{d}_seed_{seed}_task_{i:02d}",
+                    depth=d,
+                    num_demos=2,
+                    family="compositional_deep",
+                )
+                searcher = TransformationProgramSearch(
+                    max_depth=d,
+                    use_mdl=True,
+                    enable_relational=True,
+                )
+                pred, winning_b, meta = searcher.solve(list(task.train_pairs), task.test_input)
+                exact = bool(pred is not None and np.array_equal(pred, task.test_output))
+                if exact:
+                    d_solved += 1
+
+                trace = ScaledTaskTrace(
+                    task_id=task.task_id,
+                    family="compositional_deep",
+                    depth=d,
+                    exact_match=exact,
+                    pixel_accuracy=1.0 if exact else 0.0,
+                    candidates_proposed=meta.get("candidates_generated", 0),
+                    candidates_refuted_demo0=meta.get("candidates_rejected", 0),
+                    candidates_refuted_later=meta.get("spurious_rejected_on_later_demos", 0),
+                    survivors_count=meta.get("survivor_count", 1 if exact else 0),
+                    winning_description=winning_b.description if winning_b else None,
+                    winning_complexity=winning_b.complexity if winning_b else None,
+                    is_minimal=True,
+                    is_ambiguous_on_test=False,
+                    epistemic_uncertainty=meta.get("epistemic_uncertainty", 0.0),
+                    candidate_gen_ms=meta.get("candidate_gen_ms", 0.0),
+                    verification_ms=meta.get("verification_ms", 0.0),
+                    ranking_selection_ms=meta.get("ranking_selection_ms", 0.0),
+                    search_duration_ms=meta.get("search_duration_ms", 0.0),
+                    execution_ms=meta.get("execution_ms", 0.0),
+                    total_wall_clock_ms=meta.get("total_wall_clock_ms", 0.0),
+                )
+                d_traces.append(trace)
+
+            exact_pct = round((d_solved / tasks_per_depth) * 100, 2)
+            ci = ScaledGeneralizationBenchmark.compute_wilson_interval(d_solved, tasks_per_depth)
+            mean_lat = round(float(np.mean([t.total_wall_clock_ms for t in d_traces])), 2)
+
+            scorecards[d] = DepthScorecard(
+                depth=d,
+                total_tasks=tasks_per_depth,
+                solved_tasks=d_solved,
+                exact_match_pct=exact_pct,
+                confidence_interval_95=ci,
+                mean_latency_ms=mean_lat,
+                traces=d_traces,
+            )
+
+        return scorecards

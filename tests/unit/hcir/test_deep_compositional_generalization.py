@@ -15,9 +15,13 @@ from experiments.benchmarks.evaluation.generalization_harness import (
     AblationRegime,
     TransformationGeneralizationHarness,
 )
+from experiments.benchmarks.evaluation.scaled_evaluation_suite import (
+    DeepCompositionBenchmark,
+)
 from experiments.benchmarks.manifests.deep_composition_manifest import (
     get_depth3_extended_manifest,
     get_depth4_exploratory_manifest,
+    get_depth5_exploratory_manifest,
 )
 from hbllm.hcir.world.grid_operator import TransformationProgramSearch
 
@@ -42,7 +46,7 @@ def test_depth3_extended_compositional_manifest_5_tasks():
 def test_depth4_exploratory_stress_test_manifest():
     """Exploratory stress test: Verify that the engine composes 4 sequential operator stages."""
     d4_tasks = get_depth4_exploratory_manifest()
-    assert len(d4_tasks) == 2
+    assert len(d4_tasks) == 4
 
     for task in d4_tasks:
         searcher = TransformationProgramSearch(max_depth=4, use_mdl=True)
@@ -54,10 +58,29 @@ def test_depth4_exploratory_stress_test_manifest():
         )
 
 
-def test_atomic_only_collapses_on_depth3_and_depth4():
-    """Verify that AtomicOnly fails 100% of depth-3 and depth-4 tasks."""
-    all_deep_tasks = get_depth3_extended_manifest() + get_depth4_exploratory_manifest()
-    assert len(all_deep_tasks) == 7
+def test_depth5_exploratory_stress_test_manifest():
+    """Exploratory stress test: Verify that the engine composes 5 sequential operator stages."""
+    d5_tasks = get_depth5_exploratory_manifest()
+    assert len(d5_tasks) == 2
+
+    for task in d5_tasks:
+        searcher = TransformationProgramSearch(max_depth=5, use_mdl=True)
+        pred, binding, meta = searcher.solve(list(task.train_pairs), task.test_input)
+        assert meta["solved"] is True
+        assert binding is not None
+        assert np.array_equal(pred, task.test_output), (
+            f"Depth 5 task {task.task_id} prediction failed"
+        )
+
+
+def test_atomic_only_collapses_on_depth3_4_5():
+    """Verify that AtomicOnly fails 100% of depth-3, depth-4, and depth-5 tasks."""
+    all_deep_tasks = (
+        get_depth3_extended_manifest()
+        + get_depth4_exploratory_manifest()
+        + get_depth5_exploratory_manifest()
+    )
+    assert len(all_deep_tasks) == 11
 
     for task in all_deep_tasks:
         searcher = TransformationProgramSearch(max_depth=1, use_mdl=True)
@@ -69,6 +92,22 @@ def test_atomic_only_collapses_on_depth3_and_depth4():
             )
         else:
             assert not meta["solved"] or pred is None or pred.shape != task.test_output.shape
+
+
+def test_procedural_depth_scaling_benchmark_d1_to_d5():
+    """Stage 2 Validation: Verify procedural generalization across depths D=1..5 with per-depth scores."""
+    scorecards = DeepCompositionBenchmark.evaluate_depth_scaling(
+        seed=42, max_depth=5, tasks_per_depth=3
+    )
+    assert len(scorecards) == 5
+
+    for d in range(1, 6):
+        card = scorecards[d]
+        assert card.depth == d
+        assert card.total_tasks == 3
+        assert card.solved_tasks == 3, f"Depth {d} failed: {card.solved_tasks}/3 solved"
+        assert card.exact_match_pct == 100.0
+        assert card.mean_latency_ms >= 0.0
 
 
 def test_strengthened_baselines_on_deep_composition_manifest():

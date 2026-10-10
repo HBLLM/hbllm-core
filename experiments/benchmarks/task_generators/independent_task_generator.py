@@ -94,6 +94,8 @@ class IndependentTaskGenerator:
             return self._generate_pattern_extrapolate_task(task_id, num_demos)
         elif family == "component_size_rank":
             return self._generate_component_rank_task(task_id, num_demos)
+        elif family == "cellular_automaton_local_rule":
+            return self._generate_cellular_automaton_task(task_id, num_demos)
         else:
             raise ValueError(f"Unknown independent task family: {family}")
 
@@ -422,12 +424,108 @@ class IndependentTaskGenerator:
             },
         )
 
+    # =========================================================================
+    # 6. Cellular Automaton: Synchronous 2D local neighborhood rule with withheld laws
+    # =========================================================================
+    def _apply_cellular_automaton(
+        self,
+        grid: np.ndarray,
+        transition_table: dict[tuple[int, int], int],
+        neighborhood: str = "4_neighbor",
+    ) -> np.ndarray:
+        """Apply 1 synchronous step of local cellular automaton rule."""
+        H, W = grid.shape
+        out = grid.copy()
+        offsets = (
+            [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if neighborhood == "4_neighbor"
+            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+        )
+        for r in range(H):
+            for c in range(W):
+                s = int(grid[r, c])
+                k = 0
+                for dr, dc in offsets:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] != 0:
+                        k += 1
+                out[r, c] = transition_table.get((s, k), s)
+        return out
+
+    def _generate_cellular_automaton_task(self, task_id: str, num_demos: int) -> ManifestTask:
+        active_color = int(self.rng.choice([1, 2, 3, 4]))
+        transition_table: dict[tuple[int, int], int] = {
+            (0, 0): 0,
+            (0, 1): 0,
+            (0, 2): active_color,  # Birth
+            (0, 3): 0,
+            (0, 4): 0,
+            (active_color, 0): 0,  # Death (isolated)
+            (active_color, 1): active_color,  # Survival
+            (active_color, 2): active_color,  # Survival
+            (active_color, 3): 0,  # Death (overpopulation)
+            (active_color, 4): 0,
+        }
+
+        train_pairs = []
+        for _ in range(num_demos):
+            H, W = self.rng.randint(7, 10), self.rng.randint(7, 10)
+            inp = np.zeros((H, W), dtype=int)
+            num_seeds = self.rng.randint(2, 4)
+            for _ in range(num_seeds):
+                r0 = self.rng.randint(1, H - 3)
+                c0 = self.rng.randint(1, W - 3)
+                inp[r0, c0] = active_color
+                inp[r0 + 1, c0] = active_color
+                inp[r0, c0 + 1] = active_color
+            out = self._apply_cellular_automaton(inp, transition_table, neighborhood="4_neighbor")
+            train_pairs.append((inp, out))
+
+        H_t, W_t = self.rng.randint(8, 11), self.rng.randint(8, 11)
+        test_inp = np.zeros((H_t, W_t), dtype=int)
+        for _ in range(3):
+            r0 = self.rng.randint(1, H_t - 3)
+            c0 = self.rng.randint(1, W_t - 3)
+            test_inp[r0, c0] = active_color
+            test_inp[r0 + 1, c0] = active_color
+            test_inp[r0, c0 + 1] = active_color
+        test_out = self._apply_cellular_automaton(
+            test_inp, transition_table, neighborhood="4_neighbor"
+        )
+
+        return ManifestTask(
+            task_id=task_id,
+            family="cellular_automaton_local_rule",
+            depth=1,
+            train_pairs=tuple(train_pairs),
+            test_input=test_inp,
+            test_output=test_out,
+            metadata={
+                "origin": "independent_generator",
+                "family": "cellular_automaton_local_rule",
+                "neighborhood": "4_neighbor",
+                "description": f"2D synchronous cellular automaton with local rule B2/S12 on color {active_color}",
+            },
+        )
+
     @classmethod
     def generate_independent_50_suite(cls, seed: int = 42) -> list[ManifestTask]:
         """Generate 50 independent tasks: 10 per family across the 5 independent families."""
         gen = cls(seed=seed)
         suite = []
         for family in cls.FAMILIES:
+            for i in range(10):
+                task_id = f"indep_{family}_{i:02d}"
+                suite.append(gen.generate_task(task_id, family=family))
+        return suite
+
+    @classmethod
+    def generate_independent_60_suite(cls, seed: int = 42) -> list[ManifestTask]:
+        """Generate 60 independent tasks: 10 per family across all 6 independent families."""
+        gen = cls(seed=seed)
+        suite = []
+        all_families = cls.FAMILIES + ("cellular_automaton_local_rule",)
+        for family in all_families:
             for i in range(10):
                 task_id = f"indep_{family}_{i:02d}"
                 suite.append(gen.generate_task(task_id, family=family))

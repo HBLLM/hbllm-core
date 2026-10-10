@@ -135,6 +135,49 @@ def test_representation_inadequacy_and_expansion_revision():
     assert infill_trace.phase1_epistemic_uncertainty == 0.0
 
 
+def test_cellular_automaton_withheld_laws_representation_expansion_and_ablations():
+    """Stage 3 Validation: Induce a 2D cellular automaton with withheld transition laws.
+
+    Verifies:
+    1. Base solver failure (inadequacy detected, uncertainty = 1.0).
+    2. Dynamic Level 3 synthesis of local CA transition laws from categorical residuals.
+    3. Out-of-construction verification on demonstration 1.
+    4. Exact match on held-out test query.
+    5. Reusability on independent novel lattice.
+    6. Causal ablation 1 (synthesis disabled): fails with uncertainty 1.0.
+    7. Causal ablation 2 (correspondence disabled): fails.
+    """
+    gen = IndependentTaskGenerator(seed=100)
+    for i in range(3):
+        task = gen.generate_task(
+            f"ca_stage3_task_{i:02d}",
+            family="cellular_automaton_local_rule",
+            num_demos=2,
+        )
+
+        # 1. Base solver failure
+        base_solver = TransformationProgramSearch(max_depth=3, use_mdl=True, enable_relational=True)
+        pred_b, _, meta_b = base_solver.solve(list(task.train_pairs), task.test_input)
+        assert meta_b["solved"] is False
+        assert meta_b["insufficient_hypothesis_language"] is True
+        assert meta_b["epistemic_uncertainty"] == 1.0
+
+        # 2. Representation revision cycle
+        trace = RepresentationExpansionEngine.evaluate_representation_revision_cycle(task)
+        assert trace.phase1_solved is False
+        assert trace.phase1_inadequacy_detected is True
+        assert trace.phase1_epistemic_uncertainty == 1.0
+        assert trace.unexplained_residual_pixels > 0
+        assert "cellular_automaton" in trace.synthesized_operator_name
+        assert trace.out_of_construction_verified is True
+        assert trace.phase2_solved is True
+        assert trace.phase2_exact_match is True
+        assert trace.phase2_epistemic_uncertainty == 0.0
+        assert trace.reusable_on_novel_task is True
+        assert trace.control_ablation_passed is True
+        assert trace.correspondence_ablation_passed is True
+
+
 def test_multi_hypothesis_test_ambiguity_safeguard():
     """Verify that solver detects ambiguity when multiple surviving hypotheses diverge on test query."""
     # Demonstrations are symmetric under both ROT90 and TRANSPOSE on square anti-diagonal input

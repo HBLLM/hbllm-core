@@ -154,15 +154,24 @@ class ProceduralTaskGenerator:
                 [("recolor", {"src": color_a, "dst": color_b})],
             ]
         elif family == "compositional_deep":
-            if depth == 2:
+            if depth == 1:
+                candidate_pipelines = [
+                    [("crop_bbox", {})],
+                    [("rot90", {"k": 1})],
+                    [("rot180", {})],
+                    [("fliph", {})],
+                    [("flipv", {})],
+                    [("recolor", {"src": color_a, "dst": color_b})],
+                ]
+            elif depth == 2:
                 candidate_pipelines = [
                     [("crop_bbox", {}), ("rot90", {"k": 1})],
+                    [("crop_bbox", {}), ("fliph", {})],
                     [("rot90", {"k": 1}), ("recolor", {"src": color_a, "dst": color_b})],
                     [("fliph", {}), ("recolor", {"src": color_a, "dst": color_b})],
                     [("crop_bbox", {}), ("recolor", {"src": color_a, "dst": color_b})],
-                    [("flipv", {}), ("recolor", {"src": color_a, "dst": color_b})],
                 ]
-            else:
+            elif depth == 3:
                 candidate_pipelines = [
                     [
                         ("crop_bbox", {}),
@@ -176,17 +185,75 @@ class ProceduralTaskGenerator:
                     ],
                     [
                         ("crop_bbox", {}),
-                        ("flipv", {}),
-                        ("recolor", {"src": color_a, "dst": color_b}),
-                    ],
-                    [
-                        ("crop_bbox", {}),
                         ("rot180", {}),
                         ("recolor", {"src": color_a, "dst": color_b}),
                     ],
                     [
                         ("crop_bbox", {}),
                         ("scale", {"factor": 2}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("translate", {"dr": 1, "dc": 0}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                ]
+            elif depth == 4:
+                candidate_pipelines = [
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("translate", {"dr": 1, "dc": 0}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot90", {"k": 1}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("scale", {"factor": 2}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                ]
+            else:  # depth >= 5
+                candidate_pipelines = [
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot90", {"k": 1}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("scale", {"factor": 2}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot180", {}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot90", {"k": 1}),
+                        ("flipv", {}),
                         ("recolor", {"src": color_a, "dst": color_b}),
                     ],
                 ]
@@ -194,22 +261,22 @@ class ProceduralTaskGenerator:
             # Fallback conditioned on depth
             if depth == 1:
                 candidate_pipelines = [
+                    [("crop_bbox", {})],
                     [("rot90", {"k": 1})],
                     [("rot180", {})],
                     [("fliph", {})],
                     [("flipv", {})],
                     [("recolor", {"src": color_a, "dst": color_b})],
-                    [("crop_bbox", {})],
                 ]
             elif depth == 2:
                 candidate_pipelines = [
                     [("crop_bbox", {}), ("rot90", {"k": 1})],
+                    [("crop_bbox", {}), ("fliph", {})],
                     [("rot90", {"k": 1}), ("recolor", {"src": color_a, "dst": color_b})],
                     [("fliph", {}), ("recolor", {"src": color_a, "dst": color_b})],
                     [("crop_bbox", {}), ("recolor", {"src": color_a, "dst": color_b})],
-                    [("flipv", {}), ("recolor", {"src": color_a, "dst": color_b})],
                 ]
-            else:
+            elif depth == 3:
                 candidate_pipelines = [
                     [
                         ("crop_bbox", {}),
@@ -223,11 +290,6 @@ class ProceduralTaskGenerator:
                     ],
                     [
                         ("crop_bbox", {}),
-                        ("flipv", {}),
-                        ("recolor", {"src": color_a, "dst": color_b}),
-                    ],
-                    [
-                        ("crop_bbox", {}),
                         ("rot180", {}),
                         ("recolor", {"src": color_a, "dst": color_b}),
                     ],
@@ -237,9 +299,47 @@ class ProceduralTaskGenerator:
                         ("recolor", {"src": color_a, "dst": color_b}),
                     ],
                 ]
+            elif depth == 4:
+                candidate_pipelines = [
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("translate", {"dr": 1, "dc": 0}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot90", {"k": 1}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                ]
+            else:
+                candidate_pipelines = [
+                    [
+                        ("crop_bbox", {}),
+                        ("scale", {"factor": 2}),
+                        ("rot90", {"k": 1}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                    [
+                        ("crop_bbox", {}),
+                        ("rot90", {"k": 1}),
+                        ("scale", {"factor": 2}),
+                        ("fliph", {}),
+                        ("recolor", {"src": color_a, "dst": color_b}),
+                    ],
+                ]
 
         chosen_pipeline: list[tuple[str, dict[str, Any]]] = candidate_pipelines[
-            int(self.rng.integers(0, len(candidate_pipelines)))
+            self.rng.randint(0, len(candidate_pipelines) - 1)
         ]
 
         def transform_pipeline(x: np.ndarray) -> np.ndarray:

@@ -155,6 +155,62 @@ class SynthesizedCellularFluxOperator(GridOperator):
         return out
 
 
+class SynthesizedCellularAutomatonOperator(GridOperator):
+    """Algorithmically synthesized 2D cellular automaton operator with induced local transition law.
+
+    Constructed inductively from categorical residual events and discrete neighborhood statistics.
+    Applies synchronous local update rule: next_state = transition_table[(current_state, active_neighbor_count)].
+    """
+
+    def __init__(
+        self,
+        name: str,
+        transition_table: dict[tuple[int, int], int],
+        neighborhood_type: str = "4_neighbor",
+        complexity: float = 2.2,
+    ) -> None:
+        self.name = name
+        self.transition_table = dict(transition_table)
+        self.neighborhood_type = neighborhood_type
+        self.complexity = complexity
+
+    def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
+        train_pairs = context.get("train_pairs", [])
+        if not train_pairs:
+            return []
+        str_table = {f"{s}_{k}": v for (s, k), v in self.transition_table.items()}
+        return [
+            OperatorBinding(
+                operator_name=self.name,
+                params={
+                    "transition_table": str_table,
+                    "neighborhood_type": self.neighborhood_type,
+                },
+                description=f"{self.name}({self.neighborhood_type}, rule_size={len(self.transition_table)})",
+                complexity=self.complexity,
+            )
+        ]
+
+    def apply(self, grid: np.ndarray, binding: OperatorBinding) -> np.ndarray:
+        H, W = grid.shape
+        out = grid.copy()
+        offsets = (
+            [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if self.neighborhood_type == "4_neighbor"
+            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+        )
+        for r in range(H):
+            for c in range(W):
+                s = int(grid[r, c])
+                k = 0
+                for dr, dc in offsets:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] != 0:
+                        k += 1
+                out[r, c] = self.transition_table.get((s, k), 0)
+        return out
+
+
 # =========================================================================
 # Inductive Cellular Flux Synthesizer (Categorical Event Set Induction)
 # =========================================================================
@@ -174,7 +230,7 @@ class InductiveCellularFluxSynthesizer:
         train_pairs: list[tuple[np.ndarray, np.ndarray]],
         enable_correspondence: bool = True,
         enable_propagation_conditions: bool = True,
-    ) -> SynthesizedCellularFluxOperator | None:
+    ) -> GridOperator | None:
         """Analyze categorical residual events and construct an operator."""
         if not train_pairs:
             return None
@@ -337,6 +393,66 @@ class InductiveCellularFluxSynthesizer:
             pred0 = op.apply(x0, binding)
             if np.array_equal(pred0, y0):
                 return op
+
+        # ---------------------------------------------------------------------
+        # 4. Test for 2D Cellular Automaton Local Transition Law
+        # ---------------------------------------------------------------------
+        if not enable_correspondence:
+            return None
+
+        for neigh_name, offsets in [
+            ("4_neighbor", [(-1, 0), (1, 0), (0, -1), (0, 1)]),
+            (
+                "8_neighbor",
+                [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)],
+            ),
+        ]:
+            observed_map: dict[tuple[int, int], set[int]] = {}
+            consistent = True
+            for r in range(H):
+                for c in range(W):
+                    cell_st: int = int(x0[r, c])
+                    k = 0
+                    for dr, dc in offsets:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < H and 0 <= nc < W and x0[nr, nc] != 0:
+                            k += 1
+                    y_val = int(y0[r, c])
+                    if (cell_st, k) not in observed_map:
+                        observed_map[(cell_st, k)] = set()
+                    observed_map[(cell_st, k)].add(y_val)
+                    if len(observed_map[(cell_st, k)]) > 1:
+                        consistent = False
+                        break
+                if not consistent:
+                    break
+
+            if consistent and observed_map:
+                table = {key: list(vals)[0] for key, vals in observed_map.items()}
+                changes_explained = 0
+                for r in range(H):
+                    for c in range(W):
+                        cell_st_2: int = int(x0[r, c])
+                        k = sum(
+                            1
+                            for dr, dc in offsets
+                            if 0 <= r + dr < H and 0 <= c + dc < W and x0[r + dr, c + dc] != 0
+                        )
+                        pred_val = table.get((cell_st_2, k), 0)
+                        if pred_val != int(x0[r, c]) and pred_val == int(y0[r, c]):
+                            changes_explained += 1
+
+                if changes_explained > 0:
+                    ca_op = SynthesizedCellularAutomatonOperator(
+                        name=f"synthesized_cellular_automaton_{neigh_name}",
+                        transition_table=table,
+                        neighborhood_type=neigh_name,
+                        complexity=2.2,
+                    )
+                    binding = ca_op.propose({}, {"train_pairs": train_pairs})[0]
+                    pred0 = ca_op.apply(x0, binding)
+                    if np.array_equal(pred0, y0):
+                        return ca_op
 
         return None
 
@@ -519,9 +635,25 @@ class RepresentationExpansionEngine:
         )
 
     @classmethod
-    def _verify_operator_reusability(cls, operator: SynthesizedCellularFluxOperator) -> bool:
+    def _verify_operator_reusability(cls, operator: GridOperator) -> bool:
         """Verify that the synthesized operator generalizes to a different task instance with novel parameters."""
-        if operator.flux_mode == "directional_settle":
+        if isinstance(operator, SynthesizedCellularAutomatonOperator):
+            grid = np.zeros((8, 8), dtype=int)
+            active_col = 1
+            for (s, k), v in operator.transition_table.items():
+                if v != 0:
+                    active_col = v
+                    break
+            # Place a 2x2 seed block in the center
+            grid[2:4, 2:4] = active_col
+            binding = operator.propose({}, {"train_pairs": [([grid], [grid])]})[0]
+            result = operator.apply(grid, binding)
+            return bool(result.shape == (8, 8) and np.any(result != 0))
+
+        if (
+            isinstance(operator, SynthesizedCellularFluxOperator)
+            and operator.flux_mode == "directional_settle"
+        ):
             # Test on different 7x7 grid with 3 barriers and 4 floating particles
             grid = np.zeros((7, 7), dtype=int)
             grid[3, 1] = 5  # Barrier
@@ -541,7 +673,10 @@ class RepresentationExpansionEngine:
                 result[2, 1] == 2 and result[4, 4] == 3 and result[6, 6] == 4 and result[1, 1] == 0
             )
 
-        elif operator.flux_mode == "directional_ray_cast":
+        elif (
+            isinstance(operator, SynthesizedCellularFluxOperator)
+            and operator.flux_mode == "directional_ray_cast"
+        ):
             # Test on 8x8 grid with emitter at (0, 0) and obstacle at (5, 5)
             grid = np.zeros((8, 8), dtype=int)
             grid[0, 0] = operator.params.get("emitter_color", 2)

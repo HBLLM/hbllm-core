@@ -188,4 +188,93 @@ def get_depth4_exploratory_manifest() -> list[ManifestTask]:
         )
     )
 
+    # 3. Crop -> Rotate 90 -> Flip H -> Recolor
+    t3_p1_x = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
+    t3_p1_y = np.array([[7, 8], [9, 6]])
+    t3_test_x = np.array([[0, 0, 0, 0, 0], [0, 0, 1, 2, 0], [0, 0, 3, 4, 0], [0, 0, 0, 0, 0]])
+    t3_test_y = t3_p1_y.copy()
+    tasks.append(
+        ManifestTask(
+            "stress_d4_crop_rot_flip_recolor",
+            "COMPOSITIONAL",
+            4,
+            ((t3_p1_x, t3_p1_y),),
+            t3_test_x,
+            t3_test_y,
+            {"stages": ["crop", "rot_90", "flip_h", "recolor"]},
+        )
+    )
+
+    # 4. Crop -> Scale 2x -> Rotate 90 -> Recolor
+    t4_p1_x = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
+    t4_crop = np.array([[1, 2], [3, 4]])
+    t4_scaled = np.kron(t4_crop, np.ones((2, 2), dtype=int))
+    t4_rot = np.rot90(t4_scaled, -1)
+    lut4 = {1: 5, 2: 6, 3: 7, 4: 8}
+    t4_p1_y = np.vectorize(lambda c: lut4.get(c, c))(t4_rot)
+    t4_test_x = np.array([[0, 0, 0, 0, 0], [0, 1, 2, 0, 0], [0, 3, 4, 0, 0], [0, 0, 0, 0, 0]])
+    t4_test_y = t4_p1_y.copy()
+    tasks.append(
+        ManifestTask(
+            "stress_d4_crop_scale_rot_recolor",
+            "COMPOSITIONAL",
+            4,
+            ((t4_p1_x, t4_p1_y),),
+            t4_test_x,
+            t4_test_y,
+            {"stages": ["crop", "scale_2x", "rot_90", "recolor"]},
+        )
+    )
+
+    return tasks
+
+
+def get_depth5_exploratory_manifest() -> list[ManifestTask]:
+    """Return exploratory depth-5 compositional stress-test tasks."""
+    tasks: list[ManifestTask] = []
+
+    # 1. Crop -> Scale 2x -> Rotate 90 -> Flip H -> Recolor
+    t1_p1_x = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
+    t1_crop = np.array([[1, 2], [3, 4]])
+    t1_scaled = np.kron(t1_crop, np.ones((2, 2), dtype=int))
+    t1_rot = np.rot90(t1_scaled, -1)
+    t1_flip = np.flipud(t1_rot)
+    lut1 = {1: 6, 2: 7, 3: 8, 4: 9}
+    t1_p1_y = np.vectorize(lambda c: lut1.get(c, c))(t1_flip)
+    t1_test_x = np.array([[0, 0, 0, 0, 0], [0, 1, 2, 0, 0], [0, 3, 4, 0, 0], [0, 0, 0, 0, 0]])
+    t1_test_y = t1_p1_y.copy()
+    tasks.append(
+        ManifestTask(
+            "stress_d5_crop_scale_rot_flip_recolor",
+            "COMPOSITIONAL",
+            5,
+            ((t1_p1_x, t1_p1_y),),
+            t1_test_x,
+            t1_test_y,
+            {"stages": ["crop", "scale_2x", "rot_90", "flip_h", "recolor"]},
+        )
+    )
+
+    # 2. Crop -> Rotate 90 -> Scale 2x -> Flip H -> Recolor
+    t2_p1_x = np.array([[0, 0, 0, 0], [0, 1, 2, 0], [0, 3, 4, 0], [0, 0, 0, 0]])
+    t2_crop = np.array([[1, 2], [3, 4]])
+    t2_rot = np.rot90(t2_crop, -1)
+    t2_scaled = np.kron(t2_rot, np.ones((2, 2), dtype=int))
+    t2_flip = np.flipud(t2_scaled)
+    lut2 = {3: 5, 1: 6, 4: 7, 2: 8}
+    t2_p1_y = np.vectorize(lambda c: lut2.get(c, c))(t2_flip)
+    t2_test_x = np.array([[0, 0, 0, 0, 0], [0, 0, 1, 2, 0], [0, 0, 3, 4, 0], [0, 0, 0, 0, 0]])
+    t2_test_y = t2_p1_y.copy()
+    tasks.append(
+        ManifestTask(
+            "stress_d5_crop_rot_scale_flip_recolor",
+            "COMPOSITIONAL",
+            5,
+            ((t2_p1_x, t2_p1_y),),
+            t2_test_x,
+            t2_test_y,
+            {"stages": ["crop", "rot_90", "scale_2x", "flip_h", "recolor"]},
+        )
+    )
+
     return tasks

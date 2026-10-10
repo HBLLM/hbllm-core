@@ -670,7 +670,7 @@ class CompositeOperator(GridOperator):
         composed_bindings = []
         train_pairs = context.get("train_pairs", [])
 
-        for b1 in b1_list[:5]:
+        for b1 in b1_list[:10]:
             # Apply op1 to derive intermediate representations for op2 proposal
             intermediate_pairs = []
             valid = True
@@ -689,7 +689,7 @@ class CompositeOperator(GridOperator):
             inter_context["train_pairs"] = intermediate_pairs
             b2_list = self.op2.propose(scene, inter_context)
 
-            for b2 in b2_list[:5]:
+            for b2 in b2_list[:10]:
                 composed_bindings.append(
                     OperatorBinding(
                         operator_name=self.name,
@@ -987,16 +987,65 @@ class TransformationProgramSearch:
                 )
             )
 
-        # Depth 4 Compositions (Exploratory Stress Testing)
+        # Depth 4 Compositions
         if self.max_depth >= 4:
-            comp_d3_trans = CompositeOperator(
-                CompositeOperator(ObjectExtractOperator(), AffineOperator()), TranslationOperator()
-            )
+            comp_crop_aff = CompositeOperator(ObjectExtractOperator(), AffineOperator())
+            comp_d3_trans = CompositeOperator(comp_crop_aff, TranslationOperator())
             self.operators.append(CompositeOperator(comp_d3_trans, RecolorOperator()))
-            comp_d3_recol = CompositeOperator(
-                CompositeOperator(ObjectExtractOperator(), AffineOperator()), RecolorOperator()
-            )
+            comp_d3_recol = CompositeOperator(comp_crop_aff, RecolorOperator())
             self.operators.append(CompositeOperator(comp_d3_recol, SymmetryCompletionOperator()))
+            # Crop ∘ Affine ∘ Affine ∘ Recolor (e.g. Crop ∘ Rot ∘ Flip ∘ Recolor)
+            comp_d3_aff = CompositeOperator(comp_crop_aff, AffineOperator())
+            self.operators.append(CompositeOperator(comp_d3_aff, RecolorOperator()))
+            # Crop ∘ Scale ∘ Affine ∘ Recolor
+            comp_d3_scale_aff = CompositeOperator(
+                CompositeOperator(ObjectExtractOperator(), ScaleOperator()), AffineOperator()
+            )
+            self.operators.append(CompositeOperator(comp_d3_scale_aff, RecolorOperator()))
+            # Crop ∘ Affine ∘ Scale ∘ Recolor
+            comp_d3_aff_scale = CompositeOperator(comp_crop_aff, ScaleOperator())
+            self.operators.append(CompositeOperator(comp_d3_aff_scale, RecolorOperator()))
+            # Symmetry ∘ Affine ∘ Affine ∘ Recolor
+            comp_d3_sym_aff = CompositeOperator(
+                CompositeOperator(SymmetryCompletionOperator(), AffineOperator()), AffineOperator()
+            )
+            self.operators.append(CompositeOperator(comp_d3_sym_aff, RecolorOperator()))
+
+        # Depth 5 Compositions
+        if self.max_depth >= 5:
+            # Crop ∘ Scale ∘ Affine ∘ Affine ∘ Recolor
+            comp_d4_scale_aff2 = CompositeOperator(
+                CompositeOperator(
+                    CompositeOperator(ObjectExtractOperator(), ScaleOperator()), AffineOperator()
+                ),
+                AffineOperator(),
+            )
+            self.operators.append(CompositeOperator(comp_d4_scale_aff2, RecolorOperator()))
+            # Crop ∘ Affine ∘ Scale ∘ Affine ∘ Recolor
+            comp_d4_aff_scale_aff = CompositeOperator(
+                CompositeOperator(
+                    CompositeOperator(ObjectExtractOperator(), AffineOperator()), ScaleOperator()
+                ),
+                AffineOperator(),
+            )
+            self.operators.append(CompositeOperator(comp_d4_aff_scale_aff, RecolorOperator()))
+            # Crop ∘ Affine ∘ Translation ∘ Affine ∘ Recolor
+            comp_d4_trans_aff = CompositeOperator(
+                CompositeOperator(
+                    CompositeOperator(ObjectExtractOperator(), AffineOperator()),
+                    TranslationOperator(),
+                ),
+                AffineOperator(),
+            )
+            self.operators.append(CompositeOperator(comp_d4_trans_aff, RecolorOperator()))
+            # Crop ∘ Affine ∘ Affine ∘ Translation ∘ Recolor
+            comp_d4_aff2_trans = CompositeOperator(
+                CompositeOperator(
+                    CompositeOperator(ObjectExtractOperator(), AffineOperator()), AffineOperator()
+                ),
+                TranslationOperator(),
+            )
+            self.operators.append(CompositeOperator(comp_d4_aff2_trans, RecolorOperator()))
 
     def propose_candidates(
         self,
