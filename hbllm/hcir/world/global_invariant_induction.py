@@ -167,6 +167,17 @@ class InductiveGlobalInvariantSynthesizer:
                 return BranchRule(rule_type="rot90", params={})
 
             # Test uniform foreground recoloring
+            # Single color swap test (including background or foreground swap)
+            diff_mask = x != y
+            src_colors = np.unique(x[diff_mask])
+            dst_colors = np.unique(y[diff_mask])
+            if len(src_colors) == 1 and len(dst_colors) == 1:
+                return BranchRule(
+                    rule_type="recolor",
+                    params={"src_color": int(src_colors[0]), "dst_color": int(dst_colors[0])},
+                )
+
+            # Test uniform foreground recoloring
             fg_x = x != 0
             fg_y = y != 0
             if np.array_equal(fg_x, fg_y):
@@ -176,16 +187,6 @@ class InductiveGlobalInvariantSynthesizer:
                     dst = int(unique_y_fg[0])
                     return BranchRule(
                         rule_type="recolor", params={"src_color": -1, "dst_color": dst}
-                    )
-
-                # Single color swap test
-                diff_mask = x != y
-                src_colors = np.unique(x[diff_mask])
-                dst_colors = np.unique(y[diff_mask])
-                if len(src_colors) == 1 and len(dst_colors) == 1:
-                    return BranchRule(
-                        rule_type="recolor",
-                        params={"src_color": int(src_colors[0]), "dst_color": int(dst_colors[0])},
                     )
 
         return None

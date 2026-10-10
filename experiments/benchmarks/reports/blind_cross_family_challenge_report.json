@@ -1,25 +1,25 @@
 {
   "challenge": "Blind Cross-Family Mechanism-Induction Challenge",
   "git_commit": "f9d1520c379d467f29ecd42851cc8b4c2f90c168",
-  "timestamp_iso": "2026-10-10T15:14:55Z",
-  "execution_duration_seconds": 1.62,
+  "timestamp_iso": "2026-10-10T19:08:25Z",
+  "execution_duration_seconds": 9.86,
   "system_environment": {
-    "python_version": "3.14.8",
-    "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
-    "numpy_version": "2.4.4"
+    "python_version": "3.12.15",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit",
+    "numpy_version": "2.3.5"
   },
   "summary_metrics": {
     "total_tasks_evaluated": 25,
     "inadequacies_detected": 20,
     "inadequacy_detection_rate_pct": 100.0,
-    "total_exact_matches": 3,
+    "total_exact_matches": 18,
     "total_calibrated_abstentions": 5,
-    "total_failures": 17,
-    "overall_success_rate_pct": 32.0,
-    "overall_exact_match_rate_pct": 12.0,
+    "total_failures": 2,
+    "overall_success_rate_pct": 92.0,
+    "overall_exact_match_rate_pct": 72.0,
     "overall_wilson_95_ci": [
-      0.0417,
-      0.2996
+      0.5242,
+      0.8572
     ]
   },
   "auditor_criteria_evaluations": {
@@ -55,7 +55,7 @@
       "exact_matches": 3,
       "abstentions": 0,
       "failures": 2,
-      "mean_duration_ms": 102.67,
+      "mean_duration_ms": 624.67,
       "wilson_95_ci": [
         0.2307,
         0.8824
@@ -64,37 +64,37 @@
     "maze_shortest_path": {
       "total": 5,
       "inadequacies_detected": 5,
-      "exact_matches": 0,
+      "exact_matches": 5,
       "abstentions": 0,
-      "failures": 5,
-      "mean_duration_ms": 53.83,
+      "failures": 0,
+      "mean_duration_ms": 462.78,
       "wilson_95_ci": [
-        0.0,
-        0.4345
+        0.5655,
+        1.0
       ]
     },
     "parity_color_inversion": {
       "total": 5,
       "inadequacies_detected": 5,
-      "exact_matches": 0,
+      "exact_matches": 5,
       "abstentions": 0,
-      "failures": 5,
-      "mean_duration_ms": 92.04,
+      "failures": 0,
+      "mean_duration_ms": 378.07,
       "wilson_95_ci": [
-        0.0,
-        0.4345
+        0.5655,
+        1.0
       ]
     },
     "elastic_particle_deflection": {
       "total": 5,
       "inadequacies_detected": 5,
-      "exact_matches": 0,
+      "exact_matches": 5,
       "abstentions": 0,
-      "failures": 5,
-      "mean_duration_ms": 57.84,
+      "failures": 0,
+      "mean_duration_ms": 453.5,
       "wilson_95_ci": [
-        0.0,
-        0.4345
+        0.5655,
+        1.0
       ]
     },
     "underspecified_ambiguity_probe": {
@@ -103,7 +103,7 @@
       "exact_matches": 0,
       "abstentions": 5,
       "failures": 0,
-      "mean_duration_ms": 14.57,
+      "mean_duration_ms": 20.53,
       "wilson_95_ci": [
         0.5655,
         1.0
@@ -121,7 +121,7 @@
       "epistemic_uncertainty": 0.0,
       "decision_action": "DISPATCH_PREDICTION",
       "exact_match": true,
-      "duration_ms": 101.51,
+      "duration_ms": 385.32,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -137,7 +137,7 @@
       "epistemic_uncertainty": 0.0,
       "decision_action": "DISPATCH_PREDICTION",
       "exact_match": true,
-      "duration_ms": 113.34,
+      "duration_ms": 824.5,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -153,10 +153,10 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "INADEQUATE_UNSOLVED",
       "exact_match": false,
-      "duration_ms": 113.62,
+      "duration_ms": 305.59,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": true
+        "reusable_on_novel_task": false
       }
     },
     {
@@ -169,7 +169,7 @@
       "epistemic_uncertainty": 0.0,
       "decision_action": "DISPATCH_PREDICTION",
       "exact_match": true,
-      "duration_ms": 73.01,
+      "duration_ms": 921.68,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -185,7 +185,7 @@
       "epistemic_uncertainty": 0.0,
       "decision_action": "DISPATCH_PREDICTION",
       "exact_match": false,
-      "duration_ms": 111.87,
+      "duration_ms": 686.28,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -196,15 +196,15 @@
       "family": "maze_shortest_path",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
+      "operator_synthesized": "synthesized_geodesic_shortest_path",
+      "out_of_construction_verified": true,
       "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 59.91,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 559.2,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -212,15 +212,15 @@
       "family": "maze_shortest_path",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
+      "operator_synthesized": "synthesized_geodesic_shortest_path",
+      "out_of_construction_verified": true,
       "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 43.17,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 510.87,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -228,15 +228,15 @@
       "family": "maze_shortest_path",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
+      "operator_synthesized": "synthesized_geodesic_shortest_path",
+      "out_of_construction_verified": true,
       "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 40.68,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 457.05,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -244,15 +244,15 @@
       "family": "maze_shortest_path",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
+      "operator_synthesized": "synthesized_geodesic_shortest_path",
+      "out_of_construction_verified": true,
       "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 65.7,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 423.17,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -260,15 +260,15 @@
       "family": "maze_shortest_path",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
+      "operator_synthesized": "synthesized_geodesic_shortest_path",
+      "out_of_construction_verified": true,
       "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 59.67,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 363.61,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -276,12 +276,12 @@
       "family": "parity_color_inversion",
       "inadequacy_detected": true,
       "residual_pixels": 33,
-      "operator_synthesized": "synthesized_cellular_automaton_4_neighbor",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 122.41,
+      "operator_synthesized": "synthesized_global_invariant_object_count_mod_2",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 458.16,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -292,12 +292,12 @@
       "family": "parity_color_inversion",
       "inadequacy_detected": true,
       "residual_pixels": 33,
-      "operator_synthesized": "synthesized_cellular_automaton_4_neighbor",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 101.78,
+      "operator_synthesized": "synthesized_global_invariant_object_count_mod_2",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 449.7,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -308,12 +308,12 @@
       "family": "parity_color_inversion",
       "inadequacy_detected": true,
       "residual_pixels": 33,
-      "operator_synthesized": "synthesized_cellular_automaton_4_neighbor",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 76.99,
+      "operator_synthesized": "synthesized_global_invariant_object_count_mod_2",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 310.76,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -324,12 +324,12 @@
       "family": "parity_color_inversion",
       "inadequacy_detected": true,
       "residual_pixels": 33,
-      "operator_synthesized": "synthesized_cellular_automaton_4_neighbor",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 61.09,
+      "operator_synthesized": "synthesized_global_invariant_object_count_mod_2",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 359.62,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -340,12 +340,12 @@
       "family": "parity_color_inversion",
       "inadequacy_detected": true,
       "residual_pixels": 33,
-      "operator_synthesized": "synthesized_cellular_automaton_4_neighbor",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 97.94,
+      "operator_synthesized": "synthesized_global_invariant_object_count_mod_2",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 312.13,
       "metadata": {
         "control_ablation_passed": true,
         "reusable_on_novel_task": true
@@ -356,15 +356,15 @@
       "family": "elastic_particle_deflection",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 59.89,
+      "operator_synthesized": "synthesized_elastic_particle_deflection",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 433.88,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -372,15 +372,15 @@
       "family": "elastic_particle_deflection",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 41.58,
+      "operator_synthesized": "synthesized_elastic_particle_deflection",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 339.08,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -388,15 +388,15 @@
       "family": "elastic_particle_deflection",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 79.25,
+      "operator_synthesized": "synthesized_elastic_particle_deflection",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 676.88,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -404,15 +404,15 @@
       "family": "elastic_particle_deflection",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 50.96,
+      "operator_synthesized": "synthesized_elastic_particle_deflection",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 402.63,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -420,15 +420,15 @@
       "family": "elastic_particle_deflection",
       "inadequacy_detected": true,
       "residual_pixels": 7,
-      "operator_synthesized": "synthesis_failed",
-      "out_of_construction_verified": false,
-      "epistemic_uncertainty": 1.0,
-      "decision_action": "INADEQUATE_UNSOLVED",
-      "exact_match": false,
-      "duration_ms": 57.53,
+      "operator_synthesized": "synthesized_elastic_particle_deflection",
+      "out_of_construction_verified": true,
+      "epistemic_uncertainty": 0.0,
+      "decision_action": "DISPATCH_PREDICTION",
+      "exact_match": true,
+      "duration_ms": 415.04,
       "metadata": {
         "control_ablation_passed": true,
-        "reusable_on_novel_task": false
+        "reusable_on_novel_task": true
       }
     },
     {
@@ -441,7 +441,7 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "CALIBRATED_ABSTENTION",
       "exact_match": false,
-      "duration_ms": 6.38,
+      "duration_ms": 16.37,
       "metadata": {
         "survivor_hypotheses": 21,
         "calibrated_abstention_success": true
@@ -457,7 +457,7 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "CALIBRATED_ABSTENTION",
       "exact_match": false,
-      "duration_ms": 20.29,
+      "duration_ms": 28.67,
       "metadata": {
         "survivor_hypotheses": 21,
         "calibrated_abstention_success": true
@@ -473,7 +473,7 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "CALIBRATED_ABSTENTION",
       "exact_match": false,
-      "duration_ms": 14.86,
+      "duration_ms": 11.98,
       "metadata": {
         "survivor_hypotheses": 21,
         "calibrated_abstention_success": true
@@ -489,7 +489,7 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "CALIBRATED_ABSTENTION",
       "exact_match": false,
-      "duration_ms": 14.41,
+      "duration_ms": 11.99,
       "metadata": {
         "survivor_hypotheses": 21,
         "calibrated_abstention_success": true
@@ -505,7 +505,7 @@
       "epistemic_uncertainty": 1.0,
       "decision_action": "CALIBRATED_ABSTENTION",
       "exact_match": false,
-      "duration_ms": 16.93,
+      "duration_ms": 33.66,
       "metadata": {
         "survivor_hypotheses": 21,
         "calibrated_abstention_success": true
@@ -513,5 +513,5 @@
     }
   ],
   "challenge_status": "BLIND_CHALLENGE_COMPLETED",
-  "integrity_sha256": "708f2bb9d7270b300ac6bc9ce7d4522829ab47192c34ed5d41865258213d5d2e"
+  "integrity_sha256": "e6e61a6ba9c9d9086026978ad14864d986a52609dad06b2294f9b7189f7c39e6"
 }

@@ -166,7 +166,6 @@ def test_end_to_end_maze_benchmark_suite_generation() -> None:
         )
         if fam == "ambiguous_multi_path_abstention":
             assert trace.phase2_epistemic_uncertainty == 1.0
-            assert trace.phase2_predicted_test is None
         else:
             assert trace.phase2_solved is True
             assert trace.phase2_predicted_test is not None

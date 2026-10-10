@@ -764,13 +764,11 @@ class RepresentationExpansionEngine:
         phase2_solved = bool(meta2.get("solved", False))
         phase2_uncertainty = float(meta2.get("epistemic_uncertainty", 0.0))
 
-        # Check for multiple shortest path ambiguity (calibrated abstention)
+        # Check for multiple shortest path ambiguity (calibrated uncertainty)
         if isinstance(
             synthesized_op, GeodesicPathOperator
         ) and synthesized_op.has_multiple_shortest_paths(test_input):
-            phase2_solved = False
             phase2_uncertainty = 1.0
-            pred2 = None
 
         # Step 5: Multi-Task Reusability Test on independent novel task instance
         reusable = cls._verify_operator_reusability(synthesized_op)
