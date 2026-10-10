@@ -228,7 +228,7 @@ class EpistemicFeedbackAssimilator:
                 )
             )
 
-        if is_effector_action or action == 5:
+        if is_effector_action:
             if hasattr(engine, "entity_action_failed_positions"):
                 engine.entity_action_failed_positions.clear()
             if hasattr(engine, "immobile_entity_actions"):

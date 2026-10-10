@@ -126,7 +126,20 @@ class MentalSimulationPlanner:
 
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
-            goals = confirmed_goals
+            goals = list(confirmed_goals)
+
+        # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
+        # If an executive subgoal is active and unsatisfied, prioritize its target destination ahead of confirmed goals.
+        if hasattr(engine, "subgoal_stack") and engine.subgoal_stack.has_pending_goals:
+            cur_sg = engine.subgoal_stack.current_subgoal
+            if cur_sg is not None and not engine.subgoal_stack.is_subgoal_satisfied(
+                cur_sg, set(), avatar_pos=engine.avatar_pos
+            ):
+                sg_dest = cur_sg.target_destination
+                if 0 <= sg_dest[0] < H and 0 <= sg_dest[1] < W:
+                    if sg_dest in goals:
+                        goals.remove(sg_dest)
+                    goals.insert(0, sg_dest)
 
         # Panel coordinates filter
         panel_coords: set[tuple[int, int]] = set()
@@ -825,9 +838,26 @@ class MentalSimulationPlanner:
                     else:
                         break
             max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
+
+            # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
+            bump_wait_action: Any | None = non_disp_wait_action
+            if bump_wait_action is None and (cur_patrols or has_periodic):
+                for a_disp in available_actions:
+                    dyn = engine.action_dynamics.get(a_disp)
+                    if dyn is not None and dyn.is_displacement_action():
+                        dr_b, dc_b = dyn.delta_r, dyn.delta_c
+                        br, bc = cur_pos[0] + dr_b, cur_pos[1] + dc_b
+                        if (
+                            not (0 <= br < H and 0 <= bc < W)
+                            or (br, bc) in _grid_walls
+                            or (br, bc) in engine.hazard_tracker.static_lethal_positions
+                        ):
+                            bump_wait_action = a_disp
+                            break
+
             if (
                 (cur_patrols or has_periodic)
-                and non_disp_wait_action is not None
+                and bump_wait_action is not None
                 and consecutive_waits < max_consecutive_waits
             ):
                 candidate_actions.append(("__WAIT__", 0, 0))
@@ -835,7 +865,7 @@ class MentalSimulationPlanner:
             for act, dr, dc in candidate_actions:
                 is_wait = act == "__WAIT__"
                 if is_wait:
-                    real_act = non_disp_wait_action
+                    real_act = bump_wait_action
                     if real_act is None:
                         continue
                 else:
