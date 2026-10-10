@@ -216,6 +216,7 @@ def test_layer3_held_out_task_exact_match_recoloring():
 
     assert metadata["solved"] is True
     assert winning_binding is not None
+    assert pred_test is not None
     assert np.array_equal(pred_test, expected_test_output)
 
 
@@ -312,6 +313,8 @@ def test_layer4_compositional_ablation():
     pred_test, winning_binding, metadata = searcher.solve(train_pairs, test_input)
 
     assert metadata["solved"] is True
+    assert winning_binding is not None
+    assert pred_test is not None
     assert "composite" in winning_binding.operator_name or "Crop" in winning_binding.description
     assert np.array_equal(pred_test, expected_test_out)
 

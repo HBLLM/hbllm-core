@@ -37,7 +37,12 @@ from hbllm.hcir.world.representation_expansion import (
     RegionConcept,
     RelationalConcept,
 )
-from hbllm.hcir.world.rule_induction import AffineOp, AffineRule, ColorMappingRule
+from hbllm.hcir.world.rule_induction import (
+    AffineOp,
+    AffineRule,
+    ColorMappingRule,
+    IdentityRule,
+)
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 
 # =============================================================================
@@ -125,10 +130,6 @@ def test_suite_9_prediction_and_simulation_w081_to_w090() -> None:
 
     # W089: Simulation stopping criteria
     # Fixpoint stopping: identity rule stops immediately after 1 step
-    class IdentityRule:
-        def execute(self, g: np.ndarray, ctx: dict | None = None) -> np.ndarray:
-            return g.copy()
-
     fixpoint_crit = SimulationStoppingCriteria(max_steps=10, convergence_delta_threshold=0.0)
     fp_traj = predictor.simulate_rollout(base_grid, IdentityRule(), criteria=fixpoint_crit)
     assert len(fp_traj) == 2  # Step 0 initial, Step 1 identical -> stops

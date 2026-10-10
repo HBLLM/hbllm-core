@@ -31,7 +31,9 @@ from hbllm.hcir.world.representation_expansion import RepresentationExpansionEng
 def test_independent_task_suite_generation_and_grammar_independence():
     """Verify that independent task generator has no solver imports and produces disjoint families."""
     # 1. AST check: Zero solver or GridOperator imports in independent_task_generator.py
-    tree = ast.parse(inspect.getsource(inspect.getmodule(IndependentTaskGenerator)))
+    generator_module = inspect.getmodule(IndependentTaskGenerator)
+    assert generator_module is not None
+    tree = ast.parse(inspect.getsource(generator_module))
 
     imported_modules = set()
     for node in ast.walk(tree):

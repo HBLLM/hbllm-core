@@ -1,13 +1,13 @@
 {
   "milestone": "Milestone 2: Integrated World-Model Generalization",
-  "git_commit": "1619aba16f005b2851c0fe189c23492a727737fd",
-  "timestamp_iso": "2026-10-10T12:31:06Z",
-  "execution_duration_seconds": 11.41,
+  "git_commit": "f9d1520c379d467f29ecd42851cc8b4c2f90c168",
+  "timestamp_iso": "2026-10-10T15:25:55Z",
+  "execution_duration_seconds": 26.52,
   "system_environment": {
-    "python_version": "3.12.15",
-    "platform": "macOS-15.7.9-x86_64-i386-64bit",
+    "python_version": "3.14.8",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
     "processor": "i386",
-    "numpy_version": "2.3.5"
+    "numpy_version": "2.4.4"
   },
   "pillar_1_independent_reproduction": {
     "total_capabilities": 160,
@@ -201,7 +201,7 @@
         "depth_1_solved": "3/23",
         "depth_2_solved": "0/6",
         "depth_3_solved": "0/1",
-        "duration_seconds": 0.0
+        "duration_seconds": 0.1
       },
       "DFS_GREEDY": {
         "solved_tasks": 12,
@@ -214,7 +214,7 @@
         "depth_1_solved": "11/23",
         "depth_2_solved": "1/6",
         "depth_3_solved": "0/1",
-        "duration_seconds": 0.54
+        "duration_seconds": 1.42
       },
       "ATOMIC_ONLY": {
         "solved_tasks": 23,
@@ -227,7 +227,7 @@
         "depth_1_solved": "23/23",
         "depth_2_solved": "0/6",
         "depth_3_solved": "0/1",
-        "duration_seconds": 0.09
+        "duration_seconds": 0.22
       },
       "FULL_HCIR": {
         "solved_tasks": 30,
@@ -240,7 +240,7 @@
         "depth_1_solved": "23/23",
         "depth_2_solved": "6/6",
         "depth_3_solved": "1/1",
-        "duration_seconds": 0.95
+        "duration_seconds": 3.23
       }
     },
     "static_arc_gating_verified": true,
@@ -248,5 +248,5 @@
     "active_probing_restricted_to_interactive": true
   },
   "overall_status": "MILESTONE_2_COMPLETED_AND_VERIFIED",
-  "integrity_sha256": "98d168f35d6e0da06fe97547b084d81dfa2a1abaaddf472d424a73f26b7d8929"
+  "integrity_sha256": "0d283eb0212b3c6e3c785d3a3d3a4809af7446256a351351bdf2d39f72766894"
 }

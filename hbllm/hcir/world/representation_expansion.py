@@ -606,25 +606,27 @@ class RepresentationRevisionTrace:
     control_ablation_passed: bool
     correspondence_ablation_passed: bool = True
     conditions_ablation_passed: bool = True
+    phase2_predicted_test: np.ndarray | None = None
 
 
 class RepresentationExpansionEngine:
     """Metacognitive engine detecting hypothesis language inadequacy and revising representations."""
 
     @classmethod
-    def evaluate_representation_revision_cycle(
+    def synthesize_and_predict(
         cls,
-        task: Any,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        test_input: np.ndarray,
+        task_id: str = "task",
+        family: str = "unknown",
         enable_synthesis: bool = True,
         enable_correspondence: bool = True,
         enable_propagation_conditions: bool = True,
     ) -> RepresentationRevisionTrace:
-        """Run the rigorous Level 3 representation revision cycle with all causal ablations."""
-        train_pairs = list(task.train_pairs)
-
+        """Execute Level 3 representation revision with strict airgap from test output ground truth."""
         # Step 1: Base Solver Execution (fails if outside vocabulary)
         base_solver = TransformationProgramSearch(max_depth=3, use_mdl=True, enable_relational=True)
-        pred1, rule1, meta1 = base_solver.solve(train_pairs, task.test_input)
+        pred1, rule1, meta1 = base_solver.solve(train_pairs, test_input)
 
         phase1_solved = bool(meta1.get("solved", False))
         phase1_inadequate = bool(meta1.get("insufficient_hypothesis_language", False))
@@ -634,10 +636,9 @@ class RepresentationExpansionEngine:
         unexplained_residuals = int(np.sum(x0 != y0))
 
         if phase1_solved:
-            # Solved at Level 1 or Level 2 without needing representation expansion
             return RepresentationRevisionTrace(
-                task_id=task.task_id,
-                family=task.family,
+                task_id=task_id,
+                family=family,
                 phase1_solved=True,
                 phase1_inadequacy_detected=False,
                 phase1_epistemic_uncertainty=0.0,
@@ -645,19 +646,19 @@ class RepresentationExpansionEngine:
                 synthesized_operator_name="none_required",
                 out_of_construction_verified=True,
                 phase2_solved=True,
-                phase2_exact_match=True,
+                phase2_exact_match=False,
                 phase2_epistemic_uncertainty=0.0,
                 reusable_on_novel_task=True,
                 control_ablation_passed=True,
                 correspondence_ablation_passed=True,
                 conditions_ablation_passed=True,
+                phase2_predicted_test=pred1,
             )
 
-        # If synthesis or either component is ablated, verify failure
         if not enable_synthesis or not enable_correspondence or not enable_propagation_conditions:
             return RepresentationRevisionTrace(
-                task_id=task.task_id,
-                family=task.family,
+                task_id=task_id,
+                family=family,
                 phase1_solved=False,
                 phase1_inadequacy_detected=phase1_inadequate,
                 phase1_epistemic_uncertainty=phase1_uncertainty,
@@ -671,6 +672,7 @@ class RepresentationExpansionEngine:
                 control_ablation_passed=True,
                 correspondence_ablation_passed=True,
                 conditions_ablation_passed=True,
+                phase2_predicted_test=None,
             )
 
         # Step 2: Algorithmic Operator Synthesis from categorical residual events
@@ -681,8 +683,8 @@ class RepresentationExpansionEngine:
         )
         if synthesized_op is None:
             return RepresentationRevisionTrace(
-                task_id=task.task_id,
-                family=task.family,
+                task_id=task_id,
+                family=family,
                 phase1_solved=False,
                 phase1_inadequacy_detected=True,
                 phase1_epistemic_uncertainty=1.0,
@@ -696,6 +698,7 @@ class RepresentationExpansionEngine:
                 control_ablation_passed=True,
                 correspondence_ablation_passed=True,
                 conditions_ablation_passed=True,
+                phase2_predicted_test=None,
             )
 
         # Step 3: Out-of-construction verification on subsequent demonstration pairs
@@ -713,16 +716,17 @@ class RepresentationExpansionEngine:
         )
         expanded_solver.operators.append(synthesized_op)
 
-        pred2, rule2, meta2 = expanded_solver.solve(train_pairs, task.test_input)
+        pred2, rule2, meta2 = expanded_solver.solve(train_pairs, test_input)
         phase2_solved = bool(meta2.get("solved", False))
-        phase2_exact = bool(pred2 is not None and np.array_equal(pred2, task.test_output))
         phase2_uncertainty = float(meta2.get("epistemic_uncertainty", 0.0))
 
         # Step 5: Multi-Task Reusability Test on independent novel task instance
         reusable = cls._verify_operator_reusability(synthesized_op)
 
         # Step 6: Control Ablation 1 (Synthesis Disabled)
-        control_trace = cls.evaluate_representation_revision_cycle(task, enable_synthesis=False)
+        control_trace = cls.synthesize_and_predict(
+            train_pairs, test_input, task_id=task_id, family=family, enable_synthesis=False
+        )
         control_passed = (
             control_trace.phase2_solved is False
             and control_trace.phase2_epistemic_uncertainty == 1.0
@@ -745,8 +749,8 @@ class RepresentationExpansionEngine:
         conditions_ablation_passed = cond_op is None
 
         return RepresentationRevisionTrace(
-            task_id=task.task_id,
-            family=task.family,
+            task_id=task_id,
+            family=family,
             phase1_solved=phase1_solved,
             phase1_inadequacy_detected=phase1_inadequate,
             phase1_epistemic_uncertainty=phase1_uncertainty,
@@ -754,13 +758,43 @@ class RepresentationExpansionEngine:
             synthesized_operator_name=synthesized_op.name,
             out_of_construction_verified=out_of_construction_verified,
             phase2_solved=phase2_solved,
-            phase2_exact_match=phase2_exact,
+            phase2_exact_match=False,
             phase2_epistemic_uncertainty=phase2_uncertainty,
             reusable_on_novel_task=reusable,
             control_ablation_passed=control_passed,
             correspondence_ablation_passed=correspondence_ablation_passed,
             conditions_ablation_passed=conditions_ablation_passed,
+            phase2_predicted_test=pred2,
         )
+
+    @classmethod
+    def evaluate_representation_revision_cycle(
+        cls,
+        task: Any,
+        enable_synthesis: bool = True,
+        enable_correspondence: bool = True,
+        enable_propagation_conditions: bool = True,
+    ) -> RepresentationRevisionTrace:
+        """Run the representation revision cycle and score against ground truth if present."""
+        trace = cls.synthesize_and_predict(
+            train_pairs=list(task.train_pairs),
+            test_input=task.test_input,
+            task_id=task.task_id,
+            family=task.family,
+            enable_synthesis=enable_synthesis,
+            enable_correspondence=enable_correspondence,
+            enable_propagation_conditions=enable_propagation_conditions,
+        )
+        try:
+            test_out = getattr(task, "test_output", None)
+            if test_out is not None and trace.phase2_predicted_test is not None:
+                trace.phase2_exact_match = bool(
+                    np.array_equal(trace.phase2_predicted_test, test_out)
+                )
+        except Exception:
+            # Handles airgapped task proxy raising on test_output access
+            pass
+        return trace
 
     @classmethod
     def _verify_operator_reusability(cls, operator: GridOperator) -> bool:

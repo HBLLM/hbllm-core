@@ -68,6 +68,8 @@ def test_spurious_hypothesis_refutation_on_subsequent_demos():
     )
     assert meta_multi["solved"] is True
     assert meta_multi["spurious_rejected_on_later_demos"] >= 1
+    assert b_multi is not None
+    assert pred is not None
     assert b_multi.params.get("op") == "ROT_180"
     assert np.array_equal(pred, disambig_task.test_output)
 
@@ -203,4 +205,5 @@ def test_w148_structural_transfer_and_negative_transfer_immunity():
     # The Popperian refutation gate MUST refute the conflicting prior and correctly find Flip
     assert res_neg.exact_match is True
     assert res_neg.metadata.get("used_prior_transfer") is False
+    assert res_neg.winning_description is not None
     assert "flip" in res_neg.winning_description.lower() or "FLIP" in res_neg.winning_description

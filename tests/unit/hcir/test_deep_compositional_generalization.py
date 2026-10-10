@@ -37,6 +37,7 @@ def test_depth3_extended_compositional_manifest_5_tasks():
         pred, binding, meta = searcher.solve(list(task.train_pairs), task.test_input)
         assert meta["solved"] is True
         assert binding is not None
+        assert pred is not None
         assert np.array_equal(pred, task.test_output), f"Task {task.task_id} prediction failed"
         solved_count += 1
 
@@ -53,6 +54,7 @@ def test_depth4_exploratory_stress_test_manifest():
         pred, binding, meta = searcher.solve(list(task.train_pairs), task.test_input)
         assert meta["solved"] is True
         assert binding is not None
+        assert pred is not None
         assert np.array_equal(pred, task.test_output), (
             f"Depth 4 task {task.task_id} prediction failed"
         )
@@ -68,6 +70,7 @@ def test_depth5_exploratory_stress_test_manifest():
         pred, binding, meta = searcher.solve(list(task.train_pairs), task.test_input)
         assert meta["solved"] is True
         assert binding is not None
+        assert pred is not None
         assert np.array_equal(pred, task.test_output), (
             f"Depth 5 task {task.task_id} prediction failed"
         )

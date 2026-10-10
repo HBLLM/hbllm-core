@@ -373,7 +373,7 @@
     "dependencies": [
       "W013"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W015",
@@ -427,7 +427,7 @@
     "dependencies": [
       "W015"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W017",
@@ -454,7 +454,7 @@
     "dependencies": [
       "W016"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W018",
@@ -535,7 +535,7 @@
     "dependencies": [
       "W019"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W021",
@@ -805,7 +805,7 @@
     "dependencies": [
       "W029"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W031",
@@ -859,7 +859,7 @@
     "dependencies": [
       "W031"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W033",
@@ -913,7 +913,7 @@
     "dependencies": [
       "W033"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W035",
@@ -940,7 +940,7 @@
     "dependencies": [
       "W034"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W036",
@@ -967,7 +967,7 @@
     "dependencies": [
       "W035"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W037",
@@ -1048,7 +1048,7 @@
     "dependencies": [
       "W038"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W040",
@@ -1075,7 +1075,7 @@
     "dependencies": [
       "W039"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W041",

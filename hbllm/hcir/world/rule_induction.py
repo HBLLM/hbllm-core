@@ -315,12 +315,12 @@ class GravityRule(TransformationRule):
         return out
 
 
-@dataclass
+@dataclass(init=False)
 class CompositeRule(TransformationRule):
     """Sequential composition of two transformation rules: T2(T1(X))."""
 
-    rule_1: TransformationRule | None = None
-    rule_2: TransformationRule | None = None
+    rule_1: TransformationRule
+    rule_2: TransformationRule
 
     def __init__(self, rule_1: TransformationRule, rule_2: TransformationRule) -> None:
         super().__init__(
@@ -333,6 +333,8 @@ class CompositeRule(TransformationRule):
         self.rule_2 = rule_2
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
+        if self.rule_1 is None or self.rule_2 is None:
+            raise ValueError(f"CompositeRule '{self.rule_id}' has uninitialized sub-rules.")
         intermediate = self.rule_1.execute(grid, context)
         return self.rule_2.execute(intermediate, context)
 
