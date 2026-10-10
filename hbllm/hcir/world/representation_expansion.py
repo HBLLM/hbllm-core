@@ -25,6 +25,10 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.world.elastic_particle_induction import (
+    ElasticParticleDeflectionOperator,
+    InductiveParticleDeflectionSynthesizer,
+)
 from hbllm.hcir.world.global_invariant_induction import (
     InductiveGlobalInvariantSynthesizer,
 )
@@ -718,6 +722,16 @@ class RepresentationExpansionEngine:
                 synthesized_op = topo_op
                 out_of_construction_verified = True
 
+        # Step 3d: If local, scalar, and topological synthesizers failed,
+        # escalate to elastic particle deflection & ray kinematics induction (Milestone 3 Phase 3)
+        if not out_of_construction_verified:
+            particle_op = InductiveParticleDeflectionSynthesizer.synthesize_from_residuals(
+                train_pairs
+            )
+            if particle_op is not None:
+                synthesized_op = particle_op
+                out_of_construction_verified = True
+
         if synthesized_op is None or not out_of_construction_verified:
             return RepresentationRevisionTrace(
                 task_id=task_id,
@@ -902,6 +916,14 @@ class RepresentationExpansionEngine:
             b = operator.propose({}, {})[0]
             res = operator.apply(test_grid, b)
             return bool(np.sum(res == operator.path_color) > 0)
+
+        if isinstance(operator, ElasticParticleDeflectionOperator):
+            test_grid = np.zeros((8, 8), dtype=int)
+            test_grid[0, 1] = operator.emitter_color
+            test_grid[4, 5] = operator.barrier_colors[0] if operator.barrier_colors else 5
+            b = operator.propose({}, {})[0]
+            res = operator.apply(test_grid, b)
+            return bool(np.sum(res == operator.beam_color) > 0)
 
         return True
 
