@@ -25,6 +25,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.world.global_invariant_induction import (
+    InductiveGlobalInvariantSynthesizer,
+)
 from hbllm.hcir.world.grid_operator import (
     GridOperator,
     OperatorBinding,
@@ -681,7 +684,29 @@ class RepresentationExpansionEngine:
             enable_correspondence=True,
             enable_propagation_conditions=True,
         )
-        if synthesized_op is None:
+
+        out_of_construction_verified = False
+        if synthesized_op is not None:
+            # Step 3: Out-of-construction verification on subsequent demonstration pairs
+            out_of_construction_verified = True
+            binding = synthesized_op.propose({}, {"train_pairs": train_pairs})[0]
+            for xi, yi in train_pairs[1:]:
+                pred_i = synthesized_op.apply(xi, binding)
+                if not np.array_equal(pred_i, yi):
+                    out_of_construction_verified = False
+                    break
+
+        # Step 3b: If local cellular synthesis failed or overfitted/refuted on Demo 2..k,
+        # escalate to global modular scalar invariant induction (Milestone 3 Phase 1)
+        if not out_of_construction_verified:
+            global_op = InductiveGlobalInvariantSynthesizer.synthesize_from_demonstrations(
+                train_pairs
+            )
+            if global_op is not None:
+                synthesized_op = global_op
+                out_of_construction_verified = True
+
+        if synthesized_op is None or not out_of_construction_verified:
             return RepresentationRevisionTrace(
                 task_id=task_id,
                 family=family,
@@ -689,7 +714,9 @@ class RepresentationExpansionEngine:
                 phase1_inadequacy_detected=True,
                 phase1_epistemic_uncertainty=1.0,
                 unexplained_residual_pixels=unexplained_residuals,
-                synthesized_operator_name="synthesis_failed",
+                synthesized_operator_name=synthesized_op.name
+                if synthesized_op
+                else "synthesis_failed",
                 out_of_construction_verified=False,
                 phase2_solved=False,
                 phase2_exact_match=False,
@@ -700,15 +727,6 @@ class RepresentationExpansionEngine:
                 conditions_ablation_passed=True,
                 phase2_predicted_test=None,
             )
-
-        # Step 3: Out-of-construction verification on subsequent demonstration pairs
-        out_of_construction_verified = True
-        binding = synthesized_op.propose({}, {"train_pairs": train_pairs})[0]
-        for xi, yi in train_pairs[1:]:
-            pred_i = synthesized_op.apply(xi, binding)
-            if not np.array_equal(pred_i, yi):
-                out_of_construction_verified = False
-                break
 
         # Step 4: Re-evaluation with Expanded Solver
         expanded_solver = TransformationProgramSearch(
