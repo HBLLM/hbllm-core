@@ -1,0 +1,332 @@
+"""Topological Graph & Geodesic Maze Induction Engine (Milestone 3 Phase 2).
+
+Inductively discovers non-local topological geodesic mechanisms:
+1. GridTopologyGraph: Graph abstraction over 2D grids computing shortest geodesic paths.
+2. GeodesicPathOperator: Parameterized operator connecting landmark markers avoiding obstacles.
+3. InductiveTopologicalGraphSynthesizer: Synthesizes graph operators from demonstration residual events.
+"""
+
+from __future__ import annotations
+
+import collections
+import logging
+from typing import Any
+
+import numpy as np
+
+from hbllm.hcir.world.grid_operator import GridOperator, OperatorBinding
+
+logger = logging.getLogger(__name__)
+
+
+class GridTopologyGraph:
+    """Computes shortest geodesic paths through 2D grid manifolds."""
+
+    @staticmethod
+    def find_all_shortest_paths(
+        grid: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coord: tuple[int, int],
+        traversable_colors: set[int],
+        connectivity: str = "4_connected",
+    ) -> list[list[tuple[int, int]]]:
+        """Find all minimum-hop paths from start to goal through traversable cells."""
+        H, W = grid.shape
+        sr, sc = start_coord
+        gr, gc = goal_coord
+
+        if (sr, sc) == (gr, gc):
+            return [[(sr, sc)]]
+
+        offsets = (
+            [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if connectivity == "4_connected"
+            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+        )
+
+        dist: dict[tuple[int, int], int] = {(sr, sc): 0}
+        parents: dict[tuple[int, int], list[tuple[int, int]]] = collections.defaultdict(list)
+        queue = collections.deque([(sr, sc)])
+
+        found_goal = False
+        goal_dist = float("inf")
+
+        while queue:
+            curr_r, curr_c = queue.popleft()
+            d = dist[(curr_r, curr_c)]
+            if d >= goal_dist:
+                continue
+
+            for dr, dc in offsets:
+                nr, nc = curr_r + dr, curr_c + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    cell_val = int(grid[nr, nc])
+                    if (nr, nc) == (gr, gc) or cell_val in traversable_colors:
+                        new_d = d + 1
+                        if (nr, nc) not in dist:
+                            dist[(nr, nc)] = new_d
+                            parents[(nr, nc)].append((curr_r, curr_c))
+                            queue.append((nr, nc))
+                            if (nr, nc) == (gr, gc):
+                                found_goal = True
+                                goal_dist = new_d
+                        elif dist[(nr, nc)] == new_d:
+                            parents[(nr, nc)].append((curr_r, curr_c))
+
+        if not found_goal:
+            return []
+
+        # Backtrack all shortest paths from goal to start
+        paths: list[list[tuple[int, int]]] = []
+
+        def backtrack(curr: tuple[int, int], current_path: list[tuple[int, int]]) -> None:
+            if curr == (sr, sc):
+                paths.append(list(reversed(current_path)))
+                return
+            for p in parents[curr]:
+                backtrack(p, current_path + [p])
+
+        backtrack((gr, gc), [(gr, gc)])
+        return paths
+
+    @staticmethod
+    def shortest_path(
+        grid: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coord: tuple[int, int],
+        traversable_colors: set[int],
+        connectivity: str = "4_connected",
+    ) -> list[tuple[int, int]] | None:
+        """Find a canonical shortest path from start to goal."""
+        all_paths = GridTopologyGraph.find_all_shortest_paths(
+            grid, start_coord, goal_coord, traversable_colors, connectivity
+        )
+        return all_paths[0] if all_paths else None
+
+
+class GeodesicPathOperator(GridOperator):
+    """Operator that connects landmark markers with a geodesic shortest path avoiding obstacle colors."""
+
+    def __init__(
+        self,
+        name: str,
+        start_color: int,
+        goal_color: int,
+        path_color: int,
+        traversable_colors: tuple[int, ...] = (0,),
+        obstacle_colors: tuple[int, ...] = (),
+        include_endpoints: bool = False,
+        connectivity: str = "4_connected",
+        complexity: float = 2.4,
+    ) -> None:
+        self.name = name
+        self.start_color = start_color
+        self.goal_color = goal_color
+        self.path_color = path_color
+        self.traversable_colors = traversable_colors
+        self.obstacle_colors = obstacle_colors
+        self.include_endpoints = include_endpoints
+        self.connectivity = connectivity
+        self.complexity = complexity
+
+    def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
+        return [
+            OperatorBinding(
+                operator_name=self.name,
+                params={
+                    "start_color": self.start_color,
+                    "goal_color": self.goal_color,
+                    "path_color": self.path_color,
+                    "traversable_colors": list(self.traversable_colors),
+                    "obstacle_colors": list(self.obstacle_colors),
+                    "include_endpoints": self.include_endpoints,
+                    "connectivity": self.connectivity,
+                },
+                description=f"{self.name}(start={self.start_color}, goal={self.goal_color}, path={self.path_color})",
+                complexity=self.complexity,
+            )
+        ]
+
+    def _find_endpoints(
+        self, grid: np.ndarray
+    ) -> tuple[int | None, int | None, int | None, int | None]:
+        """Locate start and goal coordinates on the grid."""
+        if self.start_color == self.goal_color:
+            coords = np.argwhere(grid == self.start_color)
+            if len(coords) < 2:
+                return None, None, None, None
+            return int(coords[0][0]), int(coords[0][1]), int(coords[1][0]), int(coords[1][1])
+        start_coords = np.argwhere(grid == self.start_color)
+        goal_coords = np.argwhere(grid == self.goal_color)
+        if len(start_coords) == 0 or len(goal_coords) == 0:
+            return None, None, None, None
+        return (
+            int(start_coords[0][0]),
+            int(start_coords[0][1]),
+            int(goal_coords[0][0]),
+            int(goal_coords[0][1]),
+        )
+
+    def has_multiple_shortest_paths(self, grid: np.ndarray) -> bool:
+        """Check if grid contains ambiguous multiple shortest paths between endpoints."""
+        sr, sc, gr, gc = self._find_endpoints(grid)
+        if sr is None or sc is None or gr is None or gc is None:
+            return False
+        paths = GridTopologyGraph.find_all_shortest_paths(
+            grid=grid,
+            start_coord=(sr, sc),
+            goal_coord=(gr, gc),
+            traversable_colors=set(self.traversable_colors),
+            connectivity=self.connectivity,
+        )
+        return len(paths) > 1
+
+    def apply(self, grid: np.ndarray, binding: OperatorBinding | dict[str, Any]) -> np.ndarray:
+        out = np.copy(grid)
+        sr, sc, gr, gc = self._find_endpoints(grid)
+        if sr is None or sc is None or gr is None or gc is None:
+            return out
+
+        path = GridTopologyGraph.shortest_path(
+            grid=grid,
+            start_coord=(sr, sc),
+            goal_coord=(gr, gc),
+            traversable_colors=set(self.traversable_colors),
+            connectivity=self.connectivity,
+        )
+
+        if path:
+            for pr, pc in path:
+                if self.include_endpoints or ((pr, pc) != (sr, sc) and (pr, pc) != (gr, gc)):
+                    out[pr, pc] = self.path_color
+
+        return out
+
+
+class InductiveTopologicalGraphSynthesizer:
+    """Induces topological geodesic path operators directly from demonstration residuals."""
+
+    @classmethod
+    def synthesize_from_residuals(
+        cls, train_pairs: list[tuple[np.ndarray, np.ndarray]]
+    ) -> GeodesicPathOperator | None:
+        """Deduce landmark endpoints, obstacle sets, and shortest path parameters."""
+        if not train_pairs:
+            return None
+
+        x0, y0 = train_pairs[0]
+        diff_mask = x0 != y0
+        residual_coords = [tuple(int(c) for c in pt) for pt in np.argwhere(diff_mask)]
+
+        if len(residual_coords) == 0:
+            return None
+
+        # Residual path must all be colored with a single path color in y0
+        path_colors = np.unique(y0[diff_mask])
+        if len(path_colors) != 1:
+            return None
+        path_color = int(path_colors[0])
+
+        # Traversable medium in x0
+        traversed_colors = tuple(sorted(set(int(c) for c in np.unique(x0[diff_mask]))))
+
+        # Identify terminal endpoints of the residual path (degree <= 1 in residual graph)
+        residual_set = set(residual_coords)
+        endpoints = [
+            (r, c)
+            for (r, c) in residual_coords
+            if sum(
+                1
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                if (r + dr, c + dc) in residual_set
+            )
+            <= 1
+        ]
+
+        H, W = x0.shape
+        candidate_landmarks: set[int] = set()
+
+        for er, ec in endpoints:
+            # Check if endpoint itself was originally a landmark in x0
+            orig_col = int(x0[er, ec])
+            if orig_col not in traversed_colors and orig_col != 0:
+                candidate_landmarks.add(orig_col)
+
+            # Check adjacent cells outside residual path
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = er + dr, ec + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in residual_set:
+                    col = int(x0[nr, nc])
+                    if col not in traversed_colors and col != 0:
+                        candidate_landmarks.add(col)
+
+        # Also fallback: any non-zero, non-traversed color with count <= 4 in x0
+        for col in np.unique(x0):
+            c_int = int(col)
+            if c_int != 0 and c_int not in traversed_colors:
+                if np.sum(x0 == c_int) <= 4:
+                    candidate_landmarks.add(c_int)
+
+        if not candidate_landmarks:
+            return None
+
+        landmarks = sorted(list(candidate_landmarks))
+        candidate_pairs: list[tuple[int, int]] = []
+
+        # Distinct landmark pairs
+        for i in range(len(landmarks)):
+            for j in range(len(landmarks)):
+                if i != j:
+                    candidate_pairs.append((landmarks[i], landmarks[j]))
+                else:
+                    # Same color pair (e.g. connect two dots of same color)
+                    if np.sum(x0 == landmarks[i]) >= 2:
+                        candidate_pairs.append((landmarks[i], landmarks[i]))
+
+        all_colors = set(int(c) for c in np.unique(x0)) - {0}
+
+        # Test candidate operators
+        for start_c, goal_c in candidate_pairs:
+            obstacle_candidates = tuple(
+                sorted(all_colors - set(traversed_colors) - {start_c, goal_c})
+            )
+
+            for include_endpoints in [False, True]:
+                for conn in ["4_connected", "8_connected"]:
+                    candidate_op = GeodesicPathOperator(
+                        name="synthesized_geodesic_shortest_path",
+                        start_color=start_c,
+                        goal_color=goal_c,
+                        path_color=path_color,
+                        traversable_colors=traversed_colors,
+                        obstacle_colors=obstacle_candidates,
+                        include_endpoints=include_endpoints,
+                        connectivity=conn,
+                    )
+
+                    # Verify on Demo 0
+                    b0 = candidate_op.propose({}, {"train_pairs": train_pairs})[0]
+                    pred0 = candidate_op.apply(x0, b0)
+                    if not np.array_equal(pred0, y0):
+                        continue
+
+                    # Out-of-construction verification on Demo 1..k
+                    verified = True
+                    for xi, yi in train_pairs[1:]:
+                        pred_i = candidate_op.apply(xi, b0)
+                        if not np.array_equal(pred_i, yi):
+                            verified = False
+                            break
+
+                    if verified:
+                        logger.info(
+                            "Successfully induced topological geodesic operator: start=%d, goal=%d, path=%d, traversable=%s, obstacles=%s",
+                            start_c,
+                            goal_c,
+                            path_color,
+                            traversed_colors,
+                            obstacle_candidates,
+                        )
+                        return candidate_op
+
+        return None

@@ -33,6 +33,10 @@ from hbllm.hcir.world.grid_operator import (
     OperatorBinding,
     TransformationProgramSearch,
 )
+from hbllm.hcir.world.topological_graph_induction import (
+    GeodesicPathOperator,
+    InductiveTopologicalGraphSynthesizer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -706,6 +710,14 @@ class RepresentationExpansionEngine:
                 synthesized_op = global_op
                 out_of_construction_verified = True
 
+        # Step 3c: If local and scalar invariants failed,
+        # escalate to topological geodesic graph induction (Milestone 3 Phase 2)
+        if not out_of_construction_verified:
+            topo_op = InductiveTopologicalGraphSynthesizer.synthesize_from_residuals(train_pairs)
+            if topo_op is not None:
+                synthesized_op = topo_op
+                out_of_construction_verified = True
+
         if synthesized_op is None or not out_of_construction_verified:
             return RepresentationRevisionTrace(
                 task_id=task_id,
@@ -737,6 +749,14 @@ class RepresentationExpansionEngine:
         pred2, rule2, meta2 = expanded_solver.solve(train_pairs, test_input)
         phase2_solved = bool(meta2.get("solved", False))
         phase2_uncertainty = float(meta2.get("epistemic_uncertainty", 0.0))
+
+        # Check for multiple shortest path ambiguity (calibrated abstention)
+        if isinstance(
+            synthesized_op, GeodesicPathOperator
+        ) and synthesized_op.has_multiple_shortest_paths(test_input):
+            phase2_solved = False
+            phase2_uncertainty = 1.0
+            pred2 = None
 
         # Step 5: Multi-Task Reusability Test on independent novel task instance
         reusable = cls._verify_operator_reusability(synthesized_op)
@@ -871,6 +891,17 @@ class RepresentationExpansionEngine:
             result = operator.apply(grid, binding)
             beam_col = operator.params.get("beam_color", 3)
             return bool(result[1, 1] == beam_col and result[4, 4] == beam_col and result[6, 6] == 0)
+
+        if isinstance(operator, GeodesicPathOperator):
+            test_grid = np.zeros((5, 5), dtype=int)
+            test_grid[0, 0] = operator.start_color
+            if operator.start_color == operator.goal_color:
+                test_grid[4, 4] = operator.start_color
+            else:
+                test_grid[4, 4] = operator.goal_color
+            b = operator.propose({}, {})[0]
+            res = operator.apply(test_grid, b)
+            return bool(np.sum(res == operator.path_color) > 0)
 
         return True
 
