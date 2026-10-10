@@ -27,6 +27,7 @@ from hbllm.hcir.world.bilateral_coordination import (
     BilateralState,
 )
 from hbllm.hcir.world.causal_discovery import (
+    BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
     CausalHypothesis,
 )
@@ -82,6 +83,9 @@ from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
+from hbllm.hcir.world.rule_induction import (
+    RuleInductionEngine,
+)
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import (
@@ -97,6 +101,13 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     EnvironmentChangeDetector,
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
+)
+from hbllm.hcir.world.world_state_snapshot import (
+    ReversibilityEngine,
+    StateDifferenceComputer,
+    TemporalStateBuffer,
+    TransitionSequenceModel,
+    WorldStateSnapshot,
 )
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
@@ -330,6 +341,20 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+
+        # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
+        self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
+        self.difference_computer: StateDifferenceComputer = StateDifferenceComputer()
+
+        # Faculty: Transition Sequence Model & Reversibility Engine (W048-W050)
+        self.transition_sequence_model: TransitionSequenceModel = TransitionSequenceModel()
+        self.reversibility_engine: ReversibilityEngine = ReversibilityEngine()
+
+        # Faculty: Interventional Causal Discovery Engine (W061-W070)
+        self.causal_discovery_engine: BaseCausalDiscoveryEngine = BaseCausalDiscoveryEngine()
+
+        # Faculty: Rule Induction & Latent Structure Engine (W071-W080)
+        self.rule_induction_engine: RuleInductionEngine = RuleInductionEngine()
 
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
@@ -687,6 +712,20 @@ class AutonomousEpistemicEngine:
             action=action,
             action_data=action_data,
         )
+
+        # Wire W041-W050 temporal buffer & state transition sequence modeling
+        new_snap = WorldStateSnapshot(
+            world_id=getattr(self, "world_id", "default"),
+            variables={"grid": curr_grid, "avatar_pos": getattr(self, "avatar_pos", None)},
+        )
+        prev_snap = self.temporal_buffer.current_state
+        self.temporal_buffer.push(new_snap)
+        if prev_snap is not None and action is not None:
+            self.transition_sequence_model.record_transition(
+                pre_state=prev_snap,
+                action=str(action),
+                post_state=new_snap,
+            )
 
         # Wire interactive world-modeling feedback updates (W161-W190)
         if action is not None:

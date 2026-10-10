@@ -16,7 +16,9 @@ and Minimum Description Length (MDL) simplicity ranking:
 from __future__ import annotations
 
 import logging
+import math
 from collections import deque
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -44,6 +46,8 @@ class RuleFamily(StrEnum):
     RELATIONAL = "RELATIONAL"
     DEFORMATION = "DEFORMATION"
     COMPOSITION = "COMPOSITION"
+    CONDITIONAL = "CONDITIONAL"
+    EXCEPTION = "EXCEPTION"
 
 
 class AffineOp(StrEnum):
@@ -816,17 +820,236 @@ class SimplicityRanker:
         return sorted(survivors, key=lambda r: (r.complexity, r.rule_id))
 
 
+class ConditionalRule(TransformationRule):
+    """W074: Conditional rule executing rule_true if condition predicate holds, else rule_false."""
+
+    def __init__(
+        self,
+        condition_name: str,
+        predicate: Callable[[np.ndarray], bool],
+        rule_true: TransformationRule,
+        rule_false: TransformationRule,
+    ) -> None:
+        super().__init__(
+            rule_id=f"cond_{condition_name}_{rule_true.rule_id}_{rule_false.rule_id}",
+            family=RuleFamily.CONDITIONAL,
+            params={
+                "condition": condition_name,
+                "rule_true": rule_true.rule_id,
+                "rule_false": rule_false.rule_id,
+            },
+            complexity=rule_true.complexity + rule_false.complexity + 0.5,
+        )
+        self.condition_name = condition_name
+        self.predicate = predicate
+        self.rule_true = rule_true
+        self.rule_false = rule_false
+
+    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
+        if self.predicate(grid):
+            return self.rule_true.execute(grid, context)
+        return self.rule_false.execute(grid, context)
+
+
+class ExceptionAwareRule(TransformationRule):
+    """W075: Base rule with specialized exception patch handling."""
+
+    def __init__(
+        self,
+        base_rule: TransformationRule,
+        exception_mask_fn: Callable[[np.ndarray], np.ndarray],
+        patch_color: int,
+        exception_name: str = "outlier_patch",
+    ) -> None:
+        super().__init__(
+            rule_id=f"exc_{base_rule.rule_id}_{exception_name}",
+            family=RuleFamily.EXCEPTION,
+            params={
+                "base_rule": base_rule.rule_id,
+                "patch_color": patch_color,
+                "exception_name": exception_name,
+            },
+            complexity=base_rule.complexity + 1.2,
+        )
+        self.base_rule = base_rule
+        self.exception_mask_fn = exception_mask_fn
+        self.patch_color = patch_color
+        self.exception_name = exception_name
+
+    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
+        out = self.base_rule.execute(grid, context)
+        exc_mask = self.exception_mask_fn(grid)
+        if exc_mask.shape == out.shape:
+            out[exc_mask] = self.patch_color
+        return out
+
+
+class RulePrecedenceResolver:
+    """W077: Resolves rule precedence and conflicts among competing applicable rules."""
+
+    @classmethod
+    def resolve(
+        cls,
+        candidates: list[TransformationRule],
+        grid: np.ndarray,
+    ) -> TransformationRule | None:
+        """Select the highest-precedence rule: specificity > simplicity (MDL) > deterministic ID."""
+        if not candidates:
+            return None
+
+        def priority_key(r: TransformationRule) -> tuple[int, float, str]:
+            specificity = 0
+            if isinstance(r, (ConditionalRule, ExceptionAwareRule)):
+                specificity = 2
+            elif isinstance(r, CompositeRule):
+                specificity = 1
+            return (-specificity, r.complexity, r.rule_id)
+
+        return sorted(candidates, key=priority_key)[0]
+
+
+class LatentVariableBifurcationInducer:
+    """W078: Induces latent discrete conditioning variables that bifurcate demonstration datasets."""
+
+    LATENT_PREDICATES: dict[str, tuple[Callable[[np.ndarray], bool], str]] = {
+        "foreground_count_even": (
+            lambda g: bool(np.count_nonzero(g != 0) % 2 == 0),
+            "Foreground parity",
+        ),
+        "height_greater_width": (
+            lambda g: bool(g.shape[0] > g.shape[1]),
+            "Orientation aspect",
+        ),
+        "has_marker_color_2": (
+            lambda g: bool(2 in np.unique(g)),
+            "Contains red marker",
+        ),
+        "has_marker_color_8": (
+            lambda g: bool(8 in np.unique(g)),
+            "Contains teal marker",
+        ),
+        "unique_colors_gt_2": (
+            lambda g: bool(len(np.unique(g)) > 2),
+            "Multicolor palette",
+        ),
+    }
+
+    @classmethod
+    def induce_bifurcation(
+        cls,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        engine: RuleInductionEngine,
+    ) -> ConditionalRule | None:
+        """Searches latent variable space to bifurcate demonstrations and induce conditional rules."""
+        if len(train_pairs) < 2:
+            return None
+
+        for pred_name, (pred_fn, _) in cls.LATENT_PREDICATES.items():
+            group_true = [(x, y) for x, y in train_pairs if pred_fn(x)]
+            group_false = [(x, y) for x, y in train_pairs if not pred_fn(x)]
+
+            if not group_true or not group_false:
+                continue
+
+            rule_t, survivors_t, _ = engine.induce_rule(group_true, allow_recursion=False)
+            rule_f, survivors_f, _ = engine.induce_rule(group_false, allow_recursion=False)
+
+            if rule_t is not None and rule_f is not None:
+                return ConditionalRule(
+                    condition_name=pred_name,
+                    predicate=pred_fn,
+                    rule_true=rule_t,
+                    rule_false=rule_f,
+                )
+
+        return None
+
+
+@dataclass
+class RulePosteriorResult:
+    """W080: Calibrated Bayesian posterior and epistemic uncertainty over induced rules."""
+
+    best_rule: TransformationRule | None
+    probabilities: dict[str, float]
+    entropy_bits: float
+    confidence: float
+    is_ambiguous: bool
+
+
+class RulePosteriorCalibrator:
+    """W080: Evaluates rule confidence and epistemic uncertainty over hypothesis distributions."""
+
+    @classmethod
+    def compute_posterior(
+        cls,
+        surviving_rules: Sequence[TransformationRule],
+        temperature: float = 1.0,
+        ambiguity_entropy_threshold: float = 1.5,
+    ) -> RulePosteriorResult:
+        """Computes Boltzmann posterior distribution over surviving MDL rules."""
+        if not surviving_rules:
+            return RulePosteriorResult(
+                best_rule=None,
+                probabilities={},
+                entropy_bits=0.0,
+                confidence=0.0,
+                is_ambiguous=True,
+            )
+
+        complexities = [r.complexity for r in surviving_rules]
+        min_c = min(complexities)
+        unnorm = [math.exp(-(c - min_c) / temperature) for c in complexities]
+        total = sum(unnorm)
+        probs = [w / total for w in unnorm]
+
+        prob_dict = {r.rule_id: float(p) for r, p in zip(surviving_rules, probs, strict=False)}
+
+        entropy = 0.0
+        for p in probs:
+            if p > 1e-9:
+                entropy -= p * math.log2(p)
+
+        best_idx = 0
+        best_rule = surviving_rules[best_idx]
+        top_prob = probs[best_idx]
+
+        confidence = top_prob * math.exp(-entropy)
+        confidence = max(0.0, min(1.0, confidence))
+        is_ambiguous = len(surviving_rules) > 1 and entropy > ambiguity_entropy_threshold
+
+        return RulePosteriorResult(
+            best_rule=best_rule,
+            probabilities=prob_dict,
+            entropy_bits=entropy,
+            confidence=confidence,
+            is_ambiguous=is_ambiguous,
+        )
+
+
 class RuleInductionEngine:
-    """Unified engine coordinating generation, refutation, and simplicity selection."""
+    """Unified engine coordinating generation, refutation, simplicity selection, and bifurcation."""
 
     def __init__(self, max_candidates: int = 60) -> None:
         self.max_candidates = max_candidates
         self.generator = CandidateRuleGenerator()
         self.refutation_gate = PopperianRefutationGate()
+        self.bifurcation_inducer = LatentVariableBifurcationInducer()
+        self.posterior_calibrator = RulePosteriorCalibrator()
+
+    def extract_common_transformations(
+        self,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+    ) -> list[TransformationRule]:
+        """W073: Extracts transformation rules shared consistently across demonstration pairs."""
+        candidates = self.generator.generate_candidates(
+            train_pairs, max_candidates=self.max_candidates
+        )
+        return self.refutation_gate.evaluate_and_filter(candidates, train_pairs)
 
     def induce_rule(
         self,
         train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        allow_recursion: bool = True,
     ) -> tuple[TransformationRule | None, list[TransformationRule], dict[str, Any]]:
         """Induce the optimal transformation rule from demonstrations.
 
@@ -840,12 +1063,28 @@ class RuleInductionEngine:
         ranked = SimplicityRanker.rank_survivors(survivors)
 
         selected_rule = ranked[0] if ranked else None
+
+        # W078: If no single rule explains demonstrations, search latent variable space
+        bifurcation_rule: ConditionalRule | None = None
+        if selected_rule is None and allow_recursion:
+            bifurcation_rule = self.bifurcation_inducer.induce_bifurcation(train_pairs, self)
+            if bifurcation_rule is not None:
+                selected_rule = bifurcation_rule
+                ranked = [bifurcation_rule]
+
+        # W080: Calibrated posterior confidence & uncertainty
+        posterior = self.posterior_calibrator.compute_posterior(ranked)
+
         metadata = {
             "candidates_generated": len(candidates),
             "refuted_count": len(self.refutation_gate.falsifications),
-            "survivors_count": len(survivors),
+            "survivors_count": len(ranked),
             "selected_rule_id": selected_rule.rule_id if selected_rule else None,
             "selected_complexity": selected_rule.complexity if selected_rule else None,
+            "is_latent_bifurcated": bifurcation_rule is not None,
+            "posterior_entropy": posterior.entropy_bits,
+            "rule_confidence": posterior.confidence,
+            "is_ambiguous": posterior.is_ambiguous,
         }
 
         return selected_rule, ranked, metadata

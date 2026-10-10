@@ -651,6 +651,114 @@ class ContainmentOperator(GridOperator):
 
 
 # =====================================================================
+# 6b. Morphological Non-Rigid Deformation Operator (W059)
+# =====================================================================
+
+
+class MorphologicalDeformOperator(GridOperator):
+    """W059: Non-rigid morphological deformation (connect lines, cavity fill, shear, dilation)."""
+
+    name: str = "deform"
+
+    def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
+        bindings = []
+        train_pairs = context.get("train_pairs", [])
+        if not train_pairs:
+            return bindings
+
+        for deform_type in ["CONNECT_LINE", "CAVITY_FILL", "SHEAR_H", "SHEAR_V", "DILATE"]:
+            binding = OperatorBinding(
+                operator_name=self.name,
+                params={"type": deform_type},
+                description=f"Deform({deform_type})",
+                complexity=1.8,
+            )
+            x0, y0 = train_pairs[0]
+            try:
+                pred0 = self.apply(x0, binding)
+                if pred0.shape == y0.shape and np.array_equal(pred0, y0):
+                    bindings.append(binding)
+            except Exception:
+                continue
+        return bindings
+
+    def apply(self, grid: np.ndarray, binding: OperatorBinding) -> np.ndarray:
+        deform_type = binding.params.get("type", "CONNECT_LINE")
+        out = grid.copy()
+        bg = int(binding.params.get("bg_color", 0))
+        H, W = grid.shape
+
+        if deform_type == "CONNECT_LINE":
+            for color in np.unique(grid):
+                if color == bg:
+                    continue
+                coords = np.argwhere(grid == color)
+                if len(coords) >= 2:
+                    for i in range(len(coords) - 1):
+                        r1, c1 = coords[i]
+                        r2, c2 = coords[i + 1]
+                        c_min, c_max = min(c1, c2), max(c1, c2)
+                        out[r1, c_min : c_max + 1] = color
+                        r_min, r_max = min(r1, r2), max(r1, r2)
+                        out[r_min : r_max + 1, c2] = color
+
+        elif deform_type == "CAVITY_FILL":
+            visited = np.zeros((H, W), dtype=bool)
+            from collections import deque
+
+            q: deque[tuple[int, int]] = deque()
+            for r in range(H):
+                for c in (0, W - 1):
+                    if grid[r, c] == bg and not visited[r, c]:
+                        visited[r, c] = True
+                        q.append((r, c))
+            for c in range(W):
+                for r in (0, H - 1):
+                    if grid[r, c] == bg and not visited[r, c]:
+                        visited[r, c] = True
+                        q.append((r, c))
+            while q:
+                cr, cc = q.popleft()
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = cr + dr, cc + dc
+                    if 0 <= nr < H and 0 <= nc < W:
+                        if not visited[nr, nc] and grid[nr, nc] == bg:
+                            visited[nr, nc] = True
+                            q.append((nr, nc))
+            fg_colors = [c for c in np.unique(grid) if c != bg]
+            fill_c = fg_colors[0] if fg_colors else bg
+            out[(grid == bg) & (~visited)] = fill_c
+
+        elif deform_type == "SHEAR_H":
+            out = np.full_like(grid, bg)
+            for r in range(H):
+                shift = r // 2
+                for c in range(W):
+                    if grid[r, c] != bg and c + shift < W:
+                        out[r, c + shift] = grid[r, c]
+
+        elif deform_type == "SHEAR_V":
+            out = np.full_like(grid, bg)
+            for c in range(W):
+                shift = c // 2
+                for r in range(H):
+                    if grid[r, c] != bg and r + shift < H:
+                        out[r + shift, c] = grid[r, c]
+
+        elif deform_type == "DILATE":
+            for r in range(H):
+                for c in range(W):
+                    if grid[r, c] != bg:
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr = r + dr
+                            nc = c + dc
+                            if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] == bg:
+                                out[nr, nc] = grid[r, c]
+
+        return out
+
+
+# =====================================================================
 # 7. Compositional Operator
 # =====================================================================
 
@@ -944,6 +1052,7 @@ class TransformationProgramSearch:
             RecolorOperator(),
             CountOperator(),
             ContainmentOperator(),
+            MorphologicalDeformOperator(),
         ]
         if self.enable_relational:
             self.atomic_operators.extend(
