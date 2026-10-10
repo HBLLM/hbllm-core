@@ -48,3 +48,33 @@ class PredictorDisagreementAnalyzer:
             high_disagreement=high_disagreement,
             component_confidences=confidences,
         )
+
+    @staticmethod
+    def detect_ambiguity(
+        hypotheses: list[dict[str, Any]],
+        confidence_delta_threshold: float = 0.05,
+    ) -> tuple[bool, float]:
+        """W126: Ambiguity detection when multiple competing hypotheses share near-identical confidence."""
+        if len(hypotheses) < 2:
+            return False, 0.0
+
+        confs = [float(h.get("confidence", 0.5)) for h in hypotheses]
+        confs.sort(reverse=True)
+        top1, top2 = confs[0], confs[1]
+        delta = abs(top1 - top2)
+        is_ambiguous = delta <= confidence_delta_threshold
+        ambiguity_level = max(0.0, 1.0 - delta)
+        return is_ambiguous, ambiguity_level
+
+    @staticmethod
+    def detect_contradiction(
+        pred_a: dict[str, Any],
+        pred_b: dict[str, Any],
+    ) -> list[str]:
+        """W128: Contradiction detection identifying direct conflicts on categorical variables."""
+        contradictions: list[str] = []
+        for k in set(pred_a.keys()) & set(pred_b.keys()):
+            va, vb = pred_a[k], pred_b[k]
+            if va != vb:
+                contradictions.append(f"Conflict on variable '{k}': {va} vs {vb}")
+        return contradictions

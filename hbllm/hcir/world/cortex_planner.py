@@ -1320,3 +1320,72 @@ class MentalSimulationPlanner:
                     )
 
         return None
+
+
+@dataclass
+class ReplanResult:
+    """W140: Outcome of unexpected state divergence replanning."""
+
+    replanned: bool
+    new_plan: list[MentalSimulationStep]
+    divergence_reason: str
+    replan_count: int
+
+
+class DynamicReplanner:
+    """W140: Triggers dynamic plan repair and topological rerouting upon unexpected observation divergences."""
+
+    @staticmethod
+    def replan_on_divergence(
+        current_actual_pos: tuple[int, int],
+        expected_pos: tuple[int, int],
+        remaining_plan: list[MentalSimulationStep],
+        goal_positions: set[tuple[int, int]],
+        barriers: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+    ) -> ReplanResult:
+        """Repairs or generates a new plan from actual position to goal."""
+        if current_actual_pos == expected_pos and remaining_plan:
+            return ReplanResult(
+                replanned=False,
+                new_plan=remaining_plan,
+                divergence_reason="nominal",
+                replan_count=0,
+            )
+
+        target = list(goal_positions)[0] if goal_positions else expected_pos
+        H, W = grid_shape
+        queue = [(current_actual_pos, [])]
+        visited = {current_actual_pos}
+        found_path: list[tuple[tuple[int, int], int]] | None = None
+
+        while queue:
+            curr, path = queue.pop(0)
+            if curr == target or curr in goal_positions:
+                found_path = path
+                break
+            for dr, dc, act in [(-1, 0, 1), (1, 0, 2), (0, -1, 3), (0, 1, 4)]:
+                nr, nc = curr[0] + dr, curr[1] + dc
+                nxt = (nr, nc)
+                if 0 <= nr < H and 0 <= nc < W and nxt not in barriers and nxt not in visited:
+                    visited.add(nxt)
+                    queue.append((nxt, path + [(nxt, act)]))
+
+        if found_path is not None:
+            new_steps = [
+                MentalSimulationStep(action=act, predicted_avatar_pos=pos)
+                for pos, act in found_path
+            ]
+            return ReplanResult(
+                replanned=True,
+                new_plan=new_steps,
+                divergence_reason=f"diverged_from_{expected_pos}_to_{current_actual_pos}",
+                replan_count=1,
+            )
+
+        return ReplanResult(
+            replanned=False,
+            new_plan=[],
+            divergence_reason="unreachable_after_divergence",
+            replan_count=1,
+        )

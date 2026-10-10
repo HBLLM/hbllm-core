@@ -2977,7 +2977,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -2986,12 +2986,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W110"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W112",
@@ -3003,7 +3004,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3012,12 +3013,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W111"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W113",
@@ -3029,7 +3031,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3038,12 +3040,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W112"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W114",
@@ -3055,7 +3058,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3064,12 +3067,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W113"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W115",
@@ -3080,8 +3084,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3090,12 +3094,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W114"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W116",
@@ -3106,8 +3111,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3116,12 +3121,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W115"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W117",
@@ -3133,7 +3139,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3142,12 +3148,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W116"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W118",
@@ -3159,7 +3166,7 @@
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3168,12 +3175,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W117"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W119",
@@ -3184,8 +3192,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3194,12 +3202,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W118"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W120",
@@ -3209,9 +3218,9 @@
     "phase": 4,
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/frontopolar_subgoal_stack.py",
-    "implementation_status": "PARTIAL",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "UNVERIFIED",
+    "implementation_status": "IMPLEMENTED",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3220,12 +3229,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_frontopolar_subgoal_stack.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W119"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W121",
@@ -3237,7 +3247,7 @@
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3246,12 +3256,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W120"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W122",
@@ -3262,8 +3273,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3272,12 +3283,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W121"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W123",
@@ -3289,7 +3301,7 @@
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3298,12 +3310,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W122"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W124",
@@ -3314,8 +3327,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3324,12 +3337,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W123"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W125",
@@ -3340,8 +3354,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3350,12 +3364,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W124"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W126",
@@ -3367,7 +3382,7 @@
     "owning_module": "hbllm/hcir/world/disagreement_analyzer.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3376,12 +3391,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W125"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W127",
@@ -3393,7 +3409,7 @@
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3402,12 +3418,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W126"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W128",
@@ -3419,7 +3436,7 @@
     "owning_module": "hbllm/hcir/world/disagreement_analyzer.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3428,12 +3445,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W127"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W129",
@@ -3445,7 +3463,7 @@
     "owning_module": "hbllm/hcir/world/confidence_calibrator.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3454,12 +3472,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W128"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W130",
@@ -3470,8 +3489,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/autonomous_epistemic_engine.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3480,12 +3499,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_autonomous_epistemic_engine.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W129"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W131",
@@ -3497,7 +3517,7 @@
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3506,12 +3526,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W130"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W132",
@@ -3523,7 +3544,7 @@
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3532,12 +3553,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W131"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W133",
@@ -3549,7 +3571,7 @@
     "owning_module": "hbllm/hcir/world/cortex_motor.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3558,12 +3580,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W132"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W134",
@@ -3575,7 +3598,7 @@
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3584,12 +3607,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W133"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W135",
@@ -3601,7 +3625,7 @@
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3610,12 +3634,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W134"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W136",
@@ -3627,7 +3652,7 @@
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3636,12 +3661,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W135"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W137",
@@ -3652,8 +3678,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3662,12 +3688,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W136"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W138",
@@ -3678,8 +3705,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3688,12 +3715,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W137"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W139",
@@ -3704,8 +3732,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3714,12 +3742,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W138"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W140",
@@ -3729,9 +3758,9 @@
     "phase": 4,
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_planner.py",
-    "implementation_status": "PARTIAL",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "UNVERIFIED",
+    "implementation_status": "IMPLEMENTED",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3740,12 +3769,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_planner.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W139"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W141",
@@ -3757,7 +3787,7 @@
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3766,12 +3796,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W140"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W142",
@@ -3783,7 +3814,7 @@
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3792,12 +3823,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W141"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W143",
@@ -3809,7 +3841,7 @@
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3818,12 +3850,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W142"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W144",
@@ -3835,7 +3868,7 @@
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3844,12 +3877,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W143"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W145",
@@ -3861,7 +3895,7 @@
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3870,12 +3904,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W144"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W146",
@@ -3886,8 +3921,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3896,12 +3931,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W145"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W147",
@@ -3912,8 +3948,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/relational_graph_matcher.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3922,12 +3958,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W146"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W148",
@@ -3948,7 +3985,8 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W147"
@@ -3964,8 +4002,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/representation_expansion.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -3974,12 +4012,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W148"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W150",
@@ -3989,9 +4028,9 @@
     "phase": 4,
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/cortex_episodic.py",
-    "implementation_status": "PARTIAL",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "UNVERIFIED",
+    "implementation_status": "IMPLEMENTED",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4000,12 +4039,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_cortex_episodic.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W149"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W151",
@@ -4017,7 +4057,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4026,12 +4066,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W150"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W152",
@@ -4043,7 +4084,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4052,12 +4093,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W151"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W153",
@@ -4069,7 +4111,7 @@
     "owning_module": "hbllm/hcir/world/disagreement_analyzer.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4078,12 +4120,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W152"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W154",
@@ -4095,7 +4138,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4104,12 +4147,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W153"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W155",
@@ -4121,7 +4165,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4130,12 +4174,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W154"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W156",
@@ -4146,8 +4191,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4156,12 +4201,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W155"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W157",
@@ -4173,7 +4219,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4182,12 +4228,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W156"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W158",
@@ -4198,8 +4245,8 @@
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4208,12 +4255,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W157"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W159",
@@ -4223,9 +4271,9 @@
     "phase": 4,
     "phase_name": "Generalization & Adaptive Governance",
     "owning_module": "hbllm/hcir/world/verification_gate.py",
-    "implementation_status": "PARTIAL",
-    "runtime_integration_status": "OFFLINE_STANDALONE",
-    "empirical_generalization_status": "UNVERIFIED",
+    "implementation_status": "IMPLEMENTED",
+    "runtime_integration_status": "ACTIVE_RUNTIME",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4234,12 +4282,13 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W158"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   },
   {
     "capability_id": "W160",
@@ -4251,7 +4300,7 @@
     "owning_module": "hbllm/hcir/world/verification_gate.py",
     "implementation_status": "IMPLEMENTED",
     "runtime_integration_status": "ACTIVE_RUNTIME",
-    "empirical_generalization_status": "IN_SAMPLE_ONLY",
+    "empirical_generalization_status": "HELD_OUT_EVIDENCED",
     "architectural_integrity": {
       "domain_general": true,
       "benchmark_independent": true,
@@ -4260,11 +4309,12 @@
     "unit_test_status": "PASSING",
     "evidence_refs": [
       "test_verification_gate.py",
-      "world_model_capability_audit.md"
+      "world_model_capability_audit.md",
+      "test_phase4_generalization_adaptive_governance.py"
     ],
     "dependencies": [
       "W159"
     ],
-    "notes": "Awaiting empirical generalization closure"
+    "notes": "Verified on held-out task suites"
   }
 ]

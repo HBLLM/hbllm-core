@@ -112,6 +112,18 @@ class SaccadicAttentionSystem:
 
         return saliency
 
+    def compute_foveal_view(
+        self,
+        grid: np.ndarray,
+        focus_center: tuple[int, int],
+        radius: int = 2,
+    ) -> np.ndarray:
+        """W116: Extract multi-scale foveal window around a fixation center with edge padding."""
+        r, c = focus_center
+        padded = np.pad(grid, pad_width=radius, mode="edge")
+        pr, pc = r + radius, c + radius
+        return padded[pr - radius : pr + radius + 1, pc - radius : pc + radius + 1]
+
     def extract_fixations(
         self,
         grid: np.ndarray,

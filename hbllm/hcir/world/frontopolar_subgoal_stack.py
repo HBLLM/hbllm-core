@@ -87,10 +87,22 @@ class FrontopolarSubgoalStack:
                 return sg
         return self.stack[-1]
 
+    def peek_active_subgoal(self) -> FrontopolarSubgoal | None:
+        """Inspect the current active subgoal on top of stack."""
+        return self.current_subgoal
+
     @property
     def has_pending_goals(self) -> bool:
         """True if cognitive stack has subgoals to execute."""
         return bool(self.stack)
+
+    def is_empty(self) -> bool:
+        """Check if frontopolar subgoal stack is empty."""
+        return len(self.stack) == 0
+
+    def prune_completed_subgoals(self, completed_ids: set[str]) -> None:
+        """W119: Prune satisfied subgoals from the active planning stack."""
+        self.stack = [sg for sg in self.stack if sg.subgoal_id not in completed_ids]
 
     def push_subgoal(self, subgoal: FrontopolarSubgoal) -> None:
         """Push a newly formulated subgoal to the top of the stack (cognitive branching)."""
@@ -120,6 +132,10 @@ class FrontopolarSubgoalStack:
             len(self.stack),
         )
         return completed
+
+    def pop_active_subgoal(self) -> FrontopolarSubgoal | None:
+        """Alias for pop_subgoal to complete and pop the active subgoal."""
+        return self.pop_subgoal()
 
     def is_subgoal_satisfied(
         self,
@@ -217,3 +233,42 @@ class FrontopolarSubgoalStack:
         candidates.sort(key=lambda x: x[2])
         best_r, best_c, _ = candidates[0]
         return (best_r, best_c)
+
+
+@dataclass
+class ComputationBudget:
+    """W120: Dynamic computation-budget allocation across executive planning horizons."""
+
+    total_tokens: int = 1000
+    search_depth_limit: int = 5
+    beam_width: int = 4
+    allocated_subgoal_budgets: dict[str, int] = field(default_factory=dict)
+
+
+class ComputationBudgetAllocator:
+    """W120: Allocates and dynamically scales computation budget based on cognitive complexity."""
+
+    @staticmethod
+    def allocate_budget(
+        subgoals: list[FrontopolarSubgoal],
+        total_budget: int = 1000,
+        min_budget_per_subgoal: int = 50,
+    ) -> ComputationBudget:
+        """Allocates compute proportionally to subgoal priority and prerequisite depth."""
+        if not subgoals:
+            return ComputationBudget(total_tokens=total_budget)
+
+        total_priority = sum(sg.priority for sg in subgoals) or 1.0
+        allocations: dict[str, int] = {}
+
+        for sg in subgoals:
+            share = int(round((sg.priority / total_priority) * total_budget))
+            alloc = max(min_budget_per_subgoal, share)
+            allocations[sg.subgoal_id] = alloc
+
+        return ComputationBudget(
+            total_tokens=total_budget,
+            search_depth_limit=min(10, max(3, len(subgoals) * 2)),
+            beam_width=max(2, min(8, total_budget // 200)),
+            allocated_subgoal_budgets=allocations,
+        )

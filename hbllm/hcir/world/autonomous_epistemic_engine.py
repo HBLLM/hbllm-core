@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
@@ -121,6 +123,25 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Cognitive Phases and Cortical Faculties Modular Imports
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+class EpistemicTruthValue(StrEnum):
+    """W122: Three-valued logic distinguishing empirical falsity from epistemic unobserved ignorance."""
+
+    TRUE = "TRUE"
+    FALSE = "FALSE"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class EpistemicObservation:
+    """W121: Observation representation with calibrated uncertainty bounds and provenance."""
+
+    variable: str
+    value: Any
+    uncertainty: float
+    truth_value: EpistemicTruthValue
+    source_faculty: str = "PERCEPTION"
 
 
 from hbllm.hcir.world.cortex_assimilator import (
@@ -372,6 +393,10 @@ class AutonomousEpistemicEngine:
         # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
         self.visual_symmetry: VisualSymmetryAnalyzer = VisualSymmetryAnalyzer()
 
+        # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
+        self.relational_confidence_map: dict[str, float] = {}
+        self.evidence_provenance_log: list[dict[str, Any]] = []
+
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
         self.action_discovery: UngroundedActionDiscoveryEngine = UngroundedActionDiscoveryEngine()
@@ -423,6 +448,7 @@ class AutonomousEpistemicEngine:
         # Metacognitive Refractory Action Inhibition (Stage D13)
         self.inhibited_actions: dict[Any, int] = {}
         self.prior_avatar_feature: int | None = None
+
         self.entity_action_failed_positions: dict[Any, set[tuple[int, int]]] = {}
         self.immobile_entity_actions: set[Any] = set()
 
@@ -438,6 +464,56 @@ class AutonomousEpistemicEngine:
 
         self.hypotheses: list[CausalHypothesis] = []
         self.belief_history: list[BeliefTransitionEvent] = []
+
+    def evaluate_truth_value(
+        self,
+        variable_name: str,
+        observed_state: dict[str, Any],
+        expected_value: Any,
+    ) -> EpistemicTruthValue:
+        """W122: Distinguishes between unknown (unobserved) and false (observed negative)."""
+        if variable_name not in observed_state:
+            return EpistemicTruthValue.UNKNOWN
+        actual = observed_state[variable_name]
+        return EpistemicTruthValue.TRUE if actual == expected_value else EpistemicTruthValue.FALSE
+
+    def track_relational_confidence(self, relation_id: str, new_confidence: float) -> float:
+        """W125: Confidence tracking per relation in the world model."""
+        self.relational_confidence_map[relation_id] = max(0.0, min(1.0, new_confidence))
+        return self.relational_confidence_map[relation_id]
+
+    def record_evidence_provenance(
+        self,
+        claim: str,
+        source_faculty: str,
+        confidence: float,
+    ) -> dict[str, Any]:
+        """W127: Records evidence provenance and observational lineage."""
+        record = {
+            "claim": claim,
+            "source_faculty": source_faculty,
+            "confidence": confidence,
+            "timestep": self.step_counter,
+        }
+        self.evidence_provenance_log.append(record)
+        return record
+
+    def assess_evidence_sufficiency(
+        self,
+        observations: list[Any],
+        min_observations: int = 3,
+        min_confidence: float = 0.80,
+    ) -> tuple[bool, float]:
+        """W130: Evidence sufficiency assessment before epistemic commitment."""
+        n = len(observations)
+        if n == 0:
+            return False, 0.0
+        confs = [
+            getattr(o, "confidence", 0.5) if hasattr(o, "confidence") else 0.5 for o in observations
+        ]
+        avg_conf = sum(confs) / n
+        is_sufficient = (n >= min_observations) and (avg_conf >= min_confidence)
+        return is_sufficient, avg_conf
 
     def is_action_sufficiently_probed(self, action_id: Any) -> bool:
         """Check if an action has been tested enough times to have a reliable dynamics model."""
