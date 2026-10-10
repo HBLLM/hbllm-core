@@ -13,6 +13,7 @@ Provides:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import numpy as np
 
@@ -177,3 +178,165 @@ class VisualSymmetryAnalyzer:
             expected_feat = int(completed[r, c])
             targets.append((r, c, expected_feat, sym_score))
         return targets
+
+    @staticmethod
+    def detect_periodicity(
+        grid: np.ndarray,
+        axis: int = 0,
+        min_period: int = 1,
+    ) -> tuple[int, float]:
+        """W105: Detects spatial repetition periodicity along rows (axis=0) or columns (axis=1).
+
+        Returns:
+            (best_period, confidence)
+        """
+        if grid.ndim != 2:
+            return 0, 0.0
+        size = grid.shape[axis]
+        if size <= 1:
+            return 1, 1.0
+
+        best_p = 0
+        best_match = 0.0
+
+        for p in range(min_period, (size // 2) + 1):
+            if size % p == 0:
+                reps = size // p
+                matches = 0
+                total_comparisons = (reps - 1) * (grid.shape[1 - axis] * p)
+                if total_comparisons == 0:
+                    continue
+                for r in range(1, reps):
+                    if axis == 0:
+                        matches += int(np.sum(grid[:p, :] == grid[r * p : (r + 1) * p, :]))
+                    else:
+                        matches += int(np.sum(grid[:, :p] == grid[:, r * p : (r + 1) * p]))
+                score = matches / total_comparisons
+                if score > best_match:
+                    best_match = score
+                    best_p = p
+
+        return best_p, float(best_match)
+
+    @staticmethod
+    def detect_tiling(
+        grid: np.ndarray,
+    ) -> tuple[tuple[int, int], tuple[int, int], float]:
+        """W106: Discovers fundamental tile unit (h, w) and repetition counts (reps_r, reps_c).
+
+        Returns:
+            ((tile_h, tile_w), (reps_r, reps_c), confidence)
+        """
+        H, W = grid.shape
+        pr, conf_r = VisualSymmetryAnalyzer.detect_periodicity(grid, axis=0)
+        pc, conf_c = VisualSymmetryAnalyzer.detect_periodicity(grid, axis=1)
+
+        tile_h = pr if pr > 0 else H
+        tile_w = pc if pc > 0 else W
+        reps_r = H // tile_h if tile_h > 0 else 1
+        reps_c = W // tile_w if tile_w > 0 else 1
+
+        overall_conf = (
+            float((conf_r + conf_c) / 2.0) if (pr > 0 and pc > 0) else float(max(conf_r, conf_c))
+        )
+        return (tile_h, tile_w), (reps_r, reps_c), overall_conf
+
+    @staticmethod
+    def detect_counting_relation(
+        counts: list[int],
+    ) -> tuple[bool, str, float, dict[str, Any]]:
+        """W107: Identifies arithmetic/algebraic counting relations (constant difference, scaling, conservation)."""
+        if len(counts) < 2:
+            return False, "insufficient_samples", 0.0, {}
+
+        # 1. Conservation (all equal)
+        if all(c == counts[0] for c in counts):
+            return True, "conserved", 1.0, {"constant_value": counts[0]}
+
+        # 2. Arithmetic progression
+        diffs = [counts[i + 1] - counts[i] for i in range(len(counts) - 1)]
+        if all(d == diffs[0] for d in diffs):
+            return True, "arithmetic_step", 1.0, {"step": diffs[0]}
+
+        # 3. Geometric scaling ratio
+        if all(counts[i] != 0 and counts[i + 1] % counts[i] == 0 for i in range(len(counts) - 1)):
+            ratios = [counts[i + 1] // counts[i] for i in range(len(counts) - 1)]
+            if all(r == ratios[0] for r in ratios):
+                return True, "geometric_ratio", 1.0, {"ratio": ratios[0]}
+
+        return False, "irregular", 0.0, {}
+
+    @staticmethod
+    def detect_sequence_progression(
+        series: list[float | int],
+    ) -> tuple[bool, str, float]:
+        """W108: Detects monotonic, arithmetic, or alternating progression in a numerical or spatial sequence."""
+        if len(series) < 2:
+            return False, "insufficient_length", 0.0
+
+        is_increasing = all(series[i + 1] > series[i] for i in range(len(series) - 1))
+        is_decreasing = all(series[i + 1] < series[i] for i in range(len(series) - 1))
+
+        if is_increasing:
+            return True, "strictly_increasing", 1.0
+        if is_decreasing:
+            return True, "strictly_decreasing", 1.0
+
+        # Monotonic non-decreasing
+        if all(series[i + 1] >= series[i] for i in range(len(series) - 1)):
+            return True, "monotonic_non_decreasing", 0.9
+        if all(series[i + 1] <= series[i] for i in range(len(series) - 1)):
+            return True, "monotonic_non_increasing", 0.9
+
+        return False, "non_monotonic", 0.0
+
+    @staticmethod
+    def detect_permutation_order(
+        seq_a: list[int],
+        seq_b: list[int],
+    ) -> tuple[bool, str]:
+        """W109: Detects permutation relationships between two entity or color sequences."""
+        if len(seq_a) != len(seq_b) or sorted(seq_a) != sorted(seq_b):
+            return False, "not_a_permutation"
+
+        if seq_a == seq_b:
+            return True, "identity"
+
+        if seq_a == list(reversed(seq_b)):
+            return True, "reversed"
+
+        # Cyclic shift
+        n = len(seq_a)
+        doubled = seq_a + seq_a
+        for shift in range(1, n):
+            if doubled[shift : shift + n] == seq_b:
+                return True, f"cyclic_shift_{shift}"
+
+        return True, "arbitrary_permutation"
+
+    @staticmethod
+    def is_structurally_equivalent(
+        patch_a: np.ndarray,
+        patch_b: np.ndarray,
+        group: str = "D4",
+    ) -> tuple[bool, str | None]:
+        """W110: Tests whether patch_b is isomorphic to patch_a under dihedral group D4 transformations."""
+        if patch_a.shape != patch_b.shape and patch_a.shape != (patch_b.shape[1], patch_b.shape[0]):
+            return False, None
+
+        transforms: list[tuple[str, np.ndarray]] = [
+            ("identity", patch_a.copy()),
+            ("rot_90", np.rot90(patch_a, 1)),
+            ("rot_180", np.rot90(patch_a, 2)),
+            ("rot_270", np.rot90(patch_a, 3)),
+            ("flip_ud", np.flipud(patch_a)),
+            ("flip_lr", np.fliplr(patch_a)),
+            ("transpose", patch_a.T),
+            ("anti_transpose", np.rot90(np.fliplr(patch_a), 1)),
+        ]
+
+        for op_name, transformed in transforms:
+            if transformed.shape == patch_b.shape and np.array_equal(transformed, patch_b):
+                return True, op_name
+
+        return False, None

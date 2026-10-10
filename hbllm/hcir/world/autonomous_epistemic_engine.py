@@ -34,6 +34,7 @@ from hbllm.hcir.world.causal_discovery import (
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
 )
+from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualDeadlockDetector,
 )
@@ -79,10 +80,12 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     GeometricModelSelector,
     ParietalCoordinateTransformer,
 )
+from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
+from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
 from hbllm.hcir.world.rule_induction import (
     RuleInductionEngine,
 )
@@ -102,6 +105,7 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
 )
+from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.world_state_snapshot import (
     ReversibilityEngine,
     StateDifferenceComputer,
@@ -355,6 +359,18 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Rule Induction & Latent Structure Engine (W071-W080)
         self.rule_induction_engine: RuleInductionEngine = RuleInductionEngine()
+
+        # Faculty: Whole-Grid Outcome Predictor & Rollout Engine (W081-W089)
+        self.whole_grid_predictor: WholeGridPredictor = WholeGridPredictor()
+
+        # Faculty: Predictive Confidence Calibrator (W090)
+        self.confidence_calibrator: ConfidenceCalibrator = ConfidenceCalibrator()
+
+        # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
+        self.concept_engine: ConceptFormationEngine = ConceptFormationEngine()
+
+        # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
+        self.visual_symmetry: VisualSymmetryAnalyzer = VisualSymmetryAnalyzer()
 
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)

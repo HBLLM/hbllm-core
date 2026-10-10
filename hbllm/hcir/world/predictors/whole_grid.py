@@ -10,6 +10,7 @@ Provides the complete execution and rasterization path for 2D discrete grid worl
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -242,3 +243,218 @@ class WholeGridPredictor:
         pixel_accuracy = float(1.0 - (mismatch_count / total_pixels))
         is_exact = mismatch_count == 0
         return is_exact, pixel_accuracy, mismatch_count
+
+    @classmethod
+    def predict_next_state(
+        cls,
+        grid: np.ndarray,
+        rule: ExecutableRule,
+        context: dict[str, Any] | None = None,
+    ) -> np.ndarray:
+        """W081: Deterministic or parameterized next-state outcome prediction."""
+        return cls.render_prediction(rule, grid, context=context)
+
+    @classmethod
+    def predict_object_outcomes(
+        cls,
+        objects: list[dict[str, Any]],
+        rule: ExecutableRule,
+        canvas_shape: tuple[int, int],
+    ) -> list[dict[str, Any]]:
+        """W082: Predicts object-level outcomes by transforming isolated object masks."""
+        outcomes: list[dict[str, Any]] = []
+        for obj in objects:
+            coords = obj.get("coords", [])
+            color = int(obj.get("color", 1))
+            obj_grid = np.zeros(canvas_shape, dtype=int)
+            for r, c in coords:
+                if 0 <= r < canvas_shape[0] and 0 <= c < canvas_shape[1]:
+                    obj_grid[r, c] = color
+
+            transformed = cls.render_prediction(rule, obj_grid)
+            raw_pts = np.argwhere(transformed != 0)
+            new_coords = [tuple(int(x) for x in p) for p in raw_pts]
+            new_color = (
+                int(transformed[new_coords[0][0], new_coords[0][1]]) if new_coords else color
+            )
+
+            outcomes.append(
+                {
+                    "object_id": obj.get("id", obj.get("object_id", "obj")),
+                    "original_coords": coords,
+                    "predicted_coords": new_coords,
+                    "predicted_color": new_color,
+                    "survived": len(new_coords) > 0,
+                }
+            )
+        return outcomes
+
+    @classmethod
+    def simulate_rollout(
+        cls,
+        initial_grid: np.ndarray,
+        rules: list[ExecutableRule] | ExecutableRule,
+        criteria: SimulationStoppingCriteria | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> list[np.ndarray]:
+        """W084: Multi-step forward simulation rolling out sequential transformation rules."""
+        if criteria is None:
+            criteria = SimulationStoppingCriteria()
+
+        rule_seq: list[ExecutableRule] = rules if isinstance(rules, list) else [rules]
+        trajectory: list[np.ndarray] = [initial_grid.copy()]
+        curr = initial_grid.copy()
+
+        for step in range(1, criteria.max_steps + 1):
+            rule = rule_seq[(step - 1) % len(rule_seq)]
+            next_state = cls.render_prediction(rule, curr, context=context)
+
+            stop, _ = cls.should_stop_simulation(step, next_state, trajectory, criteria)
+            trajectory.append(next_state)
+            curr = next_state
+            if stop:
+                break
+
+        return trajectory
+
+    @classmethod
+    def simulate_alternative_outcomes(
+        cls,
+        grid: np.ndarray,
+        candidate_rules: list[ExecutableRule],
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """W085: Alternative-outcome simulation exploring branching candidate hypotheses."""
+        outcomes: list[dict[str, Any]] = []
+        for rule in candidate_rules:
+            pred = cls.render_prediction(rule, grid, context=context)
+            rule_id = getattr(rule, "rule_id", getattr(rule, "name", str(type(rule).__name__)))
+            complexity = float(getattr(rule, "complexity", 1.0))
+            outcomes.append(
+                {
+                    "rule_id": rule_id,
+                    "rule": rule,
+                    "predicted_grid": pred,
+                    "complexity": complexity,
+                }
+            )
+        return outcomes
+
+    @staticmethod
+    def compute_prediction_error(
+        predicted: np.ndarray,
+        ground_truth: np.ndarray,
+    ) -> float:
+        """W086: Normalized pixel discrepancy error in [0.0, 1.0]."""
+        if predicted.shape != ground_truth.shape:
+            return 1.0
+        total = ground_truth.size
+        if total == 0:
+            return 0.0
+        diff = np.sum(predicted != ground_truth)
+        return float(diff / total)
+
+    @staticmethod
+    def localize_prediction_error(
+        predicted: np.ndarray,
+        ground_truth: np.ndarray,
+    ) -> tuple[np.ndarray, list[tuple[int, int, int, int]]]:
+        """W087: Localizes spatial discrepancy error mask and bounding boxes of error clusters."""
+        if predicted.shape != ground_truth.shape:
+            H = max(predicted.shape[0], ground_truth.shape[0])
+            W = max(predicted.shape[1], ground_truth.shape[1])
+            mask = np.ones((H, W), dtype=bool)
+            return mask, [(0, 0, H - 1, W - 1)]
+
+        mask = predicted != ground_truth
+        if not np.any(mask):
+            return mask, []
+
+        visited = np.zeros_like(mask, dtype=bool)
+        bboxes: list[tuple[int, int, int, int]] = []
+        H, W = mask.shape
+
+        for r in range(H):
+            for c in range(W):
+                if mask[r, c] and not visited[r, c]:
+                    min_r, max_r = r, r
+                    min_c, max_c = c, c
+                    queue = deque([(r, c)])
+                    visited[r, c] = True
+                    while queue:
+                        curr_r, curr_c = queue.popleft()
+                        min_r, max_r = min(min_r, curr_r), max(max_r, curr_r)
+                        min_c, max_c = min(min_c, curr_c), max(max_c, curr_c)
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = curr_r + dr, curr_c + dc
+                            if 0 <= nr < H and 0 <= nc < W and mask[nr, nc] and not visited[nr, nc]:
+                                visited[nr, nc] = True
+                                queue.append((nr, nc))
+                    bboxes.append((min_r, min_c, max_r, max_c))
+
+        return mask, bboxes
+
+    @classmethod
+    def evaluate_rollout(
+        cls,
+        rollout_states: list[np.ndarray],
+        target_grid: np.ndarray | None = None,
+    ) -> float:
+        """W088: Evaluates utility/validity of simulated rollout trajectory."""
+        if not rollout_states:
+            return 0.0
+        final_state = rollout_states[-1]
+        if target_grid is not None:
+            err = cls.compute_prediction_error(final_state, target_grid)
+            return float(max(0.0, 1.0 - err))
+
+        if len(rollout_states) > 1:
+            diffs = [
+                cls.compute_prediction_error(rollout_states[i], rollout_states[i - 1])
+                for i in range(1, len(rollout_states))
+            ]
+            stability = 1.0 - (sum(diffs) / len(diffs))
+            return float(max(0.0, min(1.0, stability)))
+        return 1.0
+
+    @staticmethod
+    def should_stop_simulation(
+        step: int,
+        current_state: np.ndarray,
+        previous_states: list[np.ndarray],
+        criteria: SimulationStoppingCriteria,
+    ) -> tuple[bool, str]:
+        """W089: Evaluates stopping conditions across step limits, convergence fixpoints, cycles, and goals."""
+        if step >= criteria.max_steps:
+            return True, "max_steps_reached"
+
+        if criteria.target_grid is not None and np.array_equal(current_state, criteria.target_grid):
+            return True, "target_goal_reached"
+
+        if previous_states:
+            last_state = previous_states[-1]
+            if current_state.shape == last_state.shape:
+                diff_count = int(np.sum(current_state != last_state))
+                total = current_state.size or 1
+                delta_ratio = diff_count / total
+                if delta_ratio <= criteria.convergence_delta_threshold:
+                    return True, "fixpoint_converged"
+
+            if criteria.detect_cycles:
+                for past_idx, past_state in enumerate(previous_states[:-1]):
+                    if current_state.shape == past_state.shape and np.array_equal(
+                        current_state, past_state
+                    ):
+                        return True, f"cycle_detected_period_{step - past_idx}"
+
+        return False, "continue"
+
+
+@dataclass
+class SimulationStoppingCriteria:
+    """W089: Configurable termination conditions for multi-step forward simulation rollouts."""
+
+    max_steps: int = 20
+    convergence_delta_threshold: float = 0.0
+    detect_cycles: bool = True
+    target_grid: np.ndarray | None = None
