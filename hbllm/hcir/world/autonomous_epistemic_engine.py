@@ -46,6 +46,19 @@ from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
 )
+from hbllm.hcir.world.interactive_action_discovery import (
+    ActionBudgetGovernor,
+    ActionPreconditionLearner,
+    ConstrainedActiveExperimenter,
+    UngroundedActionDiscoveryEngine,
+    UnknownMechanicsLedger,
+)
+from hbllm.hcir.world.interactive_goal_evaluator import (
+    BayesianGoalInductionEngine,
+    DynamicProgressEstimator,
+    GoalConfirmationGate,
+    ModelBasedDeadlockDetector,
+)
 from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
@@ -54,7 +67,10 @@ from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
 )
-from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
+from hbllm.hcir.world.object_state_graph import (
+    ObjectStateGraphPlanner,
+    RelationalGraphMatcher,
+)
 from hbllm.hcir.world.optical_ray_projection import (
     OpticalRayProjector,
 )
@@ -64,8 +80,18 @@ from hbllm.hcir.world.remote_causal_attribution import (
 )
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
+from hbllm.hcir.world.spatiotemporal_tracker import (
+    MorphologicalDeformationTracker,
+    SpatiotemporalHazardTracker,
+)
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
+from hbllm.hcir.world.temporal_dependency_tracker import (
+    DelayedEffectModeler,
+    DualStoreMemoryManager,
+    EnvironmentChangeDetector,
+    LongHorizonDependencyGraph,
+    ObjectiveLearningEfficiencyTracker,
+)
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
 logger = logging.getLogger(__name__)
@@ -85,7 +111,9 @@ from hbllm.hcir.world.cortex_causal import (
     CausalInductionCortex,
     HCIRSymbolicWorldTheory,
 )
+from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 from hbllm.hcir.world.cortex_episodic import (
+    FalsifiableAnalogyEngine,
     HippocampalEpisodicCortex,
 )
 from hbllm.hcir.world.cortex_motor import (
@@ -98,7 +126,6 @@ from hbllm.hcir.world.cortex_perception import (
     OrientedThreat,
     PerceptionEngine,
 )
-from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
@@ -281,6 +308,42 @@ class AutonomousEpistemicEngine:
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
 
+        # Faculty: Non-Rigid Topological Deformation Tracker (W059)
+        self.deformation_tracker: MorphologicalDeformationTracker = (
+            MorphologicalDeformationTracker()
+        )
+
+        # Faculty: Constraint-Aware Relational Graph Matcher (W038)
+        self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
+
+        # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
+        self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+
+        # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
+        # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
+        self.action_discovery: UngroundedActionDiscoveryEngine = UngroundedActionDiscoveryEngine()
+        self.unknown_mechanics: UnknownMechanicsLedger = UnknownMechanicsLedger()
+        self.active_experimenter: ConstrainedActiveExperimenter = ConstrainedActiveExperimenter()
+        self.precondition_learner: ActionPreconditionLearner = ActionPreconditionLearner()
+        self.budget_governor: ActionBudgetGovernor = ActionBudgetGovernor(
+            max_budget=self.exploration_budget
+        )
+
+        # Module 2: Open-Set Goal Induction & Reachability Deadlock Pruning (W168-W170, W174, W175, W181, W182)
+        self.goal_induction: BayesianGoalInductionEngine = BayesianGoalInductionEngine()
+        self.goal_gate: GoalConfirmationGate = GoalConfirmationGate()
+        self.progress_estimator: DynamicProgressEstimator = DynamicProgressEstimator()
+        self.model_deadlock_detector: ModelBasedDeadlockDetector = ModelBasedDeadlockDetector()
+
+        # Module 3: Temporal Dynamics, Dual-Store Memory & Objective Efficiency (W167, W172, W173, W176-W180, W189, W190)
+        self.delayed_effects: DelayedEffectModeler = DelayedEffectModeler()
+        self.dependency_graph: LongHorizonDependencyGraph = LongHorizonDependencyGraph()
+        self.dual_memory: DualStoreMemoryManager = DualStoreMemoryManager()
+        self.change_detector: EnvironmentChangeDetector = EnvironmentChangeDetector()
+        self.efficiency_tracker: ObjectiveLearningEfficiencyTracker = (
+            ObjectiveLearningEfficiencyTracker()
+        )
+
         # Active exploration & curiosity state
         self.active_probe_target: tuple[int, int] | None = None
         self.active_probe_id: str | None = None
@@ -312,6 +375,8 @@ class AutonomousEpistemicEngine:
 
         # Universal Dynamic Action Affordance Registry
         self.action_affordances: dict[Any, ActionAffordance] = {}
+        self.focus_switch_actions: set[Any] = set()
+        self.last_non_displacement_action: Any | None = None
 
         self.bg_feature: int = 0
         self.level_epistemic_probes: int = 0
@@ -365,6 +430,28 @@ class AutonomousEpistemicEngine:
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
         return action in self.action_dynamics
+
+    def is_focus_switch_action(self, action: Any) -> bool:
+        """Returns True if this action switches active control/focus between entities."""
+        if action in self.focus_switch_actions:
+            return True
+        aff = self.action_affordances.get(action)
+        return bool(aff is not None and getattr(aff, "is_focus_switch", False))
+
+    def mark_focus_switch_action(self, action: Any) -> None:
+        """Empirically register an action as an entity focus switcher."""
+        self.focus_switch_actions.add(action)
+        if action in self.action_affordances:
+            self.action_affordances[action].is_focus_switch = True
+        else:
+            self.action_affordances[action] = ActionAffordance(
+                action_id=action,
+                is_focus_switch=True,
+            )
+        logger.info(
+            "AutonomousEpistemicEngine: Grounded empirical FOCUS_SWITCH affordance for action %s",
+            action,
+        )
 
     @staticmethod
     def normalize_sensory_input(raw: Any) -> np.ndarray:
@@ -500,6 +587,9 @@ class AutonomousEpistemicEngine:
             is_new_level=is_new_level,
             level=level,
         )
+        self.budget_governor.reset(max_budget=self.exploration_budget)
+        if is_new_level:
+            self.dual_memory.reset_episodic_memory()
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions."""
@@ -575,6 +665,7 @@ class AutonomousEpistemicEngine:
         action: int | None = None,
         action_data: dict[str, Any] | None = None,
     ) -> None:
+        prev_av_pos = getattr(self, "avatar_pos", None)
         EpistemicFeedbackAssimilator.assimilate(
             self,
             curr_grid,
@@ -584,6 +675,28 @@ class AutonomousEpistemicEngine:
             action=action,
             action_data=action_data,
         )
+
+        # Wire interactive world-modeling feedback updates (W161-W190)
+        if action is not None:
+            self.budget_governor.record_step()
+            prior_st = {"avatar_pos": prev_av_pos}
+            next_st = {"avatar_pos": getattr(self, "avatar_pos", None)}
+            self.action_discovery.record_transition(
+                action_id=action,
+                prior_state=prior_st,
+                next_state=next_st,
+            )
+            self.delayed_effects.record_step(
+                step=self.step_counter,
+                action_id=action,
+                state_features=next_st,
+            )
+        if is_win or is_lost:
+            self.goal_induction.observe_feedback(
+                current_state=curr_grid,
+                level_incremented=is_win,
+                is_death_or_reset=is_lost,
+            )
 
     def simulate_in_mind(
         self,

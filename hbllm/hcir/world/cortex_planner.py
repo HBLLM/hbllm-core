@@ -132,14 +132,20 @@ class MentalSimulationPlanner:
         # If an executive subgoal is active and unsatisfied, prioritize its target destination ahead of confirmed goals.
         if hasattr(engine, "subgoal_stack") and engine.subgoal_stack.has_pending_goals:
             cur_sg = engine.subgoal_stack.current_subgoal
-            if cur_sg is not None and not engine.subgoal_stack.is_subgoal_satisfied(
-                cur_sg, set(), avatar_pos=engine.avatar_pos
+            if (
+                cur_sg is not None
+                and cur_sg.target_destination != engine.avatar_pos
+                and not engine.subgoal_stack.is_subgoal_satisfied(
+                    cur_sg, set(), avatar_pos=engine.avatar_pos
+                )
             ):
                 sg_dest = cur_sg.target_destination
                 if 0 <= sg_dest[0] < H and 0 <= sg_dest[1] < W:
                     if sg_dest in goals:
                         goals.remove(sg_dest)
                     goals.insert(0, sg_dest)
+            elif cur_sg is not None and cur_sg.target_destination == engine.avatar_pos:
+                engine.subgoal_stack.pop_subgoal()
 
         # Panel coordinates filter
         panel_coords: set[tuple[int, int]] = set()
@@ -779,8 +785,8 @@ class MentalSimulationPlanner:
                     if not engine.action_dynamics[a].is_displacement_action():
                         non_disp_wait_action = a
                         break
-                elif a == 5:
-                    non_disp_wait_action = 5
+                elif not engine.is_displacement_action(a) and not engine.is_spatial_effector(a):
+                    non_disp_wait_action = a
                     break
 
         while open_set and max_expansions > 0:
@@ -1210,6 +1216,7 @@ class MentalSimulationPlanner:
                     q.append(((nr, nc), path + [step]))
             return None
 
+        buffered_subgoals: list[FrontopolarSubgoal] = []
         for _ in range(max_stages):
             effective_barriers = static_barriers - open_barriers
             goal_path = find_shortest_path(cur_pos, goals, effective_barriers)
@@ -1219,6 +1226,8 @@ class MentalSimulationPlanner:
                     "AutonomousEpistemicEngine: Hierarchical Subgoal Decomposition SUCCEEDED with %d total steps!",
                     len(accumulated_plan),
                 )
+                for sg in buffered_subgoals:
+                    engine.subgoal_stack.push_subgoal(sg)
                 return accumulated_plan
 
             candidate_triggers: list[tuple[tuple[int, int], list[MentalSimulationStep], int]] = []
@@ -1244,6 +1253,8 @@ class MentalSimulationPlanner:
                         )
                         if approach_path:
                             accumulated_plan.extend(approach_path)
+                            for sg in buffered_subgoals:
+                                engine.subgoal_stack.push_subgoal(sg)
                             return accumulated_plan
 
                 bg = engine.estimate_background(curr_grid)
@@ -1258,10 +1269,12 @@ class MentalSimulationPlanner:
                     and 1 <= e.area <= 64
                     and e.feature_id not in av_feats
                     and e.grid_pos not in goals
+                    and e.grid_pos != cur_pos
+                    and (engine.avatar_pos is None or e.grid_pos != engine.avatar_pos)
                 ]
                 for t_pos in candidate_tools:
                     t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
-                    if t_path is not None:
+                    if t_path is not None and len(t_path) > 0:
                         candidate_triggers.append((t_pos, t_path, 1))
 
             if not candidate_triggers:
@@ -1270,7 +1283,7 @@ class MentalSimulationPlanner:
             candidate_triggers.sort(key=lambda x: (len(x[1]), -x[2]))
             chosen_pos, switch_path, _ = candidate_triggers[0]
 
-            engine.working_memory.subgoal_stack.push_subgoal(
+            buffered_subgoals.append(
                 FrontopolarSubgoal(
                     subgoal_id=f"trigger_{chosen_pos[0]}_{chosen_pos[1]}",
                     subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
@@ -1296,11 +1309,11 @@ class MentalSimulationPlanner:
                 )
             ]
             if matching_mutations and matching_mutations[0].trigger_type == "ACTION":
-                act_id = int(matching_mutations[0].metadata.get("action_id", 5))
-                if act_id in available_actions:
+                act_id = matching_mutations[0].metadata.get("action_id")
+                if act_id is not None and act_id in available_actions:
                     accumulated_plan.append(
                         MentalSimulationStep(
-                            action=act_id,
+                            action=int(act_id),
                             predicted_avatar_pos=cur_pos,
                             expected_mutation="ACTION_TRIGGER",
                         )

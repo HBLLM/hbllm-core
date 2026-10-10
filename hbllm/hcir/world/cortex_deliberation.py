@@ -330,9 +330,18 @@ class PrefrontalDeliberationEngine:
                 return chosen_action, chosen_data
             elif (
                 (not spatial_effector_actions or active_panel_target is None)
-                and is_stuck_or_looping
+                and (
+                    is_stuck_or_looping or (has_aligned_optical_subgoal and not engine.mental_plan)
+                )
                 and discrete_transform_actions
             ):
+                focus_switches = [
+                    a for a in discrete_transform_actions if engine.is_focus_switch_action(a)
+                ]
+                if focus_switches:
+                    chosen_action = focus_switches[0]
+                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    return chosen_action, None
                 uninhibited_discrete = [
                     a for a in discrete_transform_actions if engine.inhibited_actions.get(a, 0) == 0
                 ]
@@ -577,6 +586,11 @@ class PrefrontalDeliberationEngine:
                     engine._last_sim_barrier_count = len(engine.learned_barriers)
 
             if simulated_plan is None:
+                focus_switches = [a for a in available_actions if engine.is_focus_switch_action(a)]
+                if focus_switches and engine.consecutive_simulation_failures >= 1:
+                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    return focus_switches[0], None
+
                 macro_plan = (
                     engine.object_planner.plan_macro_option(engine, curr_grid, available_actions)
                     if hasattr(engine, "object_planner")

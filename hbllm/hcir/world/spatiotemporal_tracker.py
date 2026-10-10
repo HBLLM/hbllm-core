@@ -217,3 +217,375 @@ class SpatiotemporalHazardTracker:
             if haz_set:
                 schedule[dt] = haz_set
         return schedule
+
+
+# ── W059: Morphological Deformation & Topological Invariant Tracker ──────────
+
+
+from enum import StrEnum
+
+
+class MorphologicalDeformationType(StrEnum):
+    """Classification of continuous non-rigid entity shape changes."""
+
+    RIGID_TRANSLATION = "RIGID_TRANSLATION"
+    EXTRUSION = "EXTRUSION"  # Growth along a directional ray / line
+    GRAVITY_SETTLING = "GRAVITY_SETTLING"  # Downward vertical compaction
+    CONTOUR_EROSION = "CONTOUR_EROSION"  # Shrinkage preserving core
+    TOPOLOGICAL_GROWTH = "TOPOLOGICAL_GROWTH"  # Expansion / flood fill
+    UNKNOWN_DEFORMATION = "UNKNOWN_DEFORMATION"
+
+
+@dataclass
+class MorphologicalEntity:
+    """Entity representation for non-rigid shape tracking."""
+
+    entity_id: str
+    feature_id: int
+    cells: set[tuple[int, int]]
+    centroid: tuple[float, float]
+    bounding_box: tuple[int, int, int, int]
+
+
+@dataclass
+class DeformationRecord:
+    """Record of continuous entity identity preservation across morphing."""
+
+    entity_id: str
+    prior_cells_count: int
+    current_cells_count: int
+    iou: float
+    euler_characteristic: int
+    deformation_type: MorphologicalDeformationType
+
+
+@dataclass
+class FissionRecord:
+    """Record of a single parent entity dividing into multiple child entities (W014)."""
+
+    parent_entity_id: str
+    child_entity_ids: list[str]
+    parent_cell_count: int
+    child_cell_counts: list[int]
+    mass_conservation_ratio: float  # sum(child_cells) / parent_cells
+    spatial_coverage_ratio: float  # (sum child cells & parent) / parent_cells
+
+
+@dataclass
+class FusionRecord:
+    """Record of multiple parent entities coalescing into a single merged entity (W014)."""
+
+    parent_entity_ids: list[str]
+    merged_entity_id: str
+    parent_cell_counts: list[int]
+    merged_cell_count: int
+    mass_conservation_ratio: float  # merged_cells / sum(parent_cells)
+    spatial_coverage_ratio: float  # (parent_cells & merged_cells) / merged_cells
+
+
+@dataclass
+class LifecycleTrackingResult:
+    """Complete result of entity lifecycle tracking across temporal frames (W014, W059)."""
+
+    one_to_one_mappings: dict[str, str]  # prior_id -> current_id
+    deformation_records: list[DeformationRecord]
+    fission_records: list[FissionRecord]
+    fusion_records: list[FusionRecord]
+    unmatched_prior_ids: list[str]
+    unmatched_current_ids: list[str]
+
+
+class MorphologicalDeformationTracker:
+    """Tracks entity identity across non-rigid spatial changes and topological fission/fusion (W014, W059)."""
+
+    @staticmethod
+    def compute_euler_characteristic(cells: set[tuple[int, int]]) -> int:
+        """Compute 2D discrete Euler characteristic chi = V - E + F for a cell set.
+
+        For a connected solid object with g holes, chi = 1 - g.
+        """
+        if not cells:
+            return 0
+
+        # Vertices: 4 corner points per cell
+        vertices: set[tuple[float, float]] = set()
+        # Edges: 4 border segments per cell
+        edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+
+        for r, c in cells:
+            # 4 vertices: (r, c), (r+1, c), (r, c+1), (r+1, c+1)
+            v_tl = (float(r), float(c))
+            v_tr = (float(r), float(c + 1))
+            v_bl = (float(r + 1), float(c))
+            v_br = (float(r + 1), float(c + 1))
+
+            vertices.update([v_tl, v_tr, v_bl, v_br])
+
+            # 4 canonical undirected edges
+            edges.add((min(v_tl, v_tr), max(v_tl, v_tr)))
+            edges.add((min(v_tr, v_br), max(v_tr, v_br)))
+            edges.add((min(v_bl, v_br), max(v_bl, v_br)))
+            edges.add((min(v_tl, v_bl), max(v_tl, v_bl)))
+
+        V = len(vertices)
+        E = len(edges)
+        F = len(cells)
+        return V - E + F
+
+    @staticmethod
+    def compute_iou(cells_a: set[tuple[int, int]], cells_b: set[tuple[int, int]]) -> float:
+        """Compute Intersection over Union (IoU) between two sets of grid cells."""
+        intersection = len(cells_a & cells_b)
+        union = len(cells_a | cells_b)
+        return float(intersection / union) if union > 0 else 0.0
+
+    @classmethod
+    def classify_deformation(
+        cls, prior: set[tuple[int, int]], current: set[tuple[int, int]]
+    ) -> MorphologicalDeformationType:
+        """Classify the geometric deformation type between two sequential states."""
+        if prior == current:
+            return MorphologicalDeformationType.RIGID_TRANSLATION
+
+        iou = cls.compute_iou(prior, current)
+        len_p = len(prior)
+        len_c = len(current)
+
+        # Check vertical settling / gravity drop
+        p_cols = {c for _, c in prior}
+        c_cols = {c for _, c in current}
+        if p_cols == c_cols and len_c == len_p:
+            p_min_r = min(r for r, _ in prior)
+            c_min_r = min(r for r, _ in current)
+            if c_min_r > p_min_r:
+                return MorphologicalDeformationType.GRAVITY_SETTLING
+
+        # Extrusion: current strictly contains prior and grows along single axis
+        if prior.issubset(current) and len_c > len_p:
+            diff = current - prior
+            diff_rows = {r for r, _ in diff}
+            diff_cols = {c for _, c in diff}
+            if len(diff_rows) == 1 or len(diff_cols) == 1:
+                return MorphologicalDeformationType.EXTRUSION
+            return MorphologicalDeformationType.TOPOLOGICAL_GROWTH
+
+        # Erosion: current is subset of prior
+        if current.issubset(prior) and len_c < len_p:
+            return MorphologicalDeformationType.CONTOUR_EROSION
+
+        if iou >= 0.2:
+            return MorphologicalDeformationType.TOPOLOGICAL_GROWTH
+
+        return MorphologicalDeformationType.UNKNOWN_DEFORMATION
+
+    def match_entities(
+        self,
+        prior_entities: list[MorphologicalEntity],
+        current_entities: list[MorphologicalEntity],
+        iou_threshold: float = 0.15,
+    ) -> tuple[dict[str, str], list[DeformationRecord]]:
+        """Preserve entity UUIDs across non-rigid shape deformations.
+
+        Returns:
+            (mapping: prior_id -> current_id, deformation_records)
+        """
+        mapping: dict[str, str] = {}
+        records: list[DeformationRecord] = []
+        matched_curr_ids: set[str] = set()
+
+        for pe in prior_entities:
+            best_curr = None
+            best_score = -1.0
+            best_iou = 0.0
+
+            for ce in current_entities:
+                if ce.entity_id in matched_curr_ids:
+                    continue
+                if pe.feature_id != ce.feature_id:
+                    continue
+
+                iou = self.compute_iou(pe.cells, ce.cells)
+                # Centroid distance penalty
+                dr = pe.centroid[0] - ce.centroid[0]
+                dc = pe.centroid[1] - ce.centroid[1]
+                dist = math.hypot(dr, dc)
+                score = iou - 0.05 * dist
+
+                if iou >= iou_threshold and score > best_score:
+                    best_score = score
+                    best_curr = ce
+                    best_iou = iou
+
+            if best_curr is not None:
+                mapping[pe.entity_id] = best_curr.entity_id
+                matched_curr_ids.add(best_curr.entity_id)
+
+                def_type = self.classify_deformation(pe.cells, best_curr.cells)
+                chi = self.compute_euler_characteristic(best_curr.cells)
+                records.append(
+                    DeformationRecord(
+                        entity_id=pe.entity_id,
+                        prior_cells_count=len(pe.cells),
+                        current_cells_count=len(best_curr.cells),
+                        iou=best_iou,
+                        euler_characteristic=chi,
+                        deformation_type=def_type,
+                    )
+                )
+
+        return mapping, records
+
+    @classmethod
+    def detect_fission(
+        cls,
+        prior_entity: MorphologicalEntity,
+        candidate_children: list[MorphologicalEntity],
+        min_coverage: float = 0.40,
+    ) -> FissionRecord | None:
+        """Detect if a prior entity split into multiple distinct child entities (W014)."""
+        if len(candidate_children) < 2:
+            return None
+
+        # Filter candidate children by matching feature_id
+        valid_children = [c for c in candidate_children if c.feature_id == prior_entity.feature_id]
+        if len(valid_children) < 2:
+            return None
+
+        child_union = set().union(*(c.cells for c in valid_children))
+        overlap = len(child_union & prior_entity.cells)
+        parent_count = len(prior_entity.cells)
+        if parent_count == 0:
+            return None
+
+        spatial_cov = overlap / parent_count
+        sum_child_cells = sum(len(c.cells) for c in valid_children)
+        mass_ratio = sum_child_cells / parent_count
+
+        # Validate fission: children either overlap parent or are in close spatial proximity with conserved mass
+        if spatial_cov >= min_coverage or (0.70 <= mass_ratio <= 1.30 and spatial_cov >= 0.20):
+            return FissionRecord(
+                parent_entity_id=prior_entity.entity_id,
+                child_entity_ids=[c.entity_id for c in valid_children],
+                parent_cell_count=parent_count,
+                child_cell_counts=[len(c.cells) for c in valid_children],
+                mass_conservation_ratio=round(mass_ratio, 4),
+                spatial_coverage_ratio=round(spatial_cov, 4),
+            )
+        return None
+
+    @classmethod
+    def detect_fusion(
+        cls,
+        candidate_parents: list[MorphologicalEntity],
+        merged_entity: MorphologicalEntity,
+        min_coverage: float = 0.40,
+    ) -> FusionRecord | None:
+        """Detect if multiple prior entities coalesced into a single merged entity (W014)."""
+        if len(candidate_parents) < 2:
+            return None
+
+        valid_parents = [p for p in candidate_parents if p.feature_id == merged_entity.feature_id]
+        if len(valid_parents) < 2:
+            return None
+
+        parent_union = set().union(*(p.cells for p in valid_parents))
+        overlap = len(parent_union & merged_entity.cells)
+        merged_count = len(merged_entity.cells)
+        if merged_count == 0:
+            return None
+
+        spatial_cov = overlap / merged_count
+        sum_parent_cells = sum(len(p.cells) for p in valid_parents)
+        mass_ratio = merged_count / sum_parent_cells if sum_parent_cells > 0 else 0.0
+
+        if spatial_cov >= min_coverage or (0.70 <= mass_ratio <= 1.30 and spatial_cov >= 0.20):
+            return FusionRecord(
+                parent_entity_ids=[p.entity_id for p in valid_parents],
+                merged_entity_id=merged_entity.entity_id,
+                parent_cell_counts=[len(p.cells) for p in valid_parents],
+                merged_cell_count=merged_count,
+                mass_conservation_ratio=round(mass_ratio, 4),
+                spatial_coverage_ratio=round(spatial_cov, 4),
+            )
+        return None
+
+    def track_lifecycle(
+        self,
+        prior_entities: list[MorphologicalEntity],
+        current_entities: list[MorphologicalEntity],
+        iou_threshold: float = 0.15,
+        high_conf_iou: float = 0.70,
+    ) -> LifecycleTrackingResult:
+        """Unified lifecycle tracking: hierarchical resolution prioritizing high-confidence 1-to-1,
+        followed by topological fission/fusion (W014), and finally relaxed 1-to-1 deformations.
+        """
+        # Phase 1: High-confidence 1-to-1 matches (IoU >= high_conf_iou)
+        one_to_one, def_records = self.match_entities(
+            prior_entities, current_entities, iou_threshold=high_conf_iou
+        )
+
+        matched_prior = set(one_to_one.keys())
+        matched_curr = set(one_to_one.values())
+
+        unmatched_priors = [pe for pe in prior_entities if pe.entity_id not in matched_prior]
+        unmatched_currs = [ce for ce in current_entities if ce.entity_id not in matched_curr]
+
+        fission_records: list[FissionRecord] = []
+        fusion_records: list[FusionRecord] = []
+
+        # Phase 2: Detect Fissions (1 -> K) among candidate entities
+        remaining_currs = list(unmatched_currs)
+        for pe in list(unmatched_priors):
+            if len(remaining_currs) < 2:
+                break
+            candidate_children = [
+                ce
+                for ce in remaining_currs
+                if ce.feature_id == pe.feature_id and bool(ce.cells & pe.cells)
+            ]
+            if len(candidate_children) >= 2:
+                fission = self.detect_fission(pe, candidate_children)
+                if fission:
+                    fission_records.append(fission)
+                    unmatched_priors.remove(pe)
+                    for c_id in fission.child_entity_ids:
+                        remaining_currs = [ce for ce in remaining_currs if ce.entity_id != c_id]
+
+        # Phase 3: Detect Fusions (K -> 1) among candidate entities
+        remaining_priors = list(unmatched_priors)
+        for ce in list(remaining_currs):
+            if len(remaining_priors) < 2:
+                break
+            candidate_parents = [
+                pe
+                for pe in remaining_priors
+                if pe.feature_id == ce.feature_id and bool(pe.cells & ce.cells)
+            ]
+            if len(candidate_parents) >= 2:
+                fusion = self.detect_fusion(candidate_parents, ce)
+                if fusion:
+                    fusion_records.append(fusion)
+                    remaining_currs.remove(ce)
+                    for p_id in fusion.parent_entity_ids:
+                        remaining_priors = [pe for pe in remaining_priors if pe.entity_id != p_id]
+
+        # Phase 4: Relaxed 1-to-1 deformation matching for remaining entities
+        if remaining_priors and remaining_currs:
+            relaxed_map, relaxed_defs = self.match_entities(
+                remaining_priors, remaining_currs, iou_threshold=iou_threshold
+            )
+            one_to_one.update(relaxed_map)
+            def_records.extend(relaxed_defs)
+            remaining_priors = [pe for pe in remaining_priors if pe.entity_id not in relaxed_map]
+            remaining_currs = [
+                ce for ce in remaining_currs if ce.entity_id not in relaxed_map.values()
+            ]
+
+        return LifecycleTrackingResult(
+            one_to_one_mappings=one_to_one,
+            deformation_records=def_records,
+            fission_records=fission_records,
+            fusion_records=fusion_records,
+            unmatched_prior_ids=[pe.entity_id for pe in remaining_priors],
+            unmatched_current_ids=[ce.entity_id for ce in remaining_currs],
+        )

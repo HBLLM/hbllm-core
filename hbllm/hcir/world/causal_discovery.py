@@ -781,3 +781,211 @@ class BaseCausalDiscoveryEngine:
     ) -> tuple[float, list[dict[str, Any]]]:
         """Test acquired causal rules against held-out entities or worlds."""
         return self.test_generalization(test_objects, self.confirmed_causal_rules)
+
+    def compute_causal_mediation(
+        self,
+        observations: list[dict[str, Any]],
+        treatment: str,
+        mediator: str,
+        outcome: str,
+        covariates: list[str] | None = None,
+        baseline_treatment: Any = 0,
+        active_treatment: Any = 1,
+        identifiability_assumptions: MediationIdentifiabilityAssumptions | None = None,
+    ) -> CausalMediationResult:
+        """Compute Pearl's non-parametric causal mediation effects (NDE, NIE, TE, CDE) under DAG identifiability (W079).
+
+        Replaces naive regression decomposition with Pearl's interventional counterfactual
+        mediation formula:
+            TE = E[Y(x1) - Y(x0)]
+            NDE = E[Y(x1, M(x0)) - Y(x0, M(x0))]
+            NIE = E[Y(x1, M(x1)) - Y(x1, M(x0))]
+            CDE(m) = E[Y(x1, m) - Y(x0, m)]
+        """
+        cov_keys = tuple(sorted(covariates or []))
+        warnings: list[str] = []
+
+        if identifiability_assumptions is None:
+            identifiability = MediationIdentifiabilityAssumptions(
+                no_treatment_outcome_confounding=True,
+                no_mediator_outcome_confounding=True,
+                no_treatment_mediator_confounding=True,
+                no_cross_world_counterfactual_confounding=True,
+                covariates_controlled=list(cov_keys),
+            )
+            if not cov_keys:
+                warnings.append(
+                    "No baseline covariates specified: assuming unconfounded observational exchangeability."
+                )
+        else:
+            identifiability = identifiability_assumptions
+            if not identifiability.is_fully_identified():
+                warnings.append(
+                    "Causal identifiability conditions violated: resulting effects represent associative decompositions."
+                )
+
+        if not observations:
+            return CausalMediationResult(
+                treatment=treatment,
+                mediator=mediator,
+                outcome=outcome,
+                total_effect=0.0,
+                natural_direct_effect=0.0,
+                natural_indirect_effect=0.0,
+                controlled_direct_effect={},
+                proportion_mediated=0.0,
+                identifiability=identifiability,
+                is_causally_identified=identifiability.is_fully_identified(),
+                unmeasured_confounding_warnings=warnings,
+            )
+
+        # 1. Stratify by baseline covariates W
+        strata: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for obs in observations:
+            w_val = tuple(obs.get(k) for k in cov_keys)
+            strata.setdefault(w_val, []).append(obs)
+
+        N_total = len(observations)
+
+        # 2. Extract discrete mediator values
+        all_m_vals = sorted(list({obs[mediator] for obs in observations if mediator in obs}))
+
+        # Helper to compute E[Y(x, M(x_prime))] via Pearl's mediation integration
+        def compute_counterfactual_expectation(x_val: Any, x_prime_val: Any) -> float:
+            total_exp = 0.0
+            for w_val, w_obs in strata.items():
+                p_w = len(w_obs) / N_total
+                if p_w <= 0.0:
+                    continue
+
+                # Estimate P(M=m | X=x_prime, W=w)
+                x_prime_obs = [o for o in w_obs if o.get(treatment) == x_prime_val]
+                p_m_given_x_prime: dict[Any, float] = {}
+                if x_prime_obs:
+                    for m in all_m_vals:
+                        count_m = sum(1 for o in x_prime_obs if o.get(mediator) == m)
+                        p_m_given_x_prime[m] = count_m / len(x_prime_obs)
+                else:
+                    # Fallback to unconditional mediator distribution if stratum sparse
+                    for m in all_m_vals:
+                        count_m = sum(1 for o in w_obs if o.get(mediator) == m)
+                        p_m_given_x_prime[m] = count_m / len(w_obs) if w_obs else 0.0
+
+                # Estimate E[Y | X=x, M=m, W=w]
+                stratum_sum = 0.0
+                for m, p_m in p_m_given_x_prime.items():
+                    if p_m <= 0.0:
+                        continue
+                    cell_obs = [
+                        o for o in w_obs if o.get(treatment) == x_val and o.get(mediator) == m
+                    ]
+                    if cell_obs:
+                        e_y = sum(float(o.get(outcome, 0.0)) for o in cell_obs) / len(cell_obs)
+                    else:
+                        # Controlled fallback: marginal E[Y | X=x, W=w]
+                        x_obs = [o for o in w_obs if o.get(treatment) == x_val]
+                        e_y = (
+                            sum(float(o.get(outcome, 0.0)) for o in x_obs) / len(x_obs)
+                            if x_obs
+                            else 0.0
+                        )
+
+                    stratum_sum += e_y * p_m
+
+                total_exp += stratum_sum * p_w
+
+            return total_exp
+
+        # 3. Compute counterfactual expectations: E[Y(x1, M(x1))], E[Y(x0, M(x0))], E[Y(x1, M(x0))]
+        e_y_11 = compute_counterfactual_expectation(active_treatment, active_treatment)
+        e_y_00 = compute_counterfactual_expectation(baseline_treatment, baseline_treatment)
+        e_y_10 = compute_counterfactual_expectation(active_treatment, baseline_treatment)
+
+        te = e_y_11 - e_y_00
+        nde = e_y_10 - e_y_00
+        nie = e_y_11 - e_y_10
+
+        # 4. Controlled Direct Effects CDE(m)
+        cde_dict: dict[Any, float] = {}
+        for m in all_m_vals:
+            # E[Y | X=x1, M=m] - E[Y | X=x0, M=m]
+            obs_x1_m = [
+                o
+                for o in observations
+                if o.get(treatment) == active_treatment and o.get(mediator) == m
+            ]
+            obs_x0_m = [
+                o
+                for o in observations
+                if o.get(treatment) == baseline_treatment and o.get(mediator) == m
+            ]
+            if obs_x1_m and obs_x0_m:
+                e_x1 = sum(float(o.get(outcome, 0.0)) for o in obs_x1_m) / len(obs_x1_m)
+                e_x0 = sum(float(o.get(outcome, 0.0)) for o in obs_x0_m) / len(obs_x0_m)
+                cde_dict[m] = round(e_x1 - e_x0, 4)
+
+        prop_mediated = nie / te if abs(te) > 1e-6 else 0.0
+
+        return CausalMediationResult(
+            treatment=treatment,
+            mediator=mediator,
+            outcome=outcome,
+            total_effect=round(te, 4),
+            natural_direct_effect=round(nde, 4),
+            natural_indirect_effect=round(nie, 4),
+            controlled_direct_effect=cde_dict,
+            proportion_mediated=round(prop_mediated, 4),
+            identifiability=identifiability,
+            is_causally_identified=identifiability.is_fully_identified(),
+            unmeasured_confounding_warnings=warnings,
+            estimation_regime="pearl_counterfactual_stratification"
+            if identifiability.is_fully_identified()
+            else "observational_association",
+        )
+
+
+# ── W079: Pearl Non-Parametric Causal Mediation Data Classes ──────────────────
+
+
+@dataclass
+class MediationIdentifiabilityAssumptions:
+    """Represents Pearl's 4 sequential conditional independence identifiability conditions (W079).
+
+    1. Y(x, m) ⟂ X | W (no unmeasured treatment-outcome confounding)
+    2. Y(x, m) ⟂ M | (X, W) (no unmeasured mediator-outcome confounding)
+    3. M(x) ⟂ X | W (no unmeasured treatment-mediator confounding)
+    4. No mediator-outcome confounder is affected by treatment X.
+    """
+
+    no_treatment_outcome_confounding: bool = True
+    no_mediator_outcome_confounding: bool = True
+    no_treatment_mediator_confounding: bool = True
+    no_cross_world_counterfactual_confounding: bool = True
+    covariates_controlled: list[str] = field(default_factory=list)
+
+    def is_fully_identified(self) -> bool:
+        """True iff all 4 Pearl/Imai identifiability conditions hold."""
+        return (
+            self.no_treatment_outcome_confounding
+            and self.no_mediator_outcome_confounding
+            and self.no_treatment_mediator_confounding
+            and self.no_cross_world_counterfactual_confounding
+        )
+
+
+@dataclass
+class CausalMediationResult:
+    """Non-parametric causal mediation decomposition results (W079)."""
+
+    treatment: str
+    mediator: str
+    outcome: str
+    total_effect: float  # TE = E[Y(x1) - Y(x0)]
+    natural_direct_effect: float  # NDE = E[Y(x1, M(x0)) - Y(x0, M(x0))]
+    natural_indirect_effect: float  # NIE = E[Y(x1, M(x1)) - Y(x1, M(x0))]
+    controlled_direct_effect: dict[Any, float]  # CDE(m) = E[Y(x1, m) - Y(x0, m)]
+    proportion_mediated: float  # NIE / TE
+    identifiability: MediationIdentifiabilityAssumptions
+    is_causally_identified: bool
+    unmeasured_confounding_warnings: list[str] = field(default_factory=list)
+    estimation_regime: str = "pearl_counterfactual_stratification"

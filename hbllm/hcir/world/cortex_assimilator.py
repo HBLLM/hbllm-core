@@ -228,11 +228,17 @@ class EpistemicFeedbackAssimilator:
                 )
             )
 
-        if is_effector_action:
+        is_focus_switch = engine.is_focus_switch_action(action)
+        if is_effector_action or is_focus_switch:
             if hasattr(engine, "entity_action_failed_positions"):
                 engine.entity_action_failed_positions.clear()
             if hasattr(engine, "immobile_entity_actions"):
                 engine.immobile_entity_actions.clear()
+            if is_focus_switch:
+                engine.avatar_features.clear()
+                engine.avatar_feature = None
+                engine.avatar_pos = None
+                engine.mental_plan.clear()
 
         if is_effector_action and action not in engine.action_affordances:
             engine.action_affordances[action] = ActionAffordance(
@@ -749,6 +755,9 @@ class EpistemicFeedbackAssimilator:
                     av_moved = [
                         item for item in moved_entities if item[1].feature_id in known_av_feats
                     ]
+                    if getattr(engine, "last_non_displacement_action", None) is not None:
+                        engine.mark_focus_switch_action(engine.last_non_displacement_action)
+                        engine.last_non_displacement_action = None
 
             if av_moved:
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
@@ -766,6 +775,16 @@ class EpistemicFeedbackAssimilator:
                     av_moved = filtered_av_moved
 
                 av_pe, av_ce, (dr, dc) = av_moved[0]
+                if prev_avatar_pos is not None:
+                    dist_to_prev = abs(av_pe.grid_pos[0] - prev_avatar_pos[0]) + abs(
+                        av_pe.grid_pos[1] - prev_avatar_pos[1]
+                    )
+                    if dist_to_prev > max(abs(dr), abs(dc)) + 3:
+                        if getattr(engine, "last_non_displacement_action", None) is not None:
+                            engine.mark_focus_switch_action(engine.last_non_displacement_action)
+                            engine.last_non_displacement_action = None
+                    else:
+                        engine.last_non_displacement_action = None
                 all_cells = [
                     cell
                     for _, ce, _ in av_moved
@@ -845,11 +864,15 @@ class EpistemicFeedbackAssimilator:
                                 ce.area,
                             )
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
-        if is_known_displacement and prev_avatar_pos is not None:
-            avatar_moved = bool(
-                engine.avatar_pos is not None and engine.avatar_pos != prev_avatar_pos
-            )
+        avatar_moved = bool(
+            engine.avatar_pos is not None
+            and prev_avatar_pos is not None
+            and engine.avatar_pos != prev_avatar_pos
+        )
+        if not is_effector_action and not is_known_displacement and not avatar_moved:
+            engine.last_non_displacement_action = action
 
+        if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_win:
                 if act_dyn is not None and act_dyn.is_displacement_action():

@@ -23,11 +23,21 @@ class WorldStateSnapshot:
 
     def __post_init__(self) -> None:
         """Compute deterministic SHA256 state hash for simulation and replay matching."""
+
+        def _default_serializer(obj: Any) -> Any:
+            if hasattr(obj, "tolist"):
+                return obj.tolist()
+            if isinstance(obj, (set, frozenset)):
+                return sorted(list(obj))
+            return str(obj)
+
         raw_payload = {
             "world_id": self.world_id,
             "variables": sorted(self.variables.items()),
             "entity_states": sorted(self.entity_states.items()),
         }
-        encoded = json.dumps(raw_payload, sort_keys=True).encode("utf-8")
+        encoded = json.dumps(raw_payload, sort_keys=True, default=_default_serializer).encode(
+            "utf-8"
+        )
         computed_hash = hashlib.sha256(encoded).hexdigest()[:16]
         object.__setattr__(self, "state_hash", computed_hash)

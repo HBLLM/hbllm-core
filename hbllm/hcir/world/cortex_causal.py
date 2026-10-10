@@ -49,6 +49,7 @@ class ActionAffordance:
     is_displacement: bool = False
     delta: tuple[int, ...] | None = None
     is_state_transform: bool = False
+    is_focus_switch: bool = False
     confidence: float = 1.0
     metadata: dict[str, Any] = field(default_factory=dict)
 

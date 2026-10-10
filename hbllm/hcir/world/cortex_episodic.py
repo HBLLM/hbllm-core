@@ -95,6 +95,9 @@ class HippocampalEpisodicCortex:
         # Lethal candidate features identified across trials
         self.discovered_lethal_features: set[int] = set()
 
+        # Falsifiable Cross-Task Analogy Engine (W148)
+        self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+
     def record_transition(
         self,
         step: int,
@@ -459,6 +462,9 @@ class HippocampalEpisodicCortex:
             engine.avatar_pos = None
             engine.action_dynamics.clear()
             engine.action_affordances.clear()
+            if hasattr(engine, "focus_switch_actions"):
+                engine.focus_switch_actions.clear()
+            engine.last_non_displacement_action = None
             engine.tested_actions.clear()
             engine.symbolic_theory.clear()
             engine.state_mutations.clear()
@@ -492,6 +498,8 @@ class HippocampalEpisodicCortex:
 
         if hasattr(engine, "object_planner"):
             engine.object_planner.reset_episode(is_new_level=is_new_level)
+        if hasattr(engine, "subgoal_stack"):
+            engine.subgoal_stack.reset_episode()
 
         # Cortical faculties reset
         if not retain_dynamics:
@@ -503,3 +511,123 @@ class HippocampalEpisodicCortex:
             engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
         if hasattr(engine, "acc_conflict_monitor"):
             engine.acc_conflict_monitor.reset()
+
+
+# ── W148: Falsifiable Cross-Task Analogy Engine ──────────────────────────────
+
+
+from enum import StrEnum
+
+
+class AnalogyStatus(StrEnum):
+    """Lifecycle state of an analogical schema transfer."""
+
+    TENTATIVE = "TENTATIVE"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+
+
+@dataclass
+class SchemaMorphism:
+    """Explicit relational schema mapping between source and target domains."""
+
+    source_domain: str
+    target_domain: str
+    predicate_mapping: dict[str, str]  # e.g. {"Key": "Switch", "Door": "Barrier"}
+    feature_mapping: dict[int, int] = field(default_factory=dict)
+    confidence: float = 0.5
+    status: AnalogyStatus = AnalogyStatus.TENTATIVE
+    counterexamples: int = 0
+    support_count: int = 0
+
+
+class FalsifiableAnalogyEngine:
+    """Cross-Task Analogy Engine with explicit structural mappings and rejection tests (W148).
+
+    Category-theoretic transfer alone is insufficient; every candidate analogy must:
+    1. Pass structural compatibility checks (matching entity arity and relational types).
+    2. Withstand empirical observation testing in the target environment.
+    3. Be immediately REJECTED if any source invariant is violated in the new context.
+    """
+
+    def __init__(self, refutation_threshold: int = 1) -> None:
+        self.refutation_threshold = refutation_threshold
+        self.active_analogies: dict[str, SchemaMorphism] = {}
+
+    def propose_analogy(
+        self,
+        source_domain: str,
+        target_domain: str,
+        predicate_mapping: dict[str, str],
+        feature_mapping: dict[int, int] | None = None,
+    ) -> SchemaMorphism:
+        """Register a tentative candidate analogy for empirical testing."""
+        analogy_id = f"{source_domain}__to__{target_domain}"
+        morphism = SchemaMorphism(
+            source_domain=source_domain,
+            target_domain=target_domain,
+            predicate_mapping=dict(predicate_mapping),
+            feature_mapping=dict(feature_mapping or {}),
+            status=AnalogyStatus.TENTATIVE,
+        )
+        self.active_analogies[analogy_id] = morphism
+        return morphism
+
+    def validate_structural_compatibility(
+        self,
+        morphism: SchemaMorphism,
+        target_entity_types: set[str],
+    ) -> bool:
+        """Rejection Predicate 1: Target context must contain mapped entity types."""
+        mapped_targets = set(morphism.predicate_mapping.values())
+        if not mapped_targets.issubset(target_entity_types):
+            morphism.status = AnalogyStatus.REJECTED
+            morphism.counterexamples += 1
+            logger.info(
+                "FalsifiableAnalogyEngine: Rejected analogy %s -> %s (missing entity types: %s)",
+                morphism.source_domain,
+                morphism.target_domain,
+                mapped_targets - target_entity_types,
+            )
+            return False
+        return True
+
+    def record_empirical_observation(
+        self,
+        analogy_id: str,
+        predicted_mutation: str,
+        actual_mutation: str,
+    ) -> bool:
+        """Rejection Predicate 2: Target state mutation must match transferred rule prediction."""
+        if analogy_id not in self.active_analogies:
+            return False
+
+        morphism = self.active_analogies[analogy_id]
+        if morphism.status == AnalogyStatus.REJECTED:
+            return False
+
+        if predicted_mutation == actual_mutation:
+            morphism.support_count += 1
+            morphism.confidence = min(0.99, morphism.confidence + 0.15)
+            if morphism.support_count >= 2:
+                morphism.status = AnalogyStatus.CONFIRMED
+            return True
+        else:
+            morphism.counterexamples += 1
+            morphism.confidence = max(0.01, morphism.confidence - 0.4)
+            if morphism.counterexamples >= self.refutation_threshold:
+                morphism.status = AnalogyStatus.REJECTED
+                logger.warning(
+                    "FalsifiableAnalogyEngine: Analogy %s REJECTED upon counterexample (predicted=%s, actual=%s)",
+                    analogy_id,
+                    predicted_mutation,
+                    actual_mutation,
+                )
+            return False
+
+    def is_analogy_active(self, analogy_id: str) -> bool:
+        """True if analogy has not been refuted and remains tentative or confirmed."""
+        if analogy_id not in self.active_analogies:
+            return False
+        m = self.active_analogies[analogy_id]
+        return m.status != AnalogyStatus.REJECTED and m.counterexamples == 0
