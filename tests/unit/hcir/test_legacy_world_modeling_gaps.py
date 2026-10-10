@@ -250,3 +250,154 @@ def test_w079_confounding_identifiability_warning() -> None:
     assert res.is_causally_identified is False
     assert len(res.unmeasured_confounding_warnings) > 0
     assert res.estimation_regime == "observational_association"
+
+
+# ── W014 & W040 Advanced Invariant & Lineage Tests ───────────────────────────
+
+
+def test_w014_non_conserved_fission_and_entropy_ambiguity() -> None:
+    """W014 supports conditional mass conservation and calibrated entropy ambiguity."""
+    tracker = MorphologicalDeformationTracker()
+
+    parent = MorphologicalEntity(
+        entity_id="parent_cut",
+        feature_id=2,
+        cells=frozenset({(r, c) for r in range(5) for c in range(4)}),  # 20 cells
+        centroid=(2.0, 1.5),
+        bounding_box=(0, 4, 0, 3),
+    )
+
+    # 4 cells removed by cutting process: child1 has 10 cells, child2 has 6 cells (16 total cells)
+    child1 = MorphologicalEntity(
+        entity_id="child1",
+        feature_id=2,
+        cells=frozenset({(r, c) for r in range(5) for c in (0, 1)}),  # 10 cells
+        centroid=(2.0, 0.5),
+        bounding_box=(0, 4, 0, 1),
+    )
+    child2 = MorphologicalEntity(
+        entity_id="child2",
+        feature_id=2,
+        cells=frozenset({(r, c) for r in range(3) for c in (2, 3)}),  # 6 cells
+        centroid=(1.0, 2.5),
+        bounding_box=(0, 2, 2, 3),
+    )
+
+    # When conservation is strictly required, non-conserved fission is rejected
+    fission_strict = tracker.detect_fission(parent, [child1, child2], conservation_required=True)
+    assert fission_strict is None
+
+    # When conservation is conditional (default False), non-conserved fission is recognized
+    fission_lenient = tracker.detect_fission(parent, [child1, child2], conservation_required=False)
+    assert fission_lenient is not None
+    assert fission_lenient.is_mass_conserved is False
+    assert fission_lenient.mass_conservation_ratio == 0.8  # 16 / 20
+    assert fission_lenient.ambiguity_score > 0.0
+    assert fission_lenient.component_correspondences["child1"] == 1.0
+    assert fission_lenient.component_correspondences["child2"] == 1.0
+
+
+def test_w014_lifecycle_dag_lineage_tracking() -> None:
+    """W014 constructs directed causal lineage DAG for all lifecycle transitions."""
+    tracker = MorphologicalDeformationTracker()
+
+    # Prior state: 1 identity entity, 1 fission parent, 1 destroyed entity
+    e_id_prev = MorphologicalEntity(
+        entity_id="p_id",
+        feature_id=1,
+        cells=frozenset({(0, 0), (0, 1)}),
+        centroid=(0.0, 0.5),
+        bounding_box=(0, 0, 0, 1),
+    )
+    e_fiss_prev = MorphologicalEntity(
+        entity_id="p_fiss",
+        feature_id=2,
+        cells=frozenset({(2, 0), (2, 1), (3, 0), (3, 1)}),
+        centroid=(2.5, 0.5),
+        bounding_box=(2, 3, 0, 1),
+    )
+    e_dest_prev = MorphologicalEntity(
+        entity_id="p_dest",
+        feature_id=3,
+        cells=frozenset({(8, 8)}),
+        centroid=(8.0, 8.0),
+        bounding_box=(8, 8, 8, 8),
+    )
+
+    # Current state: identity child, 2 fission fragments, 1 newly created entity
+    e_id_curr = MorphologicalEntity(
+        entity_id="c_id",
+        feature_id=1,
+        cells=frozenset({(0, 0), (0, 1)}),
+        centroid=(0.0, 0.5),
+        bounding_box=(0, 0, 0, 1),
+    )
+    e_frag1_curr = MorphologicalEntity(
+        entity_id="c_frag1",
+        feature_id=2,
+        cells=frozenset({(2, 0), (2, 1)}),
+        centroid=(2.0, 0.5),
+        bounding_box=(2, 2, 0, 1),
+    )
+    e_frag2_curr = MorphologicalEntity(
+        entity_id="c_frag2",
+        feature_id=2,
+        cells=frozenset({(3, 0), (3, 1)}),
+        centroid=(3.0, 0.5),
+        bounding_box=(3, 3, 0, 1),
+    )
+    e_new_curr = MorphologicalEntity(
+        entity_id="c_created",
+        feature_id=4,
+        cells=frozenset({(9, 9)}),
+        centroid=(9.0, 9.0),
+        bounding_box=(9, 9, 9, 9),
+    )
+
+    result = tracker.track_lifecycle(
+        [e_id_prev, e_fiss_prev, e_dest_prev],
+        [e_id_curr, e_frag1_curr, e_frag2_curr, e_new_curr],
+    )
+
+    dag = result.lineage_graph
+    assert "c_id" in dag
+    assert dag["c_id"].transition_type == "IDENTITY"
+    assert dag["c_id"].parent_ids == ["p_id"]
+
+    assert "p_fiss" in dag
+    assert dag["p_fiss"].transition_type == "FISSION"
+    assert set(dag["p_fiss"].child_ids) == {"c_frag1", "c_frag2"}
+
+    assert "p_dest" in dag
+    assert dag["p_dest"].transition_type == "DESTRUCTION"
+
+    assert "c_created" in dag
+    assert dag["c_created"].transition_type == "CREATION"
+
+
+def test_w040_occam_selection_affine_vs_projective() -> None:
+    """W040 uses geometric invariants to enforce Occam's razor over projective models."""
+    # 1. Pure affine transformation: shear + translation
+    src = np.array([[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+    affine_mat = np.array([[1.0, 0.5, 3.0], [0.0, 1.0, -2.0]])
+    dst_affine = AffineTransform2D(affine_mat).forward(src)
+
+    sel_affine = GeometricModelSelector.select_best_model(src, dst_affine)
+    assert sel_affine["best_model_type"] == "affine"
+    assert sel_affine["residual"] < 1e-4
+    assert sel_affine["parallelism_deviation"] < 1e-4
+
+    # 2. Pure isometric transformation (90° rotation + translation)
+    rot_mat = np.array([[0.0, -1.0, 5.0], [1.0, 0.0, 2.0]])
+    dst_iso = AffineTransform2D(rot_mat).forward(src)
+    sel_iso = GeometricModelSelector.select_best_model(src, dst_iso)
+    assert sel_iso["best_model_type"] == "isometric"
+    assert sel_iso["is_isometric"] is True
+    assert sel_iso["residual"] < 1e-4
+
+    # 3. Collinear degenerate point set
+    collinear_src = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0]])
+    collinear_dst = np.array([[0.0, 0.0], [2.0, 2.0], [4.0, 4.0], [6.0, 6.0]])
+    sel_degen = GeometricModelSelector.select_best_model(collinear_src, collinear_dst)
+    assert sel_degen["best_model_type"] == "degenerate"
+    assert sel_degen["ambiguity_score"] == 1.0

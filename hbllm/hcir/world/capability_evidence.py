@@ -56,8 +56,27 @@ class GeneralizationStatus(StrEnum):
 
 
 @dataclass
+class ArchitecturalIntegrity:
+    """Architectural integrity dimension: domain-generality, zero benchmark coupling, calibrated uncertainty."""
+
+    domain_general: bool = True
+    benchmark_independent: bool = True
+    calibrated_uncertainty: bool = True
+
+    def is_verified(self) -> bool:
+        return self.domain_general and self.benchmark_independent and self.calibrated_uncertainty
+
+    def to_dict(self) -> dict[str, bool]:
+        return {
+            "domain_general": self.domain_general,
+            "benchmark_independent": self.benchmark_independent,
+            "calibrated_uncertainty": self.calibrated_uncertainty,
+        }
+
+
+@dataclass
 class CapabilityEvidence:
-    """Structured three-tier verification evidence for cognitive world-model capabilities."""
+    """Structured four-dimensional verification evidence for cognitive world-model capabilities."""
 
     capability_id: str
     name: str
@@ -67,16 +86,18 @@ class CapabilityEvidence:
     unit_test_status: str  # PASSING | PARTIAL | NONE
     benchmark_status: str  # BENCHMARKED | UNTESTED
     generalization_status: str  # HELD_OUT_EVIDENCED | IN_SAMPLE_ONLY | UNVERIFIED
+    architectural_integrity: ArchitecturalIntegrity = field(default_factory=ArchitecturalIntegrity)
     evidence_refs: list[str] = field(default_factory=list)
     notes: str = ""
 
     def is_fully_verified(self) -> bool:
-        """A capability receives verified status ONLY when implementation, integration, and generalization hold."""
+        """A capability receives 4D verified status ONLY when implementation, integration, generalization, and architectural integrity hold."""
         return (
             self.implementation_status == ImplementationStatus.IMPLEMENTED
             and self.integration_status == IntegrationStatus.ACTIVE_RUNTIME
             and self.unit_test_status == UnitTestStatus.PASSING
             and self.generalization_status == GeneralizationStatus.HELD_OUT_EVIDENCED
+            and self.architectural_integrity.is_verified()
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +111,7 @@ class CapabilityEvidence:
             "unit_test_status": self.unit_test_status,
             "benchmark_status": self.benchmark_status,
             "generalization_status": self.generalization_status,
+            "architectural_integrity": self.architectural_integrity.to_dict(),
             "fully_verified": self.is_fully_verified(),
             "evidence_refs": list(self.evidence_refs),
             "notes": self.notes,
@@ -131,10 +153,15 @@ class CapabilityLedger:
             if entry.is_fully_verified():
                 fully_verified += 1
 
+        arch_verified = sum(
+            1 for entry in self._entries.values() if entry.architectural_integrity.is_verified()
+        )
+
         return {
             "total_capabilities": total,
             "implementation": impl_counts,
             "integration": integ_counts,
             "generalization": gen_counts,
+            "architectural_integrity_verified": arch_verified,
             "fully_verified": fully_verified,
         }

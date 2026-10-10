@@ -74,6 +74,10 @@ from hbllm.hcir.world.object_state_graph import (
 from hbllm.hcir.world.optical_ray_projection import (
     OpticalRayProjector,
 )
+from hbllm.hcir.world.parietal_coordinate_transform import (
+    GeometricModelSelector,
+    ParietalCoordinateTransformer,
+)
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
@@ -81,6 +85,8 @@ from hbllm.hcir.world.remote_causal_attribution import (
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import (
+    EntityLineageNode,
+    LifecycleTrackingResult,
     MorphologicalDeformationTracker,
     SpatiotemporalHazardTracker,
 )
@@ -308,10 +314,16 @@ class AutonomousEpistemicEngine:
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
 
-        # Faculty: Non-Rigid Topological Deformation Tracker (W059)
+        # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
         self.deformation_tracker: MorphologicalDeformationTracker = (
             MorphologicalDeformationTracker()
         )
+        self.latest_lifecycle_result: LifecycleTrackingResult | None = None
+        self.entity_lineage_graph: dict[str, EntityLineageNode] = {}
+
+        # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
+        self.coordinate_transformer: ParietalCoordinateTransformer = ParietalCoordinateTransformer()
+        self.geometric_selector: GeometricModelSelector = GeometricModelSelector()
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()

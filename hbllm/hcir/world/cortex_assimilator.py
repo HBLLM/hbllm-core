@@ -22,6 +22,7 @@ from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
 )
+from hbllm.hcir.world.spatiotemporal_tracker import MorphologicalEntity
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -478,6 +479,35 @@ class EpistemicFeedbackAssimilator:
             if best_ce_id is not None:
                 matched_ce = unmatched_curr.pop(best_ce_id)
                 moved_entities.append((pe, matched_ce, best_delta))
+
+        # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
+        if hasattr(engine, "deformation_tracker") and engine.deformation_tracker is not None:
+            morph_prev = [
+                MorphologicalEntity(
+                    entity_id=pe.id or f"prev_{pe.feature_id}_{pe.grid_pos[0]}_{pe.grid_pos[1]}",
+                    feature_id=pe.feature_id,
+                    cells=set(pe.properties.get("cells", [pe.grid_pos])),
+                    centroid=pe.centroid,
+                    bounding_box=pe.bounding_box,
+                )
+                for pe in prev_entities
+            ]
+            morph_curr = [
+                MorphologicalEntity(
+                    entity_id=ce.id or f"curr_{ce.feature_id}_{ce.grid_pos[0]}_{ce.grid_pos[1]}",
+                    feature_id=ce.feature_id,
+                    cells=set(ce.properties.get("cells", [ce.grid_pos])),
+                    centroid=ce.centroid,
+                    bounding_box=ce.bounding_box,
+                )
+                for ce in curr_entities
+            ]
+            lifecycle_res = engine.deformation_tracker.track_lifecycle(
+                morph_prev, morph_curr, conservation_required=False
+            )
+            engine.latest_lifecycle_result = lifecycle_res
+            if hasattr(engine, "entity_lineage_graph") and engine.entity_lineage_graph is not None:
+                engine.entity_lineage_graph.update(lifecycle_res.lineage_graph)
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
         # Only evaluate bilateral pairing if entities belong to controllable agent features,

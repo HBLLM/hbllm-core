@@ -172,6 +172,17 @@ class ParietalCoordinateTransformer:
             )
         return None
 
+    @staticmethod
+    def infer_geometric_mapping(
+        src_points: np.ndarray,
+        dst_points: np.ndarray,
+        residual_tol: float = 0.05,
+    ) -> dict[str, Any]:
+        """Infer best geometric coordinate model (Affine, Isometric, Projective) between point sets (W040)."""
+        return GeometricModelSelector.select_best_model(
+            src_points, dst_points, residual_tol=residual_tol
+        )
+
 
 # ── W040: Formal Geometric & Perspective Transformations ─────────────────────
 
@@ -318,69 +329,197 @@ class ProjectiveHomography2D:
 
 
 class GeometricModelSelector:
-    """Evaluates transformation model fits across Affine, Isometric, and Projective models with uncertainty (W040)."""
+    """Evaluates transformation model fits across Affine, Isometric, and Projective models with uncertainty (W040).
+
+    Uses geometric invariants (parallelism preservation, axonometric axes, vanishing points)
+    and hierarchical Occam's selection rather than naive residual minimization.
+    """
+
+    @staticmethod
+    def check_collinearity(points: np.ndarray) -> float:
+        """Measure collinearity of 2D points in [0.0, 1.0]. 1.0 indicates perfectly collinear."""
+        pts = np.asarray(points, dtype=float)
+        if len(pts) < 3:
+            return 1.0
+        centered = pts - np.mean(pts, axis=0)
+        _, s, _ = np.linalg.svd(centered)
+        if len(s) < 2 or s[0] < 1e-12:
+            return 1.0
+        return float(1.0 - (s[1] / s[0]))
+
+    @staticmethod
+    def check_parallelism_preservation(
+        src_points: np.ndarray,
+        dst_points: np.ndarray,
+        parallel_tol: float = 1e-3,
+    ) -> tuple[float, int]:
+        """Test parallelism preservation between pairs of segments in src vs dst.
+
+        Returns (max_parallelism_deviation, num_pairs_evaluated).
+        A deviation of 0.0 indicates perfect parallelism preservation (characteristic of Affine maps).
+        """
+        src = np.asarray(src_points, dtype=float)
+        dst = np.asarray(dst_points, dtype=float)
+        N = len(src)
+        if N < 4:
+            return 0.0, 0
+
+        max_dev = 0.0
+        evaluated = 0
+
+        # Find pairs of line segments (i->j) and (k->l) that are parallel in src
+        for i in range(N):
+            for j in range(i + 1, N):
+                u_src = src[j] - src[i]
+                u_norm = np.linalg.norm(u_src)
+                if u_norm < 1e-6:
+                    continue
+
+                for k in range(N):
+                    for l in range(k + 1, N):
+                        if (i, j) == (k, l) or (i == k and j == l):
+                            continue
+                        v_src = src[l] - src[k]
+                        v_norm = np.linalg.norm(v_src)
+                        if v_norm < 1e-6:
+                            continue
+
+                        # Check if u_src and v_src are parallel
+                        cross_src = abs(u_src[0] * v_src[1] - u_src[1] * v_src[0]) / (
+                            u_norm * v_norm
+                        )
+                        if cross_src < parallel_tol:
+                            # Evaluate in dst
+                            u_dst = dst[j] - dst[i]
+                            v_dst = dst[l] - dst[k]
+                            ud_norm = np.linalg.norm(u_dst)
+                            vd_norm = np.linalg.norm(v_dst)
+                            if ud_norm > 1e-6 and vd_norm > 1e-6:
+                                cross_dst = abs(u_dst[0] * v_dst[1] - u_dst[1] * v_dst[0]) / (
+                                    ud_norm * vd_norm
+                                )
+                                dev = abs(cross_dst - cross_src)
+                                if dev > max_dev:
+                                    max_dev = dev
+                                evaluated += 1
+
+        return float(max_dev), evaluated
+
+    @staticmethod
+    def check_isometry(affine_matrix: np.ndarray) -> tuple[bool, float]:
+        """Test if 2x3 affine matrix is an isometric transformation (rigid rotation/reflection + translation).
+
+        Returns (is_isometric, condition_deviation).
+        """
+        A = affine_matrix[:, :2]
+        _, s, _ = np.linalg.svd(A)
+        if len(s) < 2 or s[1] < 1e-12:
+            return False, 1.0
+        cond_dev = abs(s[0] - s[1])
+        scale_dev = abs(s[0] - 1.0)
+        is_iso = bool(cond_dev < 0.05 and scale_dev < 0.05)
+        return is_iso, float(cond_dev)
 
     @staticmethod
     def select_best_model(
         src_points: np.ndarray,
         dst_points: np.ndarray,
+        residual_tol: float = 0.05,
     ) -> dict[str, Any]:
-        """Select best geometric model under residual error and report epistemic model ambiguity."""
+        """Select best geometric model under invariant Occam selection and report epistemic model ambiguity.
+
+        Hierarchical Occam's Selection:
+        1. Collinear or underconstrained inputs return 'degenerate' with maximal epistemic ambiguity (1.0).
+        2. Affine strictly preferred over Projective when parallelism is preserved (deviation < 1e-3)
+           and residual is within tolerance, preventing overfitting from 8-param homography.
+        3. Isometric specialized when scale is isotropic and canonical axes are preserved.
+        4. Projective homography chosen only when genuine perspective foreshortening / vanishing points exist.
+        """
         src = np.asarray(src_points, dtype=float)
         dst = np.asarray(dst_points, dtype=float)
         N = len(src)
 
+        collinearity = GeometricModelSelector.check_collinearity(src)
+        if N < 3 or collinearity > 0.999:
+            return {
+                "best_model_type": "degenerate",
+                "best_model": None,
+                "residual": 999.0,
+                "residuals": {},
+                "ambiguity_score": 1.0,
+                "parallelism_deviation": 1.0,
+                "is_isometric": False,
+                "perspective_distortion": 0.0,
+            }
+
         results: dict[str, Any] = {}
         residuals: dict[str, float] = {}
 
-        # 1. Fit Affine
-        if N >= 3:
-            try:
-                affine_model, aff_res = AffineTransform2D.estimate(src, dst)
-                results["affine"] = affine_model
-                residuals["affine"] = aff_res
-            except Exception:
-                residuals["affine"] = 999.0
+        # 1. Fit Affine (6 parameters)
+        try:
+            affine_model, aff_res = AffineTransform2D.estimate(src, dst)
+            results["affine"] = affine_model
+            residuals["affine"] = aff_res
+        except Exception:
+            residuals["affine"] = 999.0
 
-        # 2. Fit Projective Homography
+        # 2. Fit Projective Homography (8 parameters)
+        proj_model: ProjectiveHomography2D | None = None
+        proj_res = 999.0
+        persp_dist = 0.0
         if N >= 4:
             try:
                 proj_model, proj_res = ProjectiveHomography2D.estimate(src, dst)
                 results["projective"] = proj_model
                 residuals["projective"] = proj_res
+                # Perspective coefficients [h31, h32]
+                H = proj_model.homography_matrix
+                persp_dist = float(np.linalg.norm(H[2, :2]))
             except Exception:
                 residuals["projective"] = 999.0
 
-        if not residuals:
-            return {
-                "best_model_type": "unknown",
-                "best_model": None,
-                "residuals": residuals,
-                "ambiguity_score": 1.0,
-            }
+        par_dev, n_pairs = GeometricModelSelector.check_parallelism_preservation(src, dst)
 
-        # Model selection: penalize degrees of freedom (Affine: 6 params, Projective: 8 params)
-        scores: dict[str, float] = {}
-        for m_type, res in residuals.items():
-            k = 6 if m_type == "affine" else 8
-            bic_penalty = (k * np.log(max(N, 1))) / max(N, 1)
-            scores[m_type] = res + 0.1 * bic_penalty
+        # 3. Occam's Invariant Selection
+        aff_model = results.get("affine")
+        is_iso = False
+        if aff_model is not None:
+            is_iso, _ = GeometricModelSelector.check_isometry(aff_model.matrix)
 
-        best_type = min(scores.keys(), key=lambda k: scores[k])
-        best_model = results.get(best_type)
-
-        # Ambiguity score: normalized entropy of softmax of negative scores
-        sorted_scores = sorted(scores.values())
-        if len(sorted_scores) >= 2:
-            gap = abs(sorted_scores[1] - sorted_scores[0])
-            ambiguity = float(np.exp(-2.0 * gap))  # Close scores -> high ambiguity
+        # Decision logic:
+        # If affine residual is within tolerance or projective perspective is negligible:
+        # Affine wins.
+        if residuals["affine"] <= residual_tol or (persp_dist < 1e-4 and residuals["affine"] < 0.2):
+            best_type = "isometric" if is_iso else "affine"
+            best_model = aff_model
+            best_res = residuals["affine"]
+            # Low ambiguity if clean fit
+            ambiguity = max(0.0, min(1.0, best_res / (residual_tol + 1e-6) * 0.2))
+        elif (
+            proj_model is not None
+            and proj_res < residuals["affine"] - 0.05
+            and proj_res <= residual_tol
+            and (par_dev > 1e-3 or persp_dist > 1e-4)
+        ):
+            # True non-affine perspective convergence
+            best_type = "projective"
+            best_model = proj_model
+            best_res = proj_res
+            ambiguity = max(0.0, min(1.0, proj_res / (residual_tol + 1e-6) * 0.2))
         else:
-            ambiguity = 0.0
+            # Ambiguous or high residual regime
+            best_type = "affine" if residuals["affine"] <= proj_res else "projective"
+            best_model = results.get(best_type)
+            best_res = residuals[best_type]
+            ambiguity = 0.85
 
         return {
             "best_model_type": best_type,
             "best_model": best_model,
-            "residual": residuals[best_type],
+            "residual": best_res,
             "residuals": residuals,
             "ambiguity_score": round(ambiguity, 4),
+            "parallelism_deviation": round(par_dev, 6),
+            "is_isometric": is_iso,
+            "perspective_distortion": round(persp_dist, 6),
         }
