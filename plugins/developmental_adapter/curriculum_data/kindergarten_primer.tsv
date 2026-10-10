@@ -1,0 +1,12 @@
+utterance	context_type	context_value
+red	color	red
+blue	color	blue
+green	color	green
+ball	entity_type	ball
+block	entity_type	block
+box	entity_type	box
+tool	entity_type	tool
+stick	entity_type	tool
+push	action	push
+pull	action	pull
+inside	relation	inside

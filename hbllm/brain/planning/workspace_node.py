@@ -120,8 +120,34 @@ class WorkspaceNode(Node, IWorkspace):
         await self.bus.subscribe("workspace.update", self.handle_update)
         await self.bus.subscribe("workspace.thought", self.handle_thought)
         await self.bus.subscribe("brain.proactive.evaluate", self.handle_proactive_evaluate)
+        await self.bus.subscribe("project.reactivated", self.handle_project_reactivated)
+        await self.bus.subscribe("relationship.new", self.handle_relationship_event)
+        await self.bus.subscribe("relationship.updated", self.handle_relationship_event)
         # Start periodic sweeper to clean orphaned blackboards
         self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
+
+    async def handle_project_reactivated(self, message: Message) -> None:
+        """Cache reactivated project metadata onto the shared HCIR workspace."""
+        if hasattr(self, "hcir_workspace") and self.hcir_workspace:
+            if hasattr(self.hcir_workspace, "metadata"):
+                self.hcir_workspace.metadata["active_project"] = message.payload
+        logger.debug(
+            "WorkspaceNode ingested project.reactivated for %s",
+            message.payload.get("project_name"),
+        )
+
+    async def handle_relationship_event(self, message: Message) -> None:
+        """Cache social relationship updates onto the shared HCIR workspace."""
+        if hasattr(self, "hcir_workspace") and self.hcir_workspace:
+            if hasattr(self.hcir_workspace, "metadata"):
+                relationships = self.hcir_workspace.metadata.setdefault("relationships", {})
+                p_name = message.payload.get("person_name")
+                if p_name:
+                    relationships[p_name] = message.payload
+        logger.debug(
+            "WorkspaceNode ingested relationship event for %s",
+            message.payload.get("person_name"),
+        )
 
     async def on_stop(self) -> None:
         """Gracefully shut down: cancel watchers, notify users of active boards, cancel sweeper."""

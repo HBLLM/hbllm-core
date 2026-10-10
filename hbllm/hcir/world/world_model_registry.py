@@ -60,3 +60,29 @@ class WorldModelRegistry:
             for m in self._models.values()
             if m.domain == domain and m.status == ModelLifecycleState.ACTIVE
         ]
+
+    @classmethod
+    def create_default(cls) -> WorldModelRegistry:
+        """Create a registry pre-populated with default core world predictors."""
+        reg = cls()
+        reg.register_model(
+            WorldModelDescriptor(
+                model_id="whole_grid_v1",
+                model_version="1.0.0",
+                domain="discrete_2d_grid",
+                supported_horizons_ms=[1000, 60000],
+                status=ModelLifecycleState.ACTIVE,
+                required_capabilities=["W083_whole_grid", "raster_rollout"],
+            )
+        )
+        reg.register_model(
+            WorldModelDescriptor(
+                model_id="physics_v1",
+                model_version="1.0.0",
+                domain="continuous_physics",
+                supported_horizons_ms=[1000, 60000],
+                status=ModelLifecycleState.ACTIVE,
+                required_capabilities=["kinematics", "collision"],
+            )
+        )
+        return reg

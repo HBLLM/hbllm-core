@@ -1,0 +1,211 @@
+word	category	definition	semantic_role	parent_concept
+above	PREPOSITION	At a higher level or layer than.	INSIDE	physical_entity
+absorb	VERB	Take in or soak up energy, liquid, or other substances.	PUSH	physical_entity
+accelerate	VERB	Increase velocity or rate of motion over time.	PUSH	physical_entity
+acceleration	NOUN	The rate of change of velocity per unit of time.	BLOCK	physical_entity
+acid	NOUN	A chemical substance that neutralizes alkalis, dissolves some metals, and turns litmus red.	BLOCK	physical_entity
+across	PREPOSITION	From one side to the other of something with clear limits.	NEAR	physical_entity
+against	PREPOSITION	In close proximity to and touching someone or something.	NEAR	physical_entity
+along	PREPOSITION	Moving in a constant direction on a more or less horizontal surface.	NEAR	physical_entity
+animal	NOUN	A living organism that feeds on organic matter, typically having specialized sense organs.	BLOCK	physical_entity
+anything	NOUN	A thing of any kind; used to refer to a thing, no matter what.	BLOCK	physical_entity
+around	PREPOSITION	Located or moving on every side; about.	NEAR	physical_entity
+atom	NOUN	The basic unit of a chemical element, consisting of a nucleus surrounded by electrons.	BLOCK	physical_entity
+attract	VERB	Exert a force on an object that tends to pull it toward the attracting body.	PULL	physical_entity
+ball	NOUN	A spherical physical body capable of rolling across surfaces.	BALL	spherical_body
+bar	NOUN	A rigid piece of metal or wood, broader than a rod, used as a lever.	TOOL	lever_instrument
+basket	NOUN	A container used to hold or carry things.	CONTAINER	receptacle
+beam	NOUN	A ray or shaft of light or other radiation, or a long, sturdy piece of squared timber or metal.	BLOCK	physical_entity
+behind	PREPOSITION	At the back of or in the wake of.	INSIDE	physical_entity
+being	NOUN	Existence; or a real or imaginary living creature or entity.	BLOCK	physical_entity
+below	PREPOSITION	At a lower level or layer than.	INSIDE	physical_entity
+beside	PREPOSITION	At the side of; next to.	NEAR	physical_entity
+between	PREPOSITION	At, into, or across the space separating two objects or points.	NEAR	physical_entity
+bin	NOUN	A box or receptacle for storing materials.	CONTAINER	receptacle
+block	NOUN	A large solid piece of hard material with flat surfaces on each side.	BLOCK	block_body
+blue	ADJECTIVE	Of a color intermediate between green and violet, as of the sky or sea on a sunny day.		physical_entity
+box	NOUN	A rigid container or receptacle, typically rectangular, with a lid or open top.	CONTAINER	receptacle
+building	NOUN	A structure with a roof and walls, such as a house, school, store, or factory.	BLOCK	physical_entity
+by	PREPOSITION	Identifying the agent performing an action; or near to; beside.	NEAR	physical_entity
+candle	NOUN	A cylinder of wax with a central wick that is lit to produce light as it burns.	BLOCK	physical_entity
+ceiling	NOUN	The upper interior surface of a room or other similar compartment.	BLOCK	physical_entity
+cell	NOUN	The smallest structural and functional unit of an organism, typically microscopic.	BLOCK	physical_entity
+chamber	NOUN	An enclosed physical space or compartment in an apparatus.	CONTAINER	physical_entity
+charge	NOUN	A physical property of matter that causes it to experience a force when placed in an electromagnetic field.	BLOCK	physical_entity
+chemical	ADJECTIVE	Relating to chemistry, or the interactions of substances as studied in chemistry.		physical_entity
+chest	NOUN	A large strong box, typically made of wood, used for storage.	CONTAINER	receptacle
+clothing	NOUN	Clothes collectively; items worn on the body.	BLOCK	physical_entity
+cold	ADJECTIVE	Of or at a low or relatively low temperature.		physical_entity
+collide	VERB	Hit with force when moving.	PUSH	physical_entity
+combust	VERB	Consume or be consumed by fire or burn chemically.	PUSH	physical_entity
+condense	VERB	Make something denser or more concentrated; change from gas to liquid.	PUSH	physical_entity
+conduct	VERB	Transmit heat, electricity, or other energy through a substance.	PUSH	physical_entity
+container	NOUN	An object that can be used to hold or transport something.	CONTAINER	physical_entity
+contract	VERB	Decrease in size, number, or range.	PUSH	physical_entity
+cool	VERB	Become or make less hot.	PUSH	physical_entity
+copper	NOUN	A red-brown metal, the chemical element of atomic number 29; an excellent electrical conductor.	BLOCK	physical_entity
+core	NOUN	The central or innermost part of an object or celestial body.	BLOCK	physical_entity
+crate	NOUN	A slatted wooden case or box used for transporting or storing goods.	CONTAINER	receptacle
+cube	NOUN	A symmetrical three-dimensional shape, either solid or hollow, contained by six equal squares.	BLOCK	block_body
+darling	NOUN	A dear or beloved person.	BLOCK	physical_entity
+deflect	VERB	Cause something to change direction by interposing an object.	PUSH	physical_entity
+dense	ADJECTIVE	Closely compacted in substance.		physical_entity
+diffuse	VERB	Spread over a wide area or between substances through random motion.	PUSH	physical_entity
+dispersion	NOUN	The action or process of distributing things or people over a wide area; or separation of light into color components.	BLOCK	physical_entity
+displace	VERB	Take over the place, position, or role of; or move from proper position.	PUSH	physical_entity
+dissolve	VERB	Become incorporated into a liquid so as to form a solution.	PUSH	physical_entity
+drag	VERB	Pull an object along forcefully, roughly, or with difficulty.	PULL	physical_entity
+draw	VERB	Produce a picture or diagram; or pull or drag a load or object toward oneself.	PULL	physical_entity
+drawing	NOUN	A picture or diagram made with a pencil, pen, or crayon rather than paint.	BLOCK	physical_entity
+drop	VERB	Let or make something fall vertically.	PUSH	physical_entity
+elastic	ADJECTIVE	Able to resume its normal shape after being stretched or compressed.		physical_entity
+electric	ADJECTIVE	Of, worked by, or producing electricity.		physical_entity
+emit	VERB	Produce and discharge radiation, sound, or gas.	PUSH	physical_entity
+enclosure	NOUN	An area or receptacle sealed off with a barrier.	CONTAINER	receptacle
+energy	NOUN	The property of matter and radiation that is manifest as a capacity to perform work.	BLOCK	physical_entity
+engine	NOUN	A machine with moving parts that converts power into motion.	BLOCK	physical_entity
+equilibrium	NOUN	A state in which opposing forces or influences are balanced.	BLOCK	physical_entity
+evening	NOUN	The period of time at the end of the day, usually from about 6 p.m. to bedtime.	BLOCK	physical_entity
+everything	NOUN	All things; all the things of a group or class.	BLOCK	physical_entity
+expand	VERB	Become or make larger or more extensive.	PUSH	physical_entity
+feeling	NOUN	An emotional state or reaction, or the perception of tactile sensations.	BLOCK	physical_entity
+field	NOUN	A region in which each point has a physical quantity such as force or electric potential.	BLOCK	physical_entity
+flow	VERB	Move steadily and continuously in a current or stream.	PUSH	physical_entity
+fluid	NOUN	A substance that has no fixed shape and yields easily to external pressure; a gas or a liquid.	BLOCK	physical_entity
+focus	NOUN	The center of interest or activity; or the point at which rays or waves meet after reflection or refraction.	BLOCK	physical_entity
+force	NOUN	Strength or energy as an attribute of physical action or movement; an influence that changes the motion of a body.	BLOCK	physical_entity
+freeze	VERB	Be turned into ice or another solid as a result of extreme cold.	PUSH	physical_entity
+friction	NOUN	The resistance that one surface or object encounters when moving over another.	BLOCK	physical_entity
+gas	NOUN	An air-like fluid substance which expands freely to fill any space available.	BLOCK	physical_entity
+globe	NOUN	A spherical body or celestial object.	BALL	spherical_body
+gold	NOUN	A yellow precious metal, the chemical element of atomic number 79.	BLOCK	physical_entity
+grasp	VERB	Seize and hold firmly with the hand or fingers.	GRASP	physical_entity
+gravity	NOUN	The force that attracts a body toward the center of the earth, or toward any other physical body having mass.	BLOCK	physical_entity
+green	ADJECTIVE	Of the color between blue and yellow, resembling growing foliage.		physical_entity
+grip	VERB	Take and keep a firm hold of.	GRASP	physical_entity
+handle	NOUN	The part by which an object is held, carried, or manipulated.	TOOL	lever_instrument
+hard	ADJECTIVE	Solid, firm, and rigid; not easily broken, bent, or pierced.		physical_entity
+haul	VERB	Pull or drag with effort or force.	PULL	physical_entity
+heat	VERB	Make or become hot or warm.	PUSH	physical_entity
+heavy	ADJECTIVE	Of great weight; difficult to lift or move.		physical_entity
+hold	VERB	Grasp, carry, or support with one's hands or in one's arms.	GRASP	physical_entity
+hopper	NOUN	A funnel-shaped container for delivering bulk materials into a machine.	CONTAINER	receptacle
+hot	ADJECTIVE	Having a high degree of heat or a high temperature.		physical_entity
+ignite	VERB	Catch fire or cause to catch fire.	PUSH	physical_entity
+implement	NOUN	A tool, utensil, or other piece of equipment, used for a practical purpose.	TOOL	tool
+in	PREPOSITION	Expressing the situation of something that is or appears to be enclosed or surrounded by something else.	INSIDE	physical_entity
+inertia	NOUN	A property of matter by which it continues in its existing state of rest or uniform motion in a straight line unless changed by an external force.	BLOCK	physical_entity
+inside	PREPOSITION	The inner side or surface of something; within the bounds.	INSIDE	physical_entity
+instrument	NOUN	A tool or implement, especially one for delicate or scientific work.	TOOL	tool
+into	PREPOSITION	Expressing movement or action with the result that someone or something becomes enclosed or surrounded by something else.	INSIDE	physical_entity
+iron	NOUN	A strong, hard magnetic silvery-gray metal.	BLOCK	physical_entity
+kinetic	ADJECTIVE	Relating to or resulting from motion.		physical_entity
+king	NOUN	The male ruler of an independent state, especially one who inherits the position by right of birth.	BLOCK	physical_entity
+lead	NOUN	A heavy, bluish-gray, soft, ductile metal.	BLOCK	physical_entity
+lens	NOUN	A piece of glass or other transparent substance with curved sides for concentrating or dispersing light.	BLOCK	physical_entity
+lever	NOUN	A rigid bar resting on a pivot, used to help move a heavy or firmly fixed load.	TOOL	lever_instrument
+lift	VERB	Raise to a higher position or level.	PUSH	physical_entity
+light	ADJECTIVE	Having little weight; not heavy; or the natural agent that stimulates sight and makes things visible.		physical_entity
+lightning	NOUN	The occurrence of a natural electrical discharge of very short duration and high voltage between a cloud and the ground or within a cloud.	BLOCK	physical_entity
+liquid	NOUN	A substance that flows freely but is of constant volume, having a consistency like that of water.	BLOCK	physical_entity
+living	NOUN	An income sufficient to live on, or the state of being alive.	BLOCK	physical_entity
+magnet	NOUN	A piece of iron or other material which has its component atoms so ordered that that material exhibits magnetism.	BLOCK	physical_entity
+magnetic	ADJECTIVE	Exhibiting or relating to magnetism.		physical_entity
+mass	NOUN	A coherent, typically large body of matter with no definite shape, or quantity of matter in a body.	BLOCK	physical_entity
+matter	NOUN	Physical substance in general, as distinct from mind and spirit; that which occupies space.	BLOCK	physical_entity
+meaning	NOUN	What is meant by a word, text, concept, or action.	BLOCK	physical_entity
+melt	VERB	Make or become liquefied by heat.	PUSH	physical_entity
+membrane	NOUN	A pliable sheetlike structure acting as a boundary, lining, or partition in an organism.	BLOCK	physical_entity
+mirror	NOUN	A reflective surface, now typically of glass coated with a metal amalgam, that reflects a clear image.	BLOCK	physical_entity
+molecule	NOUN	A group of atoms bonded together, representing the smallest fundamental unit of a chemical compound.	BLOCK	physical_entity
+moon	NOUN	The natural satellite of the earth, or celestial body orbiting a planet.	BLOCK	physical_entity
+morning	NOUN	The period of time between midnight or sunrise and noon.	BLOCK	physical_entity
+move	VERB	Go in a specified direction or manner; change position.	PUSH	physical_entity
+near	PREPOSITION	At or to a short distance away; nearby.	NEAR	physical_entity
+nothing	NOUN	Not anything; no single thing.	BLOCK	physical_entity
+nucleus	NOUN	The central and most important part of an object, movement, or group, forming the basis for its activity.	BLOCK	physical_entity
+offspring	NOUN	A person's child or children, or an animal's young.	BLOCK	physical_entity
+on	PREPOSITION	Physically in contact with and supported by a surface.	INSIDE	physical_entity
+opaque	ADJECTIVE	Not able to be seen through; not transparent.		physical_entity
+optical	ADJECTIVE	Operating in or relating to the visible part of the spectrum; relating to sight.		physical_entity
+orb	NOUN	A spherical body or globe.	BALL	spherical_body
+orbit	NOUN	The curved path of a celestial object or spacecraft around a star, planet, or moon.	BLOCK	physical_entity
+organism	NOUN	An individual animal, plant, or single-celled life form.	BLOCK	physical_entity
+oscillate	VERB	Move or swing back and forth at a regular speed.	PUSH	physical_entity
+outside	PREPOSITION	The external side or surface of something.	INSIDE	physical_entity
+painting	NOUN	The action or skill of using paint, or a picture or design executed in paints.	BLOCK	physical_entity
+piston	NOUN	A disc or short cylinder fitting closely within a tube in which it moves up and down against a fluid.	BLOCK	physical_entity
+place	VERB	Put in a particular position.	GRASP	physical_entity
+planet	NOUN	A celestial body moving in an elliptical orbit around a star.	BLOCK	physical_entity
+plant	NOUN	A living organism of the kind exemplified by trees, shrubs, herbs, grasses, ferns, and mosses.	BLOCK	physical_entity
+potential	ADJECTIVE	Latent qualities or abilities that may be developed; or energy held by an object because of its position.		physical_entity
+power	NOUN	The rate of doing work or transferring energy, or the capacity or ability to direct or influence the behavior of others.	BLOCK	physical_entity
+precipitate	VERB	Cause a substance to be deposited in solid form from a solution.	PUSH	physical_entity
+press	VERB	Apply continuous physical force against something.	PUSH	physical_entity
+prism	NOUN	A solid geometric figure whose two end faces are similar, equal, and parallel rectilinear figures.	BLOCK	physical_entity
+propel	VERB	Drive or push something forwards.	PUSH	physical_entity
+pudding	NOUN	A cooked sweet dish, typically served hot as a dessert.	BLOCK	physical_entity
+pull	VERB	Exert force upon an object so as to cause it to move toward oneself or the origin of the force.	PULL	physical_entity
+push	VERB	Exert force on someone or something in order to move them away from oneself or origin.	PUSH	physical_entity
+radiate	VERB	Emit energy, especially light or heat, in the form of rays or waves.	PUSH	physical_entity
+ray	NOUN	A narrow beam of light or other radiation.	BLOCK	physical_entity
+receptacle	NOUN	An object or space used to contain something.	CONTAINER	container
+red	ADJECTIVE	Of a color at the end of the spectrum next to orange, resembling that of blood.		physical_entity
+reflect	VERB	Throw back heat, light, or sound without absorbing it.	PUSH	physical_entity
+refract	VERB	Make a ray of light change direction when it enters at an angle.	PUSH	physical_entity
+release	VERB	Allow or enable to escape from confinement; set free.	GRASP	physical_entity
+repel	VERB	Drive or force an object back or away.	PUSH	physical_entity
+ring	NOUN	A small circular band, typically of precious metal and often set with one or more gemstones.	BLOCK	physical_entity
+rod	NOUN	A thin straight bar, especially of wood or metal.	TOOL	lever_instrument
+roll	VERB	Move in a particular direction by turning over and over on an axis.	ROLL	physical_entity
+rotate	VERB	Move or cause to move in a circle around an axis or center.	ROLL	physical_entity
+rough	ADJECTIVE	Having an uneven or irregular surface; not smooth or level.		physical_entity
+satellite	NOUN	An artificial body placed in orbit round the earth or moon or another planet in order to collect information or for communication.	BLOCK	physical_entity
+seize	VERB	Take hold of suddenly and forcibly.	GRASP	physical_entity
+shilling	NOUN	A former British coin and monetary unit equal to twelve pence.	BLOCK	physical_entity
+shove	VERB	Push someone or something roughly or with force.	PUSH	physical_entity
+sibling	NOUN	Each of two or more children or offspring having one or both parents in common.	BLOCK	physical_entity
+smooth	ADJECTIVE	Having an even and regular surface or consistency; free from perceptible projections, lumps, or indentations.		physical_entity
+soft	ADJECTIVE	Easy to mold, cut, compress, or fold; not hard or firm to the touch.		physical_entity
+solid	NOUN	Firm and stable in shape; not liquid or fluid.	BLOCK	physical_entity
+solute	NOUN	The minor component in a solution, dissolved in the solvent.	BLOCK	physical_entity
+solution	NOUN	A liquid mixture in which the minor component is uniformly distributed within the major component.	BLOCK	physical_entity
+solvent	NOUN	Having assets in excess of liabilities; or the liquid in which a solute is dissolved.	BLOCK	physical_entity
+something	NOUN	A thing that is unspecified or unknown.	BLOCK	physical_entity
+species	NOUN	A group of living organisms consisting of similar individuals capable of exchanging genes.	BLOCK	physical_entity
+spectrum	NOUN	A band of colors, as seen in a rainbow, produced by separation of the components of light by their different degrees of refraction.	BLOCK	physical_entity
+sphere	NOUN	A round solid figure in which every point on the surface is equidistant from center.	BALL	spherical_body
+spin	VERB	Turn or cause to turn or whirl round rapidly.	ROLL	physical_entity
+spring	NOUN	The season after winter and before summer; or a resilient elastic coil storing mechanical energy.	BLOCK	physical_entity
+star	NOUN	A fixed luminous point in the night sky that is a large, remote incandescent body.	BLOCK	physical_entity
+stick	NOUN	A slender piece of rigid wood or material used to extend reach.	TOOL	lever_instrument
+stop	VERB	Come to an end; finish; prevent from happening or moving.	GRASP	physical_entity
+strike	VERB	Hit forcibly and deliberately with one's hand or a weapon or other implement.	PUSH	physical_entity
+string	NOUN	Material consisting of threads of cotton, hemp, or other material twisted together to form a thin length.	BLOCK	physical_entity
+substance	NOUN	A particular kind of matter with uniform properties.	BLOCK	physical_entity
+temperature	NOUN	The degree or intensity of heat present in a substance or object.	BLOCK	physical_entity
+thing	NOUN	An object to which one need not or cannot give a specific name.	BLOCK	physical_entity
+through	PREPOSITION	Moving in one side and out of the other side of an opening, channel, or location.	INSIDE	physical_entity
+thrust	VERB	Push suddenly or violently in a specified direction.	PUSH	physical_entity
+tissue	NOUN	Any of the distinct types of material of which animals or plants are made.	BLOCK	physical_entity
+tool	NOUN	A device or implement used to carry out a particular physical function.	TOOL	physical_entity
+trajectory	NOUN	The curved path followed by a projectile flying or an object moving under the action of given forces.	BLOCK	physical_entity
+transfer	VERB	Move from one place to another.	PUSH	physical_entity
+transparent	ADJECTIVE	Allowing light to pass through so that objects behind can be distinctly seen.		physical_entity
+under	PREPOSITION	Extending or directly below something.	INSIDE	physical_entity
+upon	PREPOSITION	More formal term for on, especially in abstract senses.	INSIDE	physical_entity
+vaporize	VERB	Convert or be converted into vapor.	PUSH	physical_entity
+vault	NOUN	A secure room or compartment used to store and protect items.	CONTAINER	receptacle
+velocity	NOUN	The speed of something in a given direction.	BLOCK	physical_entity
+vessel	NOUN	A hollow container, especially one used to hold liquid or granular matter.	CONTAINER	receptacle
+vibrate	VERB	Move or cause to move continuously and rapidly to and fro.	PUSH	physical_entity
+viscous	ADJECTIVE	Having a thick, sticky consistency between solid and liquid; having a high viscosity.		physical_entity
+wave	NOUN	A periodic disturbance that transfers energy through space or a medium.	BLOCK	physical_entity
+wax	NOUN	A sticky, yellowish, moldable substance secreted by bees or synthesized from petroleum.	BLOCK	physical_entity
+wheel	NOUN	A circular object that revolves on an axle and is fixed below a vehicle or other object to enable it to move easily.	BLOCK	physical_entity
+wing	NOUN	A modified forelimb for flight, as of a bird or bat, or an airfoil that develops lift.	BLOCK	physical_entity
+within	PREPOSITION	Inside something.	INSIDE	physical_entity
+work	NOUN	Activity involving mental or physical effort done in order to achieve a purpose; force times displacement.	BLOCK	physical_entity
+yellow	ADJECTIVE	Of the color between green and orange in the spectrum, a primary subtractive color.		physical_entity
+crucible	NOUN	A ceramic or metal container in which metals or other substances may be melted or subjected to very high temperatures.	CONTAINER	receptacle
+prybar	NOUN	A tool consisting of a metal bar with a flattened end, used as a lever.	TOOL	lever_instrument

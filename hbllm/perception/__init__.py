@@ -15,6 +15,7 @@ from hbllm.perception.reality_bus import (
     RealityEventBus,
 )
 from hbllm.perception.reflex_arc import ReflexArc, ReflexRule
+from hbllm.perception.saccadic_attention import FovealFixation, SaccadicAttentionSystem
 from hbllm.perception.spatial_grid import EpistemicSpatialGrid, SpatialCellPartition
 from hbllm.perception.vector_projector import MultimodalProjector
 from hbllm.perception.vision_node import VisionNode
@@ -26,11 +27,13 @@ __all__ = [
     "EventLog",
     "EventNormalizer",
     "EventOrigin",
+    "FovealFixation",
     "PerceptionEvent",
     "PerceptionModality",
     "PhysicalObservationEvent",
     "PhysicalPerceptionStream",
     "RealityEventBus",
+    "SaccadicAttentionSystem",
     "SpatialCellPartition",
     "VisionNode",
     "MultimodalProjector",

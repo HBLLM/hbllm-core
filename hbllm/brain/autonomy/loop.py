@@ -178,6 +178,8 @@ class AutonomyCore:
             "user.action",
             "sensor.anomaly",
             "device.change",
+            "device.attached",
+            "device.detached",
             "system.critical",
             "perception.*",
         ]

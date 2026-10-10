@@ -1,0 +1,127 @@
+{
+  "timestamp": 1791472425.327235,
+  "total_games_tested": 6,
+  "total_levels_passed": 3,
+  "total_levels_possible": 46,
+  "pass_rate_pct": 6.52,
+  "games": {
+    "tu93-0768757b": {
+      "title": "TU93",
+      "levels_passed": 3,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 142.52,
+      "baseline": [
+        19,
+        16,
+        34,
+        42,
+        123,
+        80,
+        14,
+        23,
+        111
+      ]
+    },
+    "ar25-0c556536": {
+      "title": "AR25",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 887.72,
+      "baseline": [
+        32,
+        50,
+        75,
+        37,
+        89,
+        159,
+        233,
+        73
+      ]
+    },
+    "re86-8af5384d": {
+      "title": "RE86",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 1149.46,
+      "baseline": [
+        26,
+        42,
+        86,
+        108,
+        189,
+        139,
+        424,
+        241
+      ]
+    },
+    "cn04-2fe56bfb": {
+      "title": "CN04",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 132.8,
+      "baseline": [
+        29,
+        54,
+        85,
+        300,
+        208,
+        113
+      ]
+    },
+    "tr87-cd924810": {
+      "title": "TR87",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 1956.39,
+      "baseline": [
+        54,
+        58,
+        40,
+        45,
+        71,
+        146
+      ]
+    },
+    "wa30-ee6fef47": {
+      "title": "WA30",
+      "levels_passed": 0,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 114.87,
+      "baseline": [
+        71,
+        119,
+        183,
+        98,
+        368,
+        68,
+        79,
+        442,
+        415
+      ]
+    }
+  }
+}

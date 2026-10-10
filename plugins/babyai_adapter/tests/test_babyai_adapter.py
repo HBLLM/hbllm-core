@@ -25,7 +25,11 @@ for p in [str(_core_root), str(_plugins_root)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import json
+
 from babyai_adapter import (
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
     BabyAIActionAdapter,
     BabyAIEnvironment,
     BabyAIGoal,
@@ -39,6 +43,18 @@ from babyai_adapter import (
 )
 
 from hbllm.hcir.graph import EntityLifecycle, PhysicalEntityNode
+
+
+def test_plugin_manifest() -> None:
+    manifest_path = Path(__file__).resolve().parent.parent / "plugin.json"
+    assert manifest_path.exists(), "plugin.json must exist"
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["name"] == PLUGIN_NAME
+    assert data["version"] == PLUGIN_VERSION
+    assert "babyai_plan_trajectory" in data["capabilities"]
+    assert data.get("supports_native_execution") is True
+    assert "supports_standalone_fallback" not in data
 
 
 def test_minigrid_enums_and_types() -> None:

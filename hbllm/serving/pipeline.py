@@ -47,6 +47,7 @@ class PipelineConfig:
     inject_memory: bool = True
     inject_identity: bool = True
     inject_curiosity: bool = True
+    inject_context_fusion: bool = True
 
 
 class CognitivePipeline:
@@ -80,6 +81,16 @@ class CognitivePipeline:
         self._response_creation_times: dict[str, float] = {}
         self._subscriptions: list[Subscription] = []
         self._cleanup_task: asyncio.Task[None] | None = None
+
+        # Context Fusion Engine
+        self.context_fusion = getattr(self.config, "context_fusion", None)
+        if self.context_fusion is None and getattr(self.config, "inject_context_fusion", True):
+            try:
+                from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+
+                self.context_fusion = ContextFusionEngine()
+            except Exception as e:
+                logger.debug("ContextFusionEngine init skipped: %s", e)
 
     async def start(self) -> None:
         """Subscribe to decision output and sensory output to capture final responses."""
@@ -181,6 +192,7 @@ class CognitivePipeline:
         start_time = time.monotonic()
         correlation_id = str(uuid.uuid4())
         stages: list[str] = []
+        model_size = model_size or "125M"
 
         with trace_span(
             "pipeline.process",
@@ -289,8 +301,10 @@ class CognitivePipeline:
         """
         context: dict[str, Any] = {}
 
-        # Memory retrieval
-        if self.config.inject_memory:
+        # Gather context from memory, identity, and curiosity concurrently
+        async def _fetch_memory() -> list[Any]:
+            if not self.config.inject_memory:
+                return []
             try:
                 mem_msg = Message(
                     type=MessageType.QUERY,
@@ -304,16 +318,17 @@ class CognitivePipeline:
                     self.bus.request("memory.search", mem_msg, timeout=5.0),
                     timeout=5.0,
                 )
-                context["memory"] = mem_resp.payload.get("results", [])
+                return mem_resp.payload.get("results", [])
             except (TimeoutError, asyncio.TimeoutError):
                 logger.debug("Memory retrieval timed out, continuing without")
-                context["memory"] = []
+                return []
             except Exception:
                 logger.warning("Memory retrieval failed, continuing without", exc_info=True)
-                context["memory"] = []
+                return []
 
-        # Identity retrieval
-        if self.config.inject_identity:
+        async def _fetch_identity() -> dict[str, Any]:
+            if not self.config.inject_identity:
+                return {}
             try:
                 id_msg = Message(
                     type=MessageType.QUERY,
@@ -326,15 +341,16 @@ class CognitivePipeline:
                     self.bus.request("identity.query", id_msg, timeout=3.0),
                     timeout=3.0,
                 )
-                context["identity"] = id_resp.payload
+                return id_resp.payload
             except (TimeoutError, asyncio.TimeoutError):
-                context["identity"] = {}
+                return {}
             except Exception:
                 logger.warning("Identity retrieval failed, continuing without", exc_info=True)
-                context["identity"] = {}
+                return {}
 
-        # Curiosity goals
-        if self.config.inject_curiosity:
+        async def _fetch_curiosity() -> list[Any]:
+            if not self.config.inject_curiosity:
+                return []
             try:
                 cur_msg = Message(
                     type=MessageType.QUERY,
@@ -347,14 +363,50 @@ class CognitivePipeline:
                     self.bus.request("curiosity.goals", cur_msg, timeout=3.0),
                     timeout=3.0,
                 )
-                context["curiosity_goals"] = cur_resp.payload.get("goals", [])
+                return cur_resp.payload.get("goals", [])
             except (TimeoutError, asyncio.TimeoutError):
-                context["curiosity_goals"] = []
+                return []
             except Exception:
                 logger.warning(
                     "Curiosity goals retrieval failed, continuing without", exc_info=True
                 )
-                context["curiosity_goals"] = []
+                return []
+
+        mem_results, id_results, cur_results = await asyncio.gather(
+            _fetch_memory(),
+            _fetch_identity(),
+            _fetch_curiosity(),
+        )
+        context["memory"] = mem_results
+        context["identity"] = id_results
+        context["curiosity_goals"] = cur_results
+
+        # Context Fusion: synthesize and priority-budget context
+        if self.context_fusion is not None:
+            try:
+                extra = {}
+                if context.get("memory"):
+                    mem_strs = [
+                        str(m.get("content", m))
+                        for m in context["memory"]
+                        if m and isinstance(m, dict)
+                    ]
+                    if mem_strs:
+                        extra["episodic_memory"] = "\n".join(mem_strs)
+                if context.get("identity"):
+                    extra["self_model"] = str(context["identity"])
+                if context.get("curiosity_goals"):
+                    extra["active_goals"] = "\n".join([str(g) for g in context["curiosity_goals"]])
+
+                fused = await self.context_fusion.fuse(
+                    query=text,
+                    tenant_id=tenant_id,
+                    extra_context=extra,
+                )
+                context["fused_context"] = fused.to_system_prompt()
+                context["fused_metadata"] = fused.to_dict()
+            except Exception as e:
+                logger.debug("Context fusion failed (non-critical): %s", e)
 
         return context
 
@@ -378,6 +430,31 @@ class CognitivePipeline:
         self._response_futures[correlation_id] = future
         self._response_creation_times[correlation_id] = time.monotonic()
 
+        # Build prompt augmentation metadata so downstream execution nodes
+        # (GenerationNode, BaseModule, FuzzyNode, LogicNode, ApiNode) receive
+        # cognitive context rather than discarding it.
+        metadata: dict[str, Any] = {}
+        if context.get("fused_context"):
+            metadata["augmented_prompt"] = (
+                f"{context['fused_context']}\n\nUser: {text}\n\nAssistant:"
+            )
+        elif context.get("memory") or context.get("identity") or context.get("curiosity_goals"):
+            parts: list[str] = []
+            if context.get("memory"):
+                mem_strs = [
+                    str(m.get("content", m)) for m in context["memory"] if m and isinstance(m, dict)
+                ]
+                if mem_strs:
+                    parts.append("Relevant Memory:\n" + "\n".join(mem_strs))
+            if context.get("identity"):
+                parts.append(f"Identity:\n{context['identity']}")
+            if context.get("curiosity_goals"):
+                parts.append("Goals:\n" + "\n".join([str(g) for g in context["curiosity_goals"]]))
+            if parts:
+                metadata["augmented_prompt"] = (
+                    f"{chr(10).join(parts)}\n\nUser: {text}\n\nAssistant:"
+                )
+
         # Build the router message with enriched context
         query_msg = Message(
             id=correlation_id,
@@ -391,6 +468,7 @@ class CognitivePipeline:
                 "model_size": model_size,
                 "context": context,
                 "media": media or [],
+                "metadata": metadata,
             },
         )
 
@@ -487,6 +565,12 @@ class CognitivePipeline:
                 "confidence": 1.0,
             }
 
+        metadata: dict[str, Any] = {}
+        if context.get("fused_context"):
+            metadata["augmented_prompt"] = (
+                f"{context['fused_context']}\n\nUser: {text}\n\nAssistant:"
+            )
+
         # If it's short but not a canned greeting, we ask the intuition engine directly
         query_msg = Message(
             id=correlation_id,
@@ -498,6 +582,7 @@ class CognitivePipeline:
             payload={
                 "text": text,
                 "context": context,
+                "metadata": metadata,
             },
         )
         try:

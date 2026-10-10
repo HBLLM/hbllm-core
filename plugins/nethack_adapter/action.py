@@ -46,18 +46,26 @@ class NetHackActionAdapter:
     def __init__(self) -> None:
         register_nethack_predicates()
         self.visited_tiles: set[tuple[int, int]] = set()
+        self.traversed_doors: set[tuple[int, int]] = set()
+        self.blocked_moves: set[tuple[tuple[int, int], NetHackAction]] = set()
         self.failed_door_open_attempts: int = 0
         self.stairs_pos: tuple[int, int] | None = None
         self.key_pos: tuple[int, int] | None = None
+        self.last_pos: tuple[int, int] | None = None
+        self.last_action: NetHackAction | None = None
         self.perception = NetHackPerceptionAdapter()
         self.runtime = UnifiedReasoningRuntime(create_default_operator_registry())
 
     def reset(self) -> None:
         """Reset internal exploration history and landmarks."""
         self.visited_tiles.clear()
+        self.traversed_doors.clear()
+        self.blocked_moves.clear()
         self.failed_door_open_attempts = 0
         self.stairs_pos = None
         self.key_pos = None
+        self.last_pos = None
+        self.last_action = None
         self.perception = NetHackPerceptionAdapter()
 
     def enumerate_affordances(
@@ -122,6 +130,30 @@ class NetHackActionAdapter:
 
         return affordances
 
+    def _is_valid_move(
+        self,
+        obs: NetHackObservation,
+        from_pos: tuple[int, int],
+        to_pos: tuple[int, int],
+        act: NetHackAction,
+    ) -> bool:
+        """Verify move is not blocked and respects NetHack doorway movement rules."""
+        if (from_pos, act) in self.blocked_moves:
+            return False
+        fx, fy = from_pos
+        tx, ty = to_pos
+        if tx != fx and ty != fy:
+            # NetHack rule: Cannot move diagonally into or out of doorways
+            is_from_door = (from_pos in self.traversed_doors) or (
+                obs.glyphs[fy][fx] in (NetHackGlyph.DOOR_OPEN, NetHackGlyph.DOOR_CLOSED)
+            )
+            is_to_door = (to_pos in self.traversed_doors) or (
+                obs.glyphs[ty][tx] in (NetHackGlyph.DOOR_OPEN, NetHackGlyph.DOOR_CLOSED)
+            )
+            if is_from_door or is_to_door:
+                return False
+        return True
+
     def execute_action(self, intent: str, obs: NetHackObservation) -> NetHackAction:
         """Low-level actuator dispatch: translates declarative intent into discrete motor actions."""
         px, py = obs.player_pos
@@ -168,18 +200,47 @@ class NetHackActionAdapter:
             return self.execute_action("explore", obs)
 
         # Explore / Fallback
+        width = len(obs.glyphs[0])
+        height = len(obs.glyphs)
+
+        # 1. Stairs priority: if stairs are known, route to them!
+        target_stairs = self.stairs_pos or self._find_glyph_pos(obs, NetHackGlyph.STAIRS_DOWN)
+        if target_stairs is not None:
+            self.stairs_pos = target_stairs
+            if (px, py) == target_stairs:
+                return NetHackAction.DESCEND_STAIRS
+            step = self._bfs_path_step(obs, target_stairs, allow_monsters=True)
+            if step is not None and ((px, py), step) not in self.blocked_moves:
+                return step
+
+        # 2. Closed doors: find closed door and approach it
         door_pos = self._find_glyph_pos(obs, NetHackGlyph.DOOR_CLOSED)
         if door_pos is not None:
             step = self._bfs_path_step(obs, door_pos, allow_monsters=True, to_adjacent=True)
-            if step is not None:
+            if step is not None and ((px, py), step) not in self.blocked_moves:
                 return step
 
-        width = len(obs.glyphs[0])
-        height = len(obs.glyphs)
+        # 3. Open doors leading into new rooms:
+        open_doors = [
+            (x, y)
+            for y in range(height)
+            for x in range(width)
+            if obs.glyphs[y][x] == NetHackGlyph.DOOR_OPEN and (x, y) not in self.traversed_doors
+        ]
+        if open_doors:
+            open_doors.sort(key=lambda p: abs(p[0] - px) + abs(p[1] - py))
+            for od in open_doors:
+                step = self._bfs_path_step(obs, od, allow_monsters=True)
+                if step is not None and ((px, py), step) not in self.blocked_moves:
+                    return step
+
+        # 4. Immediate unvisited neighbors
         for act, (dx, dy) in ACTION_VECTORS.items():
             nx, ny = px + dx, py + dy
             if 0 <= nx < width and 0 <= ny < height:
-                if (nx, ny) not in self.visited_tiles:
+                if (nx, ny) not in self.visited_tiles and self._is_valid_move(
+                    obs, (px, py), (nx, ny), act
+                ):
                     if obs.glyphs[ny][nx] in (
                         NetHackGlyph.CORRIDOR,
                         NetHackGlyph.FLOOR,
@@ -187,15 +248,37 @@ class NetHackActionAdapter:
                     ):
                         return act
 
+        # 5. BFS to nearest unvisited passable tile
         step_unvisited = self._bfs_to_nearest_unvisited(obs)
-        if step_unvisited is not None:
+        if step_unvisited is not None and ((px, py), step_unvisited) not in self.blocked_moves:
             return step_unvisited
 
+        # 6. BFS to epistemic frontier
         frontier_step = self._explore_frontier(obs)
-        if frontier_step is not None:
+        if frontier_step is not None and ((px, py), frontier_step) not in self.blocked_moves:
             return frontier_step
 
-        return NetHackAction.WAIT
+        # 7. Fallback: Any adjacent passable tile not blocked
+        for act, (dx, dy) in ACTION_VECTORS.items():
+            nx, ny = px + dx, py + dy
+            if 0 <= nx < width and 0 <= ny < height:
+                if obs.glyphs[ny][nx] in (
+                    NetHackGlyph.CORRIDOR,
+                    NetHackGlyph.FLOOR,
+                    NetHackGlyph.DOOR_OPEN,
+                ) and self._is_valid_move(obs, (px, py), (nx, ny), act):
+                    return act
+
+        # 8. Last resort: any move not stepping into a known wall
+        for act, (dx, dy) in ACTION_VECTORS.items():
+            nx, ny = px + dx, py + dy
+            if 0 <= nx < width and 0 <= ny < height:
+                if obs.glyphs[ny][nx] != NetHackGlyph.WALL and self._is_valid_move(
+                    obs, (px, py), (nx, ny), act
+                ):
+                    return act
+
+        return NetHackAction.EAST
 
     def plan_next_action(
         self, obs: NetHackObservation, goal: NetHackGoal | None = None
@@ -203,6 +286,16 @@ class NetHackActionAdapter:
         """Select next action using UnifiedReasoningRuntime with EmbodiedCausalOperator."""
         px, py = obs.player_pos
         self.visited_tiles.add((px, py))
+
+        # Check if previous move failed (position unchanged or explicit bump)
+        if self.last_pos is not None and self.last_action is not None:
+            if (px, py) == self.last_pos and self.last_action != NetHackAction.OPEN_DOOR:
+                self.blocked_moves.add((self.last_pos, self.last_action))
+
+        # If standing on a door, mark it traversed
+        if 0 <= py < len(obs.glyphs) and 0 <= px < len(obs.glyphs[0]):
+            if obs.glyphs[py][px] in (NetHackGlyph.DOOR_OPEN, NetHackGlyph.DOOR_CLOSED):
+                self.traversed_doors.add((px, py))
 
         # Scan for landmarks
         visible_stairs = self._find_glyph_pos(obs, NetHackGlyph.STAIRS_DOWN)
@@ -220,6 +313,8 @@ class NetHackActionAdapter:
             nx, ny = px + dx, py + dy
             if 0 <= nx < width and 0 <= ny < height:
                 if obs.glyphs[ny][nx] == NetHackGlyph.MONSTER:
+                    self.last_pos = (px, py)
+                    self.last_action = act
                     return act
 
         # 2. Door interaction: If orthogonally adjacent to closed door, open or kick it
@@ -228,7 +323,10 @@ class NetHackActionAdapter:
             nx, ny = px + dx, py + dy
             if 0 <= nx < width and 0 <= ny < height:
                 if obs.glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
-                    return self.execute_action("open_door", obs)
+                    act = self.execute_action("open_door", obs)
+                    self.last_pos = (px, py)
+                    self.last_action = act
+                    return act
 
         self.failed_door_open_attempts = 0
 
@@ -250,6 +348,7 @@ class NetHackActionAdapter:
         trace = self.runtime.reason(graph=self.perception.graph, problem=problem)
 
         # 7. Actuator Motor Dispatch
+        chosen_intent = ""
         if (
             trace
             and trace.final_result
@@ -257,10 +356,15 @@ class NetHackActionAdapter:
             and "best_action" in trace.final_result.conclusions
         ):
             chosen_intent = trace.final_result.conclusions["best_action"]
-            if chosen_intent and chosen_intent != "no_op":
-                return self.execute_action(chosen_intent, obs)
 
-        return self.execute_action("explore", obs)
+        if chosen_intent and chosen_intent != "no_op":
+            act = self.execute_action(chosen_intent, obs)
+        else:
+            act = self.execute_action("explore", obs)
+
+        self.last_pos = (px, py)
+        self.last_action = act
+        return act
 
     def _bfs_to_nearest_unvisited(self, obs: NetHackObservation) -> NetHackAction | None:
         """Find the closest reachable unvisited passable tile."""
@@ -293,6 +397,8 @@ class NetHackActionAdapter:
             for act, (dx, dy) in ACTION_VECTORS.items():
                 nx, ny = cx + dx, cy + dy
                 if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
+                    if not self._is_valid_move(obs, (cx, cy), (nx, ny), act):
+                        continue
                     if obs.glyphs[ny][nx] in passable_glyphs:
                         visited.add((nx, ny))
                         queue.append((nx, ny, path + [act]))
@@ -363,6 +469,8 @@ class NetHackActionAdapter:
             for act, (dx, dy) in ACTION_VECTORS.items():
                 nx, ny = cx + dx, cy + dy
                 if 0 <= nx < width and 0 <= ny < height and (nx, ny) not in visited:
+                    if not self._is_valid_move(obs, (cx, cy), (nx, ny), act):
+                        continue
                     if (nx, ny) == (tx, ty) or obs.glyphs[ny][nx] in passable_glyphs:
                         visited.add((nx, ny))
                         queue.append((nx, ny, path + [act]))
@@ -375,9 +483,7 @@ class NetHackActionAdapter:
         height = len(obs.glyphs)
         width = len(obs.glyphs[0])
 
-        best_target = None
-        best_dist = float("inf")
-
+        candidates: list[tuple[tuple[int, int], int]] = []
         for y in range(height):
             for x in range(width):
                 if obs.glyphs[y][x] == NetHackGlyph.UNEXPLORED:
@@ -392,23 +498,24 @@ class NetHackActionAdapter:
                             ):
                                 dist = abs(px - ax) + abs(py - ay)
                                 if (ax, ay) in self.visited_tiles:
-                                    dist += 20
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_target = (ax, ay)
+                                    dist += 15
+                                candidates.append(((ax, ay), dist))
 
-        if best_target is not None:
-            if best_target == (px, py):
-                for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
-                    nx, ny = px + dx, py + dy
-                    if (
-                        0 <= nx < width
-                        and 0 <= ny < height
-                        and obs.glyphs[ny][nx] == NetHackGlyph.UNEXPLORED
-                    ):
-                        for act, vec in ACTION_VECTORS.items():
-                            if vec == (dx, dy):
+        if candidates:
+            candidates.sort(key=lambda item: item[1])
+            for (ax, ay), _ in candidates[:12]:
+                if (ax, ay) == (px, py):
+                    for act, (dx, dy) in ACTION_VECTORS.items():
+                        nx, ny = px + dx, py + dy
+                        if 0 <= nx < width and 0 <= ny < height:
+                            if (
+                                obs.glyphs[ny][nx] != NetHackGlyph.WALL
+                                and ((px, py), act) not in self.blocked_moves
+                            ):
                                 return act
-            return self._bfs_path_step(obs, best_target)
+                else:
+                    step = self._bfs_path_step(obs, (ax, ay))
+                    if step is not None and ((px, py), step) not in self.blocked_moves:
+                        return step
 
         return None
