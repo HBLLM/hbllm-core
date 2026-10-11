@@ -1,12 +1,16 @@
 """Spatiotemporal Hazard Tracking & Phase Precession System.
 
-Modeled on mammalian entorhinal grid cell phase precession and hippocampal spatiotemporal
-projection:
+Biologically modeled on mammalian entorhinal grid cell phase precession and
+hippocampal spatiotemporal projection:
 1. Dynamic Sensory Differencing: Detects oscillating cells and moving entities across time steps.
 2. Periodicity & Phase Estimation: Computes cyclic period T and phase offset for periodic hazards
-   (blinking obstacles, oscillating lasers, patrolling entities).
+   (blinking obstacles, oscillating lasers, patrolling entities) via autocorrelation.
 3. Predictive Hazard Projection: Predicts future spatial hazards at (x, y, t mod T) to enable
    collision-free navigation and temporal waiting/hesitation impulses.
+4. Morphological Deformation & Euler Invariants (W059): Classifies continuous shape transformations
+   using planar Euler characteristic (chi = V - E + F = 1 - g) and IoU tracking.
+5. Causal Lineage DAG & Fission/Fusion Resolution (W014): Tracks entity provenance across
+   creation, destruction, 1-to-K fission, K-to-1 fusion, and relaxed deformation.
 """
 
 from __future__ import annotations
@@ -15,9 +19,12 @@ import math
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
+
+# ── Domain 1: Entorhinal Phase Precession & Dynamic Hazard Tracking ───────────
 
 
 @dataclass
@@ -30,6 +37,64 @@ class DynamicCellPhase:
     cycle_values: list[int]
     hazardous_values: set[int]
     confidence: float = 1.0
+
+    def is_hazard_at_step(
+        self,
+        future_relative_step: int,
+        safe_features: set[int] | None = None,
+    ) -> bool:
+        """Predict whether cell is hazardous at t_current + future_relative_step."""
+        if self.period <= 0 or not self.cycle_values:
+            return False
+        idx = (future_relative_step - 1) % self.period if future_relative_step > 0 else -1
+        val = self.cycle_values[idx]
+        if safe_features and val in safe_features:
+            return False
+        return val in self.hazardous_values
+
+
+class PhasePrecessionEstimator:
+    """Pure computational faculty for periodicity estimation and phase decomposition."""
+
+    @staticmethod
+    def estimate_period(
+        series: list[int],
+        max_period: int = 8,
+        min_match_ratio: float = 0.85,
+    ) -> tuple[int | None, float]:
+        """Estimate repeating periodicity T using backward autocorrelation.
+
+        Returns:
+            (best_period, confidence) or (None, 0.0) if no periodicity detected.
+        """
+        n = len(series)
+        best_t: int | None = None
+        best_confidence: float = 0.0
+
+        for t in range(2, min(max_period + 1, n // 2 + 1)):
+            matches = sum(1 for i in range(t, n) if series[i] == series[i - t])
+            total = n - t
+            if total > 0:
+                ratio = matches / total
+                if ratio >= min_match_ratio and ratio > best_confidence:
+                    best_t = t
+                    best_confidence = ratio
+
+        if best_t is not None:
+            return best_t, best_confidence
+        return None, 0.0
+
+    @staticmethod
+    def compute_lcm(numbers: Sequence[int], cap: int = 24) -> int:
+        """Compute least common multiple of a sequence of integers (capped to prevent explosion)."""
+        lcm = 1
+        for num in set(numbers):
+            if num <= 0:
+                continue
+            lcm = (lcm * num) // math.gcd(lcm, num)
+            if lcm > cap:
+                return cap
+        return max(1, lcm)
 
 
 class SpatiotemporalHazardTracker:
@@ -63,7 +128,6 @@ class SpatiotemporalHazardTracker:
     def register_lethal_feature(self, feature_id: int) -> None:
         """Register a feature value that resulted in avatar destruction/death upon contact."""
         self.known_lethal_features.add(int(feature_id))
-        # Update existing periodic cells with new lethal feature
         for cell in self.periodic_cells.values():
             if int(feature_id) in cell.cycle_values:
                 cell.hazardous_values.add(int(feature_id))
@@ -76,6 +140,7 @@ class SpatiotemporalHazardTracker:
         avatar_features: set[int] | None = None,
         walkable_features: set[int] | None = None,
     ) -> None:
+        """Record an environmental observation frame and update periodic hazard models."""
         if not isinstance(grid, np.ndarray):
             if isinstance(grid, (list, tuple)) and len(grid) > 0:
                 grid = grid[-1]
@@ -88,9 +153,7 @@ class SpatiotemporalHazardTracker:
         if len(self.grid_history) < 4:
             return
 
-        H, W = grid.shape
-        # Identify dynamic cells that fluctuated across history
-        grids_arr = np.stack(list(self.grid_history), axis=0)  # Shape: (N, H, W)
+        grids_arr = np.stack(list(self.grid_history), axis=0)
         min_vals = np.min(grids_arr, axis=0)
         max_vals = np.max(grids_arr, axis=0)
         fluctuating_mask = min_vals != max_vals
@@ -102,23 +165,21 @@ class SpatiotemporalHazardTracker:
             return
 
         discovered_periods: list[int] = []
-        av_set = avatar_features or set()
         safe_features = {0, background_feature}
         if walkable_features:
             safe_features.update(walkable_features)
-        if av_set:
-            safe_features.update(av_set)
+        if avatar_features:
+            safe_features.update(avatar_features)
 
         for r, c in fluctuating_indices:
             r_idx, c_idx = int(r), int(c)
             series = [int(g[r_idx, c_idx]) for g in self.grid_history]
 
-            best_period = self._estimate_period(series)
+            best_period, confidence = PhasePrecessionEstimator.estimate_period(
+                series, max_period=self.max_period
+            )
             if best_period is not None and best_period >= 2:
-                # Cycle values over the period
                 cycle = series[-best_period:]
-                # Determine which values in this cycle are hazardous:
-                # Known lethal features or periodic non-background environmental features (excluding avatar and safe/walkable features)
                 haz_vals = {
                     v
                     for v in cycle
@@ -132,6 +193,7 @@ class SpatiotemporalHazardTracker:
                         period=best_period,
                         cycle_values=cycle,
                         hazardous_values=haz_vals,
+                        confidence=confidence,
                     )
                     discovered_periods.append(best_period)
                 else:
@@ -139,34 +201,20 @@ class SpatiotemporalHazardTracker:
             else:
                 self.periodic_cells.pop((r_idx, c_idx), None)
 
-        # Compute environmental LCM period
         if discovered_periods:
-            self.environmental_period = self._compute_lcm(discovered_periods)
+            self.environmental_period = PhasePrecessionEstimator.compute_lcm(discovered_periods)
         else:
             self.environmental_period = 1
 
     def _estimate_period(self, series: list[int]) -> int | None:
-        """Estimate repeating periodicity T using backward autocorrelation."""
-        n = len(series)
-        for T in range(2, min(self.max_period + 1, n // 2 + 1)):
-            # Check if series[i] == series[i - T] for recent history
-            matches = sum(1 for i in range(T, n) if series[i] == series[i - T])
-            total = n - T
-            if total > 0 and (matches / total) >= 0.85:
-                return T
-        return None
+        """Estimate repeating periodicity T using backward autocorrelation (legacy hook)."""
+        period, _ = PhasePrecessionEstimator.estimate_period(series, max_period=self.max_period)
+        return period
 
     @staticmethod
     def _compute_lcm(numbers: Sequence[int]) -> int:
         """Compute the least common multiple of a sequence of integers (capped at 24)."""
-        lcm = 1
-        for num in set(numbers):
-            if num <= 0:
-                continue
-            lcm = (lcm * num) // math.gcd(lcm, num)
-            if lcm > 24:
-                return 24
-        return max(1, lcm)
+        return PhasePrecessionEstimator.compute_lcm(numbers, cap=24)
 
     def is_hazard_at(
         self,
@@ -184,9 +232,8 @@ class SpatiotemporalHazardTracker:
             return False
 
         cell_phase = self.periodic_cells[(r, c)]
-        T = cell_phase.period
-        # Predicted index in cycle_values
-        idx = (future_relative_step - 1) % T
+        t = cell_phase.period
+        idx = (future_relative_step - 1) % t if future_relative_step > 0 else -1
         predicted_val = cell_phase.cycle_values[idx]
         if predicted_val == 0 or predicted_val == background_feature:
             return False
@@ -207,11 +254,12 @@ class SpatiotemporalHazardTracker:
         safe_features = {0, background_feature}
         if walkable_features:
             safe_features.update(walkable_features)
+
         for dt in range(horizon + 1):
             haz_set: set[tuple[int, int]] = set(self.static_lethal_positions)
             for (r, c), cell_phase in self.periodic_cells.items():
-                T = cell_phase.period
-                idx = (dt - 1) % T if dt > 0 else -1
+                t = cell_phase.period
+                idx = (dt - 1) % t if dt > 0 else -1
                 val = cell_phase.cycle_values[idx]
                 if val not in safe_features and val in cell_phase.hazardous_values:
                     haz_set.add((r, c))
@@ -220,10 +268,7 @@ class SpatiotemporalHazardTracker:
         return schedule
 
 
-# ── W059: Morphological Deformation & Topological Invariant Tracker ──────────
-
-
-from enum import StrEnum
+# ── Domain 2: Morphological Deformation, Euler Invariants & Causal Lineage DAG ─
 
 
 class MorphologicalDeformationType(StrEnum):
@@ -237,6 +282,17 @@ class MorphologicalDeformationType(StrEnum):
     UNKNOWN_DEFORMATION = "UNKNOWN_DEFORMATION"
 
 
+class LifecycleTransitionType(StrEnum):
+    """Event types for entity lifecycle and causal provenance DAG (W014, W059)."""
+
+    IDENTITY = "IDENTITY"
+    FISSION = "FISSION"
+    FUSION = "FUSION"
+    DEFORMATION = "DEFORMATION"
+    CREATION = "CREATION"
+    DESTRUCTION = "DESTRUCTION"
+
+
 @dataclass
 class MorphologicalEntity:
     """Entity representation for non-rigid shape tracking."""
@@ -246,6 +302,33 @@ class MorphologicalEntity:
     cells: set[tuple[int, int]] | frozenset[tuple[int, int]]
     centroid: tuple[float, float]
     bounding_box: tuple[int, int, int, int]
+
+    @classmethod
+    def from_spatial_entity(
+        cls, entity: Any, fallback_id: str | None = None
+    ) -> MorphologicalEntity:
+        """Construct MorphologicalEntity from a SpatialEntity or duck-typed object."""
+        ent_id = getattr(entity, "id", None) or fallback_id or "unnamed_entity"
+        feat_id = getattr(entity, "feature_id", 0)
+
+        props = getattr(entity, "properties", {})
+        if "cells" in props and props["cells"]:
+            cells = set(props["cells"])
+        elif hasattr(entity, "grid_pos"):
+            cells = {entity.grid_pos}
+        else:
+            cells = set()
+
+        centroid = getattr(entity, "centroid", (0.0, 0.0))
+        bbox = getattr(entity, "bounding_box", (0, 0, 0, 0))
+
+        return cls(
+            entity_id=str(ent_id),
+            feature_id=int(feat_id),
+            cells=cells,
+            centroid=centroid,
+            bounding_box=bbox,
+        )
 
 
 @dataclass
@@ -268,9 +351,7 @@ class EntityLineageNode:
     parent_ids: list[str] = field(default_factory=list)
     child_ids: list[str] = field(default_factory=list)
     generation: int = 0
-    transition_type: str = (
-        "IDENTITY"  # IDENTITY, FISSION, FUSION, DEFORMATION, CREATION, DESTRUCTION
-    )
+    transition_type: str = "IDENTITY"
     confidence: float = 1.0
     is_mass_conserved: bool = True
     ambiguity_score: float = 0.0
@@ -322,6 +403,26 @@ class LifecycleTrackingResult:
     unmatched_current_ids: list[str]
     lineage_graph: dict[str, EntityLineageNode] = field(default_factory=dict)
 
+    def get_parents(self, entity_id: str) -> list[str]:
+        """Get parent entity IDs for a node in the lineage DAG."""
+        node = self.lineage_graph.get(entity_id)
+        return list(node.parent_ids) if node else []
+
+    def get_children(self, entity_id: str) -> list[str]:
+        """Get child entity IDs for a node in the lineage DAG."""
+        node = self.lineage_graph.get(entity_id)
+        return list(node.child_ids) if node else []
+
+    def is_root(self, entity_id: str) -> bool:
+        """Check if entity was newly created (no parent in prior state)."""
+        node = self.lineage_graph.get(entity_id)
+        return bool(node and not node.parent_ids)
+
+    def is_leaf(self, entity_id: str) -> bool:
+        """Check if entity was destroyed (no children in current state)."""
+        node = self.lineage_graph.get(entity_id)
+        return bool(node and not node.child_ids and node.transition_type == "DESTRUCTION")
+
 
 class MorphologicalDeformationTracker:
     """Tracks entity identity across non-rigid spatial changes and topological fission/fusion (W014, W059)."""
@@ -330,20 +431,17 @@ class MorphologicalDeformationTracker:
     def compute_euler_characteristic(
         cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
     ) -> int:
-        """Compute 2D discrete Euler characteristic chi = V - E + F for a cell set.
+        """Compute 2D discrete Euler characteristic chi = V - E + F for a cell complex.
 
-        For a connected solid object with g holes, chi = 1 - g.
+        For a planar connected solid object with g holes, chi = 1 - g.
         """
         if not cells:
             return 0
 
-        # Vertices: 4 corner points per cell
         vertices: set[tuple[float, float]] = set()
-        # Edges: 4 border segments per cell
         edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
 
         for r, c in cells:
-            # 4 vertices: (r, c), (r+1, c), (r, c+1), (r+1, c+1)
             v_tl = (float(r), float(c))
             v_tr = (float(r), float(c + 1))
             v_bl = (float(r + 1), float(c))
@@ -351,16 +449,15 @@ class MorphologicalDeformationTracker:
 
             vertices.update([v_tl, v_tr, v_bl, v_br])
 
-            # 4 canonical undirected edges
             edges.add((min(v_tl, v_tr), max(v_tl, v_tr)))
             edges.add((min(v_tr, v_br), max(v_tr, v_br)))
             edges.add((min(v_bl, v_br), max(v_bl, v_br)))
             edges.add((min(v_tl, v_bl), max(v_tl, v_bl)))
 
-        V = len(vertices)
-        E = len(edges)
-        F = len(cells)
-        return V - E + F
+        v = len(vertices)
+        e = len(edges)
+        f = len(cells)
+        return v - e + f
 
     @staticmethod
     def compute_iou(
@@ -429,7 +526,7 @@ class MorphologicalDeformationTracker:
         matched_curr_ids: set[str] = set()
 
         for pe in prior_entities:
-            best_curr = None
+            best_curr: MorphologicalEntity | None = None
             best_score = -1.0
             best_iou = 0.0
 
@@ -440,7 +537,6 @@ class MorphologicalDeformationTracker:
                     continue
 
                 iou = self.compute_iou(pe.cells, ce.cells)
-                # Centroid distance penalty
                 dr = pe.centroid[0] - ce.centroid[0]
                 dc = pe.centroid[1] - ce.centroid[1]
                 dist = math.hypot(dr, dc)
@@ -480,13 +576,11 @@ class MorphologicalDeformationTracker:
     ) -> FissionRecord | None:
         """Detect if a prior entity split into multiple distinct child entities (W014).
 
-        Supports both mass-conserved physical fission and non-conserved morphological splitting
-        (occlusion, laser slicing, cutting, non-rigid detachment).
+        Supports both mass-conserved physical fission and non-conserved morphological splitting.
         """
         if len(candidate_children) < 2:
             return None
 
-        # Filter candidate children by matching feature_id
         valid_children = [c for c in candidate_children if c.feature_id == prior_entity.feature_id]
         if len(valid_children) < 2:
             return None
@@ -505,11 +599,9 @@ class MorphologicalDeformationTracker:
         if conservation_required and not is_conserved:
             return None
 
-        # Validate fission: children overlap parent or are in close spatial proximity
         if spatial_cov < min_coverage and not (is_conserved and spatial_cov >= 0.10):
             return None
 
-        # Individual component correspondences (child overlap with parent)
         correspondences = {
             c.entity_id: round(len(c.cells & prior_entity.cells) / len(c.cells), 4)
             if len(c.cells) > 0
@@ -517,7 +609,6 @@ class MorphologicalDeformationTracker:
             for c in valid_children
         }
 
-        # Ambiguity score: normalized entropy over child cell distributions
         fractions = (
             [len(c.cells) / sum_child_cells for c in valid_children] if sum_child_cells > 0 else []
         )
@@ -691,7 +782,7 @@ class MorphologicalDeformationTracker:
                 entity_id=c_id,
                 parent_ids=[p_id],
                 child_ids=[],
-                transition_type="IDENTITY",
+                transition_type=LifecycleTransitionType.IDENTITY,
                 confidence=1.0,
                 is_mass_conserved=True,
                 ambiguity_score=0.0,
@@ -701,7 +792,7 @@ class MorphologicalDeformationTracker:
             lineage[fission.parent_entity_id] = EntityLineageNode(
                 entity_id=fission.parent_entity_id,
                 child_ids=list(fission.child_entity_ids),
-                transition_type="FISSION",
+                transition_type=LifecycleTransitionType.FISSION,
                 confidence=round(1.0 - fission.ambiguity_score * 0.3, 4),
                 is_mass_conserved=fission.is_mass_conserved,
                 ambiguity_score=fission.ambiguity_score,
@@ -711,7 +802,7 @@ class MorphologicalDeformationTracker:
                 lineage[c_id] = EntityLineageNode(
                     entity_id=c_id,
                     parent_ids=[fission.parent_entity_id],
-                    transition_type="FISSION",
+                    transition_type=LifecycleTransitionType.FISSION,
                     confidence=round(1.0 - fission.ambiguity_score * 0.3, 4),
                     is_mass_conserved=fission.is_mass_conserved,
                     ambiguity_score=fission.ambiguity_score,
@@ -722,7 +813,7 @@ class MorphologicalDeformationTracker:
             lineage[fusion.merged_entity_id] = EntityLineageNode(
                 entity_id=fusion.merged_entity_id,
                 parent_ids=list(fusion.parent_entity_ids),
-                transition_type="FUSION",
+                transition_type=LifecycleTransitionType.FUSION,
                 confidence=round(1.0 - fusion.ambiguity_score * 0.3, 4),
                 is_mass_conserved=fusion.is_mass_conserved,
                 ambiguity_score=fusion.ambiguity_score,
@@ -732,7 +823,7 @@ class MorphologicalDeformationTracker:
                 lineage[p_id] = EntityLineageNode(
                     entity_id=p_id,
                     child_ids=[fusion.merged_entity_id],
-                    transition_type="FUSION",
+                    transition_type=LifecycleTransitionType.FUSION,
                     confidence=round(1.0 - fusion.ambiguity_score * 0.3, 4),
                     is_mass_conserved=fusion.is_mass_conserved,
                     ambiguity_score=fusion.ambiguity_score,
@@ -742,14 +833,14 @@ class MorphologicalDeformationTracker:
         for pe in remaining_priors:
             lineage[pe.entity_id] = EntityLineageNode(
                 entity_id=pe.entity_id,
-                transition_type="DESTRUCTION",
+                transition_type=LifecycleTransitionType.DESTRUCTION,
                 confidence=1.0,
             )
 
         for ce in remaining_currs:
             lineage[ce.entity_id] = EntityLineageNode(
                 entity_id=ce.entity_id,
-                transition_type="CREATION",
+                transition_type=LifecycleTransitionType.CREATION,
                 confidence=1.0,
             )
 
