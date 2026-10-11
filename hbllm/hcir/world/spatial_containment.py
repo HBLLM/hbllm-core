@@ -16,9 +16,11 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import label
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
     BeliefTransitionType,
+    CausalPredicate,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,42 @@ class SpatialRelationFact:
             "confidence": self.confidence,
             "evidence": dict(self.evidence),
         }
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export spatial relation fact as a declarative causal predicate."""
+        rel_str = (
+            self.relation.value
+            if isinstance(self.relation, SpatialRelationType)
+            else str(self.relation)
+        )
+        return CausalPredicate(
+            variable=f"spatial_relation:{rel_str}",
+            operator="==",
+            value=f"{self.subject_id}->{self.object_id}",
+            relation=f"conf:{self.confidence:.2f}",
+            target_entity=self.subject_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording spatial relation."""
+        rel_str = (
+            self.relation.value
+            if isinstance(self.relation, SpatialRelationType)
+            else str(self.relation)
+        )
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"spatial_fact_{self.subject_id}_{rel_str}_{self.object_id}",
+                node_data={
+                    "relation": rel_str,
+                    "subject_id": self.subject_id,
+                    "object_id": self.object_id,
+                    "confidence": self.confidence,
+                    "evidence": self.evidence,
+                },
+            )
+        ]
 
 
 class BaseSpatialContainmentEngine:
@@ -258,6 +296,34 @@ class BaseSpatialContainmentEngine:
 
         return backtrack(0, set())
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export spatial containment engine state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="spatial_containment_engine",
+            operator="==",
+            value=len(self.discovered_spatial_schemas),
+            relation=f"beliefs:{len(self.belief_history)}",
+            target_entity="containment_transport",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all discovered spatial schemas as declarative causal predicates."""
+        return [self.to_causal_predicate()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting spatial containment engine state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="spatial_containment_summary",
+                node_data={
+                    "schemas_count": len(self.discovered_spatial_schemas),
+                    "belief_history_count": len(self.belief_history),
+                    "interventions_count": self.interventions_count,
+                },
+            )
+        ]
+
 
 # ── Domain 2: Room Topology Extraction & Doorway Gating ───────────────────────
 
@@ -268,6 +334,29 @@ class RoomDoor:
 
     door_coord: tuple[int, int] = (0, 0)
     connects_rooms: tuple[int, int] = (0, 0)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export room doorway as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"room_door:({self.door_coord[0]},{self.door_coord[1]})",
+            operator="==",
+            value=f"rooms:{self.connects_rooms[0]}<->{self.connects_rooms[1]}",
+            relation="doorway",
+            target_entity=f"({self.door_coord[0]},{self.door_coord[1]})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording room doorway."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"door_{self.door_coord[0]}_{self.door_coord[1]}",
+                node_data={
+                    "door_coord": list(self.door_coord),
+                    "connects_rooms": list(self.connects_rooms),
+                },
+            )
+        ]
 
 
 @dataclass
@@ -288,6 +377,39 @@ class RoomTopologyGraph:
     def are_connected(self, room_a: int, room_b: int) -> bool:
         """Check if two rooms share an open doorway."""
         return room_b in self.adjacency.get(room_a, [])
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export room topology graph as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="room_topology_graph",
+            operator="==",
+            value=len(self.rooms),
+            relation=f"doors:{len(self.doors)}",
+            target_entity="room_connectivity",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all doors and room topology as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for d in self.doors:
+            preds.append(d.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting room topology."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="room_topology_summary",
+                node_data={
+                    "room_count": len(self.rooms),
+                    "door_count": len(self.doors),
+                },
+            )
+        ]
+        for d in self.doors:
+            ops.extend(d.to_transaction_operations())
+        return ops
 
 
 class RoomTopologyExtractor:
@@ -394,3 +516,28 @@ class RoomTopologyExtractor:
         rooms, doors = cls.extract_rooms_and_doors(occupancy_grid, min_room_size=min_room_size)
         adjacency = cls.build_adjacency_graph(rooms, doors)
         return RoomTopologyGraph(rooms=rooms, doors=doors, adjacency=adjacency)
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export room topology extractor capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="room_topology_extractor",
+            operator="==",
+            value="ACTIVE",
+            relation="chamber_decomposition",
+            target_entity="spatial_containment",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering room topology extractor."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="room_topology_extractor",
+                node_data={
+                    "faculty": "spatial_containment_topology",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

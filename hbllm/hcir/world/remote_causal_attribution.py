@@ -21,6 +21,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +39,35 @@ class RemoteCausalAffordance:
     activation_count: int = 1
     confidence: float = 0.5
     is_reversible: bool = True
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export remote causal affordance as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"remote_affordance:{self.trigger_feature}->{self.original_remote_feature}",
+            operator="==",
+            value=self.mutated_remote_feature,
+            relation=f"conf:{self.confidence:.2f}",
+            target_entity=f"trig:{self.trigger_pos}->rem:{self.remote_pos}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording remote causal affordance."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"remote_aff_{self.trigger_pos[0]}_{self.trigger_pos[1]}_{self.remote_pos[0]}_{self.remote_pos[1]}",
+                node_data={
+                    "trigger_pos": self.trigger_pos,
+                    "trigger_feature": self.trigger_feature,
+                    "remote_pos": self.remote_pos,
+                    "original_remote_feature": self.original_remote_feature,
+                    "mutated_remote_feature": self.mutated_remote_feature,
+                    "activation_count": self.activation_count,
+                    "confidence": self.confidence,
+                    "is_reversible": self.is_reversible,
+                },
+            )
+        ]
 
 
 class RemoteCausalAttributor:
@@ -206,3 +238,39 @@ class RemoteCausalAttributor:
             for trig, affs in self.trigger_registry.items()
             if any(a.confidence >= self.confidence_threshold for a in affs)
         ]
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export remote causal attributor state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="remote_causal_attributor",
+            operator="==",
+            value=len(self.co_occurrence_evidence),
+            relation=f"actuators:{len(self.remote_actuators)}",
+            target_entity="vmpfc_causal_attributor",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all discovered remote affordances as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for aff_list in self.remote_actuators.values():
+            for aff in aff_list:
+                preds.append(aff.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting remote causal attribution state."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="remote_causal_attributor_summary",
+                node_data={
+                    "evidence_count": len(self.co_occurrence_evidence),
+                    "actuator_count": len(self.remote_actuators),
+                    "trigger_count": len(self.trigger_registry),
+                },
+            )
+        ]
+        for aff_list in self.remote_actuators.values():
+            for aff in aff_list:
+                ops.extend(aff.to_transaction_operations())
+        return ops

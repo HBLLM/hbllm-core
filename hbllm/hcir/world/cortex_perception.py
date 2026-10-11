@@ -25,6 +25,8 @@ import numpy as np
 from scipy.ndimage import label
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,36 @@ class EpistemicObservationDiff:
     moved_object_feature: int | None = None  # feature/color of the translated object
     moved_object_size: int = 0  # pixel count of the translated object
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export visual frame difference as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"observation_diff:{self.diff_type.value}",
+            operator="==",
+            value=self.changed_pixel_count,
+            relation=f"trans:{self.translation_delta}" if self.translation_delta else "in_place",
+            target_entity=(
+                str(self.moved_object_feature) if self.moved_object_feature is not None else "none"
+            ),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording observation difference."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"diff_{self.diff_type.value}_{self.changed_pixel_count}",
+                node_data={
+                    "diff_type": self.diff_type.value,
+                    "changed_pixel_count": self.changed_pixel_count,
+                    "translation_delta": self.translation_delta,
+                    "moved_object_feature": self.moved_object_feature,
+                    "moved_object_size": self.moved_object_size,
+                    "disappeared_features": sorted(self.disappeared_features),
+                    "appeared_features": sorted(self.appeared_features),
+                },
+            )
+        ]
+
 
 @dataclass(frozen=True)
 class OrientedThreat:
@@ -69,6 +101,31 @@ class OrientedThreat:
     facing: tuple[int, int]
     gaze_pos: tuple[int, int]
     feature_id: int
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export oriented creature threat as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"oriented_threat:{self.feature_id}",
+            operator="==",
+            value=f"facing:{self.facing}",
+            relation=f"gaze:{self.gaze_pos}",
+            target_entity=f"({self.pos[0]},{self.pos[1]})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording oriented threat."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"threat_{self.feature_id}_{self.pos[0]}_{self.pos[1]}",
+                node_data={
+                    "feature_id": self.feature_id,
+                    "pos": self.pos,
+                    "facing": self.facing,
+                    "gaze_pos": self.gaze_pos,
+                },
+            )
+        ]
 
 
 class SensoryThalamus:
@@ -833,3 +890,28 @@ class PerceptionEngine:
             goals=goals,
             cargo_features=cargo_features,
         )
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export perception engine capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="cortex_perception_engine",
+            operator="==",
+            value="ACTIVE",
+            relation="thalamocortical_segmentation",
+            target_entity="cortex_perception",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering perception engine."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="perception_engine",
+                node_data={
+                    "faculty": "cortex_perception",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

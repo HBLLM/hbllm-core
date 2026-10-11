@@ -22,6 +22,7 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,31 @@ class DiscrepancyTarget:
         """Convert to legacy (r, c, feature, confidence) tuple."""
         return (self.r, self.c, self.expected_feature, self.confidence)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export discrepancy target as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"symmetry_discrepancy:{self.r}_{self.c}",
+            operator="==",
+            value=self.expected_feature,
+            relation=f"conf:{self.confidence:.2f}",
+            target_entity=f"({self.r},{self.c})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording symmetry discrepancy."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"discrepancy_{self.r}_{self.c}",
+                node_data={
+                    "r": self.r,
+                    "c": self.c,
+                    "expected_feature": self.expected_feature,
+                    "confidence": self.confidence,
+                },
+            )
+        ]
+
 
 @dataclass(frozen=True)
 class SymmetryAnalysisResult:
@@ -103,6 +129,31 @@ class SymmetryAnalysisResult:
             value=self.dominant_axis.value,
         )
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export symmetry analysis as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"symmetry_axis:{self.dominant_axis.value}",
+            operator="==",
+            value=self.dominant_score,
+            relation=f"is_sym:{self.is_symmetric}",
+            target_entity=self.dominant_axis.value,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording symmetry analysis."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"symmetry_{self.dominant_axis.value}",
+                node_data={
+                    "dominant_axis": self.dominant_axis.value,
+                    "dominant_score": self.dominant_score,
+                    "is_symmetric": self.is_symmetric,
+                    "scores": self.scores,
+                },
+            )
+        ]
+
 
 @dataclass(frozen=True)
 class PeriodicTilingResult:
@@ -120,6 +171,30 @@ class PeriodicTilingResult:
             value=self.tile_shape,
         )
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export periodic tiling structure as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="periodic_tiling_unit",
+            operator="==",
+            value=f"{self.tile_shape[0]}x{self.tile_shape[1]}",
+            relation=f"reps:{self.repetition_counts[0]}x{self.repetition_counts[1]}",
+            target_entity=f"conf:{self.confidence:.2f}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording periodic tiling."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"tiling_{self.tile_shape[0]}_{self.tile_shape[1]}",
+                node_data={
+                    "tile_shape": list(self.tile_shape),
+                    "repetition_counts": list(self.repetition_counts),
+                    "confidence": self.confidence,
+                },
+            )
+        ]
+
 
 @dataclass(frozen=True)
 class CountingRelationResult:
@@ -129,6 +204,31 @@ class CountingRelationResult:
     relation_type: CountingRelationType
     confidence: float
     parameters: dict[str, Any] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export counting relation as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"counting_relation:{self.relation_type.value}",
+            operator="==",
+            value=self.is_relation,
+            relation=f"conf:{self.confidence:.2f}",
+            target_entity=str(self.parameters),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording counting relation."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"counting_rel_{self.relation_type.value}",
+                node_data={
+                    "is_relation": self.is_relation,
+                    "relation_type": self.relation_type.value,
+                    "confidence": self.confidence,
+                    "parameters": self.parameters,
+                },
+            )
+        ]
 
 
 class VisualSymmetryAnalyzer:
@@ -485,3 +585,28 @@ class VisualSymmetryAnalyzer:
                 return True, op_enum.value
 
         return False, None
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export visual symmetry analyzer as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="visual_symmetry_analyzer",
+            operator="==",
+            value="ACTIVE",
+            relation="dihedral_d4_analysis",
+            target_entity="visual_symmetry",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering visual symmetry analyzer."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="visual_symmetry_analyzer",
+                node_data={
+                    "faculty": "visual_symmetry",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

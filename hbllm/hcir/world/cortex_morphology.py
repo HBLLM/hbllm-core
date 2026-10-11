@@ -26,6 +26,9 @@ from enum import StrEnum
 import numpy as np
 from scipy import ndimage
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +55,35 @@ class MorphologicalEntity:
     interior_coords: list[tuple[int, int]] = field(default_factory=list)
     contour_coords: list[tuple[int, int]] = field(default_factory=list)
     aspect_ratio: float = 1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export morphological entity as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"morph_entity:{self.primitive_type.value}_{self.feature_id}",
+            operator="==",
+            value=self.area,
+            relation=f"aspect:{self.aspect_ratio:.2f}",
+            target_entity=f"centroid:{self.centroid}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording morphological entity."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"morph_entity_{self.entity_id}",
+                node_data={
+                    "entity_id": self.entity_id,
+                    "primitive_type": self.primitive_type.value,
+                    "feature_id": self.feature_id,
+                    "area": self.area,
+                    "bounding_box": self.bounding_box,
+                    "centroid": self.centroid,
+                    "holes_count": self.holes_count,
+                    "aspect_ratio": self.aspect_ratio,
+                },
+            )
+        ]
 
 
 class MorphologicalSaliencyEngine:
@@ -238,6 +270,31 @@ class MorphologicalSaliencyEngine:
 
         return cleaned
 
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export morphological saliency engine capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="morphological_saliency_engine",
+            operator="==",
+            value="ACTIVE",
+            relation="loc_ventral_morphology",
+            target_entity="cortex_morphology",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering morphological saliency engine."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="morphological_saliency_engine",
+                node_data={
+                    "faculty": "cortex_morphology",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
+
 
 # ── W054: Fractional & Generalized Spatial Scaling Engine ────────────────────
 
@@ -250,6 +307,31 @@ class ScaleInferenceResult:
     scale_c: float
     is_isotropic: bool
     residual_error: float
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export scale inference result as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="scale_inference_result",
+            operator="==",
+            value=f"{self.scale_r}x{self.scale_c}",
+            relation=f"iso:{self.is_isotropic}",
+            target_entity=f"err:{self.residual_error:.4f}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording scale inference result."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="scale_inference_result",
+                node_data={
+                    "scale_r": self.scale_r,
+                    "scale_c": self.scale_c,
+                    "is_isotropic": self.is_isotropic,
+                    "residual_error": self.residual_error,
+                },
+            )
+        ]
 
 
 class FractionalScaleTransformer:
@@ -322,6 +404,31 @@ class StampInstance:
     col: int
     rotation_k: int = 0  # 90° clockwise rotations
     fidelity: float = 1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export stamp instance placement as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"stamp_instance:{self.row}_{self.col}",
+            operator="==",
+            value=f"rot:{self.rotation_k}",
+            relation=f"fidelity:{self.fidelity:.2f}",
+            target_entity=f"({self.row},{self.col})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording stamp placement."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"stamp_{self.row}_{self.col}",
+                node_data={
+                    "row": self.row,
+                    "col": self.col,
+                    "rotation_k": self.rotation_k,
+                    "fidelity": self.fidelity,
+                },
+            )
+        ]
 
 
 class GenerativePatternStamper:
@@ -434,6 +541,32 @@ class WallpaperTilingModel:
     unit_cell: np.ndarray
     concordance_score: float
     coverage_ratio: float
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export wallpaper tiling model as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"wallpaper_tiling:{self.group.value}",
+            operator="==",
+            value=f"period:{self.period_r}x{self.period_c}",
+            relation=f"score:{self.concordance_score:.2f}",
+            target_entity=self.group.value,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording wallpaper tiling model."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"wallpaper_{self.group.value}_{self.period_r}_{self.period_c}",
+                node_data={
+                    "group": self.group.value,
+                    "period_r": self.period_r,
+                    "period_c": self.period_c,
+                    "concordance_score": self.concordance_score,
+                    "coverage_ratio": self.coverage_ratio,
+                },
+            )
+        ]
 
 
 class WallpaperTilingInducer:

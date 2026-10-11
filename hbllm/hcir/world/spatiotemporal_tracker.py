@@ -24,6 +24,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 # ── Domain 1: Entorhinal Phase Precession & Dynamic Hazard Tracking ───────────
 
 
@@ -51,6 +54,33 @@ class DynamicCellPhase:
         if safe_features and val in safe_features:
             return False
         return val in self.hazardous_values
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export dynamic cell phase model as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"cell_phase:{self.r}_{self.c}",
+            operator="==",
+            value=self.period,
+            relation=f"hazards:{sorted(self.hazardous_values)}",
+            target_entity=f"({self.r},{self.c})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording dynamic cell phase."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"phase_cell_{self.r}_{self.c}",
+                node_data={
+                    "r": self.r,
+                    "c": self.c,
+                    "period": self.period,
+                    "cycle_values": self.cycle_values,
+                    "hazardous_values": sorted(self.hazardous_values),
+                    "confidence": self.confidence,
+                },
+            )
+        ]
 
 
 class PhasePrecessionEstimator:
@@ -95,6 +125,31 @@ class PhasePrecessionEstimator:
             if lcm > cap:
                 return cap
         return max(1, lcm)
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export phase precession estimator capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="phase_precession_estimator",
+            operator="==",
+            value="ACTIVE",
+            relation="entorhinal_phase_precession",
+            target_entity="spatiotemporal_tracker",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering phase precession estimator."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="phase_precession_estimator",
+                node_data={
+                    "faculty": "entorhinal_phase_precession",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
 
 
 class SpatiotemporalHazardTracker:
@@ -267,6 +322,41 @@ class SpatiotemporalHazardTracker:
                 schedule[dt] = haz_set
         return schedule
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export spatiotemporal hazard tracker state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="spatiotemporal_hazard_tracker",
+            operator="==",
+            value=self.environmental_period,
+            relation=f"periodic_cells:{len(self.periodic_cells)}",
+            target_entity=f"lethal:{sorted(self.known_lethal_features)}",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all periodic cell phase models as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for cell in self.periodic_cells.values():
+            preds.append(cell.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting hazard tracker state."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="hazard_tracker_summary",
+                node_data={
+                    "environmental_period": self.environmental_period,
+                    "periodic_cells_count": len(self.periodic_cells),
+                    "known_lethal_features": sorted(self.known_lethal_features),
+                    "static_lethal_positions": [list(p) for p in self.static_lethal_positions],
+                },
+            )
+        ]
+        for cell in self.periodic_cells.values():
+            ops.extend(cell.to_transaction_operations())
+        return ops
+
 
 # ── Domain 2: Morphological Deformation, Euler Invariants & Causal Lineage DAG ─
 
@@ -341,6 +431,33 @@ class DeformationRecord:
     iou: float
     euler_characteristic: int
     deformation_type: MorphologicalDeformationType
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export morphological deformation record as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"deformation_record:{self.entity_id}",
+            operator="==",
+            value=self.deformation_type.value,
+            relation=f"iou:{self.iou:.2f}",
+            target_entity=f"euler:{self.euler_characteristic}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording morphological deformation."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"deformation_{self.entity_id}",
+                node_data={
+                    "entity_id": self.entity_id,
+                    "prior_cells_count": self.prior_cells_count,
+                    "current_cells_count": self.current_cells_count,
+                    "iou": self.iou,
+                    "euler_characteristic": self.euler_characteristic,
+                    "deformation_type": self.deformation_type.value,
+                },
+            )
+        ]
 
 
 @dataclass
@@ -422,6 +539,42 @@ class LifecycleTrackingResult:
         """Check if entity was destroyed (no children in current state)."""
         node = self.lineage_graph.get(entity_id)
         return bool(node and not node.child_ids and node.transition_type == "DESTRUCTION")
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export lifecycle tracking summary as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="lifecycle_tracking_result",
+            operator="==",
+            value=len(self.one_to_one_mappings),
+            relation=f"deformations:{len(self.deformation_records)}",
+            target_entity=f"lineage_nodes:{len(self.lineage_graph)}",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all deformation records as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for rec in self.deformation_records:
+            preds.append(rec.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting lifecycle tracking result."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="lifecycle_tracking_summary",
+                node_data={
+                    "one_to_one_mappings_count": len(self.one_to_one_mappings),
+                    "deformation_records_count": len(self.deformation_records),
+                    "fission_records_count": len(self.fission_records),
+                    "fusion_records_count": len(self.fusion_records),
+                    "lineage_graph_nodes_count": len(self.lineage_graph),
+                },
+            )
+        ]
+        for rec in self.deformation_records:
+            ops.extend(rec.to_transaction_operations())
+        return ops
 
 
 class MorphologicalDeformationTracker:
@@ -853,3 +1006,28 @@ class MorphologicalDeformationTracker:
             unmatched_current_ids=[ce.entity_id for ce in remaining_currs],
             lineage_graph=lineage,
         )
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export morphological deformation tracker capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="morphological_deformation_tracker",
+            operator="==",
+            value="ACTIVE",
+            relation="euler_invariants_lineage",
+            target_entity="spatiotemporal_tracker",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering morphological deformation tracker."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="deformation_tracker",
+                node_data={
+                    "faculty": "morphological_deformation_tracker",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

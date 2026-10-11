@@ -1657,3 +1657,356 @@ class TestPhase27CognitiveBridgeCausalAndTransactions:
         assert eng_pred.variable == "representation_expansion_engine"
         eng_ops = RepresentationExpansionEngine.to_transaction_operations()
         assert len(eng_ops) == 1
+
+
+class TestPhase28CognitiveBridgeCausalAndTransactions:
+    """Validate declarative causal predicates and atomic HCIR transactions for Phase 28 perceptual & tracking faculties."""
+
+    def test_cortex_perception_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_perception import (
+            EpistemicObservationDiff,
+            FrameDiffType,
+            OrientedThreat,
+            PerceptionEngine,
+        )
+
+        diff = EpistemicObservationDiff(
+            changed_pixel_count=5,
+            diff_type=FrameDiffType.TRANSLATION,
+            translation_delta=(1, 0),
+            moved_object_feature=2,
+            moved_object_size=5,
+        )
+        d_pred = diff.to_causal_predicate()
+        assert d_pred.variable == "observation_diff:TRANSLATION"
+        assert d_pred.value == 5
+        d_ops = diff.to_transaction_operations()
+        assert len(d_ops) == 1
+        assert d_ops[0].node_id == "diff_TRANSLATION_5"
+
+        threat = OrientedThreat(
+            pos=(3, 3),
+            facing=(0, 1),
+            gaze_pos=(3, 4),
+            feature_id=7,
+        )
+        t_pred = threat.to_causal_predicate()
+        assert t_pred.variable == "oriented_threat:7"
+        t_ops = threat.to_transaction_operations()
+        assert len(t_ops) == 1
+        assert t_ops[0].node_id == "threat_7_3_3"
+
+        eng_pred = PerceptionEngine.to_causal_predicate()
+        assert eng_pred.variable == "cortex_perception_engine"
+        eng_ops = PerceptionEngine.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+    def test_inferotemporal_segmentation_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.inferotemporal_segmentation import (
+            InferotemporalSegmentationEngine,
+            VentralObjectToken,
+        )
+
+        token = VentralObjectToken(
+            object_id=2,
+            feature_id=4,
+            area=6,
+            centroid=(3, 3),
+            anchor_coord=(3, 3),
+            bounding_box=(2, 2, 4, 4),
+            aspect_ratio=1.0,
+            is_compact=True,
+            salience_score=0.9,
+        )
+        tok_pred = token.to_causal_predicate()
+        assert tok_pred.variable == "ventral_token:4_2"
+        assert tok_pred.value == 6
+        tok_ops = token.to_transaction_operations()
+        assert len(tok_ops) == 1
+        assert tok_ops[0].node_id == "ventral_token_4_2"
+
+        eng_pred = InferotemporalSegmentationEngine.to_causal_predicate()
+        assert eng_pred.variable == "inferotemporal_segmentation_engine"
+        eng_ops = InferotemporalSegmentationEngine.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+    def test_cortex_morphology_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_morphology import (
+            MorphologicalEntity,
+            MorphologicalSaliencyEngine,
+            MorphologyPrimitiveType,
+            ScaleInferenceResult,
+            StampInstance,
+            WallpaperSymmetryGroup,
+            WallpaperTilingModel,
+        )
+
+        entity = MorphologicalEntity(
+            entity_id="entity_m1",
+            primitive_type=MorphologyPrimitiveType.SOLID_BLOB,
+            feature_id=3,
+            area=9,
+            bounding_box=(1, 1, 3, 3),
+            centroid=(2, 2),
+            aspect_ratio=1.0,
+        )
+        e_pred = entity.to_causal_predicate()
+        assert e_pred.variable == "morph_entity:SOLID_BLOB_3"
+        assert e_pred.value == 9
+        e_ops = entity.to_transaction_operations()
+        assert len(e_ops) == 1
+        assert e_ops[0].node_id == "morph_entity_entity_m1"
+
+        scale_res = ScaleInferenceResult(
+            scale_r=2.0,
+            scale_c=2.0,
+            is_isotropic=True,
+            residual_error=0.0,
+        )
+        s_pred = scale_res.to_causal_predicate()
+        assert s_pred.variable == "scale_inference_result"
+        s_ops = scale_res.to_transaction_operations()
+        assert len(s_ops) == 1
+
+        stamp = StampInstance(row=1, col=2, rotation_k=1, fidelity=0.95)
+        st_pred = stamp.to_causal_predicate()
+        assert st_pred.variable == "stamp_instance:1_2"
+        st_ops = stamp.to_transaction_operations()
+        assert len(st_ops) == 1
+
+        wall = WallpaperTilingModel(
+            group=WallpaperSymmetryGroup.P1,
+            period_r=3,
+            period_c=3,
+            unit_cell=np.zeros((3, 3), dtype=int),
+            concordance_score=0.92,
+            coverage_ratio=1.0,
+        )
+        w_pred = wall.to_causal_predicate()
+        assert w_pred.variable == "wallpaper_tiling:p1"
+        w_ops = wall.to_transaction_operations()
+        assert len(w_ops) == 1
+
+        eng_pred = MorphologicalSaliencyEngine.to_causal_predicate()
+        assert eng_pred.variable == "morphological_saliency_engine"
+        eng_ops = MorphologicalSaliencyEngine.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+    def test_visual_symmetry_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.visual_symmetry import (
+            CountingRelationResult,
+            CountingRelationType,
+            DiscrepancyTarget,
+            PeriodicTilingResult,
+            SymmetryAnalysisResult,
+            SymmetryAxis,
+            VisualSymmetryAnalyzer,
+        )
+
+        target = DiscrepancyTarget(r=1, c=2, expected_feature=3, confidence=0.9)
+        t_pred = target.to_causal_predicate()
+        assert t_pred.variable == "symmetry_discrepancy:1_2"
+        t_ops = target.to_transaction_operations()
+        assert len(t_ops) == 1
+
+        sym = SymmetryAnalysisResult(
+            dominant_axis=SymmetryAxis.HORIZONTAL,
+            dominant_score=0.88,
+            scores={"horizontal": 0.88},
+            is_symmetric=True,
+        )
+        sym_pred = sym.to_causal_predicate()
+        assert sym_pred.variable == "symmetry_axis:horizontal"
+        sym_ops = sym.to_transaction_operations()
+        assert len(sym_ops) == 1
+
+        tiling = PeriodicTilingResult(
+            tile_shape=(3, 3),
+            repetition_counts=(2, 2),
+            confidence=0.95,
+        )
+        ti_pred = tiling.to_causal_predicate()
+        assert ti_pred.variable == "periodic_tiling_unit"
+        ti_ops = tiling.to_transaction_operations()
+        assert len(ti_ops) == 1
+
+        rel = CountingRelationResult(
+            is_relation=True,
+            relation_type=CountingRelationType.CONSERVED,
+            confidence=0.85,
+        )
+        r_pred = rel.to_causal_predicate()
+        assert r_pred.variable == "counting_relation:conserved"
+        r_ops = rel.to_transaction_operations()
+        assert len(r_ops) == 1
+
+        eng_pred = VisualSymmetryAnalyzer.to_causal_predicate()
+        assert eng_pred.variable == "visual_symmetry_analyzer"
+        eng_ops = VisualSymmetryAnalyzer.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+    def test_remote_causal_attribution_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.remote_causal_attribution import (
+            RemoteCausalAffordance,
+            RemoteCausalAttributor,
+        )
+
+        aff = RemoteCausalAffordance(
+            trigger_pos=(1, 1),
+            trigger_feature=2,
+            remote_pos=(8, 8),
+            original_remote_feature=5,
+            mutated_remote_feature=0,
+            confidence=0.85,
+        )
+        a_pred = aff.to_causal_predicate()
+        assert a_pred.variable == "remote_affordance:2->5"
+        a_ops = aff.to_transaction_operations()
+        assert len(a_ops) == 1
+
+        attributor = RemoteCausalAttributor()
+        attributor.remote_actuators[(8, 8)].append(aff)
+        attributor.co_occurrence_evidence[(((1, 1)), ((8, 8)))] = 3
+        preds = attributor.export_causal_predicates()
+        assert len(preds) == 2
+        ops = attributor.to_transaction_operations()
+        assert len(ops) == 2
+
+    def test_spatiotemporal_tracker_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.spatiotemporal_tracker import (
+            DeformationRecord,
+            DynamicCellPhase,
+            LifecycleTrackingResult,
+            MorphologicalDeformationTracker,
+            MorphologicalDeformationType,
+            PhasePrecessionEstimator,
+            SpatiotemporalHazardTracker,
+        )
+
+        phase = DynamicCellPhase(
+            r=4,
+            c=4,
+            period=3,
+            cycle_values=[0, 1, 2],
+            hazardous_values={2},
+        )
+        p_pred = phase.to_causal_predicate()
+        assert p_pred.variable == "cell_phase:4_4"
+        p_ops = phase.to_transaction_operations()
+        assert len(p_ops) == 1
+
+        est_pred = PhasePrecessionEstimator.to_causal_predicate()
+        assert est_pred.variable == "phase_precession_estimator"
+        est_ops = PhasePrecessionEstimator.to_transaction_operations()
+        assert len(est_ops) == 1
+
+        tracker = SpatiotemporalHazardTracker()
+        tracker.periodic_cells[(4, 4)] = phase
+        tracker_preds = tracker.export_causal_predicates()
+        assert len(tracker_preds) == 2
+        tracker_ops = tracker.to_transaction_operations()
+        assert len(tracker_ops) == 2
+
+        rec = DeformationRecord(
+            entity_id="entity_e1",
+            prior_cells_count=4,
+            current_cells_count=5,
+            iou=0.8,
+            euler_characteristic=1,
+            deformation_type=MorphologicalDeformationType.TOPOLOGICAL_GROWTH,
+        )
+        rec_pred = rec.to_causal_predicate()
+        assert rec_pred.variable == "deformation_record:entity_e1"
+        rec_ops = rec.to_transaction_operations()
+        assert len(rec_ops) == 1
+
+        lifecycle_res = LifecycleTrackingResult(
+            one_to_one_mappings={"entity_e1": "entity_e1_next"},
+            deformation_records=[rec],
+            fission_records=[],
+            fusion_records=[],
+            unmatched_prior_ids=[],
+            unmatched_current_ids=[],
+        )
+        lc_preds = lifecycle_res.export_causal_predicates()
+        assert len(lc_preds) == 2
+        lc_ops = lifecycle_res.to_transaction_operations()
+        assert len(lc_ops) == 2
+
+        eng_pred = MorphologicalDeformationTracker.to_causal_predicate()
+        assert eng_pred.variable == "morphological_deformation_tracker"
+        eng_ops = MorphologicalDeformationTracker.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+    def test_spatial_containment_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.spatial_containment import (
+            BaseSpatialContainmentEngine,
+            RoomDoor,
+            RoomTopologyExtractor,
+            RoomTopologyGraph,
+            SpatialRelationFact,
+            SpatialRelationType,
+        )
+
+        fact = SpatialRelationFact(
+            relation=SpatialRelationType.INSIDE,
+            subject_id="item_ball",
+            object_id="container_box",
+            confidence=0.95,
+        )
+        f_pred = fact.to_causal_predicate()
+        assert f_pred.variable == "spatial_relation:INSIDE"
+        f_ops = fact.to_transaction_operations()
+        assert len(f_ops) == 1
+
+        engine = BaseSpatialContainmentEngine()
+        eng_preds = engine.export_causal_predicates()
+        assert len(eng_preds) == 1
+        eng_ops = engine.to_transaction_operations()
+        assert len(eng_ops) == 1
+
+        door = RoomDoor(door_coord=(3, 5), connects_rooms=(0, 1))
+        d_pred = door.to_causal_predicate()
+        assert d_pred.variable == "room_door:(3,5)"
+        d_ops = door.to_transaction_operations()
+        assert len(d_ops) == 1
+
+        topology = RoomTopologyGraph(
+            rooms={0: [(1, 1)], 1: [(4, 4)]},
+            doors=[door],
+            adjacency={0: [1], 1: [0]},
+        )
+        top_preds = topology.export_causal_predicates()
+        assert len(top_preds) == 2
+        top_ops = topology.to_transaction_operations()
+        assert len(top_ops) == 2
+
+        ext_pred = RoomTopologyExtractor.to_causal_predicate()
+        assert ext_pred.variable == "room_topology_extractor"
+        ext_ops = RoomTopologyExtractor.to_transaction_operations()
+        assert len(ext_ops) == 1
+
+    def test_surprise_engine_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.surprise_engine import (
+            SurpriseEngine,
+            SurpriseEvaluation,
+        )
+
+        eval_res = SurpriseEvaluation(
+            surprise_score=0.45,
+            is_surprising=True,
+            salience_boost=0.35,
+            is_persistent=True,
+        )
+        ev_pred = eval_res.to_causal_predicate()
+        assert ev_pred.variable == "surprise_evaluation"
+        assert ev_pred.value == 0.45
+        ev_ops = eval_res.to_transaction_operations()
+        assert len(ev_ops) == 1
+
+        engine = SurpriseEngine()
+        engine._surprise_ledger["physics_world"] = [0.45, 0.50]
+        eng_preds = engine.export_causal_predicates()
+        assert len(eng_preds) == 2
+        eng_ops = engine.to_transaction_operations()
+        assert len(eng_ops) == 1

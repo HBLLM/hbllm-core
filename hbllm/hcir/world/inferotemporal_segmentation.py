@@ -20,6 +20,8 @@ import numpy as np
 from scipy.ndimage import label
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,36 @@ class VentralObjectToken:
                 "aspect_ratio": self.aspect_ratio,
             },
         )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export ventral object token as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"ventral_token:{self.feature_id}_{self.object_id}",
+            operator="==",
+            value=self.area,
+            relation=f"aspect:{self.aspect_ratio:.2f}",
+            target_entity=f"centroid:{self.centroid}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording ventral object token."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"ventral_token_{self.feature_id}_{self.object_id}",
+                node_data={
+                    "object_id": self.object_id,
+                    "feature_id": self.feature_id,
+                    "area": self.area,
+                    "centroid": self.centroid,
+                    "anchor_coord": self.anchor_coord,
+                    "bounding_box": self.bounding_box,
+                    "aspect_ratio": self.aspect_ratio,
+                    "is_compact": self.is_compact,
+                    "salience_score": self.salience_score,
+                },
+            )
+        ]
 
 
 class InferotemporalSegmentationEngine:
@@ -254,3 +286,28 @@ class InferotemporalSegmentationEngine:
             max_area=max_area,
         )
         return [t.to_spatial_entity(role=EntityRole.MANIPULABLE) for t in tokens]
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export ventral stream segmentation engine as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="inferotemporal_segmentation_engine",
+            operator="==",
+            value="ACTIVE",
+            relation="area_it_ventral_stream",
+            target_entity="inferotemporal_segmentation",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering inferotemporal segmentation engine."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="it_segmentation_engine",
+                node_data={
+                    "faculty": "inferotemporal_segmentation",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
