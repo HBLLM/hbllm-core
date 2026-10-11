@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.motor_calibration import (
@@ -1515,3 +1517,28 @@ class EpistemicFeedbackAssimilator:
             engine.mobile_threat_features.difference_update(engine.avatar_features)
         if engine.avatar_feature is not None:
             engine.mobile_threat_features.discard(engine.avatar_feature)
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export feedback assimilator capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="epistemic_feedback_assimilator",
+            operator="==",
+            value="ACTIVE",
+            relation="motor_dynamics_assimilation",
+            target_entity="cortex_assimilator",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering feedback assimilator."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="feedback_assimilator",
+                node_data={
+                    "faculty": "epistemic_feedback_assimilator",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

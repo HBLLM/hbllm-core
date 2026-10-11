@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,34 @@ class FrontopolarSubgoal:
     prerequisite_subgoal_ids: list[str] = field(default_factory=list)
     prerequisite_features: set[int] = field(default_factory=set)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export frontopolar subgoal as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"subgoal:{self.subgoal_type.value}",
+            operator="==",
+            value=f"({self.target_destination[0]},{self.target_destination[1]})",
+            relation=f"prio:{self.priority:.1f}",
+            target_entity=self.subgoal_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording frontopolar subgoal."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"subgoal_{self.subgoal_id}",
+                node_data={
+                    "subgoal_id": self.subgoal_id,
+                    "subgoal_type": self.subgoal_type.value,
+                    "target_entity_pos": self.target_entity_pos,
+                    "target_destination": self.target_destination,
+                    "priority": self.priority,
+                    "is_terminal": self.is_terminal,
+                    "prerequisites": self.prerequisite_subgoal_ids,
+                },
+            )
+        ]
 
     def are_prerequisites_met(
         self,
@@ -96,6 +126,11 @@ class FrontopolarSubgoalStack:
         """True if cognitive stack has subgoals to execute."""
         return bool(self.stack)
 
+    @property
+    def depth(self) -> int:
+        """Current stack depth."""
+        return len(self.stack)
+
     def is_empty(self) -> bool:
         """Check if frontopolar subgoal stack is empty."""
         return len(self.stack) == 0
@@ -103,6 +138,10 @@ class FrontopolarSubgoalStack:
     def prune_completed_subgoals(self, completed_ids: set[str]) -> None:
         """W119: Prune satisfied subgoals from the active planning stack."""
         self.stack = [sg for sg in self.stack if sg.subgoal_id not in completed_ids]
+
+    def push(self, subgoal: FrontopolarSubgoal) -> None:
+        """Push a newly formulated subgoal to the top of the stack."""
+        self.push_subgoal(subgoal)
 
     def push_subgoal(self, subgoal: FrontopolarSubgoal) -> None:
         """Push a newly formulated subgoal to the top of the stack (cognitive branching)."""
@@ -233,6 +272,41 @@ class FrontopolarSubgoalStack:
         candidates.sort(key=lambda x: x[2])
         best_r, best_c, _ = candidates[0]
         return (best_r, best_c)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export frontopolar stack state as a declarative causal predicate."""
+        top_id = self.current_subgoal.subgoal_id if self.current_subgoal else "empty"
+        return CausalPredicate(
+            variable="frontopolar_subgoal_stack",
+            operator="==",
+            value=top_id,
+            relation=f"depth:{self.depth}/{self.max_depth}",
+            target_entity="apfc_ba10",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export stack summary and all active subgoals as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for sg in self.stack:
+            preds.append(sg.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting frontopolar subgoal stack state."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="frontopolar_stack_summary",
+                node_data={
+                    "depth": self.depth,
+                    "max_depth": self.max_depth,
+                    "completed_count": len(self.completed_subgoals),
+                },
+            )
+        ]
+        for sg in self.stack:
+            ops.extend(sg.to_transaction_operations())
+        return ops
 
 
 @dataclass

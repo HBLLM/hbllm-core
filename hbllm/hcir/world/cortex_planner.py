@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
@@ -46,6 +48,31 @@ class MentalSimulationStep:
     expected_mutation: str | None = None
     is_deterministic_geodesic: bool = False
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export simulation step as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"simulation_step:{self.action}",
+            operator="==",
+            value=f"({self.predicted_avatar_pos[0]},{self.predicted_avatar_pos[1]})",
+            relation=f"geodesic:{self.is_deterministic_geodesic}",
+            target_entity=str(self.action),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording simulation step."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"sim_step_{self.action}_{self.predicted_avatar_pos[0]}_{self.predicted_avatar_pos[1]}",
+                node_data={
+                    "action": self.action,
+                    "predicted_pos": self.predicted_avatar_pos,
+                    "expected_mutation": self.expected_mutation,
+                    "is_deterministic_geodesic": self.is_deterministic_geodesic,
+                },
+            )
+        ]
+
 
 @dataclass
 class EpistemicGoalProposal:
@@ -61,6 +88,31 @@ class EpistemicGoalProposal:
     new_candidate_features: set[int] = field(default_factory=set)
     subgoal_to_pop: bool = False
     clear_exhausted_goals: bool = False
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export goal proposal as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="epistemic_goal_proposal",
+            operator="==",
+            value=len(self.goals),
+            relation=f"confirmed:{len(self.confirmed_goals)}",
+            target_entity=f"subgoal_pop:{self.subgoal_to_pop}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording goal proposal."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="goal_proposal_summary",
+                node_data={
+                    "goals_count": len(self.goals),
+                    "confirmed_count": len(self.confirmed_goals),
+                    "new_learned_positions": [list(p) for p in self.new_learned_goal_positions],
+                    "new_candidate_features": sorted(self.new_candidate_features),
+                },
+            )
+        ]
 
 
 class EpistemicGoalScheduler:
@@ -347,9 +399,59 @@ class EpistemicGoalScheduler:
                 return horiz_goals
         return goals
 
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export goal scheduler capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="epistemic_goal_scheduler",
+            operator="==",
+            value="ACTIVE",
+            relation="ofc_ba10_prioritization",
+            target_entity="cortex_planner",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering goal scheduler."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="goal_scheduler",
+                node_data={
+                    "faculty": "epistemic_goal_scheduler",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
+
 
 class MentalSimulationPlanner:
     """Simulates candidate action sequences internally in imagination using learned world theory."""
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export mental simulation planner capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="mental_simulation_planner",
+            operator="==",
+            value="ACTIVE",
+            relation="internal_counterfactual_rollout",
+            target_entity="cortex_planner",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering mental simulation planner."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="simulation_planner",
+                node_data={
+                    "faculty": "mental_simulation_planner",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
 
     @staticmethod
     def is_corner_deadlock(
@@ -1511,6 +1613,31 @@ class ReplanResult:
     divergence_reason: str
     replan_count: int
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export replan result as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="replan_result",
+            operator="==",
+            value=self.replanned,
+            relation=f"count:{self.replan_count}",
+            target_entity=self.divergence_reason,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording replan result."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"replan_{self.replan_count}_{self.replanned}",
+                node_data={
+                    "replanned": self.replanned,
+                    "plan_len": len(self.new_plan),
+                    "divergence_reason": self.divergence_reason,
+                    "replan_count": self.replan_count,
+                },
+            )
+        ]
+
 
 class DynamicReplanner:
     """W140: Triggers dynamic plan repair and topological rerouting upon unexpected observation divergences."""
@@ -1569,3 +1696,28 @@ class DynamicReplanner:
             divergence_reason="unreachable_after_divergence",
             replan_count=1,
         )
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export dynamic replanner capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="dynamic_replanner",
+            operator="==",
+            value="ACTIVE",
+            relation="divergence_rerouting",
+            target_entity="cortex_planner",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering dynamic replanner."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="dynamic_replanner",
+                node_data={
+                    "faculty": "dynamic_replanner",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

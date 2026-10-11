@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
@@ -47,6 +49,31 @@ class SafetyGateResult:
     should_wait: bool = False
     wait_steps: int = 0
     reason: str = ""
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export safety gate result as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="safety_gate_result",
+            operator="==",
+            value="SAFE" if self.is_safe else ("WAIT" if self.should_wait else "LETHAL"),
+            relation=f"wait_steps:{self.wait_steps}",
+            target_entity=self.reason or "nominal",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording safety gate result."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="safety_gate_result",
+                node_data={
+                    "is_safe": self.is_safe,
+                    "should_wait": self.should_wait,
+                    "wait_steps": self.wait_steps,
+                    "reason": self.reason,
+                },
+            )
+        ]
 
 
 class PlanSafetyPredicate(ABC):
@@ -322,6 +349,31 @@ class PlanSafetyEvaluator:
             if not res.is_safe or res.should_wait:
                 return res
         return SafetyGateResult(is_safe=True)
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export plan safety evaluator capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="plan_safety_evaluator",
+            operator="==",
+            value="ACTIVE",
+            relation="multivariate_prefrontal_safety_gating",
+            target_entity="cortex_deliberation",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering plan safety evaluator."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="plan_safety_evaluator",
+                node_data={
+                    "faculty": "plan_safety_evaluator",
+                    "status": "ACTIVE",
+                },
+            )
+        ]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -804,3 +856,28 @@ class PrefrontalDeliberationEngine:
         engine.last_action_data = chosen_data
         engine.last_predicted_pos = predicted_pos
         return chosen_action, chosen_data
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export prefrontal deliberation engine capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="prefrontal_deliberation_engine",
+            operator="==",
+            value="ACTIVE",
+            relation="dlpfc_vmpfc_arbitration",
+            target_entity="cortex_deliberation",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering deliberation engine."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="deliberation_engine",
+                node_data={
+                    "faculty": "prefrontal_deliberation_engine",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

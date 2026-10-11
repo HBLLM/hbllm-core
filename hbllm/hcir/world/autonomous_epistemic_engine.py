@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
@@ -32,6 +33,7 @@ from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
     CausalHypothesis,
+    CausalPredicate,
 )
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
@@ -142,6 +144,33 @@ class EpistemicObservation:
     uncertainty: float
     truth_value: EpistemicTruthValue
     source_faculty: str = "PERCEPTION"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export observation as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=self.variable,
+            operator="==",
+            value=self.value,
+            relation=f"truth:{self.truth_value.value}:unc:{self.uncertainty:.2f}",
+            target_entity=self.source_faculty,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert observation into transactional HCIR graph state mutations."""
+        node_id = f"observation_{self.variable}_{abs(hash(str(self.value)))}"
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node_id,
+                node_data={
+                    "variable": self.variable,
+                    "value": str(self.value),
+                    "uncertainty": self.uncertainty,
+                    "truth_value": str(self.truth_value),
+                    "source_faculty": self.source_faculty,
+                },
+            )
+        ]
 
 
 from hbllm.hcir.world.cortex_assimilator import (
@@ -1146,3 +1175,66 @@ class AutonomousEpistemicEngine:
             is_lost=is_lost,
             action_schemas=action_schemas,
         )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export master epistemic engine state as a declarative causal predicate."""
+        avatar_str = f"({self.avatar_pos[0]},{self.avatar_pos[1]})" if self.avatar_pos else "none"
+        return CausalPredicate(
+            variable="autonomous_epistemic_engine",
+            operator="==",
+            value=str(self._phase),
+            relation=f"step:{self.step_counter}:avatar:{avatar_str}:goals:{len(self.learned_goal_positions)}",
+            target_entity="epistemic_world_engine",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export composite causal predicates across all coordinated cortical faculties."""
+        predicates = [self.to_causal_predicate()]
+        if hasattr(self, "symbolic_theory"):
+            for p in self.symbolic_theory.goal_predicates:
+                predicates.append(p)
+            for p in self.symbolic_theory.barrier_predicates:
+                predicates.append(p)
+            for p in self.symbolic_theory.walkable_predicates:
+                predicates.append(p)
+        if hasattr(self, "episodic_cortex"):
+            predicates.append(self.episodic_cortex.to_causal_predicate())
+        if hasattr(self, "subgoal_stack"):
+            predicates.extend(self.subgoal_stack.export_causal_predicates())
+        return predicates
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert epistemic engine state and grounded facts into transactional HCIR mutations."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="autonomous_epistemic_engine",
+                node_data={
+                    "phase": str(self._phase),
+                    "step_counter": self.step_counter,
+                    "avatar_pos": list(self.avatar_pos) if self.avatar_pos else None,
+                    "avatar_feature": self._avatar_feature,
+                    "avatar_features": sorted(self.avatar_features),
+                    "tested_actions": sorted(self.tested_actions),
+                    "exploration_budget": self.exploration_budget,
+                    "consecutive_plan_failures": self.consecutive_plan_failures,
+                },
+            )
+        ]
+        for goal_pos in self.learned_goal_positions:
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"learned_goal_{goal_pos[0]}_{goal_pos[1]}",
+                    node_data={"position": list(goal_pos), "role": "GOAL"},
+                )
+            )
+        for barrier_pos in self.learned_barriers:
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}",
+                    node_data={"position": list(barrier_pos), "role": "BARRIER"},
+                )
+            )
+        return ops

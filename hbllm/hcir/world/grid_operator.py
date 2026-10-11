@@ -33,6 +33,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +48,36 @@ class OperatorBinding:
     preconditions: dict[str, Any] = field(default_factory=dict)
     description: str = ""
     complexity: float = 1.0  # MDL description length in bits / nats
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export operator binding as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable=f"operator_binding:{self.operator_name}",
+            operator="==",
+            value=f"complexity:{self.complexity:.2f}",
+            relation=f"preconditions:{len(self.preconditions)}",
+            target_entity=self.operator_name,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert operator binding into transactional HCIR graph state mutations."""
+        node_id = f"binding_{self.operator_name}_{abs(hash(str(self.params)))}"
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node_id,
+                node_data={
+                    "operator_name": self.operator_name,
+                    "params": {
+                        str(k): str(v) if isinstance(v, np.ndarray) else v
+                        for k, v in self.params.items()
+                    },
+                    "preconditions": self.preconditions,
+                    "description": self.description,
+                    "complexity": self.complexity,
+                },
+            )
+        ]
 
 
 @dataclass
@@ -106,11 +139,69 @@ class OperationalEpistemicDecision:
     abstention_reason: str | None
     brier_score: float | None
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export epistemic decision as a formal Pearl do(a) causal predicate."""
+        coord_str = (
+            f"({self.probing_coordinate[0]},{self.probing_coordinate[1]})"
+            if self.probing_coordinate
+            else "none"
+        )
+        return CausalPredicate(
+            variable="operational_epistemic_decision",
+            operator="==",
+            value=str(self.action),
+            relation=f"coord:{coord_str}:eig:{self.expected_information_gain:.2f}",
+            target_entity=self.abstention_reason or "nominal",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert epistemic decision into transactional HCIR graph state mutations."""
+        node_id = f"epistemic_decision_{self.action}_{self.probing_coordinate}"
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node_id,
+                node_data={
+                    "action": str(self.action),
+                    "probing_coordinate": list(self.probing_coordinate)
+                    if self.probing_coordinate
+                    else None,
+                    "expected_information_gain": self.expected_information_gain,
+                    "abstention_reason": self.abstention_reason,
+                    "brier_score": self.brier_score,
+                    "has_prediction": self.selected_prediction is not None,
+                },
+            )
+        ]
+
 
 class GridOperator(ABC):
     """Abstract Base Class defining the canonical GridOperator contract."""
 
     name: str = "base_operator"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export grid operator faculty as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable=f"grid_operator:{self.name}",
+            operator="==",
+            value="ACTIVE",
+            relation="visual_transformation",
+            target_entity=self.name,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert grid operator metadata into transactional HCIR graph state mutations."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"operator_{self.name}",
+                node_data={
+                    "operator_name": self.name,
+                    "family": getattr(self, "family", "visual_transformation"),
+                },
+            )
+        ]
 
     @abstractmethod
     def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
@@ -1554,3 +1645,39 @@ class TransformationProgramSearch:
             abstention_reason=None,
             brier_score=brier_score,
         )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export transformation program search engine as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable="transformation_program_search",
+            operator="==",
+            value=f"depth:{self.max_depth}:mdl:{self.use_mdl}",
+            relation=f"operators:{len(self.operators)}:priors:{len(self.prior_rules)}",
+            target_entity="program_search",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export search engine state, operators, and prior rules as causal predicates."""
+        predicates = [self.to_causal_predicate()]
+        predicates.extend(op.to_causal_predicate() for op in self.operators)
+        predicates.extend(r.to_causal_predicate() for r in self.prior_rules)
+        return predicates
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert program search engine state into transactional HCIR graph state mutations."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="transformation_program_search",
+                node_data={
+                    "max_depth": self.max_depth,
+                    "use_mdl": self.use_mdl,
+                    "enable_relational": self.enable_relational,
+                    "operator_count": len(self.operators),
+                    "prior_rules_count": len(self.prior_rules),
+                },
+            )
+        ]
+        for r in self.prior_rules:
+            ops.extend(r.to_transaction_operations())
+        return ops

@@ -27,7 +27,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.active_inference import ActionNode
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
@@ -49,6 +51,31 @@ class ACCConflictRecord:
     cycle_period: int
     cyclic_actions: list[Any]
     suppressed_actions: list[Any] = field(default_factory=list)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export ACC conflict record as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"acc_conflict:{self.step}",
+            operator="==",
+            value=self.cycle_period,
+            relation=f"cyclic:{len(self.cyclic_actions)}",
+            target_entity=f"suppressed:{len(self.suppressed_actions)}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording ACC conflict."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"acc_conflict_{self.step}",
+                node_data={
+                    "step": self.step,
+                    "cycle_period": self.cycle_period,
+                    "cyclic_actions": [str(a) for a in self.cyclic_actions],
+                    "suppressed_actions": [str(a) for a in self.suppressed_actions],
+                },
+            )
+        ]
 
 
 class ACCConflictMonitor:
@@ -102,6 +129,40 @@ class ACCConflictMonitor:
         self.position_history.clear()
         self.conflict_records.clear()
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export ACC conflict monitor state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="acc_conflict_monitor",
+            operator="==",
+            value=len(self.conflict_records),
+            relation=f"window:{self.history_window}",
+            target_entity="anterior_cingulate",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all ACC conflict records as declarative causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for rec in self.conflict_records:
+            preds.append(rec.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting ACC conflict monitor state."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="acc_conflict_summary",
+                node_data={
+                    "conflict_count": len(self.conflict_records),
+                    "history_window": self.history_window,
+                    "oscillation_threshold": self.oscillation_threshold,
+                },
+            )
+        ]
+        for rec in self.conflict_records:
+            ops.extend(rec.to_transaction_operations())
+        return ops
+
 
 @dataclass(frozen=True)
 class EpistemicProbeProposal:
@@ -118,6 +179,31 @@ class EpistemicProbeProposal:
     tested_action: int | None = None
     topological_doorway: tuple[tuple[int, int], int] | None = None
     exploration_mode: str = ""
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export epistemic probe proposal as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"probe_proposal:{self.action}",
+            operator="==",
+            value=self.exploration_mode or "epistemic_curiosity",
+            relation=f"target:{self.new_probe_target}",
+            target_entity=str(self.action),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording probe proposal."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"probe_proposal_{self.action}_{self.exploration_mode}",
+                node_data={
+                    "action": self.action,
+                    "exploration_mode": self.exploration_mode,
+                    "probe_target": self.new_probe_target,
+                    "probe_id": self.new_probe_id,
+                },
+            )
+        ]
 
 
 class EpistemicCuriosityExplorer:
@@ -1297,3 +1383,28 @@ class MotorCortexEffector:
             else:
                 coords[k] = 0
         return coords
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export motor cortex effector capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="motor_cortex_effector",
+            operator="==",
+            value="ACTIVE",
+            relation="allocentric_spatial_grounding",
+            target_entity="cortex_motor",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering motor cortex effector."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="motor_cortex_effector",
+                node_data={
+                    "faculty": "motor_cortex_effector",
+                    "status": "ACTIVE",
+                },
+            )
+        ]

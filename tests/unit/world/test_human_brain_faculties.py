@@ -2010,3 +2010,285 @@ class TestPhase28CognitiveBridgeCausalAndTransactions:
         assert len(eng_preds) == 2
         eng_ops = engine.to_transaction_operations()
         assert len(eng_ops) == 1
+
+
+class TestPhase29CognitiveBridgeCausalAndTransactions:
+    """Validate declarative causal predicates and atomic HCIR transactions for Phase 29 components."""
+
+    def test_frontopolar_subgoal_stack_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.frontopolar_subgoal_stack import (
+            FrontopolarSubgoal,
+            FrontopolarSubgoalStack,
+            SubgoalType,
+        )
+
+        subgoal = FrontopolarSubgoal(
+            subgoal_id="sg_1",
+            subgoal_type=SubgoalType.DELIVER_TO_GOAL,
+            target_entity_pos=(2, 3),
+            target_destination=(5, 5),
+            priority=2.0,
+        )
+        sg_pred = subgoal.to_causal_predicate()
+        assert "subgoal:" in sg_pred.variable
+        sg_ops = subgoal.to_transaction_operations()
+        assert len(sg_ops) == 1
+
+        stack = FrontopolarSubgoalStack()
+        stack.push(subgoal)
+        stack_pred = stack.to_causal_predicate()
+        assert stack_pred.variable == "frontopolar_subgoal_stack"
+        stack_preds = stack.export_causal_predicates()
+        assert len(stack_preds) == 2
+        stack_ops = stack.to_transaction_operations()
+        assert len(stack_ops) == 2
+
+    def test_cortex_planner_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_planner import (
+            DynamicReplanner,
+            EpistemicGoalProposal,
+            MentalSimulationPlanner,
+            MentalSimulationStep,
+        )
+
+        step = MentalSimulationStep(
+            action=1,
+            predicted_avatar_pos=(3, 4),
+            is_deterministic_geodesic=True,
+        )
+        step_pred = step.to_causal_predicate()
+        assert "simulation_step:1" in step_pred.variable
+        step_ops = step.to_transaction_operations()
+        assert len(step_ops) == 1
+
+        prop = EpistemicGoalProposal(
+            goals=[(6, 6)],
+            confirmed_goals=[(6, 6)],
+            new_learned_goal_positions={(6, 6)},
+        )
+        prop_pred = prop.to_causal_predicate()
+        assert "epistemic_goal_proposal" in prop_pred.variable
+        prop_ops = prop.to_transaction_operations()
+        assert len(prop_ops) == 1
+
+        planner_pred = MentalSimulationPlanner.to_causal_predicate()
+        assert planner_pred.variable == "mental_simulation_planner"
+        planner_ops = MentalSimulationPlanner.to_transaction_operations()
+        assert len(planner_ops) == 1
+
+        replanner_pred = DynamicReplanner.to_causal_predicate()
+        assert replanner_pred.variable == "dynamic_replanner"
+        replanner_ops = DynamicReplanner.to_transaction_operations()
+        assert len(replanner_ops) == 1
+
+    def test_cortex_deliberation_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_deliberation import (
+            PlanSafetyEvaluator,
+            PrefrontalDeliberationEngine,
+            SafetyGateResult,
+        )
+
+        gate = SafetyGateResult(
+            is_safe=True,
+            should_wait=False,
+            wait_steps=0,
+            reason="clear",
+        )
+        gate_pred = gate.to_causal_predicate()
+        assert gate_pred.variable == "safety_gate_result"
+        assert gate_pred.value == "SAFE"
+        gate_ops = gate.to_transaction_operations()
+        assert len(gate_ops) == 1
+
+        eval_pred = PlanSafetyEvaluator.to_causal_predicate()
+        assert eval_pred.variable == "plan_safety_evaluator"
+        eval_ops = PlanSafetyEvaluator.to_transaction_operations()
+        assert len(eval_ops) == 1
+
+        engine_pred = PrefrontalDeliberationEngine.to_causal_predicate()
+        assert engine_pred.variable == "prefrontal_deliberation_engine"
+        engine_ops = PrefrontalDeliberationEngine.to_transaction_operations()
+        assert len(engine_ops) == 1
+
+    def test_cortex_motor_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_motor import (
+            ACCConflictMonitor,
+            ACCConflictRecord,
+            EpistemicProbeProposal,
+            MotorCortexEffector,
+        )
+
+        rec = ACCConflictRecord(
+            step=10,
+            cycle_period=2,
+            cyclic_actions=[1, 2],
+            suppressed_actions=[2],
+        )
+        rec_pred = rec.to_causal_predicate()
+        assert "acc_conflict:10" in rec_pred.variable
+        rec_ops = rec.to_transaction_operations()
+        assert len(rec_ops) == 1
+
+        monitor = ACCConflictMonitor()
+        monitor.conflict_records.append(rec)
+        monitor_pred = monitor.to_causal_predicate()
+        assert monitor_pred.variable == "acc_conflict_monitor"
+        monitor_preds = monitor.export_causal_predicates()
+        assert len(monitor_preds) == 2
+        monitor_ops = monitor.to_transaction_operations()
+        assert len(monitor_ops) == 2
+
+        probe = EpistemicProbeProposal(
+            action=1,
+            new_probe_target=(3, 3),
+            exploration_mode="curiosity",
+        )
+        probe_pred = probe.to_causal_predicate()
+        assert "probe_proposal:1" in probe_pred.variable
+        probe_ops = probe.to_transaction_operations()
+        assert len(probe_ops) == 1
+
+        effector_pred = MotorCortexEffector.to_causal_predicate()
+        assert effector_pred.variable == "motor_cortex_effector"
+        effector_ops = MotorCortexEffector.to_transaction_operations()
+        assert len(effector_ops) == 1
+
+    def test_cortex_assimilator_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_assimilator import EpistemicFeedbackAssimilator
+
+        assimilator_pred = EpistemicFeedbackAssimilator.to_causal_predicate()
+        assert assimilator_pred.variable == "epistemic_feedback_assimilator"
+        assimilator_ops = EpistemicFeedbackAssimilator.to_transaction_operations()
+        assert len(assimilator_ops) == 1
+
+    def test_cortex_episodic_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cortex_episodic import (
+            ConsolidatedKnowledgeItem,
+            DualStoreConsolidationEngine,
+            EpisodicTransition,
+            HippocampalEpisodicCortex,
+            SchemaMorphism,
+        )
+
+        trans = EpisodicTransition(
+            step=5,
+            avatar_pos=(1, 2),
+            action_id=0,
+            reward=1.0,
+            is_win=True,
+        )
+        t_pred = trans.to_causal_predicate()
+        assert "episodic_transition:step_5" in t_pred.variable
+        t_ops = trans.to_transaction_operations()
+        assert len(t_ops) == 1
+
+        cortex = HippocampalEpisodicCortex()
+        cortex.current_episode.append(trans)
+        c_pred = cortex.to_causal_predicate()
+        assert c_pred.variable == "hippocampal_episodic_cortex"
+        c_preds = cortex.export_causal_predicates()
+        assert len(c_preds) == 2
+        c_ops = cortex.to_transaction_operations()
+        assert len(c_ops) == 2
+
+        morphism = SchemaMorphism(
+            source_domain="grid_a",
+            target_domain="grid_b",
+            predicate_mapping={"Key": "Switch"},
+        )
+        m_pred = morphism.to_causal_predicate()
+        assert "schema_morphism:grid_a->grid_b" in m_pred.variable
+        m_ops = morphism.to_transaction_operations()
+        assert len(m_ops) == 1
+
+        item = ConsolidatedKnowledgeItem(
+            concept_id="invariant_wall",
+            representation={"solid": True},
+        )
+        item_pred = item.to_causal_predicate()
+        assert item_pred.variable == "consolidated_item:invariant_wall"
+        item_ops = item.to_transaction_operations()
+        assert len(item_ops) == 1
+
+        engine = DualStoreConsolidationEngine()
+        engine.consolidated_store["invariant_wall"] = item
+        eng_pred = engine.to_causal_predicate()
+        assert eng_pred.variable == "dual_store_consolidation_engine"
+        eng_preds = engine.export_causal_predicates()
+        assert len(eng_preds) == 2
+        eng_ops = engine.to_transaction_operations()
+        assert len(eng_ops) == 2
+
+    def test_grid_operator_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.grid_operator import (
+            AffineOperator,
+            DecisionAction,
+            OperationalEpistemicDecision,
+            OperatorBinding,
+            TransformationProgramSearch,
+        )
+
+        binding = OperatorBinding(
+            operator_name="affine",
+            params={"rotate": 90},
+            complexity=1.5,
+        )
+        b_pred = binding.to_causal_predicate()
+        assert b_pred.variable == "operator_binding:affine"
+        b_ops = binding.to_transaction_operations()
+        assert len(b_ops) == 1
+
+        decision = OperationalEpistemicDecision(
+            action=DecisionAction.PREDICT,
+            selected_prediction=None,
+            probing_coordinate=None,
+            expected_information_gain=0.0,
+            abstention_reason=None,
+            brier_score=0.1,
+        )
+        d_pred = decision.to_causal_predicate()
+        assert d_pred.variable == "operational_epistemic_decision"
+        d_ops = decision.to_transaction_operations()
+        assert len(d_ops) == 1
+
+        op = AffineOperator()
+        op_pred = op.to_causal_predicate()
+        assert op_pred.variable == "grid_operator:affine"
+        op_ops = op.to_transaction_operations()
+        assert len(op_ops) == 1
+
+        search = TransformationProgramSearch(max_depth=1)
+        s_pred = search.to_causal_predicate()
+        assert s_pred.variable == "transformation_program_search"
+        s_preds = search.export_causal_predicates()
+        assert len(s_preds) >= 2
+        s_ops = search.to_transaction_operations()
+        assert len(s_ops) == 1
+
+    def test_autonomous_epistemic_engine_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import (
+            AutonomousEpistemicEngine,
+            EpistemicObservation,
+            EpistemicTruthValue,
+        )
+
+        obs = EpistemicObservation(
+            variable="door_status",
+            value="OPEN",
+            uncertainty=0.05,
+            truth_value=EpistemicTruthValue.TRUE,
+        )
+        obs_pred = obs.to_causal_predicate()
+        assert obs_pred.variable == "door_status"
+        obs_ops = obs.to_transaction_operations()
+        assert len(obs_ops) == 1
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.learned_goal_positions.add((7, 7))
+        engine.learned_barriers.add((1, 1))
+        engine_pred = engine.to_causal_predicate()
+        assert engine_pred.variable == "autonomous_epistemic_engine"
+        engine_preds = engine.export_causal_predicates()
+        assert len(engine_preds) >= 1
+        engine_ops = engine.to_transaction_operations()
+        assert len(engine_ops) >= 3

@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
@@ -52,6 +54,41 @@ class EpisodicTransition:
     grid_snapshot: np.ndarray | None = None
     state_signature: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export episodic transition as a formal Pearl do(a) causal predicate."""
+        pos_str = f"({self.avatar_pos[0]},{self.avatar_pos[1]})" if self.avatar_pos else "none"
+        outcome = "WIN" if self.is_win else ("LOST" if self.is_lost else "ACTIVE")
+        return CausalPredicate(
+            variable=f"episodic_transition:step_{self.step}",
+            operator="==",
+            value=f"action:{self.action_id}:reward:{self.reward:.2f}:{outcome}",
+            relation=f"pos:{pos_str}",
+            target_entity=self.state_signature or f"step_{self.step}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert episodic transition into transactional HCIR graph state mutations."""
+        sig = self.state_signature or f"step_{self.step}"
+        node_id = f"episodic_trans_{self.step}_{sig}"
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node_id,
+                node_data={
+                    "step": self.step,
+                    "avatar_pos": list(self.avatar_pos) if self.avatar_pos else None,
+                    "action_id": str(self.action_id),
+                    "action_data": self.action_data or {},
+                    "reward": self.reward,
+                    "is_terminal": self.is_terminal,
+                    "is_lost": self.is_lost,
+                    "is_win": self.is_win,
+                    "state_signature": self.state_signature,
+                    "metadata": self.metadata,
+                },
+            )
+        ]
 
 
 @dataclass
@@ -520,6 +557,43 @@ class HippocampalEpisodicCortex:
         if hasattr(engine, "acc_conflict_monitor"):
             engine.acc_conflict_monitor.reset()
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export episodic cortex state as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable="hippocampal_episodic_cortex",
+            operator="==",
+            value=f"episodes:{len(self.past_episodes)}:current:{len(self.current_episode)}",
+            relation=f"lethal:{len(self.discovered_lethal_features)}",
+            target_entity="cortex_episodic",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all internal episodic traces, SWR replays, and analogies as causal predicates."""
+        predicates = [self.to_causal_predicate()]
+        predicates.extend(t.to_causal_predicate() for t in self.current_episode)
+        for m in self.analogy_engine.active_analogies.values():
+            predicates.append(m.to_causal_predicate())
+        return predicates
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert episodic cortex state into transactional HCIR graph state mutations."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="hippocampal_episodic_cortex",
+                node_data={
+                    "max_trace_len": self.max_trace_len,
+                    "replay_horizon": self.replay_horizon,
+                    "current_episode_len": len(self.current_episode),
+                    "past_episodes_count": len(self.past_episodes),
+                    "discovered_lethal_features": sorted(self.discovered_lethal_features),
+                },
+            )
+        ]
+        for t in list(self.current_episode)[-20:]:
+            ops.extend(t.to_transaction_operations())
+        return ops
+
 
 # ── W148: Falsifiable Cross-Task Analogy Engine ──────────────────────────────
 
@@ -547,6 +621,36 @@ class SchemaMorphism:
     status: AnalogyStatus = AnalogyStatus.TENTATIVE
     counterexamples: int = 0
     support_count: int = 0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export relational schema morphism as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable=f"schema_morphism:{self.source_domain}->{self.target_domain}",
+            operator="==",
+            value=str(self.status),
+            relation=f"conf:{self.confidence:.2f}:supp:{self.support_count}:ce:{self.counterexamples}",
+            target_entity=f"{self.source_domain}_to_{self.target_domain}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert schema morphism into transactional HCIR graph state mutations."""
+        node_id = f"schema_morphism_{self.source_domain}_{self.target_domain}"
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node_id,
+                node_data={
+                    "source_domain": self.source_domain,
+                    "target_domain": self.target_domain,
+                    "predicate_mapping": self.predicate_mapping,
+                    "feature_mapping": {str(k): v for k, v in self.feature_mapping.items()},
+                    "confidence": self.confidence,
+                    "status": str(self.status),
+                    "counterexamples": self.counterexamples,
+                    "support_count": self.support_count,
+                },
+            )
+        ]
 
 
 class FalsifiableAnalogyEngine:
@@ -651,6 +755,32 @@ class ConsolidatedKnowledgeItem:
     access_count: int = 1
     stability: float = 0.95
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export consolidated knowledge item as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable=f"consolidated_item:{self.concept_id}",
+            operator="==",
+            value=f"stab:{self.stability:.2f}:prot:{self.protection_weight:.2f}",
+            relation=f"access:{self.access_count}",
+            target_entity=self.concept_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert consolidated item into transactional HCIR graph state mutations."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"consolidated_item_{self.concept_id}",
+                node_data={
+                    "concept_id": self.concept_id,
+                    "protection_weight": self.protection_weight,
+                    "access_count": self.access_count,
+                    "stability": self.stability,
+                    "representation": self.representation,
+                },
+            )
+        ]
+
 
 class DualStoreConsolidationEngine:
     """W150: Dual-store memory consolidation (hippocampal fast buffer + neocortical slow store).
@@ -703,3 +833,36 @@ class DualStoreConsolidationEngine:
             "consolidated_protected_count": len(self.consolidated_store),
             "catastrophic_forgetting_prevented": True,
         }
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export consolidation engine state as a formal Pearl do(a) causal predicate."""
+        return CausalPredicate(
+            variable="dual_store_consolidation_engine",
+            operator="==",
+            value=f"consolidated:{len(self.consolidated_store)}:replay:{len(self.replay_buffer)}",
+            relation=f"capacity:{self.capacity}",
+            target_entity="cortex_consolidation",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all consolidated items and engine state as causal predicates."""
+        predicates = [self.to_causal_predicate()]
+        predicates.extend(item.to_causal_predicate() for item in self.consolidated_store.values())
+        return predicates
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert dual store engine state and consolidated items into transactional HCIR mutations."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="dual_store_consolidation_engine",
+                node_data={
+                    "capacity": self.capacity,
+                    "consolidated_count": len(self.consolidated_store),
+                    "replay_buffer_len": len(self.replay_buffer),
+                },
+            )
+        ]
+        for item in self.consolidated_store.values():
+            ops.extend(item.to_transaction_operations())
+        return ops
