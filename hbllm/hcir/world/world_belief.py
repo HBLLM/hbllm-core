@@ -1,8 +1,8 @@
-"""
-World Belief Graph — Cognitive World Belief Container.
+"""World Belief Graph — Cognitive World Belief Container.
 
 Maintains cognitive beliefs, evidence sources, and certainty levels about the world.
 Strict invariant: WorldBeliefGraph CANNOT directly mutate DigitalTwinRegistry.
+Beliefs and state mutations are proposed as transactional operations or lifted to CausalPredicates.
 """
 
 from __future__ import annotations
@@ -10,9 +10,14 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_state_interpreter import InterpretedBeliefHypothesis
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +59,35 @@ class WorldBeliefNode:
             self.confidence = map_state[1]
         self.last_updated = time.time()
         return self.distribution
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export belief node as a declarative Pearl causal predicate."""
+        return CausalPredicate(
+            variable=f"{self.subject}_{self.predicate}",
+            operator="==",
+            value=self.value,
+            relation=",".join(self.evidence_sources) if self.evidence_sources else "belief",
+            target_entity=self.subject,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction updating cognitive belief node."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=self.belief_id,
+                node_data={
+                    "belief_id": self.belief_id,
+                    "subject": self.subject,
+                    "predicate": self.predicate,
+                    "value": self.value,
+                    "confidence": self.confidence,
+                    "evidence_sources": list(self.evidence_sources),
+                    "is_latent": self.is_latent,
+                    "last_updated": self.last_updated,
+                },
+            )
+        ]
 
 
 class WorldBeliefGraph:
@@ -115,3 +149,22 @@ class WorldBeliefGraph:
     def all_beliefs(self) -> list[WorldBeliefNode]:
         """Retrieve all beliefs in the graph."""
         return list(self._beliefs.values())
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all beliefs as declarative causal predicates."""
+        return [b.to_causal_predicate() for b in self._beliefs.values()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting the belief graph."""
+        ops: list[TransactionOperation] = []
+        for b in self._beliefs.values():
+            ops.extend(b.to_transaction_operations())
+        return ops
+
+    def to_world_theory(self) -> HCIRSymbolicWorldTheory:
+        """Synthesize an empirical HCIRSymbolicWorldTheory from current beliefs."""
+        from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+
+        theory = HCIRSymbolicWorldTheory()
+        theory.goal_predicates.extend(self.export_causal_predicates())
+        return theory
