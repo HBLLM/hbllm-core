@@ -203,6 +203,26 @@ class TestVisualSymmetryAnalyzer:
         target_feat = [d[2] for d in discrepancies if (d[0], d[1]) == (2, 4)][0]
         assert target_feat == 4
 
+    def test_symmetry_structured_analysis_and_causal_predicate(self) -> None:
+        """Test analyze_symmetry, analyze_tiling, and CausalPredicate generation."""
+        # 4x4 vertically symmetric grid (top row only: left=right, top!=bottom)
+        grid = np.zeros((4, 4), dtype=int)
+        grid[0, 0] = 3
+        grid[0, 3] = 3
+
+        result = VisualSymmetryAnalyzer.analyze_symmetry(grid)
+        assert result.dominant_axis == "vertical"
+        assert result.is_symmetric is True
+        pred = result.to_symbolic_predicate()
+        assert pred.variable == "visual_symmetry"
+        assert pred.value == "vertical"
+
+        # Tiling
+        tile_res = VisualSymmetryAnalyzer.analyze_tiling(grid)
+        assert tile_res.confidence >= 0.0
+        tile_pred = tile_res.to_symbolic_predicate()
+        assert tile_pred.variable == "periodic_tiling"
+
 
 class TestSpatiotemporalCollisionCones:
     """Test Premotor collision cone projection with static boundary rebound."""
