@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.causal_discovery import BeliefTransitionType
 from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
 from hbllm.hcir.world.cortex_causal import CausalInductionCortex, HCIRSymbolicWorldTheory
@@ -264,6 +265,22 @@ class TestInferotemporalSegmentation:
         # Unvisited anchor at (1, 1) should have higher priority than habituated (5, 5)
         top_anchor = anchors[0]
         assert (top_anchor[0], top_anchor[1]) == (1, 1)
+
+    def test_token_lifting_to_spatial_entity_and_manipulable_extraction(self) -> None:
+        grid = np.zeros((10, 10), dtype=int)
+        grid[2:4, 3:6] = 4
+        grid[8, 8] = 7
+
+        entities = InferotemporalSegmentationEngine.extract_manipulable_entities(
+            grid, background_feature=0
+        )
+        assert len(entities) == 2
+        for ent in entities:
+            assert isinstance(ent, SpatialEntity)
+            assert ent.role == EntityRole.MANIPULABLE
+            assert ent.area > 0
+            assert "salience_score" in ent.properties
+            assert "is_compact" in ent.properties
 
 
 class TestOpticalRayProjector:

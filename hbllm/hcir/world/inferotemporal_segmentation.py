@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.ndimage import label
 
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,27 @@ class VentralObjectToken:
     is_compact: bool
     cells: list[tuple[int, int]] = field(default_factory=list)
     salience_score: float = 0.0
+
+    def to_spatial_entity(self, role: EntityRole = EntityRole.UNKNOWN) -> SpatialEntity:
+        """Lift this ventral object token into a formal HCIR SpatialEntity component."""
+        min_r, min_c, max_r, max_c = self.bounding_box
+        return SpatialEntity(
+            id=f"ventral_{self.feature_id}_{self.object_id}_{min_r}_{min_c}",
+            role=role,
+            centroid=(float(self.centroid[0]), float(self.centroid[1])),
+            grid_pos=self.anchor_coord,
+            area=self.area,
+            bounding_box=(min_r, max_r, min_c, max_c),
+            feature_id=self.feature_id,
+            properties={
+                "cells": self.cells,
+                "feature": self.feature_id,
+                "feature_id": self.feature_id,
+                "salience_score": self.salience_score,
+                "is_compact": self.is_compact,
+                "aspect_ratio": self.aspect_ratio,
+            },
+        )
 
 
 class InferotemporalSegmentationEngine:
@@ -212,3 +235,22 @@ class InferotemporalSegmentationEngine:
 
         candidates.sort(key=lambda x: x[2], reverse=True)
         return candidates
+
+    @classmethod
+    def extract_manipulable_entities(
+        cls,
+        grid: np.ndarray,
+        background_feature: int = 0,
+        avatar_features: set[int] | None = None,
+        min_area: int = 1,
+        max_area: int = 256,
+    ) -> list[SpatialEntity]:
+        """Extract high-salience object tokens and lift them into typed SpatialEntity components."""
+        tokens = cls.segment_objects(
+            grid=grid,
+            background_feature=background_feature,
+            avatar_features=avatar_features,
+            min_area=min_area,
+            max_area=max_area,
+        )
+        return [t.to_spatial_entity(role=EntityRole.MANIPULABLE) for t in tokens]
