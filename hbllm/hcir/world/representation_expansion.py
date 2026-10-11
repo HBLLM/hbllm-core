@@ -15,6 +15,9 @@ Also implements rigorous causal controls and ablations:
 - Correspondence-Disabled Control: Proving that particle correspondence matching is causally necessary.
 - Conditions-Disabled Control: Proving that inferred collision boundaries are causally necessary.
 - Multi-Hypothesis Ambiguity Safeguard with Calibrated Epistemic Uncertainty.
+
+Domain 10: Abstract Concepts & Compositional Structures (W091–W100):
+- Object, region, relational, transformation, and hierarchical abstraction schemas.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import label
 
 from hbllm.hcir.world.elastic_particle_induction import (
     ElasticParticleDeflectionOperator,
@@ -69,7 +73,8 @@ class SynthesizedCellularFluxOperator(GridOperator):
     """Algorithmically synthesized cellular flux / propagation operator.
 
     Constructed inductively from categorical residual events E = {(r, c, x, y) | x != y}.
-    Supports directional particle settling, optical ray projection, and flood infill.
+    Supports directional particle settling, optical ray projection, flood infill,
+    alternating pattern extrapolation, and component size ranking.
     """
 
     def __init__(
@@ -102,22 +107,21 @@ class SynthesizedCellularFluxOperator(GridOperator):
     def apply(self, grid: np.ndarray, binding: OperatorBinding) -> np.ndarray:
         p = binding.params if binding and binding.params else self.params
         out = grid.copy()
-        H, W = out.shape
+        h, w = out.shape
 
         if self.flux_mode == "directional_settle":
             dr, dc = self.direction
             barrier_col = p.get("barrier_color", 5)
-            # Downward settling
             if dr > 0 and dc == 0:
-                for c in range(W):
+                for c in range(w):
                     col = out[:, c]
-                    barrier_rows = [r for r in range(H) if col[r] == barrier_col]
+                    barrier_rows = [r for r in range(h) if col[r] == barrier_col]
                     segments = []
                     prev_r = -1
                     for b_r in barrier_rows:
                         segments.append((prev_r + 1, b_r - 1))
                         prev_r = b_r
-                    segments.append((prev_r + 1, H - 1))
+                    segments.append((prev_r + 1, h - 1))
 
                     for r_start, r_end in segments:
                         if r_start <= r_end:
@@ -141,7 +145,7 @@ class SynthesizedCellularFluxOperator(GridOperator):
             emitters = np.argwhere(grid == emitter_col)
             for er, ec in emitters:
                 r, c = er + dr, ec + dc
-                while 0 <= r < H and 0 <= c < W:
+                while 0 <= r < h and 0 <= c < w:
                     if out[r, c] == obstacle_col:
                         break
                     out[r, c] = beam_col
@@ -166,36 +170,19 @@ class SynthesizedCellularFluxOperator(GridOperator):
         elif self.flux_mode == "alternating_pattern":
             col_a = p.get("col_a", 4)
             col_b = p.get("col_b", 6)
-            for r in range(H):
-                for c in range(W):
+            for r in range(h):
+                for c in range(w):
                     out[r, c] = col_a if (r + c) % 2 == 0 else col_b
             return out
 
         elif self.flux_mode == "component_size_rank":
             largest_col = p.get("largest_col", 2)
             smallest_col = p.get("smallest_col", 3)
-            visited = np.zeros_like(grid, dtype=bool)
+            labeled, num_features = label(grid != 0)
             comps = []
-            for r in range(H):
-                for c in range(W):
-                    if grid[r, c] != 0 and not visited[r, c]:
-                        comp = []
-                        q = [(r, c)]
-                        visited[r, c] = True
-                        while q:
-                            curr_r, curr_c = q.pop(0)
-                            comp.append((curr_r, curr_c))
-                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                                nr, nc = curr_r + dr, curr_c + dc
-                                if (
-                                    0 <= nr < H
-                                    and 0 <= nc < W
-                                    and grid[nr, nc] != 0
-                                    and not visited[nr, nc]
-                                ):
-                                    visited[nr, nc] = True
-                                    q.append((nr, nc))
-                        comps.append(comp)
+            for feat_id in range(1, num_features + 1):
+                pts = list(zip(*np.where(labeled == feat_id), strict=False))
+                comps.append(pts)
             if comps:
                 comps.sort(key=len, reverse=True)
                 for r, c in comps[0]:
@@ -244,20 +231,20 @@ class SynthesizedCellularAutomatonOperator(GridOperator):
         ]
 
     def apply(self, grid: np.ndarray, binding: OperatorBinding) -> np.ndarray:
-        H, W = grid.shape
+        h, w = grid.shape
         out = grid.copy()
         offsets = (
             [(-1, 0), (1, 0), (0, -1), (0, 1)]
             if self.neighborhood_type == "4_neighbor"
             else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
         )
-        for r in range(H):
-            for c in range(W):
+        for r in range(h):
+            for c in range(w):
                 s = int(grid[r, c])
                 k = 0
                 for dr, dc in offsets:
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] != 0:
+                    if 0 <= nr < h and 0 <= nc < w and grid[nr, nc] != 0:
                         k += 1
                 out[r, c] = self.transition_table.get((s, k), 0)
         return out
@@ -277,166 +264,147 @@ class InductiveCellularFluxSynthesizer:
     """
 
     @classmethod
-    def synthesize_operator_from_residuals(
+    def _synthesize_directional_settle(
         cls,
+        src_events: list[ResidualEvent],
+        dst_events: list[ResidualEvent],
+        static_context: dict[tuple[int, int], int],
         train_pairs: list[tuple[np.ndarray, np.ndarray]],
-        enable_correspondence: bool = True,
-        enable_propagation_conditions: bool = True,
+        x0: np.ndarray,
+        y0: np.ndarray,
+        enable_propagation_conditions: bool,
     ) -> GridOperator | None:
-        """Analyze categorical residual events and construct an operator."""
-        if not train_pairs:
+        """Synthesize directional particle settling operator from 1-to-1 correspondences."""
+        if not (src_events and dst_events and len(src_events) == len(dst_events)):
             return None
 
-        x0, y0 = train_pairs[0]
-        if x0.shape != y0.shape:
+        src_colors = sorted([e.x_val for e in src_events])
+        dst_colors = sorted([e.y_val for e in dst_events])
+        if src_colors != dst_colors:
             return None
 
-        H, W = x0.shape
+        candidate_directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        valid_directions = []
 
-        # Construct Categorical Residual Event Set E
-        events: list[ResidualEvent] = []
-        for r in range(H):
-            for c in range(W):
-                xv, yv = int(x0[r, c]), int(y0[r, c])
-                if xv != yv:
-                    events.append(ResidualEvent(r, c, xv, yv))
-
-        if not events:
-            return None
-
-        # Partition events into Source, Destination, and Static Context
-        src_events = [e for e in events if e.x_val != 0 and e.y_val == 0]
-        dst_events = [e for e in events if e.x_val == 0 and e.y_val != 0]
-        static_context = {
-            (r, c): int(x0[r, c])
-            for r in range(H)
-            for c in range(W)
-            if x0[r, c] != 0 and x0[r, c] == y0[r, c]
-        }
-
-        # If correspondence matching is ablated, cannot link sources to destinations
-        if not enable_correspondence:
-            return None
-
-        # ---------------------------------------------------------------------
-        # 1. Test for Directional Settling / Particle Dynamics
-        # ---------------------------------------------------------------------
-        # Condition: Every source event has a corresponding destination event of the same color
-        # displaced along a candidate flux direction vector under a 1-to-1 bipartite matching
-        if src_events and dst_events and len(src_events) == len(dst_events):
-            src_colors = sorted([e.x_val for e in src_events])
-            dst_colors = sorted([e.y_val for e in dst_events])
-
-            if src_colors == dst_colors:
-                candidate_directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                valid_directions = []
-
-                for dr, dc in candidate_directions:
-                    matched_dsts = set()
-                    all_matched = True
-                    for s in src_events:
-                        found_match = False
-                        for d_idx, d in enumerate(dst_events):
-                            if d_idx in matched_dsts:
-                                continue
-                            if d.y_val == s.x_val:
-                                delta_r = d.r - s.r
-                                delta_c = d.c - s.c
-                                if (dr != 0 and delta_c == 0 and delta_r * dr > 0) or (
-                                    dc != 0 and delta_r == 0 and delta_c * dc > 0
-                                ):
-                                    matched_dsts.add(d_idx)
-                                    found_match = True
-                                    break
-                        if not found_match:
-                            all_matched = False
+        for dr, dc in candidate_directions:
+            matched_dsts: set[int] = set()
+            all_matched = True
+            for s in src_events:
+                found_match = False
+                for d_idx, d in enumerate(dst_events):
+                    if d_idx in matched_dsts:
+                        continue
+                    if d.y_val == s.x_val:
+                        delta_r = d.r - s.r
+                        delta_c = d.c - s.c
+                        if (dr != 0 and delta_c == 0 and delta_r * dr > 0) or (
+                            dc != 0 and delta_r == 0 and delta_c * dc > 0
+                        ):
+                            matched_dsts.add(d_idx)
+                            found_match = True
                             break
-                    if all_matched and len(matched_dsts) == len(src_events):
-                        valid_directions.append((dr, dc))
+                if not found_match:
+                    all_matched = False
+                    break
+            if all_matched and len(matched_dsts) == len(src_events):
+                valid_directions.append((dr, dc))
 
-                if valid_directions:
-                    chosen_dir = valid_directions[0]
+        if not valid_directions:
+            return None
 
-                    if not enable_propagation_conditions:
-                        # Ablation: Without inferred propagation conditions, cannot determine barrier
-                        return None
+        chosen_dir = valid_directions[0]
+        if not enable_propagation_conditions:
+            return None
 
-                    dr, dc = chosen_dir
-                    # Infer collision / barrier boundary condition:
-                    # Look at what sits directly adjacent along displacement direction
-                    barrier_cols = set()
-                    for d in dst_events:
-                        adj_coord = (d.r + dr, d.c + dc)
-                        if adj_coord in static_context:
-                            barrier_cols.add(static_context[adj_coord])
+        dr, dc = chosen_dir
+        barrier_cols = set()
+        for d in dst_events:
+            adj_coord = (d.r + dr, d.c + dc)
+            if adj_coord in static_context:
+                barrier_cols.add(static_context[adj_coord])
 
-                    particle_colors = {s.x_val for s in src_events}
-                    barrier_candidates = (
-                        [c for c in barrier_cols if c not in particle_colors]
-                        or list(barrier_cols)
-                        or [5]
-                    )
-                    for barrier_col in barrier_candidates:
-                        op = SynthesizedCellularFluxOperator(
-                            name=f"synthesized_settle_{dr}_{dc}",
-                            flux_mode="directional_settle",
-                            direction=(dr, dc),
-                            params={"barrier_color": barrier_col},
-                            complexity=2.1,
-                        )
-                        binding = op.propose({}, {"train_pairs": train_pairs})[0]
-                        pred0 = op.apply(x0, binding)
-                        if np.array_equal(pred0, y0):
-                            return op
+        particle_colors = {s.x_val for s in src_events}
+        barrier_candidates = (
+            [c for c in barrier_cols if c not in particle_colors] or list(barrier_cols) or [5]
+        )
+        for barrier_col in barrier_candidates:
+            op = SynthesizedCellularFluxOperator(
+                name=f"synthesized_settle_{dr}_{dc}",
+                flux_mode="directional_settle",
+                direction=(dr, dc),
+                params={"barrier_color": barrier_col},
+                complexity=2.1,
+            )
+            binding = op.propose({}, {"train_pairs": train_pairs})[0]
+            pred0 = op.apply(x0, binding)
+            if np.array_equal(pred0, y0):
+                return op
 
-        # ---------------------------------------------------------------------
-        # 2. Test for Optical Ray Projection
-        # ---------------------------------------------------------------------
-        # Condition: No particles vacated (src_events empty), but new continuous beam
-        # pixels created along ray vector from a static emitter cell in static_context
-        if not src_events and dst_events:
-            beam_color = dst_events[0].y_val
-            # Test candidate ray directions
-            for dr, dc in [(1, 1), (1, -1), (-1, 1), (-1, -1), (0, 1), (0, -1), (1, 0), (-1, 0)]:
-                # Check if beam cells align along (dr, dc) from an adjacent emitter
-                emitters_found = []
-                for d in dst_events:
-                    er, ec = d.r - dr, d.c - dc
-                    if (er, ec) in static_context:
-                        emitters_found.append(static_context[(er, ec)])
+        return None
 
-                if emitters_found:
-                    emitter_col = emitters_found[0]
+    @classmethod
+    def _synthesize_directional_ray_cast(
+        cls,
+        src_events: list[ResidualEvent],
+        dst_events: list[ResidualEvent],
+        static_context: dict[tuple[int, int], int],
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        x0: np.ndarray,
+        y0: np.ndarray,
+        enable_propagation_conditions: bool,
+    ) -> GridOperator | None:
+        """Synthesize optical ray casting operator projecting from an adjacent emitter."""
+        if src_events or not dst_events:
+            return None
 
-                    if not enable_propagation_conditions:
-                        return None
+        beam_color = dst_events[0].y_val
+        for dr, dc in [(1, 1), (1, -1), (-1, 1), (-1, -1), (0, 1), (0, -1), (1, 0), (-1, 0)]:
+            emitters_found = []
+            for d in dst_events:
+                er, ec = d.r - dr, d.c - dc
+                if (er, ec) in static_context:
+                    emitters_found.append(static_context[(er, ec)])
 
-                    # Infer obstacle / collision boundary that stops the ray
-                    obstacle_col = 5
-                    for (er, ec), scol in static_context.items():
-                        if scol != emitter_col:
-                            obstacle_col = scol
-                            break
+            if emitters_found:
+                emitter_col = emitters_found[0]
+                if not enable_propagation_conditions:
+                    return None
 
-                    op = SynthesizedCellularFluxOperator(
-                        name=f"synthesized_ray_cast_{dr}_{dc}",
-                        flux_mode="directional_ray_cast",
-                        direction=(dr, dc),
-                        params={
-                            "emitter_color": emitter_col,
-                            "beam_color": beam_color,
-                            "obstacle_color": obstacle_col,
-                        },
-                        complexity=2.3,
-                    )
-                    binding = op.propose({}, {"train_pairs": train_pairs})[0]
-                    pred0 = op.apply(x0, binding)
-                    if np.array_equal(pred0, y0):
-                        return op
+                obstacle_col = 5
+                for (er, ec), scol in static_context.items():
+                    if scol != emitter_col:
+                        obstacle_col = scol
+                        break
 
-        # ---------------------------------------------------------------------
-        # 3. Test for Contour Infill (if not solved at Level 2)
-        # ---------------------------------------------------------------------
+                op = SynthesizedCellularFluxOperator(
+                    name=f"synthesized_ray_cast_{dr}_{dc}",
+                    flux_mode="directional_ray_cast",
+                    direction=(dr, dc),
+                    params={
+                        "emitter_color": emitter_col,
+                        "beam_color": beam_color,
+                        "obstacle_color": obstacle_col,
+                    },
+                    complexity=2.3,
+                )
+                binding = op.propose({}, {"train_pairs": train_pairs})[0]
+                pred0 = op.apply(x0, binding)
+                if np.array_equal(pred0, y0):
+                    return op
+
+        return None
+
+    @classmethod
+    def _synthesize_interior_infill(
+        cls,
+        src_events: list[ResidualEvent],
+        dst_events: list[ResidualEvent],
+        static_context: dict[tuple[int, int], int],
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        x0: np.ndarray,
+        y0: np.ndarray,
+    ) -> GridOperator | None:
+        """Synthesize closed-boundary interior infill operator."""
         if not src_events and dst_events and static_context:
             border_col = list(static_context.values())[0]
             fill_col = dst_events[0].y_val
@@ -451,13 +419,17 @@ class InductiveCellularFluxSynthesizer:
             pred0 = op.apply(x0, binding)
             if np.array_equal(pred0, y0):
                 return op
+        return None
 
-        # ---------------------------------------------------------------------
-        # 4. Test for 2D Cellular Automaton Local Transition Law
-        # ---------------------------------------------------------------------
-        if not enable_correspondence:
-            return None
-
+    @classmethod
+    def _synthesize_cellular_automaton(
+        cls,
+        x0: np.ndarray,
+        y0: np.ndarray,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+    ) -> GridOperator | None:
+        """Induce local transition laws for a 2D cellular automaton."""
+        h, w = x0.shape
         for neigh_name, offsets in [
             ("4_neighbor", [(-1, 0), (1, 0), (0, -1), (0, 1)]),
             (
@@ -467,18 +439,16 @@ class InductiveCellularFluxSynthesizer:
         ]:
             observed_map: dict[tuple[int, int], set[int]] = {}
             consistent = True
-            for r in range(H):
-                for c in range(W):
+            for r in range(h):
+                for c in range(w):
                     cell_st: int = int(x0[r, c])
-                    k = 0
-                    for dr, dc in offsets:
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < H and 0 <= nc < W and x0[nr, nc] != 0:
-                            k += 1
+                    k = sum(
+                        1
+                        for dr, dc in offsets
+                        if 0 <= r + dr < h and 0 <= c + dc < w and x0[r + dr, c + dc] != 0
+                    )
                     y_val = int(y0[r, c])
-                    if (cell_st, k) not in observed_map:
-                        observed_map[(cell_st, k)] = set()
-                    observed_map[(cell_st, k)].add(y_val)
+                    observed_map.setdefault((cell_st, k), set()).add(y_val)
                     if len(observed_map[(cell_st, k)]) > 1:
                         consistent = False
                         break
@@ -488,13 +458,13 @@ class InductiveCellularFluxSynthesizer:
             if consistent and observed_map:
                 table = {key: list(vals)[0] for key, vals in observed_map.items()}
                 changes_explained = 0
-                for r in range(H):
-                    for c in range(W):
+                for r in range(h):
+                    for c in range(w):
                         cell_st_2: int = int(x0[r, c])
                         k = sum(
                             1
                             for dr, dc in offsets
-                            if 0 <= r + dr < H and 0 <= c + dc < W and x0[r + dr, c + dc] != 0
+                            if 0 <= r + dr < h and 0 <= c + dc < w and x0[r + dr, c + dc] != 0
                         )
                         pred_val = table.get((cell_st_2, k), 0)
                         if pred_val != int(x0[r, c]) and pred_val == int(y0[r, c]):
@@ -511,17 +481,24 @@ class InductiveCellularFluxSynthesizer:
                     pred0 = ca_op.apply(x0, binding)
                     if np.array_equal(pred0, y0):
                         return ca_op
+        return None
 
-        # ---------------------------------------------------------------------
-        # 5. Test for Periodic Alternating Pattern Extrapolation
-        # ---------------------------------------------------------------------
-        if H >= 2 and W >= 2:
+    @classmethod
+    def _synthesize_alternating_pattern(
+        cls,
+        y0: np.ndarray,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        x0: np.ndarray,
+    ) -> GridOperator | None:
+        """Induce periodic 2D checkerboard/alternating pattern extrapolation."""
+        h, w = y0.shape
+        if h >= 2 and w >= 2:
             col_a, col_b = int(y0[0, 0]), int(y0[0, 1])
             if col_a != 0 and col_b != 0 and col_a != col_b:
                 is_alt = all(
                     int(y0[r, c]) == (col_a if (r + c) % 2 == 0 else col_b)
-                    for r in range(H)
-                    for c in range(W)
+                    for r in range(h)
+                    for c in range(w)
                 )
                 if is_alt:
                     alt_op = SynthesizedCellularFluxOperator(
@@ -535,32 +512,21 @@ class InductiveCellularFluxSynthesizer:
                     pred0 = alt_op.apply(x0, binding)
                     if np.array_equal(pred0, y0):
                         return alt_op
+        return None
 
-        # ---------------------------------------------------------------------
-        # 6. Test for Connected Component Size Rank
-        # ---------------------------------------------------------------------
-        visited_x = np.zeros_like(x0, dtype=bool)
+    @classmethod
+    def _synthesize_component_size_rank(
+        cls,
+        x0: np.ndarray,
+        y0: np.ndarray,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+    ) -> GridOperator | None:
+        """Induce ranking operator recoloring components by topological area."""
+        labeled_x, num_features = label(x0 != 0)
         comps_x = []
-        for r in range(H):
-            for c in range(W):
-                if x0[r, c] != 0 and not visited_x[r, c]:
-                    comp = []
-                    q = [(r, c)]
-                    visited_x[r, c] = True
-                    while q:
-                        curr_r, curr_c = q.pop(0)
-                        comp.append((curr_r, curr_c))
-                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                            nr, nc = curr_r + dr, curr_c + dc
-                            if (
-                                0 <= nr < H
-                                and 0 <= nc < W
-                                and x0[nr, nc] != 0
-                                and not visited_x[nr, nc]
-                            ):
-                                visited_x[nr, nc] = True
-                                q.append((nr, nc))
-                    comps_x.append(comp)
+        for feat_id in range(1, num_features + 1):
+            coords = list(zip(*np.where(labeled_x == feat_id), strict=False))
+            comps_x.append(coords)
 
         if len(comps_x) >= 2:
             comps_x.sort(key=len, reverse=True)
@@ -578,6 +544,94 @@ class InductiveCellularFluxSynthesizer:
                 pred0 = rank_op.apply(x0, binding)
                 if np.array_equal(pred0, y0):
                     return rank_op
+        return None
+
+    @classmethod
+    def synthesize_operator_from_residuals(
+        cls,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        enable_correspondence: bool = True,
+        enable_propagation_conditions: bool = True,
+    ) -> GridOperator | None:
+        """Analyze categorical residual events and construct an operator."""
+        if not train_pairs:
+            return None
+
+        x0, y0 = train_pairs[0]
+        if x0.shape != y0.shape:
+            return None
+
+        h, w = x0.shape
+        events: list[ResidualEvent] = []
+        for r in range(h):
+            for c in range(w):
+                xv, yv = int(x0[r, c]), int(y0[r, c])
+                if xv != yv:
+                    events.append(ResidualEvent(r, c, xv, yv))
+
+        if not events:
+            return None
+
+        src_events = [e for e in events if e.x_val != 0 and e.y_val == 0]
+        dst_events = [e for e in events if e.x_val == 0 and e.y_val != 0]
+        static_context = {
+            (r, c): int(x0[r, c])
+            for r in range(h)
+            for c in range(w)
+            if x0[r, c] != 0 and x0[r, c] == y0[r, c]
+        }
+
+        # If correspondence matching is ablated, cannot link sources to destinations
+        if not enable_correspondence:
+            return None
+
+        # 1. Directional Settling / Particle Dynamics
+        op = cls._synthesize_directional_settle(
+            src_events,
+            dst_events,
+            static_context,
+            train_pairs,
+            x0,
+            y0,
+            enable_propagation_conditions,
+        )
+        if op is not None:
+            return op
+
+        # 2. Optical Ray Projection
+        op = cls._synthesize_directional_ray_cast(
+            src_events,
+            dst_events,
+            static_context,
+            train_pairs,
+            x0,
+            y0,
+            enable_propagation_conditions,
+        )
+        if op is not None:
+            return op
+
+        # 3. Contour Infill
+        op = cls._synthesize_interior_infill(
+            src_events, dst_events, static_context, train_pairs, x0, y0
+        )
+        if op is not None:
+            return op
+
+        # 4. 2D Cellular Automaton Local Transition Law
+        op = cls._synthesize_cellular_automaton(x0, y0, train_pairs)
+        if op is not None:
+            return op
+
+        # 5. Periodic Alternating Pattern Extrapolation
+        op = cls._synthesize_alternating_pattern(y0, train_pairs, x0)
+        if op is not None:
+            return op
+
+        # 6. Connected Component Size Rank
+        op = cls._synthesize_component_size_rank(x0, y0, train_pairs)
+        if op is not None:
+            return op
 
         return None
 
@@ -589,18 +643,7 @@ class InductiveCellularFluxSynthesizer:
 
 @dataclass
 class RepresentationRevisionTrace:
-    """Audit trace documenting the rigorous Level 3 representation revision process.
-
-    1. Initial hypothesis language failure (phase1_inadequacy_detected).
-    2. Specific unexplained categorical observations (unexplained_residual_pixels).
-    3. Candidate operator dynamically synthesized (synthesized_operator_name).
-    4. Out-of-construction verification on demo 1..N (out_of_construction_verified).
-    5. Generalization prediction on held-out test query (phase2_exact_match).
-    6. Multi-task reusability test on independent task (reusable_on_novel_task).
-    7. Synthesis-disabled control ablation (control_ablation_passed).
-    8. Correspondence-disabled control ablation (correspondence_ablation_passed).
-    9. Propagation-conditions-disabled control ablation (conditions_ablation_passed).
-    """
+    """Audit trace documenting the rigorous Level 3 representation revision process."""
 
     task_id: str
     family: str
@@ -635,7 +678,6 @@ class RepresentationExpansionEngine:
         enable_propagation_conditions: bool = True,
     ) -> RepresentationRevisionTrace:
         """Execute Level 3 representation revision with strict airgap from test output ground truth."""
-        # Step 1: Base Solver Execution (fails if outside vocabulary)
         base_solver = TransformationProgramSearch(max_depth=3, use_mdl=True, enable_relational=True)
         pred1, rule1, meta1 = base_solver.solve(train_pairs, test_input)
 
@@ -695,7 +737,6 @@ class RepresentationExpansionEngine:
 
         out_of_construction_verified = False
         if synthesized_op is not None:
-            # Step 3: Out-of-construction verification on subsequent demonstration pairs
             out_of_construction_verified = True
             binding = synthesized_op.propose({}, {"train_pairs": train_pairs})[0]
             for xi, yi in train_pairs[1:]:
@@ -704,8 +745,7 @@ class RepresentationExpansionEngine:
                     out_of_construction_verified = False
                     break
 
-        # Step 3b: If local cellular synthesis failed or overfitted/refuted on Demo 2..k,
-        # escalate to global modular scalar invariant induction (Milestone 3 Phase 1)
+        # Step 3b: Global modular scalar invariant induction (Milestone 3 Phase 1)
         if not out_of_construction_verified:
             global_op = InductiveGlobalInvariantSynthesizer.synthesize_from_demonstrations(
                 train_pairs
@@ -714,16 +754,14 @@ class RepresentationExpansionEngine:
                 synthesized_op = global_op
                 out_of_construction_verified = True
 
-        # Step 3c: If local and scalar invariants failed,
-        # escalate to topological geodesic graph induction (Milestone 3 Phase 2)
+        # Step 3c: Topological geodesic graph induction (Milestone 3 Phase 2)
         if not out_of_construction_verified:
             topo_op = InductiveTopologicalGraphSynthesizer.synthesize_from_residuals(train_pairs)
             if topo_op is not None:
                 synthesized_op = topo_op
                 out_of_construction_verified = True
 
-        # Step 3d: If local, scalar, and topological synthesizers failed,
-        # escalate to elastic particle deflection & ray kinematics induction (Milestone 3 Phase 3)
+        # Step 3d: Elastic particle deflection & ray kinematics induction (Milestone 3 Phase 3)
         if not out_of_construction_verified:
             particle_op = InductiveParticleDeflectionSynthesizer.synthesize_from_residuals(
                 train_pairs
@@ -764,13 +802,12 @@ class RepresentationExpansionEngine:
         phase2_solved = bool(meta2.get("solved", False))
         phase2_uncertainty = float(meta2.get("epistemic_uncertainty", 0.0))
 
-        # Check for multiple shortest path ambiguity (calibrated uncertainty)
         if isinstance(
             synthesized_op, GeodesicPathOperator
         ) and synthesized_op.has_multiple_shortest_paths(test_input):
             phase2_uncertainty = 1.0
 
-        # Step 5: Multi-Task Reusability Test on independent novel task instance
+        # Step 5: Multi-Task Reusability Test
         reusable = cls._verify_operator_reusability(synthesized_op)
 
         # Step 6: Control Ablation 1 (Synthesis Disabled)
@@ -842,7 +879,6 @@ class RepresentationExpansionEngine:
                     np.array_equal(trace.phase2_predicted_test, test_out)
                 )
         except Exception:
-            # Handles airgapped task proxy raising on test_output access
             pass
         return trace
 
@@ -856,7 +892,6 @@ class RepresentationExpansionEngine:
                 if v != 0:
                     active_col = v
                     break
-            # Place a 2x2 seed block in the center
             grid[2:4, 2:4] = active_col
             binding = operator.propose({}, {"train_pairs": [([grid], [grid])]})[0]
             result = operator.apply(grid, binding)
@@ -866,7 +901,6 @@ class RepresentationExpansionEngine:
             isinstance(operator, SynthesizedCellularFluxOperator)
             and operator.flux_mode == "directional_settle"
         ):
-            # Test on different 7x7 grid with 3 barriers and 4 floating particles
             grid = np.zeros((7, 7), dtype=int)
             grid[3, 1] = 5  # Barrier
             grid[5, 4] = 5  # Barrier
@@ -889,7 +923,6 @@ class RepresentationExpansionEngine:
             isinstance(operator, SynthesizedCellularFluxOperator)
             and operator.flux_mode == "directional_ray_cast"
         ):
-            # Test on 8x8 grid with emitter at (0, 0) and obstacle at (5, 5)
             grid = np.zeros((8, 8), dtype=int)
             grid[0, 0] = operator.params.get("emitter_color", 2)
             grid[5, 5] = operator.params.get("obstacle_color", 5)
@@ -941,6 +974,25 @@ class ObjectConcept:
     area: int
     aspect_ratio: float
     centroid: tuple[float, float] = (0.0, 0.0)
+
+    @classmethod
+    def from_spatial_entity(cls, entity: Any) -> ObjectConcept:
+        """Construct ObjectConcept from a SpatialEntity."""
+        ent_id = getattr(entity, "id", "obj_0")
+        color = getattr(entity, "feature_id", 0)
+        props = getattr(entity, "properties", {})
+        shape_sig = props.get("shape", "BLOB")
+        area = int(props.get("area", 1))
+        aspect = float(props.get("aspect_ratio", 1.0))
+        centroid = getattr(entity, "centroid", (0.0, 0.0))
+        return cls(
+            concept_id=str(ent_id),
+            color=int(color),
+            shape_signature=str(shape_sig),
+            area=area,
+            aspect_ratio=aspect,
+            centroid=centroid,
+        )
 
 
 @dataclass
@@ -1083,13 +1135,13 @@ class ConceptFormationEngine:
         max_r, max_c = int(np.max(coords[:, 0])), int(np.max(coords[:, 1]))
         bbox = (min_r, min_c, max_r, max_c)
 
-        H, W = grid.shape
+        h, w = grid.shape
         perimeter_cells = 0
         for r, c in coords:
             is_boundary = False
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr, nc = r + dr, c + dc
-                if not (0 <= nr < H and 0 <= nc < W) or not mask[nr, nc]:
+                if not (0 <= nr < h and 0 <= nc < w) or not mask[nr, nc]:
                     is_boundary = True
                     break
             if is_boundary:
