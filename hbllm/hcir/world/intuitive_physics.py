@@ -7,6 +7,8 @@ Modeled on mammalian cerebellar internal models and parietal VIP/LIP neural circ
    empty air / chasms.
 3. Ballistic Arc & Projectile Simulation: Projects forward parabolic trajectories for
    jumping, leaping, falling, and projectile launches.
+4. Declarative Neuro-Symbolic Integration: Converts ballistic landing forecasts into
+   SymbolicSubgoal targets, formal CausalPredicates, and HCIRSymbolicWorldTheory rules.
 """
 
 from __future__ import annotations
@@ -14,10 +16,33 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
+from enum import StrEnum
 
 import numpy as np
 
+from hbllm.hcir.skills.declarative import SpatialActionIntent, SymbolicSubgoal
+from hbllm.hcir.world.cortex_causal import CausalPredicate, HCIRSymbolicWorldTheory
+
 logger = logging.getLogger(__name__)
+
+
+class GravityDirection(StrEnum):
+    """Direction of the environmental gravitational force vector."""
+
+    DOWN = "down"
+    UP = "up"
+    LEFT = "left"
+    RIGHT = "right"
+    NONE = "none"
+
+
+class PhysicalState(StrEnum):
+    """Physical state of an entity undergoing kinematic simulation."""
+
+    GROUNDED = "grounded"
+    AIRBORNE_ASCENT = "airborne_ascent"
+    AIRBORNE_FALL = "airborne_fall"
+    LETHAL_TERMINAL = "lethal_terminal"
 
 
 @dataclass
@@ -28,6 +53,34 @@ class BallisticTrajectory:
     landing_pos: tuple[int, int]
     is_grounded: bool
     is_terminal_hazard: bool = False
+    physical_state: PhysicalState = PhysicalState.GROUNDED
+
+    def __post_init__(self) -> None:
+        if self.is_terminal_hazard:
+            self.physical_state = PhysicalState.LETHAL_TERMINAL
+        elif self.is_grounded:
+            self.physical_state = PhysicalState.GROUNDED
+        else:
+            self.physical_state = PhysicalState.AIRBORNE_FALL
+
+    def to_subgoal(
+        self, intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
+    ) -> SymbolicSubgoal:
+        """Lift projected ballistic landing target into a formal declarative SymbolicSubgoal."""
+        return SymbolicSubgoal(
+            intent=intent,
+            target_query={"target_position": self.landing_pos},
+        )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export ballistic trajectory endpoint as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="ballistic_landing",
+            operator="==",
+            value=self.landing_pos,
+            relation="terminal_hazard" if self.is_terminal_hazard else "grounded",
+            target_entity="avatar",
+        )
 
 
 class IntuitivePhysicsEngine:
@@ -46,7 +99,6 @@ class IntuitivePhysicsEngine:
     def reset_episode(self) -> None:
         """Reset transient episode observations while preserving calibrated physics laws."""
         self.observed_transitions.clear()
-        # Keep has_gravity if confirmed across multiple episodes, otherwise retain
         self.known_platforms.clear()
 
     def record_transition(
@@ -92,7 +144,7 @@ class IntuitivePhysicsEngine:
         static_barriers: set[tuple[int, int]] | None = None,
     ) -> bool:
         """Check if an entity at (r, c) rests on a solid surface / floor."""
-        H, W = grid.shape
+        H, _ = grid.shape
         below_r = r + 1
 
         # Grid bottom boundary acts as ground support
@@ -121,7 +173,7 @@ class IntuitivePhysicsEngine:
         Returns:
             (landing_pos, trajectory_path, is_lethal)
         """
-        H, W = grid.shape
+        H, _ = grid.shape
         cur_r = start_r
         cur_c = start_c
         trajectory: list[tuple[int, int]] = []
@@ -185,3 +237,42 @@ class IntuitivePhysicsEngine:
             is_grounded=True,
             is_terminal_hazard=is_lethal,
         )
+
+    def infer_gravity_direction(self) -> GravityDirection:
+        """Infer canonical direction of the detected environmental gravity field."""
+        if not self.has_gravity:
+            return GravityDirection.NONE
+        dr, dc = self.gravity_vector
+        if dr > 0:
+            return GravityDirection.DOWN
+        elif dr < 0:
+            return GravityDirection.UP
+        elif dc > 0:
+            return GravityDirection.RIGHT
+        elif dc < 0:
+            return GravityDirection.LEFT
+        return GravityDirection.NONE
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export calibrated physical laws into declarative Pearl causal predicates."""
+        predicates: list[CausalPredicate] = []
+        if self.has_gravity:
+            predicates.append(
+                CausalPredicate(
+                    variable="environmental_gravity",
+                    operator="==",
+                    value=self.gravity_vector,
+                    relation=str(self.infer_gravity_direction()),
+                    target_entity="environment",
+                )
+            )
+        return predicates
+
+    def to_world_theory(self, barrier_features: set[int] | None = None) -> HCIRSymbolicWorldTheory:
+        """Synthesize an empirical HCIRSymbolicWorldTheory capturing physical dynamics."""
+        theory = HCIRSymbolicWorldTheory()
+        if barrier_features:
+            for bf in barrier_features:
+                theory.induce_barrier(bf)
+        theory.barrier_predicates.extend(self.export_causal_predicates())
+        return theory

@@ -8,17 +8,44 @@ Modeled on primate dorsal visual cortex (Area MT/V5) and corollary discharge:
 3. Autonomous Kinetic Agent Segregation: Isolates moving entities that deviate from the
    efference copy as autonomous dynamic agents / hazards, tracking their velocity vectors
    for predictive trajectory extrapolation.
+4. Declarative Neuro-Symbolic Integration: Converts kinetic entities into typed SpatialEntity
+   components, CausalPredicates, and atomic TransactionOperations.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
 
 import numpy as np
 from scipy.ndimage import label
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortex_causal import CausalPredicate
+from hbllm.hcir.world.cortex_perception import EntityRole, SpatialEntity
+
 logger = logging.getLogger(__name__)
+
+
+class KineticRole(StrEnum):
+    """Categorical role of a segregated kinetic entity."""
+
+    SELF_AVATAR = "self_avatar"
+    AUTONOMOUS_AGENT = "autonomous_agent"
+    DYNAMIC_HAZARD = "dynamic_hazard"
+    PASSIVE_DEBRIS = "passive_debris"
+    UNKNOWN = "unknown"
+
+
+class MotionType(StrEnum):
+    """Classified kinematic deformation of motion cluster."""
+
+    TRANSLATIONAL = "translational"
+    EXPANSIVE = "expansive"
+    CONTRACTIVE = "contractive"
+    STATIONARY = "stationary"
 
 
 @dataclass
@@ -33,6 +60,73 @@ class KineticEntity:
     features: set[int]
     is_self: bool = False
     confidence: float = 1.0
+    role: KineticRole = KineticRole.UNKNOWN
+    motion_type: MotionType = MotionType.TRANSLATIONAL
+    entity_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.is_self and self.role == KineticRole.UNKNOWN:
+            self.role = KineticRole.SELF_AVATAR
+        elif not self.is_self and self.role == KineticRole.UNKNOWN:
+            v_mag = abs(self.velocity[0]) + abs(self.velocity[1])
+            self.role = KineticRole.DYNAMIC_HAZARD if v_mag > 0 else KineticRole.PASSIVE_DEBRIS
+        if not self.entity_id:
+            prefix = "avatar" if self.is_self else "kinetic"
+            self.entity_id = (
+                f"{prefix}_{int(round(self.centroid[0]))}_{int(round(self.centroid[1]))}"
+            )
+
+    def to_spatial_entity(self, entity_id: str | None = None) -> SpatialEntity:
+        """Lift kinetic entity into a formal typed HCIR SpatialEntity."""
+        role_enum = EntityRole.AGENT if self.is_self else EntityRole.DYNAMIC_HAZARD
+        target_id = entity_id or self.entity_id
+        min_r, max_r, min_c, max_c = self.bounding_box
+        color_val = next(iter(self.features)) if self.features else 0
+        return SpatialEntity(
+            id=target_id,
+            role=role_enum,
+            centroid=self.centroid,
+            grid_pos=(int(round(self.centroid[0])), int(round(self.centroid[1]))),
+            area=self.area,
+            bounding_box=(min_r, max_r, min_c, max_c),
+            feature_id=color_val,
+            color=color_val,
+            properties={
+                "velocity": self.velocity,
+                "is_self": self.is_self,
+                "confidence": self.confidence,
+                "role": str(self.role),
+                "motion_type": str(self.motion_type),
+            },
+        )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export dynamic velocity and trajectory as a formal declarative CausalPredicate."""
+        return CausalPredicate(
+            variable="kinetic_velocity",
+            operator="==",
+            value=(round(self.velocity[0], 2), round(self.velocity[1], 2)),
+            relation=str(self.role),
+            target_entity="avatar" if self.is_self else self.entity_id,
+        )
+
+    def extrapolate_trajectory(
+        self, horizon: int = 3, grid_shape: tuple[int, int] | None = None
+    ) -> list[tuple[int, int]]:
+        """Project forward extrapolated trajectory for dynamic collision cones."""
+        trajectory: list[tuple[int, int]] = []
+        cur_r, cur_c = self.centroid[0], self.centroid[1]
+        dr, dc = self.velocity[0], self.velocity[1]
+
+        for step in range(1, horizon + 1):
+            nr = int(round(cur_r + dr * step))
+            nc = int(round(cur_c + dc * step))
+            if grid_shape is not None:
+                H, W = grid_shape
+                nr = max(0, min(H - 1, nr))
+                nc = max(0, min(W - 1, nc))
+            trajectory.append((nr, nc))
+        return trajectory
 
 
 @dataclass
@@ -43,6 +137,51 @@ class KineticSegregationResult:
     external_agents: list[KineticEntity] = field(default_factory=list)
     motion_energy: int = 0
     raw_delta: tuple[int, int] | None = None
+
+    def get_moving_agents(self) -> list[KineticEntity]:
+        """Retrieve external agents displaying non-zero translational velocity."""
+        return [
+            agent
+            for agent in self.external_agents
+            if abs(agent.velocity[0]) > 0.1 or abs(agent.velocity[1]) > 0.1
+        ]
+
+    def has_avatar_motion(self) -> bool:
+        """True if the self avatar underwent displacement during this frame."""
+        return self.self_avatar is not None and (
+            abs(self.self_avatar.velocity[0]) > 0.1 or abs(self.self_avatar.velocity[1]) > 0.1
+        )
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all segregated kinetic states into declarative causal predicates."""
+        predicates: list[CausalPredicate] = []
+        if self.self_avatar is not None:
+            predicates.append(self.self_avatar.to_causal_predicate())
+        for agent in self.external_agents:
+            predicates.append(agent.to_causal_predicate())
+        return predicates
+
+    def to_spatial_entities(self) -> list[SpatialEntity]:
+        """Lift all segregated kinetic entities into typed SpatialEntity components."""
+        entities: list[SpatialEntity] = []
+        if self.self_avatar is not None:
+            entities.append(self.self_avatar.to_spatial_entity())
+        for agent in self.external_agents:
+            entities.append(agent.to_spatial_entity())
+        return entities
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR state updates for all segregated entities."""
+        ops: list[TransactionOperation] = []
+        for entity in self.to_spatial_entities():
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=entity.id,
+                    node_data=entity.properties or {},
+                )
+            )
+        return ops
 
 
 class DorsalKineticStream:
@@ -75,7 +214,6 @@ class DorsalKineticStream:
         if prev_grid.shape != curr_grid.shape:
             return KineticSegregationResult()
 
-        H, W = curr_grid.shape
         diff_mask = prev_grid != curr_grid
         motion_energy = int(np.sum(diff_mask))
 
@@ -86,8 +224,8 @@ class DorsalKineticStream:
         labeled_diff, num_features = label(diff_mask)
 
         candidates: list[KineticEntity] = []
-        vacated_clusters: list[dict] = []
-        occupied_clusters: list[dict] = []
+        vacated_clusters: list[dict[str, Any]] = []
+        occupied_clusters: list[dict[str, Any]] = []
 
         for feat_id in range(1, num_features + 1):
             cluster_coords = np.argwhere(labeled_diff == feat_id)
@@ -111,7 +249,7 @@ class DorsalKineticStream:
                 if curr_grid[r, c] != background_feature and prev_grid[r, c] == background_feature
             ]
 
-            # If background_feature did not capture the substrate (e.g. floor substrate is 0 while bg is canvas color):
+            # If background_feature did not capture the substrate:
             if not vacated and not occupied:
                 prev_unique = {int(prev_grid[r, c]) for r, c in cells}
                 curr_unique = {int(curr_grid[r, c]) for r, c in cells}
@@ -250,7 +388,7 @@ class DorsalKineticStream:
                         }
                     )
 
-        # Match disjoint vacated clusters to occupied clusters (stride / jump motion >= entity size)
+        # Match disjoint vacated clusters to occupied clusters
         used_vac: set[int] = set()
         used_occ: set[int] = set()
 
@@ -324,8 +462,7 @@ class DorsalKineticStream:
             best_match_idx: int | None = None
             min_err = float("inf")
 
-            # Ventral body schema gating: if known_avatar_features is established,
-            # prioritize candidates that possess the avatar's visual features
+            # Ventral body schema gating:
             has_feat_match = known_avatar_features and any(
                 bool(cand.features & known_avatar_features) for cand in candidates
             )
@@ -346,6 +483,7 @@ class DorsalKineticStream:
             if best_match_idx is not None:
                 self_avatar = candidates[best_match_idx]
                 self_avatar.is_self = True
+                self_avatar.role = KineticRole.SELF_AVATAR
                 self_avatar.confidence = max(
                     0.6, 1.0 - (min_err / (self.velocity_tolerance + 1e-4))
                 )
@@ -360,6 +498,7 @@ class DorsalKineticStream:
                         if self_avatar is None:
                             self_avatar = cand
                             self_avatar.is_self = True
+                            self_avatar.role = KineticRole.SELF_AVATAR
                         else:
                             external_agents.append(cand)
                     else:
