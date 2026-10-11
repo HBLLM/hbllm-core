@@ -6,6 +6,8 @@ Modeled on the primate dorsolateral prefrontal cortex (dlPFC):
 2. Hierarchical Subgoal Decomposition: Formulates and manages multi-stage behavioral schemas:
    [Acquire Tool / Key] -> [Transport & Actuate Barrier] -> [Reach Primary Goal].
 3. Tool-Affordance Resonance: Learns and associates tool features with barrier features they unlock.
+4. Declarative Neuro-Symbolic Integration: Converts stages to SymbolicSubgoals and SubgoalSequences,
+   retains atomic TransactionOperation proposals, and grounds Pearl causal predicates.
 """
 
 from __future__ import annotations
@@ -14,6 +16,21 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from hbllm.hcir.skills.declarative import SpatialActionIntent, SubgoalSequence, SymbolicSubgoal
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
+from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
+from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
+from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
+from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
+from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
+from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
+from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +45,32 @@ class HeldItem:
     original_position: tuple[int, int]
     properties: dict[str, Any] = field(default_factory=dict)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export held item state as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="held_item",
+            operator="==",
+            value=self.feature_id,
+            relation=self.role,
+            target_entity="avatar",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR state updates reflecting held item permanence."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"held_item_{self.feature_id}",
+                node_data={
+                    "feature_id": self.feature_id,
+                    "role": self.role,
+                    "acquired_step": self.acquired_step,
+                    "original_position": self.original_position,
+                    "properties": dict(self.properties),
+                },
+            )
+        ]
+
 
 @dataclass
 class SubgoalStage:
@@ -39,6 +82,23 @@ class SubgoalStage:
     required_feature: int | None = None
     action_on_arrival: int | None = None  # None = CONTACT, or explicit action like 5
     is_completed: bool = False
+
+    def to_symbolic_subgoal(self) -> SymbolicSubgoal:
+        """Lift this stage to a declarative SymbolicSubgoal."""
+        intent = (
+            SpatialActionIntent.INTERACT
+            if self.stage_id == "UNLOCK_BARRIER"
+            else SpatialActionIntent.NAVIGATE
+        )
+        return SymbolicSubgoal(
+            intent=intent,
+            target_query={
+                "stage_id": self.stage_id,
+                "role": self.target_role,
+                "target_positions": list(self.target_positions),
+                "required_feature": self.required_feature,
+            },
+        )
 
 
 @dataclass
@@ -65,18 +125,9 @@ class SubgoalSchema:
     def is_finished(self) -> bool:
         return self.current_stage_idx >= len(self.stages)
 
-
-from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
-from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
-from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
-from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
-from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
-from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
-from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
-from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
-from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
-from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
-from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
+    def to_subgoal_sequence(self) -> SubgoalSequence:
+        """Convert all stages into a declarative HCIR SubgoalSequence."""
+        return SubgoalSequence(*[stage.to_symbolic_subgoal() for stage in self.stages])
 
 
 class PrefrontalWorkingMemory:
@@ -170,7 +221,6 @@ class PrefrontalWorkingMemory:
         properties: dict[str, Any] | None = None,
     ) -> None:
         """Store an acquired entity into prefrontal working memory (latent object permanence)."""
-        # Avoid duplicate entries for same item
         if not any(item.feature_id == feature_id for item in self.held_items):
             self.held_items.append(
                 HeldItem(
@@ -281,3 +331,26 @@ class PrefrontalWorkingMemory:
         )
         self.active_schema = schema
         return schema
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export working memory state into declarative causal predicates."""
+        predicates = [item.to_causal_predicate() for item in self.held_items]
+        for tool_feat, barrier_feats in self.tool_barrier_affinities.items():
+            for bf in barrier_feats:
+                predicates.append(
+                    CausalPredicate(
+                        variable="tool_barrier_affinity",
+                        operator="==",
+                        value=bf,
+                        relation=f"tool_{tool_feat}",
+                        target_entity="avatar",
+                    )
+                )
+        return predicates
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions reflecting latent object permanence."""
+        ops: list[TransactionOperation] = []
+        for item in self.held_items:
+            ops.extend(item.to_transaction_operations())
+        return ops

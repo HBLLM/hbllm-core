@@ -13,6 +13,8 @@ Modeled on primate visuospatial working memory and Baddeley's episodic buffer:
    - Row/Column stencil: click(r, c) inverts entire axis.
 4. Systematic Epistemic Scanning: Coordinates saccadic fixation in structured raster
    order over affordance arrays to avoid chaotic stochastic jitter.
+5. Declarative Neuro-Symbolic Integration: Synthesizes formal CausalPredicates, SymbolicSubgoals,
+   and atomic TransactionOperations for state-space working memory management.
 """
 
 from __future__ import annotations
@@ -21,6 +23,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
+
+from hbllm.hcir.skills.declarative import SpatialActionIntent, SymbolicSubgoal
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,16 @@ class WorkingMemorySlot:
     step_observed: int
     visit_count: int = 1
     properties: dict[str, Any] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export working memory slot binding as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="spatial_binding",
+            operator="==",
+            value=self.feature_id,
+            relation=f"step_{self.step_observed}",
+            target_entity=f"cell_{self.pos[0]}_{self.pos[1]}",
+        )
 
 
 class VisuospatialWorkingMemory:
@@ -138,6 +154,20 @@ class VisuospatialWorkingMemory:
 
         return None
 
+    def find_matching_pair_subgoal(
+        self,
+        current_pos: tuple[int, int],
+        current_feature: int,
+    ) -> SymbolicSubgoal | None:
+        """Emit a formal declarative SymbolicSubgoal targeting a matching pair coordinate."""
+        match_pos = self.find_matching_pair(current_pos, current_feature)
+        if match_pos is None:
+            return None
+        return SymbolicSubgoal(
+            intent=SpatialActionIntent.NAVIGATE,
+            target_query={"target_position": match_pos, "feature_id": current_feature},
+        )
+
     def mark_resolved(self, coords: set[tuple[int, int]]) -> None:
         """Mark coordinates as resolved / cleared."""
         self.resolved_coords.update(coords)
@@ -176,3 +206,23 @@ class VisuospatialWorkingMemory:
         # Sort top-to-bottom, left-to-right
         unvisited.sort(key=lambda p: (p[0], p[1]))
         return unvisited[0]
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all bound working memory slots as declarative causal predicates."""
+        return [slot.to_causal_predicate() for slot in self.bound_slots.values()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR state updates reflecting working memory bindings."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"wm_slot_{slot.pos[0]}_{slot.pos[1]}",
+                node_data={
+                    "pos": slot.pos,
+                    "feature_id": slot.feature_id,
+                    "step_observed": slot.step_observed,
+                    "visit_count": slot.visit_count,
+                },
+            )
+            for slot in self.bound_slots.values()
+        ]
