@@ -2,18 +2,19 @@
 
 Implements domain-agnostic spatial relation detection (INSIDE, NEAR, ON),
 synchronous containment transport schema induction, object permanence tracking,
-and room topology extraction with doorway detection.
+silhouette packing optimization, and room topology extraction with doorway detection.
 """
 
 from __future__ import annotations
 
 import logging
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import label
 
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
@@ -23,15 +24,45 @@ from hbllm.hcir.world.causal_discovery import (
 logger = logging.getLogger(__name__)
 
 
+# ── Domain 1: Spatial Relations & Containment Schemas ─────────────────────────
+
+
+class SpatialRelationType(StrEnum):
+    """Categorical spatial relations between physical or cognitive entities."""
+
+    ON = "ON"
+    INSIDE = "INSIDE"
+    NEAR = "NEAR"
+    CONTAINS = "CONTAINS"
+    CONTAINED_BY = "CONTAINED_BY"
+    ADJACENT = "ADJACENT"
+    DISJOINT = "DISJOINT"
+
+
 @dataclass
 class SpatialRelationFact:
     """Structured spatial fact induced from continuous geometric perception."""
 
-    relation: Any = "ON"
+    relation: SpatialRelationType | str = SpatialRelationType.ON
     subject_id: str = ""
     object_id: str = ""
     confidence: float = 1.0
     evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_symbolic_predicate(self) -> dict[str, Any]:
+        """Convert fact into declarative symbolic predicate form."""
+        rel_str = (
+            self.relation.value
+            if isinstance(self.relation, SpatialRelationType)
+            else str(self.relation)
+        )
+        return {
+            "relation": rel_str,
+            "subject": self.subject_id,
+            "object": self.object_id,
+            "confidence": self.confidence,
+            "evidence": dict(self.evidence),
+        }
 
 
 class BaseSpatialContainmentEngine:
@@ -46,8 +77,8 @@ class BaseSpatialContainmentEngine:
     def detect_spatial_relations(
         percept_items: Sequence[dict[str, Any]],
         near_threshold: float = 0.5,
-        inside_relation: Any = "INSIDE",
-        near_relation: Any = "NEAR",
+        inside_relation: SpatialRelationType | str = SpatialRelationType.INSIDE,
+        near_relation: SpatialRelationType | str = SpatialRelationType.NEAR,
     ) -> list[SpatialRelationFact]:
         """Induce relational facts directly from geometric and perceptual observations."""
         facts: list[SpatialRelationFact] = []
@@ -78,10 +109,10 @@ class BaseSpatialContainmentEngine:
                 if coords1 is not None and coords2 is not None:
                     dx = coords1[0] - coords2[0]
                     dy = coords1[1] - coords2[1]
-                    dist = (dx**2 + dy**2) ** 0.5
+                    dist = float((dx**2 + dy**2) ** 0.5)
                     if dist <= near_threshold:
                         confidence = (
-                            max(0.0, 1.0 - dist / near_threshold) if near_threshold > 0 else 1.0
+                            max(0.0, 1.0 - (dist / near_threshold)) if near_threshold > 0 else 1.0
                         )
                         facts.append(
                             SpatialRelationFact(
@@ -130,7 +161,7 @@ class BaseSpatialContainmentEngine:
         """Compute Euclidean distance error between predicted and actual position."""
         dx = predicted_pos[0] - actual_pos[0]
         dy = predicted_pos[1] - actual_pos[1]
-        prediction_error = (dx**2 + dy**2) ** 0.5
+        prediction_error = float((dx**2 + dy**2) ** 0.5)
         return {
             "predicted_position": predicted_pos,
             "actual_position": actual_pos,
@@ -192,9 +223,7 @@ class BaseSpatialContainmentEngine:
         if total_piece_cells != len(silhouette_cells):
             return None
 
-        # Sort pieces by size descending for efficient pruning
         indexed_pieces = sorted(enumerate(piece_shapes), key=lambda x: len(x[1]), reverse=True)
-
         n = len(piece_shapes)
         assignments: list[tuple[int, int] | None] = [None] * n
 
@@ -213,9 +242,6 @@ class BaseSpatialContainmentEngine:
             if first_uncovered is None:
                 return None
 
-            # Generate candidate offsets for this piece
-            # The piece must cover first_uncovered with one of its cells, or fit anywhere in silhouette
-            # For each cell in shape, try aligning it with first_uncovered
             fur, fuc = first_uncovered
             for pr, pc in shape:
                 dr = fur - pr
@@ -233,21 +259,41 @@ class BaseSpatialContainmentEngine:
         return backtrack(0, set())
 
 
-# ── Room Topology Extraction ──────────────────────────────────────────────────
+# ── Domain 2: Room Topology Extraction & Doorway Gating ───────────────────────
 
 
 @dataclass
 class RoomDoor:
-    """A doorway connecting two rooms detected from wall gaps."""
+    """A doorway connecting two chambers detected from wall openings."""
 
     door_coord: tuple[int, int] = (0, 0)
     connects_rooms: tuple[int, int] = (0, 0)
 
 
+@dataclass
+class RoomTopologyGraph:
+    """Topological graph of chamber connectivity and access portals."""
+
+    rooms: dict[int, list[tuple[int, int]]]
+    doors: list[RoomDoor]
+    adjacency: dict[int, list[int]]
+
+    def get_room_for_coord(self, coord: tuple[int, int]) -> int | None:
+        """Find the room index containing a given coordinate."""
+        for r_id, cells in self.rooms.items():
+            if coord in cells:
+                return r_id
+        return None
+
+    def are_connected(self, room_a: int, room_b: int) -> bool:
+        """Check if two rooms share an open doorway."""
+        return room_b in self.adjacency.get(room_a, [])
+
+
 class RoomTopologyExtractor:
     """Decomposes walkable space into chambers/rooms and detects connecting doorways.
 
-    Domain-agnostic: works on any boolean occupancy grid (True = walkable, False = wall).
+    Domain-agnostic: operates on any boolean occupancy grid (True = walkable, False = wall).
     """
 
     @staticmethod
@@ -264,12 +310,12 @@ class RoomTopologyExtractor:
         Returns:
             Tuple of (rooms dict mapping room_id to cell coordinates, list of RoomDoor instances).
         """
-        H, W = occupancy_grid.shape
+        h, w = occupancy_grid.shape
         door_coords: set[tuple[int, int]] = set()
 
         # Detect doorways: walkable cells flanked by walls on two opposite sides
-        for r in range(1, H - 1):
-            for c in range(1, W - 1):
+        for r in range(1, h - 1):
+            for c in range(1, w - 1):
                 if not occupancy_grid[r, c]:
                     continue
                 h_door = (
@@ -292,37 +338,23 @@ class RoomTopologyExtractor:
         for dr, dc in door_coords:
             room_grid[dr, dc] = False
 
-        visited = np.zeros((H, W), dtype=bool)
+        # Fast 4-connected component labeling using scipy native substrate
+        struct4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
+        labeled_rooms, num_rooms = label(room_grid, structure=struct4)
+
         rooms: dict[int, list[tuple[int, int]]] = {}
         room_id_map: dict[tuple[int, int], int] = {}
         room_counter = 0
 
-        for r in range(H):
-            for c in range(W):
-                if not room_grid[r, c] or visited[r, c]:
-                    continue
+        for comp_id in range(1, num_rooms + 1):
+            coords = [
+                (int(r), int(c)) for r, c in zip(*np.where(labeled_rooms == comp_id), strict=False)
+            ]
+            if len(coords) >= min_room_size or comp_id == 1:
                 room_counter += 1
-                queue = deque([(r, c)])
-                visited[r, c] = True
-                coords: list[tuple[int, int]] = []
-
-                while queue:
-                    cr, cc = queue.popleft()
-                    coords.append((cr, cc))
-                    room_id_map[(cr, cc)] = room_counter
-                    for offset_r, offset_c in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        nr, nc = cr + offset_r, cc + offset_c
-                        if (
-                            0 <= nr < H
-                            and 0 <= nc < W
-                            and room_grid[nr, nc]
-                            and not visited[nr, nc]
-                        ):
-                            visited[nr, nc] = True
-                            queue.append((nr, nc))
-
-                if len(coords) >= min_room_size or room_counter not in rooms:
-                    rooms[room_counter] = coords
+                rooms[room_counter] = coords
+                for coord in coords:
+                    room_id_map[coord] = room_counter
 
         # Resolve which rooms each door connects
         doors: list[RoomDoor] = []
@@ -351,3 +383,14 @@ class RoomTopologyExtractor:
                 adj[ra].add(rb)
                 adj[rb].add(ra)
         return {r: sorted(list(neighbors)) for r, neighbors in adj.items()}
+
+    @classmethod
+    def extract_topology_graph(
+        cls,
+        occupancy_grid: np.ndarray,
+        min_room_size: int = 4,
+    ) -> RoomTopologyGraph:
+        """Extract complete RoomTopologyGraph including rooms, doorways, and adjacency."""
+        rooms, doors = cls.extract_rooms_and_doors(occupancy_grid, min_room_size=min_room_size)
+        adjacency = cls.build_adjacency_graph(rooms, doors)
+        return RoomTopologyGraph(rooms=rooms, doors=doors, adjacency=adjacency)
