@@ -259,3 +259,49 @@ def test_environment_change_detection_and_efficiency_tracking() -> None:
     assert summary.cumulative_regret == 0.5
     assert summary.information_gain_rate == 0.35
     assert summary.zero_shot_transfer_success is True
+
+
+def test_declarative_action_and_goal_exports() -> None:
+    """Verifies HCIR declarative CausalPredicate, ActionAffordance, and Entropy integration."""
+    # 1. Action discovery to CausalPredicate & ActionAffordance
+    engine = UngroundedActionDiscoveryEngine(action_space=[1, 2])
+    for _ in range(4):
+        engine.record_transition(
+            action_id=1,
+            prior_state={"avatar_pos": (2, 2)},
+            next_state={"avatar_pos": (2, 3)},
+        )
+    prof1 = engine.action_profiles[1]
+    causal_pred = prof1.to_causal_predicate()
+    assert causal_pred.variable == "spatial_displacement"
+    assert causal_pred.value == (0, 1)
+
+    affordance = prof1.to_affordance()
+    assert affordance.is_displacement is True
+    assert affordance.delta == (0, 1)
+    assert affordance.confidence > 0.5
+
+    all_affordances = engine.export_action_affordances()
+    assert 1 in all_affordances
+
+    # 2. Precondition rule to composite CausalPredicate
+    learner = ActionPreconditionLearner()
+    learner.record_outcome(1, "open_door", {"has_key": True, "charge": 5}, True)
+    rule = learner.induce_preconditions(1, "open_door")
+    assert rule is not None
+    assert rule.matches({"has_key": True, "charge": 5}) is True
+    assert rule.matches({"has_key": False}) is False
+    comp_pred = rule.to_causal_predicate()
+    assert comp_pred.is_composite() or comp_pred.variable != ""
+
+    # 3. Goal induction entropy and world theory export
+    goal_engine = BayesianGoalInductionEngine()
+    initial_entropy = goal_engine.compute_goal_entropy()
+    assert initial_entropy > 0.0
+
+    state_win = {"remaining_items": 0}
+    detailed_res = goal_engine.observe_feedback_detailed(state_win, level_incremented=True)
+    assert len(detailed_res.confirmed_goals) >= 1
+    theory = goal_engine.to_symbolic_world_theory()
+    assert len(theory) >= 1
+    assert any(p.variable == "remaining_items" for p in theory)

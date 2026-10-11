@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate, LogicOperator
+from hbllm.hcir.world.cortex_causal import ActionAffordance
 
 
 class ActionEffectType(StrEnum):
@@ -31,6 +35,43 @@ class ActionEffectType(StrEnum):
     QUIESCENT_NOOP = "QUIESCENT_NOOP"
     STOCHASTIC_OR_MULTIMODAL = "STOCHASTIC_OR_MULTIMODAL"
     UNKNOWN = "UNKNOWN"
+
+
+@dataclass
+class VectorMomentsEstimator:
+    """Online estimator for 2D spatial displacement vectors using Welford's algorithm."""
+
+    count: int = 0
+    mean_r: float = 0.0
+    mean_c: float = 0.0
+    displacement_counts: dict[tuple[int, int], int] = field(
+        default_factory=lambda: defaultdict(int)
+    )
+
+    def update(self, dr: int, dc: int) -> tuple[float, float]:
+        """Update mean vector online with new observation (dr, dc)."""
+        self.count += 1
+        self.displacement_counts[(dr, dc)] += 1
+        n = self.count
+        self.mean_r += (dr - self.mean_r) / n
+        self.mean_c += (dc - self.mean_c) / n
+        return (self.mean_r, self.mean_c)
+
+    @property
+    def mean(self) -> tuple[float, float]:
+        """Current empirical 2D displacement vector (delta_r, delta_c)."""
+        return (self.mean_r, self.mean_c)
+
+    @property
+    def variance(self) -> float:
+        """Empirical variance across observed displacement vectors."""
+        if self.count <= 0:
+            return 0.0
+        sq_dists = [
+            cnt * ((pos[0] - self.mean_r) ** 2 + (pos[1] - self.mean_c) ** 2)
+            for pos, cnt in self.displacement_counts.items()
+        ]
+        return sum(sq_dists) / float(self.count)
 
 
 @dataclass
@@ -109,11 +150,90 @@ class ActionEffectProfile:
         # Epistemic uncertainty decreases with sample size: normalized Dirichlet-multinomial entropy
         self.uncertainty = 1.0 / (1.0 + math.sqrt(n))
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Convert learned empirical profile into a declarative HCIR CausalPredicate."""
+        if self.effect_type == ActionEffectType.SPATIAL_DISPLACEMENT:
+            dr = int(round(self.mean_displacement[0]))
+            dc = int(round(self.mean_displacement[1]))
+            return CausalPredicate(
+                variable="spatial_displacement",
+                operator="==",
+                value=(dr, dc),
+            )
+        elif self.effect_type == ActionEffectType.STATE_MUTATION:
+            children = [
+                CausalPredicate(variable=attr, operator="!=", value=None)
+                for attr in sorted(self.mutation_counts.keys())
+            ]
+            if len(children) == 1:
+                return children[0]
+            elif len(children) > 1:
+                return CausalPredicate(logic_op=LogicOperator.AND, children=children)
+            return CausalPredicate(variable="state_mutation", operator="==", value=True)
+        elif self.effect_type == ActionEffectType.QUIESCENT_NOOP:
+            return CausalPredicate(variable="state_delta", operator="==", value=0)
+        elif self.effect_type == ActionEffectType.CONTACT_INTERACTION:
+            return CausalPredicate(variable="contact_interaction", operator="==", value=True)
+        return CausalPredicate(
+            variable="action_effect_type",
+            operator="==",
+            value=self.effect_type.value,
+        )
+
+    def to_affordance(self) -> ActionAffordance:
+        """Synthesize a typed ActionAffordance declaration for HCIR cognitive planning."""
+        is_disp = self.effect_type == ActionEffectType.SPATIAL_DISPLACEMENT
+        delta = (
+            (int(round(self.mean_displacement[0])), int(round(self.mean_displacement[1])))
+            if is_disp
+            else None
+        )
+        return ActionAffordance(
+            action_id=self.action_id,
+            name=f"action_{self.action_id}_{self.effect_type.value.lower()}",
+            is_displacement=is_disp,
+            delta=delta,
+            is_state_transform=(self.effect_type == ActionEffectType.STATE_MUTATION),
+            confidence=max(0.0, min(1.0, 1.0 - self.uncertainty)),
+            metadata={
+                "total_observations": self.total_observations,
+                "displacement_variance": self.displacement_variance,
+                "mutation_frequency": self.mutation_frequency,
+            },
+        )
+
+
+def infer_transition_delta(
+    prior_state: dict[str, Any] | np.ndarray,
+    next_state: dict[str, Any] | np.ndarray,
+    avatar_delta: tuple[int, int] | None = None,
+) -> tuple[tuple[int, int] | None, dict[str, Any]]:
+    """Pure substrate transformation extracting spatial movement and attribute diffs."""
+    delta_pos = avatar_delta
+    if delta_pos is None and isinstance(prior_state, dict) and isinstance(next_state, dict):
+        p_pos = prior_state.get("avatar_pos")
+        n_pos = next_state.get("avatar_pos")
+        if p_pos and n_pos:
+            delta_pos = (int(n_pos[0] - p_pos[0]), int(n_pos[1] - p_pos[1]))
+
+    mutations: dict[str, Any] = {}
+    if isinstance(prior_state, dict) and isinstance(next_state, dict):
+        for k in set(prior_state.keys()) | set(next_state.keys()):
+            if k != "avatar_pos" and prior_state.get(k) != next_state.get(k):
+                mutations[k] = 1
+    elif isinstance(prior_state, np.ndarray) and isinstance(next_state, np.ndarray):
+        if prior_state.shape == next_state.shape:
+            diff_count = int(np.count_nonzero(prior_state != next_state))
+            if diff_count > 0:
+                mutations["grid_cells_mutated"] = diff_count
+
+    return delta_pos, mutations
+
 
 class UngroundedActionDiscoveryEngine:
     """Infers action transition distributions and semantics from ungrounded interaction tokens (W161, W162)."""
 
-    def __init__(self, action_space: list[Any] | None = None) -> None:
+    def __init__(self, action_space: Sequence[Any] | None = None) -> None:
         self.action_profiles: dict[Any, ActionEffectProfile] = {}
         if action_space:
             for a in action_space:
@@ -134,27 +254,7 @@ class UngroundedActionDiscoveryEngine:
     ) -> ActionEffectProfile:
         """Process an observed transition (s, a, s') and update action posterior."""
         profile = self.register_action(action_id)
-
-        # Infer displacement if not explicitly provided
-        delta_pos = avatar_delta
-        if delta_pos is None and isinstance(prior_state, dict) and isinstance(next_state, dict):
-            p_pos = prior_state.get("avatar_pos")
-            n_pos = next_state.get("avatar_pos")
-            if p_pos and n_pos:
-                delta_pos = (int(n_pos[0] - p_pos[0]), int(n_pos[1] - p_pos[1]))
-
-        # Infer state mutations
-        mutations: dict[str, Any] = {}
-        if isinstance(prior_state, dict) and isinstance(next_state, dict):
-            for k in set(prior_state.keys()) | set(next_state.keys()):
-                if k != "avatar_pos" and prior_state.get(k) != next_state.get(k):
-                    mutations[k] = 1
-        elif isinstance(prior_state, np.ndarray) and isinstance(next_state, np.ndarray):
-            if prior_state.shape == next_state.shape:
-                diff_count = int(np.count_nonzero(prior_state != next_state))
-                if diff_count > 0:
-                    mutations["grid_cells_mutated"] = diff_count
-
+        delta_pos, mutations = infer_transition_delta(prior_state, next_state, avatar_delta)
         profile.update(delta_pos=delta_pos, mutations=mutations)
         return profile
 
@@ -163,6 +263,32 @@ class UngroundedActionDiscoveryEngine:
         if not self.action_profiles:
             return None
         return max(self.action_profiles.items(), key=lambda kv: kv[1].uncertainty)[0]
+
+    def export_action_affordances(self) -> dict[Any, ActionAffordance]:
+        """Export all current empirical action profiles as typed HCIR ActionAffordance records."""
+        return {a: prof.to_affordance() for a, prof in self.action_profiles.items()}
+
+    def export_causal_predicates(self) -> dict[Any, CausalPredicate]:
+        """Export empirical profiles as declarative HCIR CausalPredicates."""
+        return {a: prof.to_causal_predicate() for a, prof in self.action_profiles.items()}
+
+    def get_summary(self) -> dict[str, Any]:
+        """Immutable diagnostic summary of action discoveries."""
+        return {
+            "total_actions": len(self.action_profiles),
+            "actions": {
+                str(a): {
+                    "effect_type": prof.effect_type.value,
+                    "uncertainty": round(prof.uncertainty, 4),
+                    "mean_displacement": (
+                        round(prof.mean_displacement[0], 2),
+                        round(prof.mean_displacement[1], 2),
+                    ),
+                    "total_observations": prof.total_observations,
+                }
+                for a, prof in self.action_profiles.items()
+            },
+        }
 
 
 # ── W163: Unknown Mechanics & Affordance Ledger ──────────────────────────────
@@ -179,6 +305,14 @@ class UnknownMechanicEntry:
     confidence: float = 0.0
     confirmed: bool = False
     refuted: bool = False
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Convert mechanic entry into declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable=f"affordance::{self.entity_signature}",
+            operator="==",
+            value=self.target_action,
+        )
 
 
 class UnknownMechanicsLedger:
@@ -226,6 +360,18 @@ class UnknownMechanicsLedger:
         """Return all active, non-refuted and non-confirmed mechanics awaiting test."""
         return [e for e in self.entries.values() if not e.confirmed and not e.refuted]
 
+    def get_confirmed_mechanics(self) -> list[UnknownMechanicEntry]:
+        """Return all empirically confirmed mechanic hypotheses."""
+        return [e for e in self.entries.values() if e.confirmed]
+
+    def get_refuted_mechanics(self) -> list[UnknownMechanicEntry]:
+        """Return all refuted mechanic hypotheses."""
+        return [e for e in self.entries.values() if e.refuted]
+
+    def reset(self) -> None:
+        """Clear ledger entries across episode or paradigm shift."""
+        self.entries.clear()
+
 
 # ── W164, W165: Constrained Expected Free Energy Active Experimentation ──────
 
@@ -240,6 +386,17 @@ class ExperimentValue:
     risk_penalty: float  # Hazard / irreversibility penalty
     expected_goal_progress: float  # Alignment with goal hypothesis
     net_value: float  # G(a) = EIG - lambda_c * C - lambda_r * R + lambda_g * Prog
+
+    def to_dict(self) -> dict[str, Any]:
+        """Diagnostic dictionary serialization."""
+        return {
+            "action_id": self.action_id,
+            "expected_info_gain": self.expected_info_gain,
+            "action_cost": self.action_cost,
+            "risk_penalty": self.risk_penalty,
+            "expected_goal_progress": self.expected_goal_progress,
+            "net_value": self.net_value,
+        }
 
 
 class ConstrainedActiveExperimenter:
@@ -287,44 +444,56 @@ class ConstrainedActiveExperimenter:
             net_value=round(net_val, 4),
         )
 
-    def select_best_action(
+    def rank_experiments(
         self,
-        available_actions: list[Any],
+        available_actions: Sequence[Any],
         discovery_engine: UngroundedActionDiscoveryEngine,
         hazard_oracle: dict[Any, float] | None = None,
         progress_oracle: dict[Any, float] | None = None,
-    ) -> tuple[Any, ExperimentValue]:
-        """Select action that maximizes constrained expected free energy."""
-        best_act = available_actions[0] if available_actions else None
-        best_eval: ExperimentValue | None = None
-
+    ) -> list[ExperimentValue]:
+        """Rank all candidate actions by net Expected Free Energy objective G(a)."""
+        evaluations: list[ExperimentValue] = []
         for a in available_actions:
             prof = discovery_engine.register_action(a)
             h_prob = (hazard_oracle or {}).get(a, 0.0)
             g_prog = (progress_oracle or {}).get(a, 0.0)
-
             val = self.evaluate_experiment(
                 action_id=a,
                 profile=prof,
                 predicted_hazard_prob=h_prob,
                 predicted_goal_progress=g_prog,
             )
+            evaluations.append(val)
+        evaluations.sort(key=lambda ev: ev.net_value, reverse=True)
+        return evaluations
 
-            if best_eval is None or val.net_value > best_eval.net_value:
-                best_eval = val
-                best_act = a
+    def select_best_action(
+        self,
+        available_actions: Sequence[Any],
+        discovery_engine: UngroundedActionDiscoveryEngine,
+        hazard_oracle: dict[Any, float] | None = None,
+        progress_oracle: dict[Any, float] | None = None,
+    ) -> tuple[Any, ExperimentValue]:
+        """Select action that maximizes constrained expected free energy."""
+        ranked = self.rank_experiments(
+            available_actions,
+            discovery_engine,
+            hazard_oracle=hazard_oracle,
+            progress_oracle=progress_oracle,
+        )
+        if ranked:
+            return ranked[0].action_id, ranked[0]
 
-        if best_eval is None:
-            best_eval = ExperimentValue(
-                action_id=best_act,
-                expected_info_gain=0.0,
-                action_cost=1.0,
-                risk_penalty=0.0,
-                expected_goal_progress=0.0,
-                net_value=0.0,
-            )
-
-        return best_act, best_eval
+        default_act = available_actions[0] if available_actions else None
+        fallback_eval = ExperimentValue(
+            action_id=default_act,
+            expected_info_gain=0.0,
+            action_cost=1.0,
+            risk_penalty=0.0,
+            expected_goal_progress=0.0,
+            net_value=0.0,
+        )
+        return default_act, fallback_eval
 
 
 # ── W171: Action Precondition Induction & Contrastive Version Spaces ────────
@@ -339,6 +508,23 @@ class PreconditionRule:
     required_features: dict[str, Any]  # e.g., {"adjacent_to_key": True, "has_charge": True}
     confidence: float
     support_count: int
+
+    def matches(self, features: dict[str, Any]) -> bool:
+        """True if the given state features satisfy all required precondition attributes."""
+        return all(features.get(k) == v for k, v in self.required_features.items())
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Convert induced feature requirements into a composite HCIR CausalPredicate."""
+        if not self.required_features:
+            return CausalPredicate(variable="unconditional", operator="==", value=True)
+
+        children = [
+            CausalPredicate(variable=k, operator="==", value=v)
+            for k, v in sorted(self.required_features.items(), key=lambda kv: kv[0])
+        ]
+        if len(children) == 1:
+            return children[0]
+        return CausalPredicate(logic_op=LogicOperator.AND, children=children)
 
 
 class ActionPreconditionLearner:
@@ -381,7 +567,7 @@ class ActionPreconditionLearner:
             shared_keys &= set(p.keys())
 
         induced_features: dict[str, Any] = {}
-        for k in shared_keys:
+        for k in sorted(shared_keys):
             val = pos[0][k]
             if all(p.get(k) == val for p in pos):
                 # Check discriminative power against negative instances
@@ -401,12 +587,30 @@ class ActionPreconditionLearner:
             support_count=len(pos),
         )
 
+    def get_all_preconditions(self) -> list[PreconditionRule]:
+        """Induce and collect all active precondition rules across learned action effects."""
+        rules: list[PreconditionRule] = []
+        for action_id, effect_name in set(self.positive_examples.keys()):
+            rule = self.induce_preconditions(action_id, effect_name)
+            if rule is not None:
+                rules.append(rule)
+        return rules
+
+    def reset(self) -> None:
+        """Reset positive and negative training examples across episodes."""
+        self.positive_examples.clear()
+        self.negative_examples.clear()
+
 
 # ── W187, W188: Budget Governor & Habenular Inhibition of Return ─────────────
 
 
 class ActionBudgetGovernor:
-    """Manages episode budget consumption and controls exploration vs. exploitation throttling (W187, W188)."""
+    """Manages episode budget consumption and controls exploration vs. exploitation throttling (W187, W188).
+
+    Biological basis: Lateral Habenular (LHb) signaling of repeated frustration/refractory inhibition,
+    modulating dopaminergic exploration drive in midbrain VTA.
+    """
 
     def __init__(self, max_budget: int = 1000) -> None:
         self.max_budget = max_budget
@@ -449,3 +653,7 @@ class ActionBudgetGovernor:
         if last_step is None:
             return False
         return (self.steps_consumed - last_step) < refractory_period
+
+    def clear_ior_cache(self) -> None:
+        """Clear refractory inhibition cache."""
+        self.ior_cache.clear()

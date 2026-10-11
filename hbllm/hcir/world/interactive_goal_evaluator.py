@@ -12,13 +12,16 @@ Implements capabilities:
 
 from __future__ import annotations
 
+import math
 from collections import deque
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 
 class TerminalStateCategory(StrEnum):
@@ -82,10 +85,60 @@ class GoalHypothesis:
 
         elif self.goal_type == GoalHypothesisType.PATTERN_SYMMETRY:
             if isinstance(state, np.ndarray):
-                # Symmetrical across vertical axis
+                axis = self.target_criteria.get("axis", "vertical")
+                if axis == "horizontal":
+                    return np.array_equal(state, np.flipud(state))
                 return np.array_equal(state, np.fliplr(state))
 
+        elif self.goal_type == GoalHypothesisType.STATE_REGISTER_THRESHOLD:
+            if isinstance(state, dict):
+                reg_name = self.target_criteria.get("register_name", "score")
+                thresh = self.target_criteria.get("threshold", 1)
+                return float(state.get(reg_name, 0)) >= float(thresh)
+
+        elif self.goal_type == GoalHypothesisType.CUSTOM_PREDICATE:
+            pred_fn = self.target_criteria.get("predicate_fn")
+            if callable(pred_fn):
+                return bool(pred_fn(state))
+            causal_pred = self.target_criteria.get("causal_predicate")
+            if isinstance(causal_pred, CausalPredicate) and isinstance(state, dict):
+                return causal_pred.evaluate(state)
+
         return False
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Convert goal hypothesis into a declarative HCIR CausalPredicate."""
+        if self.goal_type == GoalHypothesisType.CONSUMABLE_CLEARANCE:
+            feat_name = self.target_criteria.get("feature_name", "consumables_count")
+            return CausalPredicate(variable=feat_name, operator="==", value=0)
+        elif self.goal_type == GoalHypothesisType.BOUNDARY_CROSSING:
+            target_region = self.target_criteria.get("target_region", set())
+            return CausalPredicate(variable="avatar_pos", operator="in", value=target_region)
+        elif self.goal_type == GoalHypothesisType.TOPOLOGICAL_DOCKING:
+            required = self.target_criteria.get("required_docked", 1)
+            return CausalPredicate(variable="docked_count", operator=">=", value=required)
+        elif self.goal_type == GoalHypothesisType.PATTERN_SYMMETRY:
+            return CausalPredicate(variable="grid_symmetry", operator="==", value=True)
+        elif self.goal_type == GoalHypothesisType.STATE_REGISTER_THRESHOLD:
+            reg_name = self.target_criteria.get("register_name", "score")
+            thresh = self.target_criteria.get("threshold", 1)
+            return CausalPredicate(variable=reg_name, operator=">=", value=thresh)
+        elif self.goal_type == GoalHypothesisType.CUSTOM_PREDICATE:
+            causal_pred = self.target_criteria.get("causal_predicate")
+            if isinstance(causal_pred, CausalPredicate):
+                return causal_pred
+        return CausalPredicate(variable=f"goal_{self.goal_id}", operator="==", value=True)
+
+
+@dataclass
+class GoalInductionObservationResult:
+    """Structured result of Bayesian goal belief updating under environmental feedback."""
+
+    confirmed_goals: list[GoalHypothesis] = field(default_factory=list)
+    refuted_goals: list[GoalHypothesis] = field(default_factory=list)
+    active_hypotheses: list[GoalHypothesis] = field(default_factory=list)
+    dominant_goal: GoalHypothesis | None = None
+    goal_entropy: float = 0.0
 
 
 class BayesianGoalInductionEngine:
@@ -151,6 +204,18 @@ class BayesianGoalInductionEngine:
             for h in active:
                 h.posterior_probability = h.posterior_probability / total
 
+    def compute_goal_entropy(self) -> float:
+        """Calculate Shannon entropy over active goal hypotheses in bits."""
+        active = [h for h in self.hypotheses.values() if not h.is_refuted]
+        if not active:
+            return 0.0
+        entropy = 0.0
+        for h in active:
+            p = h.posterior_probability
+            if p > 1e-9:
+                entropy -= p * math.log2(p)
+        return round(entropy, 4)
+
     def observe_feedback(
         self,
         current_state: dict[str, Any] | np.ndarray,
@@ -159,7 +224,24 @@ class BayesianGoalInductionEngine:
         is_death_or_reset: bool = False,
     ) -> list[GoalHypothesis]:
         """Update Bayesian posteriors upon receiving multi-channel environmental feedback (W182)."""
+        result = self.observe_feedback_detailed(
+            current_state,
+            level_incremented=level_incremented,
+            reward_received=reward_received,
+            is_death_or_reset=is_death_or_reset,
+        )
+        return result.confirmed_goals
+
+    def observe_feedback_detailed(
+        self,
+        current_state: dict[str, Any] | np.ndarray,
+        level_incremented: bool = False,
+        reward_received: float = 0.0,
+        is_death_or_reset: bool = False,
+    ) -> GoalInductionObservationResult:
+        """Structured update of Bayesian goal beliefs with complete diagnostic accounting."""
         confirmed_goals: list[GoalHypothesis] = []
+        refuted_goals: list[GoalHypothesis] = []
 
         for h in list(self.hypotheses.values()):
             if h.is_refuted:
@@ -185,9 +267,19 @@ class BayesianGoalInductionEngine:
                     h.posterior_probability *= 0.1
                     if h.negative_evidence_count >= 2:
                         h.is_refuted = True
+                        refuted_goals.append(h)
 
         self._normalize_posteriors()
-        return confirmed_goals
+        active = [h for h in self.hypotheses.values() if not h.is_refuted]
+        dominant = max(active, key=lambda h: h.posterior_probability) if active else None
+
+        return GoalInductionObservationResult(
+            confirmed_goals=confirmed_goals,
+            refuted_goals=refuted_goals,
+            active_hypotheses=active,
+            dominant_goal=dominant,
+            goal_entropy=self.compute_goal_entropy(),
+        )
 
     def get_dominant_goal(self) -> GoalHypothesis | None:
         """Return the highest-probability active goal hypothesis."""
@@ -195,6 +287,15 @@ class BayesianGoalInductionEngine:
         if not active:
             return None
         return max(active, key=lambda h: h.posterior_probability)
+
+    def to_symbolic_world_theory(self) -> list[CausalPredicate]:
+        """Export all confirmed goal hypotheses as declarative HCIR CausalPredicates."""
+        return [h.to_causal_predicate() for h in self.hypotheses.values() if h.is_confirmed]
+
+    def reset(self) -> None:
+        """Reset goal engine back to initial priors."""
+        self.hypotheses.clear()
+        self._initialize_default_priors()
 
 
 # ── W169, W181: Goal Confirmation Gate & Terminal Classification ─────────────
@@ -219,6 +320,16 @@ class GoalConfirmationGate:
             return TerminalStateCategory.BUDGET_EXHAUSTION
         return TerminalStateCategory.NOT_TERMINAL
 
+    @staticmethod
+    def evaluate_anti_lure_hazard(
+        hypothesis: GoalHypothesis,
+    ) -> float:
+        """Anti-lure discrimination score in [0.0, 1.0]. High score indicates a lethal lure."""
+        total = hypothesis.positive_evidence_count + hypothesis.negative_evidence_count
+        if total == 0:
+            return 0.0
+        return hypothesis.negative_evidence_count / float(total)
+
 
 # ── W170: Progress Estimation ───────────────────────────────────────────────
 
@@ -232,6 +343,7 @@ class DynamicProgressEstimator:
         initial_distance: float,
         subgoals_achieved: int = 0,
         total_subgoals: int = 1,
+        spatial_weight: float = 0.6,
     ) -> float:
         """Compute normalized progress in [0.0, 1.0]."""
         if initial_distance <= 0.0:
@@ -239,12 +351,28 @@ class DynamicProgressEstimator:
         else:
             spatial_prog = max(0.0, min(1.0, 1.0 - (current_distance / initial_distance)))
 
+        subgoal_weight = 1.0 - spatial_weight
         subgoal_prog = subgoals_achieved / float(total_subgoals) if total_subgoals > 0 else 0.0
 
-        return 0.6 * spatial_prog + 0.4 * subgoal_prog
+        return spatial_weight * spatial_prog + subgoal_weight * subgoal_prog
 
 
 # ── W174, W175: Model-Based Reachability Deadlock Detection & Recovery ──────
+
+
+def canonical_state_hash(state: Any) -> Any:
+    """Compute deterministic hashable representation for graph reachability search."""
+    if isinstance(state, (int, float, str, bool)):
+        return state
+    elif isinstance(state, tuple):
+        return tuple(canonical_state_hash(x) for x in state)
+    elif isinstance(state, list):
+        return tuple(canonical_state_hash(x) for x in state)
+    elif isinstance(state, np.ndarray):
+        return (state.shape, state.tobytes())
+    elif isinstance(state, dict):
+        return tuple(sorted((k, canonical_state_hash(v)) for k, v in state.items()))
+    return str(state)
 
 
 @dataclass
@@ -256,6 +384,7 @@ class DeadlockAnalysisResult:
     goal_reachable: bool
     recovery_branch_state: Any | None = None
     steps_to_recovery: int = -1
+    cycle_detected: bool = False
 
 
 class ModelBasedDeadlockDetector:
@@ -268,7 +397,7 @@ class ModelBasedDeadlockDetector:
         self,
         current_state: Any,
         transition_fn: Callable[[Any, Any], Any],
-        available_actions: list[Any],
+        available_actions: Sequence[Any],
         is_goal_fn: Callable[[Any], bool],
         is_loss_fn: Callable[[Any], bool] | None = None,
     ) -> DeadlockAnalysisResult:
@@ -277,11 +406,12 @@ class ModelBasedDeadlockDetector:
         A state is deadlocked iff no reachable trajectory leads to goal satisfaction.
         """
         # BFS forward expansion
-        visited: set[str] = set()
+        visited: set[Any] = set()
         queue: deque[tuple[Any, int, list[Any]]] = deque([(current_state, 0, [])])
-        visited.add(str(current_state))
+        visited.add(canonical_state_hash(current_state))
 
         goal_found = False
+        cycle_found = False
         state_count = 0
 
         while queue and state_count < 1000:
@@ -307,23 +437,27 @@ class ModelBasedDeadlockDetector:
                 if next_s is None:
                     continue
 
-                s_key = str(next_s)
-                if s_key not in visited:
-                    visited.add(s_key)
-                    queue.append((next_s, depth + 1, path + [a]))
+                s_key = canonical_state_hash(next_s)
+                if s_key in visited:
+                    cycle_found = True
+                    continue
+
+                visited.add(s_key)
+                queue.append((next_s, depth + 1, path + [a]))
 
         is_deadlocked = not goal_found
         return DeadlockAnalysisResult(
             is_deadlocked=is_deadlocked,
             reachable_state_count=state_count,
             goal_reachable=goal_found,
+            cycle_detected=cycle_found,
         )
 
     def plan_recovery_action(
         self,
-        history_trace: list[tuple[Any, Any]],  # [(state, action)]
+        history_trace: Sequence[tuple[Any, Any]],  # [(state, action)]
         transition_fn: Callable[[Any, Any], Any],
-        available_actions: list[Any],
+        available_actions: Sequence[Any],
         is_goal_fn: Callable[[Any], bool],
     ) -> Any | None:
         """Finds the most recent historical state that had an alternative non-deadlocked branch (W175)."""
