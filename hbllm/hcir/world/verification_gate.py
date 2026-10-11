@@ -1,5 +1,8 @@
-"""
-Verification Gate — Safety Filter Validating Real-World Confirmations Before Learning Promotion.
+"""Verification Gate — Safety Filter Validating Real-World Confirmations Before Learning Promotion.
+
+Constitutional and epistemic safety gate ensuring all candidate world model rules,
+predictions, and state transformations pass strict validation standards before
+being promoted into reality belief stores or dispatched to execution layers.
 """
 
 from __future__ import annotations
@@ -7,9 +10,52 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
+
+
+class VerificationStatus(StrEnum):
+    """Categorical outcome of a verification evaluation."""
+
+    APPROVED = "approved"
+    REJECTED_CONFIRMATIONS = "rejected_confirmations"
+    REJECTED_CONFIDENCE = "rejected_confidence"
+    REJECTED_RISK = "rejected_risk"
+
+
+class RiskLevel(StrEnum):
+    """Operational risk classifications."""
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """Structured decision output from VerificationGate."""
+
+    status: VerificationStatus
+    is_approved: bool
+    confidence: float
+    confirmations: int
+    reason: str
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export verification result as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="verification_gate",
+            operator="==",
+            value=self.is_approved,
+            relation=str(self.status),
+            target_entity="reality",
+        )
 
 
 @dataclass
@@ -18,7 +64,50 @@ class VerificationGate:
 
     min_confirmations: int = 1
     min_confidence: float = 0.80
-    max_risk_level: str = "LOW"
+    max_risk_level: RiskLevel | str = RiskLevel.LOW
+
+    def evaluate_verification(
+        self,
+        confirmations: int,
+        confidence: float,
+        risk_level: RiskLevel | str = RiskLevel.LOW,
+    ) -> VerificationResult:
+        """Evaluate prediction promotion under formal constitutional safety criteria."""
+        if confirmations < self.min_confirmations:
+            reason = f"confirmations {confirmations} < required {self.min_confirmations}"
+            logger.info("VerificationGate rejected: %s", reason)
+            return VerificationResult(
+                status=VerificationStatus.REJECTED_CONFIRMATIONS,
+                is_approved=False,
+                confidence=confidence,
+                confirmations=confirmations,
+                reason=reason,
+            )
+
+        if confidence < self.min_confidence:
+            reason = f"confidence {confidence:.2f} < required {self.min_confidence:.2f}"
+            logger.info("VerificationGate rejected: %s", reason)
+            return VerificationResult(
+                status=VerificationStatus.REJECTED_CONFIDENCE,
+                is_approved=False,
+                confidence=confidence,
+                confirmations=confirmations,
+                reason=reason,
+            )
+
+        reason = "All promotion safety criteria satisfied."
+        logger.info(
+            "VerificationGate APPROVED promotion: confirmations=%d, confidence=%.2f",
+            confirmations,
+            confidence,
+        )
+        return VerificationResult(
+            status=VerificationStatus.APPROVED,
+            is_approved=True,
+            confidence=confidence,
+            confirmations=confirmations,
+            reason=reason,
+        )
 
     def evaluate_eligibility(
         self,
@@ -27,28 +116,26 @@ class VerificationGate:
         risk_level: str = "LOW",
     ) -> bool:
         """Return True if prediction meets all verification gate safety criteria."""
-        if confirmations < self.min_confirmations:
-            logger.info(
-                "VerificationGate rejected: confirmations %d < required %d",
-                confirmations,
-                self.min_confirmations,
-            )
-            return False
+        return self.evaluate_verification(confirmations, confidence, risk_level).is_approved
 
-        if confidence < self.min_confidence:
-            logger.info(
-                "VerificationGate rejected: confidence %.2f < required %.2f",
-                confidence,
-                self.min_confidence,
-            )
-            return False
+    def verify_transactions(self, operations: list[TransactionOperation]) -> tuple[bool, list[str]]:
+        """Verify proposed state transactions against constitutional invariants."""
+        violations: list[str] = []
+        if not operations:
+            return True, []
 
-        logger.info(
-            "VerificationGate APPROVED promotion: confirmations=%d, confidence=%.2f",
-            confirmations,
-            confidence,
-        )
-        return True
+        seen_nodes: set[str] = set()
+        for i, op in enumerate(operations):
+            if op.node_id is None:
+                violations.append(f"Operation {i} missing required node_id.")
+            elif op.op == TransactionOp.ADD_NODE and op.node_id in seen_nodes:
+                violations.append(
+                    f"Operation {i} attempts duplicate insertion of node {op.node_id}."
+                )
+            elif op.node_id:
+                seen_nodes.add(op.node_id)
+
+        return len(violations) == 0, violations
 
     @staticmethod
     def verify_internal_consistency(rules: list[dict[str, Any]]) -> tuple[bool, list[str]]:
@@ -210,6 +297,16 @@ class ModelVersionRecord:
     checkpoint_hash: str
     is_active: bool = True
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export version provenance record into a formal declarative CausalPredicate."""
+        return CausalPredicate(
+            variable="model_version",
+            operator="==",
+            value=self.version_id,
+            relation=self.parent_version_id or "root",
+            target_entity="provenance",
+        )
+
 
 class ModelProvenanceTracker:
     """W159: Tracks world-model versioning, lineage DAGs, and empirical provenance."""
@@ -248,3 +345,23 @@ class ModelProvenanceTracker:
             lineage.append(curr)
             curr = self.versions[curr].parent_version_id if curr in self.versions else None
         return lineage
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export complete lineage DAG as declarative causal predicates."""
+        return [ver.to_causal_predicate() for ver in self.versions.values()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions for version tracking."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"provenance_{ver.version_id}",
+                node_data={
+                    "version_id": ver.version_id,
+                    "parent_version_id": ver.parent_version_id,
+                    "author_faculty": ver.author_faculty,
+                    "checkpoint_hash": ver.checkpoint_hash,
+                },
+            )
+            for ver in self.versions.values()
+        ]

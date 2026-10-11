@@ -170,6 +170,31 @@ def test_suite_5_temporal_state_and_change_w041_to_w050() -> None:
     assert analysis_destr.information_loss_bits > 0.0
     assert not analysis_destr.restoration_possible
 
+    # Condition 4: Forward architecture neuro-symbolic & transaction exports
+    preds_snap = snap0.to_causal_predicates()
+    assert any(p.variable == "hp" and p.value == 100 for p in preds_snap)
+    tx_snap = snap0.to_transaction_operations()
+    assert len(tx_snap) == 1
+    assert tx_snap[0].node_id == "world_state_test_env"
+
+    preds_diff = diff.to_causal_predicates()
+    assert any(p.variable == "hp" and p.value == 90 for p in preds_diff)
+    tx_diff = diff.to_transaction_operations()
+    assert any(op.node_id == "world_var_hp" for op in tx_diff)
+
+    pred_trans = trans_rec.to_causal_predicate()
+    assert pred_trans.relation == "MOVE_RIGHT"
+    tx_trans = trans_rec.to_transaction_operations()
+    assert len(tx_trans) == 1
+    assert tx_trans[0].node_id == trans_rec.transition_id
+
+    pred_rev = analysis_rev.to_causal_predicate()
+    assert pred_rev.variable == "reversibility"
+    assert pred_rev.value is True
+    affordance_rev = analysis_rev.to_affordance()
+    assert affordance_rev is not None
+    assert affordance_rev.action_id == "MOVE_LEFT"
+
 
 # =============================================================================
 # SUITE 6: Dynamics and Transformations (W051–W060)

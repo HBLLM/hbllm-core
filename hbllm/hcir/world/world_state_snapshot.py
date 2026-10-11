@@ -1,14 +1,25 @@
-"""
-World State Snapshot — Immutable State Container for Deterministic Simulation & Replay.
+"""World State Snapshot — Immutable State Container for Deterministic Simulation & Replay.
+
+Provides chronological state timelines, multidimensional state delta computation,
+formal transition sequence modeling, and thermodynamic reversibility analysis lifted
+to declarative CausalPredicates, ActionAffordances, and atomic TransactionOperations.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.cortex_causal import ActionAffordance
 
 
 @dataclass(frozen=True)
@@ -41,6 +52,60 @@ class WorldStateSnapshot:
         )
         computed_hash = hashlib.sha256(encoded).hexdigest()[:16]
         object.__setattr__(self, "state_hash", computed_hash)
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Lift snapshot variables and entity states into declarative HCIR CausalPredicates."""
+        preds: list[CausalPredicate] = []
+        for k, v in self.variables.items():
+            if isinstance(v, (int, float, str, bool)):
+                preds.append(
+                    CausalPredicate(
+                        variable=k,
+                        operator="==",
+                        value=v,
+                        target_entity=self.world_id,
+                    )
+                )
+            elif (
+                isinstance(v, (tuple, list))
+                and len(v) == 2
+                and all(isinstance(x, (int, float)) for x in v)
+            ):
+                preds.append(
+                    CausalPredicate(
+                        variable=k,
+                        operator="==",
+                        value=(int(v[0]), int(v[1])),
+                        target_entity=self.world_id,
+                    )
+                )
+        for ent_id, ent_state in self.entity_states.items():
+            preds.append(
+                CausalPredicate(
+                    variable=f"entity:{ent_id}",
+                    operator="==",
+                    value=ent_state,
+                    target_entity=ent_id,
+                )
+            )
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR state update reflecting this snapshot."""
+        serializable_vars = {k: v for k, v in self.variables.items() if not hasattr(v, "shape")}
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"world_state_{self.world_id}",
+                node_data={
+                    "world_id": self.world_id,
+                    "timestamp": self.timestamp,
+                    "state_hash": self.state_hash,
+                    "variables": serializable_vars,
+                    "entity_states": dict(self.entity_states),
+                },
+            )
+        ]
 
 
 class TemporalStateBuffer:
@@ -92,6 +157,62 @@ class StateDifferenceResult:
     changed_cells: list[tuple[int, int]] = field(default_factory=list)  # W044
     bounding_box_of_change: tuple[int, int, int, int] | None = None  # W044
     structural_changes: list[str] = field(default_factory=list)  # W047
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Export state delta into declarative causal predicates."""
+        preds: list[CausalPredicate] = []
+        for k, (_pre_val, post_val) in self.changed_variables.items():
+            if isinstance(post_val, (int, float, str, bool)):
+                preds.append(
+                    CausalPredicate(
+                        variable=k,
+                        operator="==",
+                        value=post_val,
+                        relation="delta",
+                    )
+                )
+        for ent, (_pre_s, post_s) in self.changed_entities.items():
+            preds.append(
+                CausalPredicate(
+                    variable=f"entity:{ent}",
+                    operator="==",
+                    value=post_s,
+                    target_entity=ent,
+                    relation="state_change",
+                )
+            )
+        for struct_chg in self.structural_changes:
+            preds.append(
+                CausalPredicate(
+                    variable="structural_mutation",
+                    operator="==",
+                    value=struct_chg,
+                    relation="topology",
+                )
+            )
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions applying this state delta."""
+        ops: list[TransactionOperation] = []
+        for k, (_pre_val, post_val) in self.changed_variables.items():
+            if not hasattr(post_val, "shape"):
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.MODIFY_NODE,
+                        node_id=f"world_var_{k}",
+                        changes={"value": post_val},
+                    )
+                )
+        for ent, (_pre_s, post_s) in self.changed_entities.items():
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    node_id=f"entity_{ent}",
+                    changes={"state": post_s},
+                )
+            )
+        return ops
 
 
 class StateDifferenceComputer:
@@ -201,6 +322,33 @@ class StateTransitionRecord:
     is_reversible: bool
     timestamp: float = field(default_factory=time.time)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export state transition as a Pearl do(action) causal rule predicate."""
+        return CausalPredicate(
+            variable=f"transition:{self.transition_id}",
+            operator="==",
+            value=self.post_state.state_hash,
+            relation=self.action or "NOOP",
+            target_entity=self.pre_state.world_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction committing this transition to episodic memory."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.ADD_NODE,
+                node_id=self.transition_id,
+                node_data={
+                    "transition_id": self.transition_id,
+                    "pre_hash": self.pre_state.state_hash,
+                    "post_hash": self.post_state.state_hash,
+                    "action": self.action,
+                    "is_reversible": self.is_reversible,
+                    "timestamp": self.timestamp,
+                },
+            )
+        ]
+
 
 class TransitionSequenceModel:
     """W049: Sequence modeling of transitions, trajectories, and forward reachability."""
@@ -217,8 +365,6 @@ class TransitionSequenceModel:
         is_reversible: bool = True,
     ) -> StateTransitionRecord:
         """Record and index a state transition in the sequential model."""
-        import uuid
-
         delta = StateDifferenceComputer.compute_difference(pre_state, post_state)
         rec = StateTransitionRecord(
             transition_id=f"trans_{uuid.uuid4().hex[:8]}",
@@ -253,6 +399,29 @@ class ReversibilityAnalysis:
     inverse_action: str | None
     restoration_possible: bool
     reason: str
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export reversibility property as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="reversibility",
+            operator="==",
+            value=self.is_invertible,
+            relation=self.inverse_action or "NONE",
+            target_entity=self.reason,
+        )
+
+    def to_affordance(self) -> ActionAffordance | None:
+        """Synthesize compensatory inverse affordance if transition is invertible."""
+        if not self.inverse_action:
+            return None
+        from hbllm.hcir.world.cortex_causal import ActionAffordance
+
+        return ActionAffordance(
+            action_id=self.inverse_action,
+            name=f"inverse_{self.inverse_action}",
+            confidence=1.0 if self.is_invertible else 0.5,
+            metadata={"information_loss_bits": self.information_loss_bits, "reason": self.reason},
+        )
 
 
 class ReversibilityEngine:
@@ -296,8 +465,6 @@ class ReversibilityEngine:
         if transition.delta.changed_cells:
             # Overwriting cells: calculate Shannon entropy loss of overwriting
             n_cells = len(transition.delta.changed_cells)
-            import math
-
             info_loss_bits += n_cells * math.log2(10.0)  # ARC 10-color discrete entropy
 
         if has_destructive_loss:

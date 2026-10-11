@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
@@ -57,7 +58,9 @@ from hbllm.hcir.world.rule_induction import RuleInductionEngine
 from hbllm.hcir.world.verification_gate import (
     ModelProvenanceTracker,
     ModelVersionRecord,
+    RiskLevel,
     VerificationGate,
+    VerificationStatus,
 )
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
@@ -546,6 +549,46 @@ def test_suite_16_model_governance_and_verification_w151_to_w160() -> None:
     )
     assert invalid_pred is False
     assert "insufficient_confidence" in reason
+
+    # VerificationResult formal evaluation
+    v_res = gate.evaluate_verification(confirmations=3, confidence=0.92, risk_level=RiskLevel.LOW)
+    assert v_res.is_approved is True
+    assert v_res.status == VerificationStatus.APPROVED
+
+    v_bad = gate.evaluate_verification(confirmations=0, confidence=0.95)
+    assert v_bad.is_approved is False
+    assert v_bad.status == VerificationStatus.REJECTED_CONFIRMATIONS
+
+    # Transaction verification against constitutional invariants
+    tx_ok, viol_ok = gate.verify_transactions(
+        [
+            TransactionOperation(op=TransactionOp.ADD_NODE, node_id="node_a"),
+            TransactionOperation(op=TransactionOp.ADD_NODE, node_id="node_b"),
+        ]
+    )
+    assert tx_ok is True
+    assert len(viol_ok) == 0
+
+    tx_bad, viol_bad = gate.verify_transactions(
+        [
+            TransactionOperation(op=TransactionOp.ADD_NODE, node_id="node_dup"),
+            TransactionOperation(op=TransactionOp.ADD_NODE, node_id="node_dup"),
+        ]
+    )
+    assert tx_bad is False
+    assert len(viol_bad) == 1
+
+    # Provenance causal predicate & transaction exports
+    pred_v1 = v1.to_causal_predicate()
+    assert pred_v1.variable == "model_version"
+    assert pred_v1.value == "v1.0.0"
+
+    prov_preds = tracker.export_causal_predicates()
+    assert len(prov_preds) >= 2
+
+    prov_txs = tracker.to_transaction_operations()
+    assert len(prov_txs) >= 2
+    assert any(tx.node_id == "provenance_v1.0.0" for tx in prov_txs)
 
 
 # =============================================================================

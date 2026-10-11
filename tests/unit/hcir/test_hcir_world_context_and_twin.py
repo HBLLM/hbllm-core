@@ -58,3 +58,11 @@ def test_interpreter_and_belief_graph():
     assert overheating_belief is not None
     assert overheating_belief.value == "overheating_warning"
     assert overheating_belief.confidence == 0.88
+
+    # Causal predicate & world theory exports
+    causal_preds = interpreter.export_causal_predicates(snapshot)
+    assert len(causal_preds) == 3
+    assert any(p.variable == "temp_celsius_status" for p in causal_preds)
+
+    world_theory = interpreter.to_world_theory(snapshot)
+    assert len(world_theory.goal_predicates) == 3
