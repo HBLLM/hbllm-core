@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,32 @@ class ShapeArchetype:
         if self.area != other.area:
             return False
         return self.canonical_id == other.canonical_id
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export shape archetype geometry as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"shape_archetype:{self.height}x{self.width}",
+            operator="==",
+            value=self.area,
+            relation=f"bbox_{self.height}x{self.width}",
+            target_entity=str(self.canonical_id),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording canonical shape archetype."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"shape_archetype_{self.height}_{self.width}_{self.area}",
+                node_data={
+                    "height": self.height,
+                    "width": self.width,
+                    "area": self.area,
+                    "relative_coords": sorted(list(self.relative_coords)),
+                    "canonical_id": list(self.canonical_id),
+                },
+            )
+        ]
 
 
 @functools.lru_cache(maxsize=4096)
@@ -235,3 +263,40 @@ class MorphologicalConcept:
             f"features={len(self.observed_features)}, "
             f"affordances={list(self.learned_affordances.keys())})"
         )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export morphological concept as a declarative causal predicate."""
+        role_str = (
+            self.inferred_role.value
+            if hasattr(self.inferred_role, "value")
+            else str(self.inferred_role)
+        )
+        affordance_keys = ",".join(sorted(self.learned_affordances.keys()))
+        return CausalPredicate(
+            variable=f"morphology:{self.canonical_name}",
+            operator="==",
+            value=role_str,
+            relation=f"affordances:{affordance_keys}",
+            target_entity=str(self.canonical_id),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording morphological concept."""
+        role_str = (
+            self.inferred_role.value
+            if hasattr(self.inferred_role, "value")
+            else str(self.inferred_role)
+        )
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"morph_concept_{self.canonical_name}",
+                node_data={
+                    "canonical_name": self.canonical_name,
+                    "inferred_role": role_str,
+                    "observed_features": sorted([str(f) for f in self.observed_features]),
+                    "learned_affordances": {k: str(v) for k, v in self.learned_affordances.items()},
+                    "interaction_count": self.interaction_count,
+                },
+            )
+        ]

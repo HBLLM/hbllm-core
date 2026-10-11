@@ -1339,3 +1339,105 @@ class TestPhase25CognitiveBridgeCausalAndTransactions:
         assert len(ior_preds) == 2
         ior_ops = ior.to_transaction_operations()
         assert len(ior_ops) == 2
+
+
+class TestPhase26CognitiveBridgeCausalAndTransactions:
+    """Validate declarative causal predicates and atomic HCIR transactions for Phase 26 components."""
+
+    def test_symbolic_constraints_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.symbolic_constraints import (
+            LocalCardinalityConstraint,
+            SymbolicConstraintSolver,
+        )
+
+        c = LocalCardinalityConstraint(
+            center=(3, 3),
+            radius=1,
+            required_count=2,
+            scope={(2, 3), (3, 2)},
+        )
+        c_pred = c.to_causal_predicate()
+        assert c_pred.variable == "constraint_cardinality:(3, 3)"
+        assert c_pred.value == 2
+        c_ops = c.to_transaction_operations()
+        assert len(c_ops) == 1
+        assert c_ops[0].node_id == "cardinality_constraint_3_3"
+
+        solver = SymbolicConstraintSolver()
+        solver.constraints.append(c)
+        solver_pred = solver.to_causal_predicate()
+        assert solver_pred.variable == "symbolic_constraint_solver"
+        solver_preds = solver.export_causal_predicates()
+        assert len(solver_preds) == 2
+        solver_ops = solver.to_transaction_operations()
+        assert len(solver_ops) == 2
+
+    def test_morphology_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.morphology import (
+            MorphologicalConcept,
+            ShapeArchetype,
+        )
+
+        arch = ShapeArchetype.from_coords([(0, 0), (0, 1), (1, 0)])
+        arch_pred = arch.to_causal_predicate()
+        assert "shape_archetype:" in arch_pred.variable
+        arch_ops = arch.to_transaction_operations()
+        assert len(arch_ops) == 1
+
+        concept = MorphologicalConcept(
+            canonical_id=arch.canonical_id,
+            archetype=arch,
+            canonical_name="L_tromino",
+        )
+        c_pred = concept.to_causal_predicate()
+        assert c_pred.variable == "morphology:L_tromino"
+        c_ops = concept.to_transaction_operations()
+        assert len(c_ops) == 1
+        assert c_ops[0].node_id == "morph_concept_L_tromino"
+
+    def test_whole_grid_predictor_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.predictors.whole_grid import (
+            DimensionMode,
+            DimensionRule,
+            WholeGridPredictor,
+        )
+
+        rule = DimensionRule(mode=DimensionMode.FIXED, fixed_shape=(10, 10))
+        rule_pred = rule.to_causal_predicate()
+        assert rule_pred.variable == "dimension_rule"
+        assert rule_pred.value == "FIXED"
+        rule_ops = rule.to_transaction_operations()
+        assert len(rule_ops) == 1
+
+        predictor = WholeGridPredictor()
+        p_pred = predictor.to_causal_predicate()
+        assert p_pred.variable == "predictor:whole_grid"
+        p_ops = predictor.to_transaction_operations()
+        assert len(p_ops) == 1
+
+    def test_ensemble_predictors_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.predictors.llm import LLMReasoningPredictor
+        from hbllm.hcir.world.predictors.neural import NeuralWorldModel
+        from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+        from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
+        from hbllm.hcir.world.predictors.statistical import StatisticalPredictor
+
+        phys = PhysicsPredictor()
+        assert phys.to_causal_predicate().variable == "predictor:physics"
+        assert len(phys.to_transaction_operations()) == 1
+
+        llm = LLMReasoningPredictor()
+        assert llm.to_causal_predicate().variable == "predictor:llm"
+        assert len(llm.to_transaction_operations()) == 1
+
+        neural = NeuralWorldModel()
+        assert neural.to_causal_predicate().variable == "predictor:neural"
+        assert len(neural.to_transaction_operations()) == 1
+
+        snn = SNNTemporalPredictor()
+        assert snn.to_causal_predicate().variable == "predictor:snn"
+        assert len(snn.to_transaction_operations()) == 1
+
+        stat = StatisticalPredictor()
+        assert stat.to_causal_predicate().variable == "predictor:statistical"
+        assert len(stat.to_transaction_operations()) == 1

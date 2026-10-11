@@ -17,6 +17,8 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,31 @@ class DimensionRule:
             return None
         return None
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export dimension rule as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="dimension_rule",
+            operator="==",
+            value=self.mode.value,
+            relation=f"scale:{self.scale_factors}|fixed:{self.fixed_shape}",
+            target_entity=f"conf:{self.confidence:.2f}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording dimension rule."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="dimension_rule",
+                node_data={
+                    "mode": self.mode.value,
+                    "fixed_shape": self.fixed_shape,
+                    "scale_factors": self.scale_factors,
+                    "confidence": self.confidence,
+                },
+            )
+        ]
+
 
 class ExecutableRule(Protocol):
     """Protocol for any transformation rule executable on a 2D numpy array."""
@@ -86,6 +113,30 @@ class WholeGridPredictor:
             predicted["grid"] = np.copy(grid)
             return predicted, 0.90
         return predicted, 0.50
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export whole grid predictor status as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="predictor:whole_grid",
+            operator="==",
+            value="active",
+            relation="raster_synthesis",
+            target_entity="whole_grid",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering whole grid predictor."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="predictor_whole_grid",
+                node_data={
+                    "name": self.name,
+                    "type": "raster_synthesis",
+                    "active": True,
+                },
+            )
+        ]
 
     @staticmethod
     def estimate_background_color(grid: np.ndarray) -> int:

@@ -13,6 +13,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +28,32 @@ class LocalCardinalityConstraint:
     required_count: int
     scope: set[tuple[int, int]]  # Neighbor coordinates subject to constraint
     confidence: float = 1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export local cardinality constraint as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"constraint_cardinality:{self.center}",
+            operator="==",
+            value=self.required_count,
+            relation=f"radius_{self.radius}",
+            target_entity=f"scope_size:{len(self.scope)}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording local cardinality constraint."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"cardinality_constraint_{self.center[0]}_{self.center[1]}",
+                node_data={
+                    "center": self.center,
+                    "radius": self.radius,
+                    "required_count": self.required_count,
+                    "scope": sorted(list(self.scope)),
+                    "confidence": self.confidence,
+                },
+            )
+        ]
 
 
 class SymbolicConstraintSolver:
@@ -131,3 +160,37 @@ class SymbolicConstraintSolver:
     def get_unrevealed_safe_cells(self) -> set[tuple[int, int]]:
         """Return cells deduced to be safe that haven't been visited / revealed yet."""
         return self.known_safe_cells - self.revealed_cells
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export constraint solver state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="symbolic_constraint_solver",
+            operator="==",
+            value=len(self.constraints),
+            relation=f"safe:{len(self.known_safe_cells)}|hazards:{len(self.known_hazard_cells)}",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all solver state and local cardinality constraint predicates."""
+        preds = [self.to_causal_predicate()]
+        for c in self.constraints:
+            preds.append(c.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting solver state and active constraints."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="symbolic_constraint_solver_state",
+                node_data={
+                    "constraint_count": len(self.constraints),
+                    "known_safe_cells": sorted(list(self.known_safe_cells)),
+                    "known_hazard_cells": sorted(list(self.known_hazard_cells)),
+                    "revealed_cells": sorted(list(self.revealed_cells)),
+                },
+            )
+        ]
+        for c in self.constraints:
+            ops.extend(c.to_transaction_operations())
+        return ops

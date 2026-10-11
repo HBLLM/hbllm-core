@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,30 @@ class PhysicsPredictor:
     """Physics-based forward state transition predictor."""
 
     name: str = "physics"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export physics predictor status as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="predictor:physics",
+            operator="==",
+            value="active",
+            relation="kinematics_thermodynamics",
+            target_entity="physics",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering physics predictor."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="predictor_physics",
+                node_data={
+                    "name": self.name,
+                    "type": "kinematics_thermodynamics",
+                    "active": True,
+                },
+            )
+        ]
 
     def predict_state(
         self,
