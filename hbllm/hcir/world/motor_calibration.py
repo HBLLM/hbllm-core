@@ -5,13 +5,43 @@ Provides domain-agnostic data models for tracking:
 - Environmental state change rules (StateMutationModel)
 
 These are learned through empirical probing and trial-and-error interaction,
-mimicking human motor and causal discovery.
+mimicking human motor and causal discovery. All state evolutions can be
+lifted to formal CausalPredicates, ActionAffordances, and atomic TransactionOperations.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortex_causal import ActionAffordance, CausalPredicate
+
+logger = logging.getLogger(__name__)
+
+
+class TriggerType(StrEnum):
+    """Environmental event triggers for state mutations."""
+
+    CONTACT = "CONTACT"
+    ACTION = "ACTION"
+    PROXIMITY = "PROXIMITY"
+    TIMER = "TIMER"
+    SENSOR = "SENSOR"
+
+
+class MutationType(StrEnum):
+    """Observable environmental mutation categories."""
+
+    PROPERTY_CHANGE = "PROPERTY_CHANGE"
+    BARRIER_OPEN = "BARRIER_OPEN"
+    ROTATION = "ROTATION"
+    STATE_CHANGE = "STATE_CHANGE"
+    COLOR_REMAP = "COLOR_REMAP"
+    HOLDING_CHANGE = "HOLDING_CHANGE"
+    MUTATION = "MUTATION"
 
 
 @dataclass
@@ -149,6 +179,26 @@ class ActionDynamicsModel:
             return f"{base} | Branches: {{{branches}}}"
         return base
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Lift calibrated motor dynamics into Pearl's formal do(a) causal predicate."""
+        return CausalPredicate(
+            variable="action_displacement",
+            operator="==",
+            value=(self.delta_r, self.delta_c),
+            target_entity=str(self.action_id),
+        )
+
+    def to_affordance(self) -> ActionAffordance:
+        """Convert calibrated action dynamics into a declarative ActionAffordance."""
+        is_disp = self.is_displacement_action()
+        return ActionAffordance(
+            action_id=self.action_id,
+            name=f"action_{self.action_id}",
+            is_displacement=is_disp,
+            delta=(self.delta_r, self.delta_c) if is_disp else None,
+            confidence=self.confidence,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "action_id": self.action_id,
@@ -226,6 +276,19 @@ class ConditionedActionDynamics:
         if implicit_key in self._models:
             return self._models[implicit_key]
         return default
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all registered dynamics models into declarative causal predicates."""
+        predicates: list[CausalPredicate] = []
+        for model in self._models.values():
+            predicates.append(model.to_causal_predicate())
+            for branch in model.conditional_branches.values():
+                predicates.append(branch.to_causal_predicate())
+        return predicates
+
+    def export_affordances(self) -> list[ActionAffordance]:
+        """Export all registered dynamics models into declarative ActionAffordances."""
+        return [model.to_affordance() for model in self._models.values()]
 
     def __getitem__(self, key: int | str | tuple[int | str, str | None]) -> ActionDynamicsModel:
         if isinstance(key, tuple):
@@ -315,10 +378,10 @@ class ConditionedActionDynamics:
 class StateMutationModel:
     """Discrete causal rule mapping an environmental trigger to an observable state mutation."""
 
-    trigger_type: str  # e.g., "CONTACT", "ACTION", "PROXIMITY"
+    trigger_type: TriggerType | str
     trigger_pos: tuple[int, ...] | None = None
     trigger_feature: Any = None  # Generic feature identifier (visual, tactile, token, color)
-    mutation_type: str = "MUTATION"  # "PROPERTY_CHANGE", "BARRIER_OPEN", "ROTATION", "STATE_CHANGE", "COLOR_REMAP", "HOLDING_CHANGE"
+    mutation_type: MutationType | str = MutationType.MUTATION
     prior_value: Any = None
     posterior_value: Any = None
     confidence: float = 0.5
@@ -327,10 +390,10 @@ class StateMutationModel:
 
     def __init__(
         self,
-        trigger_type: str,
+        trigger_type: TriggerType | str,
         trigger_pos: tuple[int, ...] | None = None,
         trigger_feature: Any = None,
-        mutation_type: str = "MUTATION",
+        mutation_type: MutationType | str = MutationType.MUTATION,
         prior_value: Any = None,
         posterior_value: Any = None,
         confidence: float = 0.5,
@@ -366,12 +429,41 @@ class StateMutationModel:
             self.posterior_value = observed_posterior
             self.confidence = max(0.2, self.confidence - learning_rate)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Lift state mutation rule into Pearl's formal causal predicate."""
+        return CausalPredicate(
+            variable="state_mutation",
+            operator="==",
+            value=self.posterior_value,
+            relation=str(self.mutation_type),
+            target_entity=str(self.trigger_pos or self.trigger_feature),
+        )
+
+    def to_transaction_operations(self, node_id: str | None = None) -> list[TransactionOperation]:
+        """Propose HCIR state mutation transactions for atomic execution by TransactionManager."""
+        target_node = node_id or (
+            f"pos_{self.trigger_pos[0]}_{self.trigger_pos[1]}"
+            if self.trigger_pos and len(self.trigger_pos) >= 2
+            else "environment"
+        )
+        return [
+            TransactionOperation(
+                op=TransactionOp.MODIFY_NODE,
+                node_id=target_node,
+                changes={
+                    "mutation_type": str(self.mutation_type),
+                    "posterior_value": self.posterior_value,
+                    "confidence": self.confidence,
+                },
+            )
+        ]
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "trigger_type": self.trigger_type,
+            "trigger_type": str(self.trigger_type),
             "trigger_pos": list(self.trigger_pos) if self.trigger_pos else None,
             "trigger_feature": self.trigger_feature,
-            "mutation_type": self.mutation_type,
+            "mutation_type": str(self.mutation_type),
             "prior_value": self.prior_value,
             "posterior_value": self.posterior_value,
             "confidence": self.confidence,
@@ -382,10 +474,10 @@ class StateMutationModel:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StateMutationModel:
         return cls(
-            trigger_type=data.get("trigger_type", "CONTACT"),
+            trigger_type=data.get("trigger_type", TriggerType.CONTACT),
             trigger_pos=tuple(data["trigger_pos"]) if data.get("trigger_pos") else None,
             trigger_feature=data.get("trigger_feature"),
-            mutation_type=data.get("mutation_type", "MUTATION"),
+            mutation_type=data.get("mutation_type", MutationType.MUTATION),
             prior_value=data.get("prior_value"),
             posterior_value=data.get("posterior_value"),
             confidence=data.get("confidence", 0.5),

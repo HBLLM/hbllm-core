@@ -11,15 +11,56 @@ Biologically modeled on mammalian posterior parietal cortex and hippocampal plac
    - Projects validated subgoals and motor trajectories across symmetry planes.
 3. Spatial Bearing & Relative Displacement:
    - Computes cardinal bearings, relative distances, and target approach vectors.
+4. Formal Geometric & Perspective Homography:
+   - Evaluates transformation model fits across Affine, Isometric, and Projective models with uncertainty (W040).
 """
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.declarative import SpatialActionIntent, SymbolicSubgoal
+from hbllm.hcir.world.cortex_causal import CausalPredicate
+
 logger = logging.getLogger(__name__)
+
+
+class SpatialBearing(StrEnum):
+    """Cardinal, intercardinal, and self bearings in egocentric space."""
+
+    NORTH = "N"
+    SOUTH = "S"
+    EAST = "E"
+    WEST = "W"
+    NORTH_EAST = "NE"
+    NORTH_WEST = "NW"
+    SOUTH_EAST = "SE"
+    SOUTH_WEST = "SW"
+    SELF = "SELF"
+
+
+class DihedralTransform(StrEnum):
+    """Canonical D4 dihedral group transformations."""
+
+    REFLECT_HORIZONTAL = "reflect_horizontal"
+    REFLECT_VERTICAL = "reflect_vertical"
+    REFLECT_MAIN_DIAG = "reflect_main_diag"
+    ROTATE_180 = "rotate_180"
+    ROTATE_90_CW = "rotate_90_cw"
+    ROTATE_90_CCW = "rotate_90_ccw"
+    IDENTITY = "identity"
+
+
+class GeometricModelType(StrEnum):
+    """Geometric transformation family classifications (W040)."""
+
+    ISOMETRIC = "isometric"
+    AFFINE = "affine"
+    PROJECTIVE = "projective"
+    DEGENERATE = "degenerate"
 
 
 @dataclass(frozen=True)
@@ -29,7 +70,78 @@ class SpatialEgoVector:
     delta_r: int
     delta_c: int
     manhattan_dist: int
-    bearing: str  # 'N', 'S', 'E', 'W', 'NE', 'NW', 'SE', 'SW', 'SELF'
+    bearing: SpatialBearing | str
+
+    def is_adjacent(self, chebyshev: bool = False) -> bool:
+        """True if the target position is within immediate 1-step reach."""
+        if chebyshev:
+            return max(abs(self.delta_r), abs(self.delta_c)) <= 1
+        return self.manhattan_dist <= 1
+
+    def unit_step(self) -> tuple[int, int]:
+        """Normalize vector to single cardinal or diagonal unit step."""
+        step_r = 0 if self.delta_r == 0 else (1 if self.delta_r > 0 else -1)
+        step_c = 0 if self.delta_c == 0 else (1 if self.delta_c > 0 else -1)
+        return step_r, step_c
+
+    def to_causal_predicate(
+        self, agent_id: str = "avatar", target_id: str = "target"
+    ) -> CausalPredicate:
+        """Export egocentric relational bearing into a formal declarative causal predicate."""
+        return CausalPredicate(
+            variable="spatial_bearing",
+            operator="==",
+            value=str(self.bearing),
+            relation=f"dist_{self.manhattan_dist}",
+            target_entity=target_id,
+        )
+
+
+@dataclass
+class GeometricMappingResult:
+    """Epistemic result of geometric mapping selection between coordinate frames (W040)."""
+
+    best_model_type: GeometricModelType | str
+    best_model: AffineTransform2D | ProjectiveHomography2D | None
+    residual: float
+    residuals: dict[str, float]
+    ambiguity_score: float
+    parallelism_deviation: float
+    is_isometric: bool
+    perspective_distortion: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert result to standard dictionary representation."""
+        return {
+            "best_model_type": str(self.best_model_type),
+            "best_model": self.best_model,
+            "residual": self.residual,
+            "residuals": dict(self.residuals),
+            "ambiguity_score": self.ambiguity_score,
+            "parallelism_deviation": self.parallelism_deviation,
+            "is_isometric": self.is_isometric,
+            "perspective_distortion": self.perspective_distortion,
+        }
+
+    def __getitem__(self, key: str) -> Any:
+        """Dictionary access emulation for backward compatibility."""
+        return self.to_dict()[key]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Safe dictionary getter emulation."""
+        return self.to_dict().get(key, default)
+
+    def to_causal_predicate(
+        self, source_frame: str = "source", target_frame: str = "target"
+    ) -> CausalPredicate:
+        """Export geometric mapping invariance as a formal causal predicate."""
+        return CausalPredicate(
+            variable="geometric_mapping",
+            operator="==",
+            value=str(self.best_model_type),
+            relation=str(round(self.residual, 4)),
+            target_entity=target_frame,
+        )
 
 
 class ParietalCoordinateTransformer:
@@ -49,23 +161,23 @@ class ParietalCoordinateTransformer:
 
         # Infer cardinal bearing
         if dr == 0 and dc == 0:
-            bearing = "SELF"
+            bearing = SpatialBearing.SELF
         elif dr < 0 and dc == 0:
-            bearing = "N"
+            bearing = SpatialBearing.NORTH
         elif dr > 0 and dc == 0:
-            bearing = "S"
+            bearing = SpatialBearing.SOUTH
         elif dr == 0 and dc > 0:
-            bearing = "E"
+            bearing = SpatialBearing.EAST
         elif dr == 0 and dc < 0:
-            bearing = "W"
+            bearing = SpatialBearing.WEST
         elif dr < 0 and dc > 0:
-            bearing = "NE"
+            bearing = SpatialBearing.NORTH_EAST
         elif dr < 0 and dc < 0:
-            bearing = "NW"
+            bearing = SpatialBearing.NORTH_WEST
         elif dr > 0 and dc > 0:
-            bearing = "SE"
+            bearing = SpatialBearing.SOUTH_EAST
         else:
-            bearing = "SW"
+            bearing = SpatialBearing.SOUTH_WEST
 
         return SpatialEgoVector(
             delta_r=dr,
@@ -91,23 +203,24 @@ class ParietalCoordinateTransformer:
     def project_dihedral_transform(
         pos: tuple[int, int],
         grid_shape: tuple[int, int],
-        transform: str,
+        transform: DihedralTransform | str,
     ) -> tuple[int, int]:
         """Project a 2D coordinate under D4 dihedral group transformations."""
         H, W = grid_shape
         r, c = pos
+        t_str = str(transform)
 
-        if transform == "reflect_horizontal":
+        if t_str == DihedralTransform.REFLECT_HORIZONTAL:
             return (r, W - 1 - c)
-        elif transform == "reflect_vertical":
+        elif t_str == DihedralTransform.REFLECT_VERTICAL:
             return (H - 1 - r, c)
-        elif transform == "reflect_main_diag":
+        elif t_str == DihedralTransform.REFLECT_MAIN_DIAG:
             return (c, r)
-        elif transform == "rotate_180":
+        elif t_str == DihedralTransform.ROTATE_180:
             return (H - 1 - r, W - 1 - c)
-        elif transform == "rotate_90_cw":
+        elif t_str == DihedralTransform.ROTATE_90_CW:
             return (c, H - 1 - r)
-        elif transform == "rotate_90_ccw":
+        elif t_str == DihedralTransform.ROTATE_90_CCW:
             return (W - 1 - c, r)
         return (r, c)
 
@@ -160,24 +273,46 @@ class ParietalCoordinateTransformer:
         sym_name = best_sym[0]
         if sym_name == "horizontal":
             return ParietalCoordinateTransformer.project_dihedral_transform(
-                subgoal_pos, grid_shape, "reflect_horizontal"
+                subgoal_pos, grid_shape, DihedralTransform.REFLECT_HORIZONTAL
             )
         elif sym_name == "vertical":
             return ParietalCoordinateTransformer.project_dihedral_transform(
-                subgoal_pos, grid_shape, "reflect_vertical"
+                subgoal_pos, grid_shape, DihedralTransform.REFLECT_VERTICAL
             )
         elif sym_name == "rotational_180":
             return ParietalCoordinateTransformer.project_dihedral_transform(
-                subgoal_pos, grid_shape, "rotate_180"
+                subgoal_pos, grid_shape, DihedralTransform.ROTATE_180
             )
         return None
+
+    @staticmethod
+    def transfer_subgoal_to_symbolic(
+        subgoal_pos: tuple[int, int],
+        grid_shape: tuple[int, int],
+        grid: np.ndarray,
+        background_feature: int = 0,
+        intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE,
+    ) -> SymbolicSubgoal | None:
+        """Transfer candidate subgoal across symmetry into a formal declarative SymbolicSubgoal."""
+        transferred = ParietalCoordinateTransformer.transfer_subgoal_across_symmetry(
+            subgoal_pos=subgoal_pos,
+            grid_shape=grid_shape,
+            grid=grid,
+            background_feature=background_feature,
+        )
+        if transferred is None:
+            return None
+        return SymbolicSubgoal(
+            intent=intent,
+            target_query={"target_position": transferred},
+        )
 
     @staticmethod
     def infer_geometric_mapping(
         src_points: np.ndarray,
         dst_points: np.ndarray,
         residual_tol: float = 0.05,
-    ) -> dict[str, Any]:
+    ) -> GeometricMappingResult:
         """Infer best geometric coordinate model (Affine, Isometric, Projective) between point sets (W040)."""
         return GeometricModelSelector.select_best_model(
             src_points, dst_points, residual_tol=residual_tol
@@ -262,7 +397,6 @@ class AxonometricIsometricTransform:
         u = pts[:, 0] / self.scale
         v = pts[:, 1] / self.scale
 
-        # From: u = (x - y) * cos(rad) and v = (x + y) * sin(rad) - z_plane
         diff = u / np.cos(rad)
         sum_xy = (v + z_plane) / np.sin(rad)
         x = 0.5 * (sum_xy + diff)
@@ -425,7 +559,7 @@ class GeometricModelSelector:
         src_points: np.ndarray,
         dst_points: np.ndarray,
         residual_tol: float = 0.05,
-    ) -> dict[str, Any]:
+    ) -> GeometricMappingResult:
         """Select best geometric model under invariant Occam selection and report epistemic model ambiguity.
 
         Hierarchical Occam's Selection:
@@ -441,16 +575,16 @@ class GeometricModelSelector:
 
         collinearity = GeometricModelSelector.check_collinearity(src)
         if N < 3 or collinearity > 0.999:
-            return {
-                "best_model_type": "degenerate",
-                "best_model": None,
-                "residual": 999.0,
-                "residuals": {},
-                "ambiguity_score": 1.0,
-                "parallelism_deviation": 1.0,
-                "is_isometric": False,
-                "perspective_distortion": 0.0,
-            }
+            return GeometricMappingResult(
+                best_model_type=GeometricModelType.DEGENERATE,
+                best_model=None,
+                residual=999.0,
+                residuals={},
+                ambiguity_score=1.0,
+                parallelism_deviation=1.0,
+                is_isometric=False,
+                perspective_distortion=0.0,
+            )
 
         results: dict[str, Any] = {}
         residuals: dict[str, float] = {}
@@ -478,7 +612,7 @@ class GeometricModelSelector:
             except Exception:
                 residuals["projective"] = 999.0
 
-        par_dev, n_pairs = GeometricModelSelector.check_parallelism_preservation(src, dst)
+        par_dev, _ = GeometricModelSelector.check_parallelism_preservation(src, dst)
 
         # 3. Occam's Invariant Selection
         aff_model = results.get("affine")
@@ -490,7 +624,7 @@ class GeometricModelSelector:
         # If affine residual is within tolerance or projective perspective is negligible:
         # Affine wins.
         if residuals["affine"] <= residual_tol or (persp_dist < 1e-4 and residuals["affine"] < 0.2):
-            best_type = "isometric" if is_iso else "affine"
+            best_type = GeometricModelType.ISOMETRIC if is_iso else GeometricModelType.AFFINE
             best_model = aff_model
             best_res = residuals["affine"]
             # Low ambiguity if clean fit
@@ -502,24 +636,28 @@ class GeometricModelSelector:
             and (par_dev > 1e-3 or persp_dist > 1e-4)
         ):
             # True non-affine perspective convergence
-            best_type = "projective"
+            best_type = GeometricModelType.PROJECTIVE
             best_model = proj_model
             best_res = proj_res
             ambiguity = max(0.0, min(1.0, proj_res / (residual_tol + 1e-6) * 0.2))
         else:
             # Ambiguous or high residual regime
-            best_type = "affine" if residuals["affine"] <= proj_res else "projective"
-            best_model = results.get(best_type)
-            best_res = residuals[best_type]
+            best_type = (
+                GeometricModelType.AFFINE
+                if residuals["affine"] <= proj_res
+                else GeometricModelType.PROJECTIVE
+            )
+            best_model = results.get(str(best_type))
+            best_res = residuals[str(best_type)]
             ambiguity = 0.85
 
-        return {
-            "best_model_type": best_type,
-            "best_model": best_model,
-            "residual": best_res,
-            "residuals": residuals,
-            "ambiguity_score": round(ambiguity, 4),
-            "parallelism_deviation": round(par_dev, 6),
-            "is_isometric": is_iso,
-            "perspective_distortion": round(persp_dist, 6),
-        }
+        return GeometricMappingResult(
+            best_model_type=best_type,
+            best_model=best_model,
+            residual=best_res,
+            residuals=residuals,
+            ambiguity_score=round(ambiguity, 4),
+            parallelism_deviation=round(par_dev, 6),
+            is_isometric=is_iso,
+            perspective_distortion=round(persp_dist, 6),
+        )
