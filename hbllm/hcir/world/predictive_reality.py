@@ -1,5 +1,8 @@
-"""
-Predictive Reality Model — Ensemble Reality State Transition Predictor.
+"""Predictive Reality Model — Ensemble Reality State Transition Predictor.
+
+Multi-horizon ensemble predictive reality model integrating physics, statistical,
+SNN temporal, and neural predictors with disagreement analysis, CausalPredicates,
+and atomic TransactionOperations.
 """
 
 from __future__ import annotations
@@ -8,6 +11,8 @@ import logging
 import uuid
 from typing import Any
 
+from hbllm.hcir.transactions import TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
 from hbllm.hcir.world.prediction_types import EnsemblePrediction, PredictionProvenance
 from hbllm.hcir.world.predictors.neural import NeuralWorldModel
@@ -139,3 +144,25 @@ class PredictiveRealityModel:
             component_predictions=comp_results,
             provenance=prov,
         )
+
+    def predict_and_transact(
+        self,
+        snapshot: WorldStateSnapshot,
+        action_intent: str,
+        horizon_ms: int = 60000,
+        provenance: PredictionProvenance | None = None,
+    ) -> tuple[EnsemblePrediction, list[TransactionOperation]]:
+        """Compute ensemble prediction and generate corresponding HCIR transaction proposals."""
+        pred = self.predict(
+            snapshot=snapshot,
+            action_intent=action_intent,
+            horizon_ms=horizon_ms,
+            provenance=provenance,
+        )
+        return pred, pred.to_transaction_operations()
+
+    def export_causal_predicates(self, ensemble: EnsemblePrediction) -> list[CausalPredicate]:
+        """Export prediction state variables and provenance as declarative causal predicates."""
+        preds = ensemble.to_causal_predicates()
+        preds.append(ensemble.provenance.to_causal_predicate())
+        return preds

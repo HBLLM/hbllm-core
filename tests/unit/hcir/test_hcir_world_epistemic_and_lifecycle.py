@@ -58,6 +58,30 @@ def test_transaction_lifecycle_and_promotion():
     assert receipt is not None
     assert receipt.promotion_id == "promo_pred_1"
 
+    # Forward architecture exports
+    pred_life = lifecycle.to_causal_predicate()
+    assert pred_life.variable == "lifecycle:pred_1"
+    assert pred_life.value == "verified"
+    tx_life = lifecycle.to_transaction_operations()
+    assert len(tx_life) == 1
+    assert tx_life[0].node_id == "pred_pred_1"
+
+    pred_rcpt = receipt.to_causal_predicate()
+    assert pred_rcpt.variable == "promoted_skill:promo_pred_1"
+    assert pred_rcpt.value == "temp_decreased"
+    tx_rcpt = receipt.to_transaction_operations()
+    assert len(tx_rcpt) == 1
+    assert tx_rcpt[0].node_id == "promoted_skill_promo_pred_1"
+
+    afford_rcpt = receipt.to_affordance()
+    assert afford_rcpt.action_id == "reduce_speed"
+    assert afford_rcpt.confidence == 0.88
+
+    promo_preds = promotion.export_causal_predicates()
+    assert len(promo_preds) == 1
+    promo_txs = promotion.to_transaction_operations()
+    assert len(promo_txs) == 1
+
 
 def test_world_model_registry():
     registry = WorldModelRegistry()

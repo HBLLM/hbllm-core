@@ -1,11 +1,15 @@
-"""
-Confidence Calibrator — Prediction Confidence Vector Scaling & Temporal Decay Calculator.
+"""Confidence Calibrator — Prediction Confidence Vector Scaling & Temporal Decay Calculator.
+
+Calibrates raw predictor confidence and computes temporal exponential decay vectors,
+lifted to declarative CausalPredicates for epistemic gating.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,15 @@ class PredictionConfidenceVector:
     temporal_decay: float
     historical_accuracy: float
     uncertainty: float
+
+    def to_causal_predicate(self, metric_name: str = "confidence") -> CausalPredicate:
+        """Export confidence vector as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=metric_name,
+            operator="==",
+            value=self.calibrated_confidence,
+            relation="calibrated_confidence",
+        )
 
 
 class ConfidenceCalibrator:
@@ -30,7 +43,6 @@ class ConfidenceCalibrator:
         half_life_seconds: float = 3600.0,
     ) -> PredictionConfidenceVector:
         """Compute calibrated confidence vector and exponential temporal decay."""
-        # Exponential temporal decay: exp(-t / half_life)
         temporal_decay = math.exp(-max(0.0, age_seconds) / max(1.0, half_life_seconds))
         calibrated = raw_confidence * historical_accuracy * temporal_decay
         uncertainty = max(0.0, 1.0 - calibrated)
