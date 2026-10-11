@@ -15,6 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.grid_operator import GridOperator, OperatorBinding
 
 logger = logging.getLogger(__name__)
@@ -343,6 +345,28 @@ class GeodesicManifoldRouter:
 
         return None
 
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export router capability as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="geodesic_manifold_router",
+            operator="==",
+            value="active",
+            relation="action_transition_routing",
+            target_entity="manifold_router",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering geodesic manifold router."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="geodesic_manifold_router_state",
+                node_data={"status": "active"},
+            )
+        ]
+
 
 class GeodesicPathOperator(GridOperator):
     """Operator that connects landmark markers with a geodesic shortest path avoiding obstacle colors."""
@@ -369,7 +393,37 @@ class GeodesicPathOperator(GridOperator):
         self.connectivity = connectivity
         self.complexity = complexity
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export geodesic path operator as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"geodesic_path:{self.start_color}->{self.goal_color}",
+            operator="==",
+            value=self.path_color,
+            relation=f"conn:{self.connectivity}",
+            target_entity=self.name,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording geodesic path operator."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"op_{self.name}",
+                node_data={
+                    "name": self.name,
+                    "start_color": self.start_color,
+                    "goal_color": self.goal_color,
+                    "path_color": self.path_color,
+                    "traversable_colors": list(self.traversable_colors),
+                    "obstacle_colors": list(self.obstacle_colors),
+                    "connectivity": self.connectivity,
+                    "complexity": self.complexity,
+                },
+            )
+        ]
+
     def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
+
         return [
             OperatorBinding(
                 operator_name=self.name,

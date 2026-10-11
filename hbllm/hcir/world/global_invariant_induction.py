@@ -15,6 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.grid_operator import GridOperator, OperatorBinding
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,29 @@ class BranchRule:
         else:
             return np.copy(grid)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export branch rule as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"branch_rule:{self.rule_type}",
+            operator="==",
+            value=self.rule_type,
+            relation=f"params:{sorted(self.params.items())}",
+            target_entity=self.rule_type,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording branch rule."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"branch_rule_{self.rule_type}",
+                node_data={
+                    "rule_type": self.rule_type,
+                    "params": dict(self.params),
+                },
+            )
+        ]
+
 
 class GlobalScalarConditionedOperator(GridOperator):
     """Operator that conditions spatial transformation on a global modular scalar invariant."""
@@ -121,6 +146,42 @@ class GlobalScalarConditionedOperator(GridOperator):
         self.branches = branches
         self.complexity = complexity
         self._extractor = GlobalScalarPropertyExtractor.get_extractor(property_name)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export global invariant operator as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"global_invariant:{self.property_name}",
+            operator="==",
+            value=self.modulus,
+            relation=f"branches:{len(self.branches)}",
+            target_entity=self.name,
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export operator predicate and all branch rule predicates."""
+        preds = [self.to_causal_predicate()]
+        for b in self.branches.values():
+            preds.append(b.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting global invariant operator."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"op_{self.name}",
+                node_data={
+                    "name": self.name,
+                    "property_name": self.property_name,
+                    "modulus": self.modulus,
+                    "branch_count": len(self.branches),
+                    "complexity": self.complexity,
+                },
+            )
+        ]
+        for b in self.branches.values():
+            ops.extend(b.to_transaction_operations())
+        return ops
 
     def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
         return [
@@ -141,6 +202,7 @@ class GlobalScalarConditionedOperator(GridOperator):
         branch = self.branches.get(residue)
         if branch is None:
             # Fallback to identity if residue branch is unspecified
+
             return np.copy(grid)
         return branch.apply(grid)
 

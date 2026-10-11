@@ -29,6 +29,8 @@ from typing import Any
 import numpy as np
 from scipy.ndimage import label
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.elastic_particle_induction import (
     ElasticParticleDeflectionOperator,
     InductiveParticleDeflectionSynthesizer,
@@ -63,6 +65,31 @@ class ResidualEvent:
     x_val: int  # Initial categorical color symbol in X
     y_val: int  # Final categorical color symbol in Y
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export residual transition event as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"residual_event:{self.r}_{self.c}",
+            operator="==",
+            value=f"{self.x_val}->{self.y_val}",
+            relation="transition",
+            target_entity=f"({self.r},{self.c})",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording categorical residual transition."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"residual_{self.r}_{self.c}",
+                node_data={
+                    "r": self.r,
+                    "c": self.c,
+                    "x_val": self.x_val,
+                    "y_val": self.y_val,
+                },
+            )
+        ]
+
 
 # =========================================================================
 # Parameterized Dynamically Synthesized Operators
@@ -90,6 +117,32 @@ class SynthesizedCellularFluxOperator(GridOperator):
         self.direction = direction
         self.params = params
         self.complexity = complexity
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export cellular flux operator as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"flux_operator:{self.name}",
+            operator="==",
+            value=self.flux_mode,
+            relation=f"dir:{self.direction}",
+            target_entity=self.name,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording cellular flux operator."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"op_{self.name}",
+                node_data={
+                    "name": self.name,
+                    "flux_mode": self.flux_mode,
+                    "direction": self.direction,
+                    "params": self.params,
+                    "complexity": self.complexity,
+                },
+            )
+        ]
 
     def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
         train_pairs = context.get("train_pairs", [])
@@ -662,9 +715,65 @@ class RepresentationRevisionTrace:
     conditions_ablation_passed: bool = True
     phase2_predicted_test: np.ndarray | None = None
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export representation revision trace as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"representation_revision:{self.task_id}",
+            operator="==",
+            value="SOLVED" if self.phase2_solved else "UNSOLVED",
+            relation=f"operator:{self.synthesized_operator_name}",
+            target_entity=self.family,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording representation revision trace."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"revision_trace_{self.task_id}",
+                node_data={
+                    "task_id": self.task_id,
+                    "family": self.family,
+                    "phase1_solved": self.phase1_solved,
+                    "phase1_inadequacy_detected": self.phase1_inadequacy_detected,
+                    "phase1_epistemic_uncertainty": self.phase1_epistemic_uncertainty,
+                    "unexplained_residual_pixels": self.unexplained_residual_pixels,
+                    "synthesized_operator_name": self.synthesized_operator_name,
+                    "out_of_construction_verified": self.out_of_construction_verified,
+                    "phase2_solved": self.phase2_solved,
+                    "phase2_exact_match": self.phase2_exact_match,
+                    "phase2_epistemic_uncertainty": self.phase2_epistemic_uncertainty,
+                    "reusable_on_novel_task": self.reusable_on_novel_task,
+                    "control_ablation_passed": self.control_ablation_passed,
+                },
+            )
+        ]
+
 
 class RepresentationExpansionEngine:
     """Metacognitive engine detecting hypothesis language inadequacy and revising representations."""
+
+    @classmethod
+    def to_causal_predicate(cls) -> CausalPredicate:
+        """Export representation expansion engine status as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="representation_expansion_engine",
+            operator="==",
+            value="active",
+            relation="metacognitive_revision",
+            target_entity="level_3_expansion",
+        )
+
+    @classmethod
+    def to_transaction_operations(cls) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering representation expansion engine."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="representation_expansion_engine_state",
+                node_data={"status": "active", "revision_level": 3},
+            )
+        ]
 
     @classmethod
     def synthesize_and_predict(

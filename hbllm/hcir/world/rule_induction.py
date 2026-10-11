@@ -30,6 +30,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,6 +156,31 @@ class TransformationRule:
             "complexity": self.complexity,
             "params": dict(self.params),
         }
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export transformation rule as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"transformation_rule:{self.rule_id}",
+            operator="==",
+            value=self.family.value,
+            relation=f"complexity:{self.complexity}",
+            target_entity=self.rule_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording transformation rule."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"rule_{self.rule_id}",
+                node_data={
+                    "rule_id": self.rule_id,
+                    "family": self.family.value,
+                    "complexity": self.complexity,
+                    "params": dict(self.params),
+                },
+            )
+        ]
 
 
 @dataclass
@@ -1117,6 +1145,48 @@ class RuleInductionResult:
     refutations: list[RefutationRecord]
     metadata: dict[str, Any]
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export primary induced transformation rule as a declarative causal predicate."""
+        selected_id = self.selected_rule.rule_id if self.selected_rule else "none"
+        return CausalPredicate(
+            variable="rule_induction_selected",
+            operator="==",
+            value=selected_id,
+            relation=f"confidence:{self.posterior.confidence:.2f}",
+            target_entity="transformation_rule",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all induction outcomes including selected and surviving candidate rules."""
+        preds = [self.to_causal_predicate()]
+        if self.selected_rule:
+            preds.append(self.selected_rule.to_causal_predicate())
+        for r in self.surviving_rules:
+            if not self.selected_rule or r.rule_id != self.selected_rule.rule_id:
+                preds.append(r.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting induction results and discovered rules."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="rule_induction_result",
+                node_data={
+                    "selected_rule_id": self.selected_rule.rule_id if self.selected_rule else None,
+                    "surviving_count": len(self.surviving_rules),
+                    "refutations_count": len(self.refutations),
+                    "confidence": self.posterior.confidence,
+                    "entropy": self.posterior.entropy_bits,
+                    "is_ambiguous": self.posterior.is_ambiguous,
+                    "metadata": self.metadata,
+                },
+            )
+        ]
+        if self.selected_rule:
+            ops.extend(self.selected_rule.to_transaction_operations())
+        return ops
+
 
 class RuleInductionEngine:
     """Unified engine coordinating generation, refutation, simplicity selection, and bifurcation."""
@@ -1195,3 +1265,24 @@ class RuleInductionEngine:
         """
         result = self.induce_rule_result(train_pairs, allow_recursion=allow_recursion)
         return result.selected_rule, result.surviving_rules, result.metadata
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export rule induction engine configuration as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="rule_induction_engine",
+            operator="==",
+            value=self.max_candidates,
+            relation="active",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting rule induction engine configuration."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="rule_induction_engine_state",
+                node_data={
+                    "max_candidates": self.max_candidates,
+                },
+            )
+        ]

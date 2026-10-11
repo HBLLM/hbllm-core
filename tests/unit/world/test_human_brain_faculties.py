@@ -1441,3 +1441,219 @@ class TestPhase26CognitiveBridgeCausalAndTransactions:
         stat = StatisticalPredictor()
         assert stat.to_causal_predicate().variable == "predictor:statistical"
         assert len(stat.to_transaction_operations()) == 1
+
+
+class TestPhase27CognitiveBridgeCausalAndTransactions:
+    """Validate declarative causal predicates and atomic HCIR transactions for Phase 27 components."""
+
+    def test_rule_induction_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.rule_induction import (
+            RuleFamily,
+            RuleInductionEngine,
+            RuleInductionResult,
+            RulePosteriorResult,
+            TransformationRule,
+        )
+
+        rule = TransformationRule(
+            rule_id="rule_rot90",
+            family=RuleFamily.AFFINE,
+            params={"angle": 90},
+            complexity=1.5,
+        )
+        r_pred = rule.to_causal_predicate()
+        assert r_pred.variable == "transformation_rule:rule_rot90"
+        assert r_pred.value == "AFFINE"
+        r_ops = rule.to_transaction_operations()
+        assert len(r_ops) == 1
+        assert r_ops[0].node_id == "rule_rule_rot90"
+
+        posterior = RulePosteriorResult(
+            best_rule=rule,
+            probabilities={"rule_rot90": 0.95},
+            entropy_bits=0.1,
+            confidence=0.95,
+            is_ambiguous=False,
+        )
+        res = RuleInductionResult(
+            selected_rule=rule,
+            surviving_rules=[rule],
+            posterior=posterior,
+            refutations=[],
+            metadata={},
+        )
+        res_pred = res.to_causal_predicate()
+        assert res_pred.variable == "rule_induction_selected"
+        res_preds = res.export_causal_predicates()
+        assert len(res_preds) >= 2
+        res_ops = res.to_transaction_operations()
+        assert len(res_ops) >= 2
+
+        engine = RuleInductionEngine()
+        engine_pred = engine.to_causal_predicate()
+        assert engine_pred.variable == "rule_induction_engine"
+        engine_ops = engine.to_transaction_operations()
+        assert len(engine_ops) == 1
+
+    def test_global_invariant_induction_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.global_invariant_induction import (
+            BranchRule,
+            GlobalScalarConditionedOperator,
+        )
+
+        branch = BranchRule(
+            rule_type="recolor",
+            params={"src_color": 1, "dst_color": 2},
+        )
+        b_pred = branch.to_causal_predicate()
+        assert b_pred.variable == "branch_rule:recolor"
+        b_ops = branch.to_transaction_operations()
+        assert len(b_ops) == 1
+        assert b_ops[0].node_id == "branch_rule_recolor"
+
+        op = GlobalScalarConditionedOperator(
+            name="test_scalar_op",
+            property_name="color_count",
+            modulus=2,
+            branches={0: branch},
+            complexity=2.5,
+        )
+        op_pred = op.to_causal_predicate()
+        assert op_pred.variable == "global_invariant:color_count"
+        op_preds = op.export_causal_predicates()
+        assert len(op_preds) == 2
+        op_ops = op.to_transaction_operations()
+        assert len(op_ops) == 2
+
+    def test_topological_graph_induction_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.topological_graph_induction import (
+            GeodesicManifoldRouter,
+            GeodesicPathOperator,
+        )
+
+        router_pred = GeodesicManifoldRouter.to_causal_predicate()
+        assert router_pred.variable == "geodesic_manifold_router"
+        router_ops = GeodesicManifoldRouter.to_transaction_operations()
+        assert len(router_ops) == 1
+
+        path_op = GeodesicPathOperator(
+            name="geodesic_test_op",
+            start_color=1,
+            goal_color=2,
+            path_color=3,
+        )
+        pop_pred = path_op.to_causal_predicate()
+        assert pop_pred.variable == "geodesic_path:1->2"
+        pop_ops = path_op.to_transaction_operations()
+        assert len(pop_ops) == 1
+        assert pop_ops[0].node_id == "op_geodesic_test_op"
+
+    def test_relational_graph_matcher_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.inferotemporal_segmentation import VentralObjectToken
+        from hbllm.hcir.world.relational_graph_matcher import (
+            ObjectCorrespondence,
+            ObjectGraph,
+            RelationalEdge,
+            SpatialRelation,
+        )
+
+        edge = RelationalEdge(
+            source_id=1,
+            target_id=2,
+            relation=SpatialRelation.LEFT_OF,
+            distance=2.0,
+            dx=0.0,
+            dy=-2.0,
+        )
+        e_pred = edge.to_causal_predicate()
+        assert e_pred.variable == "relational_edge:1->2"
+        e_ops = edge.to_transaction_operations()
+        assert len(e_ops) == 1
+
+        token = VentralObjectToken(
+            object_id=1,
+            feature_id=3,
+            area=4,
+            centroid=(1, 1),
+            anchor_coord=(1, 1),
+            bounding_box=(0, 0, 2, 2),
+            aspect_ratio=1.0,
+            is_compact=True,
+        )
+        graph = ObjectGraph()
+        graph.add_node(token)
+        graph.add_edge(edge)
+        g_pred = graph.to_causal_predicate()
+        assert g_pred.variable == "object_graph"
+        g_preds = graph.export_causal_predicates()
+        assert len(g_preds) == 2
+        g_ops = graph.to_transaction_operations()
+        assert len(g_ops) == 2
+
+        corr = ObjectCorrespondence(
+            src_object_id=1,
+            dst_object_id=10,
+            match_score=0.92,
+            matched_relations=2,
+            invariants_preserved=["color"],
+        )
+        c_pred = corr.to_causal_predicate()
+        assert c_pred.variable == "object_match:1->10"
+        c_ops = corr.to_transaction_operations()
+        assert len(c_ops) == 1
+
+    def test_representation_expansion_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.representation_expansion import (
+            RepresentationExpansionEngine,
+            RepresentationRevisionTrace,
+            ResidualEvent,
+            SynthesizedCellularFluxOperator,
+        )
+
+        event = ResidualEvent(
+            r=2,
+            c=3,
+            x_val=0,
+            y_val=5,
+        )
+        ev_pred = event.to_causal_predicate()
+        assert ev_pred.variable == "residual_event:2_3"
+        ev_ops = event.to_transaction_operations()
+        assert len(ev_ops) == 1
+
+        op = SynthesizedCellularFluxOperator(
+            name="flux_op_fill",
+            flux_mode="flood_infill",
+            direction=(0, 1),
+            params={"target_color": 5},
+            complexity=2.0,
+        )
+        op_pred = op.to_causal_predicate()
+        assert op_pred.variable == "flux_operator:flux_op_fill"
+        op_ops = op.to_transaction_operations()
+        assert len(op_ops) == 1
+
+        trace = RepresentationRevisionTrace(
+            task_id="task_rev_01",
+            family="flood",
+            phase1_solved=False,
+            phase1_inadequacy_detected=True,
+            phase1_epistemic_uncertainty=0.8,
+            unexplained_residual_pixels=3,
+            synthesized_operator_name="flux_op_fill",
+            out_of_construction_verified=True,
+            phase2_solved=True,
+            phase2_exact_match=True,
+            phase2_epistemic_uncertainty=0.1,
+            reusable_on_novel_task=True,
+            control_ablation_passed=True,
+        )
+        tr_pred = trace.to_causal_predicate()
+        assert tr_pred.variable == "representation_revision:task_rev_01"
+        tr_ops = trace.to_transaction_operations()
+        assert len(tr_ops) == 1
+
+        eng_pred = RepresentationExpansionEngine.to_causal_predicate()
+        assert eng_pred.variable == "representation_expansion_engine"
+        eng_ops = RepresentationExpansionEngine.to_transaction_operations()
+        assert len(eng_ops) == 1

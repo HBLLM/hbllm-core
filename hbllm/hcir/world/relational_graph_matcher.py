@@ -21,6 +21,8 @@ from enum import StrEnum
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
     VentralObjectToken,
@@ -55,6 +57,33 @@ class RelationalEdge:
     dx: float  # row displacement
     dy: float  # col displacement
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export relational edge as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"relational_edge:{self.source_id}->{self.target_id}",
+            operator="==",
+            value=self.relation.value,
+            relation=f"dist:{self.distance:.1f}",
+            target_entity=f"dx:{self.dx:.1f}|dy:{self.dy:.1f}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording relational edge."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.ADD_EDGE,
+                edge_id=f"rel_edge_{self.source_id}_{self.target_id}",
+                edge_data={
+                    "source": f"obj_{self.source_id}",
+                    "target": f"obj_{self.target_id}",
+                    "relation": self.relation.value,
+                    "distance": self.distance,
+                    "dx": self.dx,
+                    "dy": self.dy,
+                },
+            )
+        ]
+
 
 @dataclass
 class ObjectGraph:
@@ -73,6 +102,39 @@ class ObjectGraph:
         self.edges.append(edge)
         self.adjacency[edge.source_id].append(edge)
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export object graph topology as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="object_graph",
+            operator="==",
+            value=len(self.nodes),
+            relation=f"edges:{len(self.edges)}",
+            target_entity="scene_graph",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export object graph summary and all directed relational edge predicates."""
+        preds = [self.to_causal_predicate()]
+        for edge in self.edges:
+            preds.append(edge.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting object graph nodes and edges."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="object_graph_summary",
+                node_data={
+                    "node_count": len(self.nodes),
+                    "edge_count": len(self.edges),
+                },
+            )
+        ]
+        for edge in self.edges:
+            ops.extend(edge.to_transaction_operations())
+        return ops
+
 
 @dataclass
 class ObjectCorrespondence:
@@ -83,6 +145,33 @@ class ObjectCorrespondence:
     match_score: float
     matched_relations: int
     invariants_preserved: list[str] = field(default_factory=list)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export object structural correspondence as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"object_match:{self.src_object_id}->{self.dst_object_id}",
+            operator="==",
+            value=f"score:{self.match_score:.2f}",
+            relation=f"relations:{self.matched_relations}",
+            target_entity=f"invariants:{','.join(self.invariants_preserved)}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording structural object correspondence."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.ADD_EDGE,
+                edge_id=f"corr_{self.src_object_id}_{self.dst_object_id}",
+                edge_data={
+                    "source": f"obj_{self.src_object_id}",
+                    "target": f"obj_{self.dst_object_id}",
+                    "relation": "STRUCTURAL_CORRESPONDENCE",
+                    "match_score": self.match_score,
+                    "matched_relations": self.matched_relations,
+                    "invariants_preserved": list(self.invariants_preserved),
+                },
+            )
+        ]
 
 
 class RelationalGraphMatcher:
