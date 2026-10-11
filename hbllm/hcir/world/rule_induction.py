@@ -4,13 +4,18 @@ Implements candidate rule generation, Popperian counterexample refutation,
 and Minimum Description Length (MDL) simplicity ranking:
 1. Candidate Rule Generator:
    - Proposes parameterized geometric (affine), morphological, color mapping,
-     crop/extraction, translation, and composite transformation hypotheses.
+     crop/extraction, translation, scaling, duplication, and composite transformation hypotheses.
 2. Popperian Refutation Gate:
    - Rejects candidate rules immediately upon the first demonstration counterexample.
    - Evaluates all training demonstration pairs strictly before acceptance.
 3. Simplicity & Evidence Ranker:
-   - Evaluates description complexity (Kolmogorov / MDL cost).
+   - Evaluates description complexity (Kolmogorov / MDL cost in bits/nats).
    - Selects the simplest non-falsified rule explaining all demonstrations.
+4. Latent Variable Bifurcation & Precedence Resolution (W074-W078):
+   - Induces conditional rules along latent discrete variables when single rules fail.
+   - Resolves conflicts by specificity and description length.
+5. Bayesian Uncertainty Calibration (W080):
+   - Calculates Boltzmann posterior distribution, Shannon entropy, and calibrated confidence.
 """
 
 from __future__ import annotations
@@ -25,9 +30,59 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
-
 logger = logging.getLogger(__name__)
+
+
+# ── Sensory-Motor Substrate Helpers ───────────────────────────────────────────
+
+
+class GridSubstrateUtils:
+    """Fast vectorized array operations and metric evaluations for 2D lattices."""
+
+    @staticmethod
+    def estimate_background_color(grid: np.ndarray) -> int:
+        """Estimate canvas background color via perimeter edge sampling and modal voting."""
+        if grid.size == 0:
+            return 0
+        h, w = grid.shape
+        perimeter_cells: list[int] = []
+        if h > 0 and w > 0:
+            perimeter_cells.extend(grid[0, :].tolist())
+            perimeter_cells.extend(grid[h - 1, :].tolist())
+            perimeter_cells.extend(grid[:, 0].tolist())
+            perimeter_cells.extend(grid[:, w - 1].tolist())
+
+        if perimeter_cells:
+            vals, counts = np.unique(perimeter_cells, return_counts=True)
+            return int(vals[np.argmax(counts)])
+
+        vals, counts = np.unique(grid, return_counts=True)
+        return int(vals[np.argmax(counts)])
+
+    @staticmethod
+    def compute_grid_metrics(
+        pred_y: np.ndarray,
+        target_y: np.ndarray,
+    ) -> tuple[bool, float, int]:
+        """Compute exact match status, pixel accuracy, and mismatch count between two grids.
+
+        Returns:
+            (is_exact, pixel_accuracy, mismatch_count)
+        """
+        if pred_y.shape != target_y.shape:
+            mismatches = max(pred_y.size, target_y.size)
+            return False, 0.0, mismatches
+
+        if pred_y.size == 0 and target_y.size == 0:
+            return True, 1.0, 0
+
+        mismatches = int(np.count_nonzero(pred_y != target_y))
+        is_exact = mismatches == 0
+        accuracy = float(1.0 - (mismatches / pred_y.size)) if pred_y.size > 0 else 0.0
+        return is_exact, accuracy, mismatches
+
+
+# ── Rule Grammar & Taxonomies ─────────────────────────────────────────────────
 
 
 class RuleFamily(StrEnum):
@@ -90,6 +145,15 @@ class TransformationRule:
         """Human-readable description of rule and parameters."""
         return f"{self.family.value}:{self.rule_id}({self.params})"
 
+    def to_symbolic_predicate(self) -> dict[str, Any]:
+        """Convert rule into a declarative symbolic predicate specification."""
+        return {
+            "rule_id": self.rule_id,
+            "family": self.family.value,
+            "complexity": self.complexity,
+            "params": dict(self.params),
+        }
+
 
 @dataclass
 class IdentityRule(TransformationRule):
@@ -147,7 +211,6 @@ class ColorMappingRule(TransformationRule):
     mapping: dict[int, int] = field(default_factory=dict)
 
     def __init__(self, mapping: dict[int, int]) -> None:
-        # Cost is proportional to number of active remappings
         active_changes = sum(1 for src, dst in mapping.items() if src != dst)
         cost = 1.0 + 0.25 * active_changes
         super().__init__(
@@ -156,18 +219,17 @@ class ColorMappingRule(TransformationRule):
             params={"mapping": mapping},
             complexity=cost,
         )
-        self.mapping = mapping
+        self.mapping = dict(mapping)
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
         out = grid.copy()
-        # Fast lookup substitution table for small integer indices (0-9)
         if np.all((grid >= 0) & (grid <= 9)):
             lut = np.arange(10, dtype=int)
             for src, dst in self.mapping.items():
                 if 0 <= src <= 9:
                     lut[src] = dst
             return lut[out]
-        # General dictionary fallback
+
         for src, dst in self.mapping.items():
             if src != dst:
                 out[grid == src] = dst
@@ -193,13 +255,13 @@ class CropRule(TransformationRule):
         self.target_color = target_color
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        H, W = grid.shape
-        if H == 0 or W == 0:
+        h, w = grid.shape
+        if h == 0 or w == 0:
             return grid.copy()
 
         bg = context.get("bg_color") if context else None
         if bg is None:
-            bg = WholeGridPredictor.estimate_background_color(grid)
+            bg = GridSubstrateUtils.estimate_background_color(grid)
 
         if self.crop_op == CropOp.BBOX_NON_BG:
             non_bg_coords = np.argwhere(grid != bg)
@@ -218,13 +280,13 @@ class CropRule(TransformationRule):
             return grid[r_min : r_max + 1, c_min : c_max + 1].copy()
 
         elif self.crop_op == CropOp.QUADRANT_TL:
-            return grid[: H // 2, : W // 2].copy()
+            return grid[: h // 2, : w // 2].copy()
         elif self.crop_op == CropOp.QUADRANT_TR:
-            return grid[: H // 2, W // 2 :].copy()
+            return grid[: h // 2, w // 2 :].copy()
         elif self.crop_op == CropOp.QUADRANT_BL:
-            return grid[H // 2 :, : W // 2].copy()
+            return grid[h // 2 :, : w // 2].copy()
         elif self.crop_op == CropOp.QUADRANT_BR:
-            return grid[H // 2 :, W // 2 :].copy()
+            return grid[h // 2 :, w // 2 :].copy()
 
         return grid.copy()
 
@@ -247,21 +309,21 @@ class TranslationRule(TransformationRule):
         self.dc = dc
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        H, W = grid.shape
+        h, w = grid.shape
         bg = context.get("bg_color") if context else None
         if bg is None:
-            bg = WholeGridPredictor.estimate_background_color(grid)
+            bg = GridSubstrateUtils.estimate_background_color(grid)
 
-        out = np.full((H, W), bg, dtype=int)
+        out = np.full((h, w), bg, dtype=int)
         r_src_start = max(0, -self.dr)
-        r_src_end = min(H, H - self.dr)
+        r_src_end = min(h, h - self.dr)
         c_src_start = max(0, -self.dc)
-        c_src_end = min(W, W - self.dc)
+        c_src_end = min(w, w - self.dc)
 
         r_dst_start = max(0, self.dr)
-        r_dst_end = min(H, H + self.dr)
+        r_dst_end = min(h, h + self.dr)
         c_dst_start = max(0, self.dc)
-        c_dst_end = min(W, W + self.dc)
+        c_dst_end = min(w, w + self.dc)
 
         if r_src_end > r_src_start and c_src_end > c_src_start:
             out[r_dst_start:r_dst_end, c_dst_start:c_dst_end] = grid[
@@ -274,7 +336,7 @@ class TranslationRule(TransformationRule):
 class GravityRule(TransformationRule):
     """Directional falling/compaction of foreground pixels."""
 
-    direction: str = "DOWN"  # "DOWN", "UP", "LEFT", "RIGHT"
+    direction: str = "DOWN"
 
     def __init__(self, direction: str = "DOWN") -> None:
         super().__init__(
@@ -286,30 +348,30 @@ class GravityRule(TransformationRule):
         self.direction = direction
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        H, W = grid.shape
+        h, w = grid.shape
         bg = context.get("bg_color") if context else None
         if bg is None:
-            bg = WholeGridPredictor.estimate_background_color(grid)
+            bg = GridSubstrateUtils.estimate_background_color(grid)
 
-        out = np.full((H, W), bg, dtype=int)
+        out = np.full((h, w), bg, dtype=int)
         if self.direction == "DOWN":
-            for c in range(W):
-                fg = [grid[r, c] for r in range(H) if grid[r, c] != bg]
+            for c in range(w):
+                fg = [grid[r, c] for r in range(h) if grid[r, c] != bg]
                 for i, val in enumerate(fg):
-                    out[H - len(fg) + i, c] = val
+                    out[h - len(fg) + i, c] = val
         elif self.direction == "UP":
-            for c in range(W):
-                fg = [grid[r, c] for r in range(H) if grid[r, c] != bg]
+            for c in range(w):
+                fg = [grid[r, c] for r in range(h) if grid[r, c] != bg]
                 for i, val in enumerate(fg):
                     out[i, c] = val
         elif self.direction == "RIGHT":
-            for r in range(H):
-                fg = [grid[r, c] for c in range(W) if grid[r, c] != bg]
+            for r in range(h):
+                fg = [grid[r, c] for c in range(w) if grid[r, c] != bg]
                 for i, val in enumerate(fg):
-                    out[r, W - len(fg) + i] = val
+                    out[r, w - len(fg) + i] = val
         elif self.direction == "LEFT":
-            for r in range(H):
-                fg = [grid[r, c] for c in range(W) if grid[r, c] != bg]
+            for r in range(h):
+                fg = [grid[r, c] for c in range(w) if grid[r, c] != bg]
                 for i, val in enumerate(fg):
                     out[r, i] = val
         return out
@@ -393,14 +455,14 @@ class KroneckerRule(TransformationRule):
             return grid.copy()
         bg = context.get("bg_color") if context else None
         if bg is None:
-            bg = WholeGridPredictor.estimate_background_color(grid)
+            bg = GridSubstrateUtils.estimate_background_color(grid)
 
-        H, W = grid.shape
+        h, w = grid.shape
         kh, kw = self.pattern.shape
-        out = np.full((H * kh, W * kw), bg, dtype=int)
+        out = np.full((h * kh, w * kw), bg, dtype=int)
 
-        for r in range(H):
-            for c in range(W):
+        for r in range(h):
+            for c in range(w):
                 val = grid[r, c]
                 if val != bg:
                     patch = np.where(self.pattern != 0, val, bg)
@@ -442,8 +504,8 @@ class LatticeDuplicationRule(TransformationRule):
         self.flip_alt_c = flip_alt_c
 
     def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        H, W = grid.shape
-        out = np.zeros((H * self.repeats_r, W * self.repeats_c), dtype=int)
+        h, w = grid.shape
+        out = np.zeros((h * self.repeats_r, w * self.repeats_c), dtype=int)
 
         for i in range(self.repeats_r):
             for j in range(self.repeats_c):
@@ -452,7 +514,7 @@ class LatticeDuplicationRule(TransformationRule):
                     block = np.flipud(block)
                 if self.flip_alt_c and (j % 2 == 1):
                     block = np.fliplr(block)
-                out[i * H : (i + 1) * H, j * W : (j + 1) * W] = block
+                out[i * h : (i + 1) * h, j * w : (j + 1) * w] = block
         return out
 
 
@@ -489,18 +551,18 @@ class TilingRule(TransformationRule):
             return grid.copy()
 
         target_shape = context.get("target_shape") if context else None
-        H, W = target_shape if target_shape else grid.shape
+        h, w = target_shape if target_shape else grid.shape
 
         pr, pc = self.period_r, self.period_c
-        tiled = np.zeros((H, W), dtype=int)
-        for r in range(H):
-            for c in range(W):
+        tiled = np.zeros((h, w), dtype=int)
+        for r in range(h):
+            for c in range(w):
                 tiled[r, c] = self.unit_cell[r % pr, c % pc]
 
         if self.masked_fill:
             bg = context.get("bg_color") if context else None
             if bg is None:
-                bg = WholeGridPredictor.estimate_background_color(grid)
+                bg = GridSubstrateUtils.estimate_background_color(grid)
             out = grid.copy()
             out[grid == bg] = tiled[grid == bg]
             return out
@@ -527,7 +589,7 @@ class DeformationRule(TransformationRule):
         out = grid.copy()
         bg = context.get("bg_color") if context else None
         if bg is None:
-            bg = WholeGridPredictor.estimate_background_color(grid)
+            bg = GridSubstrateUtils.estimate_background_color(grid)
 
         if self.deformation_type == "CONNECT_LINE":
             for color in np.unique(grid):
@@ -544,41 +606,122 @@ class DeformationRule(TransformationRule):
                         out[r_min : r_max + 1, c2] = color
 
         elif self.deformation_type == "FLOOD_FILL":
-            H, W = grid.shape
-            visited = np.zeros((H, W), dtype=bool)
+            h, w = grid.shape
+            visited = np.zeros((h, w), dtype=bool)
             queue: deque[tuple[int, int]] = deque()
-            for r in range(H):
+            for r in range(h):
                 if grid[r, 0] == bg and not visited[r, 0]:
                     queue.append((r, 0))
                     visited[r, 0] = True
-                if grid[r, W - 1] == bg and not visited[r, W - 1]:
-                    queue.append((r, W - 1))
-                    visited[r, W - 1] = True
-            for c in range(W):
+                if grid[r, w - 1] == bg and not visited[r, w - 1]:
+                    queue.append((r, w - 1))
+                    visited[r, w - 1] = True
+            for c in range(w):
                 if grid[0, c] == bg and not visited[0, c]:
                     queue.append((0, c))
                     visited[0, c] = True
-                if grid[H - 1, c] == bg and not visited[H - 1, c]:
-                    queue.append((H - 1, c))
-                    visited[H - 1, c] = True
+                if grid[h - 1, c] == bg and not visited[h - 1, c]:
+                    queue.append((h - 1, c))
+                    visited[h - 1, c] = True
 
             while queue:
                 r, c = queue.popleft()
                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     nr, nc = r + dr, c + dc
-                    if 0 <= nr < H and 0 <= nc < W:
+                    if 0 <= nr < h and 0 <= nc < w:
                         if not visited[nr, nc] and grid[nr, nc] == bg:
                             visited[nr, nc] = True
                             queue.append((nr, nc))
 
             fg_colors = [c for c in np.unique(grid) if c != bg]
             fill_color = fg_colors[0] if fg_colors else bg
-            for r in range(H):
-                for c in range(W):
+            for r in range(h):
+                for c in range(w):
                     if grid[r, c] == bg and not visited[r, c]:
                         out[r, c] = fill_color
 
         return out
+
+
+@dataclass
+class ConditionalRule(TransformationRule):
+    """W074: Conditional rule executing rule_true if condition predicate holds, else rule_false."""
+
+    condition_name: str = ""
+    predicate: Callable[[np.ndarray], bool] = field(default=lambda _: True)
+    rule_true: TransformationRule = field(default_factory=IdentityRule)
+    rule_false: TransformationRule = field(default_factory=IdentityRule)
+
+    def __init__(
+        self,
+        condition_name: str,
+        predicate: Callable[[np.ndarray], bool],
+        rule_true: TransformationRule,
+        rule_false: TransformationRule,
+    ) -> None:
+        super().__init__(
+            rule_id=f"cond_{condition_name}_{rule_true.rule_id}_{rule_false.rule_id}",
+            family=RuleFamily.CONDITIONAL,
+            params={
+                "condition": condition_name,
+                "rule_true": rule_true.rule_id,
+                "rule_false": rule_false.rule_id,
+            },
+            complexity=rule_true.complexity + rule_false.complexity + 0.5,
+        )
+        self.condition_name = condition_name
+        self.predicate = predicate
+        self.rule_true = rule_true
+        self.rule_false = rule_false
+
+    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
+        if self.predicate(grid):
+            return self.rule_true.execute(grid, context)
+        return self.rule_false.execute(grid, context)
+
+
+@dataclass
+class ExceptionAwareRule(TransformationRule):
+    """W075: Base rule with specialized exception patch handling."""
+
+    base_rule: TransformationRule = field(default_factory=IdentityRule)
+    exception_mask_fn: Callable[[np.ndarray], np.ndarray] = field(
+        default=lambda g: np.zeros_like(g, dtype=bool)
+    )
+    patch_color: int = 0
+    exception_name: str = "outlier_patch"
+
+    def __init__(
+        self,
+        base_rule: TransformationRule,
+        exception_mask_fn: Callable[[np.ndarray], np.ndarray],
+        patch_color: int,
+        exception_name: str = "outlier_patch",
+    ) -> None:
+        super().__init__(
+            rule_id=f"exc_{base_rule.rule_id}_{exception_name}",
+            family=RuleFamily.EXCEPTION,
+            params={
+                "base_rule": base_rule.rule_id,
+                "patch_color": patch_color,
+                "exception_name": exception_name,
+            },
+            complexity=base_rule.complexity + 1.2,
+        )
+        self.base_rule = base_rule
+        self.exception_mask_fn = exception_mask_fn
+        self.patch_color = patch_color
+        self.exception_name = exception_name
+
+    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
+        out = self.base_rule.execute(grid, context)
+        exc_mask = self.exception_mask_fn(grid)
+        if exc_mask.shape == out.shape:
+            out[exc_mask] = self.patch_color
+        return out
+
+
+# ── Inductive Hypothesis Search & Verification ────────────────────────────────
 
 
 class CandidateRuleGenerator:
@@ -596,7 +739,7 @@ class CandidateRuleGenerator:
 
         candidates: list[TransformationRule] = []
         x0, y0 = train_pairs[0]
-        bg0 = WholeGridPredictor.estimate_background_color(x0)
+        bg0 = GridSubstrateUtils.estimate_background_color(x0)
 
         # 1. Identity baseline
         candidates.append(IdentityRule())
@@ -697,12 +840,12 @@ class CandidateRuleGenerator:
                         break
 
         # 7. Motif Autocorrelation & Wallpaper Tiling Candidates (W036 & W106)
-        H_y, W_y = y0.shape
-        for pr in range(1, min(H_y // 2 + 1, 6)):
-            for pc in range(1, min(W_y // 2 + 1, 6)):
+        h_y, w_y = y0.shape
+        for pr in range(1, min(h_y // 2 + 1, 6)):
+            for pc in range(1, min(w_y // 2 + 1, 6)):
                 is_periodic = True
-                for r in range(H_y - pr):
-                    for c in range(W_y - pc):
+                for r in range(h_y - pr):
+                    for c in range(w_y - pc):
                         if y0[r, c] != y0[r + pr, c] or y0[r, c] != y0[r, c + pc]:
                             is_periodic = False
                             break
@@ -773,7 +916,7 @@ class PopperianRefutationGate:
         for rule in candidates:
             is_refuted = False
             for demo_idx, (x, y) in enumerate(train_pairs):
-                bg = WholeGridPredictor.estimate_background_color(x)
+                bg = GridSubstrateUtils.estimate_background_color(x)
                 context = {"bg_color": bg, "demo_idx": demo_idx}
 
                 try:
@@ -792,7 +935,7 @@ class PopperianRefutationGate:
                     is_refuted = True
                     break
 
-                is_exact, _, mismatch_count = WholeGridPredictor.compute_grid_metrics(pred_y, y)
+                is_exact, _, mismatch_count = GridSubstrateUtils.compute_grid_metrics(pred_y, y)
                 if not is_exact:
                     self.falsifications.append(
                         RefutationRecord(
@@ -820,70 +963,6 @@ class SimplicityRanker:
     def rank_survivors(survivors: list[TransformationRule]) -> list[TransformationRule]:
         """Sort surviving rules by ascending description complexity score."""
         return sorted(survivors, key=lambda r: (r.complexity, r.rule_id))
-
-
-class ConditionalRule(TransformationRule):
-    """W074: Conditional rule executing rule_true if condition predicate holds, else rule_false."""
-
-    def __init__(
-        self,
-        condition_name: str,
-        predicate: Callable[[np.ndarray], bool],
-        rule_true: TransformationRule,
-        rule_false: TransformationRule,
-    ) -> None:
-        super().__init__(
-            rule_id=f"cond_{condition_name}_{rule_true.rule_id}_{rule_false.rule_id}",
-            family=RuleFamily.CONDITIONAL,
-            params={
-                "condition": condition_name,
-                "rule_true": rule_true.rule_id,
-                "rule_false": rule_false.rule_id,
-            },
-            complexity=rule_true.complexity + rule_false.complexity + 0.5,
-        )
-        self.condition_name = condition_name
-        self.predicate = predicate
-        self.rule_true = rule_true
-        self.rule_false = rule_false
-
-    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        if self.predicate(grid):
-            return self.rule_true.execute(grid, context)
-        return self.rule_false.execute(grid, context)
-
-
-class ExceptionAwareRule(TransformationRule):
-    """W075: Base rule with specialized exception patch handling."""
-
-    def __init__(
-        self,
-        base_rule: TransformationRule,
-        exception_mask_fn: Callable[[np.ndarray], np.ndarray],
-        patch_color: int,
-        exception_name: str = "outlier_patch",
-    ) -> None:
-        super().__init__(
-            rule_id=f"exc_{base_rule.rule_id}_{exception_name}",
-            family=RuleFamily.EXCEPTION,
-            params={
-                "base_rule": base_rule.rule_id,
-                "patch_color": patch_color,
-                "exception_name": exception_name,
-            },
-            complexity=base_rule.complexity + 1.2,
-        )
-        self.base_rule = base_rule
-        self.exception_mask_fn = exception_mask_fn
-        self.patch_color = patch_color
-        self.exception_name = exception_name
-
-    def execute(self, grid: np.ndarray, context: dict[str, Any] | None = None) -> np.ndarray:
-        out = self.base_rule.execute(grid, context)
-        exc_mask = self.exception_mask_fn(grid)
-        if exc_mask.shape == out.shape:
-            out[exc_mask] = self.patch_color
-        return out
 
 
 class RulePrecedenceResolver:
@@ -1028,6 +1107,17 @@ class RulePosteriorCalibrator:
         )
 
 
+@dataclass
+class RuleInductionResult:
+    """Immutable result structure containing induced transformation rule and epistemic audit trail."""
+
+    selected_rule: TransformationRule | None
+    surviving_rules: list[TransformationRule]
+    posterior: RulePosteriorResult
+    refutations: list[RefutationRecord]
+    metadata: dict[str, Any]
+
+
 class RuleInductionEngine:
     """Unified engine coordinating generation, refutation, simplicity selection, and bifurcation."""
 
@@ -1048,16 +1138,12 @@ class RuleInductionEngine:
         )
         return self.refutation_gate.evaluate_and_filter(candidates, train_pairs)
 
-    def induce_rule(
+    def induce_rule_result(
         self,
         train_pairs: list[tuple[np.ndarray, np.ndarray]],
         allow_recursion: bool = True,
-    ) -> tuple[TransformationRule | None, list[TransformationRule], dict[str, Any]]:
-        """Induce the optimal transformation rule from demonstrations.
-
-        Returns:
-            (selected_rule, surviving_rules, metadata)
-        """
+    ) -> RuleInductionResult:
+        """Induce the optimal transformation rule and return structured RuleInductionResult."""
         candidates = self.generator.generate_candidates(
             train_pairs, max_candidates=self.max_candidates
         )
@@ -1066,7 +1152,7 @@ class RuleInductionEngine:
 
         selected_rule = ranked[0] if ranked else None
 
-        # W078: If no single rule explains demonstrations, search latent variable space
+        # W078: Search latent variable space if no single monolithic rule explains all demos
         bifurcation_rule: ConditionalRule | None = None
         if selected_rule is None and allow_recursion:
             bifurcation_rule = self.bifurcation_inducer.induce_bifurcation(train_pairs, self)
@@ -1089,4 +1175,23 @@ class RuleInductionEngine:
             "is_ambiguous": posterior.is_ambiguous,
         }
 
-        return selected_rule, ranked, metadata
+        return RuleInductionResult(
+            selected_rule=selected_rule,
+            surviving_rules=ranked,
+            posterior=posterior,
+            refutations=list(self.refutation_gate.falsifications),
+            metadata=metadata,
+        )
+
+    def induce_rule(
+        self,
+        train_pairs: list[tuple[np.ndarray, np.ndarray]],
+        allow_recursion: bool = True,
+    ) -> tuple[TransformationRule | None, list[TransformationRule], dict[str, Any]]:
+        """Induce the optimal transformation rule from demonstrations.
+
+        Returns:
+            (selected_rule, surviving_rules, metadata)
+        """
+        result = self.induce_rule_result(train_pairs, allow_recursion=allow_recursion)
+        return result.selected_rule, result.surviving_rules, result.metadata
