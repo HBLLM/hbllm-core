@@ -171,9 +171,6 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        if not engine.mobile_threat_features:
-            return SafetyGateResult(is_safe=True)
-
         try:
             H, W = curr_grid.shape
             bg = engine.estimate_background(curr_grid)
@@ -190,6 +187,29 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 avatar_pos=engine.avatar_pos,
                 avatar_features=av_feats,
             )
+            if not live_threats and not engine.mobile_threat_features:
+                return SafetyGateResult(is_safe=True)
+
+            # Stationary sentries gaze gate
+            stationary_threats = [
+                t for t in live_threats if t.feature_id not in engine.mobile_threat_features
+            ]
+            sentry_gaze_cells = {t.gaze_pos for t in stationary_threats if t.facing != (0, 0)}
+            if (
+                next_step.predicted_avatar_pos is not None
+                and next_step.predicted_avatar_pos in sentry_gaze_cells
+            ):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason="Avatar destination steps directly into stationary sentry gaze crosshairs",
+                )
+            for st in stationary_threats:
+                if next_step.predicted_avatar_pos == st.pos and engine.avatar_pos == st.gaze_pos:
+                    return SafetyGateResult(
+                        is_safe=False,
+                        reason="Frontal collision with armed sentry",
+                    )
+
             live_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = {
                 (t.pos, t.facing)
                 for t in live_threats

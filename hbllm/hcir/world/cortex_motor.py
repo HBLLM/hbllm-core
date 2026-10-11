@@ -173,6 +173,16 @@ class ACCConflictMonitor:
             if acts[-1] == acts[-4] and acts[-2] == acts[-5] and acts[-3] == acts[-6]:
                 cyclic_acts = [acts[-1], acts[-2], acts[-3]]
 
+        if cyclic_acts:
+            pos_list = list(self.position_history)
+            cycle_len = len(cyclic_acts)
+            if len(pos_list) >= 2 * cycle_len:
+                # In embodied/spatial navigation, an action repetition is only an oscillation
+                # if the organism returns to the same location (zero net displacement).
+                # If there is net spatial progress, it is corridor/staircase traversal, not a limit cycle.
+                if pos_list[-1] != pos_list[-1 - cycle_len]:
+                    cyclic_acts = []
+
         # Check position bounce: avatar stuck between two coordinates
         if not cyclic_acts:
             pos_list = list(self.position_history)

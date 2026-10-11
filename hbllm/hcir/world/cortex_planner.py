@@ -847,16 +847,14 @@ class MentalSimulationPlanner:
             return False
 
         static_threats = [
-            t
-            for t in oriented_threats
-            if t.facing == (0, 0) and t.feature_id not in engine.mobile_threat_features
+            t for t in oriented_threats if t.feature_id not in engine.mobile_threat_features
         ]
         init_threats = frozenset(t.pos for t in static_threats)
         threat_map = {t.pos: t for t in static_threats}
         init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(
             (t.pos, t.facing)
             for t in oriented_threats
-            if t.facing != (0, 0) or t.feature_id in engine.mobile_threat_features
+            if t.feature_id in engine.mobile_threat_features and t.facing != (0, 0)
         )
 
         def advance_patrols(
@@ -1086,7 +1084,7 @@ class MentalSimulationPlanner:
         if getattr(engine, "consecutive_simulation_failures", 0) > 0 and not has_temporal:
             max_expansions = 1200
         else:
-            max_expansions = 1500 if not has_temporal else 5000
+            max_expansions = 1500 if not (has_temporal or bool(init_threats)) else 5000
 
         non_disp_wait_action: Any | None = None
         if has_temporal:
@@ -1250,15 +1248,8 @@ class MentalSimulationPlanner:
                     if t is not None:
                         living_gaze.add(t.gaze_pos)
 
-                living_gaze_cost = 0.0
                 if (nr, nc) in living_gaze:
-                    if any(
-                        t.feature_id in engine.hazard_tracker.known_lethal_features
-                        for t in static_threats
-                        if t.gaze_pos == (nr, nc)
-                    ):
-                        continue
-                    living_gaze_cost = 80.0
+                    continue
 
                 new_threats = cur_threats
                 if (nr, nc) in cur_threats:
@@ -1418,12 +1409,7 @@ class MentalSimulationPlanner:
                 wait_cost = 2.0 if is_wait else 0.0
 
                 step_cost = (
-                    1
-                    + epistemic_cost
-                    + patrol_proximity_cost
-                    + chaser_proximity_cost
-                    + wait_cost
-                    + living_gaze_cost
+                    1 + epistemic_cost + patrol_proximity_cost + chaser_proximity_cost + wait_cost
                 )
                 new_g = g_cost + step_cost
                 new_h = heuristic(new_pos, new_blocks)
