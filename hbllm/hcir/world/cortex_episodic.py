@@ -351,6 +351,7 @@ class HippocampalEpisodicCortex:
         engine._last_sim_action_count = 0
         engine.current_simulated_goal = None
         engine._feedback_assimilated = False
+        engine.symbolic_theory.candidate_goal_features.clear()
 
         if not retain_dynamics:
             engine.level_failed_transitions.clear()
@@ -402,7 +403,9 @@ class HippocampalEpisodicCortex:
             engine.last_surprise = 0.0
             engine.last_surprise_eval = None
             engine.collision_cones.reset_episode()
-            engine.mobile_threat_features.clear()
+            # Preserve mobile_threat_features across level transitions: the same
+            # enemy feature-types recur across levels, and forgetting them causes
+            # the agent to re-discover threats by collision.
             engine._prev_oriented_threats = []
             engine.prev_grid = None
             engine.last_action = None
@@ -445,10 +448,11 @@ class HippocampalEpisodicCortex:
             engine.consecutive_goal_converging_clicks = 0
             engine.consecutive_quiescent_actions = 0
             engine.inhibited_actions.clear()
-            engine.phase = (
+            engine.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
                 if engine.is_motor_grounded()
-                else EpistemicPhase.MOTOR_GROUNDING
+                else EpistemicPhase.MOTOR_GROUNDING,
+                reason="episode_reset_level_transition",
             )
 
         elif not retain_dynamics:
@@ -488,12 +492,16 @@ class HippocampalEpisodicCortex:
             engine.hazard_tracker.known_lethal_features.clear()
             engine.hazard_tracker.periodic_cells.clear()
             engine.mobile_threat_features.clear()
-            engine.phase = EpistemicPhase.MOTOR_GROUNDING
+            engine.transition_to_phase(
+                EpistemicPhase.MOTOR_GROUNDING,
+                reason="episode_reset_cross_game",
+            )
         else:
-            engine.phase = (
+            engine.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
                 if engine.is_motor_grounded()
-                else EpistemicPhase.MOTOR_GROUNDING
+                else EpistemicPhase.MOTOR_GROUNDING,
+                reason="episode_reset_retained_dynamics",
             )
 
         if hasattr(engine, "object_planner"):

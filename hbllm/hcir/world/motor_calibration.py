@@ -126,8 +126,12 @@ class ActionDynamicsModel:
                             )
                         return
 
-                new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * dr
-                new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * dc
+                if self.probes_tested <= 1:
+                    new_dr = float(target_r)
+                    new_dc = float(target_c)
+                else:
+                    new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * dr
+                    new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * dc
                 self.delta_r = int(round(new_dr))
                 self.delta_c = int(round(new_dc))
                 self.displacement = (new_dr, new_dc)

@@ -16,8 +16,10 @@ and striatal gating:
 """
 
 import logging
+from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -32,13 +34,308 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Prefrontal Safety Gating Predicates (Stage 4 Active Inference)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class SafetyGateResult:
+    """Result of a cognitive safety gate evaluation."""
+
+    is_safe: bool = True
+    should_wait: bool = False
+    wait_steps: int = 0
+    reason: str = ""
+
+
+class PlanSafetyPredicate(ABC):
+    """Abstract base class for prefrontal safety gating predicates."""
+
+    @abstractmethod
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        """Evaluate plan safety against specific hazard models."""
+        ...
+
+
+class StaticLethalHazardPredicate(PlanSafetyPredicate):
+    """Rejects candidate trajectories intersecting known static lethal entities."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        H, W = curr_grid.shape
+        for future_step in future_steps:
+            if future_step.predicted_avatar_pos is None:
+                continue
+            fr, fc = future_step.predicted_avatar_pos
+            if 0 <= fr < H and 0 <= fc < W:
+                feat = int(curr_grid[fr, fc])
+                if feat in engine.mobile_threat_features:
+                    continue
+                if feat in engine.hazard_tracker.known_lethal_features:
+                    return SafetyGateResult(
+                        is_safe=False, reason=f"Lethal feature {feat} at ({fr}, {fc})"
+                    )
+        return SafetyGateResult(is_safe=True)
+
+
+class SpatiotemporalCollisionConePredicate(PlanSafetyPredicate):
+    """Rejects steps intersecting spatiotemporal looming collision cones."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        if engine.avatar_pos is None:
+            return SafetyGateResult(is_safe=True)
+
+        ar, ac = engine.avatar_pos
+        is_stationary = (
+            next_step.predicted_avatar_pos is None or next_step.predicted_avatar_pos == (ar, ac)
+        )
+        if is_stationary:
+            if any(
+                engine.collision_cones.is_collision_hazard(
+                    ar, ac, t_f, ignored_features=engine.mobile_threat_features
+                )
+                for t_f in (1, 2)
+            ):
+                return SafetyGateResult(
+                    is_safe=False, reason="Stationary avatar in looming collision cone"
+                )
+        elif next_step.predicted_avatar_pos is not None:
+            nr, nc = next_step.predicted_avatar_pos
+            if engine.collision_cones.is_collision_hazard(
+                nr, nc, 1, ignored_features=engine.mobile_threat_features
+            ):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"Next step ({nr}, {nc}) in looming collision cone",
+                )
+
+        return SafetyGateResult(is_safe=True)
+
+
+class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
+    """Simulates dynamic threat patrollers forward in time to prevent kinetic collisions."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        if not engine.mobile_threat_features:
+            return SafetyGateResult(is_safe=True)
+
+        try:
+            H, W = curr_grid.shape
+            bg = engine.estimate_background(curr_grid)
+            step_size = engine.infer_motor_step_size(available_actions)
+            entities = engine.extract_entities(curr_grid, bg)
+            av_feats = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
+            live_threats = PerceptionEngine.detect_oriented_threats(
+                curr_grid,
+                entities,
+                bg=bg,
+                step_size=step_size,
+                avatar_pos=engine.avatar_pos,
+                avatar_features=av_feats,
+            )
+            live_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = {
+                (t.pos, t.facing)
+                for t in live_threats
+                if t.feature_id in engine.mobile_threat_features
+            }
+
+            if not live_patrols:
+                return SafetyGateResult(is_safe=True)
+
+            half_step = max(1, step_size // 2)
+            barrier_feats = engine.symbolic_theory.barrier_features
+            bg_is_void = (
+                len(engine.symbolic_theory.walkable_features) > 0
+                and bg not in engine.symbolic_theory.walkable_features
+            )
+            patrol_walls: set[tuple[int, int]] = set(engine.learned_barriers)
+            for rr in range(H):
+                for cc in range(W):
+                    v = int(curr_grid[rr, cc])
+                    if (
+                        engine.symbolic_theory.is_barrier(v)
+                        or v in barrier_feats
+                        or (bg_is_void and v == bg)
+                    ):
+                        patrol_walls.add((rr, cc))
+
+            def _blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
+                probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
+                dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
+                for q in (probe, dest):
+                    if not (0 <= q[0] < H and 0 <= q[1] < W) or q in patrol_walls:
+                        return True
+                return False
+
+            sim_patrols = frozenset(live_patrols)
+            for future_step in future_steps:
+                avatar_dest = future_step.predicted_avatar_pos
+                new_patrol_set: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+                collision = False
+                for pat_pos, pat_facing in sim_patrols:
+                    if pat_pos == avatar_dest:
+                        collision = True
+                        break
+                    dest = (
+                        pat_pos[0] + pat_facing[0] * step_size,
+                        pat_pos[1] + pat_facing[1] * step_size,
+                    )
+                    if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in patrol_walls:
+                        new_f = (-pat_facing[0], -pat_facing[1])
+                        new_patrol_set.add((pat_pos, new_f))
+                        continue
+                    if dest == avatar_dest:
+                        collision = True
+                        break
+                    new_f = pat_facing
+                    if _blocked(dest, pat_facing):
+                        new_f = (-pat_facing[0], -pat_facing[1])
+                    new_patrol_set.add((dest, new_f))
+                if collision:
+                    return SafetyGateResult(
+                        is_safe=False, reason="Collision with simulated patrol threat"
+                    )
+                sim_patrols = frozenset(new_patrol_set)
+
+        except Exception as e:
+            logger.debug("Dynamic patrol trajectory simulation error: %s", e)
+
+        return SafetyGateResult(is_safe=True)
+
+
+class HabenularInhibitionPredicate(PlanSafetyPredicate):
+    """Inhibits repetitive looping motor actions via Lateral Habenula / Basal Ganglia IOR."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        is_geodesic = (
+            getattr(next_step, "is_deterministic_geodesic", False)
+            or next_step.expected_mutation == "topological_geodesic_step"
+        )
+        if not is_geodesic and engine.working_memory.habenular_ior.is_action_inhibited(
+            engine.avatar_pos, next_step.action
+        ):
+            return SafetyGateResult(is_safe=False, reason="Action inhibited by Habenular IOR")
+        return SafetyGateResult(is_safe=True)
+
+
+class CerebellarPhaseGatePredicate(PlanSafetyPredicate):
+    """Evaluates rhythm-locked oscillation windows via Cerebellar phase clock."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        if next_step.predicted_avatar_pos is not None:
+            phase_gate = engine.cerebellar_clock.evaluate_motion_hazard_gate(
+                current_step=engine.step_counter,
+                avatar_pos=engine.avatar_pos,
+                target_pos=next_step.predicted_avatar_pos,
+                hazard_tracker=engine.hazard_tracker,
+                background_feature=engine.bg_feature,
+                avatar_features=engine.avatar_features,
+                walkable_features=engine.symbolic_theory.walkable_features
+                | engine.verified_safe_features,
+            )
+            if phase_gate.should_wait:
+                return SafetyGateResult(
+                    is_safe=True,
+                    should_wait=True,
+                    wait_steps=phase_gate.wait_steps_recommended,
+                    reason="Cerebellar phase clock advises wait window",
+                )
+        return SafetyGateResult(is_safe=True)
+
+
+class PlanSafetyEvaluator:
+    """Prefrontal safety arbitration engine composing typed PlanSafetyPredicates."""
+
+    def __init__(self, predicates: Sequence[PlanSafetyPredicate] | None = None) -> None:
+        self.predicates: list[PlanSafetyPredicate] = list(
+            predicates
+            if predicates is not None
+            else [
+                StaticLethalHazardPredicate(),
+                SpatiotemporalCollisionConePredicate(),
+                DynamicPatrolTrajectoryPredicate(),
+                HabenularInhibitionPredicate(),
+                CerebellarPhaseGatePredicate(),
+            ]
+        )
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        future_steps = [next_step] + list(engine.mental_plan)
+        for pred in self.predicates:
+            res = pred.evaluate(
+                engine=engine,
+                curr_grid=curr_grid,
+                next_step=next_step,
+                future_steps=future_steps,
+                available_actions=available_actions,
+            )
+            if not res.is_safe or res.should_wait:
+                return res
+        return SafetyGateResult(is_safe=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Prefrontal Deliberation Engine
+# ═══════════════════════════════════════════════════════════════════════════
+
+
 class PrefrontalDeliberationEngine:
     """Executive prefrontal arbitration engine coordinating perception, mental simulation,
     affordance chunking, and motor output.
     """
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, safety_evaluator: PlanSafetyEvaluator | None = None) -> None:
+        self.safety_evaluator = safety_evaluator or PlanSafetyEvaluator()
 
     def validate_plan_safety(
         self,
@@ -57,141 +354,13 @@ class PrefrontalDeliberationEngine:
         Returns:
             (plan_safe, should_wait, wait_steps)
         """
-        H, W = curr_grid.shape
-        bg = engine.estimate_background(curr_grid)
-        all_future_steps = [next_step] + list(engine.mental_plan)
-
-        # (A) Static feature check along the planned path
-        for future_step in all_future_steps:
-            if future_step.predicted_avatar_pos is None:
-                continue
-            fr, fc = future_step.predicted_avatar_pos
-            if 0 <= fr < H and 0 <= fc < W:
-                feat = int(curr_grid[fr, fc])
-                if feat in engine.mobile_threat_features:
-                    continue
-                if feat in engine.hazard_tracker.known_lethal_features:
-                    return False, False, 0
-
-        # (A2) Spatiotemporal Collision Cones check
-        if engine.avatar_pos is not None:
-            ar, ac = engine.avatar_pos
-            is_stationary = (
-                next_step.predicted_avatar_pos is None or next_step.predicted_avatar_pos == (ar, ac)
-            )
-            if is_stationary and any(
-                engine.collision_cones.is_collision_hazard(
-                    ar, ac, t_f, ignored_features=engine.mobile_threat_features
-                )
-                for t_f in (1, 2)
-            ):
-                return False, False, 0
-            elif next_step.predicted_avatar_pos is not None:
-                nr, nc = next_step.predicted_avatar_pos
-                if engine.collision_cones.is_collision_hazard(
-                    nr, nc, 1, ignored_features=engine.mobile_threat_features
-                ):
-                    return False, False, 0
-
-        # (B) Dynamic patrol trajectory simulation
-        if engine.mobile_threat_features:
-            try:
-                step_size = engine.infer_motor_step_size(available_actions)
-                entities = engine.extract_entities(curr_grid, bg)
-                av_feats = engine.avatar_features or (
-                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
-                )
-                live_threats = PerceptionEngine.detect_oriented_threats(
-                    curr_grid,
-                    entities,
-                    bg=bg,
-                    step_size=step_size,
-                    avatar_pos=engine.avatar_pos,
-                    avatar_features=av_feats,
-                )
-                live_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = set()
-                for t in live_threats:
-                    if t.feature_id in engine.mobile_threat_features:
-                        live_patrols.add((t.pos, t.facing))
-
-                if live_patrols:
-                    half_step = max(1, step_size // 2)
-                    barrier_feats = engine.symbolic_theory.barrier_features
-                    bg_is_void = (
-                        len(engine.symbolic_theory.walkable_features) > 0
-                        and bg not in engine.symbolic_theory.walkable_features
-                    )
-                    patrol_walls: set[tuple[int, int]] = set(engine.learned_barriers)
-                    for rr in range(H):
-                        for cc in range(W):
-                            v = int(curr_grid[rr, cc])
-                            if (
-                                engine.symbolic_theory.is_barrier(v)
-                                or v in barrier_feats
-                                or (bg_is_void and v == bg)
-                            ):
-                                patrol_walls.add((rr, cc))
-
-                    def _blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
-                        probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
-                        dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
-                        for q in (probe, dest):
-                            if not (0 <= q[0] < H and 0 <= q[1] < W) or q in patrol_walls:
-                                return True
-                        return False
-
-                    sim_patrols = frozenset(live_patrols)
-                    for future_step in all_future_steps:
-                        avatar_dest = future_step.predicted_avatar_pos
-                        new_patrol_set: set[tuple[tuple[int, int], tuple[int, int]]] = set()
-                        collision = False
-                        for pat_pos, pat_facing in sim_patrols:
-                            if pat_pos == avatar_dest:
-                                collision = True
-                                break
-                            dest = (
-                                pat_pos[0] + pat_facing[0] * step_size,
-                                pat_pos[1] + pat_facing[1] * step_size,
-                            )
-                            if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in patrol_walls:
-                                new_f = (-pat_facing[0], -pat_facing[1])
-                                new_patrol_set.add((pat_pos, new_f))
-                                continue
-                            if dest == avatar_dest:
-                                collision = True
-                                break
-                            new_f = pat_facing
-                            if _blocked(dest, pat_facing):
-                                new_f = (-pat_facing[0], -pat_facing[1])
-                            new_patrol_set.add((dest, new_f))
-                        if collision:
-                            return False, False, 0
-                        sim_patrols = frozenset(new_patrol_set)
-            except Exception:
-                pass
-
-        # (C) Habenular Episodic Gating
-        if engine.working_memory.habenular_ior.is_action_inhibited(
-            engine.avatar_pos, next_step.action
-        ):
-            return False, False, 0
-
-        # (D) Cerebellar Phase Gating & Rhythm-Locked Safe Windows
-        if next_step.predicted_avatar_pos is not None:
-            phase_gate = engine.cerebellar_clock.evaluate_motion_hazard_gate(
-                current_step=engine.step_counter,
-                avatar_pos=engine.avatar_pos,
-                target_pos=next_step.predicted_avatar_pos,
-                hazard_tracker=engine.hazard_tracker,
-                background_feature=engine.bg_feature,
-                avatar_features=engine.avatar_features,
-                walkable_features=engine.symbolic_theory.walkable_features
-                | engine.verified_safe_features,
-            )
-            if phase_gate.should_wait:
-                return True, True, phase_gate.wait_steps_recommended
-
-        return True, False, 0
+        res = self.safety_evaluator.evaluate(
+            engine=engine,
+            curr_grid=curr_grid,
+            next_step=next_step,
+            available_actions=available_actions,
+        )
+        return res.is_safe, res.should_wait, res.wait_steps
 
     def arbitrate_affordances(
         self,
@@ -586,11 +755,6 @@ class PrefrontalDeliberationEngine:
                     engine._last_sim_barrier_count = len(engine.learned_barriers)
 
             if simulated_plan is None:
-                focus_switches = [a for a in available_actions if engine.is_focus_switch_action(a)]
-                if focus_switches and engine.consecutive_simulation_failures >= 1:
-                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    return focus_switches[0], None
-
                 macro_plan = (
                     engine.object_planner.plan_macro_option(engine, curr_grid, available_actions)
                     if hasattr(engine, "object_planner")

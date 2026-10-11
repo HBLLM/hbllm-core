@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import collections
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -102,6 +103,245 @@ class GridTopologyGraph:
             grid, start_coord, goal_coord, traversable_colors, connectivity
         )
         return all_paths[0] if all_paths else None
+
+    @staticmethod
+    def shortest_path_on_mask(
+        passable_mask: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coord: tuple[int, int],
+        connectivity: str = "4_connected",
+    ) -> list[tuple[int, int]] | None:
+        """Find minimum-hop shortest path from start to goal through a boolean traversable mask."""
+        H, W = passable_mask.shape
+        sr, sc = start_coord
+        gr, gc = goal_coord
+        if (sr, sc) == (gr, gc):
+            return [(sr, sc)]
+        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
+            return None
+
+        offsets = (
+            [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if connectivity == "4_connected"
+            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+        )
+
+        queue: collections.deque[tuple[int, int]] = collections.deque([(sr, sc)])
+        visited: set[tuple[int, int]] = {(sr, sc)}
+        parent: dict[tuple[int, int], tuple[int, int]] = {}
+
+        found = False
+        while queue:
+            curr_r, curr_c = queue.popleft()
+            if (curr_r, curr_c) == (gr, gc):
+                found = True
+                break
+            for dr, dc in offsets:
+                nr, nc = curr_r + dr, curr_c + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
+                    if (nr, nc) == (gr, gc) or bool(passable_mask[nr, nc]):
+                        visited.add((nr, nc))
+                        parent[(nr, nc)] = (curr_r, curr_c)
+                        queue.append((nr, nc))
+
+        if not found:
+            return None
+
+        curr = (gr, gc)
+        path = [curr]
+        while curr != (sr, sc):
+            curr = parent[curr]
+            path.append(curr)
+        path.reverse()
+        return path
+
+    @staticmethod
+    def shortest_path_with_actions(
+        passable_mask: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coord: tuple[int, int],
+        actions_with_deltas: list[tuple[Any, int, int]],
+        goal_radius: int = 0,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Find minimum-hop shortest action sequence directly in action transition space.
+
+        Returns list of (action, next_coord) pairs.
+        """
+        H, W = passable_mask.shape
+        sr, sc = start_coord
+        gr, gc = goal_coord
+
+        def _at_goal(r: int, c: int) -> bool:
+            return abs(r - gr) <= goal_radius and abs(c - gc) <= goal_radius
+
+        if _at_goal(sr, sc):
+            return []
+        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
+            return None
+
+        valid_actions = [(a, dr, dc) for a, dr, dc in actions_with_deltas if dr != 0 or dc != 0]
+        if not valid_actions:
+            return None
+
+        queue: collections.deque[tuple[int, int]] = collections.deque([(sr, sc)])
+        visited: set[tuple[int, int]] = {(sr, sc)}
+        parent: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+
+        reached_goal: tuple[int, int] | None = None
+        while queue:
+            curr_r, curr_c = queue.popleft()
+            if _at_goal(curr_r, curr_c):
+                reached_goal = (curr_r, curr_c)
+                break
+
+            for act, dr, dc in valid_actions:
+                nr, nc = curr_r + dr, curr_c + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
+                    step_mag = max(abs(dr), abs(dc))
+                    blocked = False
+                    if step_mag > 1:
+                        for s_i in range(1, step_mag + 1):
+                            inter_r = curr_r + int(round(dr * s_i / step_mag))
+                            inter_c = curr_c + int(round(dc * s_i / step_mag))
+                            if not (0 <= inter_r < H and 0 <= inter_c < W) or (
+                                not passable_mask[inter_r, inter_c]
+                                and not _at_goal(inter_r, inter_c)
+                            ):
+                                blocked = True
+                                break
+                    elif not passable_mask[nr, nc] and not _at_goal(nr, nc):
+                        blocked = True
+
+                    if not blocked:
+                        visited.add((nr, nc))
+                        parent[(nr, nc)] = ((curr_r, curr_c), act)
+                        queue.append((nr, nc))
+                        if _at_goal(nr, nc):
+                            reached_goal = (nr, nc)
+                            break
+            if reached_goal is not None:
+                break
+
+        if reached_goal is None:
+            return None
+
+        plan: list[tuple[Any, tuple[int, int]]] = []
+        curr = reached_goal
+        while curr != (sr, sc):
+            prev_pos, act = parent[curr]
+            plan.append((act, curr))
+            curr = prev_pos
+        plan.reverse()
+        return plan
+
+
+class GeodesicManifoldRouter:
+    """Substrate routing engine computing deterministic action-space geodesics over traversable 2D manifolds."""
+
+    @staticmethod
+    def route_geodesic(
+        curr_grid: np.ndarray,
+        start_pos: tuple[int, int],
+        goals: Sequence[tuple[int, int]],
+        static_barriers: set[tuple[int, int]],
+        grid_walls: set[tuple[int, int]],
+        unknown_entity_cells: set[tuple[int, int]],
+        oriented_threats: Sequence[Any],
+        movable_actions: Sequence[tuple[Any, int, int]],
+        bg: int,
+        barrier_features: set[int],
+        avatar_features: set[int],
+        max_candidate_goals: int = 5,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Find deterministic action-space shortest path across the traversable manifold.
+
+        1. Constructs boolean passable mask from static barriers, walls, and unknown obstacles.
+        2. Projects dynamic threat trajectories into evasion hazard cones.
+        3. Harmonizes multi-cell action strides.
+        4. Dispatches action-transition BFS search to nearest reachable goals.
+        """
+        H, W = curr_grid.shape
+        passable_mask = np.ones((H, W), dtype=bool)
+        for br, bc in static_barriers:
+            if 0 <= br < H and 0 <= bc < W:
+                passable_mask[br, bc] = False
+        for wr, wc in grid_walls:
+            if 0 <= wr < H and 0 <= wc < W:
+                passable_mask[wr, wc] = False
+        for ur, uc in unknown_entity_cells:
+            if 0 <= ur < H and 0 <= uc < W and (ur, uc) not in goals:
+                passable_mask[ur, uc] = False
+
+        from hbllm.hcir.world.elastic_particle_induction import ParticleKinematicsSimulator
+
+        hazard_cells: set[tuple[int, int]] = set()
+        effective_traj_barriers = set(barrier_features)
+        if not effective_traj_barriers:
+            effective_traj_barriers.add(bg)
+            non_passable_feats = set(int(v) for v in np.unique(curr_grid[~passable_mask]))
+            effective_traj_barriers.update(non_passable_feats - avatar_features)
+
+        traj_horizon = max(12, max(H, W))
+        for t in oriented_threats:
+            hazard_cells.add(t.pos)
+            if t.facing != (0, 0):
+                defl_mode = (
+                    "vertical_flip"
+                    if (t.facing[0] != 0 and t.facing[1] == 0)
+                    else "horizontal_flip"
+                )
+                traj = ParticleKinematicsSimulator.simulate_trajectory(
+                    grid=curr_grid,
+                    start_coord=t.pos,
+                    initial_velocity=t.facing,
+                    barrier_colors=effective_traj_barriers,
+                    deflection_mode=defl_mode,
+                    max_steps=traj_horizon,
+                )
+                hazard_cells.update(traj)
+
+        for hz_r, hz_c in hazard_cells:
+            if (
+                0 <= hz_r < H
+                and 0 <= hz_c < W
+                and (hz_r, hz_c) != start_pos
+                and (hz_r, hz_c) not in goals
+            ):
+                passable_mask[hz_r, hz_c] = False
+
+        passable_mask[start_pos[0], start_pos[1]] = True
+
+        sorted_goals = sorted(
+            goals,
+            key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
+        )
+
+        effective_actions = list(movable_actions)
+        max_stride = max((max(abs(dr), abs(dc)) for _, dr, dc in effective_actions), default=1)
+        if max_stride >= 2:
+            harmonized_actions: list[tuple[Any, int, int]] = []
+            for act, dr, dc in effective_actions:
+                if abs(dr) <= 1 and abs(dc) <= 1:
+                    harmonized_actions.append((act, dr * max_stride, dc * max_stride))
+                else:
+                    harmonized_actions.append((act, dr, dc))
+            effective_actions = harmonized_actions
+
+        effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
+
+        for cand_goal in sorted_goals[:max_candidate_goals]:
+            passable_mask[cand_goal[0], cand_goal[1]] = True
+            action_plan = GridTopologyGraph.shortest_path_with_actions(
+                passable_mask=passable_mask,
+                start_coord=start_pos,
+                goal_coord=cand_goal,
+                actions_with_deltas=effective_actions,
+                goal_radius=effective_goal_radius,
+            )
+            if action_plan:
+                return action_plan
+
+        return None
 
 
 class GeodesicPathOperator(GridOperator):

@@ -669,3 +669,29 @@ def test_acc_conflict_monitoring_general_discrete_action() -> None:
     chosen_act, _ = engine.decide(grid, available_actions)
     # The ACC conflict accumulator should trigger an exploratory surge on discrete action 9
     assert chosen_act == 9
+
+
+def test_event_sourced_phase_transitions() -> None:
+    """Verify that phase transitions are event-sourced and recorded in phase_history."""
+    engine = AutonomousEpistemicEngine()
+    assert engine.phase == EpistemicPhase.MOTOR_GROUNDING
+    assert len(engine.phase_history) == 0
+
+    engine.transition_to_phase(EpistemicPhase.MENTAL_SIMULATION, reason="test_reason")
+    assert engine.phase == EpistemicPhase.MENTAL_SIMULATION
+    assert len(engine.phase_history) == 1
+    assert engine.phase_history[0] == (
+        EpistemicPhase.MOTOR_GROUNDING,
+        EpistemicPhase.MENTAL_SIMULATION,
+        "test_reason",
+    )
+
+    # Assignment via property setter also transitions with provenance
+    engine.phase = EpistemicPhase.EXPLOITATION
+    assert engine.phase == EpistemicPhase.EXPLOITATION
+    assert len(engine.phase_history) == 2
+    assert engine.phase_history[1] == (
+        EpistemicPhase.MENTAL_SIMULATION,
+        EpistemicPhase.EXPLOITATION,
+        "state_assignment",
+    )

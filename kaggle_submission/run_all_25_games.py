@@ -253,7 +253,11 @@ class CognitiveAgentAdapter:
             st = feedback.info.get("state", "")
             lvl = int(feedback.info.get("levels_completed", 0))
             is_win = st == "WIN" or lvl > getattr(self, "_last_lvl", 0)
-            is_lost = st == "GAME_OVER"
+            is_lost = (
+                st == "GAME_OVER"
+                or bool(feedback.terminated)
+                or bool(feedback.info.get("terminated", False))
+            )
             if curr_grid is not None:
                 engine.assimilate_feedback(
                     curr_grid,
@@ -447,15 +451,13 @@ def run_all_25_games(
                     )
                     completed_prev = lvl
                     current_level_steps = 0
-                    cognitive_engine.reset_episode(
-                        retain_dynamics=True, is_new_level=True, level=lvl
-                    )
+                    # Note: cognitive reset is handled internally by choose_action
+                    # on level transition detection. Only clear adapter history.
+                    if hasattr(cognitive_engine, "history"):
+                        cognitive_engine.history.clear()
                 elif lvl < completed_prev:
                     completed_prev = lvl
                     current_level_steps = 0
-                    cognitive_engine.reset_episode(
-                        retain_dynamics=True, is_new_level=True, level=lvl
-                    )
 
                 state_str = str(info.get("state", "RUNNING"))
                 if state_str == "WIN" or lvl >= target_levels:

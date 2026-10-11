@@ -110,6 +110,7 @@ class EpistemicFeedbackAssimilator:
 
         engine.avatar_features = {ce.feature_id for _, ce in comp_pairs}
         engine.avatar_feature = next(iter(engine.avatar_features))
+        engine.mobile_threat_features.difference_update(engine.avatar_features)
         engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
         all_cells = [
             cell for _, ce in comp_pairs for cell in ce.properties.get("cells", [ce.grid_pos])
@@ -237,6 +238,10 @@ class EpistemicFeedbackAssimilator:
                 engine.immobile_entity_actions.clear()
             if is_focus_switch:
                 engine.avatar_features.clear()
+                # Preserve prior avatar feature for re-grounding recovery
+                # in case the focus switch was actually an INTERACT action
+                if engine.avatar_feature is not None:
+                    engine.prior_avatar_feature = engine.avatar_feature
                 engine.avatar_feature = None
                 engine.avatar_pos = None
                 engine.mental_plan.clear()
@@ -341,7 +346,10 @@ class EpistemicFeedbackAssimilator:
                                 int(round(float(np.mean(comp_c[:, 1])))),
                             )
                     engine.mental_plan.clear()
-                    engine.phase = EpistemicPhase.MENTAL_SIMULATION
+                    engine.transition_to_phase(
+                        EpistemicPhase.MENTAL_SIMULATION,
+                        reason="avatar_relocation_assimilated",
+                    )
 
                 # Numerical / cardinality constraint discovery (e.g. Minesweeper / local count grids):
                 tr, tc = target_coord
@@ -670,14 +678,21 @@ class EpistemicFeedbackAssimilator:
             known_avatar_features=engine.avatar_features,
         )
         if kinetic_res.external_agents and engine.prev_grid is not None and action is not None:
+            self_feats = (
+                set(kinetic_res.self_avatar.features)
+                if kinetic_res.self_avatar is not None
+                else set()
+            )
             for ext in kinetic_res.external_agents:
                 if ext.velocity != (0.0, 0.0):
                     valid_threat_feats = {
                         f
                         for f in ext.features
                         if f != bg
+                        and f != engine.bg_feature
                         and f not in engine.avatar_features
                         and (engine.avatar_feature is None or f != engine.avatar_feature)
+                        and f not in self_feats
                     }
                     engine.mobile_threat_features.update(valid_threat_feats)
 
@@ -710,6 +725,7 @@ class EpistemicFeedbackAssimilator:
             if valid_feats:
                 engine.avatar_features = valid_feats
                 engine.avatar_feature = next(iter(valid_feats))
+                engine.mobile_threat_features.difference_update(valid_feats)
                 engine.avatar_size = kinetic_res.self_avatar.area
                 engine.avatar_pos = (
                     int(round(kinetic_res.self_avatar.centroid[0])),
@@ -785,9 +801,7 @@ class EpistemicFeedbackAssimilator:
                     av_moved = [
                         item for item in moved_entities if item[1].feature_id in known_av_feats
                     ]
-                    if getattr(engine, "last_non_displacement_action", None) is not None:
-                        engine.mark_focus_switch_action(engine.last_non_displacement_action)
-                        engine.last_non_displacement_action = None
+                    engine.last_non_displacement_action = None
 
             if av_moved:
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
@@ -805,16 +819,7 @@ class EpistemicFeedbackAssimilator:
                     av_moved = filtered_av_moved
 
                 av_pe, av_ce, (dr, dc) = av_moved[0]
-                if prev_avatar_pos is not None:
-                    dist_to_prev = abs(av_pe.grid_pos[0] - prev_avatar_pos[0]) + abs(
-                        av_pe.grid_pos[1] - prev_avatar_pos[1]
-                    )
-                    if dist_to_prev > max(abs(dr), abs(dc)) + 3:
-                        if getattr(engine, "last_non_displacement_action", None) is not None:
-                            engine.mark_focus_switch_action(engine.last_non_displacement_action)
-                            engine.last_non_displacement_action = None
-                    else:
-                        engine.last_non_displacement_action = None
+                engine.last_non_displacement_action = None
                 all_cells = [
                     cell
                     for _, ce, _ in av_moved
@@ -1101,7 +1106,10 @@ class EpistemicFeedbackAssimilator:
                         len(engine.mental_plan),
                     )
                     engine.mental_plan.clear()
-                    engine.phase = EpistemicPhase.REPLANNING
+                    engine.transition_to_phase(
+                        EpistemicPhase.REPLANNING,
+                        reason="motor_surprise_plan_divergence",
+                    )
                     if not did_displace_correctly:
                         engine.consecutive_plan_failures += 1
                         if engine.consecutive_plan_failures >= 2:
@@ -1501,3 +1509,9 @@ class EpistemicFeedbackAssimilator:
                 is_won=is_win,
                 background_feature=engine.bg_feature,
             )
+
+        # Enforce avatar/threat non-intersection invariant
+        if engine.avatar_features:
+            engine.mobile_threat_features.difference_update(engine.avatar_features)
+        if engine.avatar_feature is not None:
+            engine.mobile_threat_features.discard(engine.avatar_feature)

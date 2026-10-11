@@ -80,19 +80,26 @@ class HCIRSymbolicWorldTheory:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
         if isinstance(entity, (int, np.integer)):
             feat = int(entity)
-            if feat in self.goal_features or feat in self.candidate_goal_features:
+            if feat in self.goal_features:
+                return True
+            if not self.goal_features and feat in self.candidate_goal_features:
                 return True
             props = {"feature_id": feat, "visual_id": feat}
             return any(pred.evaluate(props) for pred in self.goal_predicates)
 
         if entity.role == EntityRole.GOAL:
             return True
-        if (
-            entity.feature_id in self.goal_features
-            or entity.feature_id in self.candidate_goal_features
-        ):
+        if entity.feature_id in self.goal_features:
             return True
-        props = getattr(entity, "properties", {})
+        if not self.goal_features and entity.feature_id in self.candidate_goal_features:
+            return True
+        props = {
+            "feature_id": entity.feature_id,
+            "visual_id": entity.feature_id,
+            "area": getattr(entity, "area", 1),
+            "role": str(entity.role),
+            **getattr(entity, "properties", {}),
+        }
         return any(pred.evaluate(props) for pred in self.goal_predicates)
 
     def is_goal_feature(self, feature_id: int) -> bool:
@@ -101,7 +108,9 @@ class HCIRSymbolicWorldTheory:
 
     def is_barrier(self, feature_id: int) -> bool:
         """True if feature satisfies any induced barrier predicate (enforcing HCIR Attractor Invariant)."""
-        if feature_id in self.goal_features or feature_id in self.candidate_goal_features:
+        if feature_id in self.goal_features:
+            return False
+        if not self.goal_features and feature_id in self.candidate_goal_features:
             return False
         if feature_id in self.barrier_features:
             return True
@@ -126,8 +135,42 @@ class HCIRSymbolicWorldTheory:
 
         if entity.feature_id in self.cargo_features:
             return True
-        props = getattr(entity, "properties", {})
+        props = {
+            "feature_id": entity.feature_id,
+            "visual_id": entity.feature_id,
+            "area": getattr(entity, "area", 1),
+            "role": str(entity.role),
+            **getattr(entity, "properties", {}),
+        }
         return any(pred.evaluate(props) for pred in self.cargo_predicates)
+
+    def is_receptacle(self, entity: SpatialEntity | int) -> bool:
+        """True if entity or feature satisfies any receptacle predicate."""
+        if isinstance(entity, (int, np.integer)):
+            feat = int(entity)
+            if feat in self.receptacle_features:
+                return True
+            props = {"feature_id": feat, "visual_id": feat}
+            return any(pred.evaluate(props) for pred in self.receptacle_predicates)
+
+        if entity.feature_id in self.receptacle_features:
+            return True
+        props = {
+            "feature_id": entity.feature_id,
+            "visual_id": entity.feature_id,
+            "area": getattr(entity, "area", 1),
+            "role": str(entity.role),
+            **getattr(entity, "properties", {}),
+        }
+        return any(pred.evaluate(props) for pred in self.receptacle_predicates)
+
+    def induce_receptacle(self, feature_id: int) -> None:
+        """Induce universal receptacle predicate."""
+        if feature_id not in self.receptacle_features:
+            self.receptacle_features.add(feature_id)
+            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
+            self.receptacle_predicates.append(pred)
+            logger.info("HCIRSymbolicWorldTheory: Induced Receptacle Rule: %s", pred.describe())
 
     def induce_goal(self, feature_id: int) -> None:
         """Induce universal goal predicate with minimum description length."""

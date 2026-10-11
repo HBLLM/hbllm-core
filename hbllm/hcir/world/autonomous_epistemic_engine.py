@@ -195,7 +195,8 @@ class AutonomousEpistemicEngine:
         self.enable_logging = enable_logging
 
         # Cognitive state
-        self.phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
+        self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
+        self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
         self.step_counter: int = 0
 
         # Memory of frames & actions
@@ -498,6 +499,30 @@ class AutonomousEpistemicEngine:
         self.evidence_provenance_log.append(record)
         return record
 
+    @property
+    def phase(self) -> EpistemicPhase:
+        """Active cognitive lifecycle phase."""
+        return self._phase
+
+    @phase.setter
+    def phase(self, value: EpistemicPhase) -> None:
+        self.transition_to_phase(value, reason="state_assignment")
+
+    def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
+        """Formal event-sourced phase transition."""
+        if getattr(self, "_phase", None) != new_phase:
+            old = getattr(self, "_phase", EpistemicPhase.MOTOR_GROUNDING)
+            logger.info(
+                "AutonomousEpistemicEngine: Phase transition [%s -> %s] (reason: %s)",
+                old,
+                new_phase,
+                reason,
+            )
+            if not hasattr(self, "phase_history"):
+                self.phase_history = []
+            self.phase_history.append((old, new_phase, reason))
+            self._phase = new_phase
+
     def assess_evidence_sufficiency(
         self,
         observations: list[Any],
@@ -532,9 +557,45 @@ class AutonomousEpistemicEngine:
         - List of ActionAffordance instances
         - List of bare action IDs (int, str, Enum)
         """
+        _dir_priors: dict[str, tuple[int, int]] = {
+            "UP": (-1, 0),
+            "NORTH": (-1, 0),
+            "DOWN": (1, 0),
+            "SOUTH": (1, 0),
+            "LEFT": (0, -1),
+            "WEST": (0, -1),
+            "RIGHT": (0, 1),
+            "EAST": (0, 1),
+        }
         for spec in action_specs:
             aff = self._parse_action_spec(spec)
             self.action_affordances[aff.action_id] = aff
+
+            # Bayesian Directional Prior Initialization
+            if aff.action_id not in self.action_dynamics:
+                name_u = aff.name.upper()
+                prior_delta: tuple[int, int] | None = None
+                for k, d in _dir_priors.items():
+                    if k in name_u:
+                        prior_delta = d
+                        break
+                if prior_delta is None and isinstance(aff.action_id, int):
+                    # Universal Arcade Action convention: 1: UP, 2: DOWN, 3: LEFT, 4: RIGHT
+                    _idx_map = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+                    prior_delta = _idx_map.get(aff.action_id)
+
+                if prior_delta is not None:
+                    dr, dc = prior_delta
+                    aff.is_displacement = True
+                    aff.delta = (dr, dc)
+                    self.action_dynamics[aff.action_id] = ActionDynamicsModel(
+                        action_id=aff.action_id,
+                        delta_r=dr,
+                        delta_c=dc,
+                        confidence=0.75,
+                        probes_tested=0,
+                        displacement=(float(dr), float(dc)),
+                    )
 
     def _parse_action_spec(self, spec: Any) -> ActionAffordance:
         return MotorCortexEffector.parse_action_spec(spec)
@@ -721,10 +782,23 @@ class AutonomousEpistemicEngine:
             self.dual_memory.reset_episodic_memory()
 
     def is_motor_grounded(self) -> bool:
-        """True if the agent has identified its avatar and calibrated directional actions."""
-        return (self.avatar_feature is not None or bool(self.avatar_features)) and any(
+        """True if the agent has identified its avatar and calibrated directional actions,
+        OR if the game is click-only (no displacement actions exist) and enough
+        exploratory clicks have been made to characterize the environment."""
+        # Standard motor grounding: avatar + calibrated displacement actions
+        if (self.avatar_feature is not None or bool(self.avatar_features)) and any(
             dyn.confidence >= 0.7 for dyn in self.action_dynamics.values()
+        ):
+            return True
+        # Click-only environment grounding: if no displacement dynamics were ever
+        # calibrated and only spatial effectors are known, treat as grounded after
+        # enough exploration to let the object planner engage.
+        has_displacement = any(
+            dyn.is_displacement_action() for dyn in self.action_dynamics.values()
         )
+        if not has_displacement and self.action_dynamics and self.total_epistemic_probes >= 5:
+            return True
+        return False
 
     def compute_exploration_budget(self, n_actions: int) -> int:
         """Adaptive budget: more probing when more unknowns exist."""
@@ -986,7 +1060,13 @@ class AutonomousEpistemicEngine:
         translate. This is a feature-level concept, so it generalizes to other
         creatures of the same kind in later levels.
         """
-        if not av_feats:
+        effective_av_feats = set(av_feats) | set(self.avatar_features)
+        if self.avatar_feature is not None:
+            effective_av_feats.add(self.avatar_feature)
+        if hasattr(self, "prior_avatar_feature") and self.prior_avatar_feature is not None:
+            effective_av_feats.add(self.prior_avatar_feature)
+
+        if not effective_av_feats:
             self._prev_oriented_threats = []
             return
         try:
@@ -998,7 +1078,7 @@ class AutonomousEpistemicEngine:
                 bg=bg,
                 step_size=self.infer_motor_step_size(available_actions),
                 avatar_pos=self.avatar_pos,
-                avatar_features=av_feats,
+                avatar_features=effective_av_feats,
             )
         except Exception:
             self._prev_oriented_threats = []
@@ -1013,7 +1093,7 @@ class AutonomousEpistemicEngine:
             for t in threats:
                 curr_by_feat.setdefault(t.feature_id, set()).add(t.pos)
             for feat, cur_positions in curr_by_feat.items():
-                if feat in av_feats or feat in self.mobile_threat_features:
+                if feat in effective_av_feats or feat in self.mobile_threat_features:
                     continue
                 old_positions = prev_by_feat.get(feat, set())
                 appeared = cur_positions - old_positions
@@ -1027,7 +1107,10 @@ class AutonomousEpistemicEngine:
                         self.consecutive_simulation_failures = 0
                         self.simulation_cooldown = 0
                         self.mental_plan.clear()
-                        self.phase = EpistemicPhase.MENTAL_SIMULATION
+                        self.transition_to_phase(
+                            EpistemicPhase.MENTAL_SIMULATION,
+                            reason="observed_creature_patrolling",
+                        )
                         logger.info(
                             "AutonomousEpistemicEngine: Observed creature kind %d patrolling "
                             "autonomously — modeling its trajectory.",
