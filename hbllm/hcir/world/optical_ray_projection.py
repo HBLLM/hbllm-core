@@ -15,10 +15,14 @@ Modeled on human visual mental imagery (Kosslyn's mental imagery buffer) and opt
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,17 @@ class MirrorOrientation(StrEnum):
     OMNI_REFLECTOR = "+"  # Rotatable or 4-way prism
 
 
-@dataclass
+class RayTerminationReason(StrEnum):
+    """Categorical cause of optical beam termination."""
+
+    RECEPTOR = "receptor"
+    BARRIER = "barrier"
+    BOUNDARY = "boundary"
+    CYCLE = "cycle"
+    MAX_STEPS = "max_steps"
+
+
+@dataclass(frozen=True)
 class RayStep:
     """A single spatial segment along an optical beam trajectory."""
 
@@ -47,11 +61,36 @@ class OpticalRayPath:
     emitter_pos: tuple[int, int]
     steps: list[RayStep] = field(default_factory=list)
     terminated_at: tuple[int, int] | None = None
-    termination_reason: str = ""  # 'receptor', 'barrier', 'boundary', 'cycle'
+    termination_reason: RayTerminationReason | str = ""
     hit_receptor: bool = False
 
+    @property
+    def path_length(self) -> int:
+        """Total number of propagated ray segments."""
+        return len(self.steps)
 
-@dataclass
+    @property
+    def trajectory_coords(self) -> list[tuple[int, int]]:
+        """Sequential grid coordinates visited along the optical path."""
+        return [s.coord for s in self.steps]
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export ray path result as a declarative HCIR CausalPredicate."""
+        term_str = (
+            self.termination_reason.value
+            if isinstance(self.termination_reason, RayTerminationReason)
+            else str(self.termination_reason)
+        )
+        return CausalPredicate(
+            variable="optical_ray_reaches_receptor",
+            operator="==",
+            value=self.hit_receptor,
+            relation=f"terminated_due_to_{term_str}",
+            target_entity=f"emitter_{self.emitter_pos[0]}_{self.emitter_pos[1]}",
+        )
+
+
+@dataclass(frozen=True)
 class MirrorPlacementHypothesis:
     """Predicted mirror placement required to redirect ray into receptor."""
 
@@ -60,6 +99,27 @@ class MirrorPlacementHypothesis:
     incoming_dir: tuple[int, int]
     outgoing_dir: tuple[int, int]
     confidence: float = 1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export mirror hypothesis as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="mirror_orientation",
+            operator="==",
+            value=self.required_orientation.value,
+            relation="incoming_to_outgoing_reflection",
+            target_entity=f"mirror_{self.mirror_pos[0]}_{self.mirror_pos[1]}",
+        )
+
+    def to_subgoal(self) -> dict[str, Any]:
+        """Convert hypothesis into structured spatial alignment subgoal."""
+        return {
+            "intent": "PLACE_OR_ROTATE_MIRROR",
+            "target_coord": self.mirror_pos,
+            "orientation": self.required_orientation.value,
+            "incoming_direction": self.incoming_dir,
+            "outgoing_direction": self.outgoing_dir,
+            "confidence": self.confidence,
+        }
 
 
 class OpticalRayProjector:
@@ -126,7 +186,7 @@ class OpticalRayProjector:
             # Out of bounds
             if not (0 <= next_r < H and 0 <= next_c < W):
                 path.terminated_at = (curr_r, curr_c)
-                path.termination_reason = "boundary"
+                path.termination_reason = RayTerminationReason.BOUNDARY.value
                 break
 
             # Receptor hit
@@ -135,7 +195,7 @@ class OpticalRayProjector:
                     RayStep(coord=(next_r, next_c), direction=(dr, dc), step_index=step_idx)
                 )
                 path.terminated_at = (next_r, next_c)
-                path.termination_reason = "receptor"
+                path.termination_reason = RayTerminationReason.RECEPTOR.value
                 path.hit_receptor = True
                 break
 
@@ -145,7 +205,7 @@ class OpticalRayProjector:
                 refl_dir = OpticalRayProjector.reflect_vector((dr, dc), m_type)
                 if refl_dir is None:
                     path.terminated_at = (next_r, next_c)
-                    path.termination_reason = "barrier"
+                    path.termination_reason = RayTerminationReason.BARRIER.value
                     break
                 path.steps.append(
                     RayStep(coord=(next_r, next_c), direction=(dr, dc), step_index=step_idx)
@@ -155,7 +215,7 @@ class OpticalRayProjector:
                 state = (curr_r, curr_c, dr, dc)
                 if state in visited_states:
                     path.terminated_at = (curr_r, curr_c)
-                    path.termination_reason = "cycle"
+                    path.termination_reason = RayTerminationReason.CYCLE.value
                     break
                 visited_states.add(state)
                 continue
@@ -163,7 +223,7 @@ class OpticalRayProjector:
             # Barrier / Obstacle collision
             if (next_r, next_c) in barriers:
                 path.terminated_at = (next_r, next_c)
-                path.termination_reason = "barrier"
+                path.termination_reason = RayTerminationReason.BARRIER.value
                 break
 
             # Clean propagation
@@ -174,9 +234,12 @@ class OpticalRayProjector:
             state = (curr_r, curr_c, dr, dc)
             if state in visited_states:
                 path.terminated_at = (curr_r, curr_c)
-                path.termination_reason = "cycle"
+                path.termination_reason = RayTerminationReason.CYCLE.value
                 break
             visited_states.add(state)
+        else:
+            path.terminated_at = (curr_r, curr_c)
+            path.termination_reason = RayTerminationReason.MAX_STEPS.value
 
         return path
 
@@ -261,7 +324,7 @@ class OpticalRayProjector:
     def detect_and_solve_optical_paths(
         grid: np.ndarray,
         background_feature: int,
-        receptors: list[tuple[int, int]],
+        receptors: Sequence[tuple[int, int]],
         barriers: set[tuple[int, int]],
         min_beam_length: int = 2,
     ) -> list[MirrorPlacementHypothesis]:

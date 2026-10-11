@@ -17,17 +17,28 @@ import logging
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import IntEnum, StrEnum
 from typing import Any
 
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
 
-class ObjectCategory(str, Enum):
+class ExecutiveDirective(IntEnum):
+    """The 5 executive directives guiding object-centric option selection."""
+
+    CHECK_EXIT_OPEN = 1
+    GO_TO_EXIT = 2
+    EXPLORE_OBJECTS = 3
+    USE_UNLOCKING_OBJECT = 4
+    INTERACT_UNKNOWN_OBJECT = 5
+
+
+class ObjectCategory(StrEnum):
     """Semantic category for lifted salient objects."""
 
     EXIT = "EXIT"
@@ -54,18 +65,85 @@ class SalientObject:
     interaction_action: int | None = None
     properties: dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_spatial_entity(
+        cls,
+        entity: SpatialEntity,
+        category: ObjectCategory = ObjectCategory.UNKNOWN,
+    ) -> SalientObject:
+        """Construct a SalientObject directly from an HCIR SpatialEntity component."""
+        cells = set(entity.properties.get("cells", [entity.grid_pos]))
+        return cls(
+            object_id=entity.id,
+            category=category,
+            feature_id=entity.feature_id if entity.feature_id is not None else 0,
+            centroid=(int(round(entity.centroid[0])), int(round(entity.centroid[1]))),
+            cells=cells,
+            area=entity.area,
+            is_solid=(entity.role == EntityRole.OBSTACLE),
+            interaction_stances=[entity.grid_pos],
+            properties={"role": str(entity.role), **dict(entity.properties)},
+        )
+
+    def to_spatial_entity(self, role: EntityRole | None = None) -> SpatialEntity:
+        """Convert salient object back into a formal HCIR SpatialEntity."""
+        eff_role = role or (
+            EntityRole.GOAL
+            if self.category == ObjectCategory.EXIT
+            else EntityRole.MANIPULABLE
+            if self.category in (ObjectCategory.KEY, ObjectCategory.MANIPULABLE)
+            else EntityRole.OBSTACLE
+            if self.is_solid
+            else EntityRole.UNKNOWN
+        )
+        min_r = min(r for r, c in self.cells) if self.cells else self.centroid[0]
+        max_r = max(r for r, c in self.cells) if self.cells else self.centroid[0]
+        min_c = min(c for r, c in self.cells) if self.cells else self.centroid[1]
+        max_c = max(c for r, c in self.cells) if self.cells else self.centroid[1]
+        return SpatialEntity(
+            id=self.object_id,
+            role=eff_role,
+            centroid=(float(self.centroid[0]), float(self.centroid[1])),
+            grid_pos=self.interaction_stances[0] if self.interaction_stances else self.centroid,
+            area=self.area,
+            bounding_box=(min_r, max_r, min_c, max_c),
+            feature_id=self.feature_id,
+            properties=dict(self.properties),
+        )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export object identity as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable=f"object_category::{self.category.value}",
+            operator="==",
+            value=self.feature_id,
+            target_entity=self.object_id,
+        )
+
 
 @dataclass
 class MacroOption:
     """A high-level macro-action representing an option to interact with a salient object."""
 
     option_id: str
-    directive: int
+    directive: ExecutiveDirective | int
     target_object: SalientObject | None
     target_stance: tuple[int, int]
     primitive_steps: list[Any]  # list[MentalSimulationStep]
     score: float = 0.0
     description: str = ""
+
+    def to_subgoal(self) -> dict[str, Any]:
+        """Convert macro-option into a structured declarative subgoal dictionary."""
+        return {
+            "option_id": self.option_id,
+            "directive": int(self.directive),
+            "target_object_id": self.target_object.object_id if self.target_object else None,
+            "target_stance": self.target_stance,
+            "step_count": len(self.primitive_steps),
+            "score": self.score,
+            "description": self.description,
+        }
 
 
 class ObjectStateLedger:
@@ -98,9 +176,21 @@ class ObjectStateLedger:
         if feature_id is not None:
             self.interacted_features.add(feature_id)
 
+    def record_mutation(self, mutation: Any) -> None:
+        """Record an environmental state mutation triggered by interaction."""
+        self.observed_mutations.append(mutation)
+
     def get_interaction_count(self, object_id: str) -> int:
         """Return the number of times an object has been interacted with."""
         return self.interaction_counts.get(object_id, 0)
+
+    def is_interacted(self, object_id: str) -> bool:
+        """True if the object has been probed at least once."""
+        return self.get_interaction_count(object_id) > 0
+
+    def get_unlocked_barriers(self) -> set[tuple[int, int]]:
+        """Return all barrier coordinates unlocked via object interactions."""
+        return set(self.unlocked_barriers)
 
 
 class ObjectStateGraphPlanner:
@@ -278,7 +368,7 @@ class ObjectStateGraphPlanner:
             obj = SalientObject(
                 object_id=e.id,
                 category=category,
-                feature_id=e.feature_id,
+                feature_id=e.feature_id if e.feature_id is not None else 0,
                 centroid=(int(round(e.centroid[0])), int(round(e.centroid[1]))),
                 cells=entity_cells,
                 area=e.area,
@@ -296,7 +386,7 @@ class ObjectStateGraphPlanner:
         target_stances: set[tuple[int, int]],
         static_barriers: set[tuple[int, int]],
         lethal_features: set[int],
-        movable_actions: list[tuple[Any, int, int]],
+        movable_actions: Sequence[tuple[Any, int, int]],
         grid_shape: tuple[int, int],
         curr_grid: np.ndarray,
         patroller_cells: set[tuple[int, int]] | None = None,
@@ -573,7 +663,7 @@ class ObjectStateGraphPlanner:
         obj: SalientObject,
         path: list[Any],
         available_actions: Sequence[Any],
-        movable_actions: list[tuple[Any, int, int]],
+        movable_actions: Sequence[tuple[Any, int, int]],
     ) -> list[Any]:
         """Finalize the primitive action sequence, attaching terminal interaction if necessary."""
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
@@ -630,6 +720,19 @@ class RelationalNode:
     bounding_box: tuple[int, int, int, int]
     properties: dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_spatial_entity(cls, entity: SpatialEntity) -> RelationalNode:
+        """Lift an HCIR SpatialEntity component into a RelationalNode."""
+        min_r, max_r, min_c, max_c = entity.bounding_box
+        return cls(
+            node_id=entity.id,
+            color=entity.feature_id if entity.feature_id is not None else 0,
+            area=entity.area,
+            centroid=entity.centroid,
+            bounding_box=(min_r, min_c, max_r, max_c),
+            properties=dict(entity.properties),
+        )
+
 
 @dataclass
 class RelationalEdge:
@@ -654,10 +757,10 @@ class RelationalGraphMatcher:
 
     def find_mapping(
         self,
-        source_nodes: list[RelationalNode],
-        source_edges: list[RelationalEdge],
-        target_nodes: list[RelationalNode],
-        target_edges: list[RelationalEdge],
+        source_nodes: Sequence[RelationalNode],
+        source_edges: Sequence[RelationalEdge],
+        target_nodes: Sequence[RelationalNode],
+        target_edges: Sequence[RelationalEdge],
     ) -> dict[str, str] | None:
         """Find bijective mapping f: source_id -> target_id satisfying all constraints."""
         if len(source_nodes) > len(target_nodes):
