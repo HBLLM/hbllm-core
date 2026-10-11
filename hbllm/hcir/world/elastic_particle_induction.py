@@ -4,18 +4,32 @@ Inductively discovers ballistic particle kinematics and surface deflection mecha
 1. ParticleKinematicsSimulator: Simulates discrete 2D ray trajectories and elastic reflections.
 2. ElasticParticleDeflectionOperator: Parameterized operator modeling ray propagation and bounce.
 3. InductiveParticleDeflectionSynthesizer: Induces kinematics parameters directly from demonstration residuals.
+4. Declarative Neuro-Symbolic Integration: Synthesizes formal CausalPredicates and SymbolicSubgoals.
 """
 
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.skills.declarative import SpatialActionIntent, SymbolicSubgoal
+from hbllm.hcir.world.cortex_causal import CausalPredicate
 from hbllm.hcir.world.grid_operator import GridOperator, OperatorBinding
 
 logger = logging.getLogger(__name__)
+
+
+class DeflectionMode(StrEnum):
+    """Kinematic deflection reflection modes upon striking barriers or boundaries."""
+
+    HORIZONTAL_FLIP = "horizontal_flip"
+    VERTICAL_FLIP = "vertical_flip"
+    SPECULAR_NORMAL = "specular_normal"
+    BOUNDARY_BOUNCE = "boundary_bounce"
+    MULTI_REBOUND = "multi_rebound"
 
 
 class ParticleKinematicsSimulator:
@@ -27,7 +41,7 @@ class ParticleKinematicsSimulator:
         start_coord: tuple[int, int],
         initial_velocity: tuple[int, int],
         barrier_colors: set[int],
-        deflection_mode: str = "horizontal_flip",
+        deflection_mode: DeflectionMode | str = DeflectionMode.HORIZONTAL_FLIP,
         absorbing_colors: set[int] | None = None,
         max_steps: int = 150,
     ) -> list[tuple[int, int]]:
@@ -36,6 +50,7 @@ class ParticleKinematicsSimulator:
         absorbing = absorbing_colors or set()
         r, c = start_coord
         dr, dc = initial_velocity
+        d_mode = str(deflection_mode)
 
         trajectory: list[tuple[int, int]] = []
         visited_states: set[tuple[int, int, int, int]] = set()
@@ -50,7 +65,7 @@ class ParticleKinematicsSimulator:
 
             # Check boundary conditions
             if not (0 <= nr < H and 0 <= nc < W):
-                if deflection_mode in ("boundary_bounce", "multi_rebound"):
+                if d_mode in (DeflectionMode.BOUNDARY_BOUNCE, DeflectionMode.MULTI_REBOUND):
                     if nr < 0 or nr >= H:
                         dr = -dr
                     if nc < 0 or nc >= W:
@@ -65,17 +80,19 @@ class ParticleKinematicsSimulator:
 
             # Check absorption / target collision
             if cell_val in absorbing:
-                # Terminate ray at absorbing target
                 break
 
             # Check barrier collision
             if cell_val in barrier_colors:
-                if deflection_mode == "horizontal_flip":
+                if d_mode == DeflectionMode.HORIZONTAL_FLIP:
                     dc = -dc
-                elif deflection_mode == "vertical_flip":
+                elif d_mode == DeflectionMode.VERTICAL_FLIP:
                     dr = -dr
-                elif deflection_mode in ("specular_normal", "multi_rebound", "boundary_bounce"):
-                    # Check whether collision was vertical or horizontal
+                elif d_mode in (
+                    DeflectionMode.SPECULAR_NORMAL,
+                    DeflectionMode.MULTI_REBOUND,
+                    DeflectionMode.BOUNDARY_BOUNCE,
+                ):
                     vert_hit = (
                         0 <= r + dr < H and 0 <= c < W and int(grid[r + dr, c]) in barrier_colors
                     )
@@ -87,7 +104,6 @@ class ParticleKinematicsSimulator:
                     elif horiz_hit and not vert_hit:
                         dc = -dc
                     else:
-                        # Corner or diagonal strike: reverse horizontal by default
                         dc = -dc
                 else:
                     dc = -dc
@@ -122,7 +138,7 @@ class ElasticParticleDeflectionOperator(GridOperator):
         beam_color: int,
         barrier_colors: tuple[int, ...],
         initial_velocity: tuple[int, int],
-        deflection_mode: str = "horizontal_flip",
+        deflection_mode: DeflectionMode | str = DeflectionMode.HORIZONTAL_FLIP,
         absorbing_colors: tuple[int, ...] = (),
         complexity: float = 2.5,
     ) -> None:
@@ -144,7 +160,7 @@ class ElasticParticleDeflectionOperator(GridOperator):
                     "beam_color": self.beam_color,
                     "barrier_colors": list(self.barrier_colors),
                     "initial_velocity": list(self.initial_velocity),
-                    "deflection_mode": self.deflection_mode,
+                    "deflection_mode": str(self.deflection_mode),
                     "absorbing_colors": list(self.absorbing_colors),
                 },
                 description=f"{self.name}(emitter={self.emitter_color}, beam={self.beam_color}, v={self.initial_velocity})",
@@ -175,6 +191,25 @@ class ElasticParticleDeflectionOperator(GridOperator):
 
         return out
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export operator kinematics as a formal HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="elastic_deflection",
+            operator="==",
+            value=self.initial_velocity,
+            relation=str(self.deflection_mode),
+            target_entity=f"emitter_{self.emitter_color}",
+        )
+
+    def to_subgoals(self) -> list[SymbolicSubgoal]:
+        """Lift deflection operator intent into declarative planning subgoals."""
+        return [
+            SymbolicSubgoal(
+                intent=SpatialActionIntent.NAVIGATE,
+                target_query={"emitter_color": self.emitter_color, "beam_color": self.beam_color},
+            )
+        ]
+
 
 class InductiveParticleDeflectionSynthesizer:
     """Induces particle ray kinematics and surface deflection parameters from demonstration residuals."""
@@ -204,7 +239,6 @@ class InductiveParticleDeflectionSynthesizer:
         residual_set = set(residual_coords)
 
         # Identify candidate emitters: non-zero cells in x0 adjacent to residual path endpoints
-        # Terminal endpoints of residual path have degree <= 1 in residual graph
         endpoints = [
             (r, c)
             for (r, c) in residual_coords
@@ -224,7 +258,6 @@ class InductiveParticleDeflectionSynthesizer:
                 if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in residual_set:
                     col = int(x0[nr, nc])
                     if col != 0:
-                        # Emitter at (nr, nc) pointing towards (er, ec) has initial velocity:
                         vr = 1 if er > nr else (-1 if er < nr else 0)
                         vc = 1 if ec > nc else (-1 if ec < nc else 0)
                         candidate_emitters.append((col, (vr, vc)))
@@ -237,12 +270,11 @@ class InductiveParticleDeflectionSynthesizer:
                     if (vr, vc) != (0, 0):
                         candidate_emitters.append((col, (vr, vc)))
 
-        # Candidate barrier and absorbing colors
         deflection_modes = [
-            "horizontal_flip",
-            "vertical_flip",
-            "specular_normal",
-            "boundary_bounce",
+            DeflectionMode.HORIZONTAL_FLIP,
+            DeflectionMode.VERTICAL_FLIP,
+            DeflectionMode.SPECULAR_NORMAL,
+            DeflectionMode.BOUNDARY_BOUNCE,
         ]
 
         for emitter_col, init_vel in candidate_emitters:

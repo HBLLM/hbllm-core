@@ -9,6 +9,8 @@ Modeled on premotor dynamic trajectory simulation and Spelke core knowledge:
 3. Spatiotemporal Collision Cones: Projects hazard volumes into forward space-time (r, c, t).
    Allows the A* forward mental simulator and reactive motor arbiter to avoid walking into
    oncoming lethal threats and moving patrollers.
+4. Declarative Neuro-Symbolic Integration: Synthesizes formal CausalPredicates and
+   atomic TransactionOperations for state-space hazard tracking.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortex_causal import CausalPredicate
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.kinetic_stream import KineticEntity
@@ -32,6 +37,16 @@ class ProjectedTrajectory:
     initial_pos: tuple[int, int]
     velocity: tuple[int, int]
     positions: list[tuple[int, int]]  # positions[t - 1] is position at step t
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export projected trajectory as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="projected_trajectory",
+            operator="==",
+            value=self.velocity,
+            relation=f"len_{len(self.positions)}",
+            target_entity=self.entity_id,
+        )
 
 
 class SpatiotemporalCollisionCones:
@@ -172,3 +187,24 @@ class SpatiotemporalCollisionCones:
         for t in range(start_step, end_step + 1):
             swept.update(self.step_occupied_cells.get(t, set()))
         return swept
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all projected kinetic hazard trajectories into declarative causal predicates."""
+        return [proj.to_causal_predicate() for proj in self.projected_trajectories]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR state updates for active hazard volumes."""
+        ops: list[TransactionOperation] = []
+        for proj in self.projected_trajectories:
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    node_id=proj.entity_id,
+                    changes={
+                        "velocity": proj.velocity,
+                        "projected_steps": len(proj.positions),
+                        "initial_pos": proj.initial_pos,
+                    },
+                )
+            )
+        return ops

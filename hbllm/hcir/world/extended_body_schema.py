@@ -9,14 +9,33 @@ Modeled on primate posterior parietal cortex and Iriki-Maravita body schema plas
    When the matching tool is held, the forward planner and A* search treat resonant barriers
    as permeable with an interaction cost, unlocking door pathways.
 3. Effector Collision Hull Dilation: Computes the compound spatial geometry of avatar + held item.
+4. Declarative Neuro-Symbolic Integration: Synthesizes formal CausalPredicates and HCIRSymbolicWorldTheory rules.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger(__name__)
+
+
+class ToolRole(StrEnum):
+    """Functional role of an incorporated tool or held item."""
+
+    KEY = "key"
+    PUSHER = "pusher"
+    LEVER = "lever"
+    WEAPON = "weapon"
+    CONTAINER = "container"
+    TOOL = "tool"
 
 
 @dataclass
@@ -25,9 +44,19 @@ class HeldTool:
 
     feature_id: int
     acquired_step: int
-    role: str = "tool"
+    role: ToolRole | str = ToolRole.TOOL
     relative_offset: tuple[int, int] = (0, 0)
     unlocked_barriers: set[int] = field(default_factory=set)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export tool possession state as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="held_tool",
+            operator="==",
+            value=self.feature_id,
+            relation=str(self.role),
+            target_entity="avatar",
+        )
 
 
 class ExtendedBodySchema:
@@ -48,7 +77,7 @@ class ExtendedBodySchema:
         self,
         feature_id: int,
         step: int,
-        role: str = "tool",
+        role: ToolRole | str = ToolRole.TOOL,
         relative_offset: tuple[int, int] = (0, 0),
     ) -> None:
         """Incorporate an acquired tool into the extended body schema."""
@@ -121,3 +150,29 @@ class ExtendedBodySchema:
                     (avatar_pos[0] + t.relative_offset[0], avatar_pos[1] + t.relative_offset[1])
                 )
         return hull
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export tool possession and unlocked barrier permeability into formal causal predicates."""
+        predicates: list[CausalPredicate] = []
+        for tool in self.held_tools:
+            predicates.append(tool.to_causal_predicate())
+        for tool_feat, barriers in self.tool_barrier_affinities.items():
+            for b_feat in barriers:
+                predicates.append(
+                    CausalPredicate(
+                        variable="tool_barrier_resonance",
+                        operator="==",
+                        value=b_feat,
+                        relation=f"tool_{tool_feat}",
+                        target_entity="avatar",
+                    )
+                )
+        return predicates
+
+    def to_world_theory(self) -> Any:
+        """Synthesize an empirical HCIRSymbolicWorldTheory capturing tool permeability affordances."""
+        from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+
+        theory = HCIRSymbolicWorldTheory()
+        theory.walkable_predicates.extend(self.export_causal_predicates())
+        return theory
