@@ -21,6 +21,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +37,33 @@ class PhaseGateDecision:
     current_phase: int = 0
     environmental_period: int = 1
     reason: str = ""
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export phase gate decision as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="motor_phase_gate",
+            operator="==",
+            value="WAIT" if self.should_wait else "PROCEED",
+            relation=f"wait_steps:{self.wait_steps_recommended}",
+            target_entity=f"phase_{self.current_phase}_of_{self.environmental_period}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording phase gate decision."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="phase_gate_decision",
+                node_data={
+                    "should_wait": self.should_wait,
+                    "wait_steps_recommended": self.wait_steps_recommended,
+                    "safe_phase_offset": self.safe_phase_offset,
+                    "current_phase": self.current_phase,
+                    "environmental_period": self.environmental_period,
+                    "reason": self.reason,
+                },
+            )
+        ]
 
 
 class CerebellarPhaseClock:
@@ -230,3 +260,31 @@ class CerebellarPhaseClock:
                     return PhaseGateDecision(should_wait=False)
 
         return decision
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export macro periodicity state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="cerebellar_macro_period",
+            operator="==",
+            value=self.detected_macro_period if self.detected_macro_period is not None else 0,
+            relation=f"confidence:{self.period_confidence:.2f}",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all cerebellar phase state predicates."""
+        return [self.to_causal_predicate()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting cerebellar clock state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="cerebellar_phase_clock",
+                node_data={
+                    "detected_macro_period": self.detected_macro_period,
+                    "period_confidence": self.period_confidence,
+                    "last_reset_step": self.last_reset_step,
+                    "reset_intervals": list(self.reset_intervals),
+                },
+            )
+        ]

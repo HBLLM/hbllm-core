@@ -16,9 +16,15 @@ import heapq
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.cortex_causal import ActionAffordance
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,47 @@ class BilateralState:
     symmetry_axis: SymmetryAxis
     features: set[int] = field(default_factory=set)
     confidence: float = 1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export bilateral state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="bilateral_symmetry",
+            operator="==",
+            value=self.symmetry_axis.value,
+            relation=f"{self.pos1}->{self.pos2}",
+            target_entity="dual_agent",
+        )
+
+    def to_affordance(self, action_id: Any = "STEP") -> ActionAffordance:
+        """Synthesize coordinated bilateral action affordance."""
+        from hbllm.hcir.world.cortex_causal import ActionAffordance
+
+        return ActionAffordance(
+            action_id=action_id,
+            name=f"bilateral_{self.symmetry_axis.value}",
+            confidence=self.confidence,
+            metadata={
+                "pos1": self.pos1,
+                "pos2": self.pos2,
+                "symmetry_axis": self.symmetry_axis.value,
+            },
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording coupled bilateral state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="bilateral_effector_state",
+                node_data={
+                    "pos1": self.pos1,
+                    "pos2": self.pos2,
+                    "symmetry_axis": self.symmetry_axis.value,
+                    "features": sorted(list(self.features)),
+                    "confidence": self.confidence,
+                },
+            )
+        ]
 
 
 class BilateralCoordinateIntegrator:
@@ -233,3 +280,15 @@ class BilateralCoordinateIntegrator:
                     heapq.heappush(frontier, (next_g + next_h, next_g, next_state, path + [act]))
 
         return None
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Export active bilateral state as declarative causal predicates."""
+        if not self.active_bilateral_state:
+            return []
+        return [self.active_bilateral_state.to_causal_predicate()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting bilateral integrator state."""
+        if not self.active_bilateral_state:
+            return []
+        return self.active_bilateral_state.to_transaction_operations()

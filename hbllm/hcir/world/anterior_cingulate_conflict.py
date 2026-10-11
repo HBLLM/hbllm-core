@@ -20,6 +20,9 @@ import logging
 import math
 from dataclasses import dataclass, field
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +35,32 @@ class FailureCluster:
     count: int = 1
     recent_steps: list[int] = field(default_factory=list)
     lethal_actions: list[int] = field(default_factory=list)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export failure cluster as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="failure_cluster",
+            operator=">=",
+            value=self.count,
+            relation=f"actions:{self.lethal_actions}",
+            target_entity=f"{self.center_r:.1f}_{self.center_c:.1f}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording failure cluster."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"fail_cluster_{self.center_r:.1f}_{self.center_c:.1f}",
+                node_data={
+                    "center_r": self.center_r,
+                    "center_c": self.center_c,
+                    "count": self.count,
+                    "recent_steps": list(self.recent_steps),
+                    "lethal_actions": list(self.lethal_actions),
+                },
+            )
+        ]
 
 
 class AnteriorCingulateConflictMonitor:
@@ -206,3 +235,37 @@ class AnteriorCingulateConflictMonitor:
 
         self.detour_target = best_candidate
         return best_candidate
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export current frustration state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="frustration_level",
+            operator="==",
+            value=self.frustration,
+            relation="active_conflict" if self.active_conflict else "nominal",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export conflict monitor state and failure clusters as causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for cl in self.clusters:
+            preds.append(cl.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting conflict monitor state and clusters."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="anterior_cingulate_monitor",
+                node_data={
+                    "frustration": self.frustration,
+                    "active_conflict": self.active_conflict,
+                    "cluster_count": len(self.clusters),
+                    "detour_target": self.detour_target,
+                },
+            )
+        ]
+        for cl in self.clusters:
+            ops.extend(cl.to_transaction_operations())
+        return ops

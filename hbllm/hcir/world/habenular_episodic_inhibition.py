@@ -20,6 +20,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +46,32 @@ class FatalPrefixRecord:
     fatal_action: Any
     branch_point_step: int
     inhibited_state_actions: list[tuple[tuple[int, int] | None, Any]] = field(default_factory=list)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export fatal prefix as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"fatal_prefix:{self.terminal_step}",
+            operator="==",
+            value=str(self.fatal_action),
+            relation=f"branch_point:{self.branch_point_step}",
+            target_entity=f"pos:{self.fatal_pos}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording fatal prefix."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"fatal_prefix_{self.terminal_step}",
+                node_data={
+                    "terminal_step": self.terminal_step,
+                    "fatal_pos": self.fatal_pos,
+                    "fatal_action": str(self.fatal_action),
+                    "branch_point_step": self.branch_point_step,
+                    "inhibited_count": len(self.inhibited_state_actions),
+                },
+            )
+        ]
 
 
 class HabenularEpisodicIOR:
@@ -216,3 +245,37 @@ class HabenularEpisodicIOR:
     def reset(self) -> None:
         """Full reset of Habenular episodic memory and inhibition state."""
         self.reset_episode(retain_long_term=False)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export Habenular IOR state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="habenular_ior",
+            operator="==",
+            value=len(self.active_inhibitions),
+            relation=f"fatal_prefixes:{len(self.fatal_prefixes)}",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all Habenular IOR state and fatal prefix causal predicates."""
+        preds = [self.to_causal_predicate()]
+        for rec in self.fatal_prefixes:
+            preds.append(rec.to_causal_predicate())
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting Habenular IOR state."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="habenular_ior_state",
+                node_data={
+                    "active_inhibition_count": len(self.active_inhibitions),
+                    "fatal_prefix_count": len(self.fatal_prefixes),
+                    "trace_horizon": self.trace_horizon,
+                    "gamma": self.gamma,
+                },
+            )
+        ]
+        for rec in self.fatal_prefixes:
+            ops.extend(rec.to_transaction_operations())
+        return ops

@@ -10,12 +10,17 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
     BeliefTransitionType,
+    CausalPredicate,
 )
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.cortex_causal import ActionAffordance
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,52 @@ class AffordanceHypothesis:
     def describe(self) -> str:
         act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
         return f"AFFORDS({self.entity_shape}, {act_val}) => {self.affordance_label}"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export affordance hypothesis as a declarative causal predicate."""
+        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        return CausalPredicate(
+            variable=f"affordance:{self.entity_shape}",
+            operator="==",
+            value=self.affordance_label,
+            relation=act_val,
+            target_entity=self.entity_shape,
+        )
+
+    def to_affordance(self) -> ActionAffordance:
+        """Synthesize action affordance corresponding to confirmed/evaluated hypothesis."""
+        from hbllm.hcir.world.cortex_causal import ActionAffordance
+
+        return ActionAffordance(
+            action_id=self.action,
+            name=self.affordance_label,
+            confidence=self.confidence,
+            metadata={
+                "hypothesis_id": self.hypothesis_id,
+                "entity_shape": self.entity_shape,
+                "interventions_tested": self.interventions_tested,
+                "confirmed": self.confirmed,
+            },
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording affordance hypothesis."""
+        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"aff_hyp_{self.hypothesis_id}",
+                node_data={
+                    "hypothesis_id": self.hypothesis_id,
+                    "action": act_val,
+                    "entity_shape": self.entity_shape,
+                    "affordance_label": self.affordance_label,
+                    "confidence": self.confidence,
+                    "confirmed": self.confirmed,
+                    "falsified": self.falsified,
+                },
+            )
+        ]
 
 
 class BaseAffordanceDiscoveryEngine:
@@ -209,3 +260,14 @@ class BaseAffordanceDiscoveryEngine:
         )
         self.belief_history.append(event)
         return event
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all affordance hypotheses as declarative causal predicates."""
+        return [h.to_causal_predicate() for h in self.hypotheses]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting affordance discovery hypotheses."""
+        ops: list[TransactionOperation] = []
+        for h in self.hypotheses:
+            ops.extend(h.to_transaction_operations())
+        return ops

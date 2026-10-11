@@ -1179,3 +1179,163 @@ class TestParietalCoordinateTransformer:
             background_feature=0,
         )
         assert transferred == (3, 6)
+
+
+class TestPhase25CognitiveBridgeCausalAndTransactions:
+    """Validate declarative causal predicates and atomic HCIR transactions for Phase 25 components."""
+
+    def test_affordance_discovery_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.affordance_discovery import (
+            AffordanceHypothesis,
+            BaseAffordanceDiscoveryEngine,
+        )
+
+        hyp = AffordanceHypothesis(
+            hypothesis_id="aff_ball_roll",
+            action="ROLL",
+            entity_shape="ball",
+            affordance_label="ROLLABLE",
+            confidence=0.85,
+        )
+        pred = hyp.to_causal_predicate()
+        assert pred.variable == "affordance:ball"
+        assert pred.operator == "=="
+        assert pred.value == "ROLLABLE"
+
+        ops = hyp.to_transaction_operations()
+        assert len(ops) == 1
+        assert ops[0].node_id == f"aff_hyp_{hyp.hypothesis_id}"
+
+        engine = BaseAffordanceDiscoveryEngine()
+        engine.hypotheses.append(hyp)
+        engine_preds = engine.export_causal_predicates()
+        assert len(engine_preds) == 1
+        engine_ops = engine.to_transaction_operations()
+        assert len(engine_ops) == 1
+
+    def test_anterior_cingulate_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.anterior_cingulate_conflict import (
+            AnteriorCingulateConflictMonitor,
+            FailureCluster,
+        )
+
+        cluster = FailureCluster(center_r=5.0, center_c=5.0, count=3)
+        c_pred = cluster.to_causal_predicate()
+        assert "failure_cluster" in c_pred.variable
+        c_ops = cluster.to_transaction_operations()
+        assert len(c_ops) == 1
+
+        acc = AnteriorCingulateConflictMonitor()
+        acc.clusters.append(cluster)
+        acc_preds = acc.export_causal_predicates()
+        assert len(acc_preds) == 2
+        acc_ops = acc.to_transaction_operations()
+        assert len(acc_ops) == 2
+
+    def test_bilateral_coordination_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.bilateral_coordination import (
+            BilateralCoordinateIntegrator,
+            BilateralState,
+            SymmetryAxis,
+        )
+
+        state = BilateralState(
+            pos1=(2, 3),
+            pos2=(2, 7),
+            symmetry_axis=SymmetryAxis.HORIZONTAL,
+            features={1, 2},
+            confidence=0.9,
+        )
+        state_pred = state.to_causal_predicate()
+        assert state_pred.variable == "bilateral_symmetry"
+        state_ops = state.to_transaction_operations()
+        assert len(state_ops) == 1
+
+        integrator = BilateralCoordinateIntegrator()
+        integrator.active_bilateral_state = state
+        preds = integrator.to_causal_predicates()
+        assert len(preds) == 1
+        ops = integrator.to_transaction_operations()
+        assert len(ops) == 1
+
+    def test_capability_evidence_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.capability_evidence import (
+            BenchmarkStatus,
+            CapabilityEvidence,
+            CapabilityLedger,
+            GeneralizationStatus,
+            ImplementationStatus,
+            IntegrationStatus,
+            UnitTestStatus,
+        )
+
+        ev = CapabilityEvidence(
+            capability_id="cortex_planner",
+            name="Cortex Planner",
+            domain="planning",
+            implementation_status=ImplementationStatus.IMPLEMENTED,
+            integration_status=IntegrationStatus.ACTIVE_RUNTIME,
+            unit_test_status=UnitTestStatus.PASSING,
+            benchmark_status=BenchmarkStatus.BENCHMARKED,
+            generalization_status=GeneralizationStatus.HELD_OUT_EVIDENCED,
+        )
+        ev_pred = ev.to_causal_predicate()
+        assert ev_pred.variable == "capability:cortex_planner"
+        ev_ops = ev.to_transaction_operations()
+        assert len(ev_ops) == 1
+
+        ledger = CapabilityLedger()
+        ledger.register(ev)
+        ledger_preds = ledger.export_causal_predicates()
+        assert len(ledger_preds) == 1
+        ledger_ops = ledger.to_transaction_operations()
+        assert len(ledger_ops) == 2
+
+    def test_cerebellar_clock_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.cerebellar_phase_clock import (
+            CerebellarPhaseClock,
+            PhaseGateDecision,
+        )
+
+        dec = PhaseGateDecision(
+            should_wait=True,
+            wait_steps_recommended=2,
+            current_phase=1,
+            environmental_period=4,
+        )
+        dec_pred = dec.to_causal_predicate()
+        assert dec_pred.variable == "motor_phase_gate"
+        assert dec_pred.value == "WAIT"
+        dec_ops = dec.to_transaction_operations()
+        assert len(dec_ops) == 1
+
+        clock = CerebellarPhaseClock()
+        clock.detected_macro_period = 16
+        clock_preds = clock.export_causal_predicates()
+        assert len(clock_preds) == 1
+        clock_ops = clock.to_transaction_operations()
+        assert len(clock_ops) == 1
+
+    def test_habenular_ior_causal_and_transactions(self) -> None:
+        from hbllm.hcir.world.habenular_episodic_inhibition import (
+            FatalPrefixRecord,
+            HabenularEpisodicIOR,
+        )
+
+        rec = FatalPrefixRecord(
+            terminal_step=12,
+            fatal_pos=(4, 4),
+            fatal_action=3,
+            branch_point_step=9,
+        )
+        rec_pred = rec.to_causal_predicate()
+        assert "fatal_prefix:12" in rec_pred.variable
+        rec_ops = rec.to_transaction_operations()
+        assert len(rec_ops) == 1
+
+        ior = HabenularEpisodicIOR()
+        ior.fatal_prefixes.append(rec)
+        ior_preds = ior.export_causal_predicates()
+        assert len(ior_preds) == 2
+        ior_ops = ior.to_transaction_operations()
+        assert len(ior_ops) == 2

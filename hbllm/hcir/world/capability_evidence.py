@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -117,6 +120,36 @@ class CapabilityEvidence:
             "notes": self.notes,
         }
 
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export capability status as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"capability:{self.capability_id}",
+            operator="==",
+            value=self.implementation_status,
+            relation=self.integration_status,
+            target_entity=self.name,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording capability evidence."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"cap_{self.capability_id}",
+                node_data={
+                    "capability_id": self.capability_id,
+                    "name": self.name,
+                    "domain": self.domain,
+                    "implementation_status": self.implementation_status,
+                    "integration_status": self.integration_status,
+                    "unit_test_status": self.unit_test_status,
+                    "benchmark_status": self.benchmark_status,
+                    "generalization_status": self.generalization_status,
+                    "fully_verified": self.is_fully_verified(),
+                },
+            )
+        ]
+
 
 class CapabilityLedger:
     """Registry and evidence tracker across cognitive capabilities."""
@@ -165,3 +198,20 @@ class CapabilityLedger:
             "architectural_integrity_verified": arch_verified,
             "fully_verified": fully_verified,
         }
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all capability records as declarative causal predicates."""
+        return [entry.to_causal_predicate() for entry in self._entries.values()]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting capability ledger state and entries."""
+        ops = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="capability_ledger_summary",
+                node_data=self.summary(),
+            )
+        ]
+        for entry in self._entries.values():
+            ops.extend(entry.to_transaction_operations())
+        return ops
