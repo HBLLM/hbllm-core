@@ -305,3 +305,19 @@ def test_declarative_action_and_goal_exports() -> None:
     theory = goal_engine.to_symbolic_world_theory()
     assert len(theory) >= 1
     assert any(p.variable == "remaining_items" for p in theory)
+
+    # 4. Topological DAG sorting and acyclicity
+    dag = LongHorizonDependencyGraph()
+    dag.add_milestone("step_a", "First step")
+    dag.add_milestone("step_b", "Second step", prerequisites=["step_a"])
+    dag.add_milestone("step_c", "Third step", prerequisites=["step_b"])
+    assert dag.is_acyclic() is True
+    assert dag.topological_sort() == ["step_a", "step_b", "step_c"]
+
+    # 5. Dual-store memory export
+    mem = DualStoreMemoryManager()
+    mem.commit_invariant_schema("s1", "Rule1", "prov_A")
+    mem.validate_schema_in_target("s1", is_consistent_with_target_evidence=True)
+    exported = mem.export_world_theory()
+    assert len(exported) == 1
+    assert exported[0].variable == "schema::s1"
