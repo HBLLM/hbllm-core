@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.world.causal_discovery import BeliefTransitionType
 from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
-from hbllm.hcir.world.cortex_causal import CausalInductionCortex
+from hbllm.hcir.world.cortex_causal import CausalInductionCortex, HCIRSymbolicWorldTheory
 from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
 from hbllm.hcir.world.cortex_hypothesis import (
     HypothesisStatus,
@@ -28,7 +29,11 @@ from hbllm.hcir.world.cortex_morphology import (
     MorphologicalSaliencyEngine,
     MorphologyPrimitiveType,
 )
-from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+from hbllm.hcir.world.cortex_motor import (
+    EpistemicCuriosityExplorer,
+    EpistemicProbeProposal,
+    MotorCortexEffector,
+)
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
@@ -735,6 +740,33 @@ class TestMotorCortexEffector:
         assert 0 <= coords["x"] < 10
         assert 0 <= coords["y"] < 10
 
+    def test_compute_epistemic_probe_proposal_and_atomic_apply(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine()
+        engine.avatar_pos = (2, 2)
+        engine.avatar_feature = 1
+        grid = np.zeros((10, 10), dtype=int)
+        grid[2, 2] = 1
+
+        # Calculate pure proposal without mutating engine state
+        initial_probes = engine.total_epistemic_probes
+        proposal = EpistemicCuriosityExplorer.compute_epistemic_probe(
+            engine=engine,
+            curr_grid=grid,
+            available_actions=[1, 2, 3, 4],
+        )
+
+        assert isinstance(proposal, EpistemicProbeProposal)
+        assert proposal.action in (1, 2, 3, 4)
+        assert (
+            engine.total_epistemic_probes == initial_probes
+        )  # Reasoning invariant: zero direct mutation!
+
+        # Now commit atomically via engine
+        engine.apply_probe_proposal(proposal)
+        assert engine.total_epistemic_probes == initial_probes + 1
+
 
 class TestInductiveHypothesisEngine:
     """Test Prefrontal Cortex Inductive Logic, Relational Hypotheses & Counterexample Refutation."""
@@ -833,6 +865,68 @@ class TestInductiveHypothesisEngine:
         assert rule is not None
         assert rule.status == HypothesisStatus.REFUTED
         assert rule.counterexamples == 1
+
+    def test_event_sourced_belief_transitions_and_predicate_export(self) -> None:
+        hyp_engine = InductiveHypothesisEngine(min_support_to_confirm=2)
+
+        prev_grid = np.zeros((8, 8), dtype=int)
+        prev_grid[1, 1] = 2  # key switch
+        prev_grid[5, 5] = 9  # door barrier
+
+        curr_grid = np.zeros((8, 8), dtype=int)
+        curr_grid[1, 1] = 2  # switch remains, barrier 9 clears
+
+        hyp_engine.observe_transition(
+            prev_grid=prev_grid,
+            action=1,
+            curr_grid=curr_grid,
+            prev_avatar_pos=(1, 0),
+            curr_avatar_pos=(1, 1),
+            background_feature=0,
+        )
+
+        # Verify event log records hypothesis creation
+        assert len(hyp_engine.event_log) >= 1
+        create_event = hyp_engine.event_log[0]
+        assert create_event.event_type == BeliefTransitionType.HYPOTHESIS_CREATED
+        assert create_event.rule_id == "remote_mech_2_clears_9"
+
+        # Transition 2 confirms
+        prev_grid2 = np.zeros((8, 8), dtype=int)
+        prev_grid2[3, 3] = 2
+        prev_grid2[6, 6] = 9
+        curr_grid2 = np.zeros((8, 8), dtype=int)
+        curr_grid2[3, 3] = 2
+
+        hyp_engine.observe_transition(
+            prev_grid=prev_grid2,
+            action=1,
+            curr_grid=curr_grid2,
+            prev_avatar_pos=(3, 2),
+            curr_avatar_pos=(3, 3),
+            background_feature=0,
+        )
+
+        confirmed_remote = [
+            r
+            for r in hyp_engine.get_confirmed_rules()
+            if r.rule_type == HypothesisType.REMOTE_MECHANISM
+        ]
+        assert len(confirmed_remote) == 1
+        conf_rule = confirmed_remote[0]
+
+        # Verify CausalPredicate compilation
+        pred = conf_rule.to_causal_predicate()
+        assert pred.variable == "contact_feature"
+        assert pred.value == 2
+        assert pred.relation == "clears_barrier"
+        assert pred.target_entity == "9"
+
+        # Verify export to HCIRSymbolicWorldTheory
+        theory = HCIRSymbolicWorldTheory()
+        hyp_engine.export_to_world_theory(theory)
+        assert 9 in theory.barrier_features
+        assert len(theory.barrier_predicates) >= 1
 
     def test_frontopolar_spawn_causal_unlock(self) -> None:
         stack = FrontopolarSubgoalStack()

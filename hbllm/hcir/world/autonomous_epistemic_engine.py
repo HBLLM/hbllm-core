@@ -161,6 +161,7 @@ from hbllm.hcir.world.cortex_episodic import (
 from hbllm.hcir.world.cortex_motor import (
     ACCConflictMonitor,
     EpistemicCuriosityExplorer,
+    EpistemicProbeProposal,
     MotorCortexEffector,
 )
 from hbllm.hcir.world.cortex_perception import (
@@ -936,6 +937,10 @@ class AutonomousEpistemicEngine:
         available_actions: Sequence[int],
     ) -> tuple[int, dict[str, Any] | None]:
         return EpistemicCuriosityExplorer.plan_epistemic_probe(self, curr_grid, available_actions)
+
+    def apply_probe_proposal(self, proposal: EpistemicProbeProposal) -> None:
+        """Commit an EpistemicProbeProposal's state updates atomically."""
+        EpistemicCuriosityExplorer.apply_proposal_to_engine(self, proposal)
 
     def update_room_topology(self, curr_grid: np.ndarray) -> None:
         """Extract rooms and doorways from current occupancy grid knowledge."""

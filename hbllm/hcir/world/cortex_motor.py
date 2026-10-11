@@ -14,6 +14,7 @@ and ACC conflict monitoring:
    - Detects motor deadlocks (e.g. 2-cycle or 3-cycle oscillations) and forces orthogonal exploration.
 4. Epistemic Curiosity Explorer:
    - Systematically probes uncalibrated actions, unvisited spatial frontiers, and affordance panels.
+   - Emits pure EpistemicProbeProposals to maintain HCIR Reasoning and State Ownership Invariants.
 """
 
 import logging
@@ -102,6 +103,23 @@ class ACCConflictMonitor:
         self.conflict_records.clear()
 
 
+@dataclass(frozen=True)
+class EpistemicProbeProposal:
+    """Pure immutable proposal emitted by EpistemicCuriosityExplorer."""
+
+    action: int
+    action_data: dict[str, Any] | None = None
+    new_probe_target: tuple[int, int] | None = None
+    new_probe_id: str | None = None
+    clear_active_probe: bool = False
+    probed_entity_ids_to_add: tuple[str, ...] = ()
+    entity_visit_counts_to_inc: tuple[str, ...] = ()
+    tested_action_position: tuple[int, tuple[int, int] | None] | None = None
+    tested_action: int | None = None
+    topological_doorway: tuple[tuple[int, int], int] | None = None
+    exploration_mode: str = ""
+
+
 class EpistemicCuriosityExplorer:
     """Active curiosity-driven hypothesis testing and information-gain exploration."""
 
@@ -141,12 +159,402 @@ class EpistemicCuriosityExplorer:
         return True
 
     @staticmethod
-    def plan_epistemic_probe(
+    def _probe_uncalibrated_action(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         available_actions: Sequence[int],
-    ) -> tuple[int, dict[str, Any] | None]:
-        """Select an exploratory probe action to resolve epistemic uncertainty."""
+    ) -> EpistemicProbeProposal | None:
+        """Uncalibrated actions take absolute priority for motor grounding."""
+        uncalibrated = [a for a in available_actions if not engine.is_action_calibrated(a)]
+        untested_at_pos = [
+            a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
+        ]
+        if untested_at_pos:
+            chosen = untested_at_pos[0]
+            action_data = None
+            if engine.is_spatial_effector(chosen):
+                action_data = engine.ground_effector_action(curr_grid, chosen)
+            return EpistemicProbeProposal(
+                action=chosen,
+                action_data=action_data,
+                tested_action_position=(chosen, engine.avatar_pos),
+                tested_action=chosen,
+                exploration_mode="uncalibrated_grounding",
+            )
+        return None
+
+    @staticmethod
+    def _probe_motor_babble(
+        engine: AutonomousEpistemicEngine,
+        displacement_actions: list[int],
+    ) -> EpistemicProbeProposal | None:
+        """Motor babbling for self-identification and agency discovery."""
+        if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
+            babble_idx = engine.level_epistemic_probes % len(displacement_actions)
+            return EpistemicProbeProposal(
+                action=displacement_actions[babble_idx],
+                exploration_mode="motor_babbling",
+            )
+        return None
+
+    @staticmethod
+    def _probe_spatial_effector(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        displacement_actions: list[int],
+        spatial_effector_actions: list[int],
+    ) -> EpistemicProbeProposal | None:
+        """Parietal Affordance Competition (Cisek's Hypothesis): Reach gating over locomotion."""
+        if not spatial_effector_actions:
+            return None
+
+        structural_goals = PerceptionEngine.detect_structural_goals(
+            curr_grid,
+            bg=engine.estimate_background(curr_grid),
+            avatar_features=engine.avatar_features,
+            avatar_feature=engine.avatar_feature,
+        )
+        has_optical_targets = any(
+            g.get("type") in ("relational_alignment", "optical_mirror_target", "reflection_target")
+            for g in structural_goals
+        )
+        is_stuck_or_looping = engine.consecutive_stuck_steps >= 2 or (
+            engine.avatar_pos is not None and engine.recent_positions.count(engine.avatar_pos) >= 2
+        )
+        has_effective_target = any(
+            p not in engine.quiescent_click_targets
+            and engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0) < 3
+            for p in engine.effective_click_targets
+        )
+        interleaved_reach = engine.level_epistemic_probes % 4 == 0
+
+        should_probe = (
+            not displacement_actions
+            or (engine.avatar_pos is None and engine.level_epistemic_probes > 4)
+            or is_stuck_or_looping
+            or has_effective_target
+            or interleaved_reach
+            or has_optical_targets
+        )
+        if should_probe:
+            chosen_eff = spatial_effector_actions[0]
+            action_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if action_data is not None:
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=action_data,
+                    exploration_mode="spatial_effector",
+                )
+        return None
+
+    @staticmethod
+    def _probe_attractor_oscillation(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+        discrete_transform_actions: list[int],
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        spatial_effector_actions: list[int],
+        H: int,
+        W: int,
+        bg: int,
+    ) -> EpistemicProbeProposal | None:
+        """Oscillation & Attractor Loop Breaking when agent is trapped in a cycle."""
+        is_stuck = engine.consecutive_stuck_steps >= 2
+        is_oscillating = (
+            engine.avatar_pos is not None and engine.recent_positions.count(engine.avatar_pos) >= 3
+        ) or is_stuck
+        if not is_oscillating or engine.avatar_pos is None:
+            return None
+
+        logger.debug(
+            "AutonomousEpistemicEngine: Attractor loop/stuck state detected at %s! Breaking loop...",
+            engine.avatar_pos,
+        )
+
+        uncalibrated = [
+            a
+            for a in available_actions
+            if a not in engine.action_dynamics
+            or not engine.action_dynamics[a].is_displacement_action()
+        ]
+        untested_here = [
+            a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
+        ]
+        if untested_here:
+            act = untested_here[0]
+            return EpistemicProbeProposal(
+                action=act,
+                clear_active_probe=True,
+                tested_action_position=(act, engine.avatar_pos),
+                exploration_mode="attractor_loop_untested",
+            )
+
+        if discrete_transform_actions and (is_stuck or is_oscillating):
+            disc_act = discrete_transform_actions[
+                engine.level_epistemic_probes % len(discrete_transform_actions)
+            ]
+            return EpistemicProbeProposal(
+                action=disc_act,
+                clear_active_probe=True,
+                exploration_mode="attractor_loop_discrete",
+            )
+
+        best_act = None
+        min_visits = float("inf")
+        for act, (dr_cal, dc_cal) in disp_actions:
+            if engine.inhibited_actions.get(act, 0) > 0:
+                continue
+            if (engine.avatar_pos, act) in engine.failed_transitions:
+                continue
+            nr = engine.avatar_pos[0] + dr_cal
+            nc = engine.avatar_pos[1] + dc_cal
+            if not (0 <= nr < H and 0 <= nc < W):
+                continue
+            if (
+                (nr, nc) in engine.hazard_tracker.static_lethal_positions
+                or (nr, nc) in engine.learned_barriers
+                or engine.symbolic_theory.is_barrier(int(curr_grid[nr, nc]))
+            ):
+                continue
+            _osc_feat = int(curr_grid[nr, nc])
+            if _osc_feat in engine.hazard_tracker.known_lethal_features:
+                continue
+            uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg)
+            visits = engine.position_visit_counts.get((nr, nc), 0)
+            recency_pen = 20.0 if (nr, nc) in list(engine.recent_positions)[-6:] else 0.0
+            total_score = visits + recency_pen + uncertainty_pen
+            if total_score < min_visits:
+                min_visits = total_score
+                best_act = act
+
+        if best_act is not None:
+            return EpistemicProbeProposal(
+                action=best_act,
+                clear_active_probe=True,
+                exploration_mode="attractor_loop_least_visited",
+            )
+
+        if spatial_effector_actions and min_visits == float("inf"):
+            chosen_eff = spatial_effector_actions[0]
+            return EpistemicProbeProposal(
+                action=chosen_eff,
+                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
+                clear_active_probe=True,
+                exploration_mode="attractor_loop_effector",
+            )
+
+        return EpistemicProbeProposal(
+            action=available_actions[0],
+            clear_active_probe=True,
+            exploration_mode="attractor_loop_fallback",
+        )
+
+    @staticmethod
+    def _probe_looming_threat_evasion(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        bg: int,
+        bg_is_impassable_void: bool,
+    ) -> int | None:
+        """Premotor Looming Hazard Reflex: Evasion when impending collision detected."""
+        if engine.avatar_pos is None:
+            return None
+
+        ar, ac = engine.avatar_pos
+        is_looming_threat = any(
+            engine.collision_cones.is_collision_hazard(ar, ac, t_future) for t_future in (1, 2)
+        )
+        if not is_looming_threat:
+            return None
+
+        for act, (dr_cal, dc_cal) in disp_actions:
+            nr, nc = ar + dr_cal, ac + dc_cal
+            if not EpistemicCuriosityExplorer._is_ray_passable(
+                engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
+            ):
+                continue
+            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
+                continue
+            if (engine.avatar_pos, act) in engine.failed_transitions:
+                continue
+            return act
+
+        return None
+
+    @staticmethod
+    def _probe_active_inference(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        target_pos: tuple[int, int],
+        bg: int,
+        bg_is_impassable_void: bool,
+        H: int,
+        W: int,
+    ) -> int | None:
+        """Free Energy Active Inference Action Selection trading info gain vs risk."""
+        if engine.avatar_pos is None:
+            return None
+
+        tr, tc = target_pos
+        candidate_action_nodes: list[ActionNode] = []
+        info_gain_map: dict[str, float] = {}
+        node_to_act_map: dict[str, int] = {}
+
+        for act, (dr_cal, dc_cal) in disp_actions:
+            if (engine.avatar_pos, act) in engine.failed_transitions:
+                continue
+            if engine.inhibited_actions.get(act, 0) > 0:
+                continue
+            ar, ac = engine.avatar_pos
+            nr = ar + dr_cal
+            nc = ac + dc_cal
+            if not EpistemicCuriosityExplorer._is_ray_passable(
+                engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
+            ):
+                continue
+
+            # Premotor Collision Cones
+            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
+                continue
+
+            cell_feat = int(curr_grid[nr, nc])
+
+            # OFC Deadlock Pruning
+            if cell_feat in engine.learned_cargo_features:
+                pushed_r, pushed_c = nr + dr_cal, nc + dc_cal
+                dl_res = CounterfactualDeadlockDetector.evaluate_deadlock(
+                    (pushed_r, pushed_c),
+                    set(engine.learned_goal_positions),
+                    engine.learned_barriers,
+                    {(pushed_r, pushed_c)},
+                    (H, W),
+                )
+                if dl_res.is_deadlock:
+                    continue
+
+            visit_count = engine.position_visit_counts.get((nr, nc), 0)
+            info_gain = 1.0 / (1.0 + float(visit_count))
+            if (nr, nc) == (tr, tc):
+                info_gain += 0.50
+
+            uncertainty_pen = (
+                0.0 if (nr, nc) == (tr, tc) else engine._epistemic_uncertainty_cost(cell_feat, bg)
+            )
+            risk_factor = min(1.0, uncertainty_pen / 40.0)
+
+            dist_to_target = abs(tr - nr) + abs(tc - nc)
+            recency_penalty = 10.0 if (nr, nc) in list(engine.recent_positions)[-4:] else 0.0
+            estimated_cost = float(dist_to_target) + recency_penalty
+
+            act_id = f"act_{act}_{nr}_{nc}"
+            node = ActionNode(
+                id=act_id,
+                intent=f"move_{dr_cal}_{dc_cal}",
+                risk_factor=risk_factor,
+                estimated_cost=int(round(estimated_cost)),
+            )
+            candidate_action_nodes.append(node)
+            info_gain_map[act_id] = info_gain
+            node_to_act_map[act_id] = act
+
+        if candidate_action_nodes:
+            eval_results = engine.active_inference.evaluate_candidates(
+                candidate_action_nodes,
+                information_gain_map=info_gain_map,
+            )
+            if eval_results:
+                return node_to_act_map[eval_results[0].action.id]
+
+        # Metacognitive Refractory Relaxation
+        sorted_disp = sorted(disp_actions, key=lambda x: engine.inhibited_actions.get(x[0], 0))
+        ar, ac = engine.avatar_pos
+        for act, (dr_cal, dc_cal) in sorted_disp:
+            if (engine.avatar_pos, act) in engine.failed_transitions:
+                continue
+            nr = ar + dr_cal
+            nc = ac + dc_cal
+            if not EpistemicCuriosityExplorer._is_ray_passable(
+                engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
+            ):
+                continue
+            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
+                continue
+            return act
+
+        return None
+
+    @staticmethod
+    def _probe_frontier_escape(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        bg: int,
+        bg_is_impassable_void: bool,
+    ) -> int | None:
+        """Frontier Backtracking: BFS shortest path to nearest unexhausted walkable frontier cell."""
+        if not disp_actions or engine.avatar_pos is None:
+            return None
+
+        bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
+        bfs_visited = {engine.avatar_pos}
+        best_frontier_path: list[Any] | None = None
+        least_visited_path: list[Any] | None = None
+        least_visits = float("inf")
+
+        while bfs_q and len(bfs_visited) < 300:
+            p, path = bfs_q.popleft()
+            p_visits = engine.position_visit_counts.get(p, 0)
+            if p != engine.avatar_pos and p_visits < least_visits:
+                least_visits = p_visits
+                least_visited_path = path
+
+            has_unvisited_neighbor = False
+            for act, (dr_cal, dc_cal) in disp_actions:
+                nbr = (p[0] + dr_cal, p[1] + dc_cal)
+                if EpistemicCuriosityExplorer._is_ray_passable(
+                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
+                ):
+                    if engine.position_visit_counts.get(nbr, 0) == 0:
+                        has_unvisited_neighbor = True
+                        break
+            if has_unvisited_neighbor and path:
+                best_frontier_path = path
+                break
+
+            for act, (dr_cal, dc_cal) in disp_actions:
+                nr = p[0] + dr_cal
+                nc = p[1] + dc_cal
+                if (nr, nc) in bfs_visited:
+                    continue
+                if not EpistemicCuriosityExplorer._is_ray_passable(
+                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
+                ):
+                    continue
+                step_idx = len(path) + 1
+                if engine.collision_cones.is_collision_hazard(nr, nc, step_idx):
+                    continue
+                if p == engine.avatar_pos and (p, act) in engine.failed_transitions:
+                    continue
+                bfs_visited.add((nr, nc))
+                bfs_q.append(((nr, nc), path + [act]))
+
+        chosen_escape = best_frontier_path or least_visited_path
+        if chosen_escape:
+            return chosen_escape[0]
+
+        return None
+
+    @classmethod
+    def compute_epistemic_probe(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+    ) -> EpistemicProbeProposal:
+        """Pure reasoning calculation producing an EpistemicProbeProposal."""
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
         bg_is_impassable_void = (
@@ -154,25 +562,13 @@ class EpistemicCuriosityExplorer:
             and bg not in engine.symbolic_theory.walkable_features
         )
         entities = engine.extract_entities(curr_grid, bg)
-        engine.level_epistemic_probes += 1
-        engine.total_epistemic_probes += 1
 
-        # 1. Uncalibrated actions take absolute priority for motor grounding
-        uncalibrated = [a for a in available_actions if not engine.is_action_calibrated(a)]
-        untested_at_pos = [
-            a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
-        ]
-        if untested_at_pos:
-            chosen_action = untested_at_pos[0]
-            engine.tested_action_positions.add((chosen_action, engine.avatar_pos))
-            engine.tested_actions.add(chosen_action)
+        # 1. Uncalibrated actions
+        uncalibrated_prop = cls._probe_uncalibrated_action(engine, curr_grid, available_actions)
+        if uncalibrated_prop is not None:
+            return uncalibrated_prop
 
-            action_data = None
-            if engine.is_spatial_effector(chosen_action):
-                action_data = engine.ground_effector_action(curr_grid, chosen_action)
-            return chosen_action, action_data
-
-        # 2. Dynamic Affordance Partitioning (Modality-Agnostic, No Hardcoded Action IDs)
+        # 2. Dynamic Affordance Partitioning
         displacement_actions = [a for a in available_actions if engine.is_displacement_action(a)]
         spatial_effector_actions = [a for a in available_actions if engine.is_spatial_effector(a)]
         discrete_transform_actions = [
@@ -181,154 +577,62 @@ class EpistemicCuriosityExplorer:
             if a not in displacement_actions and a not in spatial_effector_actions
         ]
 
-        # 2b. Motor babbling for self-identification. Agency is established by
-        # observing which entity co-varies with DIFFERENT self-generated actions,
-        # so vary actions round-robin until the controllability test commits.
-        if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
-            babble_idx = engine.level_epistemic_probes % len(displacement_actions)
-            return displacement_actions[babble_idx], None
+        # 2b. Motor babbling for self-identification
+        babble_prop = cls._probe_motor_babble(engine, displacement_actions)
+        if babble_prop is not None:
+            return babble_prop
 
         # A. Non-displacement or Spatial Effector Environments
-        if spatial_effector_actions:
-            # Parietal Affordance Competition (Cisek's Hypothesis):
-            # When manual reach effectors (e.g. CLICK_CELL) are available, evaluate whether manual reach
-            # should gate over locomotion.
-            structural_goals = PerceptionEngine.detect_structural_goals(
-                curr_grid,
-                bg=engine.estimate_background(curr_grid),
-                avatar_features=engine.avatar_features,
-                avatar_feature=engine.avatar_feature,
-            )
-            has_optical_targets = any(
-                g.get("type")
-                in ("relational_alignment", "optical_mirror_target", "reflection_target")
-                for g in structural_goals
-            )
-            is_stuck_or_looping = engine.consecutive_stuck_steps >= 2 or (
-                engine.avatar_pos is not None
-                and engine.recent_positions.count(engine.avatar_pos) >= 2
-            )
-            has_effective_target = any(
-                p not in engine.quiescent_click_targets
-                and engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0) < 3
-                for p in engine.effective_click_targets
-            )
-            interleaved_reach = engine.level_epistemic_probes % 4 == 0
-
-            should_probe_effector = (
-                not displacement_actions
-                or (engine.avatar_pos is None and engine.level_epistemic_probes > 4)
-                or is_stuck_or_looping
-                or has_effective_target
-                or interleaved_reach
-                or has_optical_targets
-            )
-            if should_probe_effector:
-                chosen_eff = spatial_effector_actions[0]
-                action_data = engine.ground_effector_action(curr_grid, chosen_eff)
-                if action_data is not None:
-                    return chosen_eff, action_data
+        effector_prop = cls._probe_spatial_effector(
+            engine, curr_grid, displacement_actions, spatial_effector_actions
+        )
+        if effector_prop is not None:
+            return effector_prop
 
         # 3. Spatial Movement Curiosity with Target Commitment & Loop Breaking
         if engine.avatar_pos is not None:
-            engine.recent_positions.append(engine.avatar_pos)
-            engine.position_visit_counts[engine.avatar_pos] = (
-                engine.position_visit_counts.get(engine.avatar_pos, 0) + 1
-            )
-
+            probed_ids_to_add: list[str] = []
             for e in entities:
                 if (
                     abs(e.grid_pos[0] - engine.avatar_pos[0])
                     + abs(e.grid_pos[1] - engine.avatar_pos[1])
                     <= 1
                 ):
-                    engine.probed_entity_ids.add(e.id)
+                    probed_ids_to_add.append(e.id)
 
+            clear_active_probe = False
             if engine.active_probe_target is not None:
                 dist_to_target = abs(engine.active_probe_target[0] - engine.avatar_pos[0]) + abs(
                     engine.active_probe_target[1] - engine.avatar_pos[1]
                 )
-                engine.probe_target_steps += 1
                 if dist_to_target <= 1 or engine.probe_target_steps > 12:
                     if engine.active_probe_id:
-                        engine.probed_entity_ids.add(engine.active_probe_id)
-                    engine.active_probe_target = None
-                    engine.active_probe_id = None
-                    engine.probe_target_steps = 0
+                        probed_ids_to_add.append(engine.active_probe_id)
+                    clear_active_probe = True
 
-            # Oscillation & Attractor Loop Breaking
-            is_stuck = engine.consecutive_stuck_steps >= 2
-            is_oscillating = engine.recent_positions.count(engine.avatar_pos) >= 3 or is_stuck
-            if is_oscillating:
-                logger.debug(
-                    "AutonomousEpistemicEngine: Attractor loop/stuck state detected at %s! Breaking loop...",
-                    engine.avatar_pos,
-                )
-                engine.active_probe_target = None
-                engine.active_probe_id = None
-                uncalibrated = [
-                    a
-                    for a in available_actions
-                    if a not in engine.action_dynamics
-                    or not engine.action_dynamics[a].is_displacement_action()
-                ]
-                untested_here = [
-                    a
-                    for a in uncalibrated
-                    if (a, engine.avatar_pos) not in engine.tested_action_positions
-                ]
-                if untested_here:
-                    act = untested_here[0]
-                    engine.tested_action_positions.add((act, engine.avatar_pos))
-                    return act, None
-                if discrete_transform_actions and (is_stuck or is_oscillating):
-                    disc_act = discrete_transform_actions[
-                        engine.level_epistemic_probes % len(discrete_transform_actions)
-                    ]
-                    return disc_act, None
-                best_act = None
-                min_visits = float("inf")
-                disp_actions = [
-                    (act, engine.action_dynamics[act].get_displacement())
-                    for act in available_actions
-                    if act in engine.action_dynamics
-                    and engine.action_dynamics[act].is_displacement_action()
-                ]
-                for act, (dr_cal, dc_cal) in disp_actions:
-                    if engine.inhibited_actions.get(act, 0) > 0:
-                        continue
-                    if (engine.avatar_pos, act) in engine.failed_transitions:
-                        continue
-                    nr = engine.avatar_pos[0] + dr_cal
-                    nc = engine.avatar_pos[1] + dc_cal
-                    if not (0 <= nr < H and 0 <= nc < W):
-                        continue
-                    if (
-                        (nr, nc) in engine.hazard_tracker.static_lethal_positions
-                        or (nr, nc) in engine.learned_barriers
-                        or engine.symbolic_theory.is_barrier(int(curr_grid[nr, nc]))
-                    ):
-                        continue
-                    # Known-lethal features are hard-blocked; unverified features
-                    # carry an uncertainty cost (caution, not prohibition).
-                    _osc_feat = int(curr_grid[nr, nc])
-                    if _osc_feat in engine.hazard_tracker.known_lethal_features:
-                        continue
-                    uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg)
-                    visits = engine.position_visit_counts.get((nr, nc), 0)
-                    recency_pen = 20.0 if (nr, nc) in list(engine.recent_positions)[-6:] else 0.0
-                    total_score = visits + recency_pen + uncertainty_pen
-                    if total_score < min_visits:
-                        min_visits = total_score
-                        best_act = act
-                if best_act is not None:
-                    return best_act, None
-                if spatial_effector_actions and min_visits == float("inf"):
-                    chosen_eff = spatial_effector_actions[0]
-                    return chosen_eff, engine.ground_effector_action(curr_grid, chosen_eff)
-                return available_actions[0], None
+            disp_actions = [
+                (act, engine.action_dynamics[act].get_displacement())
+                for act in displacement_actions
+                if act in engine.action_dynamics
+                and hasattr(engine.action_dynamics[act], "get_displacement")
+            ]
 
-            # 3a. Update room topology and extract topological subgoals
+            # Attractor oscillation breaking
+            osc_prop = cls._probe_attractor_oscillation(
+                engine,
+                curr_grid,
+                available_actions,
+                discrete_transform_actions,
+                disp_actions,
+                spatial_effector_actions,
+                H,
+                W,
+                bg,
+            )
+            if osc_prop is not None:
+                return osc_prop
+
+            # Update room topology
             engine.update_room_topology(curr_grid)
 
             candidate_entities = [
@@ -344,6 +648,11 @@ class EpistemicCuriosityExplorer:
                 > 1
             ]
 
+            new_probe_target: tuple[int, int] | None = None
+            new_probe_id: str | None = None
+            entity_visits_to_inc: list[str] = []
+            doorway_reg: tuple[tuple[int, int], int] | None = None
+
             if engine.active_probe_target is None and candidate_entities:
                 scored: list[tuple[SpatialEntity, float]] = []
                 current_room_cells = (
@@ -358,23 +667,19 @@ class EpistemicCuriosityExplorer:
                     visits = engine.entity_visit_counts.get(e.id, 0)
                     info_val = 10.0 / (visits + 1.0)
                     if current_room_cells and e.grid_pos in current_room_cells:
-                        info_val *= 1.5  # Room-locality preference
+                        info_val *= 1.5
                     cost = dist + 1.0
                     scored.append((e, info_val / cost))
                 scored.sort(key=lambda x: x[1], reverse=True)
                 chosen = scored[0][0]
-                engine.active_probe_target = chosen.grid_pos
-                engine.active_probe_id = chosen.id
-                engine.probe_target_steps = 0
-                engine.entity_visit_counts[chosen.id] = (
-                    engine.entity_visit_counts.get(chosen.id, 0) + 1
-                )
+                new_probe_target = chosen.grid_pos
+                new_probe_id = chosen.id
+                entity_visits_to_inc.append(chosen.id)
 
-            # 3b. Room Topology Doorway Macro-Subgoal Selection:
-            # If no probe target is active, and the avatar is in a partitioned room,
-            # select connecting doorway leading to the least-explored adjacent chamber!
+            # Room Topology Doorway Macro-Subgoal Selection
             if (
                 engine.active_probe_target is None
+                and new_probe_target is None
                 and engine.topology_doors
                 and engine.current_room_id is not None
             ):
@@ -401,233 +706,203 @@ class EpistemicCuriosityExplorer:
                     connecting_doors.sort(key=lambda item: item[2], reverse=True)
                     best_door, target_room, score = connecting_doors[0]
                     if score > 0.1:
-                        engine.active_probe_target = best_door.door_coord
-                        engine.active_probe_id = (
-                            f"door_{best_door.door_coord[0]}_{best_door.door_coord[1]}"
-                        )
-                        engine.probe_target_steps = 0
-                        engine.working_memory.register_topological_doorway(
-                            best_door.door_coord, target_room
-                        )
+                        new_probe_target = best_door.door_coord
+                        new_probe_id = f"door_{best_door.door_coord[0]}_{best_door.door_coord[1]}"
+                        doorway_reg = (best_door.door_coord, target_room)
 
-            target_pos = engine.active_probe_target or (H // 2, W // 2)
-            tr, tc = target_pos
+            target_pos = new_probe_target or engine.active_probe_target or (H // 2, W // 2)
 
-            # 3c. Free Energy Active Inference Action Selection
-            disp_actions = [
-                (act, engine.action_dynamics[act].get_displacement())
-                for act in displacement_actions
-                if act in engine.action_dynamics
-                and hasattr(engine.action_dynamics[act], "get_displacement")
-            ]
             if not disp_actions and displacement_actions:
-                uncalibrated = [
-                    act for act in displacement_actions if act not in engine.action_dynamics
-                ]
-                if uncalibrated:
-                    return uncalibrated[0], None
-
-            # Premotor Looming Hazard Reflex: If the avatar's current tile is on an impending collision course
-            if engine.avatar_pos is not None:
-                ar, ac = engine.avatar_pos
-                is_looming_threat = any(
-                    engine.collision_cones.is_collision_hazard(ar, ac, t_future)
-                    for t_future in (1, 2)
-                )
-                if is_looming_threat:
-                    for act, (dr_cal, dc_cal) in disp_actions:
-                        nr, nc = ar + dr_cal, ac + dc_cal
-                        if not EpistemicCuriosityExplorer._is_ray_passable(
-                            engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
-                        ):
-                            continue
-                        if any(
-                            engine.collision_cones.is_collision_hazard(nr, nc, t_f)
-                            for t_f in (1, 2)
-                        ):
-                            continue
-                        if (engine.avatar_pos, act) in engine.failed_transitions:
-                            continue
-                        # Safe evasion found!
-                        return act, None
-
-            # 3c. Free Energy Active Inference Action Selection
-            best_action = None
-            candidate_action_nodes: list[ActionNode] = []
-            info_gain_map: dict[str, float] = {}
-            node_to_act_map: dict[str, int] = {}
-
-            for act, (dr_cal, dc_cal) in disp_actions:
-                if (engine.avatar_pos, act) in engine.failed_transitions:
-                    continue
-                if engine.inhibited_actions.get(act, 0) > 0:
-                    continue
-                ar, ac = engine.avatar_pos
-                nr = ar + dr_cal
-                nc = ac + dc_cal
-                if not EpistemicCuriosityExplorer._is_ray_passable(
-                    engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
-                ):
-                    continue
-
-                # Premotor Collision Cones: Avoid stepping into oncoming kinetic hazards
-                if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
-                    continue
-
-                cell_feat = int(curr_grid[nr, nc])
-
-                # OFC Deadlock Pruning: If stepping onto a cargo block pushes it into an irreversible deadlock, prune!
-                if cell_feat in engine.learned_cargo_features:
-                    pushed_r, pushed_c = nr + dr_cal, nc + dc_cal
-                    dl_res = CounterfactualDeadlockDetector.evaluate_deadlock(
-                        (pushed_r, pushed_c),
-                        set(engine.learned_goal_positions),
-                        engine.learned_barriers,
-                        {(pushed_r, pushed_c)},
-                        (H, W),
+                uncal = [act for act in displacement_actions if act not in engine.action_dynamics]
+                if uncal:
+                    return EpistemicProbeProposal(
+                        action=uncal[0],
+                        clear_active_probe=clear_active_probe,
+                        new_probe_target=new_probe_target,
+                        new_probe_id=new_probe_id,
+                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        topological_doorway=doorway_reg,
+                        exploration_mode="uncalibrated_displacement",
                     )
-                    if dl_res.is_deadlock:
-                        continue
 
-                # Epistemic information gain
-                visit_count = engine.position_visit_counts.get((nr, nc), 0)
-                info_gain = 1.0 / (1.0 + float(visit_count))
-                if (nr, nc) == (tr, tc):
-                    info_gain += 0.50
-
-                # Risk factor (uncertainty & danger)
-                uncertainty_pen = (
-                    0.0
-                    if (nr, nc) == (tr, tc)
-                    else engine._epistemic_uncertainty_cost(cell_feat, bg)
+            # Looming threat evasion
+            evasion_act = cls._probe_looming_threat_evasion(
+                engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            )
+            if evasion_act is not None:
+                return EpistemicProbeProposal(
+                    action=evasion_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="looming_threat_evasion",
                 )
-                risk_factor = min(1.0, uncertainty_pen / 40.0)
 
-                # Estimated cost (progress to probe target + recency penalty)
-                dist_to_target = abs(tr - nr) + abs(tc - nc)
-                recency_penalty = 10.0 if (nr, nc) in list(engine.recent_positions)[-4:] else 0.0
-                estimated_cost = float(dist_to_target) + recency_penalty
-
-                act_id = f"act_{act}_{nr}_{nc}"
-                node = ActionNode(
-                    id=act_id,
-                    intent=f"move_{dr_cal}_{dc_cal}",
-                    risk_factor=risk_factor,
-                    estimated_cost=int(round(estimated_cost)),
+            # Free Energy Active Inference Action Selection
+            inf_act = cls._probe_active_inference(
+                engine, curr_grid, disp_actions, target_pos, bg, bg_is_impassable_void, H, W
+            )
+            if inf_act is not None:
+                return EpistemicProbeProposal(
+                    action=inf_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="active_inference",
                 )
-                candidate_action_nodes.append(node)
-                info_gain_map[act_id] = info_gain
-                node_to_act_map[act_id] = act
 
-            if candidate_action_nodes:
-                eval_results = engine.active_inference.evaluate_candidates(
-                    candidate_action_nodes,
-                    information_gain_map=info_gain_map,
+            # Frontier Backtracking
+            esc_act = cls._probe_frontier_escape(
+                engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            )
+            if esc_act is not None:
+                return EpistemicProbeProposal(
+                    action=esc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="frontier_backtrack",
                 )
-                if eval_results:
-                    best_action = node_to_act_map[eval_results[0].action.id]
-
-            if best_action is not None:
-                return best_action, None
-
-            # Metacognitive Refractory Relaxation: if uninhibited actions were all blocked, try candidate with lowest inhibition
-            if best_action is None:
-                sorted_disp = sorted(
-                    disp_actions, key=lambda x: engine.inhibited_actions.get(x[0], 0)
-                )
-                ar, ac = engine.avatar_pos
-                for act, (dr_cal, dc_cal) in sorted_disp:
-                    if (engine.avatar_pos, act) in engine.failed_transitions:
-                        continue
-                    nr = ar + dr_cal
-                    nc = ac + dc_cal
-                    if not EpistemicCuriosityExplorer._is_ray_passable(
-                        engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
-                    ):
-                        continue
-                    if any(
-                        engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)
-                    ):
-                        continue
-                    best_action = act
-                    break
-
-            if best_action is not None:
-                return best_action, None
-
-            # Frontier Backtracking: find shortest path to nearest unexhausted walkable cell / junction
-            if disp_actions and engine.avatar_pos is not None:
-                bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
-                bfs_visited = {engine.avatar_pos}
-                best_frontier_path: list[Any] | None = None
-                least_visited_path: list[Any] | None = None
-                least_visits = float("inf")
-
-                while bfs_q and len(bfs_visited) < 300:
-                    p, path = bfs_q.popleft()
-                    p_visits = engine.position_visit_counts.get(p, 0)
-                    if p != engine.avatar_pos and p_visits < least_visits:
-                        least_visits = p_visits
-                        least_visited_path = path
-
-                    has_unvisited_neighbor = False
-                    for act, (dr_cal, dc_cal) in disp_actions:
-                        nbr = (p[0] + dr_cal, p[1] + dc_cal)
-                        if EpistemicCuriosityExplorer._is_ray_passable(
-                            engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
-                        ):
-                            if engine.position_visit_counts.get(nbr, 0) == 0:
-                                has_unvisited_neighbor = True
-                                break
-                    if has_unvisited_neighbor and path:
-                        best_frontier_path = path
-                        break
-
-                    for act, (dr_cal, dc_cal) in disp_actions:
-                        nr = p[0] + dr_cal
-                        nc = p[1] + dc_cal
-                        if (nr, nc) in bfs_visited:
-                            continue
-                        if not EpistemicCuriosityExplorer._is_ray_passable(
-                            engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
-                        ):
-                            continue
-                        step_idx = len(path) + 1
-                        if engine.collision_cones.is_collision_hazard(nr, nc, step_idx):
-                            continue
-                        if p == engine.avatar_pos and (p, act) in engine.failed_transitions:
-                            continue
-                        bfs_visited.add((nr, nc))
-                        bfs_q.append(((nr, nc), path + [act]))
-
-                chosen_escape = best_frontier_path or least_visited_path
-                if chosen_escape:
-                    return chosen_escape[0], None
 
             if spatial_effector_actions:
                 chosen_eff = spatial_effector_actions[0]
-                return chosen_eff, engine.ground_effector_action(curr_grid, chosen_eff)
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=engine.ground_effector_action(curr_grid, chosen_eff),
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="spatial_effector_fallback",
+                )
             elif discrete_transform_actions:
-                return discrete_transform_actions[
+                disc_act = discrete_transform_actions[
                     engine.step_counter % len(discrete_transform_actions)
-                ], None
-            uncalibrated = [a for a in available_actions if not engine.is_displacement_action(a)]
+                ]
+                return EpistemicProbeProposal(
+                    action=disc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="discrete_transform_round_robin",
+                )
+
+            uncal = [a for a in available_actions if not engine.is_displacement_action(a)]
             untested_here = [
-                a
-                for a in uncalibrated
-                if (a, engine.avatar_pos) not in engine.tested_action_positions
+                a for a in uncal if (a, engine.avatar_pos) not in engine.tested_action_positions
             ]
             if untested_here:
                 act = untested_here[0]
-                engine.tested_action_positions.add((act, engine.avatar_pos))
-                return act, None
-            return available_actions[engine.step_counter % len(available_actions)], None
+                return EpistemicProbeProposal(
+                    action=act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    tested_action_position=(act, engine.avatar_pos),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="untested_non_displacement",
+                )
+
+            return EpistemicProbeProposal(
+                action=available_actions[engine.step_counter % len(available_actions)],
+                clear_active_probe=clear_active_probe,
+                new_probe_target=new_probe_target,
+                new_probe_id=new_probe_id,
+                probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                topological_doorway=doorway_reg,
+                exploration_mode="step_counter_fallback",
+            )
 
         # 4. Fallback probe
         if spatial_effector_actions:
             chosen_eff = spatial_effector_actions[0]
-            return chosen_eff, engine.ground_effector_action(curr_grid, chosen_eff)
-        return available_actions[0], None
+            return EpistemicProbeProposal(
+                action=chosen_eff,
+                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
+                exploration_mode="effector_global_fallback",
+            )
+        return EpistemicProbeProposal(
+            action=available_actions[0],
+            exploration_mode="global_fallback",
+        )
+
+    @classmethod
+    def apply_proposal_to_engine(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        proposal: EpistemicProbeProposal,
+    ) -> None:
+        """Atomically commit EpistemicProbeProposal mutations to the engine."""
+        engine.level_epistemic_probes += 1
+        engine.total_epistemic_probes += 1
+
+        if engine.avatar_pos is not None:
+            engine.recent_positions.append(engine.avatar_pos)
+            engine.position_visit_counts[engine.avatar_pos] = (
+                engine.position_visit_counts.get(engine.avatar_pos, 0) + 1
+            )
+            if engine.active_probe_target is not None:
+                engine.probe_target_steps += 1
+
+        if proposal.clear_active_probe:
+            engine.active_probe_target = None
+            engine.active_probe_id = None
+            engine.probe_target_steps = 0
+
+        if proposal.new_probe_target is not None:
+            engine.active_probe_target = proposal.new_probe_target
+            engine.active_probe_id = proposal.new_probe_id
+            engine.probe_target_steps = 0
+
+        for eid in proposal.probed_entity_ids_to_add:
+            engine.probed_entity_ids.add(eid)
+
+        for eid in proposal.entity_visit_counts_to_inc:
+            engine.entity_visit_counts[eid] = engine.entity_visit_counts.get(eid, 0) + 1
+
+        if proposal.tested_action_position is not None:
+            engine.tested_action_positions.add(proposal.tested_action_position)
+
+        if proposal.tested_action is not None:
+            engine.tested_actions.add(proposal.tested_action)
+
+        if proposal.topological_doorway is not None:
+            door_coord, target_room = proposal.topological_doorway
+            engine.working_memory.register_topological_doorway(door_coord, target_room)
+
+    @classmethod
+    def plan_epistemic_probe(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+    ) -> tuple[int, dict[str, Any] | None]:
+        """Compute candidate proposal and commit it atomically to engine state."""
+        proposal = cls.compute_epistemic_probe(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+        )
+        cls.apply_proposal_to_engine(engine=engine, proposal=proposal)
+        return proposal.action, proposal.action_data
 
 
 class MotorCortexEffector:
@@ -702,28 +977,14 @@ class MotorCortexEffector:
         return step
 
     @staticmethod
-    def ground_effector_action(
-        engine: AutonomousEpistemicEngine, curr_grid: np.ndarray, action: Any = None
-    ) -> dict[str, Any]:
-        """Spatially ground an allocentric effector command onto salient affordances.
-
-        Dynamically maps targeting parameters based on the action's declared affordance
-        (e.g. 'x', 'y' for cell/pixel clicks, or 'azimuth', 'elevation' for directional sensors).
-        """
-        curr_grid = engine.normalize_sensory_input(curr_grid)
-        H, W = curr_grid.shape
-        aff = engine.action_affordances.get(action)
-        param_keys = aff.target_param_keys if aff else ("x", "y")
-
-        bg = engine.estimate_background(curr_grid)
-        entities = engine.extract_entities(curr_grid, bg)
-        av_feats = engine.avatar_features or (
-            {engine.avatar_feature} if engine.avatar_feature is not None else set()
-        )
-
-        click_candidates: list[tuple[int, int, float]] = []
-
-        # dlPFC Working Memory Pattern Completion: Match newly revealed card/tile with remembered partner
+    def _score_working_memory_pairs(
+        engine: AutonomousEpistemicEngine,
+        H: int,
+        W: int,
+        bg: int,
+    ) -> list[tuple[int, int, float]]:
+        """dlPFC Working Memory Pattern Completion: Match revealed card/tile with partner."""
+        candidates: list[tuple[int, int, float]] = []
         last_probed = engine.working_memory.visuospatial.last_probed_coord
         last_feat = engine.working_memory.visuospatial.last_probed_feature
         if last_probed is not None and last_feat is not None and last_feat != bg and last_feat != 0:
@@ -736,29 +997,57 @@ class MotorCortexEffector:
                 and 0 <= pair_target[0] < H
                 and 0 <= pair_target[1] < W
             ):
-                click_candidates.append((pair_target[0], pair_target[1], 450.0))
+                candidates.append((pair_target[0], pair_target[1], 450.0))
+        return candidates
 
-        # LOC Ventral Stream Geometric Symmetry Discrepancies
+    @staticmethod
+    def _score_symmetry_discrepancies(
+        curr_grid: np.ndarray,
+        bg: int,
+        H: int,
+        W: int,
+        engine: AutonomousEpistemicEngine,
+    ) -> list[tuple[int, int, float]]:
+        """LOC Ventral Stream Geometric Symmetry Discrepancies."""
+        candidates: list[tuple[int, int, float]] = []
         sym_discrepancies = VisualSymmetryAnalyzer.extract_discrepancy_targets(
             curr_grid, background_color=bg, threshold=0.55
         )
-        for dr, dc, expected_feat, sym_conf in sym_discrepancies:
+        for dr, dc, _, sym_conf in sym_discrepancies:
             if (dr, dc) not in engine.quiescent_click_targets and 0 <= dr < H and 0 <= dc < W:
                 v_count = engine.entity_visit_counts.get(f"click_{dr}_{dc}", 0)
                 if v_count < 3:
                     cand_score = 320.0 + (sym_conf * 40.0) - float(v_count) * 15.0
-                    click_candidates.append((dr, dc, cand_score))
+                    candidates.append((dr, dc, cand_score))
+        return candidates
 
-        # dlPFC Constraint Propagation: Target guaranteed safe cells
+    @staticmethod
+    def _score_safe_cells(
+        engine: AutonomousEpistemicEngine,
+        H: int,
+        W: int,
+    ) -> list[tuple[int, int, float]]:
+        """dlPFC Constraint Propagation: Target guaranteed safe cells."""
+        candidates: list[tuple[int, int, float]] = []
         deduced_safe = engine.working_memory.get_unrevealed_safe_cells()
         for sr, sc in deduced_safe:
             if (sr, sc) not in engine.quiescent_click_targets and 0 <= sr < H and 0 <= sc < W:
                 visit_count = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
                 if visit_count == 0:
-                    cand_score = 300.0  # Top priority! Guaranteed safe progress!
-                    click_candidates.append((sr, sc, cand_score))
+                    candidates.append((sr, sc, 300.0))
+        return candidates
 
-        # Visual Symmetry: Target asymmetric completion coordinates
+    @staticmethod
+    def _score_structural_goals(
+        curr_grid: np.ndarray,
+        bg: int,
+        av_feats: set[int],
+        engine: AutonomousEpistemicEngine,
+        H: int,
+        W: int,
+    ) -> list[tuple[int, int, float]]:
+        """Optical alignment & symmetry completion structural targets."""
+        candidates: list[tuple[int, int, float]] = []
         structural_goals = PerceptionEngine.detect_structural_goals(
             curr_grid,
             bg=bg,
@@ -767,43 +1056,49 @@ class MotorCortexEffector:
             barrier_features=engine.symbolic_theory.barrier_features,
             known_lethal_features=engine.hazard_tracker.known_lethal_features,
         )
-        optical_goals = [
-            g
-            for g in structural_goals
-            if g.get("type")
-            in ("relational_alignment", "optical_mirror_target", "reflection_target")
-            and g.get("position") is not None
-        ]
-        for og in optical_goals:
-            op = og["position"]
-            if op not in engine.quiescent_click_targets and 0 <= op[0] < H and 0 <= op[1] < W:
+        for og in structural_goals:
+            op = og.get("position")
+            g_type = og.get("type")
+            if (
+                op is not None
+                and op not in engine.quiescent_click_targets
+                and 0 <= op[0] < H
+                and 0 <= op[1] < W
+            ):
                 v_count = engine.entity_visit_counts.get(f"click_{op[0]}_{op[1]}", 0)
                 if v_count < 3:
-                    cand_score = 350.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
-                    click_candidates.append((op[0], op[1], cand_score))
+                    if g_type in (
+                        "relational_alignment",
+                        "optical_mirror_target",
+                        "reflection_target",
+                    ):
+                        cand_score = (
+                            350.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
+                        )
+                        candidates.append((op[0], op[1], cand_score))
+                    elif g_type == "symmetry_completion":
+                        cand_score = (
+                            250.0 + (og.get("confidence", 0.8) * 50.0) - float(v_count) * 20.0
+                        )
+                        candidates.append((op[0], op[1], cand_score))
+        return candidates
 
-        sym_goals = [
-            g
-            for g in structural_goals
-            if g.get("type") == "symmetry_completion" and g.get("position") is not None
-        ]
-        for sg in sym_goals:
-            sp = sg["position"]
-            if sp not in engine.quiescent_click_targets and 0 <= sp[0] < H and 0 <= sp[1] < W:
-                visit_count = engine.entity_visit_counts.get(f"click_{sp[0]}_{sp[1]}", 0)
-                if visit_count < 3:
-                    cand_score = (
-                        250.0 + (sg.get("confidence", 0.8) * 50.0) - float(visit_count) * 20.0
-                    )
-                    click_candidates.append((sp[0], sp[1], cand_score))
-
-        # Gestalt Affordance Panels: Prioritize regular interactive arrays & pop-out targets
+    @staticmethod
+    def _score_affordance_panels(
+        entities: Sequence[SpatialEntity],
+        curr_grid: np.ndarray,
+        bg: int,
+        H: int,
+        W: int,
+        engine: AutonomousEpistemicEngine,
+    ) -> list[tuple[int, int, float]]:
+        """Gestalt Affordance Panels: Regular interactive arrays & pop-out minority items."""
+        candidates: list[tuple[int, int, float]] = []
         panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
         for panel in panels:
             panel_coords = set(panel["item_coords"])
             has_effective_item = any(p in engine.effective_click_targets for p in panel_coords)
 
-            # Minority pop-out items are top priority targets (+220.0)
             for m_item in panel["minority_items"]:
                 mr, mc = m_item.grid_pos
                 if (mr, mc) not in engine.quiescent_click_targets and 0 <= mr < H and 0 <= mc < W:
@@ -813,9 +1108,8 @@ class MotorCortexEffector:
                     refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
                     visit_damping = min(30.0, float(visit_count) * 4.0)
                     score = 220.0 - refractory - visit_damping
-                    click_candidates.append((mr, mc, score))
+                    candidates.append((mr, mc, score))
 
-            # Other panel items (+120.0 or +160.0 if confirmed effective)
             for item in panel["items"]:
                 ir, ic = item.grid_pos
                 if (ir, ic) not in engine.quiescent_click_targets and 0 <= ir < H and 0 <= ic < W:
@@ -842,10 +1136,46 @@ class MotorCortexEffector:
                         visit_damping = min(30.0, float(visit_count) * 4.0)
                         ior_penalty = refractory + visit_damping
                     score = bonus + feat_bonus + momentum_bonus - ior_penalty
-                    click_candidates.append((ir, ic, score))
+                    candidates.append((ir, ic, score))
+        return candidates
 
-        # Control Panel Primacy: If viable candidates exist in affordance panels,
-        # focus execution strictly within the control interface! Do NOT dilute with background/walls!
+    @classmethod
+    def ground_effector_action(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        action: Any = None,
+    ) -> dict[str, Any]:
+        """Spatially ground an allocentric effector command onto salient affordances."""
+        curr_grid = engine.normalize_sensory_input(curr_grid)
+        H, W = curr_grid.shape
+        aff = engine.action_affordances.get(action)
+        param_keys = aff.target_param_keys if aff else ("x", "y")
+
+        bg = engine.estimate_background(curr_grid)
+        entities = engine.extract_entities(curr_grid, bg)
+        av_feats = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
+
+        click_candidates: list[tuple[int, int, float]] = []
+
+        # 1. dlPFC Working Memory Pattern Completion
+        click_candidates.extend(cls._score_working_memory_pairs(engine, H, W, bg))
+
+        # 2. LOC Ventral Stream Symmetry Discrepancies
+        click_candidates.extend(cls._score_symmetry_discrepancies(curr_grid, bg, H, W, engine))
+
+        # 3. dlPFC Constraint Propagation: Safe cells
+        click_candidates.extend(cls._score_safe_cells(engine, H, W))
+
+        # 4. Optical and symmetry completion goals
+        click_candidates.extend(cls._score_structural_goals(curr_grid, bg, av_feats, engine, H, W))
+
+        # 5. Gestalt Affordance Panels
+        click_candidates.extend(cls._score_affordance_panels(entities, curr_grid, bg, H, W, engine))
+
+        # 6. Salient entities if no panel candidates exist
         if not click_candidates:
             for e in entities:
                 if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
@@ -865,7 +1195,7 @@ class MotorCortexEffector:
                 cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
                 click_candidates.append((cr, cc, cand_score))
 
-        # Faculty: Inferotemporal Cortex (IT / Ventral Stream) Affordance Centroid Segmentation
+        # 7. Inferotemporal Affordance Centroid Segmentation
         if not click_candidates:
             it_anchors = InferotemporalSegmentationEngine.extract_affordance_anchors(
                 grid=curr_grid,
@@ -880,6 +1210,7 @@ class MotorCortexEffector:
             for ar, ac, score in it_anchors:
                 click_candidates.append((ar, ac, score))
 
+        # 8. Saccadic Attention Fixations
         if not click_candidates:
             fixations = engine.saccadic_attention.extract_fixations(
                 grid=curr_grid,
@@ -907,7 +1238,7 @@ class MotorCortexEffector:
                 )
                 click_candidates.append((cr, cc, cand_score))
 
-        # Fallback: scan any unvisited non-background cells not in quiescent targets
+        # 9. Fallback: unvisited non-background cells
         if not click_candidates:
             non_bg = np.argwhere(curr_grid != bg)
             for r, c in non_bg:
@@ -924,7 +1255,7 @@ class MotorCortexEffector:
                 cand_score = 20.0 + feat_bias - float(visit_count) * 2.0
                 click_candidates.append((cr, cc, cand_score))
 
-        # Fallback: re-probe confirmed effective targets
+        # 10. Fallback: re-probe confirmed effective targets
         if not click_candidates and engine.effective_click_targets:
             eff_sorted = sorted(
                 engine.effective_click_targets,
@@ -945,7 +1276,6 @@ class MotorCortexEffector:
                 engine, "step_counter", 0
             )
         else:
-            # Fallback when all known candidates are quiescent: find any unprobed coordinate
             unprobed = [
                 (r, c)
                 for r in range(H)
