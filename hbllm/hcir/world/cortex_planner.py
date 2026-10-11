@@ -148,6 +148,10 @@ class EpistemicGoalScheduler:
         for e in entities:
             if avatar_pos is not None and e.grid_pos == avatar_pos:
                 continue
+            if e.feature_id == bg:
+                continue
+            if e.role == EntityRole.OBSTACLE or engine.symbolic_theory.is_barrier(e.feature_id):
+                continue
             if (
                 e.feature_id in engine.mobile_threat_features
                 or e.feature_id in engine.hazard_tracker.known_lethal_features
@@ -158,15 +162,14 @@ class EpistemicGoalScheduler:
                     avatar_pos is not None
                     and (abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1]))
                     > 4
-                    and (e.role == EntityRole.GOAL or engine.symbolic_theory.is_goal(e))
+                    and e.role == EntityRole.GOAL
                 ):
                     confirmed_goals.append(e.grid_pos)
                 continue
             if (
                 e.feature_id in engine.symbolic_theory.goal_features
                 or (e.feature_id in engine.learned_goal_features and 1 <= e.area <= 64)
-                or (e.role == EntityRole.GOAL and not engine.symbolic_theory.goal_features)
-                or (engine.symbolic_theory.is_goal(e) and not engine.symbolic_theory.goal_features)
+                or e.role == EntityRole.GOAL
             ):
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
@@ -220,6 +223,15 @@ class EpistemicGoalScheduler:
             hypothesized_goals: list[tuple[int, int]] = []
             for e in entities:
                 if avatar_pos is not None and e.grid_pos == avatar_pos:
+                    continue
+                if e.feature_id == bg:
+                    continue
+                if engine.symbolic_theory.is_barrier(e.feature_id) or e.role == EntityRole.OBSTACLE:
+                    continue
+                if (
+                    e.feature_id in engine.hazard_tracker.known_lethal_features
+                    or e.feature_id in engine.mobile_threat_features
+                ):
                     continue
                 if avatar_pos is not None and e.feature_id in av_feats:
                     if (
@@ -345,9 +357,12 @@ class EpistemicGoalScheduler:
         elif goals:
             clear_exhausted = True
 
-        if avatar_pos is not None and len(goals) > 8:
-            goals.sort(key=lambda g: abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1]))
-            goals = goals[:8]
+        # Exclude all known static lethal coordinates from candidate attractors
+        all_lethals = (
+            engine.hazard_tracker.static_lethal_positions
+            | engine.level_lethal_positions.get(engine.current_level, set())
+        )
+        goals = [g for g in goals if g not in all_lethals]
 
         # Extended avatar projection
         goals = cls._project_extended_avatar_goals(curr_grid, engine, goals, H, W)
@@ -525,6 +540,15 @@ class MentalSimulationPlanner:
                     for pr, pc in pts:
                         static_barriers.add((int(pr), int(pc)))
 
+        # Explicitly ground all static lethal positions from hazard tracker and level memory
+        lvl_lethals = engine.level_lethal_positions.get(engine.current_level, set())
+        for r, c in engine.hazard_tracker.static_lethal_positions:
+            if 0 <= r < H and 0 <= c < W:
+                static_barriers.add((r, c))
+        for r, c in lvl_lethals:
+            if 0 <= r < H and 0 <= c < W:
+                static_barriers.add((r, c))
+
         # Corridor Manifold Continuity
         bg_is_impassable_void = (
             len(engine.symbolic_theory.walkable_features) > 0
@@ -548,8 +572,10 @@ class MentalSimulationPlanner:
                     if int(curr_grid[r, c]) == bg and (r, c) not in goals:
                         static_barriers.add((r, c))
 
-        # Enforce HCIR Attractor Invariant: Goals must never be static barriers
-        static_barriers.difference_update(goals)
+        # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
+        all_lethals = engine.hazard_tracker.static_lethal_positions | lvl_lethals
+        safe_goals = set(goals) - all_lethals
+        static_barriers.difference_update(safe_goals)
         if engine.avatar_pos is not None:
             ar, ac = engine.avatar_pos
             av_footprint = set()
@@ -821,14 +847,16 @@ class MentalSimulationPlanner:
             return False
 
         static_threats = [
-            t for t in oriented_threats if t.feature_id not in engine.mobile_threat_features
+            t
+            for t in oriented_threats
+            if t.facing == (0, 0) and t.feature_id not in engine.mobile_threat_features
         ]
         init_threats = frozenset(t.pos for t in static_threats)
         threat_map = {t.pos: t for t in static_threats}
         init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(
             (t.pos, t.facing)
             for t in oriented_threats
-            if t.feature_id in engine.mobile_threat_features
+            if t.facing != (0, 0) or t.feature_id in engine.mobile_threat_features
         )
 
         def advance_patrols(
@@ -1193,6 +1221,11 @@ class MentalSimulationPlanner:
                     continue
 
                 sim_step = len(path) + 1
+                if engine.is_under_strict_step_budget():
+                    rem_budget = engine.get_remaining_step_budget()
+                    if sim_step > rem_budget:
+                        continue
+
                 walkable_feats = (
                     engine.symbolic_theory.walkable_features | engine.verified_safe_features
                 )
@@ -1245,7 +1278,7 @@ class MentalSimulationPlanner:
 
                     upcoming = _patrol_next_cells(cur_patrols)
                     if (nr, nc) in upcoming:
-                        patrol_proximity_cost += 2.0
+                        continue
                     for pp, _pf in cur_patrols:
                         dist_to_patrol = abs(nr - pp[0]) + abs(nc - pp[1])
                         if 0 < dist_to_patrol <= step_size:
@@ -1255,7 +1288,7 @@ class MentalSimulationPlanner:
                             elif _pf[1] != 0 and (nc - pp[1]) * _pf[1] > 0:
                                 moving_towards = True
                             if moving_towards:
-                                patrol_proximity_cost += 1.0
+                                continue
 
                 new_chasers = cur_chasers
                 chaser_proximity_cost = 0.0
@@ -1560,6 +1593,40 @@ class MentalSimulationPlanner:
                         candidate_triggers.append((t_pos, t_path, 1))
 
             if not candidate_triggers:
+                all_actions_calibrated = all(
+                    engine.is_action_calibrated(a) for a in available_actions
+                )
+                if goals and all_actions_calibrated:
+                    best_approach: list[MentalSimulationStep] | None = None
+                    initial_dist = min(
+                        abs(cur_pos[0] - g[0]) + abs(cur_pos[1] - g[1]) for g in goals
+                    )
+                    min_dist_to_goal = initial_dist
+                    q_approach: deque[tuple[tuple[int, int], list[MentalSimulationStep]]] = deque(
+                        [(cur_pos, [])]
+                    )
+                    visited_approach = {cur_pos}
+                    while q_approach:
+                        p, path_app = q_approach.popleft()
+                        if path_app:
+                            d = min(abs(p[0] - g[0]) + abs(p[1] - g[1]) for g in goals)
+                            if d < min_dist_to_goal:
+                                min_dist_to_goal = d
+                                best_approach = path_app
+                        for act, dr, dc in movable_actions:
+                            if (p, act) in engine.failed_transitions:
+                                continue
+                            nr, nc = p[0] + dr, p[1] + dc
+                            if not (0 <= nr < H and 0 <= nc < W) or (nr, nc) in visited_approach:
+                                continue
+                            if (nr, nc) in effective_barriers:
+                                continue
+                            visited_approach.add((nr, nc))
+                            step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
+                            q_approach.append(((nr, nc), path_app + [step]))
+                    if best_approach:
+                        accumulated_plan.extend(best_approach)
+                        return accumulated_plan
                 break
 
             candidate_triggers.sort(key=lambda x: (len(x[1]), -x[2]))

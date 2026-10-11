@@ -332,6 +332,18 @@ class MyAgent(Agent):
         if hasattr(self.internal_agent, "spatial_cognitive_agent"):
             self.internal_agent.spatial_cognitive_agent.current_level = lvl_completed
 
+        # Synchronize environmental step limit if present in frame
+        sc = getattr(latest_frame, "step_counter", None) or getattr(
+            latest_frame, "step_limit", None
+        )
+        if sc is None and hasattr(latest_frame, "get"):
+            try:
+                sc = latest_frame.get("StepCounter")
+            except Exception:
+                pass
+        if sc is not None and hasattr(self.internal_engine, "set_environmental_step_limit"):
+            self.internal_engine.set_environmental_step_limit(int(sc))
+
         # Diagnostic telemetry per step
         step_idx = getattr(self.internal_agent, "step_counter", 0)
         if step_idx < 5 or step_idx % 10 == 0:

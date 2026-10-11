@@ -132,22 +132,37 @@ class ArcAgiConsoleDriver(BaseDriver):
     def get_inputs(self) -> DriverInput:
         grid = getattr(self.current_frame, "frame", None)
         avail = getattr(self.current_frame, "available_actions", [1, 2, 3, 4, 5, 6])
+        metadata: dict[str, Any] = {
+            "frame_obj": self.current_frame,
+            "game_id": self.game_id,
+            "available_actions": list(avail),
+            "levels_completed": getattr(self.current_frame, "levels_completed", 0),
+            "win_levels": getattr(self.current_frame, "win_levels", 1),
+            "state": getattr(
+                getattr(self.current_frame, "state", None),
+                "name",
+                str(getattr(self.current_frame, "state", "")),
+            ),
+        }
+        game_obj = getattr(self.env, "_game", None) or getattr(self.env, "game", None)
+        cur_lvl = (
+            getattr(game_obj, "current_level", None)
+            if game_obj
+            else getattr(self.env, "current_level", None)
+        )
+        if cur_lvl is not None and hasattr(cur_lvl, "get_data"):
+            try:
+                sc = cur_lvl.get_data("StepCounter")
+                if sc is not None:
+                    metadata["StepCounter"] = int(sc)
+            except Exception:
+                pass
+
         return DriverInput(
             raw_data=grid,
             source_id=self.name,
             modality=DriverModality.GRID_2D,
-            metadata={
-                "frame_obj": self.current_frame,
-                "game_id": self.game_id,
-                "available_actions": list(avail),
-                "levels_completed": getattr(self.current_frame, "levels_completed", 0),
-                "win_levels": getattr(self.current_frame, "win_levels", 1),
-                "state": getattr(
-                    getattr(self.current_frame, "state", None),
-                    "name",
-                    str(getattr(self.current_frame, "state", "")),
-                ),
-            },
+            metadata=metadata,
         )
 
     def send_output(self, action: DriverAction) -> Any:
@@ -181,12 +196,31 @@ class ArcAgiConsoleDriver(BaseDriver):
         is_done = is_win or state_str == "GAME_OVER"
         reward = 1.0 if is_win else (0.5 if lvl > 0 else 0.0)
 
+        info_dict: dict[str, Any] = {
+            "levels_completed": lvl,
+            "state": state_str,
+            "win_levels": win_levels,
+        }
+        game_obj = getattr(self.env, "_game", None) or getattr(self.env, "game", None)
+        cur_lvl = (
+            getattr(game_obj, "current_level", None)
+            if game_obj
+            else getattr(self.env, "current_level", None)
+        )
+        if cur_lvl is not None and hasattr(cur_lvl, "get_data"):
+            try:
+                sc = cur_lvl.get_data("StepCounter")
+                if sc is not None:
+                    info_dict["StepCounter"] = int(sc)
+            except Exception:
+                pass
+
         return DriverFeedback(
             success=True,
             reward=reward,
             terminated=is_done,
             causal_delta=_extract_grid(getattr(raw_result, "frame", None)),
-            info={"levels_completed": lvl, "state": state_str, "win_levels": win_levels},
+            info=info_dict,
         )
 
 
@@ -219,6 +253,9 @@ class CognitiveAgentAdapter:
 
     def observe(self, driver_input: DriverInput, perception_data: Any = None) -> None:
         self.last_frame = driver_input.metadata.get("frame_obj")
+        sc = driver_input.metadata.get("StepCounter")
+        if sc is not None and hasattr(self.agent, "internal_engine") and self.agent.internal_engine:
+            self.agent.internal_engine.set_environmental_step_limit(int(sc))
 
     def decide(self, available_actions: list[DriverAction], source_id: str = "") -> DriverAction:
         game_act = self.agent.choose_action(self.history, self.last_frame)
@@ -248,6 +285,8 @@ class CognitiveAgentAdapter:
     def update(self, action: DriverAction, feedback: DriverFeedback, source_id: str = "") -> None:
         if hasattr(self.agent, "internal_engine") and self.agent.internal_engine is not None:
             engine = self.agent.internal_engine
+            if "StepCounter" in feedback.info:
+                engine.set_environmental_step_limit(int(feedback.info["StepCounter"]))
             curr_grid = feedback.causal_delta
             avail = feedback.info.get("available_actions", [1, 2, 3, 4, 5, 6])
             st = feedback.info.get("state", "")

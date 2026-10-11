@@ -271,6 +271,10 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
+        if engine.inhibited_actions.get(next_step.action, 0) > 0:
+            return SafetyGateResult(
+                is_safe=False, reason=f"Action {next_step.action} in refractory inhibition"
+            )
         is_geodesic = (
             getattr(next_step, "is_deterministic_geodesic", False)
             or next_step.expected_mutation == "topological_geodesic_step"
@@ -636,12 +640,50 @@ class PrefrontalDeliberationEngine:
             engine.inhibited_actions[osc_act] = max(engine.inhibited_actions.get(osc_act, 0), 4)
 
         # Faculty: Anterior Cingulate Cortex (ACC) Limit Cycle & Conflict Suppression
+        forced_acc_perturbation: Any | None = None
         if engine.is_motor_grounded() and hasattr(engine, "acc_conflict_monitor"):
             engine.acc_conflict_monitor.record_step(engine.last_action, engine.avatar_pos)
             is_osc, cyclic_acts = engine.acc_conflict_monitor.detect_oscillation()
             if is_osc:
                 for cyc_a in cyclic_acts:
-                    engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 4)
+                    engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
+                engine.mental_plan.clear()
+                from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
+
+                ortho_acts = ACCConflictMonitor.get_orthogonal_actions(
+                    available_actions=available_actions,
+                    cyclic_actions=cyclic_acts,
+                    action_dynamics=engine.action_dynamics,
+                )
+                H, W = curr_grid.shape
+                for cand_a in ortho_acts:
+                    if engine.inhibited_actions.get(cand_a, 0) > 0:
+                        continue
+                    if (engine.avatar_pos, cand_a) in engine.failed_transitions:
+                        continue
+                    dyn = engine.action_dynamics.get(cand_a)
+                    if (
+                        dyn is not None
+                        and hasattr(dyn, "get_displacement")
+                        and dyn.is_displacement_action()
+                    ):
+                        dr, dc = dyn.get_displacement()
+                        if engine.avatar_pos is not None:
+                            nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
+                            if not (0 <= nr < H and 0 <= nc < W):
+                                continue
+                            if (nr, nc) in engine.hazard_tracker.static_lethal_positions:
+                                continue
+                            if (nr, nc) in engine.learned_barriers:
+                                continue
+                            feat_at_dest = int(curr_grid[nr, nc])
+                            if feat_at_dest in engine.hazard_tracker.known_lethal_features:
+                                continue
+                            forced_acc_perturbation = cand_a
+                            break
+                    else:
+                        forced_acc_perturbation = cand_a
+                        break
 
         # Visual avatar localization
         known_av_feats = set(engine.avatar_features) if engine.avatar_features else set()
@@ -685,11 +727,22 @@ class PrefrontalDeliberationEngine:
         chosen_data: dict[str, Any] | None = None
         predicted_pos: tuple[int, int] | None = None
 
-        # Prefrontal Affordance Panel & Optical Symmetry Gating
-        affordance_choice = self.arbitrate_affordances(
-            engine, curr_grid, available_actions, known_av_feats
-        )
-        if affordance_choice is not None:
+        # 0. ACC Forced Perturbation: break limit-cycle oscillation immediately
+        if forced_acc_perturbation is not None:
+            logger.info(
+                "Anterior Cingulate Cortex (ACC): Breaking limit cycle oscillation with orthogonal perturbation action %s",
+                forced_acc_perturbation,
+            )
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            chosen_action = forced_acc_perturbation
+            chosen_data = None
+
+        # 1. Prefrontal Affordance Panel & Optical Symmetry Gating
+        elif (
+            affordance_choice := self.arbitrate_affordances(
+                engine, curr_grid, available_actions, known_av_feats
+            )
+        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
             chosen_action, chosen_data = affordance_choice
 
         # 2. Check exploration cooldown
@@ -772,7 +825,10 @@ class PrefrontalDeliberationEngine:
                         chosen_action, chosen_data = engine.plan_epistemic_probe(
                             curr_grid, available_actions
                         )
-            elif next_step.action in available_actions:
+            elif (
+                next_step.action in available_actions
+                and engine.inhibited_actions.get(next_step.action, 0) == 0
+            ):
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos

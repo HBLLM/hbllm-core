@@ -228,6 +228,7 @@ class AutonomousEpistemicEngine:
         self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
         self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
         self.step_counter: int = 0
+        self.environmental_step_limit: int | None = None
 
         # Memory of frames & actions
         self.prev_grid: np.ndarray | None = None
@@ -807,9 +808,37 @@ class AutonomousEpistemicEngine:
             is_new_level=is_new_level,
             level=level,
         )
-        self.budget_governor.reset(max_budget=self.exploration_budget)
+        self.step_counter = 0
         if is_new_level:
+            self.environmental_step_limit = None
+            self.budget_governor.reset(max_budget=self.exploration_budget)
             self.dual_memory.reset_episodic_memory()
+        else:
+            eff_budget = (
+                self.environmental_step_limit
+                if self.environmental_step_limit is not None
+                else self.exploration_budget
+            )
+            self.budget_governor.reset(max_budget=eff_budget)
+
+    def set_environmental_step_limit(self, limit: int) -> None:
+        """Set strict environmental step countdown or step limit."""
+        self.environmental_step_limit = limit
+        self.exploration_budget = limit
+        self.budget_governor.reset(max_budget=limit)
+
+    def get_remaining_step_budget(self) -> int:
+        """Return remaining step budget for the current level/episode."""
+        if self.environmental_step_limit is not None:
+            return max(0, self.environmental_step_limit - self.step_counter)
+        return self.budget_governor.get_remaining_budget()
+
+    def is_under_strict_step_budget(self) -> bool:
+        """True if operating under a tight step countdown or low remaining budget."""
+        rem = self.get_remaining_step_budget()
+        return rem <= 25 or (
+            self.environmental_step_limit is not None and self.environmental_step_limit <= 35
+        )
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions,

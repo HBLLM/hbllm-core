@@ -94,6 +94,67 @@ class ACCConflictMonitor:
         if avatar_pos is not None:
             self.position_history.append(avatar_pos)
 
+    @staticmethod
+    def get_orthogonal_actions(
+        available_actions: Sequence[Any],
+        cyclic_actions: Sequence[Any],
+        action_dynamics: dict[Any, Any],
+    ) -> list[Any]:
+        """Compute actions orthogonal or complementary to the oscillating action axis.
+
+        If cycling on vertical displacement (e.g. up/down, dr!=0, dc==0),
+        prioritizes horizontal displacements (dr==0, dc!=0).
+        If cycling on horizontal displacement (dr==0, dc!=0),
+        prioritizes vertical displacements (dr!=0, dc==0).
+        Falls back to any available non-cyclic actions.
+        """
+        cyclic_set = set(cyclic_actions)
+        non_cyclic = [a for a in available_actions if a not in cyclic_set]
+        if not non_cyclic:
+            return list(available_actions)
+
+        # Compute aggregate direction vector of cyclic actions
+        total_abs_dr = 0
+        total_abs_dc = 0
+        for a in cyclic_actions:
+            dyn = action_dynamics.get(a)
+            if dyn is not None and hasattr(dyn, "get_displacement"):
+                dr, dc = dyn.get_displacement()
+                total_abs_dr += abs(dr)
+                total_abs_dc += abs(dc)
+
+        orthogonal_candidates: list[Any] = []
+        other_displacement_candidates: list[Any] = []
+        other_candidates: list[Any] = []
+
+        for a in non_cyclic:
+            dyn = action_dynamics.get(a)
+            if (
+                dyn is not None
+                and hasattr(dyn, "get_displacement")
+                and dyn.is_displacement_action()
+            ):
+                dr, dc = dyn.get_displacement()
+                if total_abs_dr > total_abs_dc:
+                    # Cyclic axis is primarily vertical -> orthogonal is horizontal
+                    if abs(dc) > abs(dr):
+                        orthogonal_candidates.append(a)
+                    else:
+                        other_displacement_candidates.append(a)
+                elif total_abs_dc > total_abs_dr:
+                    # Cyclic axis is primarily horizontal -> orthogonal is vertical
+                    if abs(dr) > abs(dc):
+                        orthogonal_candidates.append(a)
+                    else:
+                        other_displacement_candidates.append(a)
+                else:
+                    # Balanced or diagonal -> any displacement candidate
+                    other_displacement_candidates.append(a)
+            else:
+                other_candidates.append(a)
+
+        return orthogonal_candidates + other_displacement_candidates + other_candidates
+
     def detect_oscillation(self) -> tuple[bool, list[Any]]:
         """Detect 2-cycle or 3-cycle limit cycles in recent actions or positions.
 
@@ -101,25 +162,37 @@ class ACCConflictMonitor:
             (is_oscillating, cyclic_actions_to_suppress)
         """
         acts = list(self.action_history)
+        cyclic_acts: list[Any] = []
         if len(acts) >= 4:
             # Check 2-cycle: e.g. [A, B, A, B]
             if acts[-1] == acts[-3] and acts[-2] == acts[-4] and acts[-1] != acts[-2]:
-                return True, [acts[-1], acts[-2]]
+                cyclic_acts = [acts[-1], acts[-2]]
 
-        if len(acts) >= 6:
+        if not cyclic_acts and len(acts) >= 6:
             # Check 3-cycle: e.g. [A, B, C, A, B, C]
             if acts[-1] == acts[-4] and acts[-2] == acts[-5] and acts[-3] == acts[-6]:
-                return True, [acts[-1], acts[-2], acts[-3]]
+                cyclic_acts = [acts[-1], acts[-2], acts[-3]]
 
         # Check position bounce: avatar stuck between two coordinates
-        pos_list = list(self.position_history)
-        if len(pos_list) >= 4:
-            if (
-                pos_list[-1] == pos_list[-3]
-                and pos_list[-2] == pos_list[-4]
-                and pos_list[-1] != pos_list[-2]
-            ):
-                return True, list(acts[-2:])
+        if not cyclic_acts:
+            pos_list = list(self.position_history)
+            if len(pos_list) >= 4:
+                if (
+                    pos_list[-1] == pos_list[-3]
+                    and pos_list[-2] == pos_list[-4]
+                    and pos_list[-1] != pos_list[-2]
+                ):
+                    cyclic_acts = list(acts[-2:])
+
+        if cyclic_acts:
+            rec = ACCConflictRecord(
+                step=len(self.action_history),
+                cycle_period=len(cyclic_acts),
+                cyclic_actions=cyclic_acts,
+                suppressed_actions=cyclic_acts,
+            )
+            self.conflict_records.append(rec)
+            return True, cyclic_acts
 
         return False, []
 
@@ -430,8 +503,14 @@ class EpistemicCuriosityExplorer:
                 exploration_mode="attractor_loop_effector",
             )
 
+        uninhibited_available = [
+            a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+        ]
+        fallback_action = (
+            uninhibited_available[0] if uninhibited_available else available_actions[0]
+        )
         return EpistemicProbeProposal(
-            action=available_actions[0],
+            action=fallback_action,
             clear_active_probe=True,
             exploration_mode="attractor_loop_fallback",
         )
@@ -906,8 +985,13 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="untested_non_displacement",
                 )
 
+            uninhibited_acts = [
+                a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+            ]
+            cand_pool = uninhibited_acts if uninhibited_acts else list(available_actions)
+            chosen_fallback = cand_pool[engine.step_counter % len(cand_pool)]
             return EpistemicProbeProposal(
-                action=available_actions[engine.step_counter % len(available_actions)],
+                action=chosen_fallback,
                 clear_active_probe=clear_active_probe,
                 new_probe_target=new_probe_target,
                 new_probe_id=new_probe_id,
@@ -925,8 +1009,12 @@ class EpistemicCuriosityExplorer:
                 action_data=engine.ground_effector_action(curr_grid, chosen_eff),
                 exploration_mode="effector_global_fallback",
             )
+        uninhibited_global = [
+            a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+        ]
+        fallback_global = uninhibited_global[0] if uninhibited_global else available_actions[0]
         return EpistemicProbeProposal(
-            action=available_actions[0],
+            action=fallback_global,
             exploration_mode="global_fallback",
         )
 
