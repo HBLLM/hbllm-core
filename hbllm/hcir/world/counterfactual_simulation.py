@@ -17,6 +17,9 @@ from __future__ import annotations
 import logging
 from typing import NamedTuple
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +29,32 @@ class DeadlockEvaluation(NamedTuple):
     is_deadlock: bool
     deadlock_type: str
     description: str
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export deadlock evaluation as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="deadlock_evaluation",
+            operator="==",
+            value=self.is_deadlock,
+            relation=self.deadlock_type,
+            target_entity=self.description,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording deadlock state if deadlock detected."""
+        if not self.is_deadlock:
+            return []
+        return [
+            TransactionOperation(
+                op=TransactionOp.ADD_NODE,
+                node_id=f"deadlock_{self.deadlock_type}",
+                node_data={
+                    "is_deadlock": self.is_deadlock,
+                    "deadlock_type": self.deadlock_type,
+                    "description": self.description,
+                },
+            )
+        ]
 
 
 class CounterfactualDeadlockDetector:
@@ -259,3 +288,16 @@ class CounterfactualDeadlockDetector:
             )
 
         return DeadlockEvaluation(False, "none", "State is reversible")
+
+    @classmethod
+    def evaluate_and_transact(
+        cls,
+        pos: tuple[int, int],
+        goals: set[tuple[int, int]],
+        static_barriers: set[tuple[int, int]],
+        all_blocks: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+    ) -> tuple[DeadlockEvaluation, list[TransactionOperation]]:
+        """Run deadlock evaluation and propose atomic state transaction if deadlock detected."""
+        eval_res = cls.evaluate_deadlock(pos, goals, static_barriers, all_blocks, grid_shape)
+        return eval_res, eval_res.to_transaction_operations()

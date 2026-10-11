@@ -1,5 +1,7 @@
-"""
-Predictor Disagreement Analyzer — Measures Predictor Variance & Triggers Attention Salience.
+"""Predictor Disagreement Analyzer — Measures Predictor Variance & Triggers Attention Salience.
+
+Analyzes variance across ensemble predictor outputs, ambiguity between competing hypotheses,
+and direct contradictions, lifted to declarative CausalPredicates and atomic TransactionOperations.
 """
 
 from __future__ import annotations
@@ -7,6 +9,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +23,29 @@ class DisagreementReport:
     disagreement_score: float
     high_disagreement: bool
     component_confidences: dict[str, float] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export disagreement report as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="predictor_disagreement",
+            operator="==",
+            value=self.disagreement_score,
+            relation="high" if self.high_disagreement else "nominal",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording disagreement metrics."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="predictor_disagreement_report",
+                node_data={
+                    "disagreement_score": self.disagreement_score,
+                    "high_disagreement": self.high_disagreement,
+                    "component_confidences": dict(self.component_confidences),
+                },
+            )
+        ]
 
 
 class PredictorDisagreementAnalyzer:
@@ -78,3 +106,7 @@ class PredictorDisagreementAnalyzer:
             if va != vb:
                 contradictions.append(f"Conflict on variable '{k}': {va} vs {vb}")
         return contradictions
+
+    def export_causal_predicates(self, report: DisagreementReport) -> list[CausalPredicate]:
+        """Export disagreement report as declarative causal predicates."""
+        return [report.to_causal_predicate()]

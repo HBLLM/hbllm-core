@@ -69,6 +69,20 @@ class TestCounterfactualDeadlockDetector:
         assert eval_res.is_deadlock is True
         assert eval_res.deadlock_type == "corner"
 
+        pred_dl = eval_res.to_causal_predicate()
+        assert pred_dl.variable == "deadlock_evaluation"
+        assert pred_dl.value is True
+
+        tx_dl = eval_res.to_transaction_operations()
+        assert len(tx_dl) == 1
+        assert tx_dl[0].node_id == "deadlock_corner"
+
+        res_t, txs_t = CounterfactualDeadlockDetector.evaluate_and_transact(
+            (0, 0), goals, static_barriers, {(0, 0)}, grid_shape
+        )
+        assert res_t.is_deadlock is True
+        assert len(txs_t) == 1
+
     def test_goal_reversal_prevents_deadlock(self) -> None:
         goals = {(0, 0)}
         static_barriers = {(0, 1), (1, 0)}
