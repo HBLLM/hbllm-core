@@ -118,7 +118,7 @@ class ACCConflictMonitor:
         total_abs_dc = 0
         for a in cyclic_actions:
             dyn = action_dynamics.get(a)
-            if dyn is not None and hasattr(dyn, "get_displacement"):
+            if dyn is not None:
                 dr, dc = dyn.get_displacement()
                 total_abs_dr += abs(dr)
                 total_abs_dc += abs(dc)
@@ -129,11 +129,7 @@ class ACCConflictMonitor:
 
         for a in non_cyclic:
             dyn = action_dynamics.get(a)
-            if (
-                dyn is not None
-                and hasattr(dyn, "get_displacement")
-                and dyn.is_displacement_action()
-            ):
+            if dyn is not None and dyn.is_displacement_action():
                 dr, dc = dyn.get_displacement()
                 if total_abs_dr > total_abs_dc:
                     # Cyclic axis is primarily vertical -> orthogonal is horizontal
@@ -789,7 +785,6 @@ class EpistemicCuriosityExplorer:
                 (act, engine.action_dynamics[act].get_displacement())
                 for act in displacement_actions
                 if act in engine.action_dynamics
-                and hasattr(engine.action_dynamics[act], "get_displacement")
             ]
 
             # Attractor oscillation breaking

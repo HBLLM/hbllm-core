@@ -84,6 +84,7 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     GeometricModelSelector,
     ParietalCoordinateTransformer,
 )
+from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
@@ -144,6 +145,11 @@ class EpistemicObservation:
     uncertainty: float
     truth_value: EpistemicTruthValue
     source_faculty: str = "PERCEPTION"
+    confidence: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.confidence == 0.5 and self.uncertainty != 0.5:
+            self.confidence = max(0.0, min(1.0, 1.0 - self.uncertainty))
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export observation as a declarative causal predicate."""
@@ -379,6 +385,8 @@ class AutonomousEpistemicEngine:
             w_risk=0.10,
             w_cost=0.10,
         )
+        self.prediction_budget: PredictionBudget = PredictionBudget()
+        self.pending_transactions: list[TransactionOperation] = []
 
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
@@ -563,9 +571,7 @@ class AutonomousEpistemicEngine:
         n = len(observations)
         if n == 0:
             return False, 0.0
-        confs = [
-            getattr(o, "confidence", 0.5) if hasattr(o, "confidence") else 0.5 for o in observations
-        ]
+        confs = [o.confidence for o in observations]
         avg_conf = sum(confs) / n
         is_sufficient = (n >= min_observations) and (avg_conf >= min_confidence)
         return is_sufficient, avg_conf
@@ -1130,7 +1136,7 @@ class AutonomousEpistemicEngine:
         effective_av_feats = set(av_feats) | set(self.avatar_features)
         if self.avatar_feature is not None:
             effective_av_feats.add(self.avatar_feature)
-        if hasattr(self, "prior_avatar_feature") and self.prior_avatar_feature is not None:
+        if self.prior_avatar_feature is not None:
             effective_av_feats.add(self.prior_avatar_feature)
 
         if not effective_av_feats:
@@ -1223,18 +1229,40 @@ class AutonomousEpistemicEngine:
     def export_causal_predicates(self) -> list[CausalPredicate]:
         """Export composite causal predicates across all coordinated cortical faculties."""
         predicates = [self.to_causal_predicate()]
-        if hasattr(self, "symbolic_theory"):
+        if self.symbolic_theory:
             for p in self.symbolic_theory.goal_predicates:
                 predicates.append(p)
             for p in self.symbolic_theory.barrier_predicates:
                 predicates.append(p)
             for p in self.symbolic_theory.walkable_predicates:
                 predicates.append(p)
-        if hasattr(self, "episodic_cortex"):
-            predicates.append(self.episodic_cortex.to_causal_predicate())
-        if hasattr(self, "subgoal_stack"):
-            predicates.extend(self.subgoal_stack.export_causal_predicates())
+        predicates.append(self.episodic_cortex.to_causal_predicate())
+        predicates.extend(self.subgoal_stack.export_causal_predicates())
         return predicates
+
+    def record_learned_barrier(self, barrier_pos: tuple[int, int]) -> None:
+        """Record learned barrier locally and propose atomic state transaction."""
+        if barrier_pos not in self.learned_barriers:
+            self.learned_barriers.add(barrier_pos)
+            self.pending_transactions.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}",
+                    node_data={"position": list(barrier_pos), "role": "BARRIER"},
+                )
+            )
+
+    def record_learned_goal(self, goal_pos: tuple[int, int]) -> None:
+        """Record learned goal locally and propose atomic state transaction."""
+        if goal_pos not in self.learned_goal_positions:
+            self.learned_goal_positions.add(goal_pos)
+            self.pending_transactions.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"learned_goal_{goal_pos[0]}_{goal_pos[1]}",
+                    node_data={"position": list(goal_pos), "role": "GOAL"},
+                )
+            )
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Convert epistemic engine state and grounded facts into transactional HCIR mutations."""

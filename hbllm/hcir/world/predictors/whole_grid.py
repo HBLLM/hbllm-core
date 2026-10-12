@@ -106,7 +106,7 @@ class WholeGridPredictor:
         grid = predicted.get("grid")
         if grid is None:
             grid = predicted.get("grid_2d")
-        if grid is None and hasattr(snapshot, "metadata"):
+        if grid is None and snapshot.metadata:
             grid = snapshot.metadata.get("grid")
 
         if grid is not None and isinstance(grid, np.ndarray) and grid.ndim == 2:

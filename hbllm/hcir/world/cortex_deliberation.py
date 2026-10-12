@@ -508,7 +508,7 @@ class PrefrontalDeliberationEngine:
                 or is_stuck_or_looping
                 or (has_aligned_optical_subgoal and not engine.mental_plan)
             )
-            and (engine.step_counter > 1 or not has_displacement_actions)
+            and (engine.is_motor_grounded() or not has_displacement_actions)
         ):
             bg = engine.estimate_background(curr_grid)
             entities = engine.extract_entities(curr_grid, bg)
@@ -712,11 +712,7 @@ class PrefrontalDeliberationEngine:
                     if (engine.avatar_pos, cand_a) in engine.failed_transitions:
                         continue
                     dyn = engine.action_dynamics.get(cand_a)
-                    if (
-                        dyn is not None
-                        and hasattr(dyn, "get_displacement")
-                        and dyn.is_displacement_action()
-                    ):
+                    if dyn is not None and dyn.is_displacement_action():
                         dr, dc = dyn.get_displacement()
                         if engine.avatar_pos is not None:
                             nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc

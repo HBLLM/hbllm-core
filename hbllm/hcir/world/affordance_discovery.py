@@ -10,6 +10,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
@@ -41,12 +42,12 @@ class AffordanceHypothesis:
     counterexamples: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
-        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        act_val = self.action.value if isinstance(self.action, Enum) else str(self.action)
         return f"AFFORDS({self.entity_shape}, {act_val}) => {self.affordance_label}"
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export affordance hypothesis as a declarative causal predicate."""
-        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        act_val = self.action.value if isinstance(self.action, Enum) else str(self.action)
         return CausalPredicate(
             variable=f"affordance:{self.entity_shape}",
             operator="==",
@@ -73,7 +74,7 @@ class AffordanceHypothesis:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction recording affordance hypothesis."""
-        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        act_val = self.action.value if isinstance(self.action, Enum) else str(self.action)
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,

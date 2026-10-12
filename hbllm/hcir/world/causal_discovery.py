@@ -264,7 +264,7 @@ class CausalHypothesis:
 
     def describe(self) -> str:
         """Format causal hypothesis into symbolic statement."""
-        act_val = self.action.value if hasattr(self.action, "value") else str(self.action)
+        act_val = self.action.value if isinstance(self.action, Enum) else str(self.action)
         if self.predicate is not None:
             return f"{act_val}(x) ∧ ({self.predicate.describe()}) => {self.consequence}"
         return (
@@ -563,7 +563,7 @@ class BaseCausalDiscoveryEngine:
         """Synthesize confirmed hypothesis into a generalized HCIR causal rule."""
         action_val = (
             confirmed_hyp.action.value
-            if hasattr(confirmed_hyp.action, "value")
+            if isinstance(confirmed_hyp.action, Enum)
             else str(confirmed_hyp.action)
         )
         is_composite = (

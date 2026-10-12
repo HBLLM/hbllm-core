@@ -223,7 +223,7 @@ class CerebellarPhaseClock:
         If target_pos is periodic and entering next step is hazardous, but waiting k steps
         allows safe passage and avatar_pos is safe during the wait, recommends motor hesitation.
         """
-        if not hasattr(hazard_tracker, "periodic_cells") or not avatar_pos:
+        if not hazard_tracker.periodic_cells or not avatar_pos:
             return PhaseGateDecision(should_wait=False)
 
         cell_phase = hazard_tracker.periodic_cells.get(target_pos)

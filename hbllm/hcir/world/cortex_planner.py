@@ -190,7 +190,7 @@ class EpistemicGoalScheduler:
             goals = list(confirmed_goals)
 
         # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
-        if hasattr(engine, "subgoal_stack") and engine.subgoal_stack.has_pending_goals:
+        if engine.subgoal_stack.has_pending_goals:
             cur_sg = engine.subgoal_stack.current_subgoal
             if (
                 cur_sg is not None
@@ -1039,10 +1039,11 @@ class MentalSimulationPlanner:
             and engine.hazard_tracker.environmental_period >= 2
         )
         has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
-        if engine.consecutive_simulation_failures > 0 and not has_temporal:
-            max_expansions_budget = 1200
-        else:
-            max_expansions_budget = 1500 if not (has_temporal or bool(init_threats)) else 5000
+        max_expansions_budget = engine.prediction_budget.compute_search_budget(
+            has_temporal=has_temporal,
+            has_threats=bool(init_threats),
+            consecutive_failures=engine.consecutive_simulation_failures,
+        )
 
         non_disp_wait_action: Any | None = None
         if has_temporal:
@@ -1622,25 +1623,24 @@ class MentalSimulationPlanner:
                 {engine.avatar_feature} if engine.avatar_feature is not None else set()
             )
 
-            if hasattr(engine, "causal_cortex"):
-                for b_pos in boundary_barriers:
-                    b_feat = int(curr_grid[b_pos[0], b_pos[1]])
-                    trig_pos, req_tool = engine.causal_cortex.query_barrier_clearance(b_pos, b_feat)
-                    if trig_pos is not None:
-                        tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
-                        if tr_path is not None:
-                            candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
-                    elif req_tool is not None:
-                        if engine.working_memory.is_holding(req_tool):
-                            open_barriers.add(b_pos)
-                        else:
-                            for e in entities:
-                                if e.feature_id == req_tool and e.grid_pos in reachable_cells:
-                                    t_path = find_shortest_path(
-                                        cur_pos, {e.grid_pos}, effective_barriers
-                                    )
-                                    if t_path is not None:
-                                        candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
+            for b_pos in boundary_barriers:
+                b_feat = int(curr_grid[b_pos[0], b_pos[1]])
+                trig_pos, req_tool = engine.causal_cortex.query_barrier_clearance(b_pos, b_feat)
+                if trig_pos is not None:
+                    tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
+                    if tr_path is not None:
+                        candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
+                elif req_tool is not None:
+                    if engine.working_memory.is_holding(req_tool):
+                        open_barriers.add(b_pos)
+                    else:
+                        for e in entities:
+                            if e.feature_id == req_tool and e.grid_pos in reachable_cells:
+                                t_path = find_shortest_path(
+                                    cur_pos, {e.grid_pos}, effective_barriers
+                                )
+                                if t_path is not None:
+                                    candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
 
             # 4. Known state mutation triggers (switches and pressure plates)
             for tr_pos, opened_set in mutation_triggers.items():

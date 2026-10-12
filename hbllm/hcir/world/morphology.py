@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from hbllm.hcir.spatial_planner import EntityRole
@@ -268,7 +269,7 @@ class MorphologicalConcept:
         """Export morphological concept as a declarative causal predicate."""
         role_str = (
             self.inferred_role.value
-            if hasattr(self.inferred_role, "value")
+            if isinstance(self.inferred_role, Enum)
             else str(self.inferred_role)
         )
         affordance_keys = ",".join(sorted(self.learned_affordances.keys()))
@@ -284,7 +285,7 @@ class MorphologicalConcept:
         """Propose atomic HCIR transaction recording morphological concept."""
         role_str = (
             self.inferred_role.value
-            if hasattr(self.inferred_role, "value")
+            if isinstance(self.inferred_role, Enum)
             else str(self.inferred_role)
         )
         return [

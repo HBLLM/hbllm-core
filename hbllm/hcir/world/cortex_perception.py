@@ -300,11 +300,7 @@ class SpatialRoleClassifier:
             or (area > H * W * 0.35)
         )
 
-        is_theory_barrier = (
-            symbolic_theory.is_barrier(val)
-            if (symbolic_theory and hasattr(symbolic_theory, "is_barrier"))
-            else False
-        )
+        is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
         is_theory_cargo = (
             symbolic_theory.is_cargo(
                 SpatialEntity(
@@ -317,17 +313,13 @@ class SpatialRoleClassifier:
                     feature_id=val,
                 )
             )
-            if (symbolic_theory and hasattr(symbolic_theory, "is_cargo"))
+            if symbolic_theory
             else False
         )
-        is_theory_walkable = (
-            val in symbolic_theory.walkable_features
-            if (symbolic_theory and hasattr(symbolic_theory, "walkable_features"))
-            else False
-        )
+        is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
         is_theory_goal = (
             (val in symbolic_theory.goal_features or val in symbolic_theory.receptacle_features)
-            if (symbolic_theory and hasattr(symbolic_theory, "goal_features"))
+            if symbolic_theory
             else False
         )
 

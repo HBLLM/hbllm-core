@@ -336,11 +336,9 @@ class CausalInductionCortex:
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset episode state, optionally preserving discovered causal affordances."""
         self.body_schema.reset_episode(retain_dynamics=retain_dynamics)
-        if hasattr(self.causal_attributor, "reset_episode"):
-            self.causal_attributor.reset_episode(retain_long_term=retain_dynamics)
-        elif hasattr(self.causal_attributor, "reset"):
-            if not retain_dynamics:
-                self.causal_attributor.reset()
+        self.causal_attributor.reset_episode(retain_long_term=retain_dynamics)
+        if not retain_dynamics:
+            self.causal_attributor.reset()
         if not retain_dynamics:
             self.symbolic_theory.clear()
             self.observed_transitions.clear()

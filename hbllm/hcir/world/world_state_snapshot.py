@@ -15,6 +15,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
@@ -30,13 +32,14 @@ class WorldStateSnapshot:
     timestamp: float = field(default_factory=time.time)
     variables: dict[str, Any] = field(default_factory=dict)
     entity_states: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     state_hash: str = field(init=False)
 
     def __post_init__(self) -> None:
         """Compute deterministic SHA256 state hash for simulation and replay matching."""
 
         def _default_serializer(obj: Any) -> Any:
-            if hasattr(obj, "tolist"):
+            if isinstance(obj, np.ndarray):
                 return obj.tolist()
             if isinstance(obj, (set, frozenset)):
                 return sorted(list(obj))
@@ -92,7 +95,9 @@ class WorldStateSnapshot:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR state update reflecting this snapshot."""
-        serializable_vars = {k: v for k, v in self.variables.items() if not hasattr(v, "shape")}
+        serializable_vars = {
+            k: v for k, v in self.variables.items() if not isinstance(v, np.ndarray)
+        }
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
@@ -196,7 +201,7 @@ class StateDifferenceResult:
         """Propose atomic HCIR transactions applying this state delta."""
         ops: list[TransactionOperation] = []
         for k, (_pre_val, post_val) in self.changed_variables.items():
-            if not hasattr(post_val, "shape"):
+            if not isinstance(post_val, np.ndarray):
                 ops.append(
                     TransactionOperation(
                         op=TransactionOp.MODIFY_NODE,
@@ -229,10 +234,8 @@ class StateDifferenceComputer:
         def _differs(a: Any, b: Any) -> bool:
             if a is None or b is None:
                 return a is not b
-            if hasattr(a, "shape") or hasattr(b, "shape"):
-                import numpy as np
-
-                if hasattr(a, "shape") and hasattr(b, "shape"):
+            if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+                if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
                     return not np.array_equal(a, b)
                 return True
             try:
@@ -286,9 +289,11 @@ class StateDifferenceComputer:
         if "grid" in pre.variables and "grid" in post.variables:
             g_pre = pre.variables["grid"]
             g_post = post.variables["grid"]
-            if hasattr(g_pre, "shape") and hasattr(g_post, "shape") and g_pre.shape == g_post.shape:
-                import numpy as np
-
+            if (
+                isinstance(g_pre, np.ndarray)
+                and isinstance(g_post, np.ndarray)
+                and g_pre.shape == g_post.shape
+            ):
                 diff_mask = g_pre != g_post
                 coords = np.argwhere(diff_mask)
                 changed_cells = [(int(r), int(c)) for r, c in coords]

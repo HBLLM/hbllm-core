@@ -374,8 +374,7 @@ class HippocampalEpisodicCortex:
         engine.active_probe_id = None
         engine.probe_target_steps = 0
         engine.recent_positions.clear()
-        if hasattr(engine, "recent_actions"):
-            engine.recent_actions.clear()
+        engine.recent_actions.clear()
         engine.level_epistemic_probes = 0
         engine.working_memory.reset_episode(retain_long_term=retain_dynamics)
         engine.collision_cones.reset_episode()
@@ -474,8 +473,7 @@ class HippocampalEpisodicCortex:
             engine._avatar_controllability_evidence.clear()
             engine.state_mutations.clear()
             engine.bilateral_state = None
-            if hasattr(engine, "bilateral_integrator"):
-                engine.bilateral_integrator.active_bilateral_state = None
+            engine.bilateral_integrator.active_bilateral_state = None
 
             engine.entity_visit_counts.clear()
             engine.probed_entity_ids.clear()
@@ -506,8 +504,7 @@ class HippocampalEpisodicCortex:
             engine.avatar_pos = None
             engine.action_dynamics.clear()
             engine.action_affordances.clear()
-            if hasattr(engine, "focus_switch_actions"):
-                engine.focus_switch_actions.clear()
+            engine.focus_switch_actions.clear()
             engine.last_non_displacement_action = None
             engine.tested_actions.clear()
             engine.symbolic_theory.clear()
@@ -544,10 +541,8 @@ class HippocampalEpisodicCortex:
                 reason="episode_reset_retained_dynamics",
             )
 
-        if hasattr(engine, "object_planner"):
-            engine.object_planner.reset_episode(is_new_level=is_new_level)
-        if hasattr(engine, "subgoal_stack"):
-            engine.subgoal_stack.reset_episode()
+        engine.object_planner.reset_episode(is_new_level=is_new_level)
+        engine.subgoal_stack.reset_episode()
 
         # Cortical faculties reset
         if not retain_dynamics:
@@ -555,10 +550,8 @@ class HippocampalEpisodicCortex:
         else:
             self.reset_episode(retain_dynamics=True)
 
-        if hasattr(engine, "causal_cortex"):
-            engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
-        if hasattr(engine, "acc_conflict_monitor"):
-            engine.acc_conflict_monitor.reset()
+        engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
+        engine.acc_conflict_monitor.reset()
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export episodic cortex state as a formal Pearl do(a) causal predicate."""

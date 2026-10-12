@@ -1122,21 +1122,27 @@ class EpistemicFeedbackAssimilator:
             movable_features.add(engine.avatar_feature)
 
         def is_hud_mutation(r: int, c: int) -> bool:
-            """Topological barrier separation: checks if (r, c) is partitioned from avatar by solid divider lines."""
-            if engine.prev_grid is not None and engine.avatar_pos is not None:
-                min_r, max_r = min(engine.avatar_pos[0], r), max(engine.avatar_pos[0], r)
-                for div_r in range(min_r + 1, max_r):
-                    div_val = int(engine.prev_grid[div_r, 0])
-                    if np.all(engine.prev_grid[div_r, :] == div_val) and (
-                        engine.symbolic_theory.is_barrier(div_val) or div_val == engine.bg_feature
-                    ):
+            """Perimeter status bar / HUD isolation: detects mutations in edge bands or behind solid non-background divider lines."""
+            if H >= 24 and engine.prev_grid is not None:
+                if engine.avatar_pos is not None:
+                    if r >= H - 6 and engine.avatar_pos[0] < H - 8:
                         return True
-                min_c, max_c = min(engine.avatar_pos[1], c), max(engine.avatar_pos[1], c)
-                for div_c in range(min_c + 1, max_c):
-                    div_val = int(engine.prev_grid[0, div_c])
-                    if np.all(engine.prev_grid[:, div_c] == div_val) and (
-                        engine.symbolic_theory.is_barrier(div_val) or div_val == engine.bg_feature
-                    ):
+                    if r < 3 and engine.avatar_pos[0] >= 5:
+                        return True
+                    min_r, max_r = min(engine.avatar_pos[0], r), max(engine.avatar_pos[0], r)
+                    for div_r in range(min_r + 1, max_r):
+                        div_val = int(engine.prev_grid[div_r, 0])
+                        if div_val != bg and np.all(engine.prev_grid[div_r, :] == div_val):
+                            if div_r >= H - 16 or div_r <= 16:
+                                return True
+                    min_c, max_c = min(engine.avatar_pos[1], c), max(engine.avatar_pos[1], c)
+                    for div_c in range(min_c + 1, max_c):
+                        div_val = int(engine.prev_grid[0, div_c])
+                        if div_val != bg and np.all(engine.prev_grid[:, div_c] == div_val):
+                            if div_c >= W - 16 or div_c <= 16:
+                                return True
+                else:
+                    if r >= H - 6 or r < 3:
                         return True
             return False
 

@@ -402,12 +402,11 @@ class MorphologicalEntity:
         feat_id = getattr(entity, "feature_id", 0)
 
         props = getattr(entity, "properties", {})
-        if "cells" in props and props["cells"]:
+        if isinstance(props, dict) and "cells" in props and props["cells"]:
             cells = set(props["cells"])
-        elif hasattr(entity, "grid_pos"):
-            cells = {entity.grid_pos}
         else:
-            cells = set()
+            g_pos = getattr(entity, "grid_pos", None)
+            cells = {g_pos} if g_pos is not None else set()
 
         centroid = getattr(entity, "centroid", (0.0, 0.0))
         bbox = getattr(entity, "bounding_box", (0, 0, 0, 0))

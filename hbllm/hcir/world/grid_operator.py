@@ -1260,9 +1260,7 @@ class TransformationProgramSearch:
         if self.prior_rules:
             for prior_b in self.prior_rules:
                 for op in self.operators:
-                    if op.name == prior_b.operator_name or (
-                        hasattr(op, "name") and prior_b.operator_name in op.name
-                    ):
+                    if op.name == prior_b.operator_name or prior_b.operator_name in op.name:
                         # Prior rule has discounted MDL description length (amortized learning)
                         prior_b_copy = OperatorBinding(
                             operator_name=prior_b.operator_name,

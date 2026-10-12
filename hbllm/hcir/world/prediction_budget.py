@@ -56,6 +56,20 @@ class PredictionBudget:
         else:
             return ["physics", "statistical", "snn", "neural", "llm"]
 
+    def compute_search_budget(
+        self,
+        has_temporal: bool = False,
+        has_threats: bool = False,
+        consecutive_failures: int = 0,
+    ) -> int:
+        """Compute anytime A* / MCTS state expansion budget based on temporal hazard complexity."""
+        base = 1500
+        if consecutive_failures > 0 and not has_temporal:
+            return int(base * 0.8)
+        if has_temporal or has_threats:
+            return int(base * 3.33)
+        return base
+
     def to_causal_predicate(self) -> CausalPredicate:
         """Export prediction budget constraint as a declarative causal predicate."""
         return CausalPredicate(

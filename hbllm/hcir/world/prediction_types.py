@@ -11,6 +11,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
@@ -85,7 +87,7 @@ class EnsemblePrediction:
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction committing prediction to working memory."""
         serializable_state = {
-            k: v for k, v in self.predicted_state.items() if not hasattr(v, "shape")
+            k: v for k, v in self.predicted_state.items() if not isinstance(v, np.ndarray)
         }
         return [
             TransactionOperation(
