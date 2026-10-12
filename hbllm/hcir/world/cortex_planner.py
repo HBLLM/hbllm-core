@@ -1822,11 +1822,6 @@ class MentalSimulationPlanner:
                         )
                     )
 
-        if accumulated_plan:
-            for sg in reversed(buffered_subgoals):
-                engine.subgoal_stack.push_subgoal(sg)
-            return accumulated_plan
-
         return None
 
 
