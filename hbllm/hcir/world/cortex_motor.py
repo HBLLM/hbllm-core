@@ -1322,7 +1322,7 @@ class MotorCortexEffector:
                     last_step = engine.last_effector_target_step.get((mr, mc), -999)
                     delta_t = max(1, engine.step_counter - last_step)
                     refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
-                    visit_damping = min(30.0, float(visit_count) * 4.0)
+                    visit_damping = float(visit_count) * 220.0
                     score = 400.0 - refractory - visit_damping
                     candidates.append((mr, mc, score))
 

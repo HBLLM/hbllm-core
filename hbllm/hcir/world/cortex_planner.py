@@ -27,7 +27,7 @@ import numpy as np
 from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
@@ -482,11 +482,26 @@ class MentalSimulationPlanner:
     def is_wall_deadlock(
         pos: tuple[int, int],
         goals: set[tuple[int, int]],
-        H: int,
-        W: int,
+        static_barriers_or_h: set[tuple[int, int]] | int | None = None,
+        H_or_w: int | None = None,
+        W: int | None = None,
     ) -> bool:
         """Check whether a cargo block is trapped along a boundary wall with no goals on it."""
-        return CounterfactualDeadlockDetector.is_wall_deadlock(pos, goals, set(), (H, W))
+        if W is None:
+            # Called as is_wall_deadlock(pos, goals, H, W)
+            static_barriers: set[tuple[int, int]] = set()
+            grid_h = static_barriers_or_h if isinstance(static_barriers_or_h, int) else 10
+            grid_w = H_or_w if isinstance(H_or_w, int) else 10
+        else:
+            # Called as is_wall_deadlock(pos, goals, static_barriers, H, W)
+            static_barriers = (
+                static_barriers_or_h if isinstance(static_barriers_or_h, set) else set()
+            )
+            grid_h = H_or_w if isinstance(H_or_w, int) else 10
+            grid_w = int(W)
+        return CounterfactualDeadlockDetector.is_wall_deadlock(
+            pos, goals, static_barriers, (grid_h, grid_w)
+        )
 
     @staticmethod
     def _compute_static_barriers(
@@ -550,11 +565,23 @@ class MentalSimulationPlanner:
         if not bg_is_impassable_void and not engine.symbolic_theory.walkable_features:
             bg_count = int(feat_counts.get(bg, 0))
             bg_ratio = bg_count / max(1, H * W)
-            avatar_on_bg = (
-                engine.avatar_pos is not None
-                and 0 <= engine.avatar_pos[0] < H
-                and 0 <= engine.avatar_pos[1] < W
-                and int(curr_grid[engine.avatar_pos[0], engine.avatar_pos[1]]) == bg
+            ar, ac = (
+                (engine.avatar_pos[0], engine.avatar_pos[1])
+                if (
+                    engine.avatar_pos
+                    and 0 <= engine.avatar_pos[0] < H
+                    and 0 <= engine.avatar_pos[1] < W
+                )
+                else (-1, -1)
+            )
+            avatar_on_bg = ar >= 0 and (
+                int(curr_grid[ar, ac]) == bg
+                or any(
+                    0 <= ar + dr_a < H
+                    and 0 <= ac + dc_a < W
+                    and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                )
             )
             if 0.20 <= bg_ratio <= 0.80 and not avatar_on_bg:
                 bg_is_impassable_void = True
@@ -868,8 +895,21 @@ class MentalSimulationPlanner:
         static_threats = [
             t for t in oriented_threats if t.feature_id not in engine.mobile_threat_features
         ]
-        init_threats = frozenset(t.pos for t in static_threats)
-        threat_map = {t.pos: t for t in static_threats}
+        threat_cells: set[tuple[int, int]] = set()
+        threat_map: dict[tuple[int, int], OrientedThreat] = {}
+        for t in static_threats:
+            threat_cells.add(t.pos)
+            threat_map[t.pos] = t
+            tr, tc = t.pos
+            for dr_t in (-1, 0, 1):
+                for dc_t in (-1, 0, 1):
+                    rr_t, cc_t = tr + dr_t, tc + dc_t
+                    if 0 <= rr_t < H and 0 <= cc_t < W:
+                        if int(curr_grid[rr_t, cc_t]) == t.feature_id:
+                            threat_cells.add((rr_t, cc_t))
+                            threat_map[(rr_t, cc_t)] = t
+
+        init_threats = frozenset(threat_cells)
         init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(
             (t.pos, t.facing)
             for t in oriented_threats
@@ -965,7 +1005,7 @@ class MentalSimulationPlanner:
             return frozenset(nxt)
 
         is_block_delivery = bool(
-            1 <= len(pushable_blocks) <= 5
+            1 <= len(pushable_blocks) <= 16
             and any(
                 engine.symbolic_theory.is_cargo(e)
                 or e.feature_id in engine.learned_cargo_features
@@ -1315,18 +1355,14 @@ class MentalSimulationPlanner:
                             had_relaxable_block = True
                             continue
 
-                    new_threats = cur_threats
                     threat_penalty = 0.0
+                    new_threats = cur_threats
                     if (nr, nc) in cur_threats:
-                        t = threat_map.get((nr, nc))
-                        if t is not None:
-                            if cur_pos == t.gaze_pos:
-                                if _relaxed_safety:
-                                    threat_penalty = 30.0
-                                else:
-                                    had_relaxable_block = True
-                                    continue
-                            new_threats = cur_threats - {(nr, nc)}
+                        if _relaxed_safety:
+                            threat_penalty = 50.0
+                        else:
+                            had_relaxable_block = True
+                            continue
 
                     new_patrols = cur_patrols
                     patrol_proximity_cost = 0.0
@@ -1453,7 +1489,10 @@ class MentalSimulationPlanner:
                                     continue
                                 pushed_r, pushed_c = land_b
 
-                        if is_block_delivery and (pushed_r, pushed_c) not in goals:
+                        if (is_block_delivery or bool(cur_blocks)) and (
+                            pushed_r,
+                            pushed_c,
+                        ) not in goals:
                             candidate_block_set = (set(cur_blocks) - {(nr, nc)}) | {
                                 (pushed_r, pushed_c)
                             }
@@ -1742,42 +1781,6 @@ class MentalSimulationPlanner:
                         candidate_triggers.append((t_pos, t_path, 1, set()))
 
             if not candidate_triggers:
-                all_actions_calibrated = all(
-                    engine.is_action_calibrated(a) for a in available_actions
-                )
-                if goals and all_actions_calibrated:
-                    best_approach: list[MentalSimulationStep] | None = None
-                    initial_dist = min(
-                        abs(cur_pos[0] - g[0]) + abs(cur_pos[1] - g[1]) for g in goals
-                    )
-                    min_dist_to_goal = initial_dist
-                    q_approach: deque[tuple[tuple[int, int], list[MentalSimulationStep]]] = deque(
-                        [(cur_pos, [])]
-                    )
-                    visited_approach = {cur_pos}
-                    while q_approach:
-                        p, path_app = q_approach.popleft()
-                        if path_app:
-                            d = min(abs(p[0] - g[0]) + abs(p[1] - g[1]) for g in goals)
-                            if d < min_dist_to_goal:
-                                min_dist_to_goal = d
-                                best_approach = path_app
-                        for act, dr, dc in movable_actions:
-                            if (p, act) in engine.failed_transitions:
-                                continue
-                            nr, nc = p[0] + dr, p[1] + dc
-                            if not (0 <= nr < H and 0 <= nc < W) or (nr, nc) in visited_approach:
-                                continue
-                            if (nr, nc) in effective_barriers:
-                                continue
-                            visited_approach.add((nr, nc))
-                            step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
-                            q_approach.append(((nr, nc), path_app + [step]))
-                    if best_approach:
-                        accumulated_plan.extend(best_approach)
-                        for sg in reversed(buffered_subgoals):
-                            engine.subgoal_stack.push_subgoal(sg)
-                        return accumulated_plan
                 break
 
             candidate_triggers.sort(key=lambda x: (-x[2], len(x[1])))

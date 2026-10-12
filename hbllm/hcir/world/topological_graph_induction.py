@@ -274,8 +274,6 @@ class GeodesicManifoldRouter:
             if 0 <= ur < H and 0 <= uc < W and (ur, uc) not in goals:
                 passable_mask[ur, uc] = False
 
-        from hbllm.hcir.world.elastic_particle_induction import ParticleKinematicsSimulator
-
         hazard_cells: set[tuple[int, int]] = set()
         effective_traj_barriers = set(barrier_features)
         if not effective_traj_barriers:
@@ -283,24 +281,28 @@ class GeodesicManifoldRouter:
             non_passable_feats = set(int(v) for v in np.unique(curr_grid[~passable_mask]))
             effective_traj_barriers.update(non_passable_feats - avatar_features)
 
-        traj_horizon = max(12, max(H, W))
         for t in oriented_threats:
             hazard_cells.add(t.pos)
+            tr, tc = t.pos
+            for dr_t in (-1, 0, 1):
+                for dc_t in (-1, 0, 1):
+                    rr_t, cc_t = tr + dr_t, tc + dc_t
+                    if 0 <= rr_t < H and 0 <= cc_t < W:
+                        if int(curr_grid[rr_t, cc_t]) == t.feature_id:
+                            hazard_cells.add((rr_t, cc_t))
+
             if t.facing != (0, 0):
-                defl_mode = (
-                    "vertical_flip"
-                    if (t.facing[0] != 0 and t.facing[1] == 0)
-                    else "horizontal_flip"
-                )
-                traj = ParticleKinematicsSimulator.simulate_trajectory(
-                    grid=curr_grid,
-                    start_coord=t.pos,
-                    initial_velocity=t.facing,
-                    barrier_colors=effective_traj_barriers,
-                    deflection_mode=defl_mode,
-                    max_steps=traj_horizon,
-                )
-                hazard_cells.update(traj)
+                gr, gc = getattr(t, "gaze_pos", (t.pos[0] + t.facing[0], t.pos[1] + t.facing[1]))
+                d_r, d_c = t.facing
+                curr_r, curr_c = gr, gc
+                while 0 <= curr_r < H and 0 <= curr_c < W:
+                    if (curr_r, curr_c) in static_barriers or (curr_r, curr_c) in grid_walls:
+                        break
+                    if int(curr_grid[curr_r, curr_c]) in effective_traj_barriers:
+                        break
+                    hazard_cells.add((curr_r, curr_c))
+                    curr_r += d_r
+                    curr_c += d_c
 
         for hz_r, hz_c in hazard_cells:
             if (

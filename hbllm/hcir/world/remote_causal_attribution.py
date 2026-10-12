@@ -101,6 +101,11 @@ class RemoteCausalAttributor:
         """Reset all causal affordances and evidence."""
         self.reset_episode(retain_long_term=False)
 
+    def register_affordance(self, affordance: RemoteCausalAffordance) -> None:
+        """Register or reinforce a remote causal affordance directly."""
+        self.remote_actuators[affordance.remote_pos].append(affordance)
+        self.trigger_registry[affordance.trigger_pos].append(affordance)
+
     def record_transition(
         self,
         prev_grid: np.ndarray,
