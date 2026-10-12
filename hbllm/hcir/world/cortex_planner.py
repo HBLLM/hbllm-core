@@ -678,7 +678,7 @@ class MentalSimulationPlanner:
 
         # Commit proposed state updates atomically
         for gp in proposal.new_learned_goal_positions:
-            engine.learned_goal_positions.add(gp)
+            engine.record_learned_goal(gp)
         for feat in proposal.new_candidate_features:
             engine.symbolic_theory.candidate_goal_features.add(feat)
         if proposal.subgoal_to_pop:

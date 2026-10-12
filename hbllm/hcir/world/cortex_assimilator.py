@@ -361,7 +361,7 @@ class EpistemicFeedbackAssimilator:
                             engine.hazard_tracker.register_lethal_feature(
                                 int(curr_grid[hz[0], hz[1]])
                             )
-                            engine.learned_barriers.add(hz)
+                            engine.record_learned_barrier(hz)
 
             # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attribution
             loci: list[tuple[int, int]] = []
@@ -955,7 +955,7 @@ class EpistemicFeedbackAssimilator:
                                     and (kr, kc) not in cand_goal_positions
                                     and not engine.symbolic_theory.is_walkable(val)
                                 ):
-                                    engine.learned_barriers.add((kr, kc))
+                                    engine.record_learned_barrier((kr, kc))
                                     if not engine.symbolic_theory.is_barrier(val):
                                         engine.symbolic_theory.induce_barrier(val)
                                         logger.info(
@@ -973,7 +973,7 @@ class EpistemicFeedbackAssimilator:
                             end_r = prev_avatar_pos[0] + step_r * dist
                             end_c = prev_avatar_pos[1] + step_c * dist
                             if 0 <= end_r < H and 0 <= end_c < W:
-                                engine.learned_barriers.add((end_r, end_c))
+                                engine.record_learned_barrier((end_r, end_c))
 
                     if engine.last_action is not None and prev_avatar_pos is not None:
                         engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
@@ -1244,7 +1244,7 @@ class EpistemicFeedbackAssimilator:
                 win_target = (int(action_data["y"]), int(action_data["x"]))
 
             if win_target is not None:
-                engine.learned_goal_positions.add(win_target)
+                engine.record_learned_goal(win_target)
                 if (
                     engine.prev_grid is not None
                     and 0 <= win_target[0] < H
@@ -1420,7 +1420,7 @@ class EpistemicFeedbackAssimilator:
                     # Ground it as a static lethal position and barrier so neither mental simulation
                     # nor exploratory probes step into this coordinate again!
                     engine.hazard_tracker.register_lethal_position(target_pos)
-                    engine.learned_barriers.add(target_pos)
+                    engine.record_learned_barrier(target_pos)
                     engine.level_learned_barriers.setdefault(engine.current_level, set()).add(
                         target_pos
                     )
@@ -1477,7 +1477,7 @@ class EpistemicFeedbackAssimilator:
                 post_val = int(curr_grid[mr, mc])
                 if (
                     orig_val in engine.symbolic_theory.barrier_features
-                    or orig_val in engine.learned_barriers
+                    or (int(mr), int(mc)) in engine.learned_barriers
                 ) and (
                     post_val == engine.bg_feature
                     or post_val == 0
