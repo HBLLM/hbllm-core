@@ -695,3 +695,42 @@ def test_event_sourced_phase_transitions() -> None:
         EpistemicPhase.EXPLOITATION,
         "state_assignment",
     )
+
+
+def test_engine_action_deltas_and_actor_pos() -> None:
+    """Verify that action_deltas synthesizes calibrated dynamics, affordances, and arcade defaults."""
+    from hbllm.hcir.world.cortex_causal import ActionAffordance
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+
+    # Initial arcade convention fallback for actions 1-4
+    deltas = engine.action_deltas
+    assert deltas[1] == (-1, 0)
+    assert deltas[2] == (1, 0)
+    assert deltas[3] == (0, -1)
+    assert deltas[4] == (0, 1)
+
+    # Declared affordance overrides arcade default or provides custom action
+    engine.action_affordances[8] = ActionAffordance(
+        action_id=8,
+        is_displacement=True,
+        delta=(-2, 0),
+    )
+    assert engine.action_deltas[8] == (-2, 0)
+
+    # Calibrated empirical dynamics takes precedence over affordance
+    engine.action_dynamics[8] = ActionDynamicsModel(
+        action_id=8,
+        delta_r=-3,
+        delta_c=0,
+        confidence=1.0,
+    )
+    assert engine.action_deltas[8] == (-3, 0)
+
+    # current_actor_pos alias
+    assert engine.current_actor_pos is None
+    engine.avatar_pos = (5, 7)
+    assert engine.current_actor_pos == (5, 7)
+    engine.current_actor_pos = (2, 3)
+    assert engine.avatar_pos == (2, 3)

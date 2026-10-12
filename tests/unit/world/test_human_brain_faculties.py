@@ -1118,6 +1118,41 @@ class TestPrefrontalDeliberationEngine:
         assert safe is False
         assert should_wait is False
 
+    def test_oscillatory_temporal_pacing_when_waiting(self) -> None:
+        """Verify oscillatory pacing step executes cleanly using engine.action_deltas when should_wait is True."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import (
+            AutonomousEpistemicEngine,
+            EpistemicPhase,
+        )
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        delib = PrefrontalDeliberationEngine()
+        engine = AutonomousEpistemicEngine()
+        engine.avatar_pos = (5, 5)
+        engine.phase = EpistemicPhase.EXPLOITATION
+        engine._last_sim_action_count = len(engine.action_dynamics)
+
+        # Plan has a step that is temporarily blocked / needs wait
+        next_step = MentalSimulationStep(
+            action=1,
+            predicted_avatar_pos=(4, 5),
+            expected_mutation="step_up",
+        )
+        engine.mental_plan.append(next_step)
+
+        # Mock validate_plan_safety to simulate a looming transient threat requiring a wait
+        delib.validate_plan_safety = lambda *args, **kwargs: (True, True, 1)  # type: ignore[assignment]
+
+        grid = np.zeros((10, 10), dtype=int)
+        available_actions = [1, 2, 3, 4]  # Purely directional actions
+
+        chosen_act, _ = delib.decide(engine, grid, available_actions)
+        # Should pick a valid pacing action (not 1 since 1 is the waiting step)
+        assert chosen_act in [2, 3, 4]
+        # And return step was enqueued in mental_plan
+        assert len(engine.mental_plan) > 0
+
 
 class TestParietalCoordinateTransformer:
     """Test Posterior Parietal Cortex coordinate conversion and spatial symmetry projector."""

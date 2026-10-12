@@ -651,7 +651,29 @@ class AutonomousEpistemicEngine:
         aff = self.action_affordances.get(action)
         if aff is not None and aff.is_displacement:
             return True
-        return False
+        return action in self.action_deltas
+
+    @property
+    def action_deltas(self) -> dict[Any, tuple[int, int]]:
+        """Canonical mapping of action_id -> (delta_r, delta_c) displacement vector.
+
+        Synthesizes calibrated empirical action dynamics, declared affordance models,
+        and standard embodied directional conventions.
+        """
+        deltas: dict[Any, tuple[int, int]] = {}
+        for act, aff in self.action_affordances.items():
+            if aff.is_displacement and aff.delta is not None and len(aff.delta) >= 2:
+                deltas[act] = (int(round(float(aff.delta[0]))), int(round(float(aff.delta[1]))))
+        for act, dyn in self.action_dynamics.items():
+            if dyn.is_displacement_action():
+                deltas[act] = dyn.get_displacement()
+        _arcade_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+        for act, d in _arcade_convention.items():
+            if act not in deltas and (
+                act in self.action_affordances or not self.action_affordances
+            ):
+                deltas[act] = d
+        return deltas
 
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
@@ -702,6 +724,24 @@ class AutonomousEpistemicEngine:
                 self.avatar_features = {val}
         else:
             self.avatar_features.clear()
+
+    @property
+    def current_actor_pos(self) -> tuple[int, int] | None:
+        """Canonical alias for avatar_pos to satisfy actor introspection contracts."""
+        return self.avatar_pos
+
+    @current_actor_pos.setter
+    def current_actor_pos(self, val: tuple[int, int] | None) -> None:
+        self.avatar_pos = val
+
+    @property
+    def current_target_pos(self) -> tuple[int, int] | None:
+        """Canonical alias for active target or goal position."""
+        if self.active_probe_target is not None:
+            return self.active_probe_target
+        if self.learned_goal_positions:
+            return next(iter(self.learned_goal_positions))
+        return None
 
     @property
     def learned_goal_features(self) -> set[int]:

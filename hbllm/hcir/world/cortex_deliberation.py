@@ -826,22 +826,20 @@ class PrefrontalDeliberationEngine:
                 # In environments with strictly directional actions (no explicit wait),
                 # synthesize an oscillatory burn step (e.g. step back / lateral dodge -> return)
                 # to burn phase steps until dynamic hazards clear.
-                curr_pos = engine.avatar_pos
+                curr_pos = engine.avatar_pos or getattr(engine, "current_actor_pos", None)
                 H, W = curr_grid.shape
                 reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
                 pacing_candidates: list[tuple[Any, tuple[int, int]]] = []
 
                 if curr_pos is not None:
+                    action_deltas = engine.action_deltas
                     for act in available_actions:
                         if not engine.is_displacement_action(act) or act == next_step.action:
                             continue
-                        dyn = engine.action_dynamics.get(act)
-                        if dyn is not None and dyn.is_displacement_action():
-                            dr, dc = dyn.get_displacement()
-                        elif act in (1, 2, 3, 4):
-                            dr, dc = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}[act]
-                        else:
+                        delta = action_deltas.get(act)
+                        if delta is None:
                             continue
+                        dr, dc = delta
                         nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
                         if not (0 <= nr < H and 0 <= nc < W):
                             continue

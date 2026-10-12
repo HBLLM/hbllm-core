@@ -732,11 +732,7 @@ class MentalSimulationPlanner:
                     ):
                         passable_mask[r, c] = False
 
-            action_deltas = {
-                act: dyn.get_displacement()
-                for act, dyn in engine.action_dynamics.items()
-                if dyn.is_displacement_action()
-            }
+            action_deltas = engine.action_deltas
             bilateral_plan = engine.bilateral_integrator.plan_convergence_sequence(
                 pos1=engine.bilateral_state.pos1,
                 pos2=engine.bilateral_state.pos2,
