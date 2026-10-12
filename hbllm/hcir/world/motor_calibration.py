@@ -124,6 +124,14 @@ class ActionDynamicsModel:
                 target_r = int(round(dr))
                 target_c = int(round(dc))
 
+                # Single-step quantum refinement:
+                # If an action previously observed a boundary wrap (e.g. 28) and now demonstrates
+                # a smaller non-zero unit step along the same axis (e.g. 7), adopt the unit quantum.
+                if 0 < abs(target_r) < abs(self.delta_r) and self.delta_r != 0:
+                    self.delta_r = target_r
+                if 0 < abs(target_c) < abs(self.delta_c) and self.delta_c != 0:
+                    self.delta_c = target_c
+
                 # Multimodal contradiction detection:
                 # If this model is already calibrated with high confidence, and the new
                 # observation consistently deviates, do not corrupt the established EMA.

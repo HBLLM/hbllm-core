@@ -73,7 +73,7 @@ class RemoteCausalAffordance:
 class RemoteCausalAttributor:
     """Ventromedial Prefrontal Cortex engine for distal causal learning and remote mechanism control."""
 
-    def __init__(self, min_remote_distance: int = 2, confidence_threshold: float = 0.70) -> None:
+    def __init__(self, min_remote_distance: int = 1, confidence_threshold: float = 0.70) -> None:
         self.min_remote_distance = min_remote_distance
         self.confidence_threshold = confidence_threshold
 
@@ -128,8 +128,12 @@ class RemoteCausalAttributor:
         ):
             return []
 
+        H, W = prev_grid.shape
+        tr, tc = int(action_pos[0]), int(action_pos[1])
+        if not (0 <= tr < H and 0 <= tc < W):
+            return []
+
         av_set = avatar_features or set()
-        tr, tc = action_pos
         trigger_feat = int(prev_grid[tr, tc])
 
         # Compute all cell mutations between frames
@@ -210,13 +214,15 @@ class RemoteCausalAttributor:
         if not candidates:
             # Check if any actuator with the same barrier feature exists
             if barrier_feature is not None:
+                all_matching: list[RemoteCausalAffordance] = []
                 for affs in self.remote_actuators.values():
                     for a in affs:
-                        if (
-                            a.original_remote_feature == barrier_feature
-                            and a.confidence >= self.confidence_threshold
-                        ):
-                            return a
+                        if a.original_remote_feature == barrier_feature:
+                            all_matching.append(a)
+                if all_matching:
+                    all_matching.sort(key=lambda a: a.confidence, reverse=True)
+                    if all_matching[0].confidence >= 0.50:
+                        return all_matching[0]
             return None
 
         # Sort by highest causal confidence

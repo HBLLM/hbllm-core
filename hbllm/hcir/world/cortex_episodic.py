@@ -468,6 +468,9 @@ class HippocampalEpisodicCortex:
             # Carry forward hypotheses & semantics as priors
             if engine.avatar_feature is not None:
                 engine.prior_avatar_feature = engine.avatar_feature
+                engine.avatar_features = {engine.avatar_feature}
+            else:
+                engine.avatar_features.clear()
             engine._avatar_controllability_evidence.clear()
             engine.state_mutations.clear()
             engine.bilateral_state = None

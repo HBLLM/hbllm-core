@@ -141,6 +141,14 @@ class ExtendedBodySchema:
             permeable.update(self.tool_barrier_affinities.get(t.feature_id, set()))
         return permeable
 
+    def get_tools_for_barrier(self, barrier_feature: int) -> set[int]:
+        """Return tool features known to unlock this barrier feature."""
+        res: set[int] = set()
+        for tool_feat, barriers in self.tool_barrier_affinities.items():
+            if barrier_feature in barriers:
+                res.add(tool_feat)
+        return res
+
     def get_effector_hull(self, avatar_pos: tuple[int, int]) -> set[tuple[int, int]]:
         """Compute the spatial extent of the avatar plus extended tool reach."""
         hull = {avatar_pos}

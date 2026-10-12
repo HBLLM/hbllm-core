@@ -778,10 +778,7 @@ class MentalSimulationPlanner:
         for act in available_actions:
             if engine.is_spatial_effector(act):
                 continue
-            if (
-                getattr(engine, "immobile_entity_actions", None)
-                and act in engine.immobile_entity_actions
-            ):
+            if act in engine.immobile_entity_actions:
                 continue
             dyn = engine.action_dynamics.get(act)
             if dyn is not None and dyn.is_displacement_action():
@@ -835,7 +832,10 @@ class MentalSimulationPlanner:
         _grid_walls: set[tuple[int, int]] = set(static_barriers)
         for rr in range(H):
             for cc in range(W):
-                if int(curr_grid[rr, cc]) in _barrier_feats:
+                cell_val = int(curr_grid[rr, cc])
+                if cell_val in _barrier_feats or (
+                    bg_is_impassable_void and cell_val == bg and (rr, cc) not in goals
+                ):
                     _grid_walls.add((rr, cc))
 
         def _corridor_blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
@@ -999,7 +999,7 @@ class MentalSimulationPlanner:
                 )
                 return topo_steps
 
-        acc_monitor = getattr(getattr(engine, "working_memory", None), "acc_conflict", None)
+        acc_monitor = engine.working_memory.acc_conflict
         acc_weight = acc_monitor.compute_heuristic_weight(1.0) if acc_monitor else 1.0
         # Precompute Vectorized 2D Distance Field Matrix for O(1) heuristic lookup
         grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
@@ -1034,57 +1034,15 @@ class MentalSimulationPlanner:
             return base_h
 
         counter = 0
-        open_set: list[
-            tuple[
-                float,
-                float,
-                int,
-                tuple[int, int],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[tuple[int, int], tuple[int, int]]],
-                frozenset[tuple[int, int]],
-                list[MentalSimulationStep],
-            ]
-        ] = []
-        h0 = heuristic(start_pos, init_blocks)
-        heapq.heappush(
-            open_set,
-            (
-                h0,
-                0,
-                counter,
-                start_pos,
-                init_blocks,
-                init_open,
-                init_threats,
-                init_patrols,
-                init_chasers,
-                [],
-            ),
-        )
-
-        visited_states: set[
-            tuple[
-                tuple[int, int],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[int, int]],
-                frozenset[tuple[tuple[int, int], tuple[int, int]]],
-                frozenset[tuple[int, int]],
-                int,
-            ]
-        ] = set()
         has_periodic = (
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
         )
         has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
-        if getattr(engine, "consecutive_simulation_failures", 0) > 0 and not has_temporal:
-            max_expansions = 1200
+        if engine.consecutive_simulation_failures > 0 and not has_temporal:
+            max_expansions_budget = 1200
         else:
-            max_expansions = 1500 if not (has_temporal or bool(init_threats)) else 5000
+            max_expansions_budget = 1500 if not (has_temporal or bool(init_threats)) else 5000
 
         non_disp_wait_action: Any | None = None
         if has_temporal:
@@ -1097,339 +1055,432 @@ class MentalSimulationPlanner:
                     non_disp_wait_action = a
                     break
 
-        while open_set and max_expansions > 0:
-            max_expansions -= 1
-            (
-                f_score,
-                g_cost,
-                _,
-                cur_pos,
-                cur_blocks,
-                cur_open,
-                cur_threats,
-                cur_patrols,
-                cur_chasers,
-                path,
-            ) = heapq.heappop(open_set)
-
-            time_mod = len(path) % engine.hazard_tracker.environmental_period if has_periodic else 0
-            state_key = (
-                cur_pos,
-                cur_blocks,
-                cur_open,
-                cur_threats,
-                cur_patrols,
-                cur_chasers,
-                time_mod,
+        def _search_spacetime_astar(
+            _relaxed_safety: bool,
+        ) -> tuple[list[MentalSimulationStep] | None, bool]:
+            nonlocal counter
+            open_set: list[
+                tuple[
+                    float,
+                    float,
+                    int,
+                    tuple[int, int],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[tuple[int, int], tuple[int, int]]],
+                    frozenset[tuple[int, int]],
+                    list[MentalSimulationStep],
+                ]
+            ] = []
+            h0 = heuristic(start_pos, init_blocks)
+            heapq.heappush(
+                open_set,
+                (
+                    h0,
+                    0,
+                    counter,
+                    start_pos,
+                    init_blocks,
+                    init_open,
+                    init_threats,
+                    init_patrols,
+                    init_chasers,
+                    [],
+                ),
             )
-            if state_key in visited_states:
-                continue
-            visited_states.add(state_key)
 
-            if not is_block_delivery and cur_pos in goals and len(path) > 0:
-                logger.info(
-                    "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
-                    len(path),
+            visited_states: set[
+                tuple[
+                    tuple[int, int],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[int, int]],
+                    frozenset[tuple[tuple[int, int], tuple[int, int]]],
+                    frozenset[tuple[int, int]],
+                    int,
+                ]
+            ] = set()
+            max_expansions = max_expansions_budget
+            had_relaxable_block = False
+
+            while open_set and max_expansions > 0:
+                max_expansions -= 1
+                (
+                    f_score,
+                    g_cost,
+                    _,
                     cur_pos,
+                    cur_blocks,
+                    cur_open,
+                    cur_threats,
+                    cur_patrols,
+                    cur_chasers,
+                    path,
+                ) = heapq.heappop(open_set)
+
+                time_mod = (
+                    len(path) % engine.hazard_tracker.environmental_period if has_periodic else 0
                 )
-                engine.current_simulated_goal = cur_pos
-                return path
-
-            if is_block_delivery and all(g in cur_blocks for g in goals) and len(path) > 0:
-                logger.info(
-                    "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
-                    len(path),
+                state_key = (
+                    cur_pos,
+                    cur_blocks,
+                    cur_open,
+                    cur_threats,
+                    cur_patrols,
+                    cur_chasers,
+                    time_mod,
                 )
-                engine.current_simulated_goal = list(goals)[0] if goals else None
-                return path
-
-            candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
-            consecutive_waits = 0
-            if path:
-                for s in reversed(path):
-                    if s.predicted_avatar_pos == cur_pos:
-                        consecutive_waits += 1
-                    else:
-                        break
-            max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
-
-            # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
-            bump_wait_action: Any | None = non_disp_wait_action
-            if bump_wait_action is None and (cur_patrols or has_periodic):
-                for a_disp in available_actions:
-                    dyn = engine.action_dynamics.get(a_disp)
-                    if dyn is not None and dyn.is_displacement_action():
-                        dr_b, dc_b = dyn.delta_r, dyn.delta_c
-                        br, bc = cur_pos[0] + dr_b, cur_pos[1] + dc_b
-                        if (
-                            not (0 <= br < H and 0 <= bc < W)
-                            or (br, bc) in _grid_walls
-                            or (br, bc) in engine.hazard_tracker.static_lethal_positions
-                        ):
-                            bump_wait_action = a_disp
-                            break
-
-            if (
-                (cur_patrols or has_periodic)
-                and bump_wait_action is not None
-                and consecutive_waits < max_consecutive_waits
-            ):
-                candidate_actions.append(("__WAIT__", 0, 0))
-
-            for act, dr, dc in candidate_actions:
-                is_wait = act == "__WAIT__"
-                if is_wait:
-                    real_act = bump_wait_action
-                    if real_act is None:
-                        continue
-                else:
-                    real_act = act
-                if not is_wait and engine.inhibited_actions.get(act, 0) > 0:
+                if state_key in visited_states:
                     continue
-                if not is_wait and (cur_pos, act) in engine.failed_transitions:
-                    dest_r, dest_c = cur_pos[0] + dr, cur_pos[1] + dc
-                    if not (
-                        has_periodic and (dest_r, dest_c) in engine.hazard_tracker.periodic_cells
-                    ):
-                        continue
-                nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
-                if not (0 <= nr < H and 0 <= nc < W):
-                    continue
+                visited_states.add(state_key)
 
-                step_r = int(np.sign(dr))
-                step_c = int(np.sign(dc))
-                dist = max(abs(dr), abs(dc))
-                ray_blocked = False
-                for k in range(1, dist + 1):
-                    kr = cur_pos[0] + step_r * k
-                    kc = cur_pos[1] + step_c * k
-                    is_barrier_cell = (kr, kc) in static_barriers and (kr, kc) not in cur_open
-                    if is_barrier_cell:
-                        cell_feat = int(curr_grid[kr, kc]) if 0 <= kr < H and 0 <= kc < W else -1
-                        if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
-                            pass
+                if not is_block_delivery and cur_pos in goals and len(path) > 0:
+                    logger.info(
+                        "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
+                        len(path),
+                        cur_pos,
+                    )
+                    engine.current_simulated_goal = cur_pos
+                    return path, had_relaxable_block
+
+                if is_block_delivery and all(g in cur_blocks for g in goals) and len(path) > 0:
+                    logger.info(
+                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
+                        len(path),
+                    )
+                    engine.current_simulated_goal = list(goals)[0] if goals else None
+                    return path, had_relaxable_block
+
+                candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
+                consecutive_waits = 0
+                if path:
+                    for s in reversed(path):
+                        if s.predicted_avatar_pos == cur_pos:
+                            consecutive_waits += 1
                         else:
-                            ray_blocked = True
                             break
-                    if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:
-                        if int(curr_grid[kr, kc]) == bg and (kr, kc) not in goals:
-                            ray_blocked = True
-                            break
-                if ray_blocked:
-                    continue
+                max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
 
-                sim_step = len(path) + 1
-                if engine.is_under_strict_step_budget():
-                    rem_budget = engine.get_remaining_step_budget()
-                    if sim_step > rem_budget:
-                        continue
+                # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
+                bump_wait_action: Any | None = non_disp_wait_action
+                if bump_wait_action is None and (cur_patrols or has_periodic):
+                    for a_disp in available_actions:
+                        dyn = engine.action_dynamics.get(a_disp)
+                        if dyn is not None and dyn.is_displacement_action():
+                            dr_b, dc_b = dyn.delta_r, dyn.delta_c
+                            br, bc = cur_pos[0] + dr_b, cur_pos[1] + dc_b
+                            if (
+                                not (0 <= br < H and 0 <= bc < W)
+                                or (br, bc) in _grid_walls
+                                or (br, bc) in engine.hazard_tracker.static_lethal_positions
+                            ):
+                                bump_wait_action = a_disp
+                                break
 
-                walkable_feats = (
-                    engine.symbolic_theory.walkable_features | engine.verified_safe_features
-                )
-                if engine.hazard_tracker.is_hazard_at(
-                    nr, nc, sim_step, bg, avatar_features=av_feats, walkable_features=walkable_feats
-                ):
-                    continue
-                if engine.collision_cones.is_collision_hazard(
-                    nr, nc, sim_step, ignored_features=engine.mobile_threat_features
-                ):
-                    continue
                 if (
-                    sim_step <= 1
-                    and int(curr_grid[nr, nc]) in engine.hazard_tracker.known_lethal_features
-                    and int(curr_grid[nr, nc]) not in engine.mobile_threat_features
+                    (cur_patrols or has_periodic)
+                    and bump_wait_action is not None
+                    and consecutive_waits < max_consecutive_waits
                 ):
-                    continue
+                    candidate_actions.append(("__WAIT__", 0, 0))
 
-                living_gaze: set[tuple[int, int]] = set()
-                for t_pos in cur_threats:
-                    t = threat_map.get(t_pos)
-                    if t is not None:
-                        living_gaze.add(t.gaze_pos)
-
-                if (nr, nc) in living_gaze:
-                    continue
-
-                new_threats = cur_threats
-                if (nr, nc) in cur_threats:
-                    t = threat_map.get((nr, nc))
-                    if t is not None:
-                        if cur_pos == t.gaze_pos:
+                for act, dr, dc in candidate_actions:
+                    is_wait = act == "__WAIT__"
+                    if is_wait:
+                        real_act = bump_wait_action
+                        if real_act is None:
                             continue
-                        new_threats = cur_threats - {(nr, nc)}
-
-                new_patrols = cur_patrols
-                patrol_proximity_cost = 0.0
-                if cur_patrols:
-                    predicted = advance_patrols(cur_patrols, (nr, nc))
-                    if predicted is None:
+                    else:
+                        real_act = act
+                    if not is_wait and len(path) == 0 and engine.inhibited_actions.get(act, 0) > 0:
                         continue
-                    new_patrols = predicted
-
-                    upcoming = _patrol_next_cells(cur_patrols)
-                    if (nr, nc) in upcoming:
+                    if not is_wait and (cur_pos, act) in engine.failed_transitions:
+                        dest_r, dest_c = cur_pos[0] + dr, cur_pos[1] + dc
+                        if not (
+                            has_periodic
+                            and (dest_r, dest_c) in engine.hazard_tracker.periodic_cells
+                        ):
+                            continue
+                    nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
+                    if not (0 <= nr < H and 0 <= nc < W):
                         continue
-                    for pp, _pf in cur_patrols:
-                        dist_to_patrol = abs(nr - pp[0]) + abs(nc - pp[1])
-                        if 0 < dist_to_patrol <= step_size:
-                            moving_towards = False
-                            if _pf[0] != 0 and (nr - pp[0]) * _pf[0] > 0:
-                                moving_towards = True
-                            elif _pf[1] != 0 and (nc - pp[1]) * _pf[1] > 0:
-                                moving_towards = True
-                            if moving_towards:
-                                continue
 
-                new_chasers = cur_chasers
-                chaser_proximity_cost = 0.0
-                if cur_chasers:
-                    predicted_chasers = advance_chasers(cur_chasers, (nr, nc))
-                    if predicted_chasers is None:
-                        continue
-                    new_chasers = predicted_chasers
-                    for cp in new_chasers:
-                        dist_to_chaser = abs(nr - cp[0]) + abs(nc - cp[1])
-                        if dist_to_chaser <= 1:
-                            chaser_proximity_cost += 20.0
-                        elif dist_to_chaser <= 2:
-                            chaser_proximity_cost += 5.0
-
-                epistemic_cost = 0.0
-                for k in range(1, dist + 1):
-                    kr = cur_pos[0] + step_r * k
-                    kc = cur_pos[1] + step_c * k
-                    if 0 <= kr < H and 0 <= kc < W:
-                        cell_feat = int(curr_grid[kr, kc])
-                        if cell_feat in engine.hazard_tracker.known_lethal_features:
-                            if cell_feat in engine.mobile_threat_features:
+                    step_r = int(np.sign(dr))
+                    step_c = int(np.sign(dc))
+                    dist = max(abs(dr), abs(dc))
+                    ray_blocked = False
+                    for k in range(1, dist + 1):
+                        kr = cur_pos[0] + step_r * k
+                        kc = cur_pos[1] + step_c * k
+                        is_barrier_cell = (kr, kc) in static_barriers and (kr, kc) not in cur_open
+                        if is_barrier_cell:
+                            cell_feat = (
+                                int(curr_grid[kr, kc]) if 0 <= kr < H and 0 <= kc < W else -1
+                            )
+                            if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
                                 pass
                             else:
-                                is_flanked_threat = (
-                                    (kr, kc) in cur_threats
-                                    and (kr, kc) == (nr, nc)
-                                    and (kr, kc) in threat_map
-                                    and cur_pos != threat_map[(kr, kc)].gaze_pos
-                                )
-                                if not is_flanked_threat:
-                                    epistemic_cost = float("inf")
-                                    break
-                        if engine.is_feature_unverified(cell_feat, bg):
-                            epistemic_cost += engine.UNVERIFIED_FEATURE_COST
-                        if (kr, kc) in unknown_entity_cells:
-                            epistemic_cost += 10.0
-                if epistemic_cost == float("inf"):
-                    continue
+                                ray_blocked = True
+                                break
+                        if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:
+                            if int(curr_grid[kr, kc]) == bg and (kr, kc) not in goals:
+                                ray_blocked = True
+                                break
+                    if ray_blocked:
+                        continue
 
-                new_blocks = cur_blocks
-                new_pos = (nr, nc)
-
-                if engine.physics_engine.has_gravity:
-                    if not engine.physics_engine.is_supported(
-                        nr, nc, curr_grid, engine.symbolic_theory.barrier_features, static_barriers
-                    ):
-                        land_pos, fall_traj, is_lethal = engine.physics_engine.project_fall(
-                            nr,
-                            nc,
-                            curr_grid,
-                            engine.symbolic_theory.barrier_features,
-                            static_barriers,
-                            lethal_features=engine.hazard_tracker.known_lethal_features,
-                        )
-                        if is_lethal:
+                    sim_step = len(path) + 1
+                    if engine.is_under_strict_step_budget():
+                        rem_budget = engine.get_remaining_step_budget()
+                        if sim_step > rem_budget:
                             continue
-                        new_pos = land_pos
 
-                if (nr, nc) in cur_blocks:
-                    pushed_r, pushed_c = nr + dr, nc + dc
-                    if not (0 <= pushed_r < H and 0 <= pushed_c < W):
-                        continue
-                    if (
-                        pushed_r,
-                        pushed_c,
-                    ) in static_barriers and (pushed_r, pushed_c) not in cur_open:
-                        continue
-                    if (pushed_r, pushed_c) in cur_blocks:
-                        continue
                     walkable_feats = (
                         engine.symbolic_theory.walkable_features | engine.verified_safe_features
                     )
                     if engine.hazard_tracker.is_hazard_at(
-                        pushed_r,
-                        pushed_c,
+                        nr,
+                        nc,
                         sim_step,
                         bg,
                         avatar_features=av_feats,
                         walkable_features=walkable_feats,
                     ):
                         continue
+                    if engine.collision_cones.is_collision_hazard(
+                        nr, nc, sim_step, ignored_features=engine.mobile_threat_features
+                    ):
+                        continue
+                    if (
+                        sim_step <= 1
+                        and int(curr_grid[nr, nc]) in engine.hazard_tracker.known_lethal_features
+                        and int(curr_grid[nr, nc]) not in engine.mobile_threat_features
+                    ):
+                        continue
 
-                    if engine.physics_engine.has_gravity:
-                        if not engine.physics_engine.is_supported(
+                    living_gaze: set[tuple[int, int]] = set()
+                    for t_pos in cur_threats:
+                        t = threat_map.get(t_pos)
+                        if t is not None:
+                            living_gaze.add(t.gaze_pos)
+
+                    gaze_penalty = 0.0
+                    if (nr, nc) in living_gaze:
+                        if _relaxed_safety:
+                            gaze_penalty = 20.0
+                        else:
+                            had_relaxable_block = True
+                            continue
+
+                    new_threats = cur_threats
+                    threat_penalty = 0.0
+                    if (nr, nc) in cur_threats:
+                        t = threat_map.get((nr, nc))
+                        if t is not None:
+                            if cur_pos == t.gaze_pos:
+                                if _relaxed_safety:
+                                    threat_penalty = 30.0
+                                else:
+                                    had_relaxable_block = True
+                                    continue
+                            new_threats = cur_threats - {(nr, nc)}
+
+                    new_patrols = cur_patrols
+                    patrol_proximity_cost = 0.0
+                    if cur_patrols:
+                        predicted = advance_patrols(cur_patrols, (nr, nc))
+                        if predicted is None:
+                            continue
+                        new_patrols = predicted
+
+                        upcoming = _patrol_next_cells(cur_patrols)
+                        if (nr, nc) in upcoming:
+                            if _relaxed_safety:
+                                patrol_proximity_cost += 15.0
+                            else:
+                                had_relaxable_block = True
+                                continue
+                        for pp, _pf in cur_patrols:
+                            dist_to_patrol = abs(nr - pp[0]) + abs(nc - pp[1])
+                            if 0 < dist_to_patrol <= step_size:
+                                moving_towards = False
+                                if _pf[0] != 0 and (nr - pp[0]) * _pf[0] > 0:
+                                    moving_towards = True
+                                elif _pf[1] != 0 and (nc - pp[1]) * _pf[1] > 0:
+                                    moving_towards = True
+                                if moving_towards:
+                                    continue
+                                patrol_proximity_cost += 10.0
+
+                    new_chasers = cur_chasers
+                    chaser_proximity_cost = 0.0
+                    if cur_chasers:
+                        predicted_chasers = advance_chasers(cur_chasers, (nr, nc))
+                        if predicted_chasers is None:
+                            continue
+                        new_chasers = predicted_chasers
+                        for cp in new_chasers:
+                            dist_to_chaser = abs(nr - cp[0]) + abs(nc - cp[1])
+                            if dist_to_chaser <= 1:
+                                chaser_proximity_cost += 20.0
+                            elif dist_to_chaser <= 2:
+                                chaser_proximity_cost += 5.0
+
+                    epistemic_cost = 0.0
+                    for k in range(1, dist + 1):
+                        kr = cur_pos[0] + step_r * k
+                        kc = cur_pos[1] + step_c * k
+                        if 0 <= kr < H and 0 <= kc < W:
+                            cell_feat = int(curr_grid[kr, kc])
+                            if cell_feat in engine.hazard_tracker.known_lethal_features:
+                                if cell_feat in engine.mobile_threat_features:
+                                    pass
+                                else:
+                                    is_flanked_threat = (
+                                        (kr, kc) in cur_threats
+                                        and (kr, kc) == (nr, nc)
+                                        and threat_map.get((kr, kc)) is not None
+                                        and cur_pos != threat_map[(kr, kc)].gaze_pos
+                                    )
+                                    if not is_flanked_threat:
+                                        epistemic_cost = float("inf")
+                                        break
+                            if engine.is_feature_unverified(cell_feat, bg):
+                                epistemic_cost += engine.UNVERIFIED_FEATURE_COST
+                            if (kr, kc) in unknown_entity_cells:
+                                epistemic_cost += 10.0
+                    if epistemic_cost == float("inf"):
+                        continue
+
+                    new_blocks = cur_blocks
+                    new_pos = (nr, nc)
+
+                    if (nr, nc) in cur_blocks:
+                        pushed_r = nr + step_r * step_size
+                        pushed_c = nc + step_c * step_size
+                        if not (0 <= pushed_r < H and 0 <= pushed_c < W):
+                            continue
+                        if (pushed_r, pushed_c) in _grid_walls:
+                            continue
+                        if (pushed_r, pushed_c) in cur_blocks:
+                            continue
+                        push_ray_blocked = False
+                        for pk in range(1, step_size + 1):
+                            pkr = nr + step_r * pk
+                            pkc = nc + step_c * pk
+                            if (pkr, pkc) in _grid_walls:
+                                push_ray_blocked = True
+                                break
+                            if (
+                                bg_is_impassable_void
+                                and int(curr_grid[pkr, pkc]) == bg
+                                and (pkr, pkc) not in goals
+                            ):
+                                push_ray_blocked = True
+                                break
+                        if push_ray_blocked:
+                            continue
+
+                        if engine.hazard_tracker.is_hazard_at(
                             pushed_r,
                             pushed_c,
-                            curr_grid,
-                            engine.symbolic_theory.barrier_features,
-                            static_barriers,
+                            sim_step,
+                            bg,
+                            avatar_features=av_feats,
+                            walkable_features=walkable_feats,
                         ):
-                            land_b, _, is_b_lethal = engine.physics_engine.project_fall(
+                            continue
+
+                        if engine.physics_engine.has_gravity:
+                            if not engine.physics_engine.is_supported(
                                 pushed_r,
                                 pushed_c,
                                 curr_grid,
                                 engine.symbolic_theory.barrier_features,
                                 static_barriers,
+                            ):
+                                land_b, _, is_b_lethal = engine.physics_engine.project_fall(
+                                    pushed_r,
+                                    pushed_c,
+                                    curr_grid,
+                                    engine.symbolic_theory.barrier_features,
+                                    static_barriers,
+                                )
+                                if is_b_lethal:
+                                    continue
+                                pushed_r, pushed_c = land_b
+
+                        if is_block_delivery and (pushed_r, pushed_c) not in goals:
+                            candidate_block_set = (set(cur_blocks) - {(nr, nc)}) | {
+                                (pushed_r, pushed_c)
+                            }
+                            dl_eval = CounterfactualDeadlockDetector.evaluate_deadlock(
+                                (pushed_r, pushed_c),
+                                set(goals),
+                                static_barriers,
+                                candidate_block_set,
+                                (H, W),
                             )
-                            if is_b_lethal:
+                            if dl_eval.is_deadlock:
                                 continue
-                            pushed_r, pushed_c = land_b
 
-                    if is_block_delivery and (pushed_r, pushed_c) not in goals:
-                        candidate_block_set = (set(cur_blocks) - {(nr, nc)}) | {
-                            (pushed_r, pushed_c)
-                        }
-                        dl_eval = CounterfactualDeadlockDetector.evaluate_deadlock(
-                            (pushed_r, pushed_c),
-                            set(goals),
-                            static_barriers,
-                            candidate_block_set,
-                            (H, W),
-                        )
-                        if dl_eval.is_deadlock:
-                            continue
+                        block_set = set(cur_blocks)
+                        block_set.remove((nr, nc))
+                        block_set.add((pushed_r, pushed_c))
+                        new_blocks = frozenset(block_set)
 
-                    block_set = set(cur_blocks)
-                    block_set.remove((nr, nc))
-                    block_set.add((pushed_r, pushed_c))
-                    new_blocks = frozenset(block_set)
+                    new_open = cur_open
+                    if new_pos in mutation_triggers:
+                        new_open = cur_open | frozenset(mutation_triggers[new_pos])
 
-                new_open = cur_open
-                if new_pos in mutation_triggers:
-                    new_open = cur_open | frozenset(mutation_triggers[new_pos])
+                    wait_cost = 2.0 if is_wait else 0.0
 
-                wait_cost = 2.0 if is_wait else 0.0
+                    step_cost = (
+                        1
+                        + epistemic_cost
+                        + patrol_proximity_cost
+                        + chaser_proximity_cost
+                        + wait_cost
+                        + gaze_penalty
+                        + threat_penalty
+                    )
+                    new_g = g_cost + step_cost
+                    new_h = heuristic(new_pos, new_blocks)
+                    new_step = MentalSimulationStep(action=real_act, predicted_avatar_pos=new_pos)
+                    counter += 1
+                    heapq.heappush(
+                        open_set,
+                        (
+                            new_g + new_h,
+                            new_g,
+                            counter,
+                            new_pos,
+                            new_blocks,
+                            new_open,
+                            new_threats,
+                            new_patrols,
+                            new_chasers,
+                            path + [new_step],
+                        ),
+                    )
 
-                step_cost = (
-                    1 + epistemic_cost + patrol_proximity_cost + chaser_proximity_cost + wait_cost
-                )
-                new_g = g_cost + step_cost
-                new_h = heuristic(new_pos, new_blocks)
-                new_step = MentalSimulationStep(action=real_act, predicted_avatar_pos=new_pos)
-                counter += 1
-                heapq.heappush(
-                    open_set,
-                    (
-                        new_g + new_h,
-                        new_g,
-                        counter,
-                        new_pos,
-                        new_blocks,
-                        new_open,
-                        new_threats,
-                        new_patrols,
-                        new_chasers,
-                        path + [new_step],
-                    ),
-                )
+            return None, had_relaxable_block
+
+        # Run primary safety-first A* pass
+        plan, had_relaxable_block = _search_spacetime_astar(_relaxed_safety=False)
+        if plan is not None:
+            return plan
+
+        # Relaxed Safety Retry: If primary safe search failed and gaze/threat constraints were encountered
+        if had_relaxable_block and goals:
+            logger.info(
+                "MentalSimulationPlanner: Primary safe A* blocked by gaze/threat constraints. "
+                "Retrying with relaxed safety constraints."
+            )
+            relaxed_plan, _ = _search_spacetime_astar(_relaxed_safety=True)
+            if relaxed_plan is not None:
+                return relaxed_plan
 
         # Hierarchical Subgoal Decomposition Fallback
         if mutation_triggers or goals:
@@ -1502,10 +1553,19 @@ class MentalSimulationPlanner:
                             ray_blocked = True
                             break
                         if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:
-                            if int(curr_grid[kr, kc]) == bg and (kr, kc) not in goals:
+                            if (
+                                int(curr_grid[kr, kc]) == bg
+                                and (kr, kc) not in goals
+                                and (kr, kc) not in target_positions
+                            ):
                                 ray_blocked = True
                                 break
-                        if 0 <= kr < H and 0 <= kc < W:
+                        if (
+                            0 <= kr < H
+                            and 0 <= kc < W
+                            and (kr, kc) not in target_positions
+                            and (kr, kc) not in goals
+                        ):
                             if engine.is_feature_unverified(int(curr_grid[kr, kc]), bg):
                                 ray_blocked = True
                                 break
@@ -1531,22 +1591,74 @@ class MentalSimulationPlanner:
                     engine.subgoal_stack.push_subgoal(sg)
                 return accumulated_plan
 
-            candidate_triggers: list[tuple[tuple[int, int], list[MentalSimulationStep], int]] = []
+            candidate_triggers: list[
+                tuple[tuple[int, int], list[MentalSimulationStep], int, set[tuple[int, int]]]
+            ] = []
+
+            # 1. Discover reachable spatial manifold from cur_pos avoiding effective_barriers
+            reachable_cells = {cur_pos}
+            bfs_q = deque([cur_pos])
+            while bfs_q:
+                cp = bfs_q.popleft()
+                for act, dr, dc in movable_actions:
+                    np_pos = (cp[0] + dr, cp[1] + dc)
+                    if 0 <= np_pos[0] < H and 0 <= np_pos[1] < W and np_pos not in reachable_cells:
+                        if np_pos not in effective_barriers:
+                            reachable_cells.add(np_pos)
+                            bfs_q.append(np_pos)
+
+            # 2. Identify boundary barrier cells bordering the reachable manifold
+            boundary_barriers: set[tuple[int, int]] = set()
+            for r, c in reachable_cells:
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nbr = (r + dr, c + dc)
+                    if nbr in effective_barriers:
+                        boundary_barriers.add(nbr)
+
+            # 3. Known vmPFC Distal Causal Attributions & Body Schema Tool Resonance
+            bg = engine.estimate_background(curr_grid)
+            entities = engine.extract_entities(curr_grid, bg)
+            av_feats = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
+
+            if hasattr(engine, "causal_cortex"):
+                for b_pos in boundary_barriers:
+                    b_feat = int(curr_grid[b_pos[0], b_pos[1]])
+                    trig_pos, req_tool = engine.causal_cortex.query_barrier_clearance(b_pos, b_feat)
+                    if trig_pos is not None:
+                        tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
+                        if tr_path is not None:
+                            candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
+                    elif req_tool is not None:
+                        if engine.working_memory.is_holding(req_tool):
+                            open_barriers.add(b_pos)
+                        else:
+                            for e in entities:
+                                if e.feature_id == req_tool and e.grid_pos in reachable_cells:
+                                    t_path = find_shortest_path(
+                                        cur_pos, {e.grid_pos}, effective_barriers
+                                    )
+                                    if t_path is not None:
+                                        candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
+
+            # 4. Known state mutation triggers (switches and pressure plates)
             for tr_pos, opened_set in mutation_triggers.items():
-                unopened = opened_set - open_barriers
+                unopened = (opened_set & effective_barriers) - open_barriers
                 if not unopened:
                     continue
                 tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
                 if tr_path is not None:
-                    candidate_triggers.append((tr_pos, tr_path, len(unopened)))
+                    candidate_triggers.append((tr_pos, tr_path, len(unopened) * 10, unopened))
 
+            # 5. Epistemic Affordance Probing: If no confirmed triggers, test reachable objects
             if not candidate_triggers:
                 if engine.working_memory.held_items:
                     adjacent_barrier_cells: set[tuple[int, int]] = set()
-                    for br, bc in effective_barriers:
+                    for br, bc in boundary_barriers:
                         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                             ar, ac = br + dr, bc + dc
-                            if (ar, ac) not in effective_barriers and 0 <= ar < H and 0 <= ac < W:
+                            if (ar, ac) in reachable_cells:
                                 adjacent_barrier_cells.add((ar, ac))
                     if adjacent_barrier_cells:
                         approach_path = find_shortest_path(
@@ -1558,25 +1670,25 @@ class MentalSimulationPlanner:
                                 engine.subgoal_stack.push_subgoal(sg)
                             return accumulated_plan
 
-                bg = engine.estimate_background(curr_grid)
-                entities = engine.extract_entities(curr_grid, bg)
-                av_feats = engine.avatar_features or (
-                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
-                )
                 candidate_tools = [
                     e.grid_pos
                     for e in entities
-                    if e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE, EntityRole.UNKNOWN)
-                    and 1 <= e.area <= 64
+                    if e.role
+                    in (
+                        EntityRole.MANIPULABLE,
+                        EntityRole.RESOURCE,
+                        EntityRole.UNKNOWN,
+                        EntityRole.ACTUATOR,
+                    )
                     and e.feature_id not in av_feats
                     and e.grid_pos not in goals
                     and e.grid_pos != cur_pos
-                    and (engine.avatar_pos is None or e.grid_pos != engine.avatar_pos)
+                    and e.grid_pos in reachable_cells
                 ]
                 for t_pos in candidate_tools:
                     t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
                     if t_path is not None and len(t_path) > 0:
-                        candidate_triggers.append((t_pos, t_path, 1))
+                        candidate_triggers.append((t_pos, t_path, 1, set()))
 
             if not candidate_triggers:
                 all_actions_calibrated = all(
@@ -1615,8 +1727,8 @@ class MentalSimulationPlanner:
                         return accumulated_plan
                 break
 
-            candidate_triggers.sort(key=lambda x: (len(x[1]), -x[2]))
-            chosen_pos, switch_path, _ = candidate_triggers[0]
+            candidate_triggers.sort(key=lambda x: (-x[2], len(x[1])))
+            chosen_pos, switch_path, _, opened_cells = candidate_triggers[0]
 
             buffered_subgoals.append(
                 FrontopolarSubgoal(
@@ -1630,6 +1742,7 @@ class MentalSimulationPlanner:
 
             accumulated_plan.extend(switch_path)
             cur_pos = chosen_pos
+            open_barriers.update(opened_cells)
             open_barriers.update(mutation_triggers.get(chosen_pos, set()))
 
             matching_mutations = [

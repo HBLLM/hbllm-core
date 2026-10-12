@@ -261,6 +261,8 @@ class CausalInductionCortex:
         prev_grid: np.ndarray,
         curr_grid: np.ndarray,
         bg_feature: int = 0,
+        action_locus: tuple[int, int] | None = None,
+        avatar_features: set[int] | None = None,
     ) -> None:
         """Bind intentional do(a) action to local and distal environmental mutations."""
         if origin_pos is not None:
@@ -268,10 +270,13 @@ class CausalInductionCortex:
 
         # 1. Distal Causal Attribution via vmPFC
         interaction_loci: list[tuple[int, int]] = []
-        if origin_pos is not None:
-            interaction_loci.append(origin_pos)
-        if target_pos is not None and target_pos != origin_pos:
-            interaction_loci.append(target_pos)
+        if action_locus is not None:
+            interaction_loci.append(action_locus)
+        else:
+            if origin_pos is not None:
+                interaction_loci.append(origin_pos)
+            if target_pos is not None and target_pos != origin_pos:
+                interaction_loci.append(target_pos)
 
         for loc in interaction_loci:
             self.causal_attributor.record_transition(
@@ -279,6 +284,7 @@ class CausalInductionCortex:
                 curr_grid=curr_grid,
                 action_pos=loc,
                 background_feature=bg_feature,
+                avatar_features=avatar_features,
             )
 
     def query_barrier_clearance(
@@ -304,6 +310,13 @@ class CausalInductionCortex:
         )
         if affordance is not None:
             return (affordance.trigger_pos, None)
+
+        # 3. Check if body schema knows a tool that unlocks this barrier
+        tools = self.body_schema.get_tools_for_barrier(barrier_feature)
+        if tools:
+            for t_feat in tools:
+                if t_feat in self.body_schema.tool_barrier_affinities:
+                    return (None, t_feat)
 
         return (None, None)
 

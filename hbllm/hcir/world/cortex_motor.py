@@ -31,7 +31,7 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.active_inference import ActionNode
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
-from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.cortex_perception import EntityRole, PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.spatial_containment import RoomDoor
@@ -1201,7 +1201,9 @@ class MotorCortexEffector:
             if (dr, dc) not in engine.quiescent_click_targets and 0 <= dr < H and 0 <= dc < W:
                 v_count = engine.entity_visit_counts.get(f"click_{dr}_{dc}", 0)
                 if v_count < 3:
-                    cand_score = 320.0 + (sym_conf * 40.0) - float(v_count) * 15.0
+                    is_void = int(curr_grid[dr, dc]) == bg
+                    base = 120.0 if is_void else 320.0
+                    cand_score = base + (sym_conf * 40.0) - float(v_count) * 15.0
                     candidates.append((dr, dc, cand_score))
         return candidates
 
@@ -1251,19 +1253,30 @@ class MotorCortexEffector:
             ):
                 v_count = engine.entity_visit_counts.get(f"click_{op[0]}_{op[1]}", 0)
                 if v_count < 3:
+                    is_void = og.get("is_void", False) or (int(curr_grid[op[0], op[1]]) == bg)
                     if g_type in (
                         "relational_alignment",
                         "optical_mirror_target",
                         "reflection_target",
                     ):
-                        cand_score = (
-                            350.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
-                        )
+                        if is_void:
+                            cand_score = (
+                                60.0 + (og.get("confidence", 0.3) * 20.0) - float(v_count) * 20.0
+                            )
+                        else:
+                            cand_score = (
+                                240.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
+                            )
                         candidates.append((op[0], op[1], cand_score))
                     elif g_type == "symmetry_completion":
-                        cand_score = (
-                            250.0 + (og.get("confidence", 0.8) * 50.0) - float(v_count) * 20.0
-                        )
+                        if is_void:
+                            cand_score = (
+                                50.0 + (og.get("confidence", 0.5) * 20.0) - float(v_count) * 20.0
+                            )
+                        else:
+                            cand_score = (
+                                220.0 + (og.get("confidence", 0.8) * 50.0) - float(v_count) * 20.0
+                            )
                         candidates.append((op[0], op[1], cand_score))
         return candidates
 
@@ -1287,27 +1300,29 @@ class MotorCortexEffector:
                 mr, mc = m_item.grid_pos
                 if (mr, mc) not in engine.quiescent_click_targets and 0 <= mr < H and 0 <= mc < W:
                     visit_count = engine.entity_visit_counts.get(f"click_{mr}_{mc}", 0)
-                    last_step = getattr(engine, "last_effector_target_step", {}).get((mr, mc), -999)
-                    delta_t = max(1, getattr(engine, "step_counter", 0) - last_step)
+                    last_step = engine.last_effector_target_step.get((mr, mc), -999)
+                    delta_t = max(1, engine.step_counter - last_step)
                     refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
                     visit_damping = min(30.0, float(visit_count) * 4.0)
-                    score = 220.0 - refractory - visit_damping
+                    score = 400.0 - refractory - visit_damping
                     candidates.append((mr, mc, score))
 
             for item in panel["items"]:
                 ir, ic = item.grid_pos
                 if (ir, ic) not in engine.quiescent_click_targets and 0 <= ir < H and 0 <= ic < W:
                     visit_count = engine.entity_visit_counts.get(f"click_{ir}_{ic}", 0)
-                    bonus = 160.0 if has_effective_item else 120.0
+                    bonus = 260.0 if has_effective_item else 200.0
                     feat_bonus = 40.0 if item.feature_id in engine.effective_features else 0.0
-                    last_step = getattr(engine, "last_effector_target_step", {}).get((ir, ic), -999)
-                    delta_t = max(1, getattr(engine, "step_counter", 0) - last_step)
-                    is_goal_converging = (ir, ic) == getattr(
-                        engine, "active_goal_converging_coord", None
-                    ) and getattr(engine, "consecutive_goal_converging_clicks", 0) < 12
-                    is_active_momentum = (ir, ic) == getattr(
-                        engine, "last_effective_click_coord", None
-                    ) and getattr(engine, "consecutive_effective_clicks", 0) < 6
+                    last_step = engine.last_effector_target_step.get((ir, ic), -999)
+                    delta_t = max(1, engine.step_counter - last_step)
+                    is_goal_converging = (
+                        (ir, ic) == engine.active_goal_converging_coord
+                        and engine.consecutive_goal_converging_clicks < 12
+                    )
+                    is_active_momentum = (
+                        (ir, ic) == engine.last_effective_click_coord
+                        and engine.consecutive_effective_clicks < 6
+                    )
                     if is_goal_converging:
                         momentum_bonus = 120.0
                         ior_penalty = 0.0
@@ -1321,6 +1336,53 @@ class MotorCortexEffector:
                         ior_penalty = refractory + visit_damping
                     score = bonus + feat_bonus + momentum_bonus - ior_penalty
                     candidates.append((ir, ic, score))
+        return candidates
+
+    @staticmethod
+    def _score_kinetic_repulsion_targets(
+        entities: Sequence[SpatialEntity],
+        curr_grid: np.ndarray,
+        bg: int,
+        H: int,
+        W: int,
+        engine: AutonomousEpistemicEngine,
+    ) -> list[tuple[int, int, float]]:
+        """Acoustic / wave repulsion targeting: click behind floating items to propel toward goal zones."""
+        candidates: list[tuple[int, int, float]] = []
+        target_zones = [
+            e.grid_pos
+            for e in entities
+            if (
+                e.role == EntityRole.GOAL
+                or e.feature_id in engine.symbolic_theory.goal_features
+                or e.grid_pos in engine.learned_goal_positions
+            )
+            and e.area >= 4
+        ]
+        if not target_zones:
+            return candidates
+
+        for e in entities:
+            if (
+                e.role in (EntityRole.MANIPULABLE, EntityRole.UNKNOWN)
+                and 4 <= e.area <= 64
+                and e.grid_pos not in target_zones
+                and e.feature_id != bg
+            ):
+                er, ec = e.grid_pos
+                tr, tc = min(target_zones, key=lambda z: abs(z[0] - er) + abs(z[1] - ec))
+                dr = int(np.sign(tr - er))
+                dc = int(np.sign(tc - ec))
+                click_r = er - dr * 4
+                click_c = ec - dc * 4
+                if (
+                    0 <= click_r < H
+                    and 0 <= click_c < W
+                    and (click_r, click_c) not in engine.quiescent_click_targets
+                ):
+                    v_count = engine.entity_visit_counts.get(f"click_{click_r}_{click_c}", 0)
+                    if v_count < 4:
+                        candidates.append((click_r, click_c, 350.0 - float(v_count) * 25.0))
         return candidates
 
     @classmethod
@@ -1358,6 +1420,11 @@ class MotorCortexEffector:
 
         # 5. Gestalt Affordance Panels
         click_candidates.extend(cls._score_affordance_panels(entities, curr_grid, bg, H, W, engine))
+
+        # 5b. Kinetic wave & repulsion targeting
+        click_candidates.extend(
+            cls._score_kinetic_repulsion_targets(entities, curr_grid, bg, H, W, engine)
+        )
 
         # 6. Salient entities if no panel candidates exist
         if not click_candidates:
@@ -1454,11 +1521,7 @@ class MotorCortexEffector:
                 engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
             )
             target_r, target_c = int(best_r), int(best_c)
-            if not hasattr(engine, "last_effector_target_step"):
-                engine.last_effector_target_step = {}
-            engine.last_effector_target_step[(target_r, target_c)] = getattr(
-                engine, "step_counter", 0
-            )
+            engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
         else:
             unprobed = [
                 (r, c)

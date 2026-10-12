@@ -227,6 +227,7 @@ class AutonomousEpistemicEngine:
         # Cognitive state
         self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
         self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
+        self.world_id: str = "default"
         self.step_counter: int = 0
         self.environmental_step_limit: int | None = None
 
@@ -541,16 +542,14 @@ class AutonomousEpistemicEngine:
 
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
-        if getattr(self, "_phase", None) != new_phase:
-            old = getattr(self, "_phase", EpistemicPhase.MOTOR_GROUNDING)
+        if self._phase != new_phase:
+            old = self._phase
             logger.info(
                 "AutonomousEpistemicEngine: Phase transition [%s -> %s] (reason: %s)",
                 old,
                 new_phase,
                 reason,
             )
-            if not hasattr(self, "phase_history"):
-                self.phase_history = []
             self.phase_history.append((old, new_phase, reason))
             self._phase = new_phase
 
@@ -896,6 +895,7 @@ class AutonomousEpistemicEngine:
             learned_barriers=self.learned_barriers,
             learned_goal_positions=self.learned_goal_positions,
             learned_receptacle_positions=self.learned_receptacle_positions,
+            avatar_pos=self.avatar_pos,
         )
 
     def compute_frame_diff(
@@ -927,7 +927,11 @@ class AutonomousEpistemicEngine:
         action: int | None = None,
         action_data: dict[str, Any] | None = None,
     ) -> None:
-        prev_av_pos = getattr(self, "avatar_pos", None)
+        if action is None:
+            action = self.last_action
+        if action_data is None:
+            action_data = self.last_action_data
+        prev_av_pos = self.avatar_pos
         EpistemicFeedbackAssimilator.assimilate(
             self,
             curr_grid,
@@ -940,8 +944,8 @@ class AutonomousEpistemicEngine:
 
         # Wire W041-W050 temporal buffer & state transition sequence modeling
         new_snap = WorldStateSnapshot(
-            world_id=getattr(self, "world_id", "default"),
-            variables={"grid": curr_grid, "avatar_pos": getattr(self, "avatar_pos", None)},
+            world_id=self.world_id,
+            variables={"grid": curr_grid, "avatar_pos": self.avatar_pos},
         )
         prev_snap = self.temporal_buffer.current_state
         self.temporal_buffer.push(new_snap)
@@ -956,7 +960,7 @@ class AutonomousEpistemicEngine:
         if action is not None:
             self.budget_governor.record_step()
             prior_st = {"avatar_pos": prev_av_pos}
-            next_st = {"avatar_pos": getattr(self, "avatar_pos", None)}
+            next_st = {"avatar_pos": self.avatar_pos}
             self.action_discovery.record_transition(
                 action_id=action,
                 prior_state=prior_st,

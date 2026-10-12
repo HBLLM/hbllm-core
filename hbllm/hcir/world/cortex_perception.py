@@ -286,6 +286,7 @@ class SpatialRoleClassifier:
         mutations: list[Any] | None = None,
         goal_pos: set[tuple[int, int]] | None = None,
         receptacle_pos: set[tuple[int, int]] | None = None,
+        avatar_pos: tuple[int, int] | None = None,
     ) -> EntityRole:
         min_r, max_r, min_c, max_c = bounding_box
         av_set = av_feats or set()
@@ -507,13 +508,20 @@ class GestaltAffordanceDetector:
                     continue
 
                 if 0 <= ref_r < H and 0 <= ref_c < W and (ref_r, ref_c) != (cr, cc):
-                    if int(grid[ref_r, ref_c]) != feat_int:
+                    target_val = int(grid[ref_r, ref_c])
+                    if target_val != feat_int:
+                        is_void = target_val == bg
+                        if is_void and sym_score < 0.85:
+                            continue
                         goals.append(
                             {
                                 "type": "relational_alignment",
                                 "position": (ref_r, ref_c),
                                 "feature": feat_int,
-                                "confidence": float(sym_score * 0.90),
+                                "confidence": float(sym_score * 0.90)
+                                if not is_void
+                                else float(sym_score * 0.35),
+                                "is_void": is_void,
                             }
                         )
 
@@ -664,6 +672,7 @@ class PerceptionEngine:
         learned_barriers: set[tuple[int, int]] | None = None,
         learned_goal_positions: set[tuple[int, int]] | None = None,
         learned_receptacle_positions: set[tuple[int, int]] | None = None,
+        avatar_pos: tuple[int, int] | None = None,
     ) -> list[SpatialEntity]:
         """Domain-agnostic connected-component entity segmentation using native substrate labeling."""
         H, W = grid.shape
@@ -708,6 +717,7 @@ class PerceptionEngine:
                     mutations=mutations,
                     goal_pos=goal_pos,
                     receptacle_pos=receptacle_pos,
+                    avatar_pos=avatar_pos,
                 )
 
                 ent = SpatialEntity(
@@ -721,6 +731,30 @@ class PerceptionEngine:
                     properties={"cells": cells, "feature": val, "feature_id": val},
                 )
                 entities.append(ent)
+
+        # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
+        agent_entities = [e for e in entities if e.feature_id in av_feats]
+        if len(agent_entities) > 1 and avatar_pos is not None:
+            best_agent = min(
+                agent_entities,
+                key=lambda e: (
+                    abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
+                ),
+            )
+            for e in agent_entities:
+                if e is not best_agent:
+                    if (
+                        e.grid_pos in goal_pos
+                        or e.grid_pos in receptacle_pos
+                        or (
+                            symbolic_theory
+                            and hasattr(symbolic_theory, "is_goal")
+                            and symbolic_theory.is_goal(e.feature_id)
+                        )
+                    ):
+                        e.role = EntityRole.GOAL
+                    else:
+                        e.role = EntityRole.MANIPULABLE
 
         return entities
 

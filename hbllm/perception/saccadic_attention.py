@@ -77,17 +77,18 @@ class SaccadicAttentionSystem:
         # 2. Retinal Center-Surround Contrast
         # High contrast difference between receptive center and surrounding ring
         padded = np.pad(grid, pad_width=self.fovea_radius, mode="edge")
-        for r in range(H):
-            for c in range(W):
-                pr, pc = r + self.fovea_radius, c + self.fovea_radius
-                center_val = padded[pr, pc]
-                surround = padded[
-                    pr - self.fovea_radius : pr + self.fovea_radius + 1,
-                    pc - self.fovea_radius : pc + self.fovea_radius + 1,
+        total_neighbors = (2 * self.fovea_radius + 1) ** 2 - 1
+        contrast_sum = np.zeros((H, W), dtype=np.float32)
+        for dr in range(-self.fovea_radius, self.fovea_radius + 1):
+            for dc in range(-self.fovea_radius, self.fovea_radius + 1):
+                if dr == 0 and dc == 0:
+                    continue
+                shifted = padded[
+                    self.fovea_radius + dr : self.fovea_radius + dr + H,
+                    self.fovea_radius + dc : self.fovea_radius + dc + W,
                 ]
-                surround_diff = np.count_nonzero(surround != center_val)
-                norm_contrast = surround_diff / float(surround.size - 1)
-                saliency[r, c] += norm_contrast * 0.25
+                contrast_sum += (shifted != grid).astype(np.float32)
+        saliency += (contrast_sum / float(max(1, total_neighbors))) * 0.25
 
         # 3. Dynamic Temporal Motion Saccade (Visual Transient)
         if prev_grid is not None and prev_grid.shape == grid.shape:
