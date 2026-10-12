@@ -735,22 +735,27 @@ class PerceptionEngine:
         # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
         agent_entities = [e for e in entities if e.feature_id in av_feats]
         if len(agent_entities) > 1 and avatar_pos is not None:
-            best_agent = min(
-                agent_entities,
-                key=lambda e: (
-                    abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
-                ),
+            exact_matches = [
+                e
+                for e in agent_entities
+                if avatar_pos in e.properties.get("cells", [e.grid_pos]) or e.grid_pos == avatar_pos
+            ]
+            best_agent = (
+                exact_matches[0]
+                if exact_matches
+                else min(
+                    agent_entities,
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
+                    ),
+                )
             )
             for e in agent_entities:
                 if e is not best_agent:
                     if (
                         e.grid_pos in goal_pos
                         or e.grid_pos in receptacle_pos
-                        or (
-                            symbolic_theory
-                            and hasattr(symbolic_theory, "is_goal")
-                            and symbolic_theory.is_goal(e.feature_id)
-                        )
+                        or (symbolic_theory and symbolic_theory.is_goal(e.feature_id))
                     ):
                         e.role = EntityRole.GOAL
                     else:

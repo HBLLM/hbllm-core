@@ -1373,8 +1373,19 @@ class MotorCortexEffector:
                 tr, tc = min(target_zones, key=lambda z: abs(z[0] - er) + abs(z[1] - ec))
                 dr = int(np.sign(tr - er))
                 dc = int(np.sign(tc - ec))
-                click_r = er - dr * 4
-                click_c = ec - dc * 4
+                extent_r = (
+                    max(1, (e.bounding_box[1] - e.bounding_box[0] + 1) // 2)
+                    if e.bounding_box
+                    else max(1, int(round(math.sqrt(max(1, e.area)) / 2.0)))
+                )
+                extent_c = (
+                    max(1, (e.bounding_box[3] - e.bounding_box[2] + 1) // 2)
+                    if e.bounding_box
+                    else max(1, int(round(math.sqrt(max(1, e.area)) / 2.0)))
+                )
+                offset = max(2, max(extent_r, extent_c) + 1)
+                click_r = er - dr * offset
+                click_c = ec - dc * offset
                 if (
                     0 <= click_r < H
                     and 0 <= click_c < W
