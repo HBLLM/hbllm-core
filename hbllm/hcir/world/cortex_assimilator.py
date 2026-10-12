@@ -280,7 +280,10 @@ class EpistemicFeedbackAssimilator:
                     )
             if action is not None:
                 prev_inh = engine.inhibited_actions.get(action, 0)
-                engine.inhibited_actions[action] = max(prev_inh + 2, 3)
+                inh_steps = 4 if engine.consecutive_quiescent_actions >= 2 else 3
+                engine.inhibited_actions[action] = max(prev_inh + 2, inh_steps)
+                if prev_avatar_pos is not None:
+                    engine.failed_transitions.add((prev_avatar_pos, action))
 
             if is_effector_action and not is_win and not is_lost:
                 return

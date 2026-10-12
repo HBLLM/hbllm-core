@@ -1529,16 +1529,23 @@ class MotorCortexEffector:
             target_r, target_c = int(best_r), int(best_c)
             engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
         else:
-            unprobed = [
-                (r, c)
-                for r in range(H)
-                for c in range(W)
-                if (r, c) not in engine.quiescent_click_targets
-            ]
-            if unprobed:
-                target_r, target_c = unprobed[0]
+            # Ventral Stream Invariant: Never click featureless void background cells.
+            # When candidates are exhausted, clear quiescent locks on entities and re-sample
+            # the highest salience non-background object centroids.
+            engine.quiescent_click_targets.clear()
+            non_bg = np.argwhere(curr_grid != bg)
+            if len(non_bg) > 0:
+                cand_cells = [
+                    (int(r), int(c)) for r, c in non_bg if (int(r), int(c)) not in av_feats
+                ]
+                if cand_cells:
+                    cand_cells.sort(
+                        key=lambda p: engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0)
+                    )
+                    target_r, target_c = cand_cells[0]
+                else:
+                    target_r, target_c = int(non_bg[0][0]), int(non_bg[0][1])
             else:
-                engine.quiescent_click_targets.clear()
                 target_r, target_c = H // 2, W // 2
 
         coords: dict[str, Any] = {}

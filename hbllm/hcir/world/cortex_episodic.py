@@ -124,6 +124,7 @@ class HippocampalEpisodicCortex:
         # Multi-episode history archives
         self.past_episodes: list[list[EpisodicTransition]] = []
         self.successful_trajectories: list[list[EpisodicTransition]] = []
+        self.failed_trajectories: list[list[EpisodicTransition]] = []
         self.catastrophic_replays: list[ReplayCreditAssignment] = []
 
         # Grounded lethal transitions: set of (avatar_pos, action)
@@ -346,9 +347,11 @@ class HippocampalEpisodicCortex:
         2. Cross-stage level progression (transfer semantic & motor priors, point to new level map).
         3. Cross-game environment reset (strict zero-leakage cognitive isolation).
         """
-        # SWR Trajectory Consolidation: Archive any winning sequences
+        # SWR Trajectory Consolidation: Archive winning or catastrophic sequences
         if self.current_episode and any(t.is_win for t in self.current_episode):
             self.successful_trajectories.append(list(self.current_episode))
+        elif self.current_episode and any(t.is_lost for t in self.current_episode):
+            self.failed_trajectories.append(list(self.current_episode))
         self.current_episode.clear()
 
         if level is not None:
@@ -364,8 +367,16 @@ class HippocampalEpisodicCortex:
         engine.consecutive_quiescent_actions = 0
 
         engine.consecutive_stuck_steps = 0
-        engine.entity_action_failed_positions = {}
-        engine.immobile_entity_actions = set()
+        if is_new_level or not retain_dynamics:
+            engine.entity_action_failed_positions = {}
+            engine.immobile_entity_actions = set()
+        else:
+            # On same-level retry after death: preserve learned spatial negative affordances,
+            # but refresh interaction exploration and decay visit counts so interactive objects
+            # can be re-sampled with fresh hypotheses.
+            engine.quiescent_click_targets.clear()
+            for k in list(engine.entity_visit_counts.keys()):
+                engine.entity_visit_counts[k] = engine.entity_visit_counts[k] // 2
         engine.last_effective_click_coord = None
         engine.consecutive_effective_clicks = 0
         engine.mental_plan.clear()

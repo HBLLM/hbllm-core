@@ -193,13 +193,18 @@ class ArcAgiConsoleDriver(BaseDriver):
         win_levels = getattr(raw_result, "win_levels", 1)
 
         is_win = state_str == "WIN" or lvl >= win_levels
-        is_done = is_win or state_str == "GAME_OVER"
+        is_done = (
+            is_win or state_str == "GAME_OVER" or bool(getattr(raw_result, "terminated", False))
+        )
         reward = 1.0 if is_win else (0.5 if lvl > 0 else 0.0)
 
+        avail_actions = list(getattr(raw_result, "available_actions", [1, 2, 3, 4, 5, 6]))
         info_dict: dict[str, Any] = {
             "levels_completed": lvl,
             "state": state_str,
             "win_levels": win_levels,
+            "available_actions": avail_actions,
+            "terminated": is_done,
         }
         game_obj = getattr(self.env, "_game", None) or getattr(self.env, "game", None)
         cur_lvl = (
