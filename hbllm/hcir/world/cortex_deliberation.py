@@ -846,7 +846,7 @@ class PrefrontalDeliberationEngine:
                         if (nr, nc) in engine.learned_barriers or (
                             nr,
                             nc,
-                        ) in engine.level_lethal_positions:
+                        ) in engine.current_level_lethal_positions:
                             continue
                         cand_step = MentalSimulationStep(
                             action=act,

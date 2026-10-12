@@ -358,10 +358,7 @@ class EpistemicGoalScheduler:
             clear_exhausted = True
 
         # Exclude all known static lethal coordinates from candidate attractors
-        all_lethals = (
-            engine.hazard_tracker.static_lethal_positions
-            | engine.level_lethal_positions.get(engine.current_level, set())
-        )
+        all_lethals = engine.current_level_lethal_positions
         goals = [g for g in goals if g not in all_lethals]
 
         # Extended avatar projection
@@ -541,11 +538,7 @@ class MentalSimulationPlanner:
                         static_barriers.add((int(pr), int(pc)))
 
         # Explicitly ground all static lethal positions from hazard tracker and level memory
-        lvl_lethals = engine.level_lethal_positions.get(engine.current_level, set())
-        for r, c in engine.hazard_tracker.static_lethal_positions:
-            if 0 <= r < H and 0 <= c < W:
-                static_barriers.add((r, c))
-        for r, c in lvl_lethals:
+        for r, c in engine.current_level_lethal_positions:
             if 0 <= r < H and 0 <= c < W:
                 static_barriers.add((r, c))
 
@@ -573,7 +566,7 @@ class MentalSimulationPlanner:
                         static_barriers.add((r, c))
 
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
-        all_lethals = engine.hazard_tracker.static_lethal_positions | lvl_lethals
+        all_lethals = engine.current_level_lethal_positions
         safe_goals = set(goals) - all_lethals
         static_barriers.difference_update(safe_goals)
         if engine.avatar_pos is not None:
@@ -1585,7 +1578,10 @@ class MentalSimulationPlanner:
                     for k in range(1, dist + 1):
                         kr = p[0] + step_r * k
                         kc = p[1] + step_c * k
-                        if (kr, kc) in active_barriers or (kr, kc) in engine.level_lethal_positions:
+                        if (kr, kc) in active_barriers or (
+                            kr,
+                            kc,
+                        ) in engine.current_level_lethal_positions:
                             ray_blocked = True
                             break
                         if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:

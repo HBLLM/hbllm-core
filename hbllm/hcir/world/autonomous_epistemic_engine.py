@@ -744,6 +744,14 @@ class AutonomousEpistemicEngine:
         return None
 
     @property
+    def current_level_lethal_positions(self) -> set[tuple[int, int]]:
+        """Lethal positions grounded for the current active level."""
+        return (
+            self.level_lethal_positions.get(self.current_level, set())
+            | self.hazard_tracker.static_lethal_positions
+        )
+
+    @property
     def learned_goal_features(self) -> set[int]:
         return self.symbolic_theory.goal_features
 
