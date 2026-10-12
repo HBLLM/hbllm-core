@@ -621,7 +621,12 @@ class GestaltAffordanceDetector:
                 hdr = int(np.sign(np.mean(eye_coords[:, 0]) - (r1 - r0) / 2))
                 hdc = int(np.sign(np.mean(eye_coords[:, 1]) - (c1 - c0) / 2))
                 if hdr != 0 or hdc != 0:
-                    gaze_cell = (center[0] + hdr * step_size, center[1] + hdc * step_size)
+                    if step_size >= max(r1 - r0 + 1, c1 - c0 + 1):
+                        gaze_cell = (center[0] + hdr * step_size, center[1] + hdc * step_size)
+                    else:
+                        front_r = r1 if hdr > 0 else (r0 if hdr < 0 else center[0])
+                        front_c = c1 if hdc > 0 else (c0 if hdc < 0 else center[1])
+                        gaze_cell = (front_r + hdr * step_size, front_c + hdc * step_size)
                     oriented_threats.append(
                         OrientedThreat(
                             pos=center,

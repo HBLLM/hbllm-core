@@ -309,3 +309,160 @@ def test_pure_click_salient_centroid_grounding_and_ior() -> None:
         assert abs(r2 - 5) <= 1 and abs(c2 - 5) <= 1, (
             "After clicking tile 2, IOR must steer next click to tile 1!"
         )
+
+
+def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
+    """Verify that stationary sentry gaze/line of fire is never treated as a passable relaxed route."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 1)
+
+    # 4 cardinal movements calibrated
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # 10x10 grid:
+    # Avatar at (5, 1)
+    # Goal at (5, 9)
+    # Sentry 3x3 at rows 4..6, cols 5..7, eye at (5, 5) facing LEFT -> gaze at (5, 4)
+    grid = np.zeros((10, 10), dtype=int)
+    grid[5, 1] = 1  # Avatar
+    grid[5, 9] = 3  # Goal behind sentry
+
+    grid[4:7, 5:8] = 8
+    grid[5, 5] = 15  # eye facing LEFT (negative delta_c)
+
+    # Corridor is row 5, walled at row 3 and row 7
+    grid[3, :] = 2
+    grid[7, :] = 2
+    # Walls above and below corridor
+    grid[4, :5] = 2
+    grid[4, 8:] = 2
+    grid[6, :5] = 2
+    grid[6, 8:] = 2
+
+    engine.learned_goal_features.add(3)
+    engine.hazard_tracker.known_lethal_features.add(8)
+    engine.symbolic_theory.barrier_features.add(2)
+
+    available_actions = [1, 2, 3, 4]
+    plan = engine.simulate_in_mind(grid, available_actions)
+
+    # Since the only path to goal (5, 9) crosses the sentry's living gaze at (5, 4)
+    # and the sentry cannot be flanked due to walls, the plan MUST be None.
+    # It must NEVER relax the gaze constraint to walk through the lethal sightline!
+    assert plan is None, (
+        "Planner must never relax a stationary sentry gaze sightline into a valid plan!"
+    )
+
+
+def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
+    """Verify that flanking an oriented sentry from behind/side neutralizes it and opens the path."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 4)  # Starting above the sentry
+
+    # 4 cardinal movements calibrated
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # 10x10 grid:
+    # Avatar at (1, 4)
+    # Sentry centered at (3, 4) facing DOWN with gaze at (5, 4)
+    # Goal at (6, 4) beyond the sentry's gaze
+    grid = np.zeros((10, 10), dtype=int)
+    grid[1, 4] = 1  # Avatar
+    grid[6, 4] = 3  # Goal
+
+    # 3x3 enemy centered at (3, 4): rows 2..4, cols 3..5. Feature 8, eye at (4, 4) facing DOWN
+    grid[2:5, 3:6] = 8
+    grid[4, 4] = 15  # eye facing DOWN -> gaze at (4 + 1, 4) = (5, 4)
+
+    # Walls block left and right detours, so avatar must walk DOWN through sentry: (1, 4) -> (2, 4) -> (3, 4)
+    # Since avatar approaches from (1, 4) (NOT from gaze pos (5, 4)), this is a tactical flank!
+    grid[:, 2] = 2
+    grid[:, 6] = 2
+
+    engine.learned_goal_features.add(3)
+    engine.hazard_tracker.known_lethal_features.add(8)
+    engine.symbolic_theory.barrier_features.add(2)
+
+    available_actions = [1, 2, 3, 4]
+    plan = engine.simulate_in_mind(grid, available_actions)
+
+    assert plan is not None, "Planner should find a path by tactically flanking the sentry!"
+    # The plan must reach the goal (6, 4)
+    assert plan[-1].predicted_avatar_pos == (6, 4), "Plan must successfully reach the goal!"
+
+
+def test_oriented_threat_observation_rejects_spurious_translations() -> None:
+    """Verify that creature motion observation enforces entity count conservation and step size bounds."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 5)
+    engine.step_counter = 1  # Initial step
+    engine.prev_grid = np.zeros((10, 10), dtype=int)
+
+    grid1 = np.zeros((10, 10), dtype=int)
+    grid1[5, 5] = 1  # Avatar
+    # Sentry: 3x3 at rows 2..4, cols 2..4 (feature 8, eye at (4, 3) facing DOWN)
+    grid1[2:5, 2:5] = 8
+    grid1[4, 3] = 15
+
+    available_actions = [1, 2, 3, 4]
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+
+    # Step 1: should not mark feature 8 as mobile
+    engine._observe_oriented_threat_motion(grid1, available_actions, av_feats={1})
+    assert 8 not in engine.mobile_threat_features, (
+        "On step_counter <= 1, threats must not be marked mobile!"
+    )
+
+    # Step 2 with spurious teleportation across grid (dist = 5 > step_size * 2)
+    engine.step_counter = 2
+    grid2_teleport = np.zeros((10, 10), dtype=int)
+    grid2_teleport[5, 5] = 1
+    # Teleported to rows 7..9, cols 2..4
+    grid2_teleport[7:10, 2:5] = 8
+    grid2_teleport[9, 3] = 15
+    engine._observe_oriented_threat_motion(grid2_teleport, available_actions, av_feats={1})
+    assert 8 not in engine.mobile_threat_features, (
+        "Teleportation / reset must not be marked mobile!"
+    )
+
+    # Step 3 with entity death / count mismatch (1 vanished, 0 appeared)
+    engine.step_counter = 3
+    grid3_dead = np.zeros((10, 10), dtype=int)
+    grid3_dead[5, 5] = 1
+    engine._observe_oriented_threat_motion(grid3_dead, available_actions, av_feats={1})
+    assert 8 not in engine.mobile_threat_features, (
+        "Threat death/neutralization must not be marked mobile!"
+    )
+
+
+def test_click_effector_lattice_quantization() -> None:
+    """Verify MotorCortexEffector quantizes fallback clicks to lattice quantum centroids when step_sz > 1."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_pos = None
+    engine.avatar_feature = None
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=3, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=-3, delta_c=0, confidence=1.0)
+
+    # 15x15 grid with a single 3x3 block of feature 7 at rows 6..8, cols 9..11
+    # Background 0
+    grid = np.zeros((15, 15), dtype=int)
+    grid[6:9, 9:12] = 7
+
+    # Ground click action (e.g., action 6)
+    coords = MotorCortexEffector.ground_effector_action(engine, grid, action=6)
+    assert coords is not None
+    # Lattice cell with step_sz=3 for row 6..8 has centroid (6 // 3)*3 + 3//2 = 7
+    # For col 9..11 has centroid (9 // 3)*3 + 3//2 = 10
+    assert coords["y"] == 7 and coords["x"] == 10, (
+        f"Grounded click ({coords['y']}, {coords['x']}) must match lattice centroid (7, 10)!"
+    )

@@ -1550,9 +1550,26 @@ class MotorCortexEffector:
 
         # 9. Fallback: unvisited non-background cells
         if not click_candidates:
+            step_sz = (
+                getattr(getattr(engine, "spatial_tracker", None), "inferred_step_size", None)
+                or cls.infer_motor_step_size(
+                    list(engine.action_dynamics.keys()), engine.action_dynamics
+                )
+                or 1
+            )
+            seen_cand_cells: set[tuple[int, int]] = set()
             non_bg = np.argwhere(curr_grid != bg)
             for r, c in non_bg:
                 cr, cc = int(r), int(c)
+                if step_sz > 1:
+                    # Quantize to the lattice cell centroid to hit multi-pixel blocks accurately
+                    cr = (cr // step_sz) * step_sz + step_sz // 2
+                    cc = (cc // step_sz) * step_sz + step_sz // 2
+                    cr = min(max(0, cr), H - 1)
+                    cc = min(max(0, cc), W - 1)
+                if (cr, cc) in seen_cand_cells:
+                    continue
+                seen_cand_cells.add((cr, cc))
                 feat = int(curr_grid[cr, cc])
                 if (
                     (cr, cc) in engine.quiescent_click_targets

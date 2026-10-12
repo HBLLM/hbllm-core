@@ -1031,6 +1031,7 @@ class AutonomousEpistemicEngine:
                 level_incremented=is_win,
                 is_death_or_reset=is_lost,
             )
+            self._prev_oriented_threats = []
 
     def simulate_in_mind(
         self,
@@ -1207,6 +1208,11 @@ class AutonomousEpistemicEngine:
             self._prev_oriented_threats = []
             return
 
+        if self.step_counter <= 1 or self.prev_grid is None:
+            self._prev_oriented_threats = threats
+            return
+
+        step_sz = self.infer_motor_step_size(available_actions)
         prev = self._prev_oriented_threats
         if prev:
             prev_by_feat: dict[int, set[tuple[int, int]]] = {}
@@ -1221,25 +1227,27 @@ class AutonomousEpistemicEngine:
                 old_positions = prev_by_feat.get(feat, set())
                 appeared = cur_positions - old_positions
                 vanished = old_positions - cur_positions
-                for a in appeared:
-                    if any(
-                        (a[0] == v[0]) != (a[1] == v[1])  # pure cardinal translation
-                        for v in vanished
-                    ):
-                        self.mobile_threat_features.add(feat)
-                        self.consecutive_simulation_failures = 0
-                        self.simulation_cooldown = 0
-                        self.mental_plan.clear()
-                        self.transition_to_phase(
-                            EpistemicPhase.MENTAL_SIMULATION,
-                            reason="observed_creature_patrolling",
-                        )
-                        logger.info(
-                            "AutonomousEpistemicEngine: Observed creature kind %d patrolling "
-                            "autonomously — modeling its trajectory.",
-                            feat,
-                        )
-                        break
+                if appeared and len(appeared) == len(vanished):
+                    for a in appeared:
+                        if any(
+                            (a[0] == v[0]) != (a[1] == v[1])
+                            and 0 < (abs(a[0] - v[0]) + abs(a[1] - v[1])) <= step_sz * 2
+                            for v in vanished
+                        ):
+                            self.mobile_threat_features.add(feat)
+                            self.consecutive_simulation_failures = 0
+                            self.simulation_cooldown = 0
+                            self.mental_plan.clear()
+                            self.transition_to_phase(
+                                EpistemicPhase.MENTAL_SIMULATION,
+                                reason="observed_creature_patrolling",
+                            )
+                            logger.info(
+                                "AutonomousEpistemicEngine: Observed creature kind %d patrolling "
+                                "autonomously — modeling its trajectory.",
+                                feat,
+                            )
+                            break
         self._prev_oriented_threats = threats
 
     # ── Master Decision Loop ──────────────────────────────────────────────────

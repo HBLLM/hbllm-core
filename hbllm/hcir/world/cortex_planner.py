@@ -1334,8 +1334,16 @@ class MentalSimulationPlanner:
                         nr, nc, sim_step, ignored_features=engine.mobile_threat_features
                     ):
                         continue
+                    is_flanked_step = (
+                        (nr, nc) in cur_threats
+                        and threat_map.get((nr, nc)) is not None
+                        and cur_pos != threat_map[(nr, nc)].gaze_pos
+                    )
+                    is_neutralized_step = (nr, nc) in (init_threats - cur_threats)
                     if (
                         sim_step <= 1
+                        and not is_flanked_step
+                        and not is_neutralized_step
                         and int(curr_grid[nr, nc]) in engine.hazard_tracker.known_lethal_features
                         and int(curr_grid[nr, nc]) not in engine.mobile_threat_features
                     ):
@@ -1347,21 +1355,26 @@ class MentalSimulationPlanner:
                         if t is not None:
                             living_gaze.add(t.gaze_pos)
 
-                    gaze_penalty = 0.0
+                    # Stationary sightlines / lines of fire are strictly lethal — never relaxable
                     if (nr, nc) in living_gaze:
-                        if _relaxed_safety:
-                            gaze_penalty = 20.0
-                        else:
-                            had_relaxable_block = True
-                            continue
+                        continue
 
+                    gaze_penalty = 0.0
                     threat_penalty = 0.0
                     new_threats = cur_threats
                     if (nr, nc) in cur_threats:
-                        if _relaxed_safety:
-                            threat_penalty = 50.0
+                        flanked_t = threat_map.get((nr, nc))
+                        if flanked_t is not None and cur_pos != flanked_t.gaze_pos:
+                            # Tactical flanking: stepping on sentry from side/back neutralizes it
+                            threat_cells_to_remove = {
+                                p
+                                for p, ot in threat_map.items()
+                                if ot is flanked_t or p == (nr, nc)
+                            }
+                            new_threats = cur_threats - threat_cells_to_remove
+                            threat_penalty = 5.0
                         else:
-                            had_relaxable_block = True
+                            # Direct head-on approach into sentry gaze or unmapped threat is lethal
                             continue
 
                     new_patrols = cur_patrols
@@ -1413,6 +1426,8 @@ class MentalSimulationPlanner:
                             cell_feat = int(curr_grid[kr, kc])
                             if cell_feat in engine.hazard_tracker.known_lethal_features:
                                 if cell_feat in engine.mobile_threat_features:
+                                    pass
+                                elif (kr, kc) in (init_threats - cur_threats):
                                     pass
                                 else:
                                     is_flanked_threat = (
