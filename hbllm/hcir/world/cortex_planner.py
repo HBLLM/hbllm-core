@@ -646,6 +646,36 @@ class MentalSimulationPlanner:
         return mutation_triggers
 
     @staticmethod
+    def compute_swr_backward_penalties(
+        failed_trajectories: list[list[Any]],
+        horizon: int = 5,
+        initial_penalty: float = 40.0,
+        decay: float = 0.7,
+    ) -> dict[tuple[tuple[int, int], Any], float]:
+        """Hippocampal Sharp-Wave Ripple (SWR) Backward Credit Assignment.
+
+        Replays fatal episodes in reverse, assigning decaying penalties backward
+        from the failure branch point along the tail of the trajectory.
+        """
+        penalties: dict[tuple[tuple[int, int], Any], float] = {}
+        for ep in failed_trajectories[-5:]:
+            valid_transitions = [
+                (getattr(t, "avatar_pos", None), getattr(t, "action_id", None))
+                for t in ep
+                if getattr(t, "avatar_pos", None) is not None
+            ]
+            if not valid_transitions:
+                continue
+            tail = valid_transitions[-horizon:]
+            curr_p = initial_penalty
+            for pos, act in reversed(tail):
+                if pos is not None and act is not None:
+                    key = (pos, act)
+                    penalties[key] = max(penalties.get(key, 0.0), curr_p)
+                curr_p *= decay
+        return penalties
+
+    @staticmethod
     def simulate_in_mind(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
@@ -1056,6 +1086,13 @@ class MentalSimulationPlanner:
                     non_disp_wait_action = a
                     break
 
+        # SWR Backward Horizon Penalties from Hippocampal Episodic Memory
+        swr_penalties: dict[tuple[tuple[int, int], Any], float] = {}
+        if hasattr(engine, "episodic_cortex") and engine.episodic_cortex.failed_trajectories:
+            swr_penalties = MentalSimulationPlanner.compute_swr_backward_penalties(
+                engine.episodic_cortex.failed_trajectories
+            )
+
         def _search_spacetime_astar(
             _relaxed_safety: bool,
         ) -> tuple[list[MentalSimulationStep] | None, bool]:
@@ -1436,6 +1473,7 @@ class MentalSimulationPlanner:
                         new_open = cur_open | frozenset(mutation_triggers[new_pos])
 
                     wait_cost = 2.0 if is_wait else 0.0
+                    swr_penalty = swr_penalties.get((cur_pos, real_act), 0.0)
 
                     step_cost = (
                         1
@@ -1445,6 +1483,7 @@ class MentalSimulationPlanner:
                         + wait_cost
                         + gaze_penalty
                         + threat_penalty
+                        + swr_penalty
                     )
                     new_g = g_cost + step_cost
                     new_h = heuristic(new_pos, new_blocks)
@@ -1550,7 +1589,7 @@ class MentalSimulationPlanner:
                     for k in range(1, dist + 1):
                         kr = p[0] + step_r * k
                         kc = p[1] + step_c * k
-                        if (kr, kc) in active_barriers:
+                        if (kr, kc) in active_barriers or (kr, kc) in engine.level_lethal_positions:
                             ray_blocked = True
                             break
                         if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:

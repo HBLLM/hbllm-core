@@ -822,6 +822,80 @@ class PrefrontalDeliberationEngine:
                 if non_disp:
                     return non_disp[0], None
 
+                # Cerebellar / Premotor Oscillatory Temporal Pacing:
+                # In environments with strictly directional actions (no explicit wait),
+                # synthesize an oscillatory burn step (e.g. step back / lateral dodge -> return)
+                # to burn phase steps until dynamic hazards clear.
+                curr_pos = engine.avatar_pos
+                H, W = curr_grid.shape
+                reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
+                pacing_candidates: list[tuple[Any, tuple[int, int]]] = []
+
+                if curr_pos is not None:
+                    for act in available_actions:
+                        if not engine.is_displacement_action(act) or act == next_step.action:
+                            continue
+                        dyn = engine.action_dynamics.get(act)
+                        if dyn is not None and dyn.is_displacement_action():
+                            dr, dc = dyn.get_displacement()
+                        elif act in (1, 2, 3, 4):
+                            dr, dc = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}[act]
+                        else:
+                            continue
+                        nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
+                        if not (0 <= nr < H and 0 <= nc < W):
+                            continue
+                        if (nr, nc) in engine.learned_barriers or (
+                            nr,
+                            nc,
+                        ) in engine.level_lethal_positions:
+                            continue
+                        cand_step = MentalSimulationStep(
+                            action=act,
+                            predicted_avatar_pos=(nr, nc),
+                            expected_mutation="oscillatory_pacing_step",
+                        )
+                        cand_res = self.safety_evaluator.evaluate(
+                            engine=engine,
+                            curr_grid=curr_grid,
+                            next_step=cand_step,
+                            available_actions=available_actions,
+                        )
+                        if cand_res.is_safe and not cand_res.should_wait:
+                            pacing_candidates.append((act, (nr, nc)))
+
+                if pacing_candidates:
+                    # Prefer reverse of recent action to oscillate along existing safe path
+                    chosen_pacing_act, _ = pacing_candidates[0]
+                    if len(engine.recent_actions) > 0:
+                        last_act = engine.recent_actions[-1]
+                        rev_last = reverse_map.get(last_act)
+                        for act, pos in pacing_candidates:
+                            if act == rev_last:
+                                chosen_pacing_act = act
+                                break
+
+                    rev_act = reverse_map.get(chosen_pacing_act)
+                    # Enqueue return step to restore spatial trajectory once hazard passes
+                    if (
+                        rev_act is not None
+                        and rev_act in available_actions
+                        and curr_pos is not None
+                    ):
+                        engine.mental_plan.appendleft(
+                            MentalSimulationStep(
+                                action=rev_act,
+                                predicted_avatar_pos=curr_pos,
+                                expected_mutation="oscillatory_return_step",
+                            )
+                        )
+                    return chosen_pacing_act, None
+
+                # Invariant fallback: Invalidate plan and replan if no safe pacing candidate exists
+                engine.mental_plan.clear()
+                engine.phase = EpistemicPhase.REPLANNING
+                return engine.plan_epistemic_probe(curr_grid, available_actions)
+
             if not plan_safe:
                 engine.mental_plan.clear()
                 engine.phase = EpistemicPhase.REPLANNING

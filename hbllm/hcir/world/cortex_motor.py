@@ -1501,7 +1501,11 @@ class MotorCortexEffector:
             for r, c in non_bg:
                 cr, cc = int(r), int(c)
                 feat = int(curr_grid[cr, cc])
-                if (cr, cc) in engine.quiescent_click_targets or (cr, cc) in av_feats:
+                if (
+                    (cr, cc) in engine.quiescent_click_targets
+                    or feat in av_feats
+                    or (cr, cc) == engine.avatar_pos
+                ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 feat_bias = 0.0
@@ -1536,7 +1540,10 @@ class MotorCortexEffector:
             non_bg = np.argwhere(curr_grid != bg)
             if len(non_bg) > 0:
                 cand_cells = [
-                    (int(r), int(c)) for r, c in non_bg if (int(r), int(c)) not in av_feats
+                    (int(r), int(c))
+                    for r, c in non_bg
+                    if int(curr_grid[r, c]) not in av_feats
+                    and (int(r), int(c)) != engine.avatar_pos
                 ]
                 if cand_cells:
                     cand_cells.sort(
