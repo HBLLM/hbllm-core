@@ -1158,7 +1158,9 @@ class AutonomousEpistemicEngine:
         if best_pos is not None:
             self.avatar_pos = best_pos
 
-    def ground_effector_action(self, curr_grid: np.ndarray, action: Any = None) -> dict[str, Any]:
+    def ground_effector_action(
+        self, curr_grid: np.ndarray, action: Any = None
+    ) -> dict[str, Any] | None:
         """Spatially ground an allocentric effector command onto salient affordances."""
         return MotorCortexEffector.ground_effector_action(self, curr_grid, action)
 

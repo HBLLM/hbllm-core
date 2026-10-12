@@ -945,18 +945,24 @@ class EpistemicCuriosityExplorer:
                 )
 
             if spatial_effector_actions:
-                chosen_eff = spatial_effector_actions[0]
-                return EpistemicProbeProposal(
-                    action=chosen_eff,
-                    action_data=engine.ground_effector_action(curr_grid, chosen_eff),
-                    clear_active_probe=clear_active_probe,
-                    new_probe_target=new_probe_target,
-                    new_probe_id=new_probe_id,
-                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                    topological_doorway=doorway_reg,
-                    exploration_mode="spatial_effector_fallback",
-                )
+                eff_candidates = [
+                    a for a in spatial_effector_actions if engine.inhibited_actions.get(a, 0) == 0
+                ]
+                if eff_candidates:
+                    chosen_eff = eff_candidates[0]
+                    eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+                    if eff_data is not None:
+                        return EpistemicProbeProposal(
+                            action=chosen_eff,
+                            action_data=eff_data,
+                            clear_active_probe=clear_active_probe,
+                            new_probe_target=new_probe_target,
+                            new_probe_id=new_probe_id,
+                            probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                            entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                            topological_doorway=doorway_reg,
+                            exploration_mode="spatial_effector_fallback",
+                        )
             elif discrete_transform_actions:
                 disc_act = discrete_transform_actions[
                     engine.step_counter % len(discrete_transform_actions)
@@ -1007,13 +1013,18 @@ class EpistemicCuriosityExplorer:
             )
 
         # 4. Fallback probe
-        if spatial_effector_actions:
-            chosen_eff = spatial_effector_actions[0]
-            return EpistemicProbeProposal(
-                action=chosen_eff,
-                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
-                exploration_mode="effector_global_fallback",
-            )
+        eff_fallbacks = [
+            a for a in spatial_effector_actions if engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if eff_fallbacks:
+            chosen_eff = eff_fallbacks[0]
+            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if eff_data is not None:
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=eff_data,
+                    exploration_mode="effector_global_fallback",
+                )
         uninhibited_global = [
             a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
         ]
@@ -1086,6 +1097,19 @@ class EpistemicCuriosityExplorer:
 
 class MotorCortexEffector:
     """Allocentric spatial effector grounding and action affordance arbitration."""
+
+    @staticmethod
+    def _probe_looming_threat_evasion(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        bg: int,
+        bg_is_impassable_void: bool,
+    ) -> int | None:
+        """Forwarding alias to EpistemicCuriosityExplorer._probe_looming_threat_evasion."""
+        return EpistemicCuriosityExplorer._probe_looming_threat_evasion(
+            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+        )
 
     @staticmethod
     def parse_action_spec(spec: Any) -> ActionAffordance:
@@ -1391,13 +1415,29 @@ class MotorCortexEffector:
                         candidates.append((click_r, click_c, 350.0 - float(v_count) * 25.0))
         return candidates
 
+    @staticmethod
+    def is_peripheral_frame_cell(r: int, c: int, H: int, W: int, grid: np.ndarray) -> bool:
+        """True if (r, c) is on an outer grid frame or border line."""
+        if not (r == 0 or r == H - 1 or c == 0 or c == W - 1):
+            return False
+        val = int(grid[r, c])
+        if r == 0 or r == H - 1:
+            line = grid[r, :]
+            if np.count_nonzero(line == val) >= max(4, W // 3):
+                return True
+        if c == 0 or c == W - 1:
+            line = grid[:, c]
+            if np.count_nonzero(line == val) >= max(4, H // 3):
+                return True
+        return False
+
     @classmethod
     def ground_effector_action(
         cls,
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         action: Any = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """Spatially ground an allocentric effector command onto salient affordances."""
         curr_grid = engine.normalize_sensory_input(curr_grid)
         H, W = curr_grid.shape
@@ -1465,6 +1505,13 @@ class MotorCortexEffector:
                 visit_counts=engine.entity_visit_counts,
             )
             for ar, ac, score in it_anchors:
+                if (
+                    (ar, ac) in engine.quiescent_click_targets
+                    or (ar, ac) == engine.avatar_pos
+                    or int(curr_grid[ar, ac]) in av_feats
+                    or cls.is_peripheral_frame_cell(ar, ac, H, W, curr_grid)
+                ):
+                    continue
                 click_candidates.append((ar, ac, score))
 
         # 8. Saccadic Attention Fixations
@@ -1478,7 +1525,13 @@ class MotorCortexEffector:
             for f in fixations:
                 cr, cc = f.r, f.c
                 feat = int(curr_grid[cr, cc])
-                if (cr, cc) in engine.quiescent_click_targets or feat == bg:
+                if (
+                    (cr, cc) in engine.quiescent_click_targets
+                    or feat == bg
+                    or feat in av_feats
+                    or (cr, cc) == engine.avatar_pos
+                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
@@ -1504,7 +1557,11 @@ class MotorCortexEffector:
                 if (
                     (cr, cc) in engine.quiescent_click_targets
                     or feat in av_feats
+                    or feat == bg
+                    or feat == engine.bg_feature
+                    or (feat == 0 and bg != 0)
                     or (cr, cc) == engine.avatar_pos
+                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
@@ -1532,38 +1589,23 @@ class MotorCortexEffector:
             )
             target_r, target_c = int(best_r), int(best_c)
             engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
-        else:
-            # Ventral Stream Invariant: Never click featureless void background cells.
-            # When candidates are exhausted, clear quiescent locks on entities and re-sample
-            # the highest salience non-background object centroids.
-            engine.quiescent_click_targets.clear()
-            non_bg = np.argwhere(curr_grid != bg)
-            if len(non_bg) > 0:
-                cand_cells = [
-                    (int(r), int(c))
-                    for r, c in non_bg
-                    if int(curr_grid[r, c]) not in av_feats
-                    and (int(r), int(c)) != engine.avatar_pos
-                ]
-                if cand_cells:
-                    cand_cells.sort(
-                        key=lambda p: engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0)
-                    )
-                    target_r, target_c = cand_cells[0]
-                else:
-                    target_r, target_c = int(non_bg[0][0]), int(non_bg[0][1])
-            else:
-                target_r, target_c = H // 2, W // 2
 
-        coords: dict[str, Any] = {}
-        for k in param_keys:
-            if k in ("x", "col", "c", "column", "azimuth"):
-                coords[k] = target_c
-            elif k in ("y", "row", "r", "elevation", "distance"):
-                coords[k] = target_r
-            else:
-                coords[k] = 0
-        return coords
+            coords: dict[str, Any] = {}
+            for k in param_keys:
+                if k in ("x", "col", "c", "column", "azimuth"):
+                    coords[k] = target_c
+                elif k in ("y", "row", "r", "elevation", "distance"):
+                    coords[k] = target_r
+                else:
+                    coords[k] = 0
+            return coords
+
+        # Ventral Stream Invariant: Never click featureless void background cells or border lines.
+        # When all candidates are exhausted and proven quiescent, inhibit click action
+        # so deliberation and exploration switch to locomotion / directional actions.
+        if action is not None:
+            engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
+        return None
 
     @classmethod
     def to_causal_predicate(cls) -> CausalPredicate:

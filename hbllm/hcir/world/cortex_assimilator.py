@@ -511,9 +511,9 @@ class EpistemicFeedbackAssimilator:
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
         # Only evaluate bilateral pairing if entities belong to controllable agent features,
         # never autonomous mobile threats, lethal hazards, or background void.
-        if len(moved_entities) >= 2:
+        if engine.bilateral_state is None and len(moved_entities) >= 2:
             candidate_bilat = [
-                (pe.grid_pos, delta, ce.feature_id)
+                (ce.grid_pos, delta, ce.feature_id)
                 for pe, ce, delta in moved_entities
                 if ce.area <= 64
                 and ce.feature_id not in engine.mobile_threat_features
@@ -528,22 +528,113 @@ class EpistemicFeedbackAssimilator:
                 )
                 if bilat_state is not None:
                     engine.bilateral_state = bilat_state
-        elif engine.bilateral_state is not None:
+        if engine.bilateral_state is not None:
+            from scipy.ndimage import label
+
             f_list = list(engine.bilateral_state.features)
             if f_list:
-                f1 = f_list[0]
-                f2 = f_list[1] if len(f_list) > 1 else f_list[0]
-                pts1 = np.argwhere(curr_grid == f1)
-                pts2 = np.argwhere(curr_grid == f2)
-                if len(pts1) > 0 and len(pts2) > 0:
-                    engine.bilateral_state.pos1 = (
-                        int(np.mean(pts1[:, 0])),
-                        int(np.mean(pts1[:, 1])),
-                    )
-                    engine.bilateral_state.pos2 = (
-                        int(np.mean(pts2[:, 0])),
-                        int(np.mean(pts2[:, 1])),
-                    )
+                if engine.bilateral_state.quad_positions:
+                    prev_positions = list(engine.bilateral_state.quad_positions)
+                    all_centroids: list[tuple[int, int]] = []
+                    for feat in f_list:
+                        mask = curr_grid == feat
+                        lab, num_comp = label(mask)
+                        for comp_i in range(1, num_comp + 1):
+                            pts = np.argwhere(lab == comp_i)
+                            if len(pts) > 0:
+                                cr = int(round(float(np.mean(pts[:, 0]))))
+                                cc = int(round(float(np.mean(pts[:, 1]))))
+                                all_centroids.append((cr, cc))
+                    if len(all_centroids) >= len(prev_positions):
+                        if len(all_centroids) > 8:
+                            all_centroids.sort(
+                                key=lambda c: min(
+                                    abs(c[0] - p[0]) + abs(c[1] - p[1]) for p in prev_positions
+                                )
+                            )
+                            all_centroids = all_centroids[:8]
+                        import itertools
+
+                        best_perm = None
+                        min_tot_dist = float("inf")
+                        for chosen_cands in itertools.permutations(
+                            all_centroids, len(prev_positions)
+                        ):
+                            d = sum(
+                                abs(p[0] - c[0]) + abs(p[1] - c[1])
+                                for p, c in zip(prev_positions, chosen_cands)
+                            )
+                            if d < min_tot_dist:
+                                min_tot_dist = d
+                                best_perm = list(chosen_cands)
+                        if best_perm is not None:
+                            engine.bilateral_state.quad_positions = best_perm
+                            engine.bilateral_state.pos1 = best_perm[0]
+                            engine.bilateral_state.pos2 = best_perm[1]
+                else:
+                    f1 = f_list[0]
+                    f2 = f_list[1] if len(f_list) > 1 else f_list[0]
+                    prev_p1 = engine.bilateral_state.pos1
+                    prev_p2 = engine.bilateral_state.pos2
+
+                    if f1 == f2:
+                        mask = curr_grid == f1
+                        lab, num_comp = label(mask)
+                        centroids: list[tuple[int, int]] = []
+                        for comp_i in range(1, num_comp + 1):
+                            pts = np.argwhere(lab == comp_i)
+                            if len(pts) > 0:
+                                cr = int(round(float(np.mean(pts[:, 0]))))
+                                cc = int(round(float(np.mean(pts[:, 1]))))
+                                centroids.append((cr, cc))
+                        if len(centroids) >= 2:
+                            best_pair = None
+                            min_d = float("inf")
+                            for i, c1 in enumerate(centroids):
+                                for j, c2 in enumerate(centroids):
+                                    if i != j:
+                                        d = (
+                                            abs(c1[0] - prev_p1[0])
+                                            + abs(c1[1] - prev_p1[1])
+                                            + abs(c2[0] - prev_p2[0])
+                                            + abs(c2[1] - prev_p2[1])
+                                        )
+                                        if d < min_d:
+                                            min_d = d
+                                            best_pair = (c1, c2)
+                            if best_pair is not None:
+                                engine.bilateral_state.pos1 = best_pair[0]
+                                engine.bilateral_state.pos2 = best_pair[1]
+                        elif len(centroids) == 1:
+                            single_centroid = centroids[0]
+                            d1 = abs(single_centroid[0] - prev_p1[0]) + abs(
+                                single_centroid[1] - prev_p1[1]
+                            )
+                            d2 = abs(single_centroid[0] - prev_p2[0]) + abs(
+                                single_centroid[1] - prev_p2[1]
+                            )
+                            if d1 <= d2:
+                                engine.bilateral_state.pos1 = single_centroid
+                            else:
+                                engine.bilateral_state.pos2 = single_centroid
+                    else:
+                        for feat, attr in [(f1, "pos1"), (f2, "pos2")]:
+                            prev_pos = getattr(engine.bilateral_state, attr)
+                            mask = curr_grid == feat
+                            lab, num_comp = label(mask)
+                            best_c = None
+                            min_d = float("inf")
+                            for comp_i in range(1, num_comp + 1):
+                                pts = np.argwhere(lab == comp_i)
+                                if len(pts) > 0:
+                                    cr = int(round(float(np.mean(pts[:, 0]))))
+                                    cc = int(round(float(np.mean(pts[:, 1]))))
+                                    d = abs(cr - prev_pos[0]) + abs(cc - prev_pos[1])
+                                    if d < min_d:
+                                        min_d = d
+                                        best_c = (cr, cc)
+                            if best_c is not None:
+                                setattr(engine.bilateral_state, attr, best_c)
 
         def _are_adjacent(e1: SpatialEntity, e2: SpatialEntity) -> bool:
             bb1 = e1.bounding_box

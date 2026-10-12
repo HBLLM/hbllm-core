@@ -1002,21 +1002,36 @@ class MentalSimulationPlanner:
                 max_candidate_goals=5,
             )
             if action_plan:
-                topo_steps = [
-                    MentalSimulationStep(
-                        action=act,
-                        predicted_avatar_pos=next_pos,
-                        expected_mutation="topological_geodesic_step",
-                        is_deterministic_geodesic=True,
+                plan_valid = True
+                curr_p = start_pos
+                for act, next_p in action_plan:
+                    if (curr_p, act) in engine.failed_transitions:
+                        plan_valid = False
+                        break
+                    curr_p = next_p
+                if (
+                    plan_valid
+                    and action_plan
+                    and engine.inhibited_actions.get(action_plan[0][0], 0) > 0
+                ):
+                    plan_valid = False
+
+                if plan_valid:
+                    topo_steps = [
+                        MentalSimulationStep(
+                            action=act,
+                            predicted_avatar_pos=next_pos,
+                            expected_mutation="topological_geodesic_step",
+                            is_deterministic_geodesic=True,
+                        )
+                        for act, next_pos in action_plan
+                    ]
+                    logger.info(
+                        "MentalSimulationPlanner: Action-Space Geodesic BFS plan dispatched to %s (%d steps)",
+                        action_plan[-1][1],
+                        len(topo_steps),
                     )
-                    for act, next_pos in action_plan
-                ]
-                logger.info(
-                    "MentalSimulationPlanner: Action-Space Geodesic BFS plan dispatched to %s (%d steps)",
-                    action_plan[-1][1],
-                    len(topo_steps),
-                )
-                return topo_steps
+                    return topo_steps
 
         acc_monitor = engine.working_memory.acc_conflict
         acc_weight = acc_monitor.compute_heuristic_weight(1.0) if acc_monitor else 1.0
@@ -1610,6 +1625,7 @@ class MentalSimulationPlanner:
             return None
 
         buffered_subgoals: list[FrontopolarSubgoal] = []
+        visited_triggers: set[tuple[int, int]] = set()
         for _ in range(max_stages):
             effective_barriers = static_barriers - open_barriers
             goal_path = find_shortest_path(cur_pos, goals, effective_barriers)
@@ -1619,7 +1635,7 @@ class MentalSimulationPlanner:
                     "AutonomousEpistemicEngine: Hierarchical Subgoal Decomposition SUCCEEDED with %d total steps!",
                     len(accumulated_plan),
                 )
-                for sg in buffered_subgoals:
+                for sg in reversed(buffered_subgoals):
                     engine.subgoal_stack.push_subgoal(sg)
                 return accumulated_plan
 
@@ -1658,6 +1674,8 @@ class MentalSimulationPlanner:
                 b_feat = int(curr_grid[b_pos[0], b_pos[1]])
                 trig_pos, req_tool = engine.causal_cortex.query_barrier_clearance(b_pos, b_feat)
                 if trig_pos is not None:
+                    if trig_pos in visited_triggers:
+                        continue
                     tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
                     if tr_path is not None:
                         candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
@@ -1675,6 +1693,8 @@ class MentalSimulationPlanner:
 
             # 4. Known state mutation triggers (switches and pressure plates)
             for tr_pos, opened_set in mutation_triggers.items():
+                if tr_pos in visited_triggers:
+                    continue
                 unopened = (opened_set & effective_barriers) - open_barriers
                 if not unopened:
                     continue
@@ -1755,21 +1775,25 @@ class MentalSimulationPlanner:
                             q_approach.append(((nr, nc), path_app + [step]))
                     if best_approach:
                         accumulated_plan.extend(best_approach)
+                        for sg in reversed(buffered_subgoals):
+                            engine.subgoal_stack.push_subgoal(sg)
                         return accumulated_plan
                 break
 
             candidate_triggers.sort(key=lambda x: (-x[2], len(x[1])))
             chosen_pos, switch_path, _, opened_cells = candidate_triggers[0]
+            visited_triggers.add(chosen_pos)
 
-            buffered_subgoals.append(
-                FrontopolarSubgoal(
-                    subgoal_id=f"trigger_{chosen_pos[0]}_{chosen_pos[1]}",
-                    subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
-                    target_entity_pos=chosen_pos,
-                    target_destination=chosen_pos,
-                    priority=2.0,
-                )
+            new_sg = FrontopolarSubgoal(
+                subgoal_id=f"trigger_{chosen_pos[0]}_{chosen_pos[1]}",
+                subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                target_entity_pos=chosen_pos,
+                target_destination=chosen_pos,
+                priority=2.0,
             )
+            if buffered_subgoals:
+                new_sg.prerequisite_subgoal_ids = [buffered_subgoals[-1].subgoal_id]
+            buffered_subgoals.append(new_sg)
 
             accumulated_plan.extend(switch_path)
             cur_pos = chosen_pos
@@ -1797,6 +1821,11 @@ class MentalSimulationPlanner:
                             expected_mutation="ACTION_TRIGGER",
                         )
                     )
+
+        if accumulated_plan:
+            for sg in reversed(buffered_subgoals):
+                engine.subgoal_stack.push_subgoal(sg)
+            return accumulated_plan
 
         return None
 

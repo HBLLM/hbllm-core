@@ -1010,6 +1010,18 @@ class PrefrontalDeliberationEngine:
                 or not all(k in chosen_data for k in req_keys)
             ):
                 chosen_data = engine.ground_effector_action(curr_grid, chosen_action)
+                if chosen_data is None:
+                    engine.inhibited_actions[chosen_action] = max(
+                        engine.inhibited_actions.get(chosen_action, 0), 6
+                    )
+                    non_eff = [
+                        a
+                        for a in available_actions
+                        if not engine.is_spatial_effector(a)
+                        and engine.inhibited_actions.get(a, 0) == 0
+                    ]
+                    chosen_action = non_eff[0] if non_eff else available_actions[0]
+                    chosen_data = None
 
         engine.prev_grid = curr_grid.copy()
         engine.last_action = chosen_action
