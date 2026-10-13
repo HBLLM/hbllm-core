@@ -190,24 +190,24 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
             if not live_threats and not engine.mobile_threat_features:
                 return SafetyGateResult(is_safe=True)
 
-            # Stationary sentries gaze gate
+            # Oriented stationary hazard line-of-sight gate (e.g., directional sensors, optical cones)
             stationary_threats = [
                 t for t in live_threats if t.feature_id not in engine.mobile_threat_features
             ]
-            sentry_gaze_cells = {t.gaze_pos for t in stationary_threats if t.facing != (0, 0)}
+            oriented_hazard_cells = {t.gaze_pos for t in stationary_threats if t.facing != (0, 0)}
             if (
                 next_step.predicted_avatar_pos is not None
-                and next_step.predicted_avatar_pos in sentry_gaze_cells
+                and next_step.predicted_avatar_pos in oriented_hazard_cells
             ):
                 return SafetyGateResult(
                     is_safe=False,
-                    reason="Avatar destination steps directly into stationary sentry gaze crosshairs",
+                    reason="Avatar destination steps directly into oriented hazard field-of-view",
                 )
             for st in stationary_threats:
                 if next_step.predicted_avatar_pos == st.pos and engine.avatar_pos == st.gaze_pos:
                     return SafetyGateResult(
                         is_safe=False,
-                        reason="Frontal collision with armed sentry",
+                        reason="Frontal collision with oriented active hazard along line-of-sight",
                     )
 
             live_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = {
@@ -445,150 +445,49 @@ class PrefrontalDeliberationEngine:
         available_actions: Sequence[Any],
         known_av_feats: set[int],
     ) -> tuple[Any, dict[str, Any] | None] | None:
-        """Arbitrate control panel affordances and optical symmetry targets."""
-        has_displacement_actions = any(
-            engine.is_displacement_action(a) for a in available_actions
-        ) or any(
-            not engine.is_spatial_effector(a) and a not in engine.action_dynamics
-            for a in available_actions
-        )
-        spatial_effector_actions = [a for a in available_actions if engine.is_spatial_effector(a)]
-        has_immobile_failures = bool(
-            engine.immobile_entity_actions
-            and len(engine.recent_actions) >= 2
-            and any(a in engine.immobile_entity_actions for a in list(engine.recent_actions)[-2:])
-        )
-        is_stuck_or_looping = (
-            engine.consecutive_stuck_steps >= 2
-            or (
-                engine.avatar_pos is not None
-                and engine.recent_positions.count(engine.avatar_pos) >= 2
-            )
-            or (engine.avatar_pos is None and engine.step_counter > 4)
-            or has_immobile_failures
-        )
-        has_aligned_optical_subgoal = False
-        if engine.avatar_pos is not None and spatial_effector_actions:
-            bg_eval = engine.estimate_background(curr_grid)
-            sgs = PerceptionEngine.detect_structural_goals(
-                curr_grid,
-                bg=bg_eval,
-                avatar_features=known_av_feats,
-                avatar_feature=engine.avatar_feature,
-            )
-            for sg in sgs:
-                if (
-                    sg.get("type")
-                    in ("relational_alignment", "optical_mirror_target", "reflection_target")
-                    and sg.get("is_midpoint")
-                    and (
-                        engine.avatar_feature is None
-                        or sg.get("feature") == engine.avatar_feature
-                        or sg.get("feature") in engine.avatar_features
-                    )
-                ):
-                    mp = sg["position"]
-                    if (
-                        abs(mp[1] - engine.avatar_pos[1]) <= 1
-                        and abs(mp[0] - engine.avatar_pos[0]) <= 2
-                    ):
-                        has_aligned_optical_subgoal = True
-                        break
+        """Arbitrate control panel affordances and interactive targets via registered policies or generic fallbacks."""
+        # 1. Query external registered deliberation policies first (e.g. ARC3DeliberationPolicy)
+        for policy in getattr(engine, "deliberation_policies", []):
+            if hasattr(policy, "arbitrate_affordances"):
+                res = policy.arbitrate_affordances(
+                    engine, curr_grid, available_actions, known_av_feats
+                )
+                if res is not None:
+                    return res
 
+        # 2. Domain-agnostic fallback for discrete transform / focus switch actions
+        spatial_effector_actions = [a for a in available_actions if engine.is_spatial_effector(a)]
         discrete_transform_actions = [
             a
             for a in available_actions
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
+        focus_switches = [a for a in discrete_transform_actions if engine.is_focus_switch_action(a)]
+        if focus_switches:
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            return focus_switches[0], None
 
-        if (
-            (spatial_effector_actions or discrete_transform_actions)
-            and (
-                not has_displacement_actions
-                or is_stuck_or_looping
-                or (has_aligned_optical_subgoal and not engine.mental_plan)
+        if not spatial_effector_actions and discrete_transform_actions:
+            has_displacement_actions = any(
+                engine.is_displacement_action(a) for a in available_actions
+            ) or any(
+                not engine.is_spatial_effector(a) and a not in engine.action_dynamics
+                for a in available_actions
             )
-            and (engine.is_motor_grounded() or not has_displacement_actions)
-        ):
-            bg = engine.estimate_background(curr_grid)
-            entities = engine.extract_entities(curr_grid, bg)
-            panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
-            active_panel_target: tuple[int, int] | None = None
-            for p in panels:
-                unvisited_minority = [
-                    m.grid_pos
-                    for m in p["minority_items"]
-                    if engine.entity_visit_counts.get(f"click_{m.grid_pos[0]}_{m.grid_pos[1]}", 0)
-                    == 0
-                    and m.grid_pos not in engine.quiescent_click_targets
-                ]
-                if unvisited_minority:
-                    active_panel_target = unvisited_minority[0]
-                    break
-
-            if active_panel_target is None:
-                optical_goals = [
-                    g
-                    for g in PerceptionEngine.detect_structural_goals(
-                        curr_grid,
-                        bg=bg,
-                        avatar_features=known_av_feats,
-                        avatar_feature=engine.avatar_feature,
-                    )
-                    if g.get("type")
-                    in ("relational_alignment", "optical_mirror_target", "reflection_target")
-                    and g.get("position") is not None
-                    and not g.get("is_midpoint")
-                ]
-                optical_goals.sort(key=lambda g: g.get("confidence", 0.5), reverse=True)
-                for og in optical_goals:
-                    mp = og["position"]
-                    if engine.avatar_pos is not None:
-                        dist_l1 = abs(mp[0] - engine.avatar_pos[0]) + abs(
-                            mp[1] - engine.avatar_pos[1]
-                        )
-                        same_col = abs(mp[1] - engine.avatar_pos[1]) <= 3
-                        same_row = abs(mp[0] - engine.avatar_pos[0]) <= 3
-                        if dist_l1 < 8 or same_col or same_row:
-                            continue
-                    if engine.entity_visit_counts.get(f"click_{mp[0]}_{mp[1]}", 0) < 4:
-                        active_panel_target = mp
-                        break
-
-            if active_panel_target is not None and spatial_effector_actions:
-                chosen_action = spatial_effector_actions[0]
-                tr, tc = active_panel_target
-                engine.entity_visit_counts[f"click_{tr}_{tc}"] = (
-                    engine.entity_visit_counts.get(f"click_{tr}_{tc}", 0) + 1
+            is_stuck_or_looping = (
+                engine.consecutive_stuck_steps >= 2
+                or (
+                    engine.avatar_pos is not None
+                    and engine.recent_positions.count(engine.avatar_pos) >= 2
                 )
-                aff = engine.action_affordances.get(chosen_action)
-                param_keys = aff.target_param_keys if aff else ("x", "y")
-                chosen_data: dict[str, Any] = {}
-                for k in param_keys:
-                    if k in ("x", "col", "c", "column", "azimuth"):
-                        chosen_data[k] = tc
-                    elif k in ("y", "row", "r", "elevation", "distance"):
-                        chosen_data[k] = tr
-                    else:
-                        chosen_data[k] = 0
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen_action, chosen_data
-            elif (
-                (not spatial_effector_actions or active_panel_target is None)
-                and (
-                    is_stuck_or_looping or (has_aligned_optical_subgoal and not engine.mental_plan)
-                )
-                and discrete_transform_actions
-            ):
-                focus_switches = [
-                    a for a in discrete_transform_actions if engine.is_focus_switch_action(a)
-                ]
-                if focus_switches:
-                    chosen_action = focus_switches[0]
-                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    return chosen_action, None
+                or (engine.avatar_pos is None and engine.step_counter > 4)
+            )
+            if not has_displacement_actions or is_stuck_or_looping:
+                undo_acts = getattr(engine, "undo_actions", set())
                 uninhibited_discrete = [
-                    a for a in discrete_transform_actions if engine.inhibited_actions.get(a, 0) == 0
+                    a
+                    for a in discrete_transform_actions
+                    if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
                 ]
                 chosen_action = (
                     uninhibited_discrete[0]
@@ -617,6 +516,13 @@ class PrefrontalDeliberationEngine:
             engine.register_action_space(action_schemas)
 
         curr_grid = engine.normalize_sensory_input(curr_grid)
+
+        # Metacognitive Urgency Modulation:
+        # Under acute step countdown / strict budget constraints, suppress exploratory
+        # refractory cooldowns to prioritize immediate exploitation toward known goals.
+        if engine.is_under_strict_step_budget():
+            engine.exploration_cooldown = 0
+            engine.simulation_cooldown = 0
 
         # 1. Update background & assimilate sensory feedback from previous action
         engine.bg_feature = engine.estimate_background(curr_grid)
@@ -753,10 +659,13 @@ class PrefrontalDeliberationEngine:
         # Faculty E: Basal Ganglia Motor Gating & Phase Entrainment
         if engine.pending_phase_wait_steps > 0:
             engine.pending_phase_wait_steps -= 1
+            undo_acts = getattr(engine, "undo_actions", set())
             non_disp = [
                 a
                 for a in available_actions
-                if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                if not engine.is_displacement_action(a)
+                and not engine.is_spatial_effector(a)
+                and a not in undo_acts
             ]
             if non_disp:
                 return non_disp[0], None
@@ -814,10 +723,13 @@ class PrefrontalDeliberationEngine:
             if should_wait:
                 engine.mental_plan.appendleft(next_step)
                 engine.pending_phase_wait_steps = wait_steps
+                undo_acts = getattr(engine, "undo_actions", set())
                 non_disp = [
                     a
                     for a in available_actions
-                    if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                    if not engine.is_displacement_action(a)
+                    and not engine.is_spatial_effector(a)
+                    and a not in undo_acts
                 ]
                 if non_disp:
                     return non_disp[0], None
@@ -828,7 +740,14 @@ class PrefrontalDeliberationEngine:
                 # to burn phase steps until dynamic hazards clear.
                 curr_pos = engine.avatar_pos or getattr(engine, "current_actor_pos", None)
                 H, W = curr_grid.shape
-                reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
+                # Dynamically derive opposite displacement action mapping from kinematic deltas
+                reverse_map: dict[Any, Any] = {}
+                for a1, d1 in engine.action_deltas.items():
+                    for a2, d2 in engine.action_deltas.items():
+                        if d1[0] == -d2[0] and d1[1] == -d2[1] and (d1[0] != 0 or d1[1] != 0):
+                            reverse_map[a1] = a2
+                if not reverse_map:
+                    reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
                 pacing_candidates: list[tuple[Any, tuple[int, int]]] = []
 
                 if curr_pos is not None:
@@ -1024,6 +943,8 @@ class PrefrontalDeliberationEngine:
                     chosen_data = None
 
         engine.prev_grid = curr_grid.copy()
+        if hasattr(engine, "grid_history"):
+            engine.grid_history.append(curr_grid.copy())
         engine.last_action = chosen_action
         engine.last_action_data = chosen_data
         engine.last_predicted_pos = predicted_pos

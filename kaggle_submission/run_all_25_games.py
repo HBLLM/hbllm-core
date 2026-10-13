@@ -32,6 +32,11 @@ from hbllm.drivers.base import (
 )
 from hbllm.drivers.manager import DriverManager
 
+try:
+    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+except ImportError:
+    from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
+
 # Import competitive agent
 try:
     from kaggle_submission.my_agent import MyAgent
@@ -75,14 +80,7 @@ class ArcAgiConsoleDriver(BaseDriver):
             device_type="bidirectional",
             modalities=[DriverModality.GRID_2D, DriverModality.STRUCTURED],
             stream_type=DriverStreamType.POLL,
-            action_schema=[
-                {"name": "MOVE_UP", "action_id": 1},
-                {"name": "MOVE_DOWN", "action_id": 2},
-                {"name": "MOVE_LEFT", "action_id": 3},
-                {"name": "MOVE_RIGHT", "action_id": 4},
-                {"name": "INTERACT", "action_id": 5},
-                {"name": "CLICK_CELL", "action_id": 6, "parameters": {"x": "int", "y": "int"}},
-            ],
+            action_schema=[dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS],
         )
         super().__init__(
             name=name,
@@ -157,6 +155,21 @@ class ArcAgiConsoleDriver(BaseDriver):
                     metadata["StepCounter"] = int(sc)
             except Exception:
                 pass
+
+        game_actions = getattr(game_obj, "actions", None)
+        valid_targets: list[dict[str, Any]] = []
+        if game_actions and isinstance(game_actions, (list, tuple)):
+            for act_in in game_actions:
+                d = getattr(act_in, "data", None)
+                if isinstance(d, dict) and d:
+                    valid_targets.append(d)
+
+        schemas = [dict(s) for s in self.descriptor.action_schema]
+        if valid_targets:
+            for s in schemas:
+                if s.get("action_id") == 6:
+                    s["valid_targets"] = valid_targets
+        metadata["action_schemas"] = schemas
 
         return DriverInput(
             raw_data=grid,
@@ -261,6 +274,9 @@ class CognitiveAgentAdapter:
         sc = driver_input.metadata.get("StepCounter")
         if sc is not None and hasattr(self.agent, "internal_engine") and self.agent.internal_engine:
             self.agent.internal_engine.set_environmental_step_limit(int(sc))
+        schemas = driver_input.metadata.get("action_schemas")
+        if schemas:
+            self.agent.action_schemas = schemas
 
     def decide(self, available_actions: list[DriverAction], source_id: str = "") -> DriverAction:
         game_act = self.agent.choose_action(self.history, self.last_frame)

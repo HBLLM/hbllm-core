@@ -19,6 +19,7 @@ and ACC conflict monitoring:
 
 import logging
 import math
+from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -31,11 +32,10 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.active_inference import ActionNode
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
-from hbllm.hcir.world.cortex_perception import EntityRole, PerceptionEngine
+from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.spatial_containment import RoomDoor
-from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -330,12 +330,20 @@ class EpistemicCuriosityExplorer:
         available_actions: Sequence[int],
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
-        uncalibrated = [a for a in available_actions if not engine.is_action_calibrated(a)]
+        undo_acts = getattr(engine, "undo_actions", set())
+        uncalibrated = [
+            a
+            for a in available_actions
+            if not engine.is_action_calibrated(a)
+            and engine.inhibited_actions.get(a, 0) == 0
+            and a not in undo_acts
+        ]
         untested_at_pos = [
             a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
         ]
         if untested_at_pos:
-            chosen = untested_at_pos[0]
+            spatial_effs = [a for a in untested_at_pos if engine.is_spatial_effector(a)]
+            chosen = spatial_effs[0] if spatial_effs else untested_at_pos[0]
             action_data = None
             if engine.is_spatial_effector(chosen):
                 action_data = engine.ground_effector_action(curr_grid, chosen)
@@ -509,8 +517,11 @@ class EpistemicCuriosityExplorer:
                 exploration_mode="attractor_loop_effector",
             )
 
+        undo_acts = getattr(engine, "undo_actions", set())
         uninhibited_available = [
-            a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+            a
+            for a in available_actions
+            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
         ]
         fallback_action = (
             uninhibited_available[0] if uninhibited_available else available_actions[0]
@@ -1095,8 +1106,48 @@ class EpistemicCuriosityExplorer:
         return proposal.action, proposal.action_data
 
 
+class EffectorTargetScorer(ABC):
+    """Abstract interface for external or domain-specific target candidate scoring.
+
+    Allows modular game-specific or benchmark-specific solvers (e.g. ARC-AGI-3 adapters)
+    to register candidate scoring strategies without coupling the core cognitive architecture.
+    """
+
+    @abstractmethod
+    def score_targets(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        entities: Sequence[SpatialEntity],
+        bg: int,
+        H: int,
+        W: int,
+    ) -> list[tuple[int, int, float]]:
+        """Score candidate coordinates for allocentric effector targeting."""
+        ...
+
+
 class MotorCortexEffector:
     """Allocentric spatial effector grounding and action affordance arbitration."""
+
+    _registered_target_scorers: list[EffectorTargetScorer] = []
+
+    @classmethod
+    def register_target_scorer(cls, scorer: EffectorTargetScorer) -> None:
+        """Register an external or modular domain target candidate scorer."""
+        if scorer not in cls._registered_target_scorers:
+            cls._registered_target_scorers.append(scorer)
+
+    @classmethod
+    def unregister_target_scorer(cls, scorer: EffectorTargetScorer) -> None:
+        """Unregister an external target candidate scorer."""
+        if scorer in cls._registered_target_scorers:
+            cls._registered_target_scorers.remove(scorer)
+
+    @classmethod
+    def clear_target_scorers(cls) -> None:
+        """Clear all registered target scorers."""
+        cls._registered_target_scorers.clear()
 
     @staticmethod
     def _probe_looming_threat_evasion(
@@ -1157,12 +1208,16 @@ class MotorCortexEffector:
                     "WALK",
                 )
             )
+            meta: dict[str, Any] = {}
+            if "valid_targets" in spec:
+                meta["valid_targets"] = spec["valid_targets"]
             return ActionAffordance(
                 action_id=aid,
                 name=name,
                 is_displacement=is_disp,
                 requires_spatial_target=req_spatial,
                 target_param_keys=param_keys if param_keys else ("x", "y"),
+                metadata=meta,
             )
         return ActionAffordance(action_id=spec, name=str(spec))
 
@@ -1180,255 +1235,81 @@ class MotorCortexEffector:
         return step
 
     @staticmethod
-    def _score_working_memory_pairs(
-        engine: AutonomousEpistemicEngine,
-        H: int,
-        W: int,
-        bg: int,
-    ) -> list[tuple[int, int, float]]:
-        """dlPFC Working Memory Pattern Completion: Match revealed card/tile with partner."""
-        candidates: list[tuple[int, int, float]] = []
-        last_probed = engine.working_memory.visuospatial.last_probed_coord
-        last_feat = engine.working_memory.visuospatial.last_probed_feature
-        if last_probed is not None and last_feat is not None and last_feat != bg and last_feat != 0:
-            pair_target = engine.working_memory.visuospatial.find_matching_pair(
-                last_probed, last_feat
-            )
-            if (
-                pair_target is not None
-                and pair_target not in engine.quiescent_click_targets
-                and 0 <= pair_target[0] < H
-                and 0 <= pair_target[1] < W
-            ):
-                candidates.append((pair_target[0], pair_target[1], 450.0))
-        return candidates
-
-    @staticmethod
-    def _score_symmetry_discrepancies(
-        curr_grid: np.ndarray,
-        bg: int,
-        H: int,
-        W: int,
-        engine: AutonomousEpistemicEngine,
-    ) -> list[tuple[int, int, float]]:
-        """LOC Ventral Stream Geometric Symmetry Discrepancies."""
-        candidates: list[tuple[int, int, float]] = []
-        sym_discrepancies = VisualSymmetryAnalyzer.extract_discrepancy_targets(
-            curr_grid, background_color=bg, threshold=0.55
-        )
-        for dr, dc, _, sym_conf in sym_discrepancies:
-            if (dr, dc) not in engine.quiescent_click_targets and 0 <= dr < H and 0 <= dc < W:
-                v_count = engine.entity_visit_counts.get(f"click_{dr}_{dc}", 0)
-                if v_count < 3:
-                    is_void = int(curr_grid[dr, dc]) == bg
-                    base = 120.0 if is_void else 320.0
-                    cand_score = base + (sym_conf * 40.0) - float(v_count) * 15.0
-                    candidates.append((dr, dc, cand_score))
-        return candidates
-
-    @staticmethod
-    def _score_safe_cells(
-        engine: AutonomousEpistemicEngine,
-        H: int,
-        W: int,
-    ) -> list[tuple[int, int, float]]:
-        """dlPFC Constraint Propagation: Target guaranteed safe cells."""
-        candidates: list[tuple[int, int, float]] = []
-        deduced_safe = engine.working_memory.get_unrevealed_safe_cells()
-        for sr, sc in deduced_safe:
-            if (sr, sc) not in engine.quiescent_click_targets and 0 <= sr < H and 0 <= sc < W:
-                visit_count = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
-                if visit_count == 0:
-                    candidates.append((sr, sc, 300.0))
-        return candidates
-
-    @staticmethod
-    def _score_structural_goals(
-        curr_grid: np.ndarray,
-        bg: int,
-        av_feats: set[int],
-        engine: AutonomousEpistemicEngine,
-        H: int,
-        W: int,
-    ) -> list[tuple[int, int, float]]:
-        """Optical alignment & symmetry completion structural targets."""
-        candidates: list[tuple[int, int, float]] = []
-        structural_goals = PerceptionEngine.detect_structural_goals(
-            curr_grid,
-            bg=bg,
-            avatar_features=av_feats,
-            avatar_feature=engine.avatar_feature,
-            barrier_features=engine.symbolic_theory.barrier_features,
-            known_lethal_features=engine.hazard_tracker.known_lethal_features,
-        )
-        for og in structural_goals:
-            op = og.get("position")
-            g_type = og.get("type")
-            if (
-                op is not None
-                and op not in engine.quiescent_click_targets
-                and 0 <= op[0] < H
-                and 0 <= op[1] < W
-            ):
-                v_count = engine.entity_visit_counts.get(f"click_{op[0]}_{op[1]}", 0)
-                if v_count < 3:
-                    is_void = og.get("is_void", False) or (int(curr_grid[op[0], op[1]]) == bg)
-                    if g_type in (
-                        "relational_alignment",
-                        "optical_mirror_target",
-                        "reflection_target",
-                    ):
-                        if is_void:
-                            cand_score = (
-                                60.0 + (og.get("confidence", 0.3) * 20.0) - float(v_count) * 20.0
-                            )
-                        else:
-                            cand_score = (
-                                240.0 + (og.get("confidence", 0.95) * 40.0) - float(v_count) * 20.0
-                            )
-                        candidates.append((op[0], op[1], cand_score))
-                    elif g_type == "symmetry_completion":
-                        if is_void:
-                            cand_score = (
-                                50.0 + (og.get("confidence", 0.5) * 20.0) - float(v_count) * 20.0
-                            )
-                        else:
-                            cand_score = (
-                                220.0 + (og.get("confidence", 0.8) * 50.0) - float(v_count) * 20.0
-                            )
-                        candidates.append((op[0], op[1], cand_score))
-        return candidates
-
-    @staticmethod
-    def _score_affordance_panels(
-        entities: Sequence[SpatialEntity],
-        curr_grid: np.ndarray,
-        bg: int,
-        H: int,
-        W: int,
-        engine: AutonomousEpistemicEngine,
-    ) -> list[tuple[int, int, float]]:
-        """Gestalt Affordance Panels: Regular interactive arrays & pop-out minority items."""
-        candidates: list[tuple[int, int, float]] = []
-        panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
-        for panel in panels:
-            panel_coords = set(panel["item_coords"])
-            has_effective_item = any(p in engine.effective_click_targets for p in panel_coords)
-
-            for m_item in panel["minority_items"]:
-                mr, mc = m_item.grid_pos
-                if (mr, mc) not in engine.quiescent_click_targets and 0 <= mr < H and 0 <= mc < W:
-                    visit_count = engine.entity_visit_counts.get(f"click_{mr}_{mc}", 0)
-                    last_step = engine.last_effector_target_step.get((mr, mc), -999)
-                    delta_t = max(1, engine.step_counter - last_step)
-                    refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
-                    visit_damping = float(visit_count) * 220.0
-                    score = 400.0 - refractory - visit_damping
-                    candidates.append((mr, mc, score))
-
-            for item in panel["items"]:
-                ir, ic = item.grid_pos
-                if (ir, ic) not in engine.quiescent_click_targets and 0 <= ir < H and 0 <= ic < W:
-                    visit_count = engine.entity_visit_counts.get(f"click_{ir}_{ic}", 0)
-                    bonus = 260.0 if has_effective_item else 200.0
-                    feat_bonus = 40.0 if item.feature_id in engine.effective_features else 0.0
-                    last_step = engine.last_effector_target_step.get((ir, ic), -999)
-                    delta_t = max(1, engine.step_counter - last_step)
-                    is_goal_converging = (
-                        (ir, ic) == engine.active_goal_converging_coord
-                        and engine.consecutive_goal_converging_clicks < 12
-                    )
-                    is_active_momentum = (
-                        (ir, ic) == engine.last_effective_click_coord
-                        and engine.consecutive_effective_clicks < 6
-                    )
-                    if is_goal_converging:
-                        momentum_bonus = 120.0
-                        ior_penalty = 0.0
-                    elif is_active_momentum:
-                        momentum_bonus = 60.0
-                        ior_penalty = 0.0
-                    else:
-                        momentum_bonus = 0.0
-                        refractory = 35.0 if delta_t == 1 else (35.0 / float(delta_t))
-                        visit_damping = min(30.0, float(visit_count) * 4.0)
-                        ior_penalty = refractory + visit_damping
-                    score = bonus + feat_bonus + momentum_bonus - ior_penalty
-                    candidates.append((ir, ic, score))
-        return candidates
-
-    @staticmethod
-    def _score_kinetic_repulsion_targets(
-        entities: Sequence[SpatialEntity],
-        curr_grid: np.ndarray,
-        bg: int,
-        H: int,
-        W: int,
-        engine: AutonomousEpistemicEngine,
-    ) -> list[tuple[int, int, float]]:
-        """Acoustic / wave repulsion targeting: click behind floating items to propel toward goal zones."""
-        candidates: list[tuple[int, int, float]] = []
-        target_zones = [
-            e.grid_pos
-            for e in entities
-            if (
-                e.role == EntityRole.GOAL
-                or e.feature_id in engine.symbolic_theory.goal_features
-                or e.grid_pos in engine.learned_goal_positions
-            )
-            and e.area >= 4
-        ]
-        if not target_zones:
-            return candidates
-
-        for e in entities:
-            if (
-                e.role in (EntityRole.MANIPULABLE, EntityRole.UNKNOWN)
-                and 4 <= e.area <= 64
-                and e.grid_pos not in target_zones
-                and e.feature_id != bg
-            ):
-                er, ec = e.grid_pos
-                tr, tc = min(target_zones, key=lambda z: abs(z[0] - er) + abs(z[1] - ec))
-                dr = int(np.sign(tr - er))
-                dc = int(np.sign(tc - ec))
-                extent_r = (
-                    max(1, (e.bounding_box[1] - e.bounding_box[0] + 1) // 2)
-                    if e.bounding_box
-                    else max(1, int(round(math.sqrt(max(1, e.area)) / 2.0)))
-                )
-                extent_c = (
-                    max(1, (e.bounding_box[3] - e.bounding_box[2] + 1) // 2)
-                    if e.bounding_box
-                    else max(1, int(round(math.sqrt(max(1, e.area)) / 2.0)))
-                )
-                offset = max(2, max(extent_r, extent_c) + 1)
-                click_r = er - dr * offset
-                click_c = ec - dc * offset
-                if (
-                    0 <= click_r < H
-                    and 0 <= click_c < W
-                    and (click_r, click_c) not in engine.quiescent_click_targets
-                ):
-                    v_count = engine.entity_visit_counts.get(f"click_{click_r}_{click_c}", 0)
-                    if v_count < 4:
-                        candidates.append((click_r, click_c, 350.0 - float(v_count) * 25.0))
-        return candidates
-
-    @staticmethod
     def is_peripheral_frame_cell(r: int, c: int, H: int, W: int, grid: np.ndarray) -> bool:
-        """True if (r, c) is on an outer grid frame or border line."""
-        if not (r == 0 or r == H - 1 or c == 0 or c == W - 1):
-            return False
-        val = int(grid[r, c])
-        if r == 0 or r == H - 1:
-            line = grid[r, :]
-            if np.count_nonzero(line == val) >= max(4, W // 3):
-                return True
-        if c == 0 or c == W - 1:
-            line = grid[:, c]
-            if np.count_nonzero(line == val) >= max(4, H // 3):
-                return True
+        """True if (r, c) is on an outer grid frame, border line, or peripheral HUD status banner."""
+        # 1. Outer 1-pixel frame border checks
+        if r == 0 or r == H - 1 or c == 0 or c == W - 1:
+            val = int(grid[r, c])
+            if r == 0 or r == H - 1:
+                line = grid[r, :]
+                if np.count_nonzero(line == val) >= max(4, W // 3):
+                    return True
+            if c == 0 or c == W - 1:
+                line = grid[:, c]
+                if np.count_nonzero(line == val) >= max(4, H // 3):
+                    return True
+
+        # 2. Universal Top HUD / Status Banner Detection:
+        # A top HUD banner is a multi-row band across the top (r <= 16, H >= 24)
+        # separated from the gameplay grid by a distinct divider line or having a distinct
+        # banner background color different from the main gameplay field.
+        if r <= 16 and H >= 24:
+            for div_r in range(min(16, H // 3), 2, -1):
+                line = grid[div_r, :]
+                line_counts: np.ndarray = np.bincount(line.astype(int), minlength=16)
+                if len(line_counts) > 0 and np.max(line_counts) >= int(W * 0.85):
+                    line_color = int(np.argmax(line_counts))
+                    banner_region = grid[:div_r, :]
+                    field_region = grid[div_r + 1 :, :]
+                    bc_banner: np.ndarray = np.bincount(
+                        banner_region.flatten().astype(int), minlength=16
+                    )
+                    bc_field: np.ndarray = np.bincount(
+                        field_region.flatten().astype(int), minlength=16
+                    )
+                    if len(bc_banner) > 0 and len(bc_field) > 0:
+                        banner_dom = int(np.argmax(bc_banner))
+                        field_dom = int(np.argmax(bc_field))
+                        has_distinct_bg = (banner_dom != field_dom) and (
+                            (bc_banner[banner_dom] / banner_region.size) >= 0.85
+                        )
+                        has_divider_line = (line_color != field_dom) and (
+                            line_counts[line_color] >= int(W * 0.85)
+                        )
+                        if has_distinct_bg or has_divider_line:
+                            if r <= div_r:
+                                return True
+                            break
+
+        # 3. Bottom HUD / Status Banner Detection
+        if r >= H - 16 and H >= 24:
+            for div_r in range(H - 4, max(H - 18, H - H // 3), -1):
+                line = grid[div_r, :]
+                line_counts_bot: np.ndarray = np.bincount(line.astype(int), minlength=16)
+                if len(line_counts_bot) > 0 and np.max(line_counts_bot) >= int(W * 0.85):
+                    line_color = int(np.argmax(line_counts_bot))
+                    banner_region = grid[div_r + 1 :, :]
+                    field_region = grid[:div_r, :]
+                    bc_banner_bot: np.ndarray = np.bincount(
+                        banner_region.flatten().astype(int), minlength=16
+                    )
+                    bc_field_bot: np.ndarray = np.bincount(
+                        field_region.flatten().astype(int), minlength=16
+                    )
+                    if len(bc_banner_bot) > 0 and len(bc_field_bot) > 0:
+                        banner_dom = int(np.argmax(bc_banner_bot))
+                        field_dom = int(np.argmax(bc_field_bot))
+                        has_distinct_bg = (banner_dom != field_dom) and (
+                            (bc_banner_bot[banner_dom] / banner_region.size) >= 0.85
+                        )
+                        has_divider_line = (line_color != field_dom) and (
+                            line_counts_bot[line_color] >= int(W * 0.85)
+                        )
+                        if has_distinct_bg or has_divider_line:
+                            if r >= div_r:
+                                return True
+                            break
+
         return False
 
     @classmethod
@@ -1452,25 +1333,18 @@ class MotorCortexEffector:
 
         click_candidates: list[tuple[int, int, float]] = []
 
-        # 1. dlPFC Working Memory Pattern Completion
-        click_candidates.extend(cls._score_working_memory_pairs(engine, H, W, bg))
+        # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
+        for scorer in cls._registered_target_scorers:
+            try:
+                click_candidates.extend(scorer.score_targets(engine, curr_grid, entities, bg, H, W))
+            except Exception as e:
+                logger.debug("Registered target scorer %s failed: %s", scorer, e)
 
-        # 2. LOC Ventral Stream Symmetry Discrepancies
-        click_candidates.extend(cls._score_symmetry_discrepancies(curr_grid, bg, H, W, engine))
-
-        # 3. dlPFC Constraint Propagation: Safe cells
-        click_candidates.extend(cls._score_safe_cells(engine, H, W))
-
-        # 4. Optical and symmetry completion goals
-        click_candidates.extend(cls._score_structural_goals(curr_grid, bg, av_feats, engine, H, W))
-
-        # 5. Gestalt Affordance Panels
-        click_candidates.extend(cls._score_affordance_panels(entities, curr_grid, bg, H, W, engine))
-
-        # 5b. Kinetic wave & repulsion targeting
-        click_candidates.extend(
-            cls._score_kinetic_repulsion_targets(entities, curr_grid, bg, H, W, engine)
-        )
+        for scorer in getattr(engine, "target_scorers", []):
+            try:
+                click_candidates.extend(scorer.score_targets(engine, curr_grid, entities, bg, H, W))
+            except Exception as e:
+                logger.debug("Engine-local target scorer %s failed: %s", scorer, e)
 
         # 6. Salient entities if no panel candidates exist
         if not click_candidates:
@@ -1478,7 +1352,12 @@ class MotorCortexEffector:
                 if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
                     continue
                 cr, cc = e.grid_pos
-                if (cr, cc) in engine.quiescent_click_targets:
+                if (
+                    cr,
+                    cc,
+                ) in engine.quiescent_click_targets or MotorCortexEffector.is_peripheral_frame_cell(
+                    cr, cc, H, W, curr_grid
+                ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
@@ -1606,6 +1485,34 @@ class MotorCortexEffector:
             )
             target_r, target_c = int(best_r), int(best_c)
             engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
+
+            # Parietal Effector Repertoire Grounding:
+            # If the action affordance defines discrete valid targets, snap the chosen target
+            # to the nearest valid physical affordance point.
+            valid_targets = aff.metadata.get("valid_targets") if aff else None
+            if valid_targets and isinstance(valid_targets, (list, tuple)):
+                best_dist = float("inf")
+                snapped_target: dict[str, Any] | None = None
+                for vt in valid_targets:
+                    if isinstance(vt, dict):
+                        raw_vx = (
+                            vt.get("x")
+                            if vt.get("x") is not None
+                            else vt.get("c", vt.get("col", 0))
+                        )
+                        raw_vy = (
+                            vt.get("y")
+                            if vt.get("y") is not None
+                            else vt.get("r", vt.get("row", 0))
+                        )
+                        vx = int(raw_vx) if raw_vx is not None else 0
+                        vy = int(raw_vy) if raw_vy is not None else 0
+                        d = abs(vx - target_c) + abs(vy - target_r)
+                        if d < best_dist:
+                            best_dist = d
+                            snapped_target = vt
+                if snapped_target is not None:
+                    return dict(snapped_target)
 
             coords: dict[str, Any] = {}
             for k in param_keys:

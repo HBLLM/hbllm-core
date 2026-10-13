@@ -262,6 +262,24 @@ class EpistemicFeedbackAssimilator:
                 except (ValueError, TypeError):
                     pass
 
+        # Empirical State-Reversion / Undo Action Discovery:
+        # If executing this action restored the grid to the previous-previous state,
+        # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
+        if (
+            action is not None
+            and hasattr(engine, "grid_history")
+            and len(engine.grid_history) >= 2
+            and not is_effector_action
+            and not engine.is_displacement_action(action)
+        ):
+            if np.array_equal(curr_grid, engine.grid_history[-2]):
+                engine.undo_actions.add(action)
+                engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 16)
+                logger.info(
+                    "AutonomousEpistemicEngine: Grounded empirical UNDO / STATE_REVERSION affordance for action %s",
+                    action,
+                )
+
         if diff.changed_pixel_count == 0:
             engine.consecutive_quiescent_actions += 1
             engine.consecutive_effective_clicks = 0
@@ -318,6 +336,25 @@ class EpistemicFeedbackAssimilator:
 
                 if is_effector_action and diff.changed_pixel_count > 0:
                     engine.avatar_pos = target_coord
+
+                    # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
+                    if diff.changed_mask is not None and engine.prev_grid is not None:
+                        bg_val = engine.bg_feature or 0
+                        vanished_mask = (engine.prev_grid != bg_val) & (curr_grid == bg_val)
+                        appeared_mask = (curr_grid != bg_val) & (engine.prev_grid == bg_val)
+                        v_rows, v_cols = np.where(vanished_mask)
+                        a_rows, a_cols = np.where(appeared_mask)
+                        if len(v_rows) > 0 and len(a_rows) > 0:
+                            prev_cr, prev_cc = float(np.mean(v_rows)), float(np.mean(v_cols))
+                            curr_cr, curr_cc = float(np.mean(a_rows)), float(np.mean(a_cols))
+                            disp_r, disp_c = curr_cr - prev_cr, curr_cc - prev_cc
+                            off_r, off_c = float(tr) - prev_cr, float(tc) - prev_cc
+                            dot = off_r * disp_r + off_c * disp_c
+                            if dot > 0.5:
+                                engine.effector_kinetics_mode = 1
+                            elif dot < -0.5:
+                                engine.effector_kinetics_mode = -1
+
                     clicked_feats = {
                         int(f)
                         for f in np.unique(
@@ -347,7 +384,7 @@ class EpistemicFeedbackAssimilator:
                         reason="avatar_relocation_assimilated",
                     )
 
-                # Numerical / cardinality constraint discovery (e.g. Minesweeper / local count grids):
+                # Numerical / neighborhood cardinality constraint discovery:
                 tr, tc = target_coord
                 if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
                     new_feat = int(curr_grid[tr, tc])

@@ -497,6 +497,16 @@ class HippocampalEpisodicCortex:
             engine.consecutive_goal_converging_clicks = 0
             engine.consecutive_quiescent_actions = 0
             engine.inhibited_actions.clear()
+
+            # Affordance priors re-evaluation on new level transitions:
+            # Terrain barrier and walkable features from prior stages are local to those rooms.
+            # Preserving prior barrier features rigidly blinds the agent when new stages
+            # repurpose those features for pathways (e.g. tracks, bridges).
+            engine.symbolic_theory.barrier_features.clear()
+            engine.symbolic_theory.barrier_predicates.clear()
+            engine.symbolic_theory.walkable_features.clear()
+            engine.symbolic_theory.walkable_predicates.clear()
+
             engine.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
                 if engine.is_motor_grounded()
@@ -515,6 +525,7 @@ class HippocampalEpisodicCortex:
             engine.avatar_pos = None
             engine.action_dynamics.clear()
             engine.action_affordances.clear()
+            engine.effector_kinetics_mode = None
             engine.focus_switch_actions.clear()
             engine.last_non_displacement_action = None
             engine.tested_actions.clear()

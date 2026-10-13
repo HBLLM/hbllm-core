@@ -466,3 +466,248 @@ def test_click_effector_lattice_quantization() -> None:
     assert coords["y"] == 7 and coords["x"] == 10, (
         f"Grounded click ({coords['y']}, {coords['x']}) must match lattice centroid (7, 10)!"
     )
+
+
+def test_hud_status_banner_masking() -> None:
+    """Verify is_peripheral_frame_cell identifies multi-row top HUD banners and divider lines."""
+    # 64x64 grid mimicking su15:
+    # Rows 0..9 background color 4 with text digits of color 15 at rows 4..6
+    # Row 10 is divider line of color 5
+    # Rows 11..63 is main playing field with background 5 and 9
+    grid = np.full((64, 64), 5, dtype=int)
+    grid[:10, :] = 4
+    grid[4:7, 30:33] = 15  # Isolated digit
+    grid[10, :] = 5  # Divider line
+    grid[63, :] = 0  # Bottom border
+
+    # Cells in rows 0..10 must be flagged as peripheral HUD banner
+    for r in [0, 2, 5, 8, 10]:
+        assert MotorCortexEffector.is_peripheral_frame_cell(r, 32, 64, 64, grid), (
+            f"Row {r} in HUD banner must be recognized as peripheral!"
+        )
+
+    # Playing field cells (e.g. row 20, col 20) must NOT be peripheral
+    assert not MotorCortexEffector.is_peripheral_frame_cell(20, 20, 64, 64, grid), (
+        "Main playing arena must not be flagged as peripheral!"
+    )
+
+
+def test_effector_valid_targets_snapping() -> None:
+    """Verify ground_effector_action snaps targets to discrete schema affordance coordinates."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_pos = None
+    engine.avatar_feature = None
+
+    # Define discrete action repertoire with step-4 grid points starting at y=10
+    valid_targets = [{"x": x, "y": y} for x in range(0, 64, 4) for y in range(10, 64, 4)]
+    schemas = [
+        {
+            "action_id": 6,
+            "name": "CLICK_CELL",
+            "parameters": {"x": "int", "y": "int"},
+            "valid_targets": valid_targets,
+        }
+    ]
+    engine.register_action_space(schemas)
+
+    # Grid with a block of color 7 at (59, 5) -> nearest valid target is (58, 4) or (58, 8)
+    grid = np.full((64, 64), 5, dtype=int)
+    grid[:10, :] = 4  # Top HUD banner
+    grid[10, :] = 5  # Divider
+    grid[58:61, 3:6] = 7  # Movable object at bottom left
+
+    coords = MotorCortexEffector.ground_effector_action(engine, grid, action=6)
+    assert coords is not None, "Grounding must produce target coordinates!"
+    # Snapped coordinate must be one of the valid targets
+    assert any(vt["x"] == coords["x"] and vt["y"] == coords["y"] for vt in valid_targets), (
+        f"Grounded coords {coords} must be in valid_targets repertoire!"
+    )
+    # Target must be in the playing field (y >= 10), never in the HUD banner (y < 10)
+    assert coords["y"] >= 10, f"Grounded y={coords['y']} must not fall inside HUD banner!"
+
+
+def test_metacognitive_urgency_budget_modulation() -> None:
+    """Verify decide() zeros out refractory exploration cooldowns under tight step budgets."""
+    engine = AutonomousEpistemicEngine()
+    engine.exploration_budget = 20
+    engine.set_environmental_step_limit(20)
+    engine.exploration_cooldown = 5
+    engine.simulation_cooldown = 4
+
+    assert engine.is_under_strict_step_budget(), "20 remaining steps must trigger strict budget!"
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[1, 1] = 1  # avatar
+    grid[8, 8] = 2  # goal
+    engine.avatar_pos = (1, 1)
+    engine.avatar_feature = 1
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=0, delta_c=1, confidence=1.0)
+
+    # Decide next action
+    engine.decide(grid, available_actions=[1, 2])
+
+    # Cooldowns must be zeroed under acute urgency
+    assert engine.exploration_cooldown == 0, "Exploration cooldown must be cleared under urgency!"
+    assert engine.simulation_cooldown == 0, "Simulation cooldown must be cleared under urgency!"
+
+
+def test_active_inference_effector_kinetics_mode() -> None:
+    """Verify assimilate_feedback dynamically infers attraction/pull vs repulsion mode."""
+    engine = AutonomousEpistemicEngine()
+    assert engine.effector_kinetics_mode is None, "Kinetics mode must start unobserved (None)!"
+
+    engine.prev_grid = np.zeros((20, 20), dtype=int)
+    engine.prev_grid[10:13, 10:13] = 7  # Object at centroid (11, 11)
+
+    curr_grid = np.zeros((20, 20), dtype=int)
+    # Agent clicked at (5, 11) (above the object)
+    # Object moved to (7, 11) (closer to the click, i.e. pull / attraction)
+    curr_grid[6:9, 10:13] = 7
+
+    engine.assimilate_feedback(
+        curr_grid=curr_grid,
+        available_actions=[6],
+        action=6,
+        action_data={"y": 5, "x": 11},
+    )
+
+    assert engine.effector_kinetics_mode == 1, (
+        "Object moving toward the click must induce attraction mode (+1)!"
+    )
+
+    # Now test repulsion (-1): agent clicks below object at (15, 11) and object moves upwards away to (3, 11)
+    engine.prev_grid = np.zeros((20, 20), dtype=int)
+    engine.prev_grid[6:9, 10:13] = 7  # Object at centroid (7, 11)
+    curr_grid_repulse = np.zeros((20, 20), dtype=int)
+    curr_grid_repulse[2:5, 10:13] = 7  # Moves further away to (3, 11)
+
+    engine.assimilate_feedback(
+        curr_grid=curr_grid_repulse,
+        available_actions=[6],
+        action=6,
+        action_data={"y": 15, "x": 11},
+    )
+    assert engine.effector_kinetics_mode == -1, (
+        "Object moving away from the click must induce repulsion mode (-1)!"
+    )
+
+    # Cross-game reset without retaining dynamics clears kinetics mode
+    engine.reset_episode(retain_dynamics=False)
+    assert engine.effector_kinetics_mode is None, (
+        "Kinetics mode must be cleared upon cross-game reset!"
+    )
+
+
+def test_level_transition_barrier_re_evaluation() -> None:
+    """Verify episodic reset clears prior room terrain barrier features upon new level transitions."""
+    engine = AutonomousEpistemicEngine()
+    # Level 1 induces feature 2 as a barrier
+    engine.symbolic_theory.induce_barrier(2)
+    engine.symbolic_theory.induce_walkable(0)
+    assert 2 in engine.symbolic_theory.barrier_features
+
+    # Transition to new level (e.g. Level 4 where feature 2 is the traversable track)
+    engine.episodic_cortex.consolidate_schema_and_reset(
+        engine=engine,
+        is_new_level=True,
+        retain_dynamics=True,
+    )
+
+    # Barrier features must be cleared on new level transition to allow affordance re-evaluation
+    assert 2 not in engine.symbolic_theory.barrier_features, (
+        "Prior room barrier features must be cleared across new level transitions!"
+    )
+    assert len(engine.symbolic_theory.barrier_features) == 0
+
+
+def test_biological_undo_affordance_grounding() -> None:
+    """Verify assimilate_feedback detects when an action restores state to grid_history[-2] as UNDO."""
+    engine = AutonomousEpistemicEngine()
+
+    state_0 = np.zeros((10, 10), dtype=int)
+    state_0[5, 5] = 3
+
+    state_1 = np.zeros((10, 10), dtype=int)
+    state_1[6, 6] = 3
+
+    # History: state_0 was the previous state
+    engine.grid_history.append(state_0.copy())
+    engine.grid_history.append(state_1.copy())
+    engine.prev_grid = state_1.copy()
+
+    # Agent executes action 7, and board returns to state_0
+    engine.assimilate_feedback(
+        curr_grid=state_0,
+        available_actions=[6, 7],
+        action=7,
+        action_data=None,
+    )
+
+    # Action 7 must be recognized as an undo action and inhibited
+    assert 7 in engine.undo_actions, "Action 7 must be registered in undo_actions!"
+    assert engine.inhibited_actions.get(7, 0) > 0, (
+        "Undo action must be inhibited during forward progress!"
+    )
+
+
+def test_spatial_effector_safeguard_against_blind_discrete_arbitration() -> None:
+    """Verify arbitrate_affordances does not blindly dispatch arbitrary discrete actions when effectors are available."""
+    engine = AutonomousEpistemicEngine()
+    engine.step_counter = 10
+    engine.consecutive_stuck_steps = 3  # stuck condition
+
+    grid = np.zeros((10, 10), dtype=int)
+    # Available actions are [6, 7] (where 6 is spatial effector and 7 is discrete action/undo)
+    engine.register_action_space(
+        [
+            {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+            {"action_id": 7, "name": "ACTION7"},
+        ]
+    )
+
+    # With no affordance panel detected on grid, arbitrate_affordances must NOT choose action 7
+    choice = engine.deliberation_engine.arbitrate_affordances(
+        engine=engine,
+        curr_grid=grid,
+        available_actions=[6, 7],
+        known_av_feats=set(),
+    )
+    assert choice is None, (
+        "When spatial effectors are present and no panel exists, arbitrate_affordances must return None instead of blind discrete execution!"
+    )
+
+
+def test_undo_probe_filtering_and_effector_priority() -> None:
+    """Verify EpistemicCuriosityExplorer ignores undo actions and prioritizes spatial effectors during probing."""
+    from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
+
+    engine = AutonomousEpistemicEngine()
+    engine.register_action_space(
+        [
+            {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+            {"action_id": 7, "name": "ACTION7"},
+        ]
+    )
+    grid = np.zeros((10, 10), dtype=int)
+
+    # Mark action 7 as an undo action and inhibit it
+    engine.undo_actions.add(7)
+    engine.inhibited_actions[7] = 16
+
+    # Action 6 is spatial effector, action 7 is undo.
+    # When available actions are [6, 7], probe must select 6, not 7!
+    proposal = EpistemicCuriosityExplorer.compute_epistemic_probe(
+        engine, grid, available_actions=[6, 7]
+    )
+    assert proposal.action == 6, f"Probe must choose effector 6, but chose {proposal.action}!"
+
+
+def test_peripheral_driver_action_schema_completeness() -> None:
+    """Verify ARC_DEFAULT_ACTION_SCHEMAS integrity in the peripheral driver package."""
+    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+
+    ids = {s["action_id"] for s in ARC_DEFAULT_ACTION_SCHEMAS}
+    assert ids == {1, 2, 3, 4, 5, 6, 7}, (
+        f"All ARC-AGI actions 1-7 must be present in peripheral schema! Got {ids}"
+    )

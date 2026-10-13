@@ -1315,7 +1315,7 @@ class MentalSimulationPlanner:
                     sim_step = len(path) + 1
                     if engine.is_under_strict_step_budget():
                         rem_budget = engine.get_remaining_step_budget()
-                        if sim_step > rem_budget:
+                        if sim_step > rem_budget + 8:
                             continue
 
                     walkable_feats = (
@@ -1365,7 +1365,7 @@ class MentalSimulationPlanner:
                     if (nr, nc) in cur_threats:
                         flanked_t = threat_map.get((nr, nc))
                         if flanked_t is not None and cur_pos != flanked_t.gaze_pos:
-                            # Tactical flanking: stepping on sentry from side/back neutralizes it
+                            # Directional hazard neutralization: approaching oriented hazard outside its line of sight clears it
                             threat_cells_to_remove = {
                                 p
                                 for p, ot in threat_map.items()
@@ -1374,7 +1374,7 @@ class MentalSimulationPlanner:
                             new_threats = cur_threats - threat_cells_to_remove
                             threat_penalty = 5.0
                         else:
-                            # Direct head-on approach into sentry gaze or unmapped threat is lethal
+                            # Direct approach into active hazard line of sight or unmapped hazard is lethal
                             continue
 
                     new_patrols = cur_patrols

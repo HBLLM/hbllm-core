@@ -23,6 +23,22 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+try:
+    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+except ImportError:
+    try:
+        from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
+    except ImportError:
+        ARC_DEFAULT_ACTION_SCHEMAS = [
+            {"action_id": 1, "name": "MOVE_UP"},
+            {"action_id": 2, "name": "MOVE_DOWN"},
+            {"action_id": 3, "name": "MOVE_LEFT"},
+            {"action_id": 4, "name": "MOVE_RIGHT"},
+            {"action_id": 5, "name": "INTERACT"},
+            {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+            {"action_id": 7, "name": "ACTION7"},
+        ]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Kaggle / ArcEngine Compatibility Layer
 # ─────────────────────────────────────────────────────────────────────────────
@@ -894,6 +910,13 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self.internal_agent: AutonomousEpistemicEngine = AutonomousEpistemicEngine(
             instructions=instructions
         )
+        if not self.disable_archetypes:
+            try:
+                from plugins.arc_agi_adapter import install_arc3_solvers
+
+                install_arc3_solvers(self.internal_agent)
+            except Exception as e:
+                logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         if instructions and hasattr(self.internal_agent, "load_instructions"):
             self.internal_agent.load_instructions(instructions)
         self.step_count: int = 0
@@ -1034,6 +1057,13 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
                 self.internal_agent = AutonomousEpistemicEngine(instructions=self.instructions)
+                if not self.disable_archetypes:
+                    try:
+                        from plugins.arc_agi_adapter import install_arc3_solvers
+
+                        install_arc3_solvers(self.internal_agent)
+                    except Exception as e:
+                        logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
                 self.last_grid = None
 
         grid = self._extract_grid(latest_frame, frames)
@@ -1068,15 +1098,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 self.current_game_id = base_gid
 
         try:
-            _arc_schema = [
-                {"action_id": 1, "name": "MOVE_UP"},
-                {"action_id": 2, "name": "MOVE_DOWN"},
-                {"action_id": 3, "name": "MOVE_LEFT"},
-                {"action_id": 4, "name": "MOVE_RIGHT"},
-                {"action_id": 5, "name": "INTERACT"},
-                {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
-                {"action_id": 7, "name": "ACTION7", "parameters": {"x": "int", "y": "int"}},
-            ]
+            _arc_schema = [dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS]
             if hasattr(self.internal_agent, "decide"):
                 action_id, action_data = self.internal_agent.decide(
                     grid, available_actions, action_schemas=_arc_schema

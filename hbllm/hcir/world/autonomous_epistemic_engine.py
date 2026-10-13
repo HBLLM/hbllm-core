@@ -242,6 +242,8 @@ class AutonomousEpistemicEngine:
         self.last_action: int | None = None
         self.last_action_data: dict[str, Any] | None = None
         self.consecutive_quiescent_actions: int = 0
+        self.undo_actions: set[Any] = set()
+        self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 
         # Avatar self-model (Motor Grounding)
         self._avatar_feature: int | None = None
@@ -267,6 +269,9 @@ class AutonomousEpistemicEngine:
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
         self.tested_actions: set[int] = set()
         self.tested_action_positions: set[tuple[int, tuple[int, int] | None]] = set()
+        self.effector_kinetics_mode: int | None = (
+            None  # Active inference: +1 pull/attraction, -1 push/repulsion
+        )
 
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
@@ -506,6 +511,32 @@ class AutonomousEpistemicEngine:
         self.hypotheses: list[CausalHypothesis] = []
         self.belief_history: list[BeliefTransitionEvent] = []
 
+        # External domain & benchmark extension registries (e.g. ARC-AGI-3 plugin adapters)
+        self.target_scorers: list[Any] = []
+        self.deliberation_policies: list[Any] = []
+
+    def register_target_scorer(self, scorer: Any) -> None:
+        """Register an external or domain-specific target candidate scorer."""
+        if scorer not in self.target_scorers:
+            self.target_scorers.append(scorer)
+        MotorCortexEffector.register_target_scorer(scorer)
+
+    def unregister_target_scorer(self, scorer: Any) -> None:
+        """Unregister an external target candidate scorer."""
+        if scorer in self.target_scorers:
+            self.target_scorers.remove(scorer)
+        MotorCortexEffector.unregister_target_scorer(scorer)
+
+    def register_deliberation_policy(self, policy: Any) -> None:
+        """Register an external deliberation arbitration policy."""
+        if policy not in self.deliberation_policies:
+            self.deliberation_policies.append(policy)
+
+    def unregister_deliberation_policy(self, policy: Any) -> None:
+        """Unregister an external deliberation arbitration policy."""
+        if policy in self.deliberation_policies:
+            self.deliberation_policies.remove(policy)
+
     def evaluate_truth_value(
         self,
         variable_name: str,
@@ -616,7 +647,7 @@ class AutonomousEpistemicEngine:
                         prior_delta = d
                         break
                 if prior_delta is None and isinstance(aff.action_id, int):
-                    # Universal Arcade Action convention: 1: UP, 2: DOWN, 3: LEFT, 4: RIGHT
+                    # Standard discrete 2D grid direction convention: 1: UP, 2: DOWN, 3: LEFT, 4: RIGHT
                     _idx_map = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
                     prior_delta = _idx_map.get(aff.action_id)
 
@@ -667,8 +698,8 @@ class AutonomousEpistemicEngine:
         for act, dyn in self.action_dynamics.items():
             if dyn.is_displacement_action():
                 deltas[act] = dyn.get_displacement()
-        _arcade_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
-        for act, d in _arcade_convention.items():
+        _discrete_grid_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+        for act, d in _discrete_grid_convention.items():
             if act not in deltas and (
                 act in self.action_affordances or not self.action_affordances
             ):
@@ -895,7 +926,7 @@ class AutonomousEpistemicEngine:
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions,
-        OR if the game is click-only (no displacement actions exist) and enough
+        OR if the environment is allocentric/click-only (no displacement actions exist) and enough
         exploratory clicks have been made to characterize the environment."""
         # Standard motor grounding: avatar + calibrated displacement actions
         if (self.avatar_feature is not None or bool(self.avatar_features)) and any(

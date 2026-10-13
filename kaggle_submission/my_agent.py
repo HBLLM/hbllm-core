@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 # ─────────────────────────────────────────────────────────────────────────
 # CRITICAL: Ensure HBLLM Core is importable BEFORE any other import.
 # On Kaggle, the dataset zip extracts to /kaggle/input/<dataset-slug>/
@@ -126,6 +128,22 @@ logging.getLogger("arc_agi").setLevel(logging.ERROR)
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
+try:
+    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+except ImportError:
+    try:
+        from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
+    except ImportError:
+        ARC_DEFAULT_ACTION_SCHEMAS = [
+            {"name": "MOVE_UP", "action_id": 1},
+            {"name": "MOVE_DOWN", "action_id": 2},
+            {"name": "MOVE_LEFT", "action_id": 3},
+            {"name": "MOVE_RIGHT", "action_id": 4},
+            {"name": "INTERACT", "action_id": 5},
+            {"name": "CLICK_CELL", "action_id": 6, "parameters": {"x": "int", "y": "int"}},
+            {"name": "ACTION7", "action_id": 7},
+        ]
+
 
 class MyAgent(Agent):
     """The competitive ARC-AGI-3 Agent for Kaggle powered by HBLLM Core Cognitive Architecture."""
@@ -163,6 +181,13 @@ class MyAgent(Agent):
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
         self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
+        if not self.disable_archetypes:
+            try:
+                from plugins.arc_agi_adapter import install_arc3_solvers
+
+                install_arc3_solvers(self.internal_engine)
+            except Exception as e:
+                logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         self.internal_agent = self.internal_engine
         self.last_grid: np.ndarray | None = None
         self.current_game_id: str | None = None
@@ -294,6 +319,13 @@ class MyAgent(Agent):
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
                 self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
+                if not self.disable_archetypes:
+                    try:
+                        from plugins.arc_agi_adapter import install_arc3_solvers
+
+                        install_arc3_solvers(self.internal_engine)
+                    except Exception as e:
+                        logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 
@@ -356,15 +388,24 @@ class MyAgent(Agent):
         # Execute cognitive planning with resilient error recovery
         try:
             if hasattr(self.internal_engine, "decide"):
-                _arc_schema = [
-                    {"action_id": 1, "name": "MOVE_UP"},
-                    {"action_id": 2, "name": "MOVE_DOWN"},
-                    {"action_id": 3, "name": "MOVE_LEFT"},
-                    {"action_id": 4, "name": "MOVE_RIGHT"},
-                    {"action_id": 5, "name": "INTERACT"},
-                    {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
-                    {"action_id": 7, "name": "ACTION7", "parameters": {"x": "int", "y": "int"}},
-                ]
+                _arc_schema = getattr(self, "action_schemas", None)
+                if _arc_schema is None:
+                    g = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
+                        getattr(self, "arc_env", None), "game", None
+                    )
+                    v_targets = []
+                    if g and hasattr(g, "actions") and g.actions:
+                        v_targets = [
+                            getattr(a, "data", None)
+                            for a in g.actions
+                            if isinstance(getattr(a, "data", None), dict)
+                            and getattr(a, "data", None)
+                        ]
+                    _arc_schema = [dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS]
+                    if v_targets:
+                        for s in _arc_schema:
+                            if s.get("action_id") == 6:
+                                s["valid_targets"] = v_targets
                 action_id, action_data = self.internal_engine.decide(
                     grid, available_actions, action_schemas=_arc_schema
                 )

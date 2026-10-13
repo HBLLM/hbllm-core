@@ -57,7 +57,7 @@ class LocalCardinalityConstraint:
 
 
 class SymbolicConstraintSolver:
-    """dlPFC-inspired constraint propagation solver for Minesweeper, counting, and logic grids."""
+    """dlPFC-inspired constraint propagation solver for local cardinality, counting, and spatial logic grids."""
 
     def __init__(self) -> None:
         self.constraints: list[LocalCardinalityConstraint] = []
