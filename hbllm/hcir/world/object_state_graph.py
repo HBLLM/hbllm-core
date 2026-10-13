@@ -245,6 +245,10 @@ class ObjectStateGraphPlanner:
                 if engine.symbolic_theory.is_barrier(val) or val in barrier_features:
                     static_barriers.add((r, c))
 
+        for r, c in engine.current_level_lethal_positions:
+            if 0 <= r < H and 0 <= c < W:
+                static_barriers.add((r, c))
+
         raw_entities: list[SpatialEntity] = engine.extract_entities(curr_grid, bg)
         salient_objects: list[SalientObject] = []
 
@@ -496,6 +500,10 @@ class ObjectStateGraphPlanner:
                 val = int(curr_grid[r, c])
                 if engine.symbolic_theory.is_barrier(val) or val in barrier_features:
                     static_barriers.add((r, c))
+
+        for r, c in engine.current_level_lethal_positions:
+            if 0 <= r < H and 0 <= c < W:
+                static_barriers.add((r, c))
 
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         failed_transitions = set(getattr(engine, "failed_transitions", set()))

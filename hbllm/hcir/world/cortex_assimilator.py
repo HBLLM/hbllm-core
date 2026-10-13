@@ -291,11 +291,26 @@ class EpistemicFeedbackAssimilator:
                 engine.effective_click_targets.discard(target_coord)
                 tr, tc = target_coord
                 if 0 <= tr < H and 0 <= tc < W:
+                    probed_feat = int(curr_grid[tr, tc])
                     engine.working_memory.visuospatial.record_probe(
                         pos=target_coord,
-                        feature_id=int(curr_grid[tr, tc]),
+                        feature_id=probed_feat,
                         step=engine.step_counter,
                     )
+                    # Categorical Causal Lifting: If clicking background produced 0 diff, background is inert
+                    if probed_feat == engine.bg_feature or probed_feat == 0:
+                        engine.quiescent_features.add(probed_feat)
+                    else:
+                        q_count = getattr(engine, "_feature_quiescent_counts", None)
+                        if q_count is None:
+                            q_count = {}
+                            engine._feature_quiescent_counts = q_count
+                        q_count[probed_feat] = q_count.get(probed_feat, 0) + 1
+                        if (
+                            q_count[probed_feat] >= 2
+                            and probed_feat not in engine.effective_features
+                        ):
+                            engine.quiescent_features.add(probed_feat)
             if action is not None:
                 prev_inh = engine.inhibited_actions.get(action, 0)
                 inh_steps = 4 if engine.consecutive_quiescent_actions >= 2 else 3

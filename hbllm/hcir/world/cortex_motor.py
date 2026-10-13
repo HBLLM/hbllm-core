@@ -1349,7 +1349,12 @@ class MotorCortexEffector:
         # 6. Salient entities if no panel candidates exist
         if not click_candidates:
             for e in entities:
-                if e.feature_id == bg or e.feature_id in av_feats or e.area > 120:
+                if (
+                    e.feature_id == bg
+                    or e.feature_id in av_feats
+                    or e.area > 120
+                    or e.feature_id in engine.quiescent_features
+                ):
                     continue
                 cr, cc = e.grid_pos
                 if (
@@ -1362,11 +1367,7 @@ class MotorCortexEffector:
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
-                feat_bias = 0.0
-                if e.feature_id in engine.quiescent_features:
-                    feat_bias -= 80.0
-                elif e.feature_id in engine.effective_features:
-                    feat_bias += 40.0
+                feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
                 ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
                 cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
                 click_candidates.append((cr, cc, cand_score))
@@ -1388,6 +1389,7 @@ class MotorCortexEffector:
                     (ar, ac) in engine.quiescent_click_targets
                     or (ar, ac) == engine.avatar_pos
                     or int(curr_grid[ar, ac]) in av_feats
+                    or int(curr_grid[ar, ac]) in engine.quiescent_features
                     or cls.is_peripheral_frame_cell(ar, ac, H, W, curr_grid)
                 ):
                     continue
@@ -1408,17 +1410,14 @@ class MotorCortexEffector:
                     (cr, cc) in engine.quiescent_click_targets
                     or feat == bg
                     or feat in av_feats
+                    or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
                     or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
-                feat_bias = 0.0
-                if feat in engine.quiescent_features:
-                    feat_bias -= 80.0
-                elif feat in engine.effective_features:
-                    feat_bias += 40.0
+                feat_bias = 40.0 if feat in engine.effective_features else 0.0
                 cand_score = (
                     f.salience
                     + affordance_bonus
@@ -1456,16 +1455,13 @@ class MotorCortexEffector:
                     or feat == bg
                     or feat == engine.bg_feature
                     or (feat == 0 and bg != 0)
+                    or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
                     or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                feat_bias = 0.0
-                if feat in engine.quiescent_features:
-                    feat_bias -= 80.0
-                elif feat in engine.effective_features:
-                    feat_bias += 40.0
+                feat_bias = 40.0 if feat in engine.effective_features else 0.0
                 cand_score = 20.0 + feat_bias - float(visit_count) * 2.0
                 click_candidates.append((cr, cc, cand_score))
 

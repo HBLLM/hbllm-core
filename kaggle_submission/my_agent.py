@@ -159,7 +159,7 @@ class MyAgent(Agent):
         record: bool = False,
         arc_env: Any = None,
         *args: Any,
-        disable_archetypes: bool = False,
+        disable_archetypes: bool = True,
         instructions: Any = None,
         **kwargs: Any,
     ) -> None:

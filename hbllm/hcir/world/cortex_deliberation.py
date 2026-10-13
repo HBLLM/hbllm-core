@@ -16,6 +16,7 @@ and striatal gating:
 """
 
 import logging
+import math
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Sequence
@@ -636,6 +637,46 @@ class PrefrontalDeliberationEngine:
                     else:
                         forced_acc_perturbation = cand_a
                         break
+
+        # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
+        acc_death_conflict = getattr(engine.working_memory, "acc_conflict", None)
+        if acc_death_conflict is not None and getattr(acc_death_conflict, "active_conflict", False):
+            c_radius = float(getattr(acc_death_conflict, "cluster_radius", 3.0))
+            # Invalidate any active plans routing into failure clusters
+            if engine.mental_plan:
+                for cl in acc_death_conflict.clusters:
+                    if cl.count >= 2:
+                        for step_s in engine.mental_plan:
+                            if step_s.predicted_avatar_pos is not None:
+                                pr, pc = step_s.predicted_avatar_pos
+                                if math.hypot(pr - cl.center_r, pc - cl.center_c) <= c_radius:
+                                    engine.mental_plan.clear()
+                                    engine.current_simulated_goal = None
+                                    break
+                            if not engine.mental_plan:
+                                break
+
+            # Mark death cluster cells as static lethal hazards to force topological detours
+            for cl in acc_death_conflict.clusters:
+                if cl.count >= 2:
+                    cr_int, cc_int = int(round(cl.center_r)), int(round(cl.center_c))
+                    rad_int = int(math.ceil(c_radius))
+                    for dr_c in range(-rad_int, rad_int + 1):
+                        for dc_c in range(-rad_int, rad_int + 1):
+                            if math.hypot(dr_c, dc_c) <= c_radius:
+                                lr, lc = cr_int + dr_c, cc_int + dc_c
+                                if 0 <= lr < curr_grid.shape[0] and 0 <= lc < curr_grid.shape[1]:
+                                    engine.hazard_tracker.static_lethal_positions.add((lr, lc))
+                                    cell_f = int(curr_grid[lr, lc])
+                                    if cell_f in engine.symbolic_theory.goal_features:
+                                        engine.symbolic_theory.goal_features.discard(cell_f)
+                                        engine.hazard_tracker.known_lethal_features.add(cell_f)
+                                        logger.warning(
+                                            "ACC Metacognitive Shift: Inverted hypothesis for feature %d (GOAL -> LETHAL) due to death cluster at (%d, %d)",
+                                            cell_f,
+                                            lr,
+                                            lc,
+                                        )
 
         # Visual avatar localization
         known_av_feats = set(engine.avatar_features) if engine.avatar_features else set()

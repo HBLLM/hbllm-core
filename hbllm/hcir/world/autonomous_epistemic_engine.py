@@ -490,6 +490,7 @@ class AutonomousEpistemicEngine:
         # Feature-level interventional causal falsification (Piagetian Stage D3)
         self.quiescent_features: set[int] = set()
         self.effective_features: set[int] = set()
+        self._feature_quiescent_counts: dict[int, int] = {}
 
         # Metacognitive Refractory Action Inhibition (Stage D13)
         self.inhibited_actions: dict[Any, int] = {}
@@ -511,7 +512,7 @@ class AutonomousEpistemicEngine:
         self.hypotheses: list[CausalHypothesis] = []
         self.belief_history: list[BeliefTransitionEvent] = []
 
-        # External domain & benchmark extension registries (e.g. ARC-AGI-3 plugin adapters)
+        # External domain & benchmark extension registries (e.g. plugin adapters)
         self.target_scorers: list[Any] = []
         self.deliberation_policies: list[Any] = []
 

@@ -1595,6 +1595,21 @@ class MentalSimulationPlanner:
             if subgoal_plan:
                 return subgoal_plan
 
+        # Teleological Backward Cut-Set Decomposition Fallback (Human BA10 Reasoning)
+        if goals and start_pos is not None:
+            teleo_plan = MentalSimulationPlanner._plan_teleological_cutset_subgoals(
+                engine,
+                curr_grid,
+                available_actions,
+                start_pos,
+                set(goals),
+                static_barriers,
+                movable_actions,
+                oriented_threats=oriented_threats,
+            )
+            if teleo_plan:
+                return teleo_plan
+
         return None
 
     @staticmethod
@@ -1661,13 +1676,11 @@ class MentalSimulationPlanner:
                             ):
                                 ray_blocked = True
                                 break
-                        if (
-                            0 <= kr < H
-                            and 0 <= kc < W
-                            and (kr, kc) not in target_positions
-                            and (kr, kc) not in goals
-                        ):
-                            if engine.is_feature_unverified(int(curr_grid[kr, kc]), bg):
+                        if 0 <= kr < H and 0 <= kc < W:
+                            if (
+                                int(curr_grid[kr, kc])
+                                in engine.hazard_tracker.known_lethal_features
+                            ):
                                 ray_blocked = True
                                 break
                     if ray_blocked:
@@ -1841,6 +1854,268 @@ class MentalSimulationPlanner:
                     )
 
         return None
+
+    @staticmethod
+    def _plan_teleological_cutset_subgoals(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+        start_pos: tuple[int, int],
+        goals: set[tuple[int, int]],
+        static_barriers: set[tuple[int, int]],
+        movable_actions: list[tuple[int, int, int]],
+        oriented_threats: Sequence[OrientedThreat] = (),
+    ) -> list[MentalSimulationStep] | None:
+        """Teleological Retrocausal Decomposition (Human BA10 Reasoning):
+        When direct path to goal is blocked by barriers/doors:
+        1. Find relaxed geodesic from start_pos to closest goal ignoring static barriers.
+        2. Identify the first blocking barrier cut-set along this trajectory.
+        3. Backward-chain to discover potential keys, switches, levers, or matching affordances:
+           - Matching-color entity (key of same feature as barrier)
+           - Reachable manipulable entities / actuators
+           - Gateway interaction stances adjacent to the barrier
+        4. Push a high-priority FrontopolarSubgoal and return path to candidate key/trigger.
+        """
+        H, W = curr_grid.shape
+        bg = engine.estimate_background(curr_grid)
+        lethal_positions = engine.current_level_lethal_positions
+        lethal_features = engine.hazard_tracker.known_lethal_features
+
+        # Living sentry sightlines and physical threat footprints are never relaxable
+        living_gaze: set[tuple[int, int]] = {
+            t.gaze_pos for t in oriented_threats if t.gaze_pos is not None
+        }
+        threat_cells: set[tuple[int, int]] = set()
+        for t in oriented_threats:
+            threat_cells.add(t.pos)
+            tr, tc = t.pos
+            for dr_t in (-1, 0, 1):
+                for dc_t in (-1, 0, 1):
+                    threat_cells.add((tr + dr_t, tc + dc_t))
+
+        # 1. Relaxed BFS to find trajectory towards goal ignoring static barriers
+        q: deque[tuple[tuple[int, int], list[tuple[int, int]]]] = deque([(start_pos, [start_pos])])
+        visited_relaxed = {start_pos}
+        relaxed_path: list[tuple[int, int]] | None = None
+
+        while q:
+            p, path = q.popleft()
+            if p in goals:
+                relaxed_path = path
+                break
+            for _, dr, dc in movable_actions:
+                nr, nc = p[0] + dr, p[1] + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+                if (nr, nc) in visited_relaxed or (nr, nc) in lethal_positions:
+                    continue
+                if (nr, nc) in living_gaze or (nr, nc) in threat_cells:
+                    continue
+                if int(curr_grid[nr, nc]) in lethal_features:
+                    continue
+                visited_relaxed.add((nr, nc))
+                q.append(((nr, nc), path + [(nr, nc)]))
+
+        if not relaxed_path:
+            return None
+
+        # 2. Identify the first blocking barrier cell along the relaxed path
+        blocking_barrier_pos: tuple[int, int] | None = None
+        for step_p in relaxed_path:
+            if step_p in static_barriers or engine.symbolic_theory.is_barrier(
+                int(curr_grid[step_p[0], step_p[1]])
+            ):
+                blocking_barrier_pos = step_p
+                break
+
+        if blocking_barrier_pos is None:
+            return None
+
+        # Sentry lines of fire and creature bodies are threats, not unlockable doors
+        if blocking_barrier_pos in living_gaze or blocking_barrier_pos in threat_cells:
+            return None
+
+        # 3. Discover reachable spatial manifold from start_pos avoiding static_barriers
+        reachable_cells = {start_pos}
+        reach_q = deque([start_pos])
+        parent_map: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+
+        while reach_q:
+            cp = reach_q.popleft()
+            for act, dr, dc in movable_actions:
+                if (cp, act) in engine.failed_transitions:
+                    continue
+                np_pos = (cp[0] + dr, cp[1] + dc)
+                if not (0 <= np_pos[0] < H and 0 <= np_pos[1] < W):
+                    continue
+                if np_pos in reachable_cells:
+                    continue
+                if np_pos in static_barriers or np_pos in lethal_positions:
+                    continue
+                if np_pos in living_gaze or np_pos in threat_cells:
+                    continue
+                if engine.symbolic_theory.is_barrier(int(curr_grid[np_pos[0], np_pos[1]])):
+                    continue
+                if int(curr_grid[np_pos[0], np_pos[1]]) in lethal_features:
+                    continue
+                reachable_cells.add(np_pos)
+                parent_map[np_pos] = (cp, act)
+                reach_q.append(np_pos)
+
+        def reconstruct_path(dest: tuple[int, int]) -> list[MentalSimulationStep]:
+            steps: list[MentalSimulationStep] = []
+            curr = dest
+            while curr in parent_map:
+                prev_p, act = parent_map[curr]
+                steps.append(MentalSimulationStep(action=act, predicted_avatar_pos=curr))
+                curr = prev_p
+            steps.reverse()
+            return steps
+
+        # Extract separating barrier cut-set cells on the perimeter of the reachable manifold
+        boundary_barriers: set[tuple[int, int]] = set()
+        for r, c in reachable_cells:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nbr = (r + dr, c + dc)
+                if nbr not in reachable_cells and 0 <= nbr[0] < H and 0 <= nbr[1] < W:
+                    if nbr in static_barriers or engine.symbolic_theory.is_barrier(
+                        int(curr_grid[nbr[0], nbr[1]])
+                    ):
+                        # Must border an unreached cell to be a separating cut-set boundary (not an isolated token on floor)
+                        borders_unreached = False
+                        for dr2, dc2 in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nbr2 = (nbr[0] + dr2, nbr[1] + dc2)
+                            if (
+                                0 <= nbr2[0] < H
+                                and 0 <= nbr2[1] < W
+                                and nbr2 not in reachable_cells
+                                and nbr2 not in static_barriers
+                                and not engine.symbolic_theory.is_barrier(
+                                    int(curr_grid[nbr2[0], nbr2[1]])
+                                )
+                            ):
+                                borders_unreached = True
+                                break
+                        if borders_unreached:
+                            boundary_barriers.add(nbr)
+
+        boundary_barrier_feats = {
+            int(curr_grid[br, bc])
+            for br, bc in boundary_barriers
+            if (br, bc) not in living_gaze and (br, bc) not in threat_cells
+        }
+
+        # 4. Search for teleological unlocking keys or interactable entities
+        entities = engine.extract_entities(curr_grid, bg)
+        av_feats = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
+
+        candidate_subgoal_targets: list[
+            tuple[tuple[int, int], float, str, list[MentalSimulationStep]]
+        ] = []
+
+        for e in entities:
+            if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
+                continue
+            if e.grid_pos in goals:
+                continue
+            if e.grid_pos in living_gaze or e.grid_pos in threat_cells:
+                continue
+            if e.feature_id in lethal_features:
+                continue
+            if e.grid_pos in boundary_barriers:
+                continue
+
+            # Determine path to candidate entity
+            target_path: list[MentalSimulationStep] | None = None
+            if e.grid_pos in reachable_cells:
+                target_path = reconstruct_path(e.grid_pos)
+            else:
+                # Entity pos might be tentatively marked as barrier; check if approachable from adjacent manifold
+                best_adj_p: list[MentalSimulationStep] | None = None
+                for act, dr, dc in movable_actions:
+                    adj_p = (e.grid_pos[0] - dr, e.grid_pos[1] - dc)
+                    if adj_p in reachable_cells:
+                        p_to_adj = reconstruct_path(adj_p)
+                        step_into = MentalSimulationStep(
+                            action=act, predicted_avatar_pos=e.grid_pos
+                        )
+                        full_p = p_to_adj + [step_into]
+                        if best_adj_p is None or len(full_p) < len(best_adj_p):
+                            best_adj_p = full_p
+                target_path = best_adj_p
+
+            if not target_path:
+                continue
+
+            # A. Color-matching Key / Affordance (Feature match with door in boundary cut-set)
+            if e.feature_id in boundary_barrier_feats and e.area <= 16:
+                candidate_subgoal_targets.append(
+                    (e.grid_pos, 200.0, f"color_match_key_{e.feature_id}", target_path)
+                )
+            # B. Small manipulable / pickup / switch items
+            elif (
+                e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE, EntityRole.ACTUATOR)
+                and e.area <= 16
+            ):
+                candidate_subgoal_targets.append(
+                    (e.grid_pos, 100.0, f"interactive_entity_{e.feature_id}", target_path)
+                )
+            # C. Minority pop-out or isolated token
+            elif 1 <= e.area <= 9:
+                candidate_subgoal_targets.append(
+                    (e.grid_pos, 60.0, f"salient_token_{e.feature_id}", target_path)
+                )
+
+        # Stance immediately adjacent to the blocking barrier
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            adj = (blocking_barrier_pos[0] + dr, blocking_barrier_pos[1] + dc)
+            if (
+                adj in reachable_cells
+                and adj != start_pos
+                and adj not in living_gaze
+                and adj not in threat_cells
+            ):
+                st_path = reconstruct_path(adj)
+                if st_path:
+                    candidate_subgoal_targets.append(
+                        (adj, 40.0, f"barrier_approach_stance_{blocking_barrier_pos}", st_path)
+                    )
+
+        if not candidate_subgoal_targets:
+            return None
+
+        # Sort candidates by priority score descending, then by path length
+        candidate_subgoal_targets.sort(key=lambda x: (-x[1], len(x[3])))
+
+        # Teleological backward chaining requires a concrete candidate affordance (key, trigger, token)
+        # or an item in inventory to apply; approaching an impassable blank barrier without tools is a dead-end
+        if candidate_subgoal_targets[0][1] < 60.0 and not engine.working_memory.held_items:
+            return None
+
+        best_target, _, intent_name, path_to_target = candidate_subgoal_targets[0]
+
+        logger.info(
+            "MentalSimulationPlanner: Formulated Teleological Backward Subgoal [%s at %s] "
+            "to unlock barrier %s (%d steps).",
+            intent_name,
+            best_target,
+            blocking_barrier_pos,
+            len(path_to_target),
+        )
+
+        # Push to BA10 Subgoal Stack
+        teleo_sg = FrontopolarSubgoal(
+            subgoal_id=f"teleo_{intent_name}_{best_target[0]}_{best_target[1]}",
+            subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+            target_entity_pos=best_target,
+            target_destination=best_target,
+            priority=2.5,
+        )
+        engine.subgoal_stack.push_subgoal(teleo_sg)
+
+        return path_to_target
 
 
 @dataclass

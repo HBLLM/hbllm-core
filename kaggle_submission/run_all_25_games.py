@@ -665,7 +665,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--enable-archetypes",
         action="store_true",
-        help="Enable legacy heuristic archetypes (default: disabled, 100 percent pure AutonomousEpistemicEngine).",
+        help="Enable visual gestalt archetypes and ARC-AGI-3 target scorers (default: disabled, pure cognitive kernel).",
+    )
+    parser.add_argument(
+        "--disable-archetypes",
+        action="store_true",
+        help="Explicitly disable visual gestalt archetypes and target scorers (default: disabled).",
     )
     parser.add_argument(
         "--instructions",
@@ -723,9 +728,15 @@ if __name__ == "__main__":
             x.strip() for x in args.instructions.replace("\n", ";").split(";") if x.strip()
         ]
 
+    disable_archetypes = True
+    if args.enable_archetypes:
+        disable_archetypes = False
+    elif args.disable_archetypes:
+        disable_archetypes = True
+
     run_all_25_games(
         selected_games=selected,
-        disable_archetypes=not args.enable_archetypes,
+        disable_archetypes=disable_archetypes,
         scorecard_file=args.output,
         instructions=custom_inst,
         max_steps_per_game=args.max_steps,

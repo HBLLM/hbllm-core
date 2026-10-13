@@ -711,3 +711,119 @@ def test_peripheral_driver_action_schema_completeness() -> None:
     assert ids == {1, 2, 3, 4, 5, 6, 7}, (
         f"All ARC-AGI actions 1-7 must be present in peripheral schema! Got {ids}"
     )
+
+
+def test_teleological_cutset_subgoal_decomposition() -> None:
+    """Verify teleological backward cut-set decomposition formulates subgoals to clear blocking barriers."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 1)
+
+    # Calibrate cardinal directions
+    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
+    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    # 10x10 grid with dividing wall at col 5
+    grid = np.zeros((10, 10), dtype=int)
+    grid[1, 1] = 1  # Avatar
+    grid[8, 8] = 3  # Goal on right side
+    grid[:, 5] = 2  # Rigid wall
+    grid[5, 5] = 4  # Purple Door barrier at (5, 5)
+    grid[1, 3] = 4  # Purple Key item at (1, 3) on avatar's side
+
+    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.barrier_features.add(4)
+
+    available_actions = [1, 2, 3, 4]
+    plan = engine.simulate_in_mind(grid, available_actions)
+
+    assert plan is not None, "Teleological backward cut-set planner must formulate a plan to key!"
+    assert engine.subgoal_stack.has_pending_goals, (
+        "Subgoal stack must receive the teleological key subgoal!"
+    )
+    sg = engine.subgoal_stack.current_subgoal
+    assert sg is not None
+    assert sg.target_destination == (1, 3), (
+        f"Subgoal destination must be purple key at (1, 3), got {sg.target_destination}!"
+    )
+    # The returned plan must lead avatar to the key at (1, 3)
+    assert plan[-1].predicted_avatar_pos == (1, 3), (
+        f"Plan must navigate to key at (1, 3), got {plan[-1].predicted_avatar_pos}!"
+    )
+
+
+def test_categorical_quiescent_feature_pruning() -> None:
+    """Verify Pearl do(a) causal credit assignment categorizes inert features and prunes them from clicks."""
+    from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
+
+    engine = AutonomousEpistemicEngine()
+    engine.register_action_space(
+        [
+            {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+        ]
+    )
+    grid = np.zeros((10, 10), dtype=int)
+    grid[2, 2] = 5  # Feature 5 entity
+    grid[7, 7] = 8  # Feature 8 entity
+
+    # Mark feature 5 as categorically quiescent (e.g. tested twice with zero diff)
+    engine.quiescent_features.add(5)
+
+    # Plan probe: Must NEVER choose feature 5 when feature 8 is available!
+    proposal = EpistemicCuriosityExplorer.compute_epistemic_probe(
+        engine, grid, available_actions=[6]
+    )
+    assert proposal is not None and proposal.action == 6
+    assert proposal.action_data is not None
+    click_y = proposal.action_data.get("y")
+    click_x = proposal.action_data.get("x")
+    clicked_feat = grid[click_y, click_x]
+    assert clicked_feat != 5, (
+        f"Effector must not click quiescent feature 5! Clicked at ({click_y}, {click_x})"
+    )
+
+
+def test_metacognitive_acc_death_conflict_inversion() -> None:
+    """Verify that ACC conflict resolution invalidates plans heading into death clusters and inverts hypotheses."""
+    from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+    from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+    delib = PrefrontalDeliberationEngine()
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (5, 1)
+    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[5, 1] = 1
+    grid[5, 8] = 9  # False goal at (5, 8)
+    engine.symbolic_theory.goal_features.add(9)
+
+    # Register 2 deaths at cluster near (5, 7)
+    engine.working_memory.acc_conflict.register_death_event(
+        actor_pos=(5.0, 7.0), step=10, last_action=4
+    )
+    engine.working_memory.acc_conflict.register_death_event(
+        actor_pos=(5.0, 7.0), step=20, last_action=4
+    )
+    assert engine.working_memory.acc_conflict.active_conflict, (
+        "2 deaths must trigger active conflict!"
+    )
+
+    # Candidate plan heading toward (5, 7)
+    engine.mental_plan.append(MentalSimulationStep(action=4, predicted_avatar_pos=(5, 7)))
+
+    # Call decide to invoke executive conflict resolution
+    delib.decide(engine, curr_grid=grid, available_actions=[4])
+
+    # Mental plan heading into death cluster must be cleared!
+    assert len(engine.mental_plan) == 0, "Active plan heading into death cluster must be cleared!"
+    # Death cluster cells must be marked in static lethal positions!
+    assert (5, 7) in engine.hazard_tracker.static_lethal_positions, (
+        "Death cluster center must be registered as static lethal hazard!"
+    )
+    # False goal at death cluster must be inverted!
+    assert (5, 7) in engine.hazard_tracker.static_lethal_positions
