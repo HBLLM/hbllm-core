@@ -166,11 +166,27 @@ class EpistemicGoalScheduler:
                 ):
                     confirmed_goals.append(e.grid_pos)
                 continue
-            if (
-                e.feature_id in engine.symbolic_theory.goal_features
+            # Causal Disambiguation: Pervasive walkable substrates (e.g. tracks, floors)
+            # that recur in large quantities cannot be the singular exit/goal.
+            feat_total_cells = int(np.count_nonzero(curr_grid == e.feature_id))
+            feat_instance_count = sum(1 for ent in entities if ent.feature_id == e.feature_id)
+            is_pervasive_substrate = (
+                e.feature_id in engine.symbolic_theory.walkable_features
+                or e.feature_id in engine.verified_safe_features
+            ) and (feat_instance_count > 2 or feat_total_cells > 64)
+            if is_pervasive_substrate:
+                engine.symbolic_theory.goal_features.discard(e.feature_id)
+                continue
+
+            is_goal_candidate = (
+                (
+                    e.feature_id in engine.symbolic_theory.goal_features
+                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                )
                 or (e.feature_id in engine.learned_goal_features and 1 <= e.area <= 64)
                 or e.role == EntityRole.GOAL
-            ):
+            )
+            if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
                     if (
@@ -243,7 +259,14 @@ class EpistemicGoalScheduler:
                     continue
                 if e.grid_pos in panel_coords:
                     continue
-                if e.feature_id in engine.symbolic_theory.candidate_goal_features:
+                if (
+                    e.feature_id in engine.symbolic_theory.goal_features
+                    and e.feature_id != 0
+                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                ) or (
+                    e.feature_id in engine.symbolic_theory.candidate_goal_features
+                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                ):
                     if e.grid_pos not in hypothesized_goals:
                         hypothesized_goals.append(e.grid_pos)
                 elif (
@@ -316,9 +339,17 @@ class EpistemicGoalScheduler:
                 e.grid_pos
                 for e in entities
                 if e.grid_pos not in panel_coords
-                and e.role in (EntityRole.UNKNOWN, EntityRole.AGENT)
+                and e.role
+                in (
+                    EntityRole.UNKNOWN,
+                    EntityRole.AGENT,
+                    EntityRole.ACTUATOR,
+                    EntityRole.MANIPULABLE,
+                    EntityRole.RESOURCE,
+                )
                 and 1 <= e.area <= 64
                 and e.feature_id != bg
+                and not engine.symbolic_theory.is_walkable(e.feature_id)
                 and e.feature_id not in engine.hazard_tracker.known_lethal_features
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and (
@@ -520,7 +551,9 @@ class MentalSimulationPlanner:
             if 0 <= r < H and 0 <= c < W:
                 val = int(curr_grid[r, c])
                 if (r, c) in engine.hazard_tracker.static_lethal_positions or (
-                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                    val != bg
+                    and not engine.symbolic_theory.is_walkable(val)
+                    and val not in engine.verified_safe_features
                 ):
                     static_barriers.add((r, c))
 
@@ -535,11 +568,23 @@ class MentalSimulationPlanner:
                 ):
                     static_barriers.add((r, c))
 
-        # Structural dividing boundaries are physical barriers
+        # General Intelligence & Physics Grounding:
+        # Physical surfaces (roads, tracks, rails, corridors, bridges) can have narrow elongated
+        # geometries in 2D lattices or 3D LiDAR/occupancy scans. Empirical traversal evidence
+        # strictly supersedes geometric bounding-box priors.
         for feat in np.unique(curr_grid):
             feat_int = int(feat)
-            if feat_int == bg or feat_int in av_feats:
+            if (
+                feat_int == bg
+                or feat_int in av_feats
+                or feat_int in engine.symbolic_theory.walkable_features
+                or feat_int in engine.verified_safe_features
+            ):
                 continue
+            if engine.avatar_pos is not None:
+                ar, ac = engine.avatar_pos
+                if 0 <= ar < H and 0 <= ac < W and int(curr_grid[ar, ac]) == feat_int:
+                    continue
             pts = np.argwhere(curr_grid == feat_int)
             if 15 <= len(pts) <= H * W * 0.15:
                 min_r, min_c = pts.min(axis=0)
@@ -558,11 +603,9 @@ class MentalSimulationPlanner:
                 static_barriers.add((r, c))
 
         # Corridor Manifold Continuity
-        bg_is_impassable_void = (
-            len(engine.symbolic_theory.walkable_features) > 0
-            and bg not in engine.symbolic_theory.walkable_features
-        )
-        if not bg_is_impassable_void and not engine.symbolic_theory.walkable_features:
+        walkable_and_safe = engine.symbolic_theory.walkable_features | engine.verified_safe_features
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+        if not bg_is_impassable_void:
             bg_count = int(feat_counts.get(bg, 0))
             bg_ratio = bg_count / max(1, H * W)
             ar, ac = (
@@ -583,7 +626,7 @@ class MentalSimulationPlanner:
                     for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                 )
             )
-            if 0.20 <= bg_ratio <= 0.80 and not avatar_on_bg:
+            if bg_ratio >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
 
         if bg_is_impassable_void:
@@ -606,6 +649,13 @@ class MentalSimulationPlanner:
                         if int(curr_grid[r_f, c_f]) in av_feats:
                             av_footprint.add((r_f, c_f))
             static_barriers.difference_update(av_footprint)
+
+        # Empirical Walkability Invariant: Verified walkable/safe features cannot be static barriers
+        for feat_w in engine.symbolic_theory.walkable_features | engine.verified_safe_features:
+            if feat_w != bg:
+                w_pts = np.argwhere(curr_grid == feat_w)
+                for wr, wc in w_pts:
+                    static_barriers.discard((int(wr), int(wc)))
 
         if blocked_cells:
             static_barriers.update(blocked_cells)
@@ -704,6 +754,18 @@ class MentalSimulationPlanner:
         blocked_cells: set[tuple[int, int]] | None = None,
     ) -> list[MentalSimulationStep] | None:
         """Simulate candidate action sequences internally in memory without taking physical steps."""
+        if engine.avatar_pos is None and (
+            engine.avatar_features
+            or engine.avatar_feature is not None
+            or engine.prior_avatar_feature is not None
+        ):
+            known_av = set(engine.avatar_features)
+            if engine.avatar_feature is not None:
+                known_av.add(engine.avatar_feature)
+            elif engine.prior_avatar_feature is not None:
+                known_av.add(engine.prior_avatar_feature)
+            engine._update_avatar_position_from_grid(curr_grid, known_av)
+
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
             return None
 
@@ -821,15 +883,20 @@ class MentalSimulationPlanner:
 
         # 4. Available directional movements in mental model
         movable_actions: list[tuple[Any, int, int]] = []
+        action_deltas = engine.action_deltas
         for act in available_actions:
             if engine.is_spatial_effector(act):
                 continue
             if act in engine.immobile_entity_actions:
                 continue
-            dyn = engine.action_dynamics.get(act)
-            if dyn is not None and dyn.is_displacement_action():
-                dr, dc = dyn.get_displacement()
-                movable_actions.append((act, dr, dc))
+            if act in action_deltas:
+                dr, dc = action_deltas[act]
+                if abs(dc) >= 2 * abs(dr):
+                    dr = 0
+                elif abs(dr) >= 2 * abs(dc):
+                    dc = 0
+                if dr != 0 or dc != 0:
+                    movable_actions.append((act, dr, dc))
 
         if not movable_actions:
             return None
@@ -1027,32 +1094,51 @@ class MentalSimulationPlanner:
         # When temporal threats (patrols, chasers) exist, defer to Space-Time A*.
         # ─────────────────────────────────────────────────────────────────────
         if goals and not is_block_delivery and not has_temporal and start_pos is not None:
-            action_plan = GeodesicManifoldRouter.route_geodesic(
-                curr_grid=curr_grid,
-                start_pos=start_pos,
-                goals=goals,
-                static_barriers=static_barriers,
-                grid_walls=_grid_walls,
-                unknown_entity_cells=unknown_entity_cells,
-                oriented_threats=oriented_threats,
-                movable_actions=movable_actions,
-                bg=bg,
-                barrier_features=set(_barrier_feats),
-                avatar_features=av_feats,
-                max_candidate_goals=5,
+            geodesic_movable_actions = [
+                (act, dr, dc)
+                for act, dr, dc in movable_actions
+                if (start_pos, act) not in engine.failed_transitions
+                and not engine.working_memory.habenular_ior.is_action_inhibited(start_pos, act)
+                and engine.inhibited_actions.get(act, 0) == 0
+            ]
+            action_plan = (
+                GeodesicManifoldRouter.route_geodesic(
+                    curr_grid=curr_grid,
+                    start_pos=start_pos,
+                    goals=goals,
+                    static_barriers=static_barriers,
+                    grid_walls=_grid_walls,
+                    unknown_entity_cells=unknown_entity_cells,
+                    oriented_threats=oriented_threats,
+                    movable_actions=geodesic_movable_actions,
+                    bg=bg,
+                    barrier_features=set(_barrier_feats),
+                    avatar_features=av_feats,
+                    max_candidate_goals=5,
+                )
+                if geodesic_movable_actions
+                else None
             )
             if action_plan:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    if (curr_p, act) in engine.failed_transitions:
+                    if (
+                        (curr_p, act) in engine.failed_transitions
+                        or engine.working_memory.habenular_ior.is_action_inhibited(curr_p, act)
+                    ):
                         plan_valid = False
                         break
                     curr_p = next_p
                 if (
                     plan_valid
                     and action_plan
-                    and engine.inhibited_actions.get(action_plan[0][0], 0) > 0
+                    and (
+                        engine.inhibited_actions.get(action_plan[0][0], 0) > 0
+                        or engine.working_memory.habenular_ior.is_action_inhibited(
+                            start_pos, action_plan[0][0]
+                        )
+                    )
                 ):
                     plan_valid = False
 
@@ -1117,6 +1203,8 @@ class MentalSimulationPlanner:
             has_temporal=has_temporal,
             has_threats=bool(init_threats),
             consecutive_failures=engine.consecutive_simulation_failures,
+            is_under_strict_budget=engine.is_under_strict_step_budget(),
+            remaining_steps=engine.get_remaining_step_budget(),
         )
 
         non_disp_wait_action: Any | None = None
@@ -1141,6 +1229,17 @@ class MentalSimulationPlanner:
             _relaxed_safety: bool,
         ) -> tuple[list[MentalSimulationStep] | None, bool]:
             nonlocal counter
+            parent_map: dict[int, tuple[int, MentalSimulationStep]] = {}
+
+            def _reconstruct_path(node_id: int) -> list[MentalSimulationStep]:
+                curr = node_id
+                rev: list[MentalSimulationStep] = []
+                while curr in parent_map:
+                    curr, step = parent_map[curr]
+                    rev.append(step)
+                rev.reverse()
+                return rev
+
             open_set: list[
                 tuple[
                     float,
@@ -1152,7 +1251,8 @@ class MentalSimulationPlanner:
                     frozenset[tuple[int, int]],
                     frozenset[tuple[tuple[int, int], tuple[int, int]]],
                     frozenset[tuple[int, int]],
-                    list[MentalSimulationStep],
+                    int,
+                    int,
                 ]
             ] = []
             h0 = heuristic(start_pos, init_blocks)
@@ -1168,7 +1268,8 @@ class MentalSimulationPlanner:
                     init_threats,
                     init_patrols,
                     init_chasers,
-                    [],
+                    0,
+                    0,
                 ),
             )
 
@@ -1191,18 +1292,19 @@ class MentalSimulationPlanner:
                 (
                     f_score,
                     g_cost,
-                    _,
+                    node_id,
                     cur_pos,
                     cur_blocks,
                     cur_open,
                     cur_threats,
                     cur_patrols,
                     cur_chasers,
-                    path,
+                    path_len,
+                    consecutive_waits,
                 ) = heapq.heappop(open_set)
 
                 time_mod = (
-                    len(path) % engine.hazard_tracker.environmental_period if has_periodic else 0
+                    path_len % engine.hazard_tracker.environmental_period if has_periodic else 0
                 )
                 state_key = (
                     cur_pos,
@@ -1217,7 +1319,8 @@ class MentalSimulationPlanner:
                     continue
                 visited_states.add(state_key)
 
-                if not is_block_delivery and cur_pos in goals and len(path) > 0:
+                if not is_block_delivery and cur_pos in goals and path_len > 0:
+                    path = _reconstruct_path(node_id)
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
                         len(path),
@@ -1226,7 +1329,8 @@ class MentalSimulationPlanner:
                     engine.current_simulated_goal = cur_pos
                     return path, had_relaxable_block
 
-                if is_block_delivery and all(g in cur_blocks for g in goals) and len(path) > 0:
+                if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
+                    path = _reconstruct_path(node_id)
                     logger.info(
                         "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
                         len(path),
@@ -1235,13 +1339,6 @@ class MentalSimulationPlanner:
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
-                consecutive_waits = 0
-                if path:
-                    for s in reversed(path):
-                        if s.predicted_avatar_pos == cur_pos:
-                            consecutive_waits += 1
-                        else:
-                            break
                 max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
 
                 # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
@@ -1275,9 +1372,19 @@ class MentalSimulationPlanner:
                             continue
                     else:
                         real_act = act
-                    if not is_wait and len(path) == 0 and engine.inhibited_actions.get(act, 0) > 0:
+                    if (
+                        not is_wait
+                        and path_len == 0
+                        and (
+                            engine.inhibited_actions.get(act, 0) > 0
+                            or engine.working_memory.habenular_ior.is_action_inhibited(cur_pos, act)
+                        )
+                    ):
                         continue
-                    if not is_wait and (cur_pos, act) in engine.failed_transitions:
+                    if not is_wait and (
+                        (cur_pos, act) in engine.failed_transitions
+                        or engine.working_memory.habenular_ior.is_action_inhibited(cur_pos, act)
+                    ):
                         dest_r, dest_c = cur_pos[0] + dr, cur_pos[1] + dc
                         if not (
                             has_periodic
@@ -1312,7 +1419,7 @@ class MentalSimulationPlanner:
                     if ray_blocked:
                         continue
 
-                    sim_step = len(path) + 1
+                    sim_step = path_len + 1
                     if engine.is_under_strict_step_budget():
                         rem_budget = engine.get_remaining_step_budget()
                         if sim_step > rem_budget + 8:
@@ -1533,6 +1640,20 @@ class MentalSimulationPlanner:
                     wait_cost = 2.0 if is_wait else 0.0
                     swr_penalty = swr_penalties.get((cur_pos, real_act), 0.0)
 
+                    habenular_penalty = 0.0
+                    if hasattr(engine, "working_memory") and hasattr(
+                        engine.working_memory, "habenular_ior"
+                    ):
+                        habenular_penalty = (
+                            engine.working_memory.habenular_ior.get_repulsion_penalty(
+                                cur_pos, real_act
+                            )
+                        )
+                    elif hasattr(engine, "habenular_ior"):
+                        habenular_penalty = engine.habenular_ior.get_repulsion_penalty(
+                            cur_pos, real_act
+                        )
+
                     step_cost = (
                         1
                         + epistemic_cost
@@ -1542,11 +1663,14 @@ class MentalSimulationPlanner:
                         + gaze_penalty
                         + threat_penalty
                         + swr_penalty
+                        + habenular_penalty
                     )
                     new_g = g_cost + step_cost
                     new_h = heuristic(new_pos, new_blocks)
                     new_step = MentalSimulationStep(action=real_act, predicted_avatar_pos=new_pos)
                     counter += 1
+                    parent_map[counter] = (node_id, new_step)
+                    new_waits = consecutive_waits + 1 if (is_wait or new_pos == cur_pos) else 0
                     heapq.heappush(
                         open_set,
                         (
@@ -1559,7 +1683,8 @@ class MentalSimulationPlanner:
                             new_threats,
                             new_patrols,
                             new_chasers,
-                            path + [new_step],
+                            path_len + 1,
+                            new_waits,
                         ),
                     )
 
@@ -1626,10 +1751,8 @@ class MentalSimulationPlanner:
         """Recursive multi-stage subgoal decomposition for locked barrier doors and remote switches."""
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
-        bg_is_impassable_void = (
-            len(engine.symbolic_theory.walkable_features) > 0
-            and bg not in engine.symbolic_theory.walkable_features
-        )
+        walkable_and_safe = engine.symbolic_theory.walkable_features | engine.verified_safe_features
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
         cur_pos = start_pos
         open_barriers: set[tuple[int, int]] = set()
         accumulated_plan: list[MentalSimulationStep] = []

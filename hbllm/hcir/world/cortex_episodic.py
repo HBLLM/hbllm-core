@@ -316,13 +316,16 @@ class HippocampalEpisodicCortex:
             self.past_episodes.append(list(self.current_episode))
             self.current_episode.clear()
 
-    def reset_episode(self, retain_dynamics: bool = True) -> None:
+    def reset_episode(self, retain_dynamics: bool = True, retain_inhibitions: bool = False) -> None:
         """Reset transient episode buffer while optionally preserving long-term episodic traces."""
         self.current_episode.clear()
         if not retain_dynamics:
             self.reset()
         else:
-            self.habenular_ior.reset_episode(retain_long_term=True)
+            self.habenular_ior.reset_episode(
+                retain_long_term=True,
+                retain_inhibitions=retain_inhibitions,
+            )
 
     def reset(self) -> None:
         """Full reset of episodic memories (e.g., across environment switches)."""
@@ -364,6 +367,7 @@ class HippocampalEpisodicCortex:
         engine.last_predicted_pos = None
         engine.bilateral_state = None
         engine.pending_phase_wait_steps = 0
+        engine.consecutive_pacing_steps = 0
         engine.consecutive_quiescent_actions = 0
 
         engine.consecutive_stuck_steps = 0
@@ -372,9 +376,8 @@ class HippocampalEpisodicCortex:
             engine.immobile_entity_actions = set()
         else:
             # On same-level retry after death: preserve learned spatial negative affordances,
-            # but refresh interaction exploration and decay visit counts so interactive objects
-            # can be re-sampled with fresh hypotheses.
-            engine.quiescent_click_targets.clear()
+            # barriers, and quiescent inert coordinates so inert scenery/borders are not re-tested,
+            # while decaying entity visit counts so interactive objects can be re-sampled with fresh hypotheses.
             for k in list(engine.entity_visit_counts.keys()):
                 engine.entity_visit_counts[k] = engine.entity_visit_counts[k] // 2
         engine.last_effective_click_coord = None
@@ -387,7 +390,27 @@ class HippocampalEpisodicCortex:
         engine.recent_positions.clear()
         engine.recent_actions.clear()
         engine.level_epistemic_probes = 0
-        engine.working_memory.reset_episode(retain_long_term=retain_dynamics)
+        is_same_level_retry = not is_new_level and retain_dynamics
+        if is_same_level_retry:
+            # Same level retry on death: trigger Habenular catastrophe backpropagation FIRST
+            # before transient episode buffers are reset
+            if hasattr(engine, "working_memory") and hasattr(
+                engine.working_memory, "habenular_ior"
+            ):
+                engine.working_memory.habenular_ior.record_catastrophe(
+                    final_step=engine.step_counter,
+                    is_lost=True,
+                )
+            elif hasattr(engine, "habenular_ior"):
+                engine.habenular_ior.record_catastrophe(
+                    final_step=engine.step_counter,
+                    is_lost=True,
+                )
+
+        engine.working_memory.reset_episode(
+            retain_long_term=retain_dynamics,
+            retain_inhibitions=is_same_level_retry,
+        )
         engine.collision_cones.reset_episode()
         engine.consecutive_plan_failures = 0
         engine.exploration_cooldown = 0
@@ -461,7 +484,6 @@ class HippocampalEpisodicCortex:
             engine.consecutive_simulation_failures = 0
             engine.simulation_cooldown = 0
         else:
-            # Same level retry on death
             engine.hazard_tracker.grid_history.clear()
             engine.hazard_tracker.step_history.clear()
             engine.tested_action_positions.clear()
@@ -473,6 +495,9 @@ class HippocampalEpisodicCortex:
             engine.last_predicted_pos = None
             engine.mental_plan.clear()
             engine._prev_oriented_threats = []
+            engine.recent_positions.clear()
+            if hasattr(engine, "acc_conflict_monitor"):
+                engine.acc_conflict_monitor.reset()
 
         if is_new_level and retain_dynamics:
             # Carry forward hypotheses & semantics as priors
@@ -492,20 +517,30 @@ class HippocampalEpisodicCortex:
             engine.effective_click_targets.clear()
             engine.click_affordances.clear()
             engine.quiescent_features.clear()
+            if hasattr(engine, "feature_quiescent_counts"):
+                engine.feature_quiescent_counts.clear()
+            if hasattr(engine, "_feature_quiescent_counts"):
+                engine._feature_quiescent_counts.clear()
             engine.last_effector_target_step.clear()
             engine.active_goal_converging_coord = None
             engine.consecutive_goal_converging_clicks = 0
+            engine.active_causal_actuator_coord = None
+            engine.consecutive_causal_probes = 0
             engine.consecutive_quiescent_actions = 0
             engine.inhibited_actions.clear()
 
             # Affordance priors re-evaluation on new level transitions:
-            # Terrain barrier and walkable features from prior stages are local to those rooms.
-            # Preserving prior barrier features rigidly blinds the agent when new stages
-            # repurpose those features for pathways (e.g. tracks, bridges).
+            # Physical terrain affordances (e.g. tracks, bridges, road surfaces) persist across
+            # rooms of the same environment unless counterfactual evidence invalidates them.
+            # Local coordinate barriers reset, but empirical walkable affordances are retained.
             engine.symbolic_theory.barrier_features.clear()
             engine.symbolic_theory.barrier_predicates.clear()
-            engine.symbolic_theory.walkable_features.clear()
-            engine.symbolic_theory.walkable_predicates.clear()
+            engine.symbolic_theory.walkable_features.update(engine.verified_safe_features)
+            for f in engine.verified_safe_features:
+                if not any(p.value == f for p in engine.symbolic_theory.walkable_predicates):
+                    engine.symbolic_theory.walkable_predicates.append(
+                        CausalPredicate(variable="feature_id", operator="==", value=f)
+                    )
 
             engine.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
@@ -538,6 +573,10 @@ class HippocampalEpisodicCortex:
             engine.effective_click_targets.clear()
             engine.click_affordances.clear()
             engine.quiescent_features.clear()
+            if hasattr(engine, "feature_quiescent_counts"):
+                engine.feature_quiescent_counts.clear()
+            if hasattr(engine, "_feature_quiescent_counts"):
+                engine._feature_quiescent_counts.clear()
             engine.effective_features.clear()
             engine.consecutive_quiescent_actions = 0
             engine.inhibited_actions.clear()
@@ -570,7 +609,10 @@ class HippocampalEpisodicCortex:
         if not retain_dynamics:
             self.reset()
         else:
-            self.reset_episode(retain_dynamics=True)
+            self.reset_episode(
+                retain_dynamics=True,
+                retain_inhibitions=is_same_level_retry,
+            )
 
         engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
         engine.acc_conflict_monitor.reset()

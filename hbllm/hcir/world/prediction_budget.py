@@ -61,8 +61,17 @@ class PredictionBudget:
         has_temporal: bool = False,
         has_threats: bool = False,
         consecutive_failures: int = 0,
+        is_under_strict_budget: bool = False,
+        remaining_steps: int | None = None,
     ) -> int:
-        """Compute anytime A* / MCTS state expansion budget based on temporal hazard complexity."""
+        """Compute anytime A* / MCTS state expansion budget based on temporal hazard complexity
+        and acute cognitive step limits.
+        """
+        # Under acute step urgency (<= 25 steps remaining), cap search expansions to 600
+        # to ensure rapid anytime action emission without latency stalls.
+        if is_under_strict_budget or (remaining_steps is not None and remaining_steps <= 25):
+            return 600
+
         base = 1500
         if consecutive_failures > 0 and not has_temporal:
             return int(base * 0.8)

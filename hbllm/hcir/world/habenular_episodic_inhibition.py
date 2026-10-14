@@ -106,6 +106,17 @@ class HabenularEpisodicIOR:
         # Limit cycle detector (recent action history)
         self.recent_actions: deque[Any] = deque(maxlen=16)
 
+    @staticmethod
+    def _make_action_token(action: Any, action_data: dict[str, Any] | None = None) -> Any:
+        if (
+            action_data
+            and isinstance(action_data, dict)
+            and "x" in action_data
+            and "y" in action_data
+        ):
+            return (action, int(action_data["y"]), int(action_data["x"]))
+        return action
+
     def record_step(
         self,
         step: int,
@@ -156,6 +167,32 @@ class HabenularEpisodicIOR:
         fatal_pos = terminal.avatar_pos
         fatal_act = terminal.action_id
 
+        # Root counterfactual credit assignment:
+        # In a failed attempt that died without level progress, the root decision branch at step 0
+        # was insufficient. Inhibit that root choice so the subsequent life explores alternative branches.
+        if trace_list:
+            root = trace_list[0]
+            root_tok = self._make_action_token(root.action_id, root.action_data)
+            root_key = (root.avatar_pos, root_tok)
+            inh_dur = max(self.inhibition_duration_steps * 3, 72)
+            self.active_inhibitions[root_key] = inh_dur
+            self.active_inhibitions[(None, root_tok)] = inh_dur
+            if root.avatar_pos is not None:
+                self.active_inhibitions[(root.avatar_pos, root.action_id)] = inh_dur
+            self.active_inhibitions[(None, root.action_id)] = inh_dur
+            root_penalty = self.base_penalty * 0.4
+            self.repulsion_table[root_key] = self.repulsion_table.get(root_key, 0.0) + root_penalty
+            self.repulsion_table[(None, root_tok)] = (
+                self.repulsion_table.get((None, root_tok), 0.0) + root_penalty * 0.5
+            )
+            logger.info(
+                "HabenularEpisodicIOR: Root action %s repulsed (key=%s, duration=%d steps, penalty=%.1f) for next life branch",
+                root.action_id,
+                root_key,
+                inh_dur,
+                root_penalty,
+            )
+
         # Credit assignment: penalize actions closest to the terminal catastrophe
         for i in range(lookback):
             idx = T - 1 - i
@@ -163,13 +200,16 @@ class HabenularEpisodicIOR:
             temporal_decay = self.gamma**i
             penalty = self.base_penalty * temporal_decay
 
-            key = (transition.avatar_pos, transition.action_id)
+            act_tok = self._make_action_token(transition.action_id, transition.action_data)
+            key = (transition.avatar_pos, act_tok)
             self.repulsion_table[key] += penalty
 
             # If within immediate fatal window (last 3 steps), install active motor inhibition
             if i <= 3:
                 self.active_inhibitions[key] = self.inhibition_duration_steps
                 inhibited_pairs.append(key)
+                if transition.avatar_pos is None:
+                    self.active_inhibitions[(None, act_tok)] = self.inhibition_duration_steps
 
         record = FatalPrefixRecord(
             terminal_step=final_step,
@@ -190,35 +230,57 @@ class HabenularEpisodicIOR:
         self.recent_actions.clear()
         return record
 
-    def is_action_inhibited(self, avatar_pos: tuple[int, int] | None, action: Any) -> bool:
+    def is_action_inhibited(
+        self,
+        avatar_pos: tuple[int, int] | None,
+        action: Any,
+        action_data: dict[str, Any] | None = None,
+    ) -> bool:
         """Check if action is actively inhibited by habenular gating at this coordinate."""
-        key = (avatar_pos, action)
-        if self.active_inhibitions.get(key, 0) > 0:
+        act_token = self._make_action_token(action, action_data)
+        if self.active_inhibitions.get((avatar_pos, act_token), 0) > 0:
             return True
-        # Also check coordinate-free action inhibition if high global repulsion
-        wildcard_key = (None, action)
-        if self.active_inhibitions.get(wildcard_key, 0) > 0:
+        if self.active_inhibitions.get((None, act_token), 0) > 0:
+            return True
+        if act_token != action:
+            if self.active_inhibitions.get((avatar_pos, action), 0) > 0:
+                return True
+            if self.active_inhibitions.get((None, action), 0) > 0:
+                return True
+        # Check high persistent repulsion threshold from prior fatal episode traces
+        if self.get_repulsion_penalty(avatar_pos, action, action_data) >= self.base_penalty * 0.9:
             return True
         return False
 
-    def get_repulsion_penalty(self, avatar_pos: tuple[int, int] | None, action: Any) -> float:
+    def get_repulsion_penalty(
+        self,
+        avatar_pos: tuple[int, int] | None,
+        action: Any,
+        action_data: dict[str, Any] | None = None,
+    ) -> float:
         """Return accumulated negative preference score for this state-action choice."""
-        key = (avatar_pos, action)
+        act_token = self._make_action_token(action, action_data)
+        key = (avatar_pos, act_token)
         score = self.repulsion_table.get(key, 0.0)
-        # Coordinate-independent penalty
-        wildcard_key = (None, action)
+        wildcard_key = (None, act_token)
         score += self.repulsion_table.get(wildcard_key, 0.0) * 0.5
         return score
 
     def detect_action_oscillation(self) -> Any | None:
         """Detect rapid periodic action oscillation (e.g. [A, B, A, B, A, B]) and return action to suppress."""
-        if len(self.recent_actions) < 6:
-            return None
+        cycle = self.detect_cyclic_actions()
+        return cycle[0] if cycle else None
+
+    def detect_cyclic_actions(self) -> list[Any]:
+        """Detect 2-cycle or 3-cycle motor oscillations and return all cyclic actions involved."""
+        if len(self.recent_actions) < 4:
+            return []
         acts = list(self.recent_actions)
-        # 2-cycle check
+        # 2-cycle check: [A, B, A, B] or longer
         if (
-            acts[-1] == acts[-3] == acts[-5]
-            and acts[-2] == acts[-4] == acts[-6]
+            len(acts) >= 4
+            and acts[-1] == acts[-3]
+            and acts[-2] == acts[-4]
             and acts[-1] != acts[-2]
         ):
             logger.info(
@@ -226,18 +288,44 @@ class HabenularEpisodicIOR:
                 acts[-1],
                 acts[-2],
             )
-            return acts[-1]
-        return None
+            return [acts[-1], acts[-2]]
+        # 3-cycle check: [A, B, C, A, B, C]
+        if (
+            len(acts) >= 6
+            and acts[-1] == acts[-4]
+            and acts[-2] == acts[-5]
+            and acts[-3] == acts[-6]
+            and len({acts[-1], acts[-2], acts[-3]}) > 1
+        ):
+            logger.info(
+                "HabenularEpisodicIOR: 3-cycle motor oscillation [%s, %s, %s] detected!",
+                acts[-1],
+                acts[-2],
+                acts[-3],
+            )
+            return [acts[-1], acts[-2], acts[-3]]
+        # 4-repetition check: [A, A, A, A]
+        if len(acts) >= 4 and len(set(acts[-4:])) == 1:
+            logger.info(
+                "HabenularEpisodicIOR: Stagnant repeated action %s detected!",
+                acts[-1],
+            )
+            return [acts[-1]]
+        return []
 
-    def reset_episode(self, retain_long_term: bool = True) -> None:
+    def reset_episode(
+        self, retain_long_term: bool = True, retain_inhibitions: bool = False
+    ) -> None:
         """Reset transient episode traces while optionally preserving learned negative valence.
 
         Args:
             retain_long_term: If True, preserves repulsion table and fatal prefixes across episodes.
+            retain_inhibitions: If True, preserves active inhibitions across retries for tree search.
         """
         self.episode_trace.clear()
         self.recent_actions.clear()
-        self.active_inhibitions.clear()
+        if not retain_inhibitions:
+            self.active_inhibitions.clear()
         if not retain_long_term:
             self.repulsion_table.clear()
             self.fatal_prefixes.clear()

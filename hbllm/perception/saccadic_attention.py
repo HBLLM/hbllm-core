@@ -13,7 +13,9 @@ focal points, touch affordances) to a ranked set of discrete, salient foveal fix
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -144,6 +146,25 @@ class SaccadicAttentionSystem:
             grid, prev_grid=prev_grid, background_feature=background_feature
         )
 
+        # Pre-extract morphological primitives ONCE per frame
+        prim_by_coord: dict[tuple[int, int, int], Any] = {}
+        prim_by_feat: dict[int, Any] = {}
+        try:
+            from hbllm.hcir.world.cortex_morphology import (
+                MorphologicalSaliencyEngine,
+                MorphologyPrimitiveType,
+            )
+
+            prims = MorphologicalSaliencyEngine.extract_morphological_primitives(
+                grid, background_feature=background_feature
+            )
+            for p in prims:
+                prim_by_coord[(p.feature_id, p.bounding_box[0], p.bounding_box[1])] = p
+                if p.feature_id not in prim_by_feat:
+                    prim_by_feat[p.feature_id] = p
+        except Exception:
+            pass
+
         # Segment discrete visual entities via Gestalt 4-connectivity
         visited = np.zeros((H, W), dtype=bool)
         entity_fixations: list[FovealFixation] = []
@@ -154,16 +175,16 @@ class SaccadicAttentionSystem:
                 if visited[r, c] or val == background_feature:
                     continue
 
-                # BFS connected component
+                # BFS connected component using deque for O(1) pops
                 component_pixels: list[tuple[int, int]] = []
-                queue: list[tuple[int, int]] = [(r, c)]
+                queue: deque[tuple[int, int]] = deque([(r, c)])
                 visited[r, c] = True
 
                 min_r, max_r = r, r
                 min_c, max_c = c, c
 
                 while queue:
-                    curr_r, curr_c = queue.pop(0)
+                    curr_r, curr_c = queue.popleft()
                     component_pixels.append((curr_r, curr_c))
                     min_r = min(min_r, curr_r)
                     max_r = max(max_r, curr_r)
@@ -211,27 +232,20 @@ class SaccadicAttentionSystem:
                 ):
                     reason = "dynamic_motion_entity"
 
-                # Morphological primitive modulation
-                try:
-                    from hbllm.hcir.world.cortex_morphology import (
-                        MorphologicalSaliencyEngine,
-                        MorphologyPrimitiveType,
-                    )
+                # Morphological primitive modulation using precomputed lookup
+                p_info = prim_by_coord.get((val, min_r, min_c)) or prim_by_feat.get(val)
+                if p_info is not None:
+                    try:
+                        from hbllm.hcir.world.cortex_morphology import MorphologyPrimitiveType
 
-                    prims = MorphologicalSaliencyEngine.extract_morphological_primitives(
-                        grid, background_feature=background_feature
-                    )
-                    prim_map = {p.feature_id: p for p in prims}
-                    p_info = prim_map.get(val)
-                    if p_info is not None:
                         if p_info.primitive_type == MorphologyPrimitiveType.HOLLOW_CONTAINER:
                             final_salience += 0.25
                             reason = "morphological_hollow_container"
                         elif p_info.primitive_type == MorphologyPrimitiveType.SINGLETON:
                             final_salience += 0.20
                             reason = "morphological_popout_singleton"
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
                 entity_fixations.append(
                     FovealFixation(

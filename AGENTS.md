@@ -33,6 +33,10 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
    > *"Never write temporary duct tape. Always upgrade toward the target architecture."*  
    Whenever modifying existing or legacy code, **do not add new procedural hacks, monkey-patches, or level-specific `if/else` branches**. Instead, refactor the code toward its intended canonical architecture: declarative HCIR grammar, formal transactions, or dynamic causal predicates. Every change must move the codebase closer to the future target state.
 
+7. **General Intelligence Invariant (Task-Agnostic Core Directive):**
+   > *"The core is general intelligence, never a single-task solver."*  
+   The cognitive core (`hbllm.brain`, `hbllm.hcir`, `hbllm.hcir.world`) must always remain strictly task-agnostic and domain-agnostic. No special functions, ad-hoc solvers, or heuristics designed solely for individual tasks or specific benchmarks (such as dedicated ARC-AGI puzzle solvers, hardcoded game mechanics, or competition-only shortcuts) may be included in the core. All capabilities must emerge from universal neuro-symbolic principles, active inference, Pearl's causal calculus, spatial physics, and domain-general reasoning. Single-task adapters or benchmark harnesses belong strictly in external evaluation or plugin modules (`benchmarks/`, `plugins/`, `kaggle_submission/`), never in `core/`.
+
 ---
 
 ## 2. The Cortical Epistemic Loop (`hbllm.hcir.world`)
@@ -166,8 +170,8 @@ await services.event_bus.wait_for(
 
 ## 5. Agent Anti-Patterns Blacklist (Strictly Forbidden)
 
-1. **No Game-Specific / Level-Specific Hacks in Cortices:**  
-   Never insert hardcoded coordinates, level IDs, or ad-hoc constants into `cortex_planner.py`, `cortex_deliberation.py`, or `autonomous_epistemic_engine.py`. Cortex logic must remain universal.
+1. **No Single-Task Solvers, Game-Specific Hacks, or Benchmark Solvers in Core:**  
+   Never insert special functions, single-task routines, or dedicated game/puzzle solvers (such as ARC-AGI puzzle solvers, hardcoded game mechanics, level IDs, or bespoke competition heuristics) into `core/hbllm/`. The core must always implement general intelligence. If an environment or benchmark exposes a reasoning bottleneck, address it by strengthening universal neuro-symbolic faculties (e.g. topological manifold routing, Pearl's causal *do(a)* calculus, active inference dead-end pruning), never by adding specialized task solvers.
 2. **No Direct SQLite / DB Queries:**  
    Never issue raw SQL queries directly against `working_memory.db`, `procedural_memory.db`, etc. Always route through `HCIRMemoryBackend`.
 3. **No External LLM Client Imports in Core Reasoning:**  
@@ -290,6 +294,6 @@ Before completing any task, verify:
 2. [ ] **State Ownership:** Is state mutated via `TransactionManager` instead of direct assignment?
 3. [ ] **Declarative over Procedural:** Are new skills or faculties expressed via declarative grammar (`DeclarativeNeuroSymbolicSkill` + `SymbolicPredicate`) rather than ad-hoc if-statements?
 4. [ ] **LLM-Free Core:** Does reasoning remain completely independent of external LLM API calls?
-5. [ ] **Domain Agnostic:** Are cortical algorithms general and free of game-specific or level-specific hacks?
+5. [ ] **General Intelligence & Domain Agnostic:** Does the core remain strictly task-agnostic, free of single-task functions, game-specific hacks, or ARC-AGI-specific puzzle solvers?
 6. [ ] **Unit Tests:** Have changes been validated with `pytest`?
 7. [ ] **Knowledge Graph:** Has `graphify update .` been executed after modifying code files?

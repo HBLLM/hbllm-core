@@ -76,6 +76,10 @@ class HCIRSymbolicWorldTheory:
     cargo_features: set[int] = field(default_factory=set)
     receptacle_features: set[int] = field(default_factory=set)
 
+    # Telic global board goal induction
+    telic_goal_type: str = ""  # e.g. "deplete", "navigate", "cargo"
+    telic_target_feature: int | None = None
+
     def is_goal(self, entity: SpatialEntity | int) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
         if isinstance(entity, (int, np.integer)):
@@ -174,6 +178,8 @@ class HCIRSymbolicWorldTheory:
 
     def induce_goal(self, feature_id: int) -> None:
         """Induce universal goal predicate with minimum description length."""
+        if feature_id == 0:
+            return
         self.barrier_features.discard(feature_id)
         if feature_id not in self.goal_features:
             self.goal_features.add(feature_id)
@@ -215,6 +221,15 @@ class HCIRSymbolicWorldTheory:
             self.cargo_predicates.append(pred)
             logger.info("HCIRSymbolicWorldTheory: Induced Cargo Rule: %s", pred.describe())
 
+    def induce_depletion_goal(self, feature_id: int) -> None:
+        """Induce a global board depletion goal (clear board of this feature)."""
+        self.telic_goal_type = "deplete"
+        self.telic_target_feature = feature_id
+        self.induce_goal(feature_id)
+        logger.info(
+            "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %d", feature_id
+        )
+
     def clear(self) -> None:
         """Clear all intensional predicates when resetting across distinct games."""
         self.goal_predicates.clear()
@@ -228,6 +243,8 @@ class HCIRSymbolicWorldTheory:
         self.walkable_features.clear()
         self.cargo_features.clear()
         self.receptacle_features.clear()
+        self.telic_goal_type = ""
+        self.telic_target_feature = None
 
 
 class CausalInductionCortex:

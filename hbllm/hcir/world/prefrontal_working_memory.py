@@ -166,7 +166,9 @@ class PrefrontalWorkingMemory:
         self.executive_directives = lines
         logger.info("PrefrontalWorkingMemory: Loaded %d executive directives.", len(lines))
 
-    def reset_episode(self, retain_long_term: bool = True) -> None:
+    def reset_episode(
+        self, retain_long_term: bool = True, retain_inhibitions: bool = False
+    ) -> None:
         """Reset transient working memory for a new trial while optionally retaining cross-trial tool affinities."""
         self.held_items.clear()
         self.active_schema = None
@@ -186,7 +188,10 @@ class PrefrontalWorkingMemory:
             self.tool_barrier_affinities.clear()
             self.habenular_ior.reset()
         else:
-            self.habenular_ior.reset_episode(retain_long_term=True)
+            self.habenular_ior.reset_episode(
+                retain_long_term=True,
+                retain_inhibitions=retain_inhibitions,
+            )
 
     def register_cardinality_constraint(
         self,

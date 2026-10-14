@@ -325,10 +325,21 @@ class GeodesicManifoldRouter:
         if max_stride >= 2:
             harmonized_actions: list[tuple[Any, int, int]] = []
             for act, dr, dc in effective_actions:
-                if abs(dr) <= 1 and abs(dc) <= 1:
-                    harmonized_actions.append((act, dr * max_stride, dc * max_stride))
+                clean_dr, clean_dc = dr, dc
+                if abs(clean_dc) >= 2 * abs(clean_dr):
+                    clean_dr = 0
+                elif abs(clean_dr) >= 2 * abs(clean_dc):
+                    clean_dc = 0
+                mag = max(abs(clean_dr), abs(clean_dc))
+                if 0 < mag < max_stride:
+                    scale = max_stride // mag if max_stride % mag == 0 else max_stride / mag
+                    new_dr = int(round(clean_dr * scale))
+                    new_dc = int(round(clean_dc * scale))
+                    harmonized_actions.append((act, new_dr, new_dc))
+                elif mag <= 1 and max_stride >= 2:
+                    harmonized_actions.append((act, clean_dr * max_stride, clean_dc * max_stride))
                 else:
-                    harmonized_actions.append((act, dr, dc))
+                    harmonized_actions.append((act, clean_dr, clean_dc))
             effective_actions = harmonized_actions
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)

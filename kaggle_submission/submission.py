@@ -939,9 +939,18 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         levels_completed = getattr(latest_frame, "levels_completed", 0)
         return state_str == "WIN" or levels_completed >= win_levels
 
-    def reset_episode(self, retain_dynamics: bool = False) -> None:
-        """Reset internal state between episodes."""
-        self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
+    def reset_episode(
+        self,
+        retain_dynamics: bool = False,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
+        """Reset internal state between episodes or levels."""
+        self.internal_agent.reset_episode(
+            retain_dynamics=retain_dynamics,
+            is_new_level=is_new_level,
+            level=level,
+        )
         self.step_count = 0
         self.last_grid = None
 
@@ -1037,13 +1046,33 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
         # Framework contract: First call -> fresh level; after death -> retry with retained dynamics
         if state_str in ("NOT_PLAYED", "GameState.NOT_PLAYED"):
-            self.internal_agent.reset_episode()
+            self.reset_episode(retain_dynamics=False)
             self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
             return getattr(GameAction, "RESET", GameAction.ACTION1)
         if state_str in ("GAME_OVER", "GameState.GAME_OVER"):
-            self.internal_agent.reset_episode(retain_dynamics=True)
+            grid = self._extract_grid(latest_frame, frames)
+            avail = self._extract_available_actions(latest_frame)
+            if (
+                hasattr(self.internal_agent, "assimilate_feedback")
+                and getattr(self.internal_agent, "prev_grid", None) is not None
+            ):
+                self.internal_agent.assimilate_feedback(grid, avail, is_lost=True)
+            self.reset_episode(
+                retain_dynamics=True,
+                is_new_level=False,
+                level=self.current_levels_completed,
+            )
             self.last_grid = None
             return getattr(GameAction, "RESET", GameAction.ACTION1)
+
+        # Check full_reset signal from ARC-AGI environment
+        if getattr(latest_frame, "full_reset", False):
+            self.reset_episode(retain_dynamics=False)
+            self.last_grid = None
+            if hasattr(self.internal_agent, "prev_grid"):
+                self.internal_agent.prev_grid = None
 
         # Game ID extraction and internal cognitive management BEFORE planning
         raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
@@ -1069,26 +1098,49 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         grid = self._extract_grid(latest_frame, frames)
         available_actions = self._extract_available_actions(latest_frame)
 
-        # Detect level transition: sudden large grid difference or episode reset
+        # Detect level completion / transition or reset
         lvl_completed = getattr(latest_frame, "levels_completed", 0)
-        if lvl_completed > self.current_levels_completed:
+        if lvl_completed != self.current_levels_completed:
+            if lvl_completed > self.current_levels_completed:
+                if (
+                    hasattr(self.internal_agent, "assimilate_feedback")
+                    and getattr(self.internal_agent, "prev_grid", None) is not None
+                ):
+                    self.internal_agent.assimilate_feedback(grid, available_actions, is_win=True)
             self.current_levels_completed = lvl_completed
-            self.internal_agent.reset_episode(retain_dynamics=True)
+            if hasattr(self.internal_agent, "current_level"):
+                self.internal_agent.current_level = lvl_completed
+            self.reset_episode(retain_dynamics=True, is_new_level=True, level=lvl_completed)
             self.last_grid = None
 
         if self.last_grid is not None and self.last_grid.shape == grid.shape:
             diff_ratio = float(np.mean(self.last_grid != grid))
             if diff_ratio > 0.50:
                 # Level completed / transitioned! Preserve learned dynamics zero-shot
-                self.internal_agent.reset_episode(retain_dynamics=True)
+                self.reset_episode(
+                    retain_dynamics=True,
+                    is_new_level=True,
+                    level=self.current_levels_completed,
+                )
+                self.last_grid = None
 
         self.last_grid = grid.copy()
         self.step_count += 1
 
-        # Make the real WIN/GAME_OVER signal reachable from the feedback loop
+        # Synchronize working level and frame state
         self.internal_agent.last_frame_state = state_str
         if hasattr(self.internal_agent, "current_level"):
             self.internal_agent.current_level = lvl_completed
+        if hasattr(self.internal_agent, "spatial_cognitive_agent"):
+            self.internal_agent.spatial_cognitive_agent.current_level = lvl_completed
+
+        # Synchronize environmental step limit if present in frame
+        sc = getattr(latest_frame, "step_counter", None) or getattr(
+            latest_frame, "step_limit", None
+        )
+        if sc is not None and isinstance(sc, int) and sc > 0:
+            if hasattr(self.internal_agent, "set_environmental_step_limit"):
+                self.internal_agent.set_environmental_step_limit(sc)
 
         # Synchronize game identity
         game_id = getattr(self, "game_id", None) or getattr(latest_frame, "game_id", None)

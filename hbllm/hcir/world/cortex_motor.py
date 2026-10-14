@@ -590,6 +590,8 @@ class EpistemicCuriosityExplorer:
                 continue
             if engine.inhibited_actions.get(act, 0) > 0:
                 continue
+            if engine.working_memory.habenular_ior.is_action_inhibited(engine.avatar_pos, act):
+                continue
             ar, ac = engine.avatar_pos
             nr = ar + dr_cal
             nc = ac + dc_cal
@@ -629,7 +631,10 @@ class EpistemicCuriosityExplorer:
 
             dist_to_target = abs(tr - nr) + abs(tc - nc)
             recency_penalty = 10.0 if (nr, nc) in list(engine.recent_positions)[-4:] else 0.0
-            estimated_cost = float(dist_to_target) + recency_penalty
+            repulsion_penalty = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                engine.avatar_pos, act
+            )
+            estimated_cost = float(dist_to_target) + recency_penalty + repulsion_penalty
 
             act_id = f"act_{act}_{nr}_{nc}"
             node = ActionNode(
@@ -651,10 +656,18 @@ class EpistemicCuriosityExplorer:
                 return node_to_act_map[eval_results[0].action.id]
 
         # Metacognitive Refractory Relaxation
-        sorted_disp = sorted(disp_actions, key=lambda x: engine.inhibited_actions.get(x[0], 0))
+        sorted_disp = sorted(
+            disp_actions,
+            key=lambda x: (
+                engine.working_memory.habenular_ior.get_repulsion_penalty(engine.avatar_pos, x[0]),
+                engine.inhibited_actions.get(x[0], 0),
+            ),
+        )
         ar, ac = engine.avatar_pos
         for act, (dr_cal, dc_cal) in sorted_disp:
             if (engine.avatar_pos, act) in engine.failed_transitions:
+                continue
+            if engine.working_memory.habenular_ior.is_action_inhibited(engine.avatar_pos, act):
                 continue
             nr = ar + dr_cal
             nc = ac + dc_cal
@@ -718,7 +731,10 @@ class EpistemicCuriosityExplorer:
                 step_idx = len(path) + 1
                 if engine.collision_cones.is_collision_hazard(nr, nc, step_idx):
                     continue
-                if p == engine.avatar_pos and (p, act) in engine.failed_transitions:
+                if p == engine.avatar_pos and (
+                    (p, act) in engine.failed_transitions
+                    or engine.working_memory.habenular_ior.is_action_inhibited(p, act)
+                ):
                     continue
                 bfs_visited.add((nr, nc))
                 bfs_q.append(((nr, nc), path + [act]))
@@ -739,10 +755,8 @@ class EpistemicCuriosityExplorer:
         """Pure reasoning calculation producing an EpistemicProbeProposal."""
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
-        bg_is_impassable_void = (
-            len(engine.symbolic_theory.walkable_features) > 0
-            and bg not in engine.symbolic_theory.walkable_features
-        )
+        walkable_and_safe = engine.symbolic_theory.walkable_features | engine.verified_safe_features
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
         entities = engine.extract_entities(curr_grid, bg)
 
         # 1. Uncalibrated actions
@@ -1008,10 +1022,35 @@ class EpistemicCuriosityExplorer:
                 )
 
             uninhibited_acts = [
-                a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+                a
+                for a in available_actions
+                if engine.inhibited_actions.get(a, 0) == 0
+                and not engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, a
+                )
             ]
-            cand_pool = uninhibited_acts if uninhibited_acts else list(available_actions)
-            chosen_fallback = cand_pool[engine.step_counter % len(cand_pool)]
+            cand_pool = (
+                uninhibited_acts
+                if uninhibited_acts
+                else [a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0]
+                or list(available_actions)
+            )
+            # Metacognitive Entropy & Habenular Regret Minimization:
+            # Prioritize least repulsed actions, breaking ties with least recently executed actions
+            recent_rev = list(reversed(engine.recent_actions))
+
+            def _selection_key(a: int) -> tuple[float, int]:
+                rep = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, a
+                )
+                try:
+                    rec = -recent_rev.index(a)
+                except ValueError:
+                    rec = -999
+                return (rep, rec)
+
+            cand_pool.sort(key=_selection_key)
+            chosen_fallback = cand_pool[0]
             return EpistemicProbeProposal(
                 action=chosen_fallback,
                 clear_active_probe=clear_active_probe,
@@ -1020,7 +1059,7 @@ class EpistemicCuriosityExplorer:
                 probed_entity_ids_to_add=tuple(probed_ids_to_add),
                 entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
                 topological_doorway=doorway_reg,
-                exploration_mode="step_counter_fallback",
+                exploration_mode="entropy_lru_fallback",
             )
 
         # 4. Fallback probe
@@ -1037,9 +1076,34 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="effector_global_fallback",
                 )
         uninhibited_global = [
-            a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+            a
+            for a in available_actions
+            if engine.inhibited_actions.get(a, 0) == 0
+            and not engine.working_memory.habenular_ior.is_action_inhibited(engine.avatar_pos, a)
         ]
-        fallback_global = uninhibited_global[0] if uninhibited_global else available_actions[0]
+        if not uninhibited_global:
+            uninhibited_global = [
+                a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
+            ]
+        recent_rev = list(reversed(engine.recent_actions))
+
+        def _global_key(a: int) -> tuple[float, int, int]:
+            rep = engine.working_memory.habenular_ior.get_repulsion_penalty(engine.avatar_pos, a)
+            freq = list(engine.recent_actions).count(a)
+            try:
+                rec = -recent_rev.index(a)
+            except ValueError:
+                rec = -999
+            return (rep, freq, rec)
+
+        if uninhibited_global:
+            uninhibited_global.sort(key=_global_key)
+            fallback_global = uninhibited_global[0]
+        else:
+            cand = list(available_actions)
+            cand.sort(key=_global_key)
+            fallback_global = cand[0] if cand else available_actions[0]
+
         return EpistemicProbeProposal(
             action=fallback_global,
             exploration_mode="global_fallback",
@@ -1209,6 +1273,8 @@ class MotorCortexEffector:
                 )
             )
             meta: dict[str, Any] = {}
+            if "metadata" in spec and isinstance(spec["metadata"], dict):
+                meta.update(spec["metadata"])
             if "valid_targets" in spec:
                 meta["valid_targets"] = spec["valid_targets"]
             return ActionAffordance(
@@ -1237,17 +1303,9 @@ class MotorCortexEffector:
     @staticmethod
     def is_peripheral_frame_cell(r: int, c: int, H: int, W: int, grid: np.ndarray) -> bool:
         """True if (r, c) is on an outer grid frame, border line, or peripheral HUD status banner."""
-        # 1. Outer 1-pixel frame border checks
+        # 1. Outer 1-pixel perimeter boundary checks
         if r == 0 or r == H - 1 or c == 0 or c == W - 1:
-            val = int(grid[r, c])
-            if r == 0 or r == H - 1:
-                line = grid[r, :]
-                if np.count_nonzero(line == val) >= max(4, W // 3):
-                    return True
-            if c == 0 or c == W - 1:
-                line = grid[:, c]
-                if np.count_nonzero(line == val) >= max(4, H // 3):
-                    return True
+            return True
 
         # 2. Universal Top HUD / Status Banner Detection:
         # A top HUD banner is a multi-row band across the top (r <= 16, H >= 24)
@@ -1368,8 +1426,29 @@ class MotorCortexEffector:
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
                 feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
+                telic_bonus = (
+                    150.0
+                    if (
+                        engine.symbolic_theory.telic_goal_type == "deplete"
+                        and e.feature_id == engine.symbolic_theory.telic_target_feature
+                    )
+                    else 0.0
+                )
                 ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
-                cand_score = saliency + affordance_bonus + feat_bias - ior_penalty
+                haben_pen = 0.0
+                if hasattr(engine, "working_memory") and hasattr(
+                    engine.working_memory, "habenular_ior"
+                ):
+                    if engine.working_memory.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
+                    ):
+                        continue
+                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
+                    )
+                cand_score = (
+                    saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
+                )
                 click_candidates.append((cr, cc, cand_score))
 
         # 7. Inferotemporal Affordance Centroid Segmentation
@@ -1484,10 +1563,10 @@ class MotorCortexEffector:
 
             # Parietal Effector Repertoire Grounding:
             # If the action affordance defines discrete valid targets, snap the chosen target
-            # to the nearest valid physical affordance point.
+            # to the nearest valid physical affordance point that is not known to be quiescent.
             valid_targets = aff.metadata.get("valid_targets") if aff else None
             if valid_targets and isinstance(valid_targets, (list, tuple)):
-                best_dist = float("inf")
+                best_score = float("inf")
                 snapped_target: dict[str, Any] | None = None
                 for vt in valid_targets:
                     if isinstance(vt, dict):
@@ -1503,12 +1582,71 @@ class MotorCortexEffector:
                         )
                         vx = int(raw_vx) if raw_vx is not None else 0
                         vy = int(raw_vy) if raw_vy is not None else 0
-                        d = abs(vx - target_c) + abs(vy - target_r)
-                        if d < best_dist:
-                            best_dist = d
+                        if (vy, vx) in engine.quiescent_click_targets:
+                            continue
+                        if hasattr(engine, "working_memory") and hasattr(
+                            engine.working_memory, "habenular_ior"
+                        ):
+                            if engine.working_memory.habenular_ior.is_action_inhibited(
+                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                            ):
+                                continue
+                        elif hasattr(engine, "habenular_ior"):
+                            if engine.habenular_ior.is_action_inhibited(
+                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                            ):
+                                continue
+                        haben_pen = 0.0
+                        if hasattr(engine, "working_memory") and hasattr(
+                            engine.working_memory, "habenular_ior"
+                        ):
+                            haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                            )
+                        vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                        # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
+                        d = (
+                            float(abs(vx - target_c) + abs(vy - target_r))
+                            + float(vis) * 25.0
+                            + haben_pen
+                        )
+                        if d < best_score:
+                            best_score = d
                             snapped_target = vt
+
+                # If all un-quiescent candidates were exhausted, select least-visited un-quiescent valid target
+                if snapped_target is None and valid_targets:
+                    least_visited_vt: dict[str, Any] | None = None
+                    min_vis = float("inf")
+                    for vt in valid_targets:
+                        if isinstance(vt, dict):
+                            raw_vx = vt.get("x", vt.get("c", 0))
+                            raw_vy = vt.get("y", vt.get("r", 0))
+                            vx = int(raw_vx) if raw_vx is not None else 0
+                            vy = int(raw_vy) if raw_vy is not None else 0
+                            if (vy, vx) in engine.quiescent_click_targets:
+                                continue
+                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                            if vis < min_vis:
+                                min_vis = vis
+                                least_visited_vt = vt
+                    snapped_target = least_visited_vt
+
                 if snapped_target is not None:
+                    # Update visit count for snapped coordinate
+                    svx = int(snapped_target.get("x", snapped_target.get("c", 0)))
+                    svy = int(snapped_target.get("y", snapped_target.get("r", 0)))
+                    engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
+                        engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
+                    )
                     return dict(snapped_target)
+
+                # All discrete valid targets are exhausted and proven quiescent!
+                if action is not None:
+                    engine.inhibited_actions[action] = max(
+                        engine.inhibited_actions.get(action, 0), 6
+                    )
+                return None
 
             coords: dict[str, Any] = {}
             for k in param_keys:

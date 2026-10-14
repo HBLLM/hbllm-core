@@ -78,7 +78,12 @@ class ActionDynamicsModel:
     def get_displacement(self, condition: str | None = None) -> tuple[int, int]:
         """Get (delta_r, delta_c) displacement for a condition."""
         dyn = self.get_dynamics(condition)
-        return dyn.delta_r, dyn.delta_c
+        dr, dc = dyn.delta_r, dyn.delta_c
+        if abs(dc) >= 2 * abs(dr):
+            dr = 0
+        elif abs(dr) >= 2 * abs(dc):
+            dc = 0
+        return dr, dc
 
     def is_displacement_action(self, condition: str | None = None) -> bool:
         """True if empirical testing demonstrates spatial translation of the body."""
@@ -104,6 +109,10 @@ class ActionDynamicsModel:
             if condition not in self.conditional_branches:
                 dr = int(round(float(observed_delta[0]))) if len(observed_delta) >= 1 else 0
                 dc = int(round(float(observed_delta[1]))) if len(observed_delta) >= 2 else 0
+                if abs(dc) >= 2 * abs(dr):
+                    dr = 0
+                elif abs(dr) >= 2 * abs(dc):
+                    dc = 0
                 self.conditional_branches[condition] = ActionDynamicsModel(
                     action_id=self.action_id,
                     delta_r=dr,
@@ -123,20 +132,53 @@ class ActionDynamicsModel:
                 dr, dc = float(observed_delta[0]), float(observed_delta[1])
                 target_r = int(round(dr))
                 target_c = int(round(dc))
+                if abs(target_c) >= 2 * abs(target_r):
+                    target_r = 0
+                elif abs(target_r) >= 2 * abs(target_c):
+                    target_c = 0
 
-                # Single-step quantum refinement:
+                # Ensure baseline self.delta_r and self.delta_c are snapped if dominant axis exists
+                if abs(self.delta_c) >= 2 * abs(self.delta_r):
+                    self.delta_r = 0
+                elif abs(self.delta_r) >= 2 * abs(self.delta_c):
+                    self.delta_c = 0
+
+                # Single-step quantum refinement & unconstrained stride expansion:
                 # If an action previously observed a boundary wrap (e.g. 28) and now demonstrates
                 # a smaller non-zero unit step along the same axis (e.g. 7), adopt the unit quantum.
                 if 0 < abs(target_r) < abs(self.delta_r) and self.delta_r != 0:
                     self.delta_r = target_r
                 if 0 < abs(target_c) < abs(self.delta_c) and self.delta_c != 0:
                     self.delta_c = target_c
+                # If an action previously observed a partial/truncated step (e.g. 3) and now demonstrates
+                # a larger integer multiple stride along the same axis (e.g. 6), adopt the unconstrained stride.
+                if (
+                    abs(self.delta_r) > 0
+                    and abs(target_r) > abs(self.delta_r)
+                    and target_r % self.delta_r == 0
+                ):
+                    self.delta_r = target_r
+                if (
+                    abs(self.delta_c) > 0
+                    and abs(target_c) > abs(self.delta_c)
+                    and target_c % self.delta_c == 0
+                ):
+                    self.delta_c = target_c
 
                 # Multimodal contradiction detection:
                 # If this model is already calibrated with high confidence, and the new
-                # observation consistently deviates, do not corrupt the established EMA.
+                # observation consistently deviates on a different axis/non-multiple, do not corrupt the established EMA.
                 # Instead, fork into an alternative conditional branch.
-                if self.confidence >= 0.7 and self.probes_tested >= 2:
+                is_quantum_multiple = (
+                    self.delta_r != 0
+                    and target_r != 0
+                    and (target_r % self.delta_r == 0 or self.delta_r % target_r == 0)
+                ) or (
+                    self.delta_c != 0
+                    and target_c != 0
+                    and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
+                )
+                if not is_quantum_multiple and self.confidence >= 0.7 and self.probes_tested >= 2:
                     dist_dev = abs(target_r - self.delta_r) + abs(target_c - self.delta_c)
                     if dist_dev >= 1:
                         cond_key = f"cond_{target_r}_{target_c}"
@@ -168,11 +210,15 @@ class ActionDynamicsModel:
                     new_dr = float(target_r)
                     new_dc = float(target_c)
                 else:
-                    new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * dr
-                    new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * dc
+                    new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * float(target_r)
+                    new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * float(target_c)
                 self.delta_r = int(round(new_dr))
                 self.delta_c = int(round(new_dc))
-                self.displacement = (new_dr, new_dc)
+                if abs(self.delta_c) >= 2 * abs(self.delta_r):
+                    self.delta_r = 0
+                elif abs(self.delta_r) >= 2 * abs(self.delta_c):
+                    self.delta_c = 0
+                self.displacement = (float(self.delta_r), float(self.delta_c))
             self.confidence = min(1.0, self.confidence + 0.1)
         else:
             self.confidence = max(0.0, self.confidence - 0.15)

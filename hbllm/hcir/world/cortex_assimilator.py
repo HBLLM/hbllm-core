@@ -97,6 +97,10 @@ class EpistemicFeedbackAssimilator:
         heuristic) and controllability-based (multi-frame correlation) identification.
         """
         dr, dc = delta
+        if abs(dc) >= 2 * abs(dr):
+            dr = 0
+        elif abs(dr) >= 2 * abs(dc):
+            dc = 0
 
         def _adjacent(a: SpatialEntity, b: SpatialEntity) -> bool:
             b1, b2 = a.bounding_box, b.bounding_box
@@ -286,6 +290,9 @@ class EpistemicFeedbackAssimilator:
             engine.last_effective_click_coord = None
             engine.active_goal_converging_coord = None
             engine.consecutive_goal_converging_clicks = 0
+            if getattr(engine, "active_causal_actuator_coord", None) == target_coord:
+                engine.active_causal_actuator_coord = None
+                engine.consecutive_causal_probes = 0
             if target_coord is not None:
                 engine.quiescent_click_targets.add(target_coord)
                 engine.effective_click_targets.discard(target_coord)
@@ -301,9 +308,12 @@ class EpistemicFeedbackAssimilator:
                     if probed_feat == engine.bg_feature or probed_feat == 0:
                         engine.quiescent_features.add(probed_feat)
                     else:
-                        q_count = getattr(engine, "_feature_quiescent_counts", None)
+                        q_count = getattr(engine, "feature_quiescent_counts", None)
+                        if q_count is None:
+                            q_count = getattr(engine, "_feature_quiescent_counts", None)
                         if q_count is None:
                             q_count = {}
+                            engine.feature_quiescent_counts = q_count
                             engine._feature_quiescent_counts = q_count
                         q_count[probed_feat] = q_count.get(probed_feat, 0) + 1
                         if (
@@ -337,6 +347,19 @@ class EpistemicFeedbackAssimilator:
                     engine.consecutive_effective_clicks = 1
                 engine.effective_click_targets.add(target_coord)
                 engine.quiescent_click_targets.discard(target_coord)
+                # Active Causal Empowerment: Bind this coordinate as the active causal actuator
+                if getattr(engine, "active_causal_actuator_coord", None) == target_coord:
+                    engine.consecutive_causal_probes = (
+                        getattr(engine, "consecutive_causal_probes", 0) + 1
+                    )
+                    if engine.consecutive_causal_probes >= getattr(
+                        engine, "causal_actuator_streak_limit", 4
+                    ):
+                        engine.active_causal_actuator_coord = None
+                        engine.consecutive_causal_probes = 0
+                else:
+                    engine.active_causal_actuator_coord = target_coord
+                    engine.consecutive_causal_probes = 1
                 if engine.prev_grid is not None:
                     r, c = target_coord
                     if 0 <= r < engine.prev_grid.shape[0] and 0 <= c < engine.prev_grid.shape[1]:
@@ -879,6 +902,10 @@ class EpistemicFeedbackAssimilator:
                 )
                 if kinetic_res.raw_delta is not None and action is not None:
                     dr, dc = kinetic_res.raw_delta
+                    if abs(dc) >= 2 * abs(dr):
+                        dr = 0
+                    elif abs(dr) >= 2 * abs(dc):
+                        dc = 0
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, kinetic_res.self_avatar.cells, (dr, dc), H, W
                     )
@@ -965,6 +992,10 @@ class EpistemicFeedbackAssimilator:
                     av_moved = filtered_av_moved
 
                 av_pe, av_ce, (dr, dc) = av_moved[0]
+                if abs(dc) >= 2 * abs(dr):
+                    dr = 0
+                elif abs(dr) >= 2 * abs(dc):
+                    dc = 0
                 engine.last_non_displacement_action = None
                 all_cells = [
                     cell
@@ -1133,11 +1164,19 @@ class EpistemicFeedbackAssimilator:
                         engine.simulation_cooldown = 0
                         engine.consecutive_simulation_failures = 0
 
-                if prev_avatar_pos is not None and engine.avatar_pos is not None:
-                    if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
-                        engine.consecutive_stuck_steps += 1
-                    else:
-                        engine.consecutive_stuck_steps = 0
+            if diff.changed_pixel_count == 0 and not is_win and not is_lost:
+                engine.consecutive_stuck_steps += 1
+                if engine.last_action is not None:
+                    recent_acts = list(engine.recent_actions)[-3:]
+                    if len(recent_acts) >= 3 and all(a == engine.last_action for a in recent_acts):
+                        engine.inhibited_actions[engine.last_action] = max(
+                            engine.inhibited_actions.get(engine.last_action, 0) + 4, 6
+                        )
+            elif prev_avatar_pos is not None and engine.avatar_pos is not None:
+                if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
+                    engine.consecutive_stuck_steps += 1
+                else:
+                    engine.consecutive_stuck_steps = 0
             else:
                 engine.consecutive_stuck_steps = 0
 
@@ -1370,6 +1409,20 @@ class EpistemicFeedbackAssimilator:
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
         )
 
+        # Faculty: Telic Depletion Goal Induction
+        # When an interventional action clears pixels of a non-background, non-avatar feature,
+        # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
+        if diff.mutated_pixels and not is_lost:
+            for r, c, old_v, new_v in diff.mutated_pixels:
+                if (
+                    new_v == bg
+                    and old_v != bg
+                    and old_v not in av_feats
+                    and not engine.symbolic_theory.is_barrier(old_v)
+                ):
+                    engine.symbolic_theory.induce_depletion_goal(old_v)
+                    break
+
         if is_win:
             win_target = None
             if prev_avatar_pos is not None:
@@ -1402,11 +1455,18 @@ class EpistemicFeedbackAssimilator:
                         or abs(win_target[0] - prev_avatar_pos[0]) > 0
                         or abs(win_target[1] - prev_avatar_pos[1]) > 0
                     )
+                    feat_extent = int(np.count_nonzero(engine.prev_grid == goal_feat))
+                    is_substrate = (
+                        goal_feat in engine.symbolic_theory.walkable_features
+                        or goal_feat in engine.verified_safe_features
+                        or feat_extent > 64
+                    )
                     if (
                         goal_feat != bg
                         and goal_feat != engine.bg_feature
                         and (goal_feat not in av_feats or is_distant_target)
                         and not engine.symbolic_theory.is_barrier(goal_feat)
+                        and not is_substrate
                     ):
                         engine.symbolic_theory.induce_goal(goal_feat)
                         logger.info(
@@ -1441,11 +1501,20 @@ class EpistemicFeedbackAssimilator:
                 sr, sc = engine.current_simulated_goal
                 if 0 <= sr < H and 0 <= sc < W:
                     sim_feat = int(engine.prev_grid[sr, sc])
+                    sim_extent = int(np.count_nonzero(engine.prev_grid == sim_feat))
                     if (
                         sim_feat != bg
                         and sim_feat != engine.bg_feature
                         and sim_feat not in av_feats
                         and not engine.symbolic_theory.is_barrier(sim_feat)
+                        and not (
+                            sim_feat
+                            in (
+                                engine.symbolic_theory.walkable_features
+                                | engine.verified_safe_features
+                            )
+                            or sim_extent > 64
+                        )
                     ):
                         engine.symbolic_theory.induce_goal(sim_feat)
 

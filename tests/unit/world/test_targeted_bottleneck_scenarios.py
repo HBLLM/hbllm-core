@@ -827,3 +827,123 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
     )
     # False goal at death cluster must be inverted!
     assert (5, 7) in engine.hazard_tracker.static_lethal_positions
+
+
+def test_feature_quiescent_counts_causal_induction_and_reset() -> None:
+    """Verify that feature_quiescent_counts tracks ineffective probes per feature and resets cleanly."""
+    engine = AutonomousEpistemicEngine()
+    engine.register_action_space(
+        [
+            {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
+        ]
+    )
+    # 1. Attribute existence and initial state
+    assert hasattr(engine, "feature_quiescent_counts"), (
+        "engine must expose feature_quiescent_counts"
+    )
+    assert hasattr(engine, "_feature_quiescent_counts"), (
+        "engine must expose _feature_quiescent_counts"
+    )
+    assert engine.feature_quiescent_counts == {}
+    assert engine._feature_quiescent_counts == {}
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[3, 3] = 4  # Entity of feature 4
+    engine.prev_grid = grid.copy()
+
+    # First quiescent click on feature 4 (result grid identical to prev_grid -> 0 diff)
+    engine.assimilate_feedback(
+        curr_grid=grid.copy(),
+        available_actions=[6],
+        action=6,
+        action_data={"y": 3, "x": 3},
+    )
+    assert engine.feature_quiescent_counts.get(4) == 1
+    assert 4 not in engine.quiescent_features, (
+        "Threshold is 2; 1 quiescent probe must not induce quiescence yet"
+    )
+
+    # Second quiescent click on feature 4
+    engine.prev_grid = grid.copy()
+    engine.assimilate_feedback(
+        curr_grid=grid.copy(),
+        available_actions=[6],
+        action=6,
+        action_data={"y": 3, "x": 3},
+    )
+    assert engine.feature_quiescent_counts.get(4) == 2
+    assert 4 in engine.quiescent_features, (
+        "2 quiescent probes must induce categorical feature quiescence"
+    )
+
+    # Level transition must reset quiescent features and counts
+    engine.episodic_cortex.consolidate_schema_and_reset(
+        engine=engine,
+        is_new_level=True,
+        retain_dynamics=True,
+    )
+    assert len(engine.quiescent_features) == 0, (
+        "quiescent_features must be cleared on level transition"
+    )
+    assert len(engine.feature_quiescent_counts) == 0, (
+        "feature_quiescent_counts must be cleared on level transition"
+    )
+    assert len(engine._feature_quiescent_counts) == 0, (
+        "_feature_quiescent_counts must be cleared on level transition"
+    )
+
+
+def test_adaptive_prediction_budget_search_scaling() -> None:
+    """Verify PredictionBudget dynamically scales anytime search expansions under acute step urgency."""
+    from hbllm.hcir.world.prediction_budget import PredictionBudget
+
+    budget = PredictionBudget()
+
+    # Normal conditions
+    normal_b = budget.compute_search_budget(has_temporal=False, has_threats=False)
+    assert normal_b == 1500
+
+    # Complex temporal hazards
+    temporal_b = budget.compute_search_budget(has_temporal=True, has_threats=False)
+    assert temporal_b > 4000
+
+    # Under acute step budget urgency (<= 25 steps remaining)
+    urgent_b = budget.compute_search_budget(
+        has_temporal=True,
+        has_threats=True,
+        is_under_strict_budget=True,
+        remaining_steps=20,
+    )
+    assert urgent_b == 600, "Urgent step budget must throttle expansions to 600 anytime cap!"
+
+
+def test_exploratory_goals_schedule_canonical_entity_roles() -> None:
+    """Verify EpistemicGoalScheduler correctly schedules exploratory candidate goals for canonical EntityRoles."""
+    from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (1, 1)
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[1, 1] = 1
+
+    entities = [
+        SpatialEntity(grid_pos=(5, 5), area=4, feature_id=3, role=EntityRole.MANIPULABLE),
+        SpatialEntity(grid_pos=(6, 6), area=4, feature_id=4, role=EntityRole.ACTUATOR),
+        SpatialEntity(grid_pos=(7, 7), area=4, feature_id=5, role=EntityRole.RESOURCE),
+        SpatialEntity(grid_pos=(8, 8), area=4, feature_id=6, role=EntityRole.UNKNOWN),
+    ]
+
+    proposal = EpistemicGoalScheduler.schedule_goals(
+        engine=engine,
+        curr_grid=grid,
+        entities=entities,
+        bg=0,
+        av_feats={1},
+        target_role=EntityRole.GOAL,
+        available_actions=[1, 2, 3, 4],
+    )
+
+    assert set(proposal.goals) == {(5, 5), (6, 6), (7, 7), (8, 8)}
+    assert proposal.new_candidate_features == {3, 4, 5, 6}

@@ -84,6 +84,11 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     GeometricModelSelector,
     ParietalCoordinateTransformer,
 )
+from hbllm.hcir.world.percept import (
+    BasePerceptionAdapter,
+    PerceptionFrame,
+    PerceptionRegistry,
+)
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
@@ -220,6 +225,9 @@ class AutonomousEpistemicEngine:
     """
 
     MIN_PROBES_PER_ACTION: int = 3
+    _feature_quiescent_counts: dict[int, int]
+    feature_quiescent_counts: dict[int, int]
+    consecutive_pacing_steps: int = 0
 
     def __init__(
         self,
@@ -327,6 +335,7 @@ class AutonomousEpistemicEngine:
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
         self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
         self.pending_phase_wait_steps: int = 0
+        self.consecutive_pacing_steps: int = 0
 
         # Faculty: Premotor Spatiotemporal Collision Cones & Trajectory Extrapolation
         self.collision_cones: SpatiotemporalCollisionCones = SpatiotemporalCollisionCones()
@@ -372,6 +381,7 @@ class AutonomousEpistemicEngine:
 
         # Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
         self.object_planner: ObjectStateGraphPlanner = ObjectStateGraphPlanner()
+        self.perception_adapter: BasePerceptionAdapter | None = None
         self.topology_rooms: dict[int, list[tuple[int, int]]] = {}
         self.topology_doors: list[RoomDoor] = []
         self.room_adjacency: dict[int, list[int]] = {}
@@ -487,10 +497,16 @@ class AutonomousEpistemicEngine:
         self.active_goal_converging_coord: tuple[int, int] | None = None
         self.consecutive_goal_converging_clicks: int = 0
 
+        # Active Causal Empowerment & Contingency Testing
+        self.active_causal_actuator_coord: tuple[int, int] | None = None
+        self.consecutive_causal_probes: int = 0
+        self.causal_actuator_streak_limit: int = 4
+
         # Feature-level interventional causal falsification (Piagetian Stage D3)
         self.quiescent_features: set[int] = set()
         self.effective_features: set[int] = set()
-        self._feature_quiescent_counts: dict[int, int] = {}
+        self.feature_quiescent_counts: dict[int, int] = {}
+        self._feature_quiescent_counts: dict[int, int] = self.feature_quiescent_counts
 
         # Metacognitive Refractory Action Inhibition (Stage D13)
         self.inhibited_actions: dict[Any, int] = {}
@@ -699,6 +715,20 @@ class AutonomousEpistemicEngine:
         for act, dyn in self.action_dynamics.items():
             if dyn.is_displacement_action():
                 deltas[act] = dyn.get_displacement()
+        # Symmetrical motor stride reconciliation:
+        # Reconcile antiparallel displacement vectors along cardinal axes to the maximum verified stride
+        # if one direction was constrained by an obstacle during calibration (e.g. (0, -6) vs (0, 3)).
+        for a1, d1 in list(deltas.items()):
+            for a2, d2 in list(deltas.items()):
+                if a1 != a2:
+                    if d1[0] == 0 and d2[0] == 0 and d1[1] * d2[1] < 0:
+                        max_stride = max(abs(d1[1]), abs(d2[1]))
+                        if abs(d1[1]) < max_stride and max_stride % abs(d1[1]) == 0:
+                            deltas[a1] = (0, -max_stride if d1[1] < 0 else max_stride)
+                    elif d1[1] == 0 and d2[1] == 0 and d1[0] * d2[0] < 0:
+                        max_stride = max(abs(d1[0]), abs(d2[0]))
+                        if abs(d1[0]) < max_stride and max_stride % abs(d1[0]) == 0:
+                            deltas[a1] = (-max_stride if d1[0] < 0 else max_stride, 0)
         _discrete_grid_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
         for act, d in _discrete_grid_convention.items():
             if act not in deltas and (
@@ -963,6 +993,20 @@ class AutonomousEpistemicEngine:
 
     # ── Delegated Public Interfaces ───────────────────────────────────────────
 
+    def perceive(self, raw_observation: Any) -> PerceptionFrame:
+        """Lift raw sensory input into an abstract PerceptionFrame using the registered sensory adapter."""
+        if isinstance(raw_observation, PerceptionFrame):
+            return raw_observation
+        adapter = self.perception_adapter or PerceptionRegistry.get_default()
+        if adapter is not None:
+            return adapter.lift_percept(raw_observation, context=self)
+        H, W = (
+            (raw_observation.shape[0], raw_observation.shape[1])
+            if hasattr(raw_observation, "shape") and len(raw_observation.shape) >= 2
+            else (16, 16)
+        )
+        return PerceptionFrame(shape=(H, W))
+
     def estimate_background(self, grid: np.ndarray) -> int:
         return PerceptionEngine.estimate_background(
             grid,
@@ -1064,6 +1108,31 @@ class AutonomousEpistemicEngine:
                 is_death_or_reset=is_lost,
             )
             self._prev_oriented_threats = []
+
+        # Attribute environmental mutations to active object interaction
+        active_obj_id = getattr(self.object_planner, "active_target_object_id", None)
+        if active_obj_id and self.prev_grid is not None and self.prev_grid.shape == curr_grid.shape:
+            diff_mask = self.prev_grid != curr_grid
+            if (
+                prev_av_pos
+                and 0 <= prev_av_pos[0] < curr_grid.shape[0]
+                and 0 <= prev_av_pos[1] < curr_grid.shape[1]
+            ):
+                diff_mask[prev_av_pos[0], prev_av_pos[1]] = False
+            if (
+                self.avatar_pos
+                and 0 <= self.avatar_pos[0] < curr_grid.shape[0]
+                and 0 <= self.avatar_pos[1] < curr_grid.shape[1]
+            ):
+                diff_mask[self.avatar_pos[0], self.avatar_pos[1]] = False
+            diff_coords = np.argwhere(diff_mask)
+            if len(diff_coords) > 0:
+                mutated_cells = {(int(r), int(c)) for r, c in diff_coords}
+                self.object_planner.ledger.record_causal_effect(
+                    object_id=active_obj_id,
+                    effect_type="MUTATED_CELLS",
+                    affected_coords=mutated_cells,
+                )
 
     def simulate_in_mind(
         self,

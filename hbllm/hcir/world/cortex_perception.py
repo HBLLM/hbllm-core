@@ -318,7 +318,13 @@ class SpatialRoleClassifier:
         )
         is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
         is_theory_goal = (
-            (val in symbolic_theory.goal_features or val in symbolic_theory.receptacle_features)
+            (
+                val != 0
+                and (
+                    val in symbolic_theory.goal_features
+                    or val in symbolic_theory.receptacle_features
+                )
+            )
             if symbolic_theory
             else False
         )
@@ -400,7 +406,7 @@ class GestaltAffordanceDetector:
                     }
                 )
 
-        # 2. Detect edge exit markers
+        # 2. Detect edge and near-edge exit markers
         for feat in np.unique(grid):
             feat_int = int(feat)
             if (
@@ -416,20 +422,51 @@ class GestaltAffordanceDetector:
                 continue
 
             touches_edge = any(r == 0 or r == H - 1 or c == 0 or c == W - 1 for r, c in pts)
+            cells = [(int(r), int(c)) for r, c in pts]
+            centroid = (
+                int(round(float(np.mean(pts[:, 0])))),
+                int(round(float(np.mean(pts[:, 1])))),
+            )
             if touches_edge:
-                centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
-                )
                 goals.append(
                     {
                         "type": "exit_marker",
                         "position": centroid,
+                        "cells": cells,
                         "feature": feat_int,
                         "size": len(pts),
-                        "confidence": 0.6,
+                        "confidence": 0.75,
                     }
                 )
+
+        # 2B. Detect perimeter gateway breach / doorway notches
+        from collections import Counter
+
+        for edge_cells in [
+            [(0, c) for c in range(W)],
+            [(H - 1, c) for c in range(W)],
+            [(r, 0) for r in range(H)],
+            [(r, W - 1) for r in range(H)],
+        ]:
+            edge_vals = [int(grid[r, c]) for r, c in edge_cells]
+            val_counts = Counter(edge_vals)
+            if not val_counts:
+                continue
+            dom_val, count = val_counts.most_common(1)[0]
+            if count >= len(edge_cells) * 0.6 and (
+                (barrier_features and dom_val in barrier_features) or dom_val != bg
+            ):
+                gap_cells = [edge_cells[i] for i, v in enumerate(edge_vals) if v != dom_val]
+                if 1 <= len(gap_cells) <= 4:
+                    goals.append(
+                        {
+                            "type": "gateway_notch",
+                            "position": gap_cells[len(gap_cells) // 2],
+                            "cells": gap_cells,
+                            "feature": int(grid[gap_cells[0]]),
+                            "confidence": 0.85,
+                        }
+                    )
 
         # 3. Check for symmetry-completion goals on foreground pattern
         sym_type, sym_score = VisualSymmetryAnalyzer.find_dominant_symmetry(
