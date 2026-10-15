@@ -196,7 +196,13 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             try:
                 structural_goals = detect_goals_fn(grid=grid, bg=bg)
                 for sg in structural_goals:
-                    if sg.get("type") in ("exit_marker", "gateway_notch", "target_zone"):
+                    if sg.get("type") in (
+                        "exit_marker",
+                        "gateway_notch",
+                        "target_zone",
+                        "target_constellation",
+                        "receptacle_dock",
+                    ):
                         for cp in sg.get("cells", []):
                             candidate_goals.add(cp)
                         pos = sg.get("position")

@@ -429,6 +429,10 @@ class GestaltAffordanceDetector:
             if len(pts) < 1 or len(pts) > 4:
                 continue
 
+            # Telemetry Guard: Points strictly on bottom HUD row are status counter pixels, not maze exits
+            if H >= 16 and all(r >= H - 2 for r, _ in pts):
+                continue
+
             touches_edge = any(r == 0 or r == H - 1 or c == 0 or c == W - 1 for r, c in pts)
             cells = [(int(r), int(c)) for r, c in pts]
             centroid = (
@@ -456,6 +460,9 @@ class GestaltAffordanceDetector:
             [(r, 0) for r in range(H)],
             [(r, W - 1) for r in range(H)],
         ]:
+            if H >= 16 and edge_cells[0][0] == H - 1:
+                # Bottom status bar row is not a maze exit gateway
+                continue
             edge_vals = [int(grid[r, c]) for r, c in edge_cells]
             val_counts = Counter(edge_vals)
             if not val_counts:
@@ -637,6 +644,72 @@ class GestaltAffordanceDetector:
                                     "is_midpoint": True,
                                 }
                             )
+
+        # 5. Gestalt Receptacle Enclaves & Docking Constellations (Closure & Containment)
+        # Core Knowledge: Bounded perimeter components enclosing cavities or interior markers
+        # serve as docking receptacles or target templates for movable pieces.
+        struct_conn = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+        enclaves_by_target: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        enclave_border_feats: set[int] = set()
+
+        for feat in np.unique(grid):
+            feat_int = int(feat)
+            if (
+                feat_int == bg
+                or feat_int == 0
+                or (known_lethal_features and feat_int in known_lethal_features)
+                or (barrier_features and feat_int in barrier_features)
+            ):
+                continue
+            mask = grid == feat_int
+            labeled_mask, num_clusters = label(mask, structure=struct_conn)
+            for c_idx in range(1, num_clusters + 1):
+                c_pts = np.argwhere(labeled_mask == c_idx)
+                min_cr, min_cc = c_pts.min(axis=0)
+                max_cr, max_cc = c_pts.max(axis=0)
+                h_c = max_cr - min_cr + 1
+                w_c = max_cc - min_cc + 1
+                if 3 <= h_c <= 24 and 3 <= w_c <= 24:
+                    sub = grid[min_cr : max_cr + 1, min_cc : max_cc + 1]
+                    interior = sub[1:-1, 1:-1]
+                    unique_int = np.unique(interior)
+                    for u in unique_int:
+                        u_int = int(u)
+                        if u_int != feat_int and u_int != bg and u_int != 0:
+                            int_pts = np.argwhere(interior == u_int)
+                            for ip in int_pts:
+                                gr = min_cr + 1 + ip[0]
+                                gc = min_cc + 1 + ip[1]
+                                enclaves_by_target[u_int].append((int(gr), int(gc)))
+                                enclave_border_feats.add(feat_int)
+
+        for target_feat, coords in enclaves_by_target.items():
+            if len(coords) >= 2:
+                pts_arr = np.array(coords)
+                constellation_centroid = (
+                    int(round(float(np.median(pts_arr[:, 0])))),
+                    int(round(float(np.median(pts_arr[:, 1])))),
+                )
+                goals.append(
+                    {
+                        "type": "target_constellation",
+                        "position": constellation_centroid,
+                        "feature": target_feat,
+                        "cells": coords,
+                        "border_features": list(enclave_border_feats),
+                        "confidence": 0.95,
+                    }
+                )
+            for gr, gc in coords:
+                goals.append(
+                    {
+                        "type": "receptacle_dock",
+                        "position": (gr, gc),
+                        "feature": target_feat,
+                        "border_features": list(enclave_border_feats),
+                        "confidence": 0.90,
+                    }
+                )
 
         return goals
 

@@ -273,6 +273,8 @@ class PrefrontalWorkingMemory:
         self.last_non_displacement_action: Any | None = None
         self.level_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
+        self.target_constellations: dict[int, tuple[int, int]] = {}
+        self.structural_goals: list[dict[str, Any]] = []
 
     def has_salience_shift(self, engine: Any) -> bool:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise
@@ -338,9 +340,15 @@ class PrefrontalWorkingMemory:
         logger.info("PrefrontalWorkingMemory: Loaded %d executive directives.", len(lines))
 
     def reset_episode(
-        self, retain_long_term: bool = True, retain_inhibitions: bool = False
+        self,
+        retain_long_term: bool = True,
+        retain_inhibitions: bool = False,
+        is_new_level: bool = False,
     ) -> None:
         """Reset transient working memory for a new trial while optionally retaining cross-trial tool affinities."""
+        if is_new_level:
+            self.target_constellations.clear()
+            self.structural_goals.clear()
         self.held_items.clear()
         self.active_schema = None
         self.unlocked_barriers.clear()
@@ -408,6 +416,7 @@ class PrefrontalWorkingMemory:
             self.focus_switch_actions.clear()
             self.last_non_displacement_action = None
             self.total_epistemic_probes = 0
+            self.target_constellations.clear()
         else:
             self.habenular_ior.reset_episode(
                 retain_long_term=True,

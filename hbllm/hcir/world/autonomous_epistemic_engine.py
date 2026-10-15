@@ -699,6 +699,59 @@ class AutonomousEpistemicEngine:
         self.working_memory.recent_actions = val
 
     @property
+    def goals(self) -> list[tuple[int, int]]:
+        """Return unified list of active candidate goal coordinates."""
+        res: list[tuple[int, int]] = list(self.learned_goal_positions)
+        sgs = getattr(self.working_memory, "structural_goals", None)
+        if not sgs and self.prev_grid is not None:
+            sgs = self.detect_structural_goals(self.prev_grid, bg=self.bg_feature)
+            if hasattr(self.working_memory, "structural_goals"):
+                self.working_memory.structural_goals = sgs
+        if sgs:
+            for sg in sgs:
+                if sg.get("type") == "target_constellation":
+                    f = sg.get("feature")
+                    pos = sg.get("position")
+                    if (
+                        f is not None
+                        and pos is not None
+                        and hasattr(self.working_memory, "target_constellations")
+                    ):
+                        self.working_memory.target_constellations.setdefault(f, pos)
+
+            av_feats = self.avatar_features or (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
+            constellations = [
+                sg
+                for sg in sgs
+                if sg.get("type") == "target_constellation"
+                and (sg.get("feature") in av_feats if av_feats else True)
+            ]
+            if constellations:
+                c_goals: list[tuple[int, int]] = []
+                for c in constellations:
+                    pos = c.get("position")
+                    if pos and pos not in c_goals:
+                        c_goals.append(pos)
+                return c_goals
+
+            if hasattr(self.working_memory, "target_constellations"):
+                for av_f in av_feats:
+                    if av_f in self.working_memory.target_constellations:
+                        return [self.working_memory.target_constellations[av_f]]
+
+            for sg in sgs:
+                pos = sg.get("position")
+                if pos and pos not in res:
+                    res.append(pos)
+                if sg.get("type") != "target_constellation":
+                    for cp in sg.get("cells", []):
+                        if cp not in res:
+                            res.append(cp)
+        return res
+
+    @property
     def exhausted_candidate_goals(self) -> set[tuple[int, int]]:
         return self.working_memory.exhausted_candidate_goals
 
@@ -1820,49 +1873,65 @@ class AutonomousEpistemicEngine:
                     break
 
     def _update_avatar_position_from_grid(
-        self, curr_grid: np.ndarray, known_av_feats: set[int]
+        self,
+        curr_grid: np.ndarray,
+        known_av_feats: set[int],
+        preferred_pos: tuple[int, int] | None = None,
     ) -> None:
         """Visually localize the avatar position on the current grid."""
         H, W = curr_grid.shape
-        from scipy.ndimage import label
+        from scipy.ndimage import binary_closing, label
 
         mask = np.isin(curr_grid, list(known_av_feats))
         if not np.any(mask):
             return
 
-        labeled, num_features = label(mask)
+        # Perform 3x3 topological morphological closing to integrate multi-part bodies or cutouts with internal markers
+        closed_mask = binary_closing(mask, structure=np.ones((3, 3)))
+        labeled, num_features = label(closed_mask)
         if num_features == 0:
             return
 
         # If avatar was already precisely localized by assimilate_feedback via motion tracking,
         # and current avatar_pos contains an avatar feature and matches avatar_size, verify and keep it
-        if self.avatar_pos is not None:
+        if self.avatar_pos is not None and preferred_pos is None:
             r, c = self.avatar_pos
-            if 0 <= r < H and 0 <= c < W and mask[r, c]:
+            comp_lbl = 0
+            if 0 <= r < H and 0 <= c < W and labeled[r, c] > 0:
                 comp_lbl = labeled[r, c]
-                if comp_lbl > 0:
-                    coords = np.argwhere(labeled == comp_lbl)
-                    min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
-                    min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
-                    is_edge_hud = (
-                        min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
-                    ) or (
-                        min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4)
-                    )
-                    if not is_edge_hud:
-                        comp_area = len(coords)
-                        if self.avatar_size == 0 or (
-                            0.25 * self.avatar_size <= comp_area <= 2.5 * self.avatar_size
-                        ):
-                            return
+            else:
+                for dr in range(-2, 3):
+                    for dc in range(-2, 3):
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < H and 0 <= nc < W and labeled[nr, nc] > 0:
+                            cand_lbl = labeled[nr, nc]
+                            if cand_lbl > 0:
+                                comp_lbl = cand_lbl
+                                break
+                    if comp_lbl > 0:
+                        break
+            if comp_lbl > 0:
+                coords = np.argwhere(labeled == comp_lbl)
+                min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
+                min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
+                is_edge_hud = (
+                    min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
+                ) or (min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4))
+                if not is_edge_hud:
+                    comp_area = len(coords)
+                    if self.avatar_size == 0 or (
+                        0.15 * self.avatar_size <= comp_area <= 6.0 * self.avatar_size
+                    ):
+                        self.avatar_size = comp_area
+                        return
 
-        best_pos = None
-        min_score = float("inf")
-
+        # Collect candidates
+        candidates = []
+        max_candidate_area = 0
         for lbl in range(1, num_features + 1):
             coords = np.argwhere(labeled == lbl)
             area = len(coords)
-            if 1 <= area <= max(49, int(H * W * 0.15)):
+            if 1 <= area <= max(64, int(H * W * 0.15)):
                 min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
                 min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
                 # Filter out peripheral border lines / HUD gauges
@@ -1876,21 +1945,51 @@ class AutonomousEpistemicEngine:
                     int(round(float(np.mean(coords[:, 0])))),
                     int(round(float(np.mean(coords[:, 1])))),
                 )
-                if self.avatar_pos is not None:
-                    dist = abs(centroid[0] - self.avatar_pos[0]) + abs(
-                        centroid[1] - self.avatar_pos[1]
-                    )
-                    size_diff = abs(area - self.avatar_size) if self.avatar_size > 0 else 0
-                    score = dist + size_diff * 0.5
-                else:
-                    # Fresh localization: choose component best matching known avatar_size
-                    score = abs(area - self.avatar_size) if self.avatar_size > 0 else 0
-                if score < min_score:
-                    min_score = score
-                    best_pos = centroid
+                candidates.append((centroid, area, coords))
+                if area > max_candidate_area:
+                    max_candidate_area = area
+
+        if not candidates:
+            return
+
+        # Check if current avatar_pos actually tracks this feature
+        is_tracking_active = False
+        if self.avatar_pos is not None:
+            ar, ac = self.avatar_pos
+            if 0 <= ar < H and 0 <= ac < W and curr_grid[ar, ac] in known_av_feats:
+                is_tracking_active = True
+
+        best_pos = None
+        best_size = self.avatar_size
+        min_score = float("inf")
+
+        for centroid, area, coords in candidates:
+            # If substantial bodies exist (area >= 4), filter out single-pixel peripheral guide marks/notches
+            if max_candidate_area >= 4 and area <= 2:
+                continue
+
+            if preferred_pos is not None:
+                dist = abs(centroid[0] - preferred_pos[0]) + abs(centroid[1] - preferred_pos[1])
+                score = dist * 2.0 - area * 0.01
+            elif is_tracking_active and self.avatar_pos is not None:
+                dist = abs(centroid[0] - self.avatar_pos[0]) + abs(centroid[1] - self.avatar_pos[1])
+                size_diff = abs(area - self.avatar_size) if self.avatar_size > 0 else 0
+                score = dist + size_diff * 0.5
+            elif self.avatar_size > 0:
+                score = abs(area - self.avatar_size) - area * 0.01
+            else:
+                # Fresh localization or focus switch: select dominant cohesive body
+                score = -float(area)
+
+            if score < min_score:
+                min_score = score
+                best_pos = centroid
+                best_size = area
 
         if best_pos is not None:
             self.avatar_pos = best_pos
+            if not is_tracking_active or preferred_pos is not None:
+                self.avatar_size = best_size
 
     def ground_effector_action(
         self, curr_grid: np.ndarray, action: Any = None

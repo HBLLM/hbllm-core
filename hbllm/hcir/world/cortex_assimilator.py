@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import defaultdict
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -141,8 +142,21 @@ class EpistemicFeedbackAssimilator:
             if any(_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
                 comp_pairs.append((pe, ce))
 
-        engine.avatar_features = {ce.feature_id for _, ce in comp_pairs}
-        engine.avatar_feature = next(iter(engine.avatar_features))
+        new_av_feats = {ce.feature_id for _, ce in comp_pairs}
+        if new_av_feats != engine.avatar_features:
+            engine.mental_plan.clear()
+        engine.avatar_features = new_av_feats
+        feat_areas: dict[int, int] = defaultdict(int)
+        for _, ce in comp_pairs:
+            feat_areas[ce.feature_id] += ce.area
+        sorted_feats = sorted(
+            engine.avatar_features,
+            key=lambda f: feat_areas[f] if f != 0 else 0,
+            reverse=True,
+        )
+        engine.avatar_feature = (
+            sorted_feats[0] if sorted_feats else next(iter(engine.avatar_features))
+        )
         engine.mobile_threat_features.difference_update(engine.avatar_features)
         engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
         all_cells = [
@@ -266,6 +280,7 @@ class EpistemicFeedbackAssimilator:
                     engine.prior_avatar_feature = engine.avatar_feature
                 engine.avatar_feature = None
                 engine.avatar_pos = None
+                engine.avatar_size = 0
                 engine.mental_plan.clear()
 
         if is_effector_action and action not in engine.action_affordances:
@@ -590,7 +605,9 @@ class EpistemicFeedbackAssimilator:
             min_dist = float("inf")
             best_delta = (0, 0)
             for ce_id, ce in unmatched_curr.items():
-                if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 144:
+                area_diff = abs(pe.area - ce.area)
+                area_match = (pe.area == ce.area) or (area_diff <= 2 and min(pe.area, ce.area) >= 4)
+                if pe.feature_id == ce.feature_id and area_match and pe.area <= 144:
                     dr = int(round(ce.centroid[0] - pe.centroid[0]))
                     dc = int(round(ce.centroid[1] - pe.centroid[1]))
                     dist = abs(dr) + abs(dc)
@@ -669,7 +686,71 @@ class EpistemicFeedbackAssimilator:
                             if action in engine.action_affordances:
                                 engine.action_affordances[action].is_index_selector = True
             elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 16:
-                if action not in engine.index_selector_actions:
+                # Check if a single focal indicator/marker transferred between entities
+                is_marker_transfer = False
+                if engine.prev_grid is not None and 2 <= diff.changed_pixel_count <= 8:
+                    prev_g = engine.prev_grid
+                    curr_g = curr_grid
+                    diff_mask = prev_g != curr_g
+                    diff_coords = np.argwhere(diff_mask)
+                    non_bg_diffs = [
+                        (int(r), int(c))
+                        for r, c in diff_coords
+                        if r < curr_g.shape[0] - 2  # exclude bottom step counter / HUD
+                    ]
+                    if len(non_bg_diffs) == 2:
+                        c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
+                        v1_prev, v1_curr = int(prev_g[c1]), int(curr_g[c1])
+                        v2_prev, v2_curr = int(prev_g[c2]), int(curr_g[c2])
+                        if (v1_curr == v2_prev and v1_prev != bg and v2_curr != bg) or (
+                            v2_curr == v1_prev and v2_prev != bg and v1_curr != bg
+                        ):
+                            is_marker_transfer = True
+
+                if is_marker_transfer:
+                    engine.mark_focus_switch_action(action)
+                    engine.working_memory.focus_switch_actions.add(action)
+                    # The new focus locus is the coordinate where the marker appeared in curr_g
+                    new_locus = None
+                    if curr_g[c1] == 0 or (v1_curr != v1_prev and v1_curr == v2_prev):
+                        new_locus = c1
+                    elif curr_g[c2] == 0 or (v2_curr != v2_prev and v2_curr == v1_prev):
+                        new_locus = c2
+                    else:
+                        new_locus = c2
+
+                    new_feat = None
+                    if new_locus is not None:
+                        lr, lc = new_locus
+                        for dr in range(-2, 3):
+                            for dc in range(-2, 3):
+                                nr, nc = lr + dr, lc + dc
+                                if 0 <= nr < H and 0 <= nc < W:
+                                    val = int(curr_g[nr, nc])
+                                    if val not in (bg, engine.bg_feature, 0):
+                                        new_feat = val
+                                        break
+                            if new_feat is not None:
+                                break
+
+                    old_feat = (
+                        getattr(engine, "prior_avatar_feature", None) or engine.avatar_feature
+                    )
+                    if new_feat is not None:
+                        engine.prior_avatar_feature = old_feat
+                        engine.avatar_features = {new_feat}
+                        engine.avatar_feature = new_feat
+                        engine.avatar_pos = None
+                        engine.avatar_size = 0
+                        engine._update_avatar_position_from_grid(
+                            curr_g, {new_feat}, preferred_pos=new_locus
+                        )
+                    else:
+                        engine.avatar_features.clear()
+                        engine.avatar_feature = None
+                        engine.avatar_pos = None
+                    engine.mental_plan.clear()
+                elif action not in engine.index_selector_actions:
                     engine.symbolic_theory.induce_value_mutator(action)
                     engine.value_mutator_actions.add(action)
                     if action in engine.action_affordances:
@@ -1020,16 +1101,24 @@ class EpistemicFeedbackAssimilator:
                 engine.avatar_feature = next(iter(valid_feats))
                 engine.mobile_threat_features.difference_update(valid_feats)
                 engine.avatar_size = kinetic_res.self_avatar.area
-                engine.avatar_pos = (
-                    int(round(kinetic_res.self_avatar.centroid[0])),
-                    int(round(kinetic_res.self_avatar.centroid[1])),
-                )
-                if kinetic_res.raw_delta is not None and action is not None:
-                    dr, dc = kinetic_res.raw_delta
-                    if abs(dc) >= 2 * abs(dr):
-                        dr = 0
-                    elif abs(dr) >= 2 * abs(dc):
-                        dc = 0
+                dr, dc = 0, 0
+                if kinetic_res.raw_delta is not None:
+                    raw_dr, raw_dc = kinetic_res.raw_delta
+                    if abs(raw_dc) >= 2 * abs(raw_dr):
+                        dr, dc = 0, raw_dc
+                    elif abs(raw_dr) >= 2 * abs(raw_dc):
+                        dr, dc = raw_dr, 0
+                    else:
+                        dr, dc = raw_dr, raw_dc
+
+                if prev_avatar_pos is not None and (dr != 0 or dc != 0):
+                    engine.avatar_pos = (prev_avatar_pos[0] + dr, prev_avatar_pos[1] + dc)
+                else:
+                    engine.avatar_pos = (
+                        int(round(kinetic_res.self_avatar.centroid[0])),
+                        int(round(kinetic_res.self_avatar.centroid[1])),
+                    )
+                if (dr != 0 or dc != 0) and action is not None:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, kinetic_res.self_avatar.cells, (dr, dc), H, W
                     )
@@ -1118,6 +1207,26 @@ class EpistemicFeedbackAssimilator:
                     engine.last_non_displacement_action = None
 
             if av_moved:
+                # Gestalt Common Fate: If multiple avatar components moved, find consensus displacement
+                consensus_groups: dict[
+                    tuple[int, int], list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]]
+                ] = {}
+                for item in av_moved:
+                    consensus_groups.setdefault(item[2], []).append(item)
+
+                expected_delta = (
+                    (act_dyn.delta_r, act_dyn.delta_c)
+                    if act_dyn and act_dyn.is_displacement_action()
+                    else None
+                )
+                if expected_delta in consensus_groups:
+                    av_moved = consensus_groups[expected_delta]
+                elif consensus_groups:
+                    best_delta, best_items = max(
+                        consensus_groups.items(), key=lambda it: len(it[1])
+                    )
+                    av_moved = best_items
+
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
                     av_moved.sort(
                         key=lambda item: (
@@ -1143,10 +1252,13 @@ class EpistemicFeedbackAssimilator:
                     for _, ce, _ in av_moved
                     for cell in ce.properties.get("cells", [ce.grid_pos])
                 ]
-                engine.avatar_pos = (
-                    int(round(sum(c[0] for c in all_cells) / len(all_cells))),
-                    int(round(sum(c[1] for c in all_cells) / len(all_cells))),
-                )
+                if prev_avatar_pos is not None and (dr != 0 or dc != 0):
+                    engine.avatar_pos = (prev_avatar_pos[0] + dr, prev_avatar_pos[1] + dc)
+                else:
+                    engine.avatar_pos = (
+                        int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                        int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+                    )
                 if not is_win:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, all_cells, (dr, dc), H, W

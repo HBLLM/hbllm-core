@@ -546,10 +546,47 @@ class PrefrontalDeliberationEngine:
             for a in available_actions
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
-        focus_switches = [a for a in discrete_transform_actions if engine.is_focus_switch_action(a)]
+        focus_switches = [
+            a
+            for a in discrete_transform_actions
+            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
+        ]
         if focus_switches:
-            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-            return focus_switches[0], None
+            goals = list(getattr(engine, "goals", getattr(engine, "learned_goal_positions", [])))
+            if not goals and hasattr(engine, "detect_structural_goals"):
+                sgs = engine.detect_structural_goals(curr_grid, bg=engine.bg_feature)
+                av_feats = engine.avatar_features or (
+                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
+                )
+                constellations = [
+                    sg
+                    for sg in sgs
+                    if sg.get("type") == "target_constellation"
+                    and (sg.get("feature") in av_feats if av_feats else True)
+                ]
+                targets = constellations if constellations else sgs
+                for sg in targets:
+                    if sg.get("position"):
+                        goals.append(sg["position"])
+            avatar_arrived = bool(
+                engine.avatar_pos is not None
+                and goals
+                and any(engine.avatar_pos == g for g in goals)
+            )
+            no_viable_plan = bool(
+                not engine.mental_plan
+                and engine.consecutive_plan_failures >= 3
+                and engine.consecutive_stuck_steps >= 2
+            )
+            if avatar_arrived or no_viable_plan:
+                chosen_switch = focus_switches[0]
+                engine.inhibited_actions[chosen_switch] = max(
+                    engine.inhibited_actions.get(chosen_switch, 0), 4
+                )
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                engine.consecutive_plan_failures = 0
+                engine.consecutive_stuck_steps = 0
+                return chosen_switch, None
 
         # Faculty: Dial / State-Cycler Interleaved Deliberation (Norman Parameter Space Navigation)
         index_selectors = [
@@ -678,24 +715,43 @@ class PrefrontalDeliberationEngine:
         if curr_pos is not None:
             bg = engine.estimate_background(curr_grid)
             walkable_and_safe = engine.symbolic_theory.walkable_features
-            bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+            other_walkables = {f for f in walkable_and_safe if f != bg and f != 0}
+            bg_is_impassable_void = len(other_walkables) > 0 and bg not in walkable_and_safe
             if not bg_is_impassable_void:
                 bg_count = int(np.count_nonzero(curr_grid == bg))
                 bg_ratio = bg_count / max(1, H * W)
                 ar, ac = curr_pos
-                avatar_on_bg = (
-                    0 <= ar < H
-                    and 0 <= ac < W
-                    and (
-                        int(curr_grid[ar, ac]) == bg
+                av_feats = engine.avatar_features or (
+                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
+                )
+                if av_feats:
+                    avatar_cells = [
+                        (int(r), int(c)) for r, c in np.argwhere(np.isin(curr_grid, list(av_feats)))
+                    ]
+                    avatar_on_bg = any(
+                        int(curr_grid[r, c]) == bg
                         or any(
-                            0 <= ar + dr_a < H
-                            and 0 <= ac + dc_a < W
-                            and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                            0 <= r + dr_a < H
+                            and 0 <= c + dc_a < W
+                            and int(curr_grid[r + dr_a, c + dc_a]) == bg
                             for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                         )
+                        for r, c in avatar_cells
                     )
-                )
+                else:
+                    avatar_on_bg = (
+                        0 <= ar < H
+                        and 0 <= ac < W
+                        and (
+                            int(curr_grid[ar, ac]) == bg
+                            or any(
+                                0 <= ar + dr_a < H
+                                and 0 <= ac + dc_a < W
+                                and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                                for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            )
+                        )
+                    )
                 if bg_ratio >= 0.20 and not avatar_on_bg:
                     bg_is_impassable_void = True
 
@@ -793,7 +849,16 @@ class PrefrontalDeliberationEngine:
             engine.simulation_cooldown = 0
 
         # 1. Update background & assimilate sensory feedback from previous action
+        old_bg = engine.bg_feature
         engine.bg_feature = engine.estimate_background(curr_grid)
+        if engine.bg_feature != old_bg:
+            if (
+                old_bg == 0
+                and 0 in engine.symbolic_theory.walkable_features
+                and not np.any(curr_grid == 0)
+            ):
+                engine.symbolic_theory.walkable_features.discard(0)
+            engine.symbolic_theory.induce_walkable(engine.bg_feature)
         if engine.prev_grid is not None and not engine._feedback_assimilated:
             engine.assimilate_feedback(
                 curr_grid,
@@ -975,7 +1040,9 @@ class PrefrontalDeliberationEngine:
         known_av_feats = set(engine.avatar_features) if engine.avatar_features else set()
         if engine.avatar_feature is not None:
             known_av_feats.add(engine.avatar_feature)
-        elif engine.prior_avatar_feature is not None:
+        elif engine.prior_avatar_feature is not None and not engine.is_focus_switch_action(
+            engine.last_action
+        ):
             known_av_feats.add(engine.prior_avatar_feature)
         if known_av_feats:
             engine._update_avatar_position_from_grid(curr_grid, known_av_feats)
@@ -983,6 +1050,7 @@ class PrefrontalDeliberationEngine:
                 engine.avatar_pos is not None
                 and engine.avatar_feature is None
                 and engine.prior_avatar_feature is not None
+                and not engine.is_focus_switch_action(engine.last_action)
             ):
                 engine.avatar_feature = engine.prior_avatar_feature
                 engine.avatar_features.add(engine.prior_avatar_feature)
@@ -1037,7 +1105,7 @@ class PrefrontalDeliberationEngine:
             affordance_choice := self.arbitrate_affordances(
                 engine, curr_grid, available_actions, known_av_feats
             )
-        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
+        ) is not None:
             chosen_action, chosen_data = affordance_choice
 
         # 2. Check active mental plan during EXPLOITATION phase

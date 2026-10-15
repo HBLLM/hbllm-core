@@ -462,9 +462,14 @@ class DorsalKineticStream:
             best_match_idx: int | None = None
             min_err = float("inf")
 
-            # Ventral body schema gating:
+            # Ventral body schema gating: require velocity consistency before gating to prior features
             has_feat_match = known_avatar_features and any(
-                bool(cand.features & known_avatar_features) for cand in candidates
+                bool(cand.features & known_avatar_features)
+                and (
+                    abs(cand.velocity[0] - exp_dr) + abs(cand.velocity[1] - exp_dc)
+                    <= self.velocity_tolerance
+                )
+                for cand in candidates
             )
 
             for i, cand in enumerate(candidates):

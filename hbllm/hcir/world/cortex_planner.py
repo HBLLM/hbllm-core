@@ -195,7 +195,25 @@ class EpistemicGoalScheduler:
                     confirmed_goals.append(gp)
 
         goals: list[tuple[int, int]] = []
-        if confirmed_goals:
+        sgs = getattr(engine.working_memory, "structural_goals", None)
+        if not sgs and hasattr(engine, "detect_structural_goals"):
+            sgs = engine.detect_structural_goals(curr_grid, bg=bg)
+            if hasattr(engine.working_memory, "structural_goals"):
+                engine.working_memory.structural_goals = sgs
+        if sgs:
+            matched_constellations = [
+                sg
+                for sg in sgs
+                if sg.get("type") == "target_constellation"
+                and (sg.get("feature") in av_feats if av_feats else True)
+            ]
+            if matched_constellations:
+                for c in matched_constellations:
+                    pos = c.get("position")
+                    if pos and pos not in goals:
+                        goals.append(pos)
+
+        if not goals and confirmed_goals:
             goals = list(confirmed_goals)
 
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
@@ -312,6 +330,8 @@ class EpistemicGoalScheduler:
             ]
         if not goals:
             structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
+            if hasattr(engine.working_memory, "structural_goals"):
+                engine.working_memory.structural_goals = structural_goals
             primary_sgs = [
                 sg
                 for sg in structural_goals
@@ -322,19 +342,57 @@ class EpistemicGoalScheduler:
                     "reflection_target",
                     "relational_alignment",
                     "optical_mirror_target",
+                    "target_constellation",
+                    "receptacle_dock",
+                    "symmetry_completion",
                 )
             ]
-            cand_sgs = primary_sgs if primary_sgs else structural_goals
+            matched_constellations = [
+                sg
+                for sg in structural_goals
+                if sg.get("type") == "target_constellation"
+                and (sg.get("feature") in av_feats if av_feats else True)
+            ]
+            matched_docking = (
+                matched_constellations
+                if matched_constellations
+                else [
+                    sg
+                    for sg in structural_goals
+                    if sg.get("type") in ("target_constellation", "receptacle_dock")
+                    and (sg.get("feature") in av_feats if av_feats else True)
+                ]
+            )
+            cand_sgs = (
+                matched_docking
+                if matched_docking
+                else (primary_sgs if primary_sgs else structural_goals)
+            )
+            cand_sgs = sorted(cand_sgs, key=lambda s: s.get("confidence", 0.5), reverse=True)
             for sg in cand_sgs:
                 feat = sg.get("feature")
-                if feat is not None and (
-                    (feat in av_feats and not sg.get("is_midpoint"))
-                    or feat in engine.hazard_tracker.known_lethal_features
-                    or engine.symbolic_theory.is_barrier(feat)
+                sg_type = sg.get("type", "")
+                is_docking = sg_type in ("receptacle_dock", "target_constellation")
+                if feat is not None:
+                    if not is_docking and feat in av_feats and not sg.get("is_midpoint"):
+                        continue
+                    if (
+                        feat in engine.hazard_tracker.known_lethal_features
+                        or engine.symbolic_theory.is_barrier(feat)
+                    ):
+                        continue
+                pos = sg.get("position")
+                if (
+                    pos
+                    and 0 <= pos[0] < H
+                    and 0 <= pos[1] < W
+                    and pos != avatar_pos
+                    and pos not in panel_coords
                 ):
-                    continue
+                    if pos not in goals:
+                        goals.append(pos)
                 cells = sg.get("cells")
-                if cells:
+                if cells and sg_type != "target_constellation":
                     for cp in cells:
                         if (
                             0 <= cp[0] < H
@@ -344,17 +402,6 @@ class EpistemicGoalScheduler:
                         ):
                             if cp not in goals:
                                 goals.append(cp)
-                else:
-                    pos = sg.get("position")
-                    if (
-                        pos
-                        and 0 <= pos[0] < H
-                        and 0 <= pos[1] < W
-                        and pos != avatar_pos
-                        and pos not in panel_coords
-                    ):
-                        if pos not in goals:
-                            goals.append(pos)
 
         # (d) Exploratory guesses: unknown entities
         if not goals:
@@ -414,6 +461,29 @@ class EpistemicGoalScheduler:
         # Exclude all known static lethal coordinates from candidate attractors
         all_lethals = engine.current_level_lethal_positions
         goals = [g for g in goals if g not in all_lethals]
+
+        # Ground goals onto reachable affine motor lattice coset if discrete stride > 1
+        step_size = max(
+            [
+                max(abs(dr), abs(dc))
+                for dr, dc in engine.action_deltas.values()
+                if dr != 0 or dc != 0
+            ],
+            default=1,
+        )
+        if step_size > 1 and avatar_pos is not None and goals:
+            aligned_goals: list[tuple[int, int]] = []
+            for gr, gc in goals:
+                if (gr - avatar_pos[0]) % step_size == 0 and (gc - avatar_pos[1]) % step_size == 0:
+                    aligned_goals.append((gr, gc))
+                else:
+                    agr = avatar_pos[0] + int(round((gr - avatar_pos[0]) / step_size)) * step_size
+                    agc = avatar_pos[1] + int(round((gc - avatar_pos[1]) / step_size)) * step_size
+                    if 0 <= agr < H and 0 <= agc < W:
+                        aligned_goals.append((agr, agc))
+                    else:
+                        aligned_goals.append((gr, gc))
+            goals = aligned_goals
 
         # Extended avatar projection
         goals = cls._project_extended_avatar_goals(curr_grid, engine, goals, H, W)
@@ -624,7 +694,8 @@ class MentalSimulationPlanner:
 
         # Corridor Manifold Continuity
         walkable_and_safe = engine.symbolic_theory.walkable_features
-        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+        other_walkables = {f for f in walkable_and_safe if f != bg and f != 0}
+        bg_is_impassable_void = len(other_walkables) > 0 and bg not in walkable_and_safe
         if not bg_is_impassable_void:
             bg_count = int(feat_counts.get(bg, 0))
             bg_ratio = bg_count / max(1, H * W)
@@ -637,15 +708,30 @@ class MentalSimulationPlanner:
                 )
                 else (-1, -1)
             )
-            avatar_on_bg = ar >= 0 and (
-                int(curr_grid[ar, ac]) == bg
-                or any(
-                    0 <= ar + dr_a < H
-                    and 0 <= ac + dc_a < W
-                    and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
-                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if av_feats:
+                avatar_cells = [
+                    (int(r), int(c)) for r, c in np.argwhere(np.isin(curr_grid, list(av_feats)))
+                ]
+                avatar_on_bg = any(
+                    int(curr_grid[r, c]) == bg
+                    or any(
+                        0 <= r + dr_a < H
+                        and 0 <= c + dc_a < W
+                        and int(curr_grid[r + dr_a, c + dc_a]) == bg
+                        for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                    )
+                    for r, c in avatar_cells
                 )
-            )
+            else:
+                avatar_on_bg = ar >= 0 and (
+                    int(curr_grid[ar, ac]) == bg
+                    or any(
+                        0 <= ar + dr_a < H
+                        and 0 <= ac + dc_a < W
+                        and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                        for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                    )
+                )
             if bg_ratio >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
 
@@ -937,17 +1023,23 @@ class MentalSimulationPlanner:
 
         # Unknown solid entity cells: risk-aware path planning
         unknown_entity_cells: set[tuple[int, int]] = set()
+        enclave_border_feats: set[int] = set()
+        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "structural_goals"):
+            for sg in engine.working_memory.structural_goals:
+                for bf in sg.get("border_features", []):
+                    enclave_border_feats.add(bf)
         for e in entities:
             if (
                 e.feature_id != bg
                 and e.feature_id != 0
                 and e.feature_id not in av_feats
+                and e.feature_id not in enclave_border_feats
+                and e.role not in (EntityRole.MANIPULABLE, EntityRole.GOAL, EntityRole.RECEPTACLE)
                 and not engine.symbolic_theory.is_walkable(e.feature_id)
                 and not engine.symbolic_theory.is_goal(e)
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and not engine.symbolic_theory.is_cargo(e)
                 and e.feature_id not in engine.learned_cargo_features
-                and e.role != EntityRole.MANIPULABLE
                 and e.grid_pos not in goals
             ):
                 for cell in e.properties.get("cells", [e.grid_pos]):
@@ -1227,21 +1319,10 @@ class MentalSimulationPlanner:
                 grid_shape=(H, W),
                 traversable=traversable_cells,
             )
-        # Gather all physical cells of confirmed/candidate goal entities
+        # Gather all physical cells of confirmed/candidate goal entities targeted in goals
         all_goal_cells: set[tuple[int, int]] = set(goals)
-        goal_features = (
-            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
-        )
-        for gf in goal_features:
-            if gf != bg and gf not in av_feats:
-                for gr_idx, gc_idx in np.argwhere(curr_grid == gf):
-                    all_goal_cells.add((int(gr_idx), int(gc_idx)))
         for e in entities:
-            if (
-                engine.symbolic_theory.is_goal(e)
-                or e.role == EntityRole.GOAL
-                or e.feature_id in goal_features
-            ):
+            if e.grid_pos in all_goal_cells:
                 for cr, cc in e.properties.get("cells", [e.grid_pos]):
                     all_goal_cells.add((int(cr), int(cc)))
 
@@ -1537,7 +1618,11 @@ class MentalSimulationPlanner:
                             )
                             if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
                                 pass
-                            elif cell_feat in goal_features or (kr, kc) in all_goal_cells:
+                            elif (
+                                cell_feat in engine.symbolic_theory.goal_features
+                                or cell_feat in engine.symbolic_theory.candidate_goal_features
+                                or (kr, kc) in all_goal_cells
+                            ):
                                 pass
                             else:
                                 ray_blocked = True

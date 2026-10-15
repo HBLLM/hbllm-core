@@ -547,6 +547,11 @@ class HippocampalEpisodicCortex:
         if is_new_level or not retain_dynamics:
             engine.entity_action_failed_positions = {}
             engine.immobile_entity_actions = set()
+        if not retain_dynamics:
+            engine.avatar_features.clear()
+            engine.avatar_feature = None
+            engine.avatar_size = 0
+            engine.prior_avatar_feature = None
         else:
             # On same-level retry after death: preserve learned spatial negative affordances,
             # barriers, and quiescent inert coordinates so inert scenery/borders are not re-tested,
@@ -583,6 +588,7 @@ class HippocampalEpisodicCortex:
         engine.working_memory.reset_episode(
             retain_long_term=retain_dynamics,
             retain_inhibitions=is_same_level_retry,
+            is_new_level=is_new_level,
         )
         engine.collision_cones.reset_episode()
         engine.consecutive_plan_failures = 0
