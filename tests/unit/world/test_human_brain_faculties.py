@@ -787,6 +787,7 @@ class TestMotorCortexEffector:
         grid[4, 7] = 3
 
         coords = engine.ground_effector_action(grid, action=6)
+        assert coords is not None
         assert "x" in coords and "y" in coords
         assert 0 <= coords["x"] < 10
         assert 0 <= coords["y"] < 10
@@ -1131,7 +1132,7 @@ class TestPrefrontalDeliberationEngine:
         engine = AutonomousEpistemicEngine()
         engine.avatar_pos = (5, 5)
         engine.phase = EpistemicPhase.EXPLOITATION
-        engine._last_sim_action_count = len(engine.action_dynamics)
+        engine.working_memory.update_salience_baseline(engine)
 
         # Plan has a step that is temporarily blocked / needs wait
         next_step = MentalSimulationStep(
@@ -2327,3 +2328,1100 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
         assert len(engine_preds) >= 1
         engine_ops = engine.to_transaction_operations()
         assert len(engine_ops) >= 3
+
+
+class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
+    """Validate that formal internal memory stores (PrefrontalWorkingMemory, VisuospatialWorkingMemory,
+    HabenularEpisodicIOR, and HCIRSymbolicWorldTheory) serve as the unified Single Source of Truth (SSOT).
+    """
+
+    def test_symbolic_theory_single_source_of_truth(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+
+        # Spelke core knowledge: background 0 is seeded as walkable space by default
+        assert engine.symbolic_theory.is_walkable(0)
+        assert 0 in engine.verified_safe_features
+
+        # Verified safe features strictly maps to symbolic_theory.walkable_features
+        engine.verified_safe_features.add(4)
+        assert engine.symbolic_theory.is_walkable(4)
+        assert 4 in engine.symbolic_theory.walkable_features
+
+        engine.symbolic_theory.induce_walkable(7)
+        assert 7 in engine.verified_safe_features
+
+        # Goal features unification
+        engine.learned_goal_features.add(2)
+        assert engine.symbolic_theory.is_goal(2)
+        assert 2 in engine.symbolic_theory.goal_features
+
+        # Cargo features unification
+        engine.learned_cargo_features.add(5)
+        assert engine.symbolic_theory.is_cargo(5)
+        assert 5 in engine.symbolic_theory.cargo_features
+
+        # Barrier features unification
+        engine.learned_barrier_features.add(8)
+        assert engine.symbolic_theory.is_barrier(8)
+        assert 8 in engine.symbolic_theory.barrier_features
+
+    def test_prefrontal_working_memory_executive_ssot(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+
+        # Active plan queue resides in working_memory
+        step = MentalSimulationStep(
+            action=1,
+            action_data={},
+            predicted_avatar_pos=(2, 2),
+        )
+        engine.mental_plan.append(step)
+        assert len(engine.working_memory.mental_plan) == 1
+        assert engine.working_memory.mental_plan[0].action == 1
+
+        engine.working_memory.mental_plan.clear()
+        assert len(engine.mental_plan) == 0
+
+        # Metacognitive cooldowns & failure counters
+        engine.consecutive_simulation_failures = 3
+        engine.simulation_cooldown = 5
+        engine.consecutive_plan_failures = 2
+        engine.exploration_cooldown = 4
+        engine.consecutive_stuck_steps = 1
+
+        assert engine.working_memory.consecutive_simulation_failures == 3
+        assert engine.working_memory.simulation_cooldown == 5
+        assert engine.working_memory.consecutive_plan_failures == 2
+        assert engine.working_memory.exploration_cooldown == 4
+        assert engine.working_memory.consecutive_stuck_steps == 1
+
+        # Resetting working memory clears cooldowns
+        engine.working_memory.reset_episode()
+        assert engine.consecutive_simulation_failures == 0
+        assert engine.simulation_cooldown == 0
+        assert engine.consecutive_plan_failures == 0
+        assert engine.exploration_cooldown == 0
+        assert engine.consecutive_stuck_steps == 0
+
+    def test_visuospatial_and_habenular_spatial_ssot(self) -> None:
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+
+        # Level 0 barriers & failed transitions
+        engine.learned_barriers.add((3, 3))
+        assert (3, 3) in engine.working_memory.visuospatial.learned_barriers
+        assert (3, 3) in engine.working_memory.visuospatial.level_learned_barriers[0]
+
+        engine.failed_transitions.add(((1, 1), 2))
+        assert ((1, 1), 2) in engine.habenular_ior.failed_transitions
+        assert ((1, 1), 2) in engine.habenular_ior.level_failed_transitions[0]
+
+        # Switch to Level 1: working memory buffers automatically switch active partition
+        engine.current_level = 1
+        assert len(engine.learned_barriers) == 0
+        assert len(engine.failed_transitions) == 0
+
+        engine.learned_barriers.add((5, 5))
+        engine.failed_transitions.add(((4, 4), 3))
+
+        assert (5, 5) in engine.working_memory.visuospatial.level_learned_barriers[1]
+        assert ((4, 4), 3) in engine.habenular_ior.level_failed_transitions[1]
+
+        # Switch back to Level 0: Level 0 memory is intact
+        engine.current_level = 0
+        assert (3, 3) in engine.learned_barriers
+        assert ((1, 1), 2) in engine.failed_transitions
+
+    def test_transaction_consolidation_across_all_memory_stores(self) -> None:
+        from hbllm.hcir.transactions import TransactionOp
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+
+        engine.symbolic_theory.induce_goal(3)
+        engine.symbolic_theory.induce_barrier(9)
+        engine.working_memory.visuospatial.record_probe((4, 4), feature_id=2, step=1)
+        engine.working_memory.unlocked_barriers.add((6, 6))
+
+        ops = engine.to_transaction_operations()
+        node_ids = {op.node_id for op in ops if op.node_id is not None}
+
+        assert any("ontology_goal_3" in nid for nid in node_ids)
+        assert any("ontology_barrier_9" in nid for nid in node_ids)
+        assert any("wm_slot_4_4" in nid for nid in node_ids)
+        assert any("unlocked_barrier_6_6" in nid for nid in node_ids)
+        assert all(op.op == TransactionOp.UPSERT_NODE for op in ops)
+
+    def test_spelke_physical_axioms_and_evaluators(self) -> None:
+        from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory, SpelkePhysicalAxiom
+
+        theory = HCIRSymbolicWorldTheory()
+        theory.seed_core_knowledge(bg_feature=0)
+
+        # 1. All 5 core Spelke physical principles are grounded
+        assert SpelkePhysicalAxiom.FREE_SPACE in theory.spelke_axioms
+        assert SpelkePhysicalAxiom.SOLIDITY_CONTINUITY in theory.spelke_axioms
+        assert SpelkePhysicalAxiom.CONTACT_CAUSALITY in theory.spelke_axioms
+        assert SpelkePhysicalAxiom.COHESION in theory.spelke_axioms
+        assert SpelkePhysicalAxiom.DIRECTIONAL_INERTIA in theory.spelke_axioms
+        assert 0 in theory.walkable_features
+
+        # 2. Spelke spatiotemporal continuity evaluation
+        # Unobstructed path
+        assert (
+            theory.evaluates_spelke_continuity(
+                origin=(1, 1),
+                destination=(1, 4),
+                barrier_set={(2, 1), (2, 2)},
+                grid_bounds=(10, 10),
+            )
+            is True
+        )
+        # Wall of barriers completely partitioning the space
+        wall = {(r, 3) for r in range(10)}
+        assert (
+            theory.evaluates_spelke_continuity(
+                origin=(1, 1),
+                destination=(1, 5),
+                barrier_set=wall,
+                grid_bounds=(10, 10),
+            )
+            is False
+        )
+
+        # 3. Spelke mechanical contact causality evaluation
+        # 4-way adjacent
+        assert theory.evaluates_spelke_contact((2, 2), (2, 3), adjacency="4-way") is True
+        assert theory.evaluates_spelke_contact((2, 2), (1, 2), adjacency="4-way") is True
+        # Diagonal: false for 4-way, true for 8-way
+        assert theory.evaluates_spelke_contact((2, 2), (3, 3), adjacency="4-way") is False
+        assert theory.evaluates_spelke_contact((2, 2), (3, 3), adjacency="8-way") is True
+        # Distant
+        assert theory.evaluates_spelke_contact((2, 2), (5, 5), adjacency="8-way") is False
+
+        # 4. Axioms serialize into canonical HCIR transactions
+        ops = theory.to_transaction_operations()
+        node_ids = {op.node_id for op in ops if op.node_id is not None}
+        assert "spelke_axiom_free_space" in node_ids
+        assert "spelke_axiom_solidity_continuity" in node_ids
+        assert "spelke_axiom_contact_causality" in node_ids
+
+    def test_procedural_skill_synthesis_and_retrieval(self) -> None:
+        from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
+        from hbllm.hcir.world.prefrontal_working_memory import (
+            PrefrontalWorkingMemory,
+            SubgoalSchema,
+            SubgoalStage,
+        )
+
+        wm = PrefrontalWorkingMemory()
+        schema = SubgoalSchema(
+            schema_name="KEY_DOOR_GOAL_SCHEMA",
+            stages=[
+                SubgoalStage(stage_id="ACQUIRE_KEY", target_role="KEY", target_positions={(2, 2)}),
+                SubgoalStage(
+                    stage_id="UNLOCK_BARRIER", target_role="BARRIER", target_positions={(4, 4)}
+                ),
+                SubgoalStage(stage_id="REACH_GOAL", target_role="GOAL", target_positions={(8, 8)}),
+            ],
+        )
+
+        # Synthesize skill
+        skill = wm.synthesize_skill_from_schema(schema, required_actions={1, 2, 3, 4})
+        assert isinstance(skill, DeclarativeNeuroSymbolicSkill)
+        assert skill.skill_name == "skill_key_door_goal_schema"
+        assert skill.program is not None
+        assert len(skill.program) == 3
+
+        # Query procedural library
+        retrieved = wm.query_procedural_skill("KEY_DOOR_GOAL_SCHEMA")
+        assert retrieved is skill
+
+        # Evaluate declarative signature
+        dummy_grid = np.zeros((10, 10), dtype=int)
+        assert skill.can_handle(dummy_grid, available_actions=[1, 2, 3, 4]) is True
+        assert skill.can_handle(dummy_grid, available_actions=[1, 2]) is False
+
+        # Verify transaction serialization
+        ops = wm.to_transaction_operations()
+        node_ids = {op.node_id for op in ops if op.node_id is not None}
+        assert "procedural_skill_KEY_DOOR_GOAL_SCHEMA" in node_ids
+
+        # Register custom skill without explicit description attribute
+        class CustomSkillWithoutDesc(DeclarativeNeuroSymbolicSkill):
+            skill_name = "custom_door_opener"
+
+        custom_skill = CustomSkillWithoutDesc()
+        assert custom_skill.description == ""
+        wm.register_procedural_skill("CUSTOM_SKILL", custom_skill)
+
+        # Ensure to_transaction_operations succeeds without AttributeError
+        ops2 = wm.to_transaction_operations()
+        node_map = {op.node_id: op.node_data for op in ops2 if op.node_id is not None}
+        assert "procedural_skill_CUSTOM_SKILL" in node_map
+        assert (
+            node_map["procedural_skill_CUSTOM_SKILL"]["description"]
+            == "Procedural skill for CUSTOM_SKILL"
+        )
+
+    def test_tiered_workspace_transaction_mirroring_and_promotion(self) -> None:
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        tiered = TieredWorkspace()
+
+        # Attach workspace and create active task frame
+        frame = engine.attach_tiered_workspace(tiered, goal_id="reach_goal_test")
+        assert engine.transaction_manager is not None
+        assert engine.active_task_frame is frame
+
+        # Induce knowledge in symbolic theory and working memory
+        engine.symbolic_theory.seed_core_knowledge(bg_feature=0)
+        engine.symbolic_theory.induce_goal(7)
+        engine.record_learned_goal((3, 3))
+        engine.record_learned_barrier((5, 5))
+
+        # Commit transactions to the active task frame
+        tx = engine.commit_working_memory_transactions()
+        assert tx is not None
+        assert tx.is_committed
+
+        # Verify state exists in WORKING task frame
+        assert frame.workspace.get_node("ontology_goal_7") is not None
+        assert frame.workspace.get_node("learned_goal_3_3") is not None
+        assert frame.workspace.get_node("learned_barrier_5_5") is not None
+        assert frame.workspace.get_node("spelke_axiom_solidity_continuity") is not None
+
+        # Prepare active schema in working memory
+        schema = SubgoalSchema(
+            schema_name="WINNING_SUBGOAL_SCHEMA",
+            stages=[
+                SubgoalStage(stage_id="STEP_ONE", target_role="GOAL", target_positions={(3, 3)}),
+            ],
+        )
+        engine.working_memory.active_schema = schema
+
+        # Simulate level win -> triggers automatic promotion from WORKING to PERSISTENT
+        curr_grid = np.zeros((10, 10), dtype=int)
+        curr_grid[3, 3] = 7
+        engine.avatar_pos = (3, 2)
+        engine.prev_grid = curr_grid.copy()
+        engine.assimilate_feedback(
+            curr_grid=curr_grid,
+            available_actions=[1, 2, 3, 4],
+            is_win=True,
+            action=1,
+        )
+
+        # Assert nodes have been promoted to WorkspaceTier.PERSISTENT
+        persistent_goal = tiered.persistent.get_node("ontology_goal_7")
+        assert persistent_goal is not None
+
+        persistent_goal_pos = tiered.persistent.get_node("learned_goal_3_3")
+        assert persistent_goal_pos is not None
+
+        persistent_skill = tiered.persistent.get_node("procedural_skill_WINNING_SUBGOAL_SCHEMA")
+        assert persistent_skill is not None
+
+    def test_habitual_procedural_skill_execution_in_planner(self) -> None:
+        """Test Option 1: Habitual procedural skill matching, schema instantiation, and execution in planner."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler
+        from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        curr_grid = np.zeros((10, 10), dtype=int)
+        curr_grid[5, 5] = 2  # Tool
+        curr_grid[8, 8] = 3  # Goal
+        engine.avatar_pos = (1, 1)
+
+        # Synthesize a procedural skill in working memory
+        schema = SubgoalSchema(
+            schema_name="ACQUIRE_THEN_REACH",
+            stages=[
+                SubgoalStage(
+                    stage_id="ACQUIRE_TOOL", target_role="tool", target_positions={(5, 5)}
+                ),
+                SubgoalStage(stage_id="REACH_GOAL", target_role="goal", target_positions={(8, 8)}),
+            ],
+        )
+        engine.working_memory.synthesize_skill_from_schema(schema, required_actions=[1, 2, 3, 4])
+        engine.working_memory.active_schema = (
+            None  # Reset active schema to test automatic habitual recall
+        )
+
+        # Verify skill is stored
+        assert "ACQUIRE_THEN_REACH" in engine.working_memory.procedural_library
+
+        # Run goal scheduling with available actions
+        proposal = EpistemicGoalScheduler.schedule_goals(
+            engine=engine,
+            curr_grid=curr_grid,
+            entities=[],
+            bg=0,
+            av_feats=set(),
+            target_role=EntityRole.GOAL,
+            available_actions=[1, 2, 3, 4],
+        )
+
+        # Verify active schema was habitually instantiated and first stage target (5, 5) prioritized
+        assert engine.working_memory.active_schema is not None
+        assert engine.working_memory.active_schema.schema_name == "ACQUIRE_THEN_REACH"
+        assert (5, 5) in proposal.goals
+        assert proposal.goals[0] == (5, 5)
+
+        # Advance avatar to (5, 5) -> current stage satisfied
+        engine.avatar_pos = (5, 5)
+        proposal2 = EpistemicGoalScheduler.schedule_goals(
+            engine=engine,
+            curr_grid=curr_grid,
+            entities=[],
+            bg=0,
+            av_feats=set(),
+            target_role=EntityRole.GOAL,
+            available_actions=[1, 2, 3, 4],
+        )
+
+        # Verify schema advanced to stage 2 and prioritized (8, 8)
+        assert engine.working_memory.active_schema.current_stage_idx == 1
+        assert (8, 8) in proposal2.goals
+        assert proposal2.goals[0] == (8, 8)
+
+    def test_persistent_workspace_lifelong_memory_hydration(self) -> None:
+        """Test Option 2: Lifelong memory hydration from TieredWorkspace persistent tier."""
+        from hbllm.hcir.graph import ConceptNode, ConstraintNode, GoalNode, SkillNode
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_causal import SpelkePhysicalAxiom
+
+        tiered = TieredWorkspace()
+
+        # Seed persistent tier directly with promoted nodes
+        tiered.persistent.upsert_node(
+            SkillNode(
+                id="procedural_skill_PERSISTENT_UNLOCK",
+                name="PERSISTENT_UNLOCK",
+                description="Long-term key-door solver",
+                properties={"schema_name": "PERSISTENT_UNLOCK"},
+            ),
+            author="test",
+        )
+        tiered.persistent.upsert_node(
+            ConceptNode(
+                id="ontology_goal_8",
+                label="goal_feature_8",
+                definition="Known winning entity feature",
+                properties={"feature_id": 8},
+            ),
+            author="test",
+        )
+        tiered.persistent.upsert_node(
+            GoalNode(
+                id="learned_goal_4_4",
+                description="Persistent goal coordinate",
+                properties={"position": [4, 4]},
+            ),
+            author="test",
+        )
+        tiered.persistent.upsert_node(
+            ConstraintNode(
+                id="learned_barrier_6_6",
+                name="barrier_6_6",
+                description="Persistent static barrier",
+                properties={"position": [6, 6]},
+            ),
+            author="test",
+        )
+        tiered.persistent.upsert_node(
+            ConceptNode(
+                id="spelke_axiom_solidity_continuity",
+                label="solidity_continuity",
+                definition="Spelke solidity axiom",
+                properties={"axiom_name": "solidity_continuity"},
+            ),
+            author="test",
+        )
+
+        # Initialize a new epistemic engine (tabula rasa)
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        assert 8 not in engine.symbolic_theory.goal_features
+        assert (4, 4) not in engine.learned_goal_positions
+        assert (6, 6) not in engine.learned_barriers
+        assert "PERSISTENT_UNLOCK" not in engine.working_memory.procedural_library
+
+        # Attach workspace with automatic persistent hydration
+        engine.attach_tiered_workspace(
+            tiered, goal_id="lifelong_learning_task", hydrate_persistent=True
+        )
+
+        # Assert all persistent nodes were hydrated into engine stores
+        assert 8 in engine.symbolic_theory.goal_features
+        assert (4, 4) in engine.learned_goal_positions
+        assert (6, 6) in engine.learned_barriers
+        assert "PERSISTENT_UNLOCK" in engine.working_memory.procedural_library
+        assert SpelkePhysicalAxiom.SOLIDITY_CONTINUITY in engine.symbolic_theory.spelke_axioms
+
+    def test_spelke_topological_pruning_in_counterfactual_rollout(self) -> None:
+        """Test Option 3: Spelke continuity and contact causality in counterfactual rollout expansion."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.symbolic_theory.seed_core_knowledge(bg_feature=0)
+        engine.avatar_pos = (2, 2)
+        engine.avatar_features = {1}
+        engine.action_dynamics = {
+            1: ActionDynamicsModel(action_id=1, delta_r=-1, delta_c=0, probes_tested=5),
+            2: ActionDynamicsModel(action_id=2, delta_r=1, delta_c=0, probes_tested=5),
+            3: ActionDynamicsModel(action_id=3, delta_r=0, delta_c=-1, probes_tested=5),
+            4: ActionDynamicsModel(action_id=4, delta_r=0, delta_c=1, probes_tested=5),
+        }
+
+        # Grid with barrier separating avatar at (2, 2) from goal at (2, 5)
+        grid = np.zeros((6, 6), dtype=int)
+        grid[2, 2] = 1  # Avatar
+        grid[2, 5] = 7  # Goal
+        grid[:, 3] = 9  # Solid wall barrier
+
+        engine.symbolic_theory.induce_barrier(9)
+        engine.symbolic_theory.induce_goal(7)
+        engine.record_learned_goal((2, 5))
+
+        # Evaluate Spelke continuity: trajectory crossing col 3 is invalid
+        wall_barrier_set = {(r, 3) for r in range(6)}
+        assert not engine.symbolic_theory.evaluates_spelke_continuity(
+            (2, 2), (2, 4), barrier_set=wall_barrier_set, grid_bounds=(6, 6)
+        )
+        assert engine.symbolic_theory.evaluates_spelke_continuity(
+            (2, 2), (2, 1), barrier_set=wall_barrier_set, grid_bounds=(6, 6)
+        )
+
+        # Evaluate Spelke contact: avatar at (2, 2) cannot push cargo at (2, 4)
+        assert not engine.symbolic_theory.evaluates_spelke_contact((2, 2), (2, 4), adjacency=True)
+        assert engine.symbolic_theory.evaluates_spelke_contact((2, 2), (2, 3), adjacency=True)
+
+    def test_metacognitive_conflict_schema_invalidation(self) -> None:
+        """Test Option 4: Metacognitive conflict-driven schema revision and phase transition."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+        from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine._phase = EpistemicPhase.EXPLOITATION
+        schema = SubgoalSchema(
+            schema_name="FRAGILE_SCHEMA",
+            stages=[
+                SubgoalStage(stage_id="RISKY_STEP", target_role="goal", target_positions={(4, 4)})
+            ],
+        )
+        engine.working_memory.active_schema = schema
+
+        curr_grid = np.zeros((8, 8), dtype=int)
+        engine.avatar_pos = (4, 3)
+        engine.prev_grid = curr_grid.copy()
+
+        # First failure: confidence drops from 1.0 to 0.5, failure_count = 1
+        engine.assimilate_feedback(
+            curr_grid=curr_grid,
+            available_actions=[1, 2, 3, 4],
+            is_lost=True,
+            action=1,
+        )
+        assert engine.working_memory.active_schema is not None
+        assert engine.working_memory.active_schema.failure_count == 1
+        assert engine.working_memory.active_schema.confidence == 0.5
+
+        # Second failure in same localized area: triggers recurring conflict and invalidation
+        engine.assimilate_feedback(
+            curr_grid=curr_grid,
+            available_actions=[1, 2, 3, 4],
+            is_lost=True,
+            action=1,
+        )
+        # Active schema should now be completely invalidated
+        assert engine.working_memory.active_schema is None
+        # Engine shifts from EXPLOITING to EPISTEMIC_PROBE for new discovery
+        assert engine._phase == EpistemicPhase.EPISTEMIC_PROBE
+
+    def test_spelke_cohesion_and_inertia_evaluators(self) -> None:
+        """Test Spelke cohesion (rigid body multi-cell motion) and directional inertia."""
+        from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+
+        theory = HCIRSymbolicWorldTheory()
+
+        # Multi-cell rigid body (2x2 square)
+        block_cells = {(2, 2), (2, 3), (3, 2), (3, 3)}
+        barriers = {(4, 2)}
+
+        # Displace by (1, 0) -> touches barrier at (4, 2) -> False
+        assert not theory.evaluates_spelke_cohesion(
+            entity_cells=block_cells,
+            displacement=(1, 0),
+            barrier_set=barriers,
+            grid_bounds=(10, 10),
+        )
+
+        # Displace by (0, 1) -> moves safely to {(2, 3), (2, 4), (3, 3), (3, 4)} -> True
+        assert theory.evaluates_spelke_cohesion(
+            entity_cells=block_cells,
+            displacement=(0, 1),
+            barrier_set=barriers,
+            grid_bounds=(10, 10),
+        )
+
+        # Out-of-bounds displacement: (8, 0) exceeds H=10
+        assert not theory.evaluates_spelke_cohesion(
+            entity_cells=block_cells,
+            displacement=(8, 0),
+            barrier_set=set(),
+            grid_bounds=(10, 10),
+        )
+
+        # Directional inertia: position (1, 1), velocity (0, 1), 3 steps
+        traj = theory.evaluates_spelke_inertia(
+            position=(1, 1),
+            velocity=(0, 1),
+            steps=3,
+            obstacles=set(),
+            grid_bounds=(10, 10),
+        )
+        assert traj == [(1, 2), (1, 3), (1, 4)]
+
+        # Inertia with inelastic obstacle collision
+        traj_blocked = theory.evaluates_spelke_inertia(
+            position=(1, 1),
+            velocity=(0, 1),
+            steps=5,
+            obstacles={(1, 3)},
+            grid_bounds=(10, 10),
+        )
+        assert traj_blocked == [(1, 2)]
+
+        # Inertia with elastic boundary bounce
+        traj_bounce = theory.evaluates_spelke_inertia(
+            position=(1, 8),
+            velocity=(0, 1),
+            steps=2,
+            obstacles=set(),
+            bounce=True,
+            grid_bounds=(10, 10),
+        )
+        assert len(traj_bounce) == 2
+        assert traj_bounce[0] == (1, 9)
+        assert traj_bounce[1] == (1, 8)
+
+    def test_composite_declarative_macro_skill_composition(self) -> None:
+        """Test hierarchical macro-skill chaining and composition in procedural memory."""
+        from hbllm.hcir.world.prefrontal_working_memory import (
+            PrefrontalWorkingMemory,
+            SubgoalSchema,
+            SubgoalStage,
+        )
+
+        wm = PrefrontalWorkingMemory()
+
+        # Skill 1: Acquire Tool
+        schema1 = SubgoalSchema(
+            schema_name="ACQUIRE_KEY",
+            stages=[
+                SubgoalStage(stage_id="GRAB_KEY", target_role="tool", target_positions={(2, 2)})
+            ],
+        )
+        wm.synthesize_skill_from_schema(schema1, required_actions=[1, 2, 3, 4])
+
+        # Skill 2: Unlock Door
+        schema2 = SubgoalSchema(
+            schema_name="UNLOCK_DOOR",
+            stages=[
+                SubgoalStage(
+                    stage_id="OPEN_BARRIER", target_role="barrier", target_positions={(4, 4)}
+                )
+            ],
+        )
+        wm.synthesize_skill_from_schema(schema2, required_actions=[1, 2, 3, 4])
+
+        # Compose macro-skill
+        macro = wm.compose_macro_skill(
+            skill_names=["ACQUIRE_KEY", "UNLOCK_DOOR"],
+            macro_name="KEY_THEN_DOOR_MACRO",
+            description="Sequenced tool-use and door opening macro",
+        )
+        assert macro is not None
+        assert "KEY_THEN_DOOR_MACRO" in wm.procedural_library
+        assert macro.program is not None
+        assert len(macro.program.subgoals) == 2
+
+        # Instantiate as active schema
+        schema = wm.instantiate_skill_as_schema("KEY_THEN_DOOR_MACRO")
+        assert schema is not None
+        assert schema.schema_name == "KEY_THEN_DOOR_MACRO"
+        assert len(schema.stages) == 2
+        assert schema.stages[0].stage_id == "GRAB_KEY"
+        assert schema.stages[1].stage_id == "OPEN_BARRIER"
+
+    def test_pearl_epistemic_intervention_information_gain(self) -> None:
+        """Test Pearl do(a) causal intervention planning for ambiguous entity disambiguation."""
+        from hbllm.hcir.spatial_planner import SpatialEntity
+        from hbllm.hcir.world.cortex_causal import CausalInductionCortex
+
+        cortex = CausalInductionCortex()
+        avatar_pos = (1, 1)
+
+        # Ambiguous entity 1: near avatar at (2, 2)
+        e1 = SpatialEntity(
+            id="unknown_switch",
+            feature_id=5,
+            grid_pos=(2, 2),
+            area=1,
+            centroid=(2.0, 2.0),
+            bounding_box=(2, 2, 2, 2),
+        )
+        # Ambiguous entity 2: far from avatar at (8, 8)
+        e2 = SpatialEntity(
+            id="unknown_box",
+            feature_id=6,
+            grid_pos=(8, 8),
+            area=1,
+            centroid=(8.0, 8.0),
+            bounding_box=(8, 8, 8, 8),
+        )
+
+        proposal = cortex.plan_epistemic_intervention(
+            avatar_pos=avatar_pos,
+            candidate_entities=[e1, e2],
+            available_actions=[1, 2, 3, 4],
+            bg_feature=0,
+        )
+
+        assert proposal is not None
+        assert proposal.target_coord == (2, 2)
+        assert proposal.target_feature == 5
+        assert proposal.expected_information_gain > 0.0
+
+        # Verify transaction proposal serialization
+        ops = proposal.to_transaction_operations()
+        assert len(ops) == 1
+        assert ops[0].node_id == "active_epistemic_intervention"
+        assert ops[0].node_data["target_feature"] == 5
+
+    def test_parietal_egocentric_polar_and_entity_lifting(self) -> None:
+        """Test Posterior Parietal Cortex viewpoint-invariant polar transformations and entity frame lifting."""
+        from hbllm.hcir.spatial_planner import SpatialEntity
+        from hbllm.hcir.world.parietal_coordinate_transform import (
+            HeadingOrientation,
+            ParietalCoordinateTransformer,
+        )
+
+        avatar_pos = (5, 5)
+
+        # 1. Target directly north (ahead when facing NORTH)
+        polar_north = ParietalCoordinateTransformer.allo_to_ego_polar(
+            allo_coord=(3, 5),
+            avatar_pos=avatar_pos,
+            heading=HeadingOrientation.NORTH,
+        )
+        assert polar_north.forward_depth == 2.0
+        assert polar_north.lateral_offset == 0.0
+        assert polar_north.relative_bearing == "FORWARD"
+
+        # Invert back to allocentric
+        allo_north = ParietalCoordinateTransformer.ego_polar_to_allo(
+            polar=polar_north,
+            avatar_pos=avatar_pos,
+            heading=HeadingOrientation.NORTH,
+        )
+        assert allo_north == (3, 5)
+
+        # 2. Target east (to the right when facing NORTH)
+        polar_east = ParietalCoordinateTransformer.allo_to_ego_polar(
+            allo_coord=(5, 8),
+            avatar_pos=avatar_pos,
+            heading=HeadingOrientation.NORTH,
+        )
+        assert polar_east.relative_bearing == "RIGHT"
+        assert polar_east.lateral_offset == 3.0
+        assert polar_east.forward_depth == 0.0
+
+        # Rotate heading: when facing EAST, target at (5, 8) is now FORWARD
+        polar_facing_east = ParietalCoordinateTransformer.allo_to_ego_polar(
+            allo_coord=(5, 8),
+            avatar_pos=avatar_pos,
+            heading=HeadingOrientation.EAST,
+        )
+        assert polar_facing_east.relative_bearing == "FORWARD"
+        assert polar_facing_east.forward_depth == 3.0
+
+        # 3. Entity Frame Lifting
+        e1 = SpatialEntity(
+            id="key_1",
+            feature_id=3,
+            grid_pos=(3, 5),
+            area=1,
+            centroid=(3.0, 5.0),
+            bounding_box=(3, 5, 3, 5),
+        )
+        lifted = ParietalCoordinateTransformer.lift_entities_to_ego_frame(
+            entities=[e1],
+            avatar_pos=avatar_pos,
+            heading=HeadingOrientation.NORTH,
+        )
+        assert len(lifted) == 1
+        assert lifted[0].entity_id == "key_1"
+        assert lifted[0].polar_coord.relative_bearing == "FORWARD"
+        pred = lifted[0].to_causal_predicate()
+        assert pred.variable == "ego_entity:key_1"
+
+    def test_hippocampal_offline_td_experience_replay(self) -> None:
+        """Test Hippocampal offline Temporal Difference (TD) experience replay and Q-value consolidation."""
+        from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
+
+        cortex = HippocampalEpisodicCortex()
+
+        # Record a 4-step trajectory leading to success
+        cortex.record_transition(step=0, avatar_pos=(1, 1), action=1, reward=0.0)
+        cortex.record_transition(step=1, avatar_pos=(1, 2), action=2, reward=0.0)
+        cortex.record_transition(step=2, avatar_pos=(1, 3), action=3, reward=0.0)
+        cortex.record_transition(
+            step=3, avatar_pos=(1, 4), action=4, reward=1.0, is_win=True, is_terminal=True
+        )
+
+        summary = cortex.consolidate_episodic_replay_td(
+            learning_rate=0.5,
+            discount=0.9,
+            prioritized=True,
+            max_batch_size=10,
+        )
+
+        assert summary.replayed_steps == 4
+        assert summary.max_td_error > 0.0
+        assert len(summary.updated_q_values) > 0
+
+        # Verify transaction serialization
+        ops = summary.to_transaction_operations()
+        assert len(ops) == len(summary.updated_q_values)
+        assert ops[0].node_id.startswith("td_q_")
+
+    def test_frontopolar_subgoal_mcts_hierarchical_planning(self) -> None:
+        """Test BA10 Frontopolar Subgoal MCTS with Spelke continuity and Habenular lethal pruning."""
+        from hbllm.hcir.world.cortex_planner import (
+            FrontopolarSubgoalMCTSPlanner,
+        )
+        from hbllm.hcir.world.frontopolar_subgoal_stack import (
+            FrontopolarSubgoal,
+            SubgoalType,
+        )
+
+        avatar_pos = (1, 1)
+
+        # Candidate subgoals
+        sg_key = FrontopolarSubgoal(
+            subgoal_id="grab_key",
+            subgoal_type=SubgoalType.ACQUIRE_TOOL,
+            target_entity_pos=(2, 2),
+            target_destination=(2, 2),
+            required_feature=3,
+        )
+        sg_door = FrontopolarSubgoal(
+            subgoal_id="open_door",
+            subgoal_type=SubgoalType.CLEAR_OBSTACLE,
+            target_entity_pos=(4, 4),
+            target_destination=(4, 4),
+        )
+        # Lethal trap subgoal: should be pruned by Habenular check
+        sg_trap = FrontopolarSubgoal(
+            subgoal_id="walk_into_lava",
+            subgoal_type=SubgoalType.NAVIGATE_TO,
+            target_entity_pos=(7, 7),
+            target_destination=(7, 7),
+        )
+
+        result = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
+            avatar_pos=avatar_pos,
+            candidate_subgoals=[sg_key, sg_door, sg_trap],
+            goal_positions={(8, 8)},
+            barriers={(4, 3), (4, 5)},
+            grid_bounds=(10, 10),
+            lethal_positions={(7, 7)},
+            max_iterations=32,
+        )
+
+        assert result.total_iterations == 32
+        assert result.pruned_dead_ends >= 1
+        # Lethal trap should never be selected in optimal plan
+        for sg in result.best_subgoals:
+            assert sg.subgoal_id != "walk_into_lava"
+
+        # Verify causal predicate & transaction generation
+        pred = result.to_causal_predicate()
+        assert pred.variable == "frontopolar_subgoal_mcts"
+        ops = result.to_transaction_operations()
+        assert len(ops) == len(result.best_subgoals)
+
+    def test_parietal_motor_egocentric_dispatch(self) -> None:
+        """Test Parietal-Motor egocentric intention dispatch and heading coordination."""
+        from hbllm.hcir.world.cortex_motor import (
+            EgocentricMotorIntent,
+            ParietalMotorDispatcher,
+        )
+        from hbllm.hcir.world.parietal_coordinate_transform import HeadingOrientation
+
+        # Standard 4-way cardinal actions: 1=UP(-1, 0), 2=DOWN(1, 0), 3=LEFT(0, -1), 4=RIGHT(0, 1)
+        action_deltas = {
+            1: (-1, 0),
+            2: (1, 0),
+            3: (0, -1),
+            4: (0, 1),
+        }
+
+        # Facing NORTH
+        res_fwd = ParietalMotorDispatcher.dispatch_egocentric_intent(
+            intent=EgocentricMotorIntent.MOVE_FORWARD,
+            current_heading=HeadingOrientation.NORTH,
+            action_deltas=action_deltas,
+        )
+        assert res_fwd.chosen_action_id == 1
+        assert res_fwd.target_displacement == (-1, 0)
+        assert res_fwd.resulting_heading == HeadingOrientation.NORTH
+
+        res_right = ParietalMotorDispatcher.dispatch_egocentric_intent(
+            intent=EgocentricMotorIntent.MOVE_RIGHT,
+            current_heading=HeadingOrientation.NORTH,
+            action_deltas=action_deltas,
+        )
+        assert res_right.chosen_action_id == 4
+        assert res_right.target_displacement == (0, 1)
+
+        # Rotations
+        res_turn_r = ParietalMotorDispatcher.dispatch_egocentric_intent(
+            intent=EgocentricMotorIntent.TURN_RIGHT,
+            current_heading=HeadingOrientation.NORTH,
+            action_deltas=action_deltas,
+        )
+        assert res_turn_r.chosen_action_id is None
+        assert res_turn_r.resulting_heading == HeadingOrientation.EAST
+
+        # Facing EAST: MOVE_FORWARD should now map to action 4 (0, 1)
+        res_fwd_east = ParietalMotorDispatcher.dispatch_egocentric_intent(
+            intent=EgocentricMotorIntent.MOVE_FORWARD,
+            current_heading=res_turn_r.resulting_heading,
+            action_deltas=action_deltas,
+        )
+        assert res_fwd_east.chosen_action_id == 4
+        assert res_fwd_east.target_displacement == (0, 1)
+
+        # Predicate & Transaction operations
+        pred = res_fwd.to_causal_predicate()
+        assert pred.variable == "ego_dispatch:MOVE_FORWARD"
+        ops = res_fwd.to_transaction_operations()
+        assert len(ops) == 1
+        assert ops[0].node_id.startswith("ego_dispatch_MOVE_FORWARD_")
+
+    def test_hippocampal_td_replay_consolidation_on_reset(self) -> None:
+        """Test automatic Hippocampal TD experience replay into SymbolicWorldTheory upon reset."""
+        from unittest.mock import MagicMock
+
+        from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+        from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
+
+        cortex = HippocampalEpisodicCortex()
+        theory = HCIRSymbolicWorldTheory()
+
+        mock_engine = MagicMock()
+        mock_engine.symbolic_theory = theory
+        mock_engine.working_memory = MagicMock()
+
+        # Record a 3-step episode
+        cortex.record_transition(step=0, avatar_pos=(1, 1), action=1, reward=0.0)
+        cortex.record_transition(step=1, avatar_pos=(1, 2), action=4, reward=0.0)
+        cortex.record_transition(
+            step=2, avatar_pos=(1, 3), action=4, reward=1.0, is_win=True, is_terminal=True
+        )
+
+        assert len(theory.domain_predicates) == 0
+
+        # Consolidate and reset on level win
+        cortex.consolidate_schema_and_reset(
+            engine=mock_engine,
+            retain_dynamics=True,
+            is_new_level=True,
+            level=2,
+        )
+
+        # Verify Q-values consolidated and predicates transferred to symbolic theory
+        assert len(cortex.q_table) > 0
+        assert len(theory.domain_predicates) > 0
+        assert any("q_value:" in p.variable for p in theory.domain_predicates)
+
+    def test_prefrontal_working_memory_ssot_delegation(self) -> None:
+        """Test that AutonomousEpistemicEngine delegates exploration state directly to PrefrontalWorkingMemory."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine(exploration_budget=50, enable_logging=False)
+
+        # Mutate through engine properties
+        engine.active_probe_target = (4, 7)
+        engine.active_probe_id = "entity_4_7"
+        engine.probe_target_steps = 3
+        engine.entity_visit_counts = {"e_door": 2}
+        engine.inhibited_actions = {1: 5}
+
+        # Verify underlying PrefrontalWorkingMemory SSOT updated
+        assert engine.working_memory.active_probe_target == (4, 7)
+        assert engine.working_memory.active_probe_id == "entity_4_7"
+        assert engine.working_memory.probe_target_steps == 3
+        assert engine.working_memory.entity_visit_counts == {"e_door": 2}
+        assert engine.working_memory.inhibited_actions == {1: 5}
+
+        # Verify reading via engine properties
+        assert engine.active_probe_target == (4, 7)
+        assert engine.entity_visit_counts["e_door"] == 2
+        assert engine.inhibited_actions[1] == 5
+
+        # Reset episode and verify transient fields cleared
+        engine.working_memory.reset_episode(retain_long_term=False)
+        assert engine.active_probe_target is None
+        assert engine.probe_target_steps == 0
+        assert len(engine.entity_visit_counts) == 0
+        assert len(engine.inhibited_actions) == 0
+
+    def test_anterior_cingulate_conflict_predicate_safety_gate(self) -> None:
+        """Test ACC conflict gating: rejecting trajectories into recurrent death clusters."""
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
+        from hbllm.hcir.world.cortex_deliberation import (
+            AnteriorCingulateConflictPredicate,
+        )
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        acc = AnteriorCingulateConflictMonitor(cluster_radius=2.0)
+        # Register two death events at (5, 5) to form a recurrent failure cluster
+        acc.register_death_event(actor_pos=(5.0, 5.0), step=1, last_action=1)
+        acc.register_death_event(actor_pos=(5.0, 5.0), step=2, last_action=1)
+        assert acc.is_in_conflict_zone((5, 5))
+
+        mock_engine = MagicMock()
+        mock_engine.working_memory.acc_conflict = acc
+        mock_engine.avatar_pos = (4, 5)
+        mock_engine.collision_cones = None
+
+        cand_step = MentalSimulationStep(
+            action=1,
+            predicted_avatar_pos=(5, 5),
+            expected_mutation="move_into_danger",
+        )
+
+        pred = AnteriorCingulateConflictPredicate()
+        curr_grid = np.zeros((10, 10), dtype=int)
+        res = pred.evaluate(
+            engine=mock_engine,
+            curr_grid=curr_grid,
+            next_step=cand_step,
+            future_steps=[cand_step],
+            available_actions=[1, 2, 3, 4],
+        )
+        assert not res.is_safe
+        assert "ACC recurrent failure cluster" in res.reason
+
+        # Safe position away from death cluster
+        safe_step = MentalSimulationStep(
+            action=2,
+            predicted_avatar_pos=(1, 1),
+            expected_mutation="safe_move",
+        )
+        res_safe = pred.evaluate(
+            engine=mock_engine,
+            curr_grid=curr_grid,
+            next_step=safe_step,
+            future_steps=[safe_step],
+            available_actions=[1, 2, 3, 4],
+        )
+        assert res_safe.is_safe
+
+    def test_frontopolar_subgoal_mcts_with_body_schema(self) -> None:
+        """Test Frontopolar Subgoal MCTS with ExtendedBodySchema and tool-barrier resonance."""
+        import numpy as np
+
+        from hbllm.hcir.world.cortex_planner import (
+            FrontopolarSubgoal,
+            FrontopolarSubgoalMCTSPlanner,
+            SubgoalType,
+        )
+        from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+
+        body_schema = ExtendedBodySchema()
+        # Key feature 4 unlocks barrier feature 5
+        body_schema.register_resonance(tool_feature=4, barrier_feature=5)
+
+        # 5x5 grid with barrier of feature 5 separating key and goal
+        # (2, 2) is a barrier cell of feature 5
+        grid = np.zeros((5, 5), dtype=int)
+        grid[2, 2] = 5
+
+        # Subgoal 1: Acquire key at (1, 1) (feature 4)
+        sg_key = FrontopolarSubgoal(
+            subgoal_id="acquire_key",
+            subgoal_type=SubgoalType.ACQUIRE_TOOL,
+            target_entity_pos=(1, 1),
+            target_destination=(1, 1),
+            required_feature=4,
+            priority=80.0,
+        )
+        # Subgoal 2: Clear/navigate barrier at (2, 2)
+        sg_barrier = FrontopolarSubgoal(
+            subgoal_id="unlock_door",
+            subgoal_type=SubgoalType.CLEAR_OBSTACLE,
+            target_entity_pos=(2, 2),
+            target_destination=(2, 2),
+            required_feature=4,
+            priority=60.0,
+        )
+
+        mcts_res = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
+            avatar_pos=(0, 0),
+            candidate_subgoals=[sg_key, sg_barrier],
+            goal_positions={(4, 4)},
+            barriers={(2, 2)},
+            grid_bounds=(5, 5),
+            held_items=set(),
+            body_schema=body_schema,
+            tool_barrier_affinities=body_schema.tool_barrier_affinities,
+            curr_grid=grid,
+            max_iterations=40,
+        )
+
+        assert len(mcts_res.best_subgoals) > 0
+        # Optimal sequence should prioritize acquiring the key first
+        assert mcts_res.best_subgoals[0].subgoal_id == "acquire_key"
+
+    def test_parietal_motor_dispatcher_tool_effector_targets(self) -> None:
+        """Test ParietalMotorDispatcher.resolve_tool_effector_targets with body schema extension."""
+        from hbllm.hcir.world.cortex_motor import ParietalMotorDispatcher
+        from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+        from hbllm.hcir.world.parietal_coordinate_transform import HeadingOrientation
+
+        schema = ExtendedBodySchema()
+        schema.acquire_tool(feature_id=3, step=1, relative_offset=(0, 2))
+
+        # Heading EAST: fwd is (0, 1)
+        targets = ParietalMotorDispatcher.resolve_tool_effector_targets(
+            avatar_pos=(3, 3),
+            current_heading=HeadingOrientation.EAST,
+            body_schema=schema,
+        )
+
+        # Must include avatar_pos (3, 3)
+        assert (3, 3) in targets
+        # Must include immediate forward cell (3, 4)
+        assert (3, 4) in targets
+        # Must include relative offset (3, 3 + 2) = (3, 5)
+        assert (3, 5) in targets

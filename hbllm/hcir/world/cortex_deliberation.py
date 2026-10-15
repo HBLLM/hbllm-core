@@ -139,20 +139,26 @@ class SpatiotemporalCollisionConePredicate(PlanSafetyPredicate):
             next_step.predicted_avatar_pos is None or next_step.predicted_avatar_pos == (ar, ac)
         )
         if is_stationary:
-            if any(
-                engine.collision_cones.is_collision_hazard(
-                    ar, ac, t_f, ignored_features=engine.mobile_threat_features
-                )
-                for t_f in (1, 2)
-            ):
+            if any(engine.collision_cones.is_collision_hazard(ar, ac, t_f) for t_f in (1, 2)):
                 return SafetyGateResult(
                     is_safe=False, reason="Stationary avatar in looming collision cone"
                 )
         elif next_step.predicted_avatar_pos is not None:
             nr, nc = next_step.predicted_avatar_pos
-            if engine.collision_cones.is_collision_hazard(
-                nr, nc, 1, ignored_features=engine.mobile_threat_features
-            ):
+            if engine.collision_cones.is_collision_hazard(nr, nc, 1):
+                # Check if temporal wait clears the corridor
+                acc_mon = getattr(engine.working_memory, "acc_conflict", None)
+                if acc_mon is not None:
+                    should_w, w_steps = acc_mon.should_advise_temporal_wait(
+                        (ar, ac), (nr, nc), engine.collision_cones
+                    )
+                    if should_w:
+                        return SafetyGateResult(
+                            is_safe=False,
+                            should_wait=True,
+                            wait_steps=w_steps,
+                            reason=f"looming collision cone at ({nr}, {nc}) clearing in {w_steps} steps",
+                        )
                 return SafetyGateResult(
                     is_safe=False,
                     reason=f"Next step ({nr}, {nc}) in looming collision cone",
@@ -222,9 +228,7 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
 
             half_step = max(1, step_size // 2)
             barrier_feats = engine.symbolic_theory.barrier_features
-            walkable_and_safe = (
-                engine.symbolic_theory.walkable_features | engine.verified_safe_features
-            )
+            walkable_and_safe = engine.symbolic_theory.walkable_features
             bg_is_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
             patrol_walls: set[tuple[int, int]] = set(engine.learned_barriers)
             for rr in range(H):
@@ -270,11 +274,14 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                         new_f = (-pat_facing[0], -pat_facing[1])
                     new_patrol_set.add((dest, new_f))
                 if collision:
+                    if (
+                        next_step.expected_mutation == "oscillatory_return_step"
+                        and future_step != next_step
+                    ):
+                        continue
                     return SafetyGateResult(
-                        is_safe=True,
-                        should_wait=True,
-                        wait_steps=2,
-                        reason="Collision with simulated patrol threat: temporal pacing advised",
+                        is_safe=False,
+                        reason="Collision with simulated patrol threat along plan: space-time replanning required",
                     )
                 sim_patrols = frozenset(new_patrol_set)
 
@@ -295,7 +302,12 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        if engine.inhibited_actions.get(next_step.action, 0) > 0:
+        has_temporal = (
+            bool(engine.hazard_tracker.periodic_cells)
+            or bool(engine.mobile_threat_features)
+            or bool(engine.collision_cones.projected_trajectories)
+        )
+        if not has_temporal and engine.inhibited_actions.get(next_step.action, 0) > 0:
             return SafetyGateResult(
                 is_safe=False, reason=f"Action {next_step.action} in refractory inhibition"
             )
@@ -325,8 +337,7 @@ class CerebellarPhaseGatePredicate(PlanSafetyPredicate):
                 hazard_tracker=engine.hazard_tracker,
                 background_feature=engine.bg_feature,
                 avatar_features=engine.avatar_features,
-                walkable_features=engine.symbolic_theory.walkable_features
-                | engine.verified_safe_features,
+                walkable_features=engine.symbolic_theory.walkable_features,
             )
             if phase_gate.should_wait:
                 return SafetyGateResult(
@@ -335,6 +346,53 @@ class CerebellarPhaseGatePredicate(PlanSafetyPredicate):
                     wait_steps=phase_gate.wait_steps_recommended,
                     reason="Cerebellar phase clock advises wait window",
                 )
+        return SafetyGateResult(is_safe=True)
+
+
+class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
+    """Evaluates plan safety against Anterior Cingulate Cortex (ACC) failure clusters,
+    frustration states, and dynamic collision wait recommendations.
+    """
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        acc = getattr(engine.working_memory, "acc_conflict", None)
+        if acc is None:
+            return SafetyGateResult(is_safe=True)
+
+        pred_pos = next_step.predicted_avatar_pos
+        if pred_pos is not None:
+            # 1. Reject paths routing directly into recurrent death clusters
+            if hasattr(acc, "is_in_conflict_zone") and acc.is_in_conflict_zone(pred_pos):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"Candidate step {pred_pos} is inside an ACC recurrent failure cluster",
+                )
+
+            # 2. Check if ACC advises temporal wait due to collision cones crossing candidate pos
+            curr_pos = engine.avatar_pos or (0, 0)
+            collision_cones = getattr(engine, "collision_cones", None)
+            if collision_cones is not None and hasattr(acc, "should_advise_temporal_wait"):
+                should_wait, wait_steps = acc.should_advise_temporal_wait(
+                    current_pos=curr_pos,
+                    candidate_pos=pred_pos,
+                    collision_cones=collision_cones,
+                    max_steps=3,
+                )
+                if should_wait:
+                    return SafetyGateResult(
+                        is_safe=True,
+                        should_wait=True,
+                        wait_steps=wait_steps,
+                        reason="ACC advises temporal wait until collision hazard clears",
+                    )
+
         return SafetyGateResult(is_safe=True)
 
 
@@ -351,6 +409,7 @@ class PlanSafetyEvaluator:
                 DynamicPatrolTrajectoryPredicate(),
                 HabenularInhibitionPredicate(),
                 CerebellarPhaseGatePredicate(),
+                AnteriorCingulateConflictPredicate(),
             ]
         )
 
@@ -360,8 +419,10 @@ class PlanSafetyEvaluator:
         curr_grid: np.ndarray,
         next_step: MentalSimulationStep,
         available_actions: Sequence[Any],
+        future_steps: Sequence[MentalSimulationStep] | None = None,
     ) -> SafetyGateResult:
-        future_steps = [next_step] + list(engine.mental_plan)
+        if future_steps is None:
+            future_steps = [next_step] + list(engine.mental_plan)
         for pred in self.predicates:
             res = pred.evaluate(
                 engine=engine,
@@ -499,6 +560,146 @@ class PrefrontalDeliberationEngine:
 
         return None
 
+    def _execute_temporal_pacing(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        next_step: MentalSimulationStep,
+        wait_steps: int,
+    ) -> tuple[Any, dict[str, Any] | None, tuple[int, int] | None]:
+        """Cerebellar / Premotor oscillatory temporal pacing:
+        In environments with strictly directional actions (no explicit wait),
+        synthesize an oscillatory burn step (e.g. step back / lateral dodge -> return)
+        to burn phase steps until dynamic hazards clear.
+        """
+        engine.consecutive_pacing_steps += 1
+        if engine.consecutive_pacing_steps > 2:
+            engine.consecutive_pacing_steps = 0
+            engine.mental_plan.clear()
+            engine.transition_to_phase(
+                EpistemicPhase.REPLANNING,
+                reason="pacing_window_exhausted",
+            )
+            act, data = engine.plan_epistemic_probe(curr_grid, available_actions)
+            return act, data, None
+
+        engine.mental_plan.appendleft(next_step)
+        engine.pending_phase_wait_steps = wait_steps
+        undo_acts = getattr(engine, "undo_actions", set())
+        non_disp = [
+            a
+            for a in available_actions
+            if not engine.is_displacement_action(a)
+            and not engine.is_spatial_effector(a)
+            and a not in undo_acts
+        ]
+        curr_pos = engine.avatar_pos or getattr(engine, "current_actor_pos", None)
+        if non_disp:
+            return non_disp[0], None, curr_pos
+
+        H, W = curr_grid.shape
+        reverse_map: dict[Any, Any] = {}
+        for a1, d1 in engine.action_deltas.items():
+            for a2, d2 in engine.action_deltas.items():
+                if d1[0] == -d2[0] and d1[1] == -d2[1] and (d1[0] != 0 or d1[1] != 0):
+                    reverse_map[a1] = a2
+        if not reverse_map:
+            reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
+        pacing_candidates: list[tuple[Any, tuple[int, int]]] = []
+
+        if curr_pos is not None:
+            bg = engine.estimate_background(curr_grid)
+            walkable_and_safe = engine.symbolic_theory.walkable_features
+            bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+            if not bg_is_impassable_void:
+                bg_count = int(np.count_nonzero(curr_grid == bg))
+                bg_ratio = bg_count / max(1, H * W)
+                ar, ac = curr_pos
+                avatar_on_bg = (
+                    0 <= ar < H
+                    and 0 <= ac < W
+                    and (
+                        int(curr_grid[ar, ac]) == bg
+                        or any(
+                            0 <= ar + dr_a < H
+                            and 0 <= ac + dc_a < W
+                            and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                            for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        )
+                    )
+                )
+                if bg_ratio >= 0.20 and not avatar_on_bg:
+                    bg_is_impassable_void = True
+
+            action_deltas = engine.action_deltas
+            for act in available_actions:
+                if not engine.is_displacement_action(act) or act == next_step.action:
+                    continue
+                delta = action_deltas.get(act)
+                if delta is None:
+                    continue
+                dr, dc = delta
+                nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+                if (nr, nc) in engine.learned_barriers or (
+                    nr,
+                    nc,
+                ) in engine.current_level_lethal_positions:
+                    continue
+                val = int(curr_grid[nr, nc])
+                if (
+                    engine.symbolic_theory.is_barrier(val)
+                    or val in engine.symbolic_theory.barrier_features
+                    or val in engine.hazard_tracker.known_lethal_features
+                    or (bg_is_impassable_void and val == bg)
+                ):
+                    continue
+                cand_step = MentalSimulationStep(
+                    action=act,
+                    predicted_avatar_pos=(nr, nc),
+                    expected_mutation="oscillatory_pacing_step",
+                )
+                cand_res = self.safety_evaluator.evaluate(
+                    engine=engine,
+                    curr_grid=curr_grid,
+                    next_step=cand_step,
+                    available_actions=available_actions,
+                    future_steps=[cand_step],
+                )
+                if cand_res.is_safe and not cand_res.should_wait:
+                    pacing_candidates.append((act, (nr, nc)))
+
+        if pacing_candidates:
+            # Prefer reverse of recent action to oscillate along existing safe path
+            chosen_pacing_act, chosen_pacing_pos = pacing_candidates[0]
+            if len(engine.recent_actions) > 0:
+                last_act = engine.recent_actions[-1]
+                rev_last = reverse_map.get(last_act)
+                for act, pos in pacing_candidates:
+                    if act == rev_last:
+                        chosen_pacing_act, chosen_pacing_pos = act, pos
+                        break
+
+            rev_act = reverse_map.get(chosen_pacing_act)
+            # Enqueue return step to restore spatial trajectory once hazard passes
+            if rev_act is not None and rev_act in available_actions and curr_pos is not None:
+                engine.mental_plan.appendleft(
+                    MentalSimulationStep(
+                        action=rev_act,
+                        predicted_avatar_pos=curr_pos,
+                        expected_mutation="oscillatory_return_step",
+                    )
+                )
+            return chosen_pacing_act, None, chosen_pacing_pos
+
+        # Invariant fallback: Invalidate plan and replan if no safe pacing candidate exists
+        engine.mental_plan.clear()
+        engine.phase = EpistemicPhase.REPLANNING
+        act, data = engine.plan_epistemic_probe(curr_grid, available_actions)
+        return act, data, None
+
     def decide(
         self,
         engine: AutonomousEpistemicEngine,
@@ -537,28 +738,26 @@ class PrefrontalDeliberationEngine:
             )
         engine._feedback_assimilated = False
 
-        # Phasic Salience Reset: Environmental discovery or high surprise awakens deliberate forward search
-        n_calibrated_actions = len(engine.action_dynamics)
-        if (
-            len(engine.learned_goal_positions) > engine._last_sim_goal_count
-            or len(engine.learned_barriers) != engine._last_sim_barrier_count
-            or n_calibrated_actions > engine._last_sim_action_count
-            or engine.last_surprise >= 0.4
-        ):
+        # Phasic Salience Reset: Environmental discovery, dynamic threat emergence, or high surprise
+        # Query prefrontal working memory for salience shift to awaken deliberate forward search
+        if engine.working_memory.has_salience_shift(engine):
             engine.simulation_cooldown = 0
             engine.consecutive_simulation_failures = 0
-            if n_calibrated_actions > engine._last_sim_action_count:
-                engine.mental_plan.clear()
-                engine.phase = (
-                    EpistemicPhase.MENTAL_SIMULATION
-                    if engine.is_motor_grounded()
-                    else EpistemicPhase.EPISTEMIC_EXPLORATION
-                )
-                engine._last_sim_action_count = n_calibrated_actions
-            engine._last_sim_goal_count = len(engine.learned_goal_positions)
-            engine._last_sim_barrier_count = len(engine.learned_barriers)
+            engine.mental_plan.clear()
+            engine.phase = (
+                EpistemicPhase.MENTAL_SIMULATION
+                if engine.is_motor_grounded()
+                else EpistemicPhase.EPISTEMIC_EXPLORATION
+            )
+
+        has_temporal = (
+            bool(engine.hazard_tracker.periodic_cells)
+            or bool(engine.mobile_threat_features)
+            or bool(engine.collision_cones.projected_trajectories)
+        )
 
         # Metacognitive Refractory Inhibition: decay refractory timers
+
         if engine.simulation_cooldown > 0:
             engine.simulation_cooldown -= 1
         to_uninhibited = [act for act, timer in engine.inhibited_actions.items() if timer <= 1]
@@ -683,6 +882,23 @@ class PrefrontalDeliberationEngine:
                                             lc,
                                         )
 
+            # Invalidate deadlocked subgoals in FrontopolarSubgoalStack if they target conflict zones
+            if engine.subgoal_stack.has_pending_goals:
+                cur_sg = engine.subgoal_stack.current_subgoal
+                if cur_sg is not None:
+                    target = cur_sg.target_entity_pos or cur_sg.target_destination
+                    if target and acc_death_conflict.is_in_conflict_zone(target):
+                        logger.warning(
+                            "ACC Metacognitive Gating: Aborting deadlocked subgoal %s targeting conflict zone %s",
+                            cur_sg.subgoal_id,
+                            target,
+                        )
+                        engine.subgoal_stack.clear_subgoals()
+                        engine.transition_to_phase(
+                            EpistemicPhase.REPLANNING,
+                            reason="acc_subgoal_conflict_abort",
+                        )
+
         # Visual avatar localization
         known_av_feats = set(engine.avatar_features) if engine.avatar_features else set()
         if engine.avatar_feature is not None:
@@ -761,111 +977,13 @@ class PrefrontalDeliberationEngine:
             )
 
             if should_wait:
-                engine.consecutive_pacing_steps += 1
-                if engine.consecutive_pacing_steps > 2:
-                    engine.consecutive_pacing_steps = 0
-                    engine.mental_plan.clear()
-                    engine.transition_to_phase(
-                        EpistemicPhase.REPLANNING,
-                        reason="pacing_window_exhausted",
-                    )
-                    return engine.plan_epistemic_probe(curr_grid, available_actions)
-
-                engine.mental_plan.appendleft(next_step)
-                engine.pending_phase_wait_steps = wait_steps
-                undo_acts = getattr(engine, "undo_actions", set())
-                non_disp = [
-                    a
-                    for a in available_actions
-                    if not engine.is_displacement_action(a)
-                    and not engine.is_spatial_effector(a)
-                    and a not in undo_acts
-                ]
-                if non_disp:
-                    return non_disp[0], None
-
-                # Cerebellar / Premotor Oscillatory Temporal Pacing:
-                # In environments with strictly directional actions (no explicit wait),
-                # synthesize an oscillatory burn step (e.g. step back / lateral dodge -> return)
-                # to burn phase steps until dynamic hazards clear.
-                curr_pos = engine.avatar_pos or getattr(engine, "current_actor_pos", None)
-                H, W = curr_grid.shape
-                # Dynamically derive opposite displacement action mapping from kinematic deltas
-                reverse_map: dict[Any, Any] = {}
-                for a1, d1 in engine.action_deltas.items():
-                    for a2, d2 in engine.action_deltas.items():
-                        if d1[0] == -d2[0] and d1[1] == -d2[1] and (d1[0] != 0 or d1[1] != 0):
-                            reverse_map[a1] = a2
-                if not reverse_map:
-                    reverse_map = {1: 2, 2: 1, 3: 4, 4: 3}
-                pacing_candidates: list[tuple[Any, tuple[int, int]]] = []
-
-                if curr_pos is not None:
-                    action_deltas = engine.action_deltas
-                    for act in available_actions:
-                        if not engine.is_displacement_action(act) or act == next_step.action:
-                            continue
-                        delta = action_deltas.get(act)
-                        if delta is None:
-                            continue
-                        dr, dc = delta
-                        nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        if (nr, nc) in engine.learned_barriers or (
-                            nr,
-                            nc,
-                        ) in engine.current_level_lethal_positions:
-                            continue
-                        cand_step = MentalSimulationStep(
-                            action=act,
-                            predicted_avatar_pos=(nr, nc),
-                            expected_mutation="oscillatory_pacing_step",
-                        )
-                        cand_res = self.safety_evaluator.evaluate(
-                            engine=engine,
-                            curr_grid=curr_grid,
-                            next_step=cand_step,
-                            available_actions=available_actions,
-                        )
-                        if cand_res.is_safe and not cand_res.should_wait:
-                            pacing_candidates.append((act, (nr, nc)))
-
-                if pacing_candidates:
-                    # Prefer reverse of recent action to oscillate along existing safe path
-                    chosen_pacing_act, _ = pacing_candidates[0]
-                    if len(engine.recent_actions) > 0:
-                        last_act = engine.recent_actions[-1]
-                        rev_last = reverse_map.get(last_act)
-                        for act, pos in pacing_candidates:
-                            if act == rev_last:
-                                chosen_pacing_act = act
-                                break
-
-                    rev_act = reverse_map.get(chosen_pacing_act)
-                    # Enqueue return step to restore spatial trajectory once hazard passes
-                    if (
-                        rev_act is not None
-                        and rev_act in available_actions
-                        and curr_pos is not None
-                    ):
-                        engine.mental_plan.appendleft(
-                            MentalSimulationStep(
-                                action=rev_act,
-                                predicted_avatar_pos=curr_pos,
-                                expected_mutation="oscillatory_return_step",
-                            )
-                        )
-                    return chosen_pacing_act, None
-
-                # Invariant fallback: Invalidate plan and replan if no safe pacing candidate exists
+                chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
+                    engine, curr_grid, available_actions, next_step, wait_steps
+                )
+            elif not plan_safe:
+                engine.consecutive_pacing_steps = 0
                 engine.mental_plan.clear()
-                engine.phase = EpistemicPhase.REPLANNING
-                return engine.plan_epistemic_probe(curr_grid, available_actions)
 
-            engine.consecutive_pacing_steps = 0
-            if not plan_safe:
-                engine.mental_plan.clear()
                 engine.phase = EpistemicPhase.REPLANNING
                 # Primary replanning: Object-Centric Macro Option
                 macro_plan = engine.object_planner.plan_macro_option(
@@ -881,7 +999,7 @@ class PrefrontalDeliberationEngine:
                 else:
                     danger_cells = (
                         {next_step.predicted_avatar_pos}
-                        if next_step.predicted_avatar_pos is not None
+                        if next_step.predicted_avatar_pos is not None and not has_temporal
                         else set()
                     )
                     simulated_plan = engine.simulate_in_mind(
@@ -902,14 +1020,16 @@ class PrefrontalDeliberationEngine:
                         )
             elif (
                 next_step.action in available_actions
-                and engine.inhibited_actions.get(next_step.action, 0) == 0
+                and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
                 and not engine.working_memory.habenular_ior.is_action_inhibited(
                     engine.avatar_pos, next_step.action, next_step.action_data
                 )
             ):
+                engine.consecutive_pacing_steps = 0
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos
+
             else:
                 engine.mental_plan.clear()
                 engine.phase = EpistemicPhase.REPLANNING
@@ -947,11 +1067,14 @@ class PrefrontalDeliberationEngine:
                     plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                         engine, curr_grid, available_actions, next_step
                     )
-                    if (
+                    if should_wait:
+                        chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
+                            engine, curr_grid, available_actions, next_step, wait_steps
+                        )
+                    elif (
                         plan_safe
-                        and not should_wait
                         and next_step.action in available_actions
-                        and engine.inhibited_actions.get(next_step.action, 0) == 0
+                        and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
                         and not engine.working_memory.habenular_ior.is_action_inhibited(
                             engine.avatar_pos, next_step.action, next_step.action_data
                         )
@@ -965,13 +1088,13 @@ class PrefrontalDeliberationEngine:
                         chosen_action, chosen_data = engine.plan_epistemic_probe(
                             curr_grid, available_actions
                         )
+
                 else:
                     engine.consecutive_simulation_failures += 1
                     engine.simulation_cooldown = min(
                         12, 2 ** min(engine.consecutive_simulation_failures, 4)
                     )
-                    engine._last_sim_goal_count = len(engine.learned_goal_positions)
-                    engine._last_sim_barrier_count = len(engine.learned_barriers)
+                    engine.working_memory.update_salience_baseline(engine)
 
             # 3B. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
             # If exit is not open/reachable or in search backoff, interact with intermediate objects

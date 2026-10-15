@@ -106,6 +106,19 @@ class HabenularEpisodicIOR:
         # Limit cycle detector (recent action history)
         self.recent_actions: deque[Any] = deque(maxlen=16)
 
+        # Negative transition archives (Preserved per-level across attempts)
+        self.current_level: int = 0
+        self.level_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
+
+    @property
+    def failed_transitions(self) -> set[tuple[tuple[int, int], int]]:
+        """Failed (state, action) transitions recorded on current level."""
+        return self.level_failed_transitions.setdefault(self.current_level, set())
+
+    @failed_transitions.setter
+    def failed_transitions(self, val: set[tuple[tuple[int, int], int]]) -> None:
+        self.level_failed_transitions[self.current_level] = val
+
     @staticmethod
     def _make_action_token(action: Any, action_data: dict[str, Any] | None = None) -> Any:
         if (
@@ -174,17 +187,20 @@ class HabenularEpisodicIOR:
             root = trace_list[0]
             root_tok = self._make_action_token(root.action_id, root.action_data)
             root_key = (root.avatar_pos, root_tok)
-            inh_dur = max(self.inhibition_duration_steps * 3, 72)
-            self.active_inhibitions[root_key] = inh_dur
-            self.active_inhibitions[(None, root_tok)] = inh_dur
-            if root.avatar_pos is not None:
-                self.active_inhibitions[(root.avatar_pos, root.action_id)] = inh_dur
-            self.active_inhibitions[(None, root.action_id)] = inh_dur
+            inh_dur = max(self.inhibition_duration_steps * 2, 48)
             root_penalty = self.base_penalty * 0.4
-            self.repulsion_table[root_key] = self.repulsion_table.get(root_key, 0.0) + root_penalty
-            self.repulsion_table[(None, root_tok)] = (
-                self.repulsion_table.get((None, root_tok), 0.0) + root_penalty * 0.5
-            )
+            if root.avatar_pos is not None:
+                self.active_inhibitions[root_key] = inh_dur
+                self.active_inhibitions[(root.avatar_pos, root.action_id)] = inh_dur
+                self.repulsion_table[root_key] = (
+                    self.repulsion_table.get(root_key, 0.0) + root_penalty
+                )
+            else:
+                self.active_inhibitions[(None, root_tok)] = inh_dur
+                self.active_inhibitions[(None, root.action_id)] = inh_dur
+                self.repulsion_table[(None, root_tok)] = (
+                    self.repulsion_table.get((None, root_tok), 0.0) + root_penalty * 0.5
+                )
             logger.info(
                 "HabenularEpisodicIOR: Root action %s repulsed (key=%s, duration=%d steps, penalty=%.1f) for next life branch",
                 root.action_id,
@@ -276,6 +292,8 @@ class HabenularEpisodicIOR:
         if len(self.recent_actions) < 4:
             return []
         acts = list(self.recent_actions)
+        cyclic_acts: list[Any] = []
+        cycle_len = 0
         # 2-cycle check: [A, B, A, B] or longer
         if (
             len(acts) >= 4
@@ -283,35 +301,61 @@ class HabenularEpisodicIOR:
             and acts[-2] == acts[-4]
             and acts[-1] != acts[-2]
         ):
-            logger.info(
-                "HabenularEpisodicIOR: 2-cycle motor oscillation [%s, %s] detected!",
-                acts[-1],
-                acts[-2],
-            )
-            return [acts[-1], acts[-2]]
+            cyclic_acts = [acts[-1], acts[-2]]
+            cycle_len = 2
         # 3-cycle check: [A, B, C, A, B, C]
-        if (
+        elif (
             len(acts) >= 6
             and acts[-1] == acts[-4]
             and acts[-2] == acts[-5]
             and acts[-3] == acts[-6]
             and len({acts[-1], acts[-2], acts[-3]}) > 1
         ):
-            logger.info(
-                "HabenularEpisodicIOR: 3-cycle motor oscillation [%s, %s, %s] detected!",
-                acts[-1],
-                acts[-2],
-                acts[-3],
-            )
-            return [acts[-1], acts[-2], acts[-3]]
+            cyclic_acts = [acts[-1], acts[-2], acts[-3]]
+            cycle_len = 3
         # 4-repetition check: [A, A, A, A]
-        if len(acts) >= 4 and len(set(acts[-4:])) == 1:
-            logger.info(
-                "HabenularEpisodicIOR: Stagnant repeated action %s detected!",
-                acts[-1],
-            )
-            return [acts[-1]]
-        return []
+        elif len(acts) >= 4 and len(set(acts[-4:])) == 1:
+            cyclic_acts = [acts[-1]]
+            cycle_len = 4
+
+        if cyclic_acts and self.episode_trace:
+            traces = list(self.episode_trace)
+            # In embodied spatial navigation, an action repetition is only an oscillation
+            # or stagnant loop if the organism returns to the same location or fails to move.
+            # If there is net spatial progress, it is corridor or staircase traversal.
+            if cycle_len == 2 and len(traces) >= 4:
+                p_curr, p_prev = traces[-1].avatar_pos, traces[-3].avatar_pos
+                if p_curr is not None and p_prev is not None and p_curr != p_prev:
+                    return []
+            elif cycle_len == 3 and len(traces) >= 6:
+                p_curr, p_prev = traces[-1].avatar_pos, traces[-4].avatar_pos
+                if p_curr is not None and p_prev is not None and p_curr != p_prev:
+                    return []
+            elif cycle_len == 4 and len(traces) >= 4:
+                p_curr, p_prev = traces[-1].avatar_pos, traces[-4].avatar_pos
+                if p_curr is not None and p_prev is not None and p_curr != p_prev:
+                    return []
+
+        if cyclic_acts:
+            if cycle_len == 2:
+                logger.info(
+                    "HabenularEpisodicIOR: 2-cycle motor oscillation [%s, %s] detected!",
+                    cyclic_acts[0],
+                    cyclic_acts[1],
+                )
+            elif cycle_len == 3:
+                logger.info(
+                    "HabenularEpisodicIOR: 3-cycle motor oscillation [%s, %s, %s] detected!",
+                    cyclic_acts[0],
+                    cyclic_acts[1],
+                    cyclic_acts[2],
+                )
+            elif cycle_len == 4:
+                logger.info(
+                    "HabenularEpisodicIOR: Stagnant repeated action %s detected!",
+                    cyclic_acts[0],
+                )
+        return cyclic_acts
 
     def reset_episode(
         self, retain_long_term: bool = True, retain_inhibitions: bool = False
@@ -329,6 +373,7 @@ class HabenularEpisodicIOR:
         if not retain_long_term:
             self.repulsion_table.clear()
             self.fatal_prefixes.clear()
+            self.level_failed_transitions.clear()
 
     def reset(self) -> None:
         """Full reset of Habenular episodic memory and inhibition state."""

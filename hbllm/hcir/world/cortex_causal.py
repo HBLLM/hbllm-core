@@ -18,12 +18,16 @@ and parietal tool affordance resonance (Iriki-Maravita body schema plasticity):
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from enum import StrEnum
+from typing import Any, Literal
 
 import numpy as np
 
+from hbllm.hcir.graph import ConceptNode
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
@@ -32,6 +36,16 @@ from hbllm.hcir.world.remote_causal_attribution import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SpelkePhysicalAxiom(StrEnum):
+    """Elizabeth Spelke's infant/primate Core Knowledge physical principles."""
+
+    FREE_SPACE = "free_space"
+    COHESION = "cohesion"
+    SOLIDITY_CONTINUITY = "solidity_continuity"
+    CONTACT_CAUSALITY = "contact_causality"
+    DIRECTIONAL_INERTIA = "directional_inertia"
 
 
 @dataclass
@@ -67,6 +81,7 @@ class HCIRSymbolicWorldTheory:
     walkable_predicates: list[CausalPredicate] = field(default_factory=list)
     cargo_predicates: list[CausalPredicate] = field(default_factory=list)
     receptacle_predicates: list[CausalPredicate] = field(default_factory=list)
+    domain_predicates: list[CausalPredicate] = field(default_factory=list)
 
     # Fast-lookup cached sets
     goal_features: set[int] = field(default_factory=set)
@@ -79,6 +94,9 @@ class HCIRSymbolicWorldTheory:
     # Telic global board goal induction
     telic_goal_type: str = ""  # e.g. "deplete", "navigate", "cargo"
     telic_target_feature: int | None = None
+
+    # Elizabeth Spelke's Core Knowledge physical axioms
+    spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
 
     def is_goal(self, entity: SpatialEntity | int) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
@@ -230,6 +248,281 @@ class HCIRSymbolicWorldTheory:
             "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %d", feature_id
         )
 
+    def register_predicate(self, predicate: CausalPredicate) -> None:
+        """Register a generic or learned causal predicate into the symbolic world theory."""
+        if predicate not in self.domain_predicates:
+            self.domain_predicates.append(predicate)
+
+    def seed_core_knowledge(self, bg_feature: int = 0) -> None:
+        """Seed domain-general Spelke core cognitive knowledge (Physics & Free Space axioms).
+
+        Grounds infant/primate Core Knowledge systems (Spelke 1990, Carey 2009):
+        1. FREE_SPACE: Environmental background affords uninhibited locomotion.
+        2. SOLIDITY_CONTINUITY: Solid entity boundaries resist traversal unless actuated;
+           spatiotemporal paths cannot pass through solid obstacles.
+        3. CONTACT_CAUSALITY: State changes and displacements require direct spatial contact
+           or grounded distal interventions.
+        4. COHESION: Physical entities maintain cohesive bounded spatial extents.
+        5. DIRECTIONAL_INERTIA: Displacements maintain directional continuity unless
+           interrupted by collisions or external forces.
+        """
+        self.induce_walkable(bg_feature)
+
+        # 1. Free Space
+        self.spelke_axioms[SpelkePhysicalAxiom.FREE_SPACE] = CausalPredicate(
+            variable="feature_id",
+            operator="==",
+            value=bg_feature,
+        )
+
+        # 2. Solidity & Spatiotemporal Continuity
+        self.spelke_axioms[SpelkePhysicalAxiom.SOLIDITY_CONTINUITY] = CausalPredicate(
+            variable="is_solid",
+            operator="==",
+            value=True,
+        )
+
+        # 3. Contact Causality
+        self.spelke_axioms[SpelkePhysicalAxiom.CONTACT_CAUSALITY] = CausalPredicate(
+            variable="requires_contact",
+            operator="==",
+            value=True,
+        )
+
+        # 4. Cohesion / Boundedness
+        self.spelke_axioms[SpelkePhysicalAxiom.COHESION] = CausalPredicate(
+            variable="is_cohesive",
+            operator="==",
+            value=True,
+        )
+
+        # 5. Directional Inertia
+        self.spelke_axioms[SpelkePhysicalAxiom.DIRECTIONAL_INERTIA] = CausalPredicate(
+            variable="maintains_inertia",
+            operator="==",
+            value=True,
+        )
+
+    def evaluates_spelke_continuity(
+        self,
+        origin: tuple[int, int],
+        destination: tuple[int, int],
+        barrier_set: set[tuple[int, int]],
+        grid_bounds: tuple[int, int] | None = None,
+    ) -> bool:
+        """Evaluate Spelke spatiotemporal continuity.
+
+        True if there exists a barrier-free topological conduit from origin to destination.
+        Returns False if solid boundaries block continuous motion without actuation.
+        """
+        if origin == destination:
+            return True
+        if origin in barrier_set or destination in barrier_set:
+            return False
+
+        r_min = min(origin[0], destination[0]) - 2
+        r_max = max(origin[0], destination[0]) + 2
+        c_min = min(origin[1], destination[1]) - 2
+        c_max = max(origin[1], destination[1]) + 2
+        if grid_bounds:
+            r_min = max(0, r_min)
+            c_min = max(0, c_min)
+            r_max = min(grid_bounds[0] - 1, r_max)
+            c_max = min(grid_bounds[1] - 1, c_max)
+
+        from collections import deque
+
+        queue: deque[tuple[int, int]] = deque([origin])
+        visited: set[tuple[int, int]] = {origin}
+
+        while queue:
+            curr = queue.popleft()
+            if curr == destination:
+                return True
+            r, c = curr
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                nxt = (nr, nc)
+                if r_min <= nr <= r_max and c_min <= nc <= c_max:
+                    if nxt not in visited and nxt not in barrier_set:
+                        visited.add(nxt)
+                        queue.append(nxt)
+        return False
+
+    def evaluates_spelke_contact(
+        self,
+        agent_pos: tuple[int, int],
+        target_pos: tuple[int, int],
+        adjacency: Literal["4-way", "8-way"] | bool = "4-way",
+    ) -> bool:
+        """Evaluate Spelke mechanical contact causality.
+
+        True if agent is adjacent to the target entity affording direct mechanical actuation.
+        """
+        dr = abs(agent_pos[0] - target_pos[0])
+        dc = abs(agent_pos[1] - target_pos[1])
+        if adjacency == "8-way":
+            return max(dr, dc) == 1
+        return (dr + dc) == 1
+
+    def evaluates_spelke_cohesion(
+        self,
+        entity_cells: set[tuple[int, int]],
+        displacement: tuple[int, int],
+        barrier_set: set[tuple[int, int]],
+        grid_bounds: tuple[int, int] | None = None,
+    ) -> bool:
+        """Evaluate Spelke Cohesion & Rigid Body Motion.
+
+        Objects move as cohesive wholes with rigid connectivity.
+        True if all constituent cells under displacement (dr, dc):
+        1. Maintain mutual relative connectivity without tearing.
+        2. Remain strictly inside grid_bounds.
+        3. Do not intersect any static barriers (excluding cells currently vacated by the entity).
+        """
+        if not entity_cells:
+            return True
+        dr, dc = displacement
+        displaced_cells = {(r + dr, c + dc) for r, c in entity_cells}
+
+        if grid_bounds:
+            H, W = grid_bounds
+            for r, c in displaced_cells:
+                if not (0 <= r < H and 0 <= c < W):
+                    return False
+
+        # Collision check with external barriers
+        external_barriers = barrier_set - entity_cells
+        if any(cell in external_barriers for cell in displaced_cells):
+            return False
+
+        return True
+
+    def evaluates_spelke_inertia(
+        self,
+        position: tuple[int, int],
+        velocity: tuple[int, int],
+        steps: int = 1,
+        obstacles: set[tuple[int, int]] | None = None,
+        bounce: bool = False,
+        grid_bounds: tuple[int, int] | None = None,
+    ) -> list[tuple[int, int]]:
+        """Evaluate Spelke Directional Inertia & Momentum Conservation.
+
+        Objects maintain directional trajectory and velocity across time steps
+        unless deflected or halted by external boundaries or obstacles.
+
+        Returns projected sequence of coordinates [(r_1, c_1), ..., (r_n, c_n)].
+        """
+        trajectory: list[tuple[int, int]] = []
+        curr_r, curr_c = position
+        vr, vc = velocity
+        obs = obstacles or set()
+
+        for _ in range(steps):
+            next_r, next_c = curr_r + vr, curr_c + vc
+            hit = False
+
+            if grid_bounds:
+                H, W = grid_bounds
+                if not (0 <= next_r < H and 0 <= next_c < W):
+                    hit = True
+
+            if (next_r, next_c) in obs:
+                hit = True
+
+            if hit:
+                if bounce:
+                    vr, vc = -vr, -vc
+                    next_r, next_c = curr_r + vr, curr_c + vc
+                    if grid_bounds:
+                        H, W = grid_bounds
+                        next_r = max(0, min(H - 1, next_r))
+                        next_c = max(0, min(W - 1, next_c))
+                else:
+                    break
+
+            curr_r, curr_c = next_r, next_c
+            trajectory.append((curr_r, curr_c))
+
+        return trajectory
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert all symbolic world predicates and ontology into atomic HCIR graph transactions."""
+        ops: list[TransactionOperation] = []
+
+        # Ground Elizabeth Spelke physical axioms
+        for axiom, pred in self.spelke_axioms.items():
+            node_id = f"spelke_axiom_{axiom.value}"
+            node = ConceptNode(
+                id=node_id,
+                label=f"spelke_{axiom.value}",
+                definition=pred.describe(),
+                domain="spelke_core_knowledge",
+                properties={
+                    "axiom": axiom.value,
+                    "predicate": pred.describe(),
+                    "variable": pred.variable,
+                    "operator": pred.operator,
+                    "value": str(pred.value),
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_dump(),
+                )
+            )
+
+        for role, feats in [
+            ("goal", self.goal_features),
+            ("barrier", self.barrier_features),
+            ("walkable", self.walkable_features),
+            ("cargo", self.cargo_features),
+            ("receptacle", self.receptacle_features),
+        ]:
+            for feat in feats:
+                node_id = f"ontology_{role}_{feat}"
+                node = ConceptNode(
+                    id=node_id,
+                    label=f"{role}_{feat}",
+                    definition=f"Learned intensional {role} entity with feature {feat}",
+                    domain="spatial_ontology",
+                    properties={
+                        "role": role,
+                        "feature_id": feat,
+                        "is_intensional": True,
+                    },
+                )
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node_id,
+                        node_data=node.model_dump(),
+                    )
+                )
+        if self.telic_goal_type:
+            node_id = "ontology_telic_goal"
+            node = ConceptNode(
+                id=node_id,
+                label=f"telic_goal_{self.telic_goal_type}",
+                definition=f"Global telic goal: {self.telic_goal_type} targeting {self.telic_target_feature}",
+                domain="spatial_ontology",
+                properties={
+                    "telic_goal_type": self.telic_goal_type,
+                    "telic_target_feature": self.telic_target_feature,
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_dump(),
+                )
+            )
+        return ops
+
     def clear(self) -> None:
         """Clear all intensional predicates when resetting across distinct games."""
         self.goal_predicates.clear()
@@ -243,6 +536,7 @@ class HCIRSymbolicWorldTheory:
         self.walkable_features.clear()
         self.cargo_features.clear()
         self.receptacle_features.clear()
+        self.spelke_axioms.clear()
         self.telic_goal_type = ""
         self.telic_target_feature = None
 
@@ -363,3 +657,95 @@ class CausalInductionCortex:
     def reset(self) -> None:
         """Reset all causal induction state, symbolic theories, and observed transitions."""
         self.reset_episode(retain_dynamics=False)
+
+    def plan_epistemic_intervention(
+        self,
+        avatar_pos: tuple[int, int] | None,
+        candidate_entities: Sequence[SpatialEntity],
+        available_actions: Sequence[Any],
+        bg_feature: int = 0,
+    ) -> EpistemicInterventionProposal | None:
+        """Pearl's do(a) active causal calculus:
+        Computes expected information gain of targeted interventions to disambiguate unknown entities.
+        """
+        if not candidate_entities or not available_actions:
+            return None
+
+        # Filter ambiguous entities (not confirmed goal, barrier, or background)
+        ambiguous = [
+            e
+            for e in candidate_entities
+            if e.feature_id != bg_feature
+            and (avatar_pos is None or e.grid_pos != avatar_pos)
+            and not self.symbolic_theory.is_goal(e.feature_id)
+            and not self.symbolic_theory.is_barrier(e.feature_id)
+            and not self.symbolic_theory.is_walkable(e.feature_id)
+        ]
+        if not ambiguous:
+            return None
+
+        best_entity: SpatialEntity | None = None
+        best_score = -1.0
+        best_hypothesis = ""
+
+        for e in ambiguous:
+            dist = (
+                abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
+                if avatar_pos
+                else 1
+            )
+            is_unprobed = e.feature_id not in self.symbolic_theory.walkable_features
+            entropy = 1.5 if is_unprobed else 0.5
+            info_gain = entropy / max(1, dist)
+
+            if info_gain > best_score:
+                best_score = info_gain
+                best_entity = e
+                best_hypothesis = f"test_affordance_feature_{e.feature_id}_at_{e.grid_pos}"
+
+        if best_entity is None:
+            return None
+
+        chosen_action = available_actions[0]
+        return EpistemicInterventionProposal(
+            action=chosen_action,
+            target_coord=best_entity.grid_pos,
+            target_feature=best_entity.feature_id,
+            expected_information_gain=best_score,
+            hypothesis=best_hypothesis,
+        )
+
+
+@dataclass
+class EpistemicInterventionProposal:
+    """Proposed Pearl do(a) intervention designed to maximize causal information gain."""
+
+    action: Any
+    target_coord: tuple[int, int] | None = None
+    target_feature: int | None = None
+    expected_information_gain: float = 0.0
+    hypothesis: str = ""
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        return CausalPredicate(
+            variable="epistemic_intervention",
+            operator="==",
+            value=str(self.action),
+            relation=f"info_gain:{self.expected_information_gain:.3f}",
+            target_entity=str(self.target_coord),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="active_epistemic_intervention",
+                node_data={
+                    "action": self.action,
+                    "target_coord": list(self.target_coord) if self.target_coord else None,
+                    "target_feature": self.target_feature,
+                    "expected_information_gain": self.expected_information_gain,
+                    "hypothesis": self.hypothesis,
+                },
+            )
+        ]

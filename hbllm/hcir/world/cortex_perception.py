@@ -287,6 +287,7 @@ class SpatialRoleClassifier:
         goal_pos: set[tuple[int, int]] | None = None,
         receptacle_pos: set[tuple[int, int]] | None = None,
         avatar_pos: tuple[int, int] | None = None,
+        cells: list[tuple[int, int]] | None = None,
     ) -> EntityRole:
         min_r, max_r, min_c, max_c = bounding_box
         av_set = av_feats or set()
@@ -341,7 +342,14 @@ class SpatialRoleClassifier:
             return EntityRole.ACTUATOR
         elif is_theory_cargo and not is_theory_walkable:
             return EntityRole.MANIPULABLE
-        elif is_theory_goal or grid_pos in goal_set or grid_pos in receptacle_set:
+        elif (
+            is_theory_goal
+            or (
+                (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
+                and (cells is None or any(p in goal_set for p in cells))
+            )
+            or grid_pos in receptacle_set
+        ):
             return EntityRole.GOAL
         elif area <= 16:
             return EntityRole.UNKNOWN
@@ -752,6 +760,7 @@ class PerceptionEngine:
                     goal_pos=goal_pos,
                     receptacle_pos=receptacle_pos,
                     avatar_pos=avatar_pos,
+                    cells=cells,
                 )
 
                 ent = SpatialEntity(

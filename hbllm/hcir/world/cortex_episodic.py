@@ -103,6 +103,35 @@ class ReplayCreditAssignment:
     confidence: float = 1.0
 
 
+@dataclass
+class TDReplaySummary:
+    """Outcome of Hippocampal offline Temporal Difference (TD) experience replay."""
+
+    replayed_steps: int
+    mean_td_error: float
+    max_td_error: float
+    updated_q_values: dict[tuple[str, Any], float]
+    consolidated_predicates: list[CausalPredicate]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions updating consolidated Q-values in TieredWorkspace."""
+        ops: list[TransactionOperation] = []
+        for (state_sig, act), q_val in self.updated_q_values.items():
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"td_q_{state_sig}_{act}",
+                    node_data={
+                        "state_signature": state_sig,
+                        "action": str(act),
+                        "q_value": float(q_val),
+                        "mean_td_error": self.mean_td_error,
+                    },
+                )
+            )
+        return ops
+
+
 class HippocampalEpisodicCortex:
     """Hippocampal-Habenular episodic memory system for trial-and-error learning."""
 
@@ -132,6 +161,10 @@ class HippocampalEpisodicCortex:
 
         # Lethal candidate features identified across trials
         self.discovered_lethal_features: set[int] = set()
+
+        # State-Action Value Table (offline TD consolidation)
+        self.q_table: dict[tuple[str, Any], float] = {}
+        self.transition_counts: dict[tuple[str, Any, str], int] = {}
 
         # Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
@@ -310,6 +343,133 @@ class HippocampalEpisodicCortex:
             return 100.0
         return self.habenular_ior.get_repulsion_penalty(avatar_pos, action)
 
+    def consolidate_episodic_replay_td(
+        self,
+        learning_rate: float = 0.2,
+        discount: float = 0.9,
+        prioritized: bool = True,
+        max_batch_size: int = 64,
+        replay_successful_only: bool = False,
+    ) -> TDReplaySummary:
+        """Consolidates offline episodic traces using Temporal Difference (TD) learning.
+
+        Evaluates sharp-wave ripple backward/forward sequence replay across active and past episodes.
+        Computes TD prediction error:
+            delta = reward + gamma * max_a' Q(s', a') - Q(s, a)
+        and updates estimated state-action values Q(s, a) <- Q(s, a) + alpha * delta.
+        """
+        candidate_episodes: list[list[EpisodicTransition]] = []
+        if self.current_episode:
+            candidate_episodes.append(list(self.current_episode))
+        if replay_successful_only:
+            candidate_episodes.extend(self.successful_trajectories)
+        else:
+            candidate_episodes.extend(self.successful_trajectories)
+            candidate_episodes.extend(self.past_episodes)
+
+        if not candidate_episodes:
+            return TDReplaySummary(
+                replayed_steps=0,
+                mean_td_error=0.0,
+                max_td_error=0.0,
+                updated_q_values={},
+                consolidated_predicates=[],
+            )
+
+        quadruples: list[tuple[str, Any, float, str, bool]] = []
+        for ep in candidate_episodes:
+            for i, trans in enumerate(ep):
+                s = trans.state_signature or (
+                    f"pos_{trans.avatar_pos[0]}_{trans.avatar_pos[1]}"
+                    if trans.avatar_pos
+                    else f"step_{trans.step}"
+                )
+                a = trans.action_id
+                r = trans.reward
+                if trans.is_win:
+                    r += 10.0
+                elif trans.is_lost:
+                    r -= 10.0
+
+                if i + 1 < len(ep) and not trans.is_terminal:
+                    next_trans = ep[i + 1]
+                    s_prime = next_trans.state_signature or (
+                        f"pos_{next_trans.avatar_pos[0]}_{next_trans.avatar_pos[1]}"
+                        if next_trans.avatar_pos
+                        else f"step_{next_trans.step}"
+                    )
+                    is_term = False
+                else:
+                    s_prime = "terminal"
+                    is_term = True
+
+                quadruples.append((s, a, r, s_prime, is_term))
+                self.transition_counts[(s, a, s_prime)] = (
+                    self.transition_counts.get((s, a, s_prime), 0) + 1
+                )
+
+        if not quadruples:
+            return TDReplaySummary(
+                replayed_steps=0,
+                mean_td_error=0.0,
+                max_td_error=0.0,
+                updated_q_values={},
+                consolidated_predicates=[],
+            )
+
+        scored_quads: list[tuple[float, tuple[str, Any, float, str, bool]]] = []
+        for s, a, r, s_prime, is_term in quadruples:
+            cur_q = self.q_table.get((s, a), 0.0)
+            if is_term:
+                next_max_q = 0.0
+            else:
+                next_acts = [q for (st, act), q in self.q_table.items() if st == s_prime]
+                next_max_q = max(next_acts) if next_acts else 0.0
+            td_err = abs(r + discount * next_max_q - cur_q)
+            scored_quads.append((td_err, (s, a, r, s_prime, is_term)))
+
+        if prioritized:
+            scored_quads.sort(key=lambda x: x[0], reverse=True)
+
+        batch = scored_quads[:max_batch_size]
+
+        td_errors: list[float] = []
+        updated_q: dict[tuple[str, Any], float] = {}
+        predicates: list[CausalPredicate] = []
+
+        for _, (s, a, r, s_prime, is_term) in batch:
+            cur_q = self.q_table.get((s, a), 0.0)
+            if is_term:
+                next_max_q = 0.0
+            else:
+                next_acts = [q for (st, act), q in self.q_table.items() if st == s_prime]
+                next_max_q = max(next_acts) if next_acts else 0.0
+            delta = r + discount * next_max_q - cur_q
+            new_q = cur_q + learning_rate * delta
+            self.q_table[(s, a)] = new_q
+            updated_q[(s, a)] = new_q
+            td_errors.append(abs(delta))
+
+            pred = CausalPredicate(
+                variable=f"q_value:{s}",
+                operator="==",
+                value=f"action:{a}:q:{new_q:.3f}",
+                relation=f"td_error:{abs(delta):.3f}",
+                target_entity=s,
+            )
+            predicates.append(pred)
+
+        mean_err = float(np.mean(td_errors)) if td_errors else 0.0
+        max_err = float(np.max(td_errors)) if td_errors else 0.0
+
+        return TDReplaySummary(
+            replayed_steps=len(batch),
+            mean_td_error=mean_err,
+            max_td_error=max_err,
+            updated_q_values=updated_q,
+            consolidated_predicates=predicates,
+        )
+
     def _archive_and_clear(self) -> None:
         """Archive current episode to long-term memory and clear active buffer."""
         if self.current_episode:
@@ -350,7 +510,20 @@ class HippocampalEpisodicCortex:
         2. Cross-stage level progression (transfer semantic & motor priors, point to new level map).
         3. Cross-game environment reset (strict zero-leakage cognitive isolation).
         """
-        # SWR Trajectory Consolidation: Archive winning or catastrophic sequences
+        # 1. Offline Hippocampal TD Experience Replay & Q-value consolidation
+        if self.current_episode:
+            td_summary = self.consolidate_episodic_replay_td(
+                learning_rate=0.2,
+                discount=0.9,
+                prioritized=True,
+                max_batch_size=32,
+            )
+            # Sync consolidated causal predicates into Symbolic World Theory
+            if hasattr(engine, "symbolic_theory") and engine.symbolic_theory is not None:
+                for pred in td_summary.consolidated_predicates:
+                    engine.symbolic_theory.register_predicate(pred)
+
+        # 2. SWR Trajectory Consolidation: Archive winning or catastrophic sequences
         if self.current_episode and any(t.is_win for t in self.current_episode):
             self.successful_trajectories.append(list(self.current_episode))
         elif self.current_episode and any(t.is_lost for t in self.current_episode):
@@ -416,9 +589,7 @@ class HippocampalEpisodicCortex:
         engine.exploration_cooldown = 0
         engine.consecutive_simulation_failures = 0
         engine.simulation_cooldown = 0
-        engine._last_sim_goal_count = 0
-        engine._last_sim_barrier_count = 0
-        engine._last_sim_action_count = 0
+        engine.working_memory.reset_salience_baseline()
         engine.current_simulated_goal = None
         engine._feedback_assimilated = False
         engine.symbolic_theory.candidate_goal_features.clear()
@@ -535,8 +706,7 @@ class HippocampalEpisodicCortex:
             # Local coordinate barriers reset, but empirical walkable affordances are retained.
             engine.symbolic_theory.barrier_features.clear()
             engine.symbolic_theory.barrier_predicates.clear()
-            engine.symbolic_theory.walkable_features.update(engine.verified_safe_features)
-            for f in engine.verified_safe_features:
+            for f in engine.symbolic_theory.walkable_features:
                 if not any(p.value == f for p in engine.symbolic_theory.walkable_predicates):
                     engine.symbolic_theory.walkable_predicates.append(
                         CausalPredicate(variable="feature_id", operator="==", value=f)

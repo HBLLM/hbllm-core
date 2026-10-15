@@ -22,8 +22,16 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.graph import (
+    ConstraintNode,
+    GoalNode,
+    ObservationNode,
+)
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
-from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
+from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
@@ -225,8 +233,6 @@ class AutonomousEpistemicEngine:
     """
 
     MIN_PROBES_PER_ACTION: int = 3
-    _feature_quiescent_counts: dict[int, int]
-    feature_quiescent_counts: dict[int, int]
     consecutive_pacing_steps: int = 0
 
     def __init__(
@@ -259,19 +265,22 @@ class AutonomousEpistemicEngine:
         self.avatar_pos: tuple[int, int] | None = None
         self.avatar_size: int = 1
 
-        # Controllability-based avatar identification: accumulates evidence
-        # across multiple frames/actions to distinguish the avatar (responds
-        # to player input) from other moving entities (autonomous movement).
-        # Maps feature_id -> list of (action_id, observed_delta) observations.
-        self._avatar_controllability_evidence: dict[int, list[tuple[int, tuple[int, int]]]] = {}
-
-        # Experiential verification: features the avatar has successfully
-        # traversed without dying. Replaces hardcoded pixel-count thresholds
-        # with empirical "I walked on this and survived" knowledge.
-        self.verified_safe_features: set[int] = set()
-
-        # Intensional Neuro-Symbolic World Theory
+        # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
         self.symbolic_theory: HCIRSymbolicWorldTheory = HCIRSymbolicWorldTheory()
+        self.symbolic_theory.seed_core_knowledge(bg_feature=0)
+
+        # Prefrontal Working Memory & Executive Faculties (SSOT for cognitive state)
+        self.working_memory: PrefrontalWorkingMemory = PrefrontalWorkingMemory()
+        if instructions:
+            self.load_instructions(instructions)
+
+        # Bind biological faculties to working memory stores
+        self.subgoal_stack: FrontopolarSubgoalStack = self.working_memory.subgoal_stack
+        self.body_schema: ExtendedBodySchema = self.working_memory.body_schema
+        self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
+        self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
+        self.optical_projector: OpticalRayProjector = self.working_memory.optical_projector
+        self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
 
         # Motor calibration & dynamics
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
@@ -286,41 +295,13 @@ class AutonomousEpistemicEngine:
 
         # Episodic Ground Facts (Layout coordinates, preserved per-level across attempts)
         self._current_level: int = 0
-        self.level_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
-        self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
-        self.level_lethal_positions: dict[int, set[tuple[int, int]]] = {}
-        self.learned_barriers: set[tuple[int, int]] = self.level_learned_barriers.setdefault(
-            0, set()
-        )
-        self.learned_goal_positions: set[tuple[int, int]] = set()
-        self.learned_receptacle_positions: set[tuple[int, int]] = set()
-
-        # Mental simulation plan
-        self.mental_plan: deque[MentalSimulationStep] = deque()
-        self.active_hypothesis: CausalHypothesis | None = None
-        self.failed_transitions: set[tuple[tuple[int, int], int]] = (
-            self.level_failed_transitions.setdefault(0, set())
-        )
+        self.working_memory.visuospatial.current_level = 0
+        self.habenular_ior.current_level = 0
 
         # Theory of Mind: creature kinds observed to patrol autonomously
-        # (feature-level concept, retained across levels like a human would).
         self.mobile_threat_features: set[int] = set()
-        self._prev_oriented_threats: list[OrientedThreat] = []
-        self.consecutive_plan_failures: int = 0
-        self.consecutive_stuck_steps: int = 0
-        self.exploration_cooldown: int = 0
-        self.consecutive_simulation_failures: int = 0
-        self.simulation_cooldown: int = 0
-        self._last_sim_goal_count: int = 0
-        self._last_sim_barrier_count: int = 0
-        self._last_sim_action_count: int = 0
-        self.current_simulated_goal: tuple[int, int] | None = None
-        self.last_predicted_pos: tuple[int, int] | None = None
 
-        # Prefrontal working memory & biological hazard tracker
-        self.working_memory: PrefrontalWorkingMemory = PrefrontalWorkingMemory()
-        if instructions:
-            self.load_instructions(instructions)
+        # Biological hazard tracker & intuitive physics
         self.hazard_tracker: SpatiotemporalHazardTracker = SpatiotemporalHazardTracker()
         self.saccadic_attention: SaccadicAttentionSystem = SaccadicAttentionSystem()
         self.physics_engine: IntuitivePhysicsEngine = IntuitivePhysicsEngine()
@@ -342,24 +323,6 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Orbitofrontal Cortex (OFC) Counterfactual Deadlock Detector
         self.deadlock_detector: CounterfactualDeadlockDetector = CounterfactualDeadlockDetector()
-
-        # Faculty: Brodmann Area 10 (aPFC) Hierarchical Subgoal Stack & Cognitive Branching
-        self.subgoal_stack: FrontopolarSubgoalStack = self.working_memory.subgoal_stack
-
-        # Faculty: Inferior Parietal Lobule (IPL) Extended Body Schema & Tool Affordances
-        self.body_schema: ExtendedBodySchema = self.working_memory.body_schema
-
-        # Faculty: Anterior Mid-Cingulate Cortex (aMCC) & Lateral Habenula Episodic IOR
-        self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
-
-        # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attributor
-        self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
-
-        # Faculty: Parieto-Occipital Mental Imagery (V6/MST) Optical Ray Projector
-        self.optical_projector: OpticalRayProjector = self.working_memory.optical_projector
-
-        # Faculty: Inferotemporal Cortex (IT / Ventral Stream) Affordance Centroid Segmentation
-        self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
 
         # Faculty: Hippocampal & Lateral Habenula Episodic Memory (Trial-and-Error Loop)
         self.episodic_cortex: HippocampalEpisodicCortex = HippocampalEpisodicCortex(
@@ -478,59 +441,463 @@ class AutonomousEpistemicEngine:
             ObjectiveLearningEfficiencyTracker()
         )
 
-        # Active exploration & curiosity state
-        self.active_probe_target: tuple[int, int] | None = None
-        self.active_probe_id: str | None = None
-        self.probe_target_steps: int = 0
-        self.probed_entity_ids: set[str] = set()
-        self.entity_visit_counts: dict[str, int] = {}
-        self.position_visit_counts: dict[tuple[int, int], int] = {}
-        self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
-        self.recent_actions: deque[Any] = deque(maxlen=16)
-        self.exhausted_candidate_goals: set[tuple[int, int]] = set()
-        self.quiescent_click_targets: set[tuple[int, int]] = set()
-        self.effective_click_targets: set[tuple[int, int]] = set()
-        self.last_effective_click_coord: tuple[int, int] | None = None
-        self.consecutive_effective_clicks: int = 0
-        self.click_affordances: dict[tuple[int, int], list[tuple[int, int]]] = {}
-        self.last_effector_target_step: dict[tuple[int, int], int] = {}
-        self.active_goal_converging_coord: tuple[int, int] | None = None
-        self.consecutive_goal_converging_clicks: int = 0
-
-        # Active Causal Empowerment & Contingency Testing
-        self.active_causal_actuator_coord: tuple[int, int] | None = None
-        self.consecutive_causal_probes: int = 0
-        self.causal_actuator_streak_limit: int = 4
-
-        # Feature-level interventional causal falsification (Piagetian Stage D3)
-        self.quiescent_features: set[int] = set()
-        self.effective_features: set[int] = set()
-        self.feature_quiescent_counts: dict[int, int] = {}
-        self._feature_quiescent_counts: dict[int, int] = self.feature_quiescent_counts
-
-        # Metacognitive Refractory Action Inhibition (Stage D13)
-        self.inhibited_actions: dict[Any, int] = {}
-        self.prior_avatar_feature: int | None = None
-
-        self.entity_action_failed_positions: dict[Any, set[tuple[int, int]]] = {}
-        self.immobile_entity_actions: set[Any] = set()
-
-        # Universal Dynamic Action Affordance Registry
-        self.action_affordances: dict[Any, ActionAffordance] = {}
-        self.focus_switch_actions: set[Any] = set()
-        self.last_non_displacement_action: Any | None = None
-
         self.bg_feature: int = 0
-        self.level_epistemic_probes: int = 0
-        self.total_epistemic_probes: int = 0
-        self._feedback_assimilated: bool = False
-
         self.hypotheses: list[CausalHypothesis] = []
         self.belief_history: list[BeliefTransitionEvent] = []
 
         # External domain & benchmark extension registries (e.g. plugin adapters)
         self.target_scorers: list[Any] = []
         self.deliberation_policies: list[Any] = []
+
+        # Tiered Cognitive Workspace & Transaction Manager live mirroring
+        self.tiered_workspace: TieredWorkspace | None = None
+        self.transaction_manager: TransactionManager | None = None
+        self.active_task_frame: TaskFrame | None = None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Working Memory & Knowledge Base Properties (Single Source of Truth)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @property
+    def verified_safe_features(self) -> set[int]:
+        """Empirically verified safe/walkable features in symbolic world theory."""
+        return self.symbolic_theory.walkable_features
+
+    @verified_safe_features.setter
+    def verified_safe_features(self, val: set[int]) -> None:
+        self.symbolic_theory.walkable_features = val
+
+    @property
+    def mental_plan(self) -> deque[MentalSimulationStep]:
+        """Active mental simulation plan in prefrontal working memory."""
+        return self.working_memory.mental_plan
+
+    @mental_plan.setter
+    def mental_plan(self, val: deque[MentalSimulationStep]) -> None:
+        self.working_memory.mental_plan = val
+
+    @property
+    def active_hypothesis(self) -> Any | None:
+        """Active causal hypothesis evaluated in prefrontal working memory."""
+        return self.working_memory.active_hypothesis
+
+    @active_hypothesis.setter
+    def active_hypothesis(self, val: Any | None) -> None:
+        self.working_memory.active_hypothesis = val
+
+    @property
+    def consecutive_simulation_failures(self) -> int:
+        return self.working_memory.consecutive_simulation_failures
+
+    @consecutive_simulation_failures.setter
+    def consecutive_simulation_failures(self, val: int) -> None:
+        self.working_memory.consecutive_simulation_failures = val
+
+    @property
+    def simulation_cooldown(self) -> int:
+        return self.working_memory.simulation_cooldown
+
+    @simulation_cooldown.setter
+    def simulation_cooldown(self, val: int) -> None:
+        self.working_memory.simulation_cooldown = val
+
+    @property
+    def consecutive_plan_failures(self) -> int:
+        return self.working_memory.consecutive_plan_failures
+
+    @consecutive_plan_failures.setter
+    def consecutive_plan_failures(self, val: int) -> None:
+        self.working_memory.consecutive_plan_failures = val
+
+    @property
+    def exploration_cooldown(self) -> int:
+        return self.working_memory.exploration_cooldown
+
+    @exploration_cooldown.setter
+    def exploration_cooldown(self, val: int) -> None:
+        self.working_memory.exploration_cooldown = val
+
+    @property
+    def consecutive_stuck_steps(self) -> int:
+        return self.working_memory.consecutive_stuck_steps
+
+    @consecutive_stuck_steps.setter
+    def consecutive_stuck_steps(self, val: int) -> None:
+        self.working_memory.consecutive_stuck_steps = val
+
+    @property
+    def level_learned_barriers(self) -> dict[int, set[tuple[int, int]]]:
+        """Spatial barrier coordinates mapped per level in visuospatial working memory."""
+        return self.working_memory.visuospatial.level_learned_barriers
+
+    @level_learned_barriers.setter
+    def level_learned_barriers(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.working_memory.visuospatial.level_learned_barriers = val
+
+    @property
+    def learned_barriers(self) -> set[tuple[int, int]]:
+        """Barrier coordinates on active level in visuospatial working memory."""
+        return self.working_memory.visuospatial.learned_barriers
+
+    @learned_barriers.setter
+    def learned_barriers(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.visuospatial.learned_barriers = val
+
+    @property
+    def level_lethal_positions(self) -> dict[int, set[tuple[int, int]]]:
+        """Lethal obstacle coordinates mapped per level in visuospatial working memory."""
+        return self.working_memory.visuospatial.level_lethal_positions
+
+    @level_lethal_positions.setter
+    def level_lethal_positions(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.working_memory.visuospatial.level_lethal_positions = val
+
+    @property
+    def learned_goal_positions(self) -> set[tuple[int, int]]:
+        """Goal coordinates mapped in visuospatial working memory."""
+        return self.working_memory.visuospatial.learned_goal_positions
+
+    @learned_goal_positions.setter
+    def learned_goal_positions(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.visuospatial.learned_goal_positions = val
+
+    @property
+    def learned_receptacle_positions(self) -> set[tuple[int, int]]:
+        """Receptacle coordinates mapped in visuospatial working memory."""
+        return self.working_memory.visuospatial.learned_receptacle_positions
+
+    @learned_receptacle_positions.setter
+    def learned_receptacle_positions(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.visuospatial.learned_receptacle_positions = val
+
+    @property
+    def level_failed_transitions(self) -> dict[int, set[tuple[tuple[int, int], int]]]:
+        """Negative state-action transitions archived in Habenular episodic memory."""
+        return self.habenular_ior.level_failed_transitions
+
+    @level_failed_transitions.setter
+    def level_failed_transitions(self, val: dict[int, set[tuple[tuple[int, int], int]]]) -> None:
+        self.habenular_ior.level_failed_transitions = val
+
+    @property
+    def failed_transitions(self) -> set[tuple[tuple[int, int], int]]:
+        """Negative state-action transitions on active level in Habenular memory."""
+        return self.habenular_ior.failed_transitions
+
+    @failed_transitions.setter
+    def failed_transitions(self, val: set[tuple[tuple[int, int], int]]) -> None:
+        self.habenular_ior.failed_transitions = val
+
+    @property
+    def current_simulated_goal(self) -> tuple[int, int] | None:
+        """Active goal coordinate tracked in prefrontal working memory."""
+        return self.working_memory.focal_attention_point
+
+    @current_simulated_goal.setter
+    def current_simulated_goal(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.focal_attention_point = val
+
+    @property
+    def last_predicted_pos(self) -> tuple[int, int] | None:
+        """Last predicted avatar position (efference copy) in prefrontal working memory."""
+        return self.working_memory.last_predicted_pos
+
+    @last_predicted_pos.setter
+    def last_predicted_pos(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.last_predicted_pos = val
+
+    @property
+    def _feedback_assimilated(self) -> bool:
+        """Sensory feedback assimilation state in prefrontal working memory."""
+        return self.working_memory.feedback_assimilated
+
+    @_feedback_assimilated.setter
+    def _feedback_assimilated(self, val: bool) -> None:
+        self.working_memory.feedback_assimilated = val
+
+    @property
+    def _avatar_controllability_evidence(self) -> dict[int, list[tuple[int, tuple[int, int]]]]:
+        """Motor grounding controllability evidence held in prefrontal working memory."""
+        return self.working_memory.avatar_controllability_evidence
+
+    @_avatar_controllability_evidence.setter
+    def _avatar_controllability_evidence(
+        self, val: dict[int, list[tuple[int, tuple[int, int]]]]
+    ) -> None:
+        self.working_memory.avatar_controllability_evidence = val
+
+    @property
+    def _prev_oriented_threats(self) -> list[OrientedThreat]:
+        """Dynamic threat kinematics held in prefrontal working memory."""
+        return self.working_memory.prev_oriented_threats
+
+    @_prev_oriented_threats.setter
+    def _prev_oriented_threats(self, val: list[OrientedThreat]) -> None:
+        self.working_memory.prev_oriented_threats = val
+
+    @property
+    def active_probe_target(self) -> tuple[int, int] | None:
+        return self.working_memory.active_probe_target
+
+    @active_probe_target.setter
+    def active_probe_target(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.active_probe_target = val
+
+    @property
+    def active_probe_id(self) -> str | None:
+        return self.working_memory.active_probe_id
+
+    @active_probe_id.setter
+    def active_probe_id(self, val: str | None) -> None:
+        self.working_memory.active_probe_id = val
+
+    @property
+    def probe_target_steps(self) -> int:
+        return self.working_memory.probe_target_steps
+
+    @probe_target_steps.setter
+    def probe_target_steps(self, val: int) -> None:
+        self.working_memory.probe_target_steps = val
+
+    @property
+    def probed_entity_ids(self) -> set[str]:
+        return self.working_memory.probed_entity_ids
+
+    @probed_entity_ids.setter
+    def probed_entity_ids(self, val: set[str]) -> None:
+        self.working_memory.probed_entity_ids = val
+
+    @property
+    def entity_visit_counts(self) -> dict[str, int]:
+        return self.working_memory.entity_visit_counts
+
+    @entity_visit_counts.setter
+    def entity_visit_counts(self, val: dict[str, int]) -> None:
+        self.working_memory.entity_visit_counts = val
+
+    @property
+    def position_visit_counts(self) -> dict[tuple[int, int], int]:
+        return self.working_memory.position_visit_counts
+
+    @position_visit_counts.setter
+    def position_visit_counts(self, val: dict[tuple[int, int], int]) -> None:
+        self.working_memory.position_visit_counts = val
+
+    @property
+    def recent_positions(self) -> deque[tuple[int, int]]:
+        return self.working_memory.recent_positions
+
+    @recent_positions.setter
+    def recent_positions(self, val: deque[tuple[int, int]]) -> None:
+        self.working_memory.recent_positions = val
+
+    @property
+    def recent_actions(self) -> deque[Any]:
+        return self.working_memory.recent_actions
+
+    @recent_actions.setter
+    def recent_actions(self, val: deque[Any]) -> None:
+        self.working_memory.recent_actions = val
+
+    @property
+    def exhausted_candidate_goals(self) -> set[tuple[int, int]]:
+        return self.working_memory.exhausted_candidate_goals
+
+    @exhausted_candidate_goals.setter
+    def exhausted_candidate_goals(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.exhausted_candidate_goals = val
+
+    @property
+    def quiescent_click_targets(self) -> set[tuple[int, int]]:
+        return self.working_memory.quiescent_click_targets
+
+    @quiescent_click_targets.setter
+    def quiescent_click_targets(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.quiescent_click_targets = val
+
+    @property
+    def effective_click_targets(self) -> set[tuple[int, int]]:
+        return self.working_memory.effective_click_targets
+
+    @effective_click_targets.setter
+    def effective_click_targets(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.effective_click_targets = val
+
+    @property
+    def last_effective_click_coord(self) -> tuple[int, int] | None:
+        return self.working_memory.last_effective_click_coord
+
+    @last_effective_click_coord.setter
+    def last_effective_click_coord(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.last_effective_click_coord = val
+
+    @property
+    def consecutive_effective_clicks(self) -> int:
+        return self.working_memory.consecutive_effective_clicks
+
+    @consecutive_effective_clicks.setter
+    def consecutive_effective_clicks(self, val: int) -> None:
+        self.working_memory.consecutive_effective_clicks = val
+
+    @property
+    def click_affordances(self) -> dict[tuple[int, int], list[tuple[int, int]]]:
+        return self.working_memory.click_affordances
+
+    @click_affordances.setter
+    def click_affordances(self, val: dict[tuple[int, int], list[tuple[int, int]]]) -> None:
+        self.working_memory.click_affordances = val
+
+    @property
+    def last_effector_target_step(self) -> dict[tuple[int, int], int]:
+        return self.working_memory.last_effector_target_step
+
+    @last_effector_target_step.setter
+    def last_effector_target_step(self, val: dict[tuple[int, int], int]) -> None:
+        self.working_memory.last_effector_target_step = val
+
+    @property
+    def active_goal_converging_coord(self) -> tuple[int, int] | None:
+        return self.working_memory.active_goal_converging_coord
+
+    @active_goal_converging_coord.setter
+    def active_goal_converging_coord(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.active_goal_converging_coord = val
+
+    @property
+    def consecutive_goal_converging_clicks(self) -> int:
+        return self.working_memory.consecutive_goal_converging_clicks
+
+    @consecutive_goal_converging_clicks.setter
+    def consecutive_goal_converging_clicks(self, val: int) -> None:
+        self.working_memory.consecutive_goal_converging_clicks = val
+
+    @property
+    def active_causal_actuator_coord(self) -> tuple[int, int] | None:
+        return self.working_memory.active_causal_actuator_coord
+
+    @active_causal_actuator_coord.setter
+    def active_causal_actuator_coord(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.active_causal_actuator_coord = val
+
+    @property
+    def consecutive_causal_probes(self) -> int:
+        return self.working_memory.consecutive_causal_probes
+
+    @consecutive_causal_probes.setter
+    def consecutive_causal_probes(self, val: int) -> None:
+        self.working_memory.consecutive_causal_probes = val
+
+    @property
+    def causal_actuator_streak_limit(self) -> int:
+        return self.working_memory.causal_actuator_streak_limit
+
+    @causal_actuator_streak_limit.setter
+    def causal_actuator_streak_limit(self, val: int) -> None:
+        self.working_memory.causal_actuator_streak_limit = val
+
+    @property
+    def quiescent_features(self) -> set[int]:
+        return self.working_memory.quiescent_features
+
+    @quiescent_features.setter
+    def quiescent_features(self, val: set[int]) -> None:
+        self.working_memory.quiescent_features = val
+
+    @property
+    def effective_features(self) -> set[int]:
+        return self.working_memory.effective_features
+
+    @effective_features.setter
+    def effective_features(self, val: set[int]) -> None:
+        self.working_memory.effective_features = val
+
+    @property
+    def feature_quiescent_counts(self) -> dict[int, int]:
+        return self.working_memory.feature_quiescent_counts
+
+    @feature_quiescent_counts.setter
+    def feature_quiescent_counts(self, val: dict[int, int]) -> None:
+        self.working_memory.feature_quiescent_counts = val
+
+    @property
+    def _feature_quiescent_counts(self) -> dict[int, int]:
+        return self.working_memory.feature_quiescent_counts
+
+    @_feature_quiescent_counts.setter
+    def _feature_quiescent_counts(self, val: dict[int, int]) -> None:
+        self.working_memory.feature_quiescent_counts = val
+
+    @property
+    def inhibited_actions(self) -> dict[Any, int]:
+        return self.working_memory.inhibited_actions
+
+    @inhibited_actions.setter
+    def inhibited_actions(self, val: dict[Any, int]) -> None:
+        self.working_memory.inhibited_actions = val
+
+    @property
+    def prior_avatar_feature(self) -> int | None:
+        return self.working_memory.prior_avatar_feature
+
+    @prior_avatar_feature.setter
+    def prior_avatar_feature(self, val: int | None) -> None:
+        self.working_memory.prior_avatar_feature = val
+
+    @property
+    def entity_action_failed_positions(self) -> dict[Any, set[tuple[int, int]]]:
+        return self.working_memory.entity_action_failed_positions
+
+    @entity_action_failed_positions.setter
+    def entity_action_failed_positions(self, val: dict[Any, set[tuple[int, int]]]) -> None:
+        self.working_memory.entity_action_failed_positions = val
+
+    @property
+    def immobile_entity_actions(self) -> set[Any]:
+        return self.working_memory.immobile_entity_actions
+
+    @immobile_entity_actions.setter
+    def immobile_entity_actions(self, val: set[Any]) -> None:
+        self.working_memory.immobile_entity_actions = val
+
+    @property
+    def action_affordances(self) -> dict[Any, ActionAffordance]:
+        return self.working_memory.action_affordances
+
+    @action_affordances.setter
+    def action_affordances(self, val: dict[Any, ActionAffordance]) -> None:
+        self.working_memory.action_affordances = val
+
+    @property
+    def focus_switch_actions(self) -> set[Any]:
+        return self.working_memory.focus_switch_actions
+
+    @focus_switch_actions.setter
+    def focus_switch_actions(self, val: set[Any]) -> None:
+        self.working_memory.focus_switch_actions = val
+
+    @property
+    def last_non_displacement_action(self) -> Any | None:
+        return self.working_memory.last_non_displacement_action
+
+    @last_non_displacement_action.setter
+    def last_non_displacement_action(self, val: Any | None) -> None:
+        self.working_memory.last_non_displacement_action = val
+
+    @property
+    def level_epistemic_probes(self) -> int:
+        return self.working_memory.level_epistemic_probes
+
+    @level_epistemic_probes.setter
+    def level_epistemic_probes(self, val: int) -> None:
+        self.working_memory.level_epistemic_probes = val
+
+    @property
+    def total_epistemic_probes(self) -> int:
+        return self.working_memory.total_epistemic_probes
+
+    @total_epistemic_probes.setter
+    def total_epistemic_probes(self, val: int) -> None:
+        self.working_memory.total_epistemic_probes = val
 
     def register_target_scorer(self, scorer: Any) -> None:
         """Register an external or domain-specific target candidate scorer."""
@@ -553,6 +920,168 @@ class AutonomousEpistemicEngine:
         """Unregister an external deliberation arbitration policy."""
         if policy in self.deliberation_policies:
             self.deliberation_policies.remove(policy)
+
+    def attach_tiered_workspace(
+        self,
+        tiered: TieredWorkspace,
+        goal_id: str = "main_goal",
+        hydrate_persistent: bool = True,
+    ) -> TaskFrame:
+        """Connect the epistemic engine to an event-sourced 4-tier cognitive workspace.
+
+        Establishes an active task frame in the Working tier and binds the TransactionManager
+        as the single commit authority for atomic graph mutations.
+        Optionally hydrates learned skills, goals, barriers, and axioms from the Persistent tier.
+        """
+        self.tiered_workspace = tiered
+        frame = tiered.create_task_frame(goal_id=goal_id)
+        self.active_task_frame = frame
+        self.transaction_manager = TransactionManager(workspace=frame.workspace)
+        logger.info(
+            "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",
+            frame.frame_id,
+            goal_id,
+        )
+        if hydrate_persistent:
+            self.hydrate_from_persistent_tier()
+        return frame
+
+    def hydrate_from_persistent_tier(self) -> int:
+        """Hydrate internal memory stores (working memory, symbolic theory, visuospatial memory)
+        from nodes stored in the persistent tier of the TieredWorkspace.
+
+        Returns the number of restored knowledge items.
+        """
+        if self.tiered_workspace is None:
+            return 0
+
+        persistent_ws = self.tiered_workspace.persistent
+        res = persistent_ws.query(GraphQuery(limit=9999))
+        hydrated_count = 0
+
+        for node in res.nodes:
+            nid = node.id
+            ntype = getattr(node, "node_type", "")
+            props = getattr(node, "properties", {}) or {}
+
+            # 1. Restore Procedural Skills
+            if nid.startswith("procedural_skill_") or ntype == "skill":
+                schema_name = (
+                    props.get("schema_name")
+                    or getattr(node, "name", "")
+                    or getattr(node, "label", "")
+                    or nid.removeprefix("procedural_skill_")
+                )
+                if schema_name not in self.working_memory.procedural_library:
+                    from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
+
+                    class RestoredSkill(DeclarativeNeuroSymbolicSkill):
+                        skill_name = schema_name
+                        description = (
+                            getattr(node, "description", "")
+                            or f"Restored persistent skill {schema_name}"
+                        )
+
+                    self.working_memory.register_procedural_skill(schema_name, RestoredSkill())
+                    hydrated_count += 1
+                    logger.info(
+                        "AutonomousEpistemicEngine: Hydrated persistent skill '%s'", schema_name
+                    )
+
+            # 2. Restore Semantic Goal Ontology
+            elif nid.startswith("ontology_goal_"):
+                feat = props.get("feature_id")
+                if feat is None:
+                    try:
+                        feat = int(nid.removeprefix("ontology_goal_"))
+                    except ValueError:
+                        pass
+                if feat is not None:
+                    self.symbolic_theory.goal_features.add(int(feat))
+                    self.symbolic_theory.candidate_goal_features.add(int(feat))
+                    hydrated_count += 1
+                    logger.info(
+                        "AutonomousEpistemicEngine: Hydrated persistent goal feature %s", feat
+                    )
+
+            # 3. Restore Learned Spatial Goals
+            elif nid.startswith("learned_goal_") or ntype == "goal":
+                pos = props.get("position")
+                if pos and len(pos) == 2:
+                    gp = (int(pos[0]), int(pos[1]))
+                else:
+                    parts = nid.removeprefix("learned_goal_").split("_")
+                    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                        gp = (int(parts[0]), int(parts[1]))
+                    else:
+                        gp = None
+                if gp is not None:
+                    self.record_learned_goal(gp)
+                    hydrated_count += 1
+
+            # 4. Restore Learned Barriers
+            elif nid.startswith("learned_barrier_") or ntype == "constraint":
+                pos = props.get("position")
+                if pos and len(pos) == 2:
+                    bp = (int(pos[0]), int(pos[1]))
+                else:
+                    parts = nid.removeprefix("learned_barrier_").split("_")
+                    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                        bp = (int(parts[0]), int(parts[1]))
+                    else:
+                        bp = None
+                if bp is not None:
+                    self.record_learned_barrier(bp)
+                    hydrated_count += 1
+
+            # 5. Restore Spelke Physical Axioms
+            elif nid.startswith("spelke_axiom_"):
+                from hbllm.hcir.world.cortex_causal import CausalPredicate, SpelkePhysicalAxiom
+
+                axiom_name = props.get("axiom_name") or nid.removeprefix("spelke_axiom_")
+                for ax in SpelkePhysicalAxiom:
+                    if ax.value == axiom_name:
+                        if ax not in self.symbolic_theory.spelke_axioms:
+                            self.symbolic_theory.spelke_axioms[ax] = CausalPredicate(
+                                variable=f"spelke_axiom_{ax.value}",
+                                operator="==",
+                                value="INVARIANT",
+                                relation="core_knowledge_physics",
+                                target_entity=ax.value,
+                            )
+                            hydrated_count += 1
+                        break
+
+        logger.info(
+            "AutonomousEpistemicEngine: Hydrated %d persistent knowledge items", hydrated_count
+        )
+        return hydrated_count
+
+    def commit_working_memory_transactions(self) -> HCIRTransaction | None:
+        """Mirror current epistemic state and internal memory to the active task frame via TransactionManager.
+
+        Atomic operations produced by to_transaction_operations() are bundled into an HCIRTransaction
+        and committed to the active TaskFrame workspace.
+        """
+        if self.transaction_manager is None or self.active_task_frame is None:
+            return None
+
+        ops = self.to_transaction_operations()
+        if not ops:
+            return None
+
+        tx = HCIRTransaction(
+            author="AutonomousEpistemicEngine",
+            operations=ops,
+        )
+        committed_tx = self.transaction_manager.commit(tx)
+
+        if self.tiered_workspace is not None:
+            self.tiered_workspace.notify_commit()
+
+        # Clear transient pending buffer
+        self.pending_transactions.clear()
+        return committed_tx
 
     def evaluate_truth_value(
         self,
@@ -608,6 +1137,10 @@ class AutonomousEpistemicEngine:
             )
             self.phase_history.append((old, new_phase, reason))
             self._phase = new_phase
+
+    def shift_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
+        """Alias for transition_to_phase."""
+        self.transition_to_phase(new_phase, reason=reason)
 
     def assess_evidence_sufficiency(
         self,
@@ -762,6 +1295,17 @@ class AutonomousEpistemicEngine:
                     deltas[act] = d
         return deltas
 
+    @action_deltas.setter
+    def action_deltas(self, val: dict[Any, tuple[int, int]]) -> None:
+        """Allow explicit initialization of calibrated displacement actions."""
+        for act, d in val.items():
+            self.action_dynamics[act] = ActionDynamicsModel(
+                action_id=act,
+                delta_r=d[0],
+                delta_c=d[1],
+                probes_tested=1,
+            )
+
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
         return action in self.action_dynamics
@@ -888,7 +1432,7 @@ class AutonomousEpistemicEngine:
         and survived, or classified by the symbolic theory (walkable, barrier,
         goal, candidate goal, cargo). Anything else is epistemically unknown.
         """
-        if feat == bg or feat in self.verified_safe_features:
+        if feat == bg or self.symbolic_theory.is_walkable(feat):
             return False
         av = self.avatar_features or (
             {self.avatar_feature} if self.avatar_feature is not None else set()
@@ -925,8 +1469,8 @@ class AutonomousEpistemicEngine:
     def set_current_level(self, level: int) -> None:
         if self._current_level != level:
             self._current_level = level
-            self.failed_transitions = self.level_failed_transitions.setdefault(level, set())
-            self.learned_barriers = self.level_learned_barriers.setdefault(level, set())
+            self.working_memory.visuospatial.current_level = level
+            self.habenular_ior.current_level = level
             self.hazard_tracker.static_lethal_positions = self.level_lethal_positions.setdefault(
                 level, set()
             )
@@ -1087,6 +1631,11 @@ class AutonomousEpistemicEngine:
         if action_data is None:
             action_data = self.last_action_data
         prev_av_pos = self.avatar_pos
+
+        # Synthesize active subgoal schema into reusable procedural skill upon level win
+        if is_win and self.working_memory.active_schema is not None:
+            self.working_memory.synthesize_skill_from_schema(self.working_memory.active_schema)
+
         EpistemicFeedbackAssimilator.assimilate(
             self,
             curr_grid,
@@ -1133,6 +1682,38 @@ class AutonomousEpistemicEngine:
                 is_death_or_reset=is_lost,
             )
             self._prev_oriented_threats = []
+
+        if is_win and self.tiered_workspace is not None and self.active_task_frame is not None:
+            # Commit working memory state to the active task frame
+            self.commit_working_memory_transactions()
+
+            # Promote verified goals, ontology, and procedural skills to WorkspaceTier.PERSISTENT
+            for goal_feat in self.symbolic_theory.goal_features:
+                node_id = f"ontology_goal_{goal_feat}"
+                self.tiered_workspace.promote(
+                    node_id=node_id,
+                    from_tier=WorkspaceTier.WORKING,
+                    to_tier=WorkspaceTier.PERSISTENT,
+                )
+
+            all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
+            for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+                all_goals.update(g_set)
+            for goal_pos in all_goals:
+                node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+                self.tiered_workspace.promote(
+                    node_id=node_id,
+                    from_tier=WorkspaceTier.WORKING,
+                    to_tier=WorkspaceTier.PERSISTENT,
+                )
+
+            for schema_name in self.working_memory.procedural_library:
+                node_id = f"procedural_skill_{schema_name}"
+                self.tiered_workspace.promote(
+                    node_id=node_id,
+                    from_tier=WorkspaceTier.WORKING,
+                    to_tier=WorkspaceTier.PERSISTENT,
+                )
 
         # Attribute environmental mutations to active object interaction
         active_obj_id = getattr(self.object_planner, "active_target_object_id", None)
@@ -1428,58 +2009,104 @@ class AutonomousEpistemicEngine:
         """Record learned barrier locally and propose atomic state transaction."""
         if barrier_pos not in self.learned_barriers:
             self.learned_barriers.add(barrier_pos)
+            bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"
+            bnode = ConstraintNode(
+                id=bid,
+                name=f"barrier_{barrier_pos[0]}_{barrier_pos[1]}",
+                description=f"Learned impenetrable barrier at {barrier_pos}",
+                target=f"position_{barrier_pos[0]}_{barrier_pos[1]}",
+                properties={"position": list(barrier_pos), "role": "BARRIER"},
+            )
             self.pending_transactions.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}",
-                    node_data={"position": list(barrier_pos), "role": "BARRIER"},
+                    node_id=bid,
+                    node_data=bnode.model_dump(),
                 )
             )
 
     def record_learned_goal(self, goal_pos: tuple[int, int]) -> None:
         """Record learned goal locally and propose atomic state transaction."""
+        self.working_memory.visuospatial.level_learned_goals.setdefault(
+            self.current_level, set()
+        ).add(goal_pos)
         if goal_pos not in self.learned_goal_positions:
             self.learned_goal_positions.add(goal_pos)
+            gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+
+            gnode = GoalNode(
+                id=gid,
+                description=f"Learned goal location at {goal_pos}",
+                properties={"position": list(goal_pos), "role": "GOAL"},
+            )
             self.pending_transactions.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=f"learned_goal_{goal_pos[0]}_{goal_pos[1]}",
-                    node_data={"position": list(goal_pos), "role": "GOAL"},
+                    node_id=gid,
+                    node_data=gnode.model_dump(),
                 )
             )
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Convert epistemic engine state and grounded facts into transactional HCIR mutations."""
+        """Convert epistemic engine state, internal memory, and knowledge base into transactional HCIR mutations."""
+        node_id = "autonomous_epistemic_engine"
+        engine_node = ObservationNode(
+            id=node_id,
+            description="Autonomous epistemic engine executive telemetry",
+            sensor_source="autonomous_epistemic_engine",
+            payload={
+                "phase": str(self._phase),
+                "step_counter": self.step_counter,
+                "avatar_pos": list(self.avatar_pos) if self.avatar_pos else None,
+                "avatar_feature": self._avatar_feature,
+                "avatar_features": sorted(self.avatar_features),
+                "tested_actions": sorted(self.tested_actions),
+                "exploration_budget": self.exploration_budget,
+                "consecutive_plan_failures": self.consecutive_plan_failures,
+            },
+        )
         ops = [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
-                node_id="autonomous_epistemic_engine",
-                node_data={
-                    "phase": str(self._phase),
-                    "step_counter": self.step_counter,
-                    "avatar_pos": list(self.avatar_pos) if self.avatar_pos else None,
-                    "avatar_feature": self._avatar_feature,
-                    "avatar_features": sorted(self.avatar_features),
-                    "tested_actions": sorted(self.tested_actions),
-                    "exploration_budget": self.exploration_budget,
-                    "consecutive_plan_failures": self.consecutive_plan_failures,
-                },
+                node_id=node_id,
+                node_data=engine_node.model_dump(),
             )
         ]
-        for goal_pos in self.learned_goal_positions:
+        ops.extend(self.pending_transactions)
+        ops.extend(self.symbolic_theory.to_transaction_operations())
+        ops.extend(self.working_memory.to_transaction_operations())
+        all_goal_positions = set(self.learned_goal_positions)
+        for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+            all_goal_positions.update(g_set)
+        for goal_pos in all_goal_positions:
+            gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+            gnode = GoalNode(
+                id=gid,
+                description=f"Learned goal location at {goal_pos}",
+                properties={"position": list(goal_pos), "role": "GOAL"},
+            )
             ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=f"learned_goal_{goal_pos[0]}_{goal_pos[1]}",
-                    node_data={"position": list(goal_pos), "role": "GOAL"},
+                    node_id=gid,
+                    node_data=gnode.model_dump(),
                 )
             )
+
         for barrier_pos in self.learned_barriers:
+            bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"
+            bnode = ConstraintNode(
+                id=bid,
+                name=f"barrier_{barrier_pos[0]}_{barrier_pos[1]}",
+                description=f"Learned impenetrable barrier at {barrier_pos}",
+                target=f"position_{barrier_pos[0]}_{barrier_pos[1]}",
+                properties={"position": list(barrier_pos), "role": "BARRIER"},
+            )
             ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}",
-                    node_data={"position": list(barrier_pos), "role": "BARRIER"},
+                    node_id=bid,
+                    node_data=bnode.model_dump(),
                 )
             )
         return ops

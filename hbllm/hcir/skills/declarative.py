@@ -816,12 +816,14 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
     """Base class for skills specified via declarative neuro-symbolic grammar.
 
     Subclasses define:
+    - `description`: Optional natural language or symbolic description of the skill.
     - `signature`: A composable `SymbolicPredicate` defining invariant recognition.
     - `program`: An optional `SubgoalSequence` defining the high-level intent plan.
     - Subclasses can optionally implement `solve(ctx)` to synthesize concrete
       actions using core mathematical/spatial solvers.
     """
 
+    description: str = ""
     signature: SymbolicPredicate = AllOf()
     program: SubgoalSequence | None = None
 
@@ -889,3 +891,46 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
             metadata=metadata,
         )
         return self.solve(ctx, current_level=current_level)
+
+
+class CompositeDeclarativeSkill(DeclarativeNeuroSymbolicSkill):
+    """Hierarchically composed macro-skill sequencing multiple declarative sub-skills.
+
+    Combines sub-skill signatures via composable conjunction (AllOf) and
+    concatenates their SubgoalSequence programs into a unified macro-program.
+    """
+
+    def __init__(
+        self,
+        skills: Sequence[DeclarativeNeuroSymbolicSkill],
+        skill_name: str = "composite_macro_skill",
+        description: str = "",
+    ) -> None:
+        self.sub_skills = list(skills)
+        self.skill_name = skill_name
+        self.description = (
+            description
+            or f"Macro-skill composed of {len(skills)} sub-skills: {[getattr(s, 'skill_name', str(s)) for s in skills]}"
+        )
+
+        signatures = [s.signature for s in skills if getattr(s, "signature", None) is not None]
+        self.signature = AllOf(*signatures) if signatures else AllOf()
+
+        all_subgoals = []
+        for s in skills:
+            prog = getattr(s, "program", None)
+            if prog is not None and hasattr(prog, "subgoals"):
+                all_subgoals.extend(prog.subgoals)
+        self.program = SubgoalSequence(*all_subgoals) if all_subgoals else None
+
+    def solve(
+        self, ctx: SkillEvaluationContext, current_level: int = 0
+    ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
+        """Execute sub-skills sequentially, concatenating actions."""
+        actions: list[Any] = []
+        for s in self.sub_skills:
+            if hasattr(s, "solve"):
+                acts = s.solve(ctx, current_level=current_level)
+                if acts:
+                    actions.extend(acts)
+        return actions

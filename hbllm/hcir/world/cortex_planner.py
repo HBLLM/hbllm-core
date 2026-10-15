@@ -30,6 +30,7 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
+from hbllm.hcir.world.prefrontal_working_memory import HeldItem
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
 if TYPE_CHECKING:
@@ -172,27 +173,19 @@ class EpistemicGoalScheduler:
             feat_instance_count = sum(1 for ent in entities if ent.feature_id == e.feature_id)
             is_pervasive_substrate = (
                 e.feature_id in engine.symbolic_theory.walkable_features
-                or e.feature_id in engine.verified_safe_features
             ) and (feat_instance_count > 2 or feat_total_cells > 64)
             if is_pervasive_substrate:
                 engine.symbolic_theory.goal_features.discard(e.feature_id)
                 continue
 
             is_goal_candidate = (
-                (
-                    e.feature_id in engine.symbolic_theory.goal_features
-                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
-                )
-                or (e.feature_id in engine.learned_goal_features and 1 <= e.area <= 64)
-                or e.role == EntityRole.GOAL
-            )
+                e.feature_id in engine.symbolic_theory.goal_features
+                and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+            ) or e.role == EntityRole.GOAL
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
-                    if (
-                        e.feature_id in engine.symbolic_theory.goal_features
-                        or e.feature_id in engine.learned_goal_features
-                    ):
+                    if e.feature_id in engine.symbolic_theory.goal_features:
                         new_learned_positions.add(e.grid_pos)
 
         # Object Permanence: Retain known goal positions if currently occluded by mobile entities
@@ -204,6 +197,36 @@ class EpistemicGoalScheduler:
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
             goals = list(confirmed_goals)
+
+        # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
+        wm = getattr(engine, "working_memory", None)
+        if wm is not None:
+            if wm.active_schema is not None and not wm.active_schema.is_finished:
+                if wm.active_schema.is_current_stage_satisfied(
+                    avatar_pos=avatar_pos,
+                    held_items=wm.held_items,
+                    unlocked_barriers=wm.unlocked_barriers,
+                ):
+                    wm.active_schema.advance()
+
+                curr_st = wm.active_schema.current_stage
+                if curr_st is not None and curr_st.target_positions:
+                    for sp in reversed(list(curr_st.target_positions)):
+                        if 0 <= sp[0] < H and 0 <= sp[1] < W:
+                            if sp in goals:
+                                goals.remove(sp)
+                            goals.insert(0, sp)
+            elif wm.active_schema is None and wm.procedural_library:
+                matched = wm.find_matching_skill(available_actions=available_actions)
+                if matched is not None:
+                    skill_name, _ = matched
+                    schema = wm.instantiate_skill_as_schema(skill_name)
+                    if schema and schema.current_stage and schema.current_stage.target_positions:
+                        for sp in reversed(list(schema.current_stage.target_positions)):
+                            if 0 <= sp[0] < H and 0 <= sp[1] < W:
+                                if sp in goals:
+                                    goals.remove(sp)
+                                goals.insert(0, sp)
 
         # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
         if engine.subgoal_stack.has_pending_goals:
@@ -551,9 +574,7 @@ class MentalSimulationPlanner:
             if 0 <= r < H and 0 <= c < W:
                 val = int(curr_grid[r, c])
                 if (r, c) in engine.hazard_tracker.static_lethal_positions or (
-                    val != bg
-                    and not engine.symbolic_theory.is_walkable(val)
-                    and val not in engine.verified_safe_features
+                    val != bg and not engine.symbolic_theory.is_walkable(val)
                 ):
                     static_barriers.add((r, c))
 
@@ -578,7 +599,6 @@ class MentalSimulationPlanner:
                 feat_int == bg
                 or feat_int in av_feats
                 or feat_int in engine.symbolic_theory.walkable_features
-                or feat_int in engine.verified_safe_features
             ):
                 continue
             if engine.avatar_pos is not None:
@@ -603,7 +623,7 @@ class MentalSimulationPlanner:
                 static_barriers.add((r, c))
 
         # Corridor Manifold Continuity
-        walkable_and_safe = engine.symbolic_theory.walkable_features | engine.verified_safe_features
+        walkable_and_safe = engine.symbolic_theory.walkable_features
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
         if not bg_is_impassable_void:
             bg_count = int(feat_counts.get(bg, 0))
@@ -639,6 +659,14 @@ class MentalSimulationPlanner:
         all_lethals = engine.current_level_lethal_positions
         safe_goals = set(goals) - all_lethals
         static_barriers.difference_update(safe_goals)
+        goal_features = (
+            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
+        )
+        for gf in goal_features:
+            if gf != bg and gf not in av_feats:
+                g_pts = np.argwhere(curr_grid == gf)
+                for gr_idx, gc_idx in g_pts:
+                    static_barriers.discard((int(gr_idx), int(gc_idx)))
         if engine.avatar_pos is not None:
             ar, ac = engine.avatar_pos
             av_footprint = set()
@@ -651,7 +679,7 @@ class MentalSimulationPlanner:
             static_barriers.difference_update(av_footprint)
 
         # Empirical Walkability Invariant: Verified walkable/safe features cannot be static barriers
-        for feat_w in engine.symbolic_theory.walkable_features | engine.verified_safe_features:
+        for feat_w in engine.symbolic_theory.walkable_features:
             if feat_w != bg:
                 w_pts = np.argwhere(curr_grid == feat_w)
                 for wr, wc in w_pts:
@@ -849,15 +877,16 @@ class MentalSimulationPlanner:
         pushable_blocks: list[tuple[int, int]] = [
             e.grid_pos
             for e in entities
-            if (
+            if e.feature_id not in av_feats
+            and e.feature_id != bg
+            and e.grid_pos not in goals
+            and (
                 engine.symbolic_theory.is_cargo(e)
                 or e.feature_id in engine.learned_cargo_features
                 or (
                     e.role == EntityRole.MANIPULABLE
                     and 1 <= e.area <= 64
-                    and e.feature_id != bg
-                    and e.feature_id not in av_feats
-                    and e.grid_pos not in goals
+                    and e.feature_id not in engine.mobile_threat_features
                 )
             )
             and e.feature_id not in engine.hazard_tracker.known_lethal_features
@@ -977,11 +1006,21 @@ class MentalSimulationPlanner:
                             threat_map[(rr_t, cc_t)] = t
 
         init_threats = frozenset(threat_cells)
-        init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(
+        patrol_items: set[tuple[tuple[int, int], tuple[int, int]]] = {
             (t.pos, t.facing)
             for t in oriented_threats
             if t.feature_id in engine.mobile_threat_features and t.facing != (0, 0)
-        )
+        }
+        for proj in engine.collision_cones.projected_trajectories:
+            if (
+                proj.feature_id in engine.mobile_threat_features
+                or proj.feature_id in engine.hazard_tracker.known_lethal_features
+            ):
+                vr, vc = proj.velocity
+                if vr != 0 or vc != 0:
+                    f = (int(np.sign(vr)), int(np.sign(vc)))
+                    patrol_items.add((proj.initial_pos, f))
+        init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(patrol_items)
 
         def advance_patrols(
             patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]],
@@ -1074,9 +1113,13 @@ class MentalSimulationPlanner:
         is_block_delivery = bool(
             1 <= len(pushable_blocks) <= 16
             and any(
-                engine.symbolic_theory.is_cargo(e)
-                or e.feature_id in engine.learned_cargo_features
-                or e.role == EntityRole.MANIPULABLE
+                (
+                    engine.symbolic_theory.is_cargo(e)
+                    or e.feature_id in engine.learned_cargo_features
+                    or e.role == EntityRole.MANIPULABLE
+                )
+                and e.feature_id not in av_feats
+                and e.grid_pos in pushable_blocks
                 for e in entities
             )
         )
@@ -1085,7 +1128,12 @@ class MentalSimulationPlanner:
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
         )
-        has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
+        has_temporal = (
+            bool(init_patrols)
+            or bool(init_chasers)
+            or has_periodic
+            or bool(engine.collision_cones.projected_trajectories)
+        )
 
         # ─────────────────────────────────────────────────────────────────────
         # Fast Topological Geodesic & Kinematics Router (Substrate Layer)
@@ -1161,14 +1209,68 @@ class MentalSimulationPlanner:
 
         acc_monitor = engine.working_memory.acc_conflict
         acc_weight = acc_monitor.compute_heuristic_weight(1.0) if acc_monitor else 1.0
-        # Precompute Vectorized 2D Distance Field Matrix for O(1) heuristic lookup
+        if acc_monitor and acc_monitor.active_conflict and start_pos is not None:
+            traversable_cells: set[tuple[int, int]] = set()
+            for r_t in range(H):
+                for c_t in range(W):
+                    if (r_t, c_t) not in static_barriers and (r_t, c_t) not in _grid_walls:
+                        traversable_cells.add((r_t, c_t))
+            first_goal = list(goals)[0] if goals else start_pos
+            acc_monitor.synthesize_perimeter_detour(
+                current_pos=start_pos,
+                goal_pos=first_goal,
+                grid_shape=(H, W),
+                traversable=traversable_cells,
+            )
+        # Gather all physical cells of confirmed/candidate goal entities
+        all_goal_cells: set[tuple[int, int]] = set(goals)
+        goal_features = (
+            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
+        )
+        for gf in goal_features:
+            if gf != bg and gf not in av_feats:
+                for gr_idx, gc_idx in np.argwhere(curr_grid == gf):
+                    all_goal_cells.add((int(gr_idx), int(gc_idx)))
+        for e in entities:
+            if (
+                engine.symbolic_theory.is_goal(e)
+                or e.role == EntityRole.GOAL
+                or e.feature_id in goal_features
+            ):
+                for cr, cc in e.properties.get("cells", [e.grid_pos]):
+                    all_goal_cells.add((int(cr), int(cc)))
+
+        # Precompute Vectorized 2D Geodesic Distance Field Matrix for O(1) heuristic lookup
         grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
         if goals and not is_block_delivery:
-            r_indices = np.arange(H, dtype=np.int32)[:, None]
-            c_indices = np.arange(W, dtype=np.int32)[None, :]
-            for gr, gc in goals:
-                d_mat = np.abs(r_indices - gr) + np.abs(c_indices - gc)
-                grid_dist_field = np.minimum(grid_dist_field, d_mat)
+            b_step = step_size if step_size > 1 else 1
+            bfs_q: deque[tuple[int, int]] = deque()
+            for gr, gc in all_goal_cells:
+                if 0 <= gr < H and 0 <= gc < W:
+                    grid_dist_field[gr, gc] = 0.0
+                    bfs_q.append((gr, gc))
+
+            while bfs_q:
+                cr, cc = bfs_q.popleft()
+                cd = grid_dist_field[cr, cc]
+                for dr_b, dc_b in [(-b_step, 0), (b_step, 0), (0, -b_step), (0, b_step)]:
+                    nr_b, nc_b = cr + dr_b, cc + dc_b
+                    if 0 <= nr_b < H and 0 <= nc_b < W:
+                        if (nr_b, nc_b) in _grid_walls and (nr_b, nc_b) not in all_goal_cells:
+                            continue
+                        if grid_dist_field[nr_b, nc_b] > cd + 1.0:
+                            grid_dist_field[nr_b, nc_b] = cd + 1.0
+                            bfs_q.append((nr_b, nc_b))
+
+            unreached = grid_dist_field >= 999999.0
+            if np.any(unreached):
+                r_indices = np.arange(H, dtype=np.int32)[:, None]
+                c_indices = np.arange(W, dtype=np.int32)[None, :]
+                for gr, gc in all_goal_cells:
+                    d_mat = (np.abs(r_indices - gr) + np.abs(c_indices - gc)) / float(b_step)
+                    grid_dist_field[unreached] = np.minimum(
+                        grid_dist_field[unreached], d_mat[unreached]
+                    )
 
         def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
             if is_block_delivery and blocks:
@@ -1198,7 +1300,12 @@ class MentalSimulationPlanner:
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
         )
-        has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
+        has_temporal = (
+            bool(init_patrols)
+            or bool(init_chasers)
+            or has_periodic
+            or bool(engine.collision_cones.projected_trajectories)
+        )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
             has_temporal=has_temporal,
             has_threats=bool(init_threats),
@@ -1319,7 +1426,11 @@ class MentalSimulationPlanner:
                     continue
                 visited_states.add(state_key)
 
-                if not is_block_delivery and cur_pos in goals and path_len > 0:
+                if (
+                    not is_block_delivery
+                    and (cur_pos in goals or cur_pos in all_goal_cells)
+                    and path_len > 0
+                ):
                     path = _reconstruct_path(node_id)
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
@@ -1343,7 +1454,7 @@ class MentalSimulationPlanner:
 
                 # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
                 bump_wait_action: Any | None = non_disp_wait_action
-                if bump_wait_action is None and (cur_patrols or has_periodic):
+                if bump_wait_action is None and (cur_patrols or has_periodic or has_temporal):
                     for a_disp in available_actions:
                         dyn = engine.action_dynamics.get(a_disp)
                         if dyn is not None and dyn.is_displacement_action():
@@ -1358,7 +1469,7 @@ class MentalSimulationPlanner:
                                 break
 
                 if (
-                    (cur_patrols or has_periodic)
+                    (cur_patrols or has_periodic or has_temporal)
                     and bump_wait_action is not None
                     and consecutive_waits < max_consecutive_waits
                 ):
@@ -1374,26 +1485,38 @@ class MentalSimulationPlanner:
                         real_act = act
                     if (
                         not is_wait
+                        and not has_temporal
                         and path_len == 0
-                        and (
-                            engine.inhibited_actions.get(act, 0) > 0
-                            or engine.working_memory.habenular_ior.is_action_inhibited(cur_pos, act)
-                        )
+                        and engine.inhibited_actions.get(act, 0) > 0
                     ):
                         continue
+
                     if not is_wait and (
                         (cur_pos, act) in engine.failed_transitions
                         or engine.working_memory.habenular_ior.is_action_inhibited(cur_pos, act)
                     ):
                         dest_r, dest_c = cur_pos[0] + dr, cur_pos[1] + dc
-                        if not (
-                            has_periodic
-                            and (dest_r, dest_c) in engine.hazard_tracker.periodic_cells
-                        ):
+                        is_temporal_dynamic_cell = (
+                            (
+                                has_periodic
+                                and (dest_r, dest_c) in engine.hazard_tracker.periodic_cells
+                            )
+                            or bool(cur_patrols)
+                            or bool(cur_chasers)
+                        )
+                        if not is_temporal_dynamic_cell:
                             continue
                     nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
                     if not (0 <= nr < H and 0 <= nc < W):
                         continue
+
+                    # Core Knowledge Physics: Evaluate Spelke Continuity along candidate path step
+                    if hasattr(engine.symbolic_theory, "evaluates_spelke_continuity"):
+                        active_barriers = static_barriers - cur_open
+                        if not engine.symbolic_theory.evaluates_spelke_continuity(
+                            cur_pos, (nr, nc), active_barriers, (H, W)
+                        ):
+                            continue
 
                     step_r = int(np.sign(dr))
                     step_c = int(np.sign(dc))
@@ -1409,11 +1532,17 @@ class MentalSimulationPlanner:
                             )
                             if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
                                 pass
+                            elif cell_feat in goal_features or (kr, kc) in all_goal_cells:
+                                pass
                             else:
                                 ray_blocked = True
                                 break
                         if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:
-                            if int(curr_grid[kr, kc]) == bg and (kr, kc) not in goals:
+                            if (
+                                int(curr_grid[kr, kc]) == bg
+                                and (kr, kc) not in goals
+                                and (kr, kc) not in all_goal_cells
+                            ):
                                 ray_blocked = True
                                 break
                     if ray_blocked:
@@ -1425,9 +1554,7 @@ class MentalSimulationPlanner:
                         if sim_step > rem_budget + 8:
                             continue
 
-                    walkable_feats = (
-                        engine.symbolic_theory.walkable_features | engine.verified_safe_features
-                    )
+                    walkable_feats = engine.symbolic_theory.walkable_features
                     if engine.hazard_tracker.is_hazard_at(
                         nr,
                         nc,
@@ -1437,10 +1564,13 @@ class MentalSimulationPlanner:
                         walkable_features=walkable_feats,
                     ):
                         continue
-                    if engine.collision_cones.is_collision_hazard(
-                        nr, nc, sim_step, ignored_features=engine.mobile_threat_features
-                    ):
-                        continue
+                    collision_cone_penalty = 0.0
+                    if engine.collision_cones.is_collision_hazard(nr, nc, sim_step):
+                        if not _relaxed_safety:
+                            had_relaxable_block = True
+                            continue
+                        else:
+                            collision_cone_penalty = 30.0
                     is_flanked_step = (
                         (nr, nc) in cur_threats
                         and threat_map.get((nr, nc)) is not None
@@ -1462,11 +1592,9 @@ class MentalSimulationPlanner:
                         if t is not None:
                             living_gaze.add(t.gaze_pos)
 
-                    # Stationary sightlines / lines of fire are strictly lethal — never relaxable
                     if (nr, nc) in living_gaze:
                         continue
 
-                    gaze_penalty = 0.0
                     threat_penalty = 0.0
                     new_threats = cur_threats
                     if (nr, nc) in cur_threats:
@@ -1557,6 +1685,13 @@ class MentalSimulationPlanner:
                     new_pos = (nr, nc)
 
                     if (nr, nc) in cur_blocks:
+                        # Core Knowledge Physics: Evaluate Spelke Contact Causality (must be adjacent)
+                        if hasattr(engine.symbolic_theory, "evaluates_spelke_contact"):
+                            if not engine.symbolic_theory.evaluates_spelke_contact(
+                                cur_pos, (nr, nc), adjacency="4-way"
+                            ):
+                                continue
+
                         pushed_r = nr + step_r * step_size
                         pushed_c = nc + step_c * step_size
                         if not (0 <= pushed_r < H and 0 <= pushed_c < W):
@@ -1565,6 +1700,13 @@ class MentalSimulationPlanner:
                             continue
                         if (pushed_r, pushed_c) in cur_blocks:
                             continue
+
+                        # Core Knowledge Physics: Evaluate Spelke Continuity for pushed cargo trajectory
+                        if hasattr(engine.symbolic_theory, "evaluates_spelke_continuity"):
+                            if not engine.symbolic_theory.evaluates_spelke_continuity(
+                                (nr, nc), (pushed_r, pushed_c), _grid_walls, (H, W)
+                            ):
+                                continue
                         push_ray_blocked = False
                         for pk in range(1, step_size + 1):
                             pkr = nr + step_r * pk
@@ -1660,8 +1802,8 @@ class MentalSimulationPlanner:
                         + patrol_proximity_cost
                         + chaser_proximity_cost
                         + wait_cost
-                        + gaze_penalty
                         + threat_penalty
+                        + collision_cone_penalty
                         + swr_penalty
                         + habenular_penalty
                     )
@@ -1751,7 +1893,7 @@ class MentalSimulationPlanner:
         """Recursive multi-stage subgoal decomposition for locked barrier doors and remote switches."""
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
-        walkable_and_safe = engine.symbolic_theory.walkable_features | engine.verified_safe_features
+        walkable_and_safe = engine.symbolic_theory.walkable_features
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
         cur_pos = start_pos
         open_barriers: set[tuple[int, int]] = set()
@@ -1933,6 +2075,58 @@ class MentalSimulationPlanner:
 
             if not candidate_triggers:
                 break
+
+            if len(candidate_triggers) > 1:
+                c_subgoals = [
+                    FrontopolarSubgoal(
+                        subgoal_id=f"cand_trig_{c_pos[0]}_{c_pos[1]}",
+                        subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                        target_entity_pos=c_pos,
+                        target_destination=c_pos,
+                        priority=float(score),
+                    )
+                    for c_pos, _, score, _ in candidate_triggers
+                ]
+                held_set: set[int] = set()
+                if hasattr(engine.working_memory, "held_feature_ids"):
+                    held_set = set(engine.working_memory.held_feature_ids)
+                elif (
+                    hasattr(engine.working_memory, "held_items")
+                    and engine.working_memory.held_items
+                ):
+                    items = engine.working_memory.held_items
+                    if isinstance(items, dict):
+                        held_set = {
+                            int(k)
+                            if isinstance(k, (int, np.integer))
+                            else getattr(v, "feature_id", 0)
+                            for k, v in items.items()
+                        }
+                    else:
+                        held_set = {
+                            item.feature_id if isinstance(item, HeldItem) else int(item)
+                            for item in items
+                        }
+                mcts_res = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
+                    avatar_pos=cur_pos,
+                    candidate_subgoals=c_subgoals,
+                    goal_positions=goals,
+                    barriers=effective_barriers,
+                    grid_bounds=(H, W),
+                    held_items=held_set,
+                    lethal_positions=engine.current_level_lethal_positions,
+                    max_iterations=32,
+                    body_schema=getattr(engine.working_memory, "body_schema", None),
+                    tool_barrier_affinities=getattr(
+                        engine.working_memory, "tool_barrier_affinities", None
+                    ),
+                    curr_grid=curr_grid,
+                )
+                if mcts_res.best_subgoals:
+                    best_sg = mcts_res.best_subgoals[0]
+                    matching = [c for c in candidate_triggers if c[0] == best_sg.target_entity_pos]
+                    if matching:
+                        candidate_triggers = matching
 
             candidate_triggers.sort(key=lambda x: (-x[2], len(x[1])))
             chosen_pos, switch_path, _, opened_cells = candidate_triggers[0]
@@ -2209,6 +2403,58 @@ class MentalSimulationPlanner:
         if not candidate_subgoal_targets:
             return None
 
+        if len(candidate_subgoal_targets) > 1:
+            c_subgoals = [
+                FrontopolarSubgoal(
+                    subgoal_id=f"teleo_cand_{t_pos[0]}_{t_pos[1]}",
+                    subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                    target_entity_pos=t_pos,
+                    target_destination=t_pos,
+                    priority=float(score),
+                )
+                for t_pos, score, _, _ in candidate_subgoal_targets
+            ]
+            held_set: set[int] = set()
+            if hasattr(engine.working_memory, "held_feature_ids"):
+                held_set = set(engine.working_memory.held_feature_ids)
+            elif hasattr(engine.working_memory, "held_items") and engine.working_memory.held_items:
+                items = engine.working_memory.held_items
+                if isinstance(items, dict):
+                    held_set = {
+                        int(k) if isinstance(k, (int, np.integer)) else getattr(v, "feature_id", 0)
+                        for k, v in items.items()
+                    }
+                else:
+                    held_set = {
+                        item.feature_id if isinstance(item, HeldItem) else int(item)
+                        for item in items
+                    }
+            mcts_res = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
+                avatar_pos=start_pos,
+                candidate_subgoals=c_subgoals,
+                goal_positions=goals,
+                barriers=static_barriers,
+                grid_bounds=(H, W),
+                held_items=held_set,
+                lethal_positions=engine.current_level_lethal_positions,
+                max_iterations=32,
+                body_schema=getattr(engine.working_memory, "body_schema", None),
+                tool_barrier_affinities=getattr(
+                    engine.working_memory, "tool_barrier_affinities", None
+                ),
+                curr_grid=curr_grid,
+            )
+            if mcts_res.best_subgoals:
+                best_sg = mcts_res.best_subgoals[0]
+                matching = [
+                    c for c in candidate_subgoal_targets if c[0] == best_sg.target_entity_pos
+                ]
+                if matching:
+                    rest = [
+                        c for c in candidate_subgoal_targets if c[0] != best_sg.target_entity_pos
+                    ]
+                    candidate_subgoal_targets = matching + rest
+
         # Sort candidates by priority score descending, then by path length
         candidate_subgoal_targets.sort(key=lambda x: (-x[1], len(x[3])))
 
@@ -2358,3 +2604,314 @@ class DynamicReplanner:
                 },
             )
         ]
+
+
+@dataclass
+class FrontopolarSubgoalMCTSNode:
+    """MCTS node representing an abstract subgoal state in Frontopolar BA10 tree search."""
+
+    subgoal: FrontopolarSubgoal | None
+    state_avatar_pos: tuple[int, int]
+    state_held_items: frozenset[int]
+    state_cleared_barriers: frozenset[tuple[int, int]]
+    parent: FrontopolarSubgoalMCTSNode | None = None
+    children: list[FrontopolarSubgoalMCTSNode] = field(default_factory=list)
+    visits: int = 0
+    total_value: float = 0.0
+    untried_subgoals: list[FrontopolarSubgoal] = field(default_factory=list)
+    depth: int = 0
+
+    @property
+    def q_value(self) -> float:
+        return self.total_value / self.visits if self.visits > 0 else 0.0
+
+    def ucb1(self, c: float = 1.414) -> float:
+        if self.visits == 0:
+            return float("inf")
+        if not self.parent or self.parent.visits == 0:
+            return self.q_value
+        return self.q_value + c * float(np.sqrt(np.log(self.parent.visits) / self.visits))
+
+
+@dataclass
+class FrontopolarSubgoalMCTSResult:
+    """Outcome of BA10 Frontopolar Subgoal Monte Carlo Tree Search."""
+
+    best_subgoals: list[FrontopolarSubgoal]
+    total_iterations: int
+    tree_depth: int
+    expected_value: float
+    pruned_dead_ends: int
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export MCTS plan outcome as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="frontopolar_subgoal_mcts",
+            operator="==",
+            value=len(self.best_subgoals),
+            relation=f"val:{self.expected_value:.2f}:pruned:{self.pruned_dead_ends}",
+            target_entity="cortex_planner",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions registering the planned subgoal sequence."""
+        ops: list[TransactionOperation] = []
+        for idx, sg in enumerate(self.best_subgoals):
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=f"mcts_subgoal_{idx}_{sg.subgoal_id}",
+                    node_data={
+                        "order": idx,
+                        "subgoal_id": sg.subgoal_id,
+                        "subgoal_type": str(sg.subgoal_type),
+                        "target_pos": list(sg.target_entity_pos) if sg.target_entity_pos else None,
+                        "priority": sg.priority,
+                    },
+                )
+            )
+        return ops
+
+
+class FrontopolarSubgoalMCTSPlanner:
+    """BA10 Frontopolar Subgoal Monte Carlo Tree Search Planner.
+
+    Executes hierarchical tree search over abstract subgoals rather than primitive steps:
+    1. Selection: UCB1 exploration-exploitation over abstract subgoal nodes.
+    2. Expansion & Physical/Habenular Dead-End Pruning:
+       - Prunes branches requiring movement across impermeable barriers without required keys (Spelke continuity).
+       - Prunes paths entering grounded Habenular lethal zones or death loci.
+    3. Rollout Simulation:
+       - Evaluates path connectivity from current state through candidates to terminal goal.
+    4. Backpropagation:
+       - Backpropagates path efficiency and reward up the subgoal hierarchy.
+    """
+
+    @staticmethod
+    def _is_reachable(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        effective_barriers: set[tuple[int, int]],
+        grid_bounds: tuple[int, int],
+    ) -> bool:
+        """Check 4-way BFS topological reachability from start to goal."""
+        if start == goal:
+            return True
+        H, W = grid_bounds
+        queue = deque([start])
+        visited = {start}
+
+        while queue:
+            curr = queue.popleft()
+            if curr == goal:
+                return True
+            cr, cc = curr
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cr + dr, cc + dc
+                nxt = (nr, nc)
+                if 0 <= nr < H and 0 <= nc < W and nxt not in visited:
+                    if nxt == goal or nxt not in effective_barriers:
+                        visited.add(nxt)
+                        queue.append(nxt)
+        return False
+
+    @classmethod
+    def plan_subgoal_mcts(
+        cls,
+        avatar_pos: tuple[int, int],
+        candidate_subgoals: Sequence[FrontopolarSubgoal],
+        goal_positions: set[tuple[int, int]],
+        barriers: set[tuple[int, int]],
+        grid_bounds: tuple[int, int],
+        held_items: set[int] | set[HeldItem] | Sequence[HeldItem] | None = None,
+        lethal_positions: set[tuple[int, int]] | None = None,
+        max_iterations: int = 48,
+        exploration_weight: float = 1.414,
+        max_depth: int = 5,
+        body_schema: Any | None = None,
+        tool_barrier_affinities: dict[int, set[int]] | None = None,
+        curr_grid: np.ndarray | None = None,
+    ) -> FrontopolarSubgoalMCTSResult:
+        """Run Frontopolar Subgoal MCTS with Spelke/Habenular pruning and Extended Body Schema dynamics."""
+        if not candidate_subgoals:
+            return FrontopolarSubgoalMCTSResult(
+                best_subgoals=[],
+                total_iterations=0,
+                tree_depth=0,
+                expected_value=0.0,
+                pruned_dead_ends=0,
+            )
+
+        lethal = lethal_positions or set()
+        normalized_held: set[int] = set()
+        if held_items:
+            for item in held_items:
+                if isinstance(item, HeldItem):
+                    normalized_held.add(item.feature_id)
+                elif hasattr(item, "feature_id"):
+                    normalized_held.add(int(item.feature_id))
+                else:
+                    normalized_held.add(int(item))
+
+        root = FrontopolarSubgoalMCTSNode(
+            subgoal=None,
+            state_avatar_pos=avatar_pos,
+            state_held_items=frozenset(normalized_held),
+            state_cleared_barriers=frozenset(),
+            untried_subgoals=list(candidate_subgoals),
+            depth=0,
+        )
+
+        pruned_count = 0
+
+        for _ in range(max_iterations):
+            node = root
+
+            # 1. Selection
+            while node.children and not node.untried_subgoals:
+                node = max(node.children, key=lambda c: c.ucb1(exploration_weight))
+
+            # 2. Expansion
+            if node.untried_subgoals and node.depth < max_depth:
+                cand_sg = node.untried_subgoals.pop(0)
+                cand_target = cand_sg.target_entity_pos or cand_sg.target_destination
+
+                # Habenular Lethal Pruning
+                if cand_target in lethal:
+                    pruned_count += 1
+                    continue
+
+                # Spelke Continuity / Barrier Reachability Pruning with Extended Body Schema Permeability
+                effective_barriers = set(barriers) - set(node.state_cleared_barriers)
+                if curr_grid is not None and (tool_barrier_affinities or body_schema):
+                    permeable_feats: set[int] = set()
+                    for h_feat in node.state_held_items:
+                        if tool_barrier_affinities and h_feat in tool_barrier_affinities:
+                            permeable_feats.update(tool_barrier_affinities[h_feat])
+                        if body_schema and hasattr(body_schema, "tool_barrier_affinities"):
+                            permeable_feats.add(h_feat)
+                            permeable_feats.update(
+                                body_schema.tool_barrier_affinities.get(h_feat, set())
+                            )
+                    if permeable_feats:
+                        H_b, W_b = grid_bounds
+                        effective_barriers = {
+                            b
+                            for b in effective_barriers
+                            if not (
+                                0 <= b[0] < H_b
+                                and 0 <= b[1] < W_b
+                                and int(curr_grid[b[0], b[1]]) in permeable_feats
+                            )
+                        }
+
+                # Prerequisite checking: clearing obstacles or unlocking mechanisms requires held key/tool
+                if cand_sg.subgoal_type in [
+                    SubgoalType.CLEAR_OBSTACLE,
+                    SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                ]:
+                    req_f = getattr(cand_sg, "required_feature", None)
+                    if req_f is not None and req_f not in node.state_held_items:
+                        pruned_count += 1
+                        continue
+
+                if cand_target is not None:
+                    if not cls._is_reachable(
+                        node.state_avatar_pos,
+                        cand_target,
+                        effective_barriers,
+                        grid_bounds,
+                    ):
+                        pruned_count += 1
+                        continue
+
+                # Transition state
+                next_pos = cand_target if cand_target is not None else node.state_avatar_pos
+                next_held = set(node.state_held_items)
+                next_cleared = set(node.state_cleared_barriers)
+
+                if cand_sg.subgoal_type in [SubgoalType.COLLECT_ITEM, SubgoalType.ACQUIRE_TOOL]:
+                    feat = getattr(
+                        cand_sg, "required_feature", getattr(cand_sg, "target_feature", None)
+                    )
+                    if feat is not None:
+                        next_held.add(feat)
+                        # Predict resonant barrier clearing upon tool acquisition
+                        if curr_grid is not None:
+                            unlocked_f: set[int] = set()
+                            if tool_barrier_affinities and feat in tool_barrier_affinities:
+                                unlocked_f.update(tool_barrier_affinities[feat])
+                            if body_schema and hasattr(body_schema, "tool_barrier_affinities"):
+                                unlocked_f.add(feat)
+                                unlocked_f.update(
+                                    body_schema.tool_barrier_affinities.get(feat, set())
+                                )
+                            if unlocked_f:
+                                H_b, W_b = grid_bounds
+                                for br, bc in barriers:
+                                    if (
+                                        0 <= br < H_b
+                                        and 0 <= bc < W_b
+                                        and int(curr_grid[br, bc]) in unlocked_f
+                                    ):
+                                        next_cleared.add((br, bc))
+                elif cand_sg.subgoal_type in [
+                    SubgoalType.CLEAR_OBSTACLE,
+                    SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                ]:
+                    if cand_sg.target_destination:
+                        next_cleared.add(cand_sg.target_destination)
+                    if cand_sg.target_entity_pos:
+                        next_cleared.add(cand_sg.target_entity_pos)
+
+                remaining_cands = [
+                    s for s in candidate_subgoals if s.subgoal_id != cand_sg.subgoal_id
+                ]
+                child = FrontopolarSubgoalMCTSNode(
+                    subgoal=cand_sg,
+                    state_avatar_pos=next_pos,
+                    state_held_items=frozenset(next_held),
+                    state_cleared_barriers=frozenset(next_cleared),
+                    parent=node,
+                    untried_subgoals=remaining_cands,
+                    depth=node.depth + 1,
+                )
+                node.children.append(child)
+                target_node = child
+            else:
+                target_node = node
+
+            # 3. Simulation / Value Evaluation
+            sim_pos = target_node.state_avatar_pos
+            if goal_positions and sim_pos in goal_positions:
+                rollout_val = 100.0 - target_node.depth * 5.0
+            elif goal_positions:
+                min_d = min(
+                    abs(gr - sim_pos[0]) + abs(gc - sim_pos[1]) for gr, gc in goal_positions
+                )
+                rollout_val = 50.0 / (1.0 + min_d) - target_node.depth * 2.0
+            else:
+                rollout_val = 10.0 - target_node.depth
+
+            # 4. Backpropagation
+            curr = target_node
+            while curr is not None:
+                curr.visits += 1
+                curr.total_value += rollout_val
+                curr = curr.parent
+
+        # Extract optimal trajectory from tree
+        best_path: list[FrontopolarSubgoal] = []
+        curr = root
+        while curr.children:
+            curr = max(curr.children, key=lambda c: c.visits)
+            if curr.subgoal is not None:
+                best_path.append(curr.subgoal)
+
+        return FrontopolarSubgoalMCTSResult(
+            best_subgoals=best_path,
+            total_iterations=max_iterations,
+            tree_depth=len(best_path),
+            expected_value=root.q_value,
+            pruned_dead_ends=pruned_count,
+        )

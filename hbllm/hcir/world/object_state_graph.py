@@ -278,9 +278,7 @@ class ObjectStateGraphPlanner:
         barrier_features = engine.symbolic_theory.barrier_features
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         known_goal_positions = set(percept.candidate_goals)
-        known_goal_features = set(engine.symbolic_theory.goal_features) | set(
-            engine.learned_goal_features
-        )
+        known_goal_features = set(engine.symbolic_theory.goal_features)
 
         salient_objects: list[SalientObject] = []
         for e in percept.entities:
@@ -320,7 +318,7 @@ class ObjectStateGraphPlanner:
             is_cargo = (
                 e.role == EntityRole.MANIPULABLE
                 or engine.symbolic_theory.is_cargo(e)
-                or e.feature_id in engine.learned_cargo_features
+                or e.feature_id in engine.symbolic_theory.cargo_features
             )
 
             if is_goal:

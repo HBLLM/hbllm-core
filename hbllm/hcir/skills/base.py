@@ -23,6 +23,7 @@ class BaseHierarchicalSkill(ABC):
     """Abstract base class for all standardized HCIR hierarchical skills."""
 
     skill_name: str = "base_skill"
+    description: str = ""
     semantic_intent: SpatialActionIntent = SpatialActionIntent.NAVIGATE
 
     @abstractmethod

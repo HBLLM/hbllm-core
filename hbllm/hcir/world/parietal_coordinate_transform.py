@@ -16,6 +16,7 @@ Biologically modeled on mammalian posterior parietal cortex and hippocampal plac
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -42,6 +43,34 @@ class SpatialBearing(StrEnum):
     SELF = "SELF"
 
 
+class HeadingOrientation(StrEnum):
+    """Gaze and heading orientations in 2D coordinate space."""
+
+    NORTH = "NORTH"
+    SOUTH = "SOUTH"
+    EAST = "EAST"
+    WEST = "WEST"
+
+    @property
+    def unit_vector(self) -> tuple[int, int]:
+        """Directional unit vector in (delta_r, delta_c)."""
+        if self == HeadingOrientation.NORTH:
+            return (-1, 0)
+        elif self == HeadingOrientation.SOUTH:
+            return (1, 0)
+        elif self == HeadingOrientation.EAST:
+            return (0, 1)
+        elif self == HeadingOrientation.WEST:
+            return (0, -1)
+        return (-1, 0)
+
+    @property
+    def right_vector(self) -> tuple[int, int]:
+        """Right-hand orthogonal lateral unit vector in (delta_r, delta_c)."""
+        hr, hc = self.unit_vector
+        return (hc, -hr)
+
+
 class DihedralTransform(StrEnum):
     """Canonical D4 dihedral group transformations."""
 
@@ -64,6 +93,48 @@ class GeometricModelType(StrEnum):
 
 
 @dataclass(frozen=True)
+class EgocentricPolarCoord:
+    """Viewpoint-invariant polar coordinate and forward/lateral projections."""
+
+    radius: float
+    azimuth_rad: float
+    relative_bearing: str
+    forward_depth: float
+    lateral_offset: float
+
+    def to_causal_predicate(self, entity_id: str = "entity") -> CausalPredicate:
+        """Export egocentric polar coordinates as a formal causal predicate."""
+        return CausalPredicate(
+            variable="egocentric_polar",
+            operator="==",
+            value=f"r:{self.radius:.2f}:az:{self.azimuth_rad:.2f}:{self.relative_bearing}",
+            relation=f"fwd:{self.forward_depth:.2f}:lat:{self.lateral_offset:.2f}",
+            target_entity=entity_id,
+        )
+
+
+@dataclass(frozen=True)
+class EgocentricEntityRepresentation:
+    """High-level lifted spatial entity in avatar-centric egocentric frame."""
+
+    entity_id: str
+    feature_id: int
+    allocentric_pos: tuple[int, int]
+    polar_coord: EgocentricPolarCoord
+    egocentric_displacement: tuple[int, int]
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export entity egocentric representation as a causal predicate."""
+        return CausalPredicate(
+            variable=f"ego_entity:{self.entity_id}",
+            operator="==",
+            value=f"feat:{self.feature_id}:bearing:{self.polar_coord.relative_bearing}",
+            relation=f"dist:{self.polar_coord.radius:.2f}",
+            target_entity=self.entity_id,
+        )
+
+
+@dataclass(frozen=True)
 class SpatialEgoVector:
     """Egocentric displacement vector relative to avatar position."""
 
@@ -83,6 +154,71 @@ class SpatialEgoVector:
         step_r = 0 if self.delta_r == 0 else (1 if self.delta_r > 0 else -1)
         step_c = 0 if self.delta_c == 0 else (1 if self.delta_c > 0 else -1)
         return step_r, step_c
+
+    def to_rotated_ego(
+        self,
+        heading: HeadingOrientation | str = HeadingOrientation.NORTH,
+    ) -> tuple[int, int]:
+        """Rotate displacement vector to align with avatar heading (forward_depth, lateral_offset)."""
+        if isinstance(heading, str):
+            heading = HeadingOrientation(heading.upper())
+        hr, hc = heading.unit_vector
+        rr, rc = heading.right_vector
+        fwd = self.delta_r * hr + self.delta_c * hc
+        lat = self.delta_r * rr + self.delta_c * rc
+        return int(round(fwd)), int(round(lat))
+
+    def to_polar(
+        self,
+        heading: HeadingOrientation | str = HeadingOrientation.NORTH,
+    ) -> EgocentricPolarCoord:
+        """Transform displacement into viewpoint-invariant polar coordinate relative to heading."""
+        if isinstance(heading, str):
+            heading = HeadingOrientation(heading.upper())
+        hr, hc = heading.unit_vector
+        rr, rc = heading.right_vector
+
+        fwd = float(self.delta_r * hr + self.delta_c * hc)
+        lat = float(self.delta_r * rr + self.delta_c * rc)
+        radius = float(np.hypot(self.delta_r, self.delta_c))
+
+        if radius < 1e-6:
+            return EgocentricPolarCoord(
+                radius=0.0,
+                azimuth_rad=0.0,
+                relative_bearing="SELF",
+                forward_depth=0.0,
+                lateral_offset=0.0,
+            )
+
+        azimuth = float(np.arctan2(lat, fwd))
+        pi = float(np.pi)
+
+        # Discretize relative bearing into 8 octants
+        if abs(azimuth) < pi / 8.0:
+            rel_bearing = "FORWARD"
+        elif pi / 8.0 <= azimuth < 3.0 * pi / 8.0:
+            rel_bearing = "FORWARD_RIGHT"
+        elif 3.0 * pi / 8.0 <= azimuth < 5.0 * pi / 8.0:
+            rel_bearing = "RIGHT"
+        elif 5.0 * pi / 8.0 <= azimuth < 7.0 * pi / 8.0:
+            rel_bearing = "BACKWARD_RIGHT"
+        elif abs(azimuth) >= 7.0 * pi / 8.0:
+            rel_bearing = "BACKWARD"
+        elif -7.0 * pi / 8.0 <= azimuth < -5.0 * pi / 8.0:
+            rel_bearing = "BACKWARD_LEFT"
+        elif -5.0 * pi / 8.0 <= azimuth < -3.0 * pi / 8.0:
+            rel_bearing = "LEFT"
+        else:
+            rel_bearing = "FORWARD_LEFT"
+
+        return EgocentricPolarCoord(
+            radius=radius,
+            azimuth_rad=azimuth,
+            relative_bearing=rel_bearing,
+            forward_depth=fwd,
+            lateral_offset=lat,
+        )
 
     def to_causal_predicate(
         self, agent_id: str = "avatar", target_id: str = "target"
@@ -198,6 +334,66 @@ class ParietalCoordinateTransformer:
         else:
             dr, dc = ego_vector
         return (ar + dr, ac + dc)
+
+    @staticmethod
+    def allo_to_ego_polar(
+        allo_coord: tuple[int, int],
+        avatar_pos: tuple[int, int],
+        heading: HeadingOrientation | str = HeadingOrientation.NORTH,
+    ) -> EgocentricPolarCoord:
+        """Transform allocentric coordinate to viewpoint-invariant polar coordinate relative to heading."""
+        ego_vec = ParietalCoordinateTransformer.allo_to_ego(allo_coord, avatar_pos)
+        return ego_vec.to_polar(heading=heading)
+
+    @staticmethod
+    def ego_polar_to_allo(
+        polar: EgocentricPolarCoord,
+        avatar_pos: tuple[int, int],
+        heading: HeadingOrientation | str = HeadingOrientation.NORTH,
+    ) -> tuple[int, int]:
+        """Transform viewpoint-invariant polar coordinate back to world-fixed allocentric coordinate."""
+        if isinstance(heading, str):
+            heading = HeadingOrientation(heading.upper())
+        hr, hc = heading.unit_vector
+        rr, rc = heading.right_vector
+        dr = int(round(polar.forward_depth * hr + polar.lateral_offset * rr))
+        dc = int(round(polar.forward_depth * hc + polar.lateral_offset * rc))
+        return (avatar_pos[0] + dr, avatar_pos[1] + dc)
+
+    @staticmethod
+    def lift_entities_to_ego_frame(
+        entities: Sequence[Any],
+        avatar_pos: tuple[int, int],
+        heading: HeadingOrientation | str = HeadingOrientation.NORTH,
+    ) -> list[EgocentricEntityRepresentation]:
+        """Lift a collection of spatial entities into canonical viewpoint-invariant egocentric representations."""
+        lifted: list[EgocentricEntityRepresentation] = []
+        for ent in entities:
+            ent_id = getattr(ent, "id", str(getattr(ent, "feature_id", "entity")))
+            feat_id = getattr(ent, "feature_id", 0)
+            if hasattr(ent, "grid_pos"):
+                pos = ent.grid_pos
+            elif hasattr(ent, "centroid"):
+                pos = (int(round(ent.centroid[0])), int(round(ent.centroid[1])))
+            elif hasattr(ent, "cells") and ent.cells:
+                first = list(ent.cells)[0]
+                pos = (first[0], first[1])
+            else:
+                pos = avatar_pos
+
+            ego_vec = ParietalCoordinateTransformer.allo_to_ego(pos, avatar_pos)
+            polar = ego_vec.to_polar(heading=heading)
+            rot_disp = ego_vec.to_rotated_ego(heading=heading)
+            lifted.append(
+                EgocentricEntityRepresentation(
+                    entity_id=ent_id,
+                    feature_id=feat_id,
+                    allocentric_pos=pos,
+                    polar_coord=polar,
+                    egocentric_displacement=rot_disp,
+                )
+            )
+        return lifted
 
     @staticmethod
     def project_dihedral_transform(

@@ -330,11 +330,17 @@ class TransactionManager:
         """Apply transaction operations to the workspace graph."""
         for op in transaction.operations:
             if op.op == TransactionOp.ADD_NODE:
-                node = self._deserialize_node(op.node_data or {})
+                raw_data = dict(op.node_data or {})
+                if "id" not in raw_data and op.node_id:
+                    raw_data["id"] = op.node_id
+                node = self._deserialize_node(raw_data)
                 self._workspace.add_node(node, author=transaction.author)
 
             elif op.op == TransactionOp.UPSERT_NODE:
-                node = self._deserialize_node(op.node_data or {})
+                raw_data = dict(op.node_data or {})
+                if "id" not in raw_data and op.node_id:
+                    raw_data["id"] = op.node_id
+                node = self._deserialize_node(raw_data)
                 self._workspace.upsert_node(node, author=transaction.author)
 
             elif op.op == TransactionOp.MODIFY_NODE:
@@ -364,6 +370,22 @@ class TransactionManager:
     def _deserialize_node(data: dict[str, Any]) -> HCIRNode:
         """Deserialize a node dict into the correct typed subclass."""
         node_type_str = data.get("node_type", "")
+        if not node_type_str:
+            from hbllm.hcir.graph import ConceptNode
+
+            nid = data.get("id") or "node_untyped"
+            known_fields = {"id", "category", "lifecycle", "tags", "confidence", "properties"}
+            props = {k: v for k, v in data.items() if k not in known_fields}
+            if "properties" in data and isinstance(data["properties"], dict):
+                props.update(data["properties"])
+            return ConceptNode(
+                id=nid,
+                label=str(data.get("role") or data.get("variable") or nid),
+                definition=str(props),
+                domain="cognitive_state",
+                properties=props,
+            )
+
         try:
             node_type = HCIRNodeType(node_type_str)
         except ValueError:

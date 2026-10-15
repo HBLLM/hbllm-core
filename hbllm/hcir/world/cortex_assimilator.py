@@ -38,8 +38,12 @@ class EpistemicPhase(StrEnum):
     EPISTEMIC_EXPLORATION = (
         "epistemic_exploration"  # Trial-and-error hypothesis testing on unknown objects
     )
+    EPISTEMIC_PROBE = (
+        "epistemic_probe"  # Active epistemic probing upon conflict / unknown discovery
+    )
     MENTAL_SIMULATION = "mental_simulation"  # Forward planning in mind
     EXPLOITATION = "exploitation"  # Direct execution of verified solution
+    EXPLOITING = "exploitation"  # Direct execution alias
     REPLANNING = "replanning"  # Recovering from unexpected contradiction
 
 
@@ -213,9 +217,7 @@ class EpistemicFeedbackAssimilator:
         H, W = curr_grid.shape
 
         if not is_win:
-            walkable_feats = (
-                engine.symbolic_theory.walkable_features | engine.verified_safe_features
-            )
+            walkable_feats = engine.symbolic_theory.walkable_features
             engine.hazard_tracker.record_frame(
                 engine.step_counter,
                 curr_grid,
@@ -235,15 +237,8 @@ class EpistemicFeedbackAssimilator:
         action = engine.last_action
         action_data = engine.last_action_data
 
-        # Faculty: Anterior Mid-Cingulate & Habenula Episodic IOR Transition Tracing
-        engine.working_memory.habenular_ior.record_step(
-            step=engine.step_counter,
-            avatar_pos=prev_avatar_pos,
-            action=action,
-            action_data=action_data,
-        )
-
         aff = engine.action_affordances.get(action)
+
         if aff is not None:
             is_effector_action = aff.requires_spatial_target
         else:
@@ -902,6 +897,9 @@ class EpistemicFeedbackAssimilator:
             static_barriers=static_walls,
             grid_shape=(H, W),
             horizon=12,
+            oriented_threats=getattr(engine, "_prev_oriented_threats", None),
+            mobile_threat_features=engine.mobile_threat_features,
+            stride=getattr(engine, "spatial_lattice_stride", 1),
         )
 
         if (
@@ -963,10 +961,23 @@ class EpistemicFeedbackAssimilator:
                 {engine.avatar_feature} if engine.avatar_feature is not None else set()
             )
             av_moved = [item for item in moved_entities if item[1].feature_id in known_av_feats]
+            # Check if known avatar entity is still visible on the grid
+            avatar_still_present = (
+                any(ce.feature_id in known_av_feats for ce in curr_entities)
+                if known_av_feats
+                else False
+            )
+            if avatar_still_present and not av_moved:
+                # Avatar is present but stationary (e.g., bumped a wall or barrier)
+                for ce in curr_entities:
+                    if ce.feature_id in known_av_feats:
+                        engine.avatar_pos = ce.grid_pos
+                        break
             if (
                 not is_win
                 and not is_lost
                 and not av_moved
+                and not avatar_still_present
                 and not is_effector_action
                 and moved_entities
                 and (action in engine.action_dynamics or not action_data)
@@ -1106,6 +1117,7 @@ class EpistemicFeedbackAssimilator:
                         ):
                             engine.avatar_features.add(ce.feature_id)
                             engine.avatar_size += ce.area
+                            engine.symbolic_theory.cargo_features.discard(ce.feature_id)
                             logger.info(
                                 "AutonomousEpistemicEngine: Discovered compound avatar component (feat=%d, size=%d)",
                                 ce.feature_id,
@@ -1493,9 +1505,7 @@ class EpistemicFeedbackAssimilator:
                     )
                     feat_extent = int(np.count_nonzero(engine.prev_grid == goal_feat))
                     is_substrate = (
-                        goal_feat in engine.symbolic_theory.walkable_features
-                        or goal_feat in engine.verified_safe_features
-                        or feat_extent > 64
+                        goal_feat in engine.symbolic_theory.walkable_features or feat_extent > 64
                     )
                     if (
                         goal_feat != bg
@@ -1544,12 +1554,7 @@ class EpistemicFeedbackAssimilator:
                         and sim_feat not in av_feats
                         and not engine.symbolic_theory.is_barrier(sim_feat)
                         and not (
-                            sim_feat
-                            in (
-                                engine.symbolic_theory.walkable_features
-                                | engine.verified_safe_features
-                            )
-                            or sim_extent > 64
+                            sim_feat in engine.symbolic_theory.walkable_features or sim_extent > 64
                         )
                     ):
                         engine.symbolic_theory.induce_goal(sim_feat)
@@ -1580,6 +1585,18 @@ class EpistemicFeedbackAssimilator:
                     step=engine.step_counter,
                     last_action=action,
                 )
+
+            # Faculty: Prefrontal Metacognitive Conflict-Driven Schema Revision
+            if engine.working_memory.active_schema is not None:
+                invalidated = engine.working_memory.handle_schema_failure(actor)
+                if invalidated or engine.working_memory.acc_conflict.is_frustrated():
+                    logger.warning(
+                        "AutonomousEpistemicEngine: Active schema invalidated due to conflict/catastrophe. Shifting to EPISTEMIC_PROBE."
+                    )
+                    engine.transition_to_phase(
+                        EpistemicPhase.EPISTEMIC_PROBE,
+                        reason="metacognitive_schema_conflict_invalidation",
+                    )
             # Faculty: Hippocampal Sharp-Wave Ripple (SWR) Backward Negative Replay
             engine.episodic_cortex.trigger_sharp_wave_ripple_replay(
                 is_lost=True,

@@ -72,6 +72,23 @@ class VisuospatialWorkingMemory:
         self.matching_evidence: int = 0
         self.is_pair_matching_task: bool = False
 
+        # Spatial Layout Facts (Preserved per-level across attempts)
+        self.current_level: int = 0
+        self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
+        self.level_lethal_positions: dict[int, set[tuple[int, int]]] = {}
+        self.level_learned_goals: dict[int, set[tuple[int, int]]] = {}
+        self.learned_goal_positions: set[tuple[int, int]] = set()
+        self.learned_receptacle_positions: set[tuple[int, int]] = set()
+
+    @property
+    def learned_barriers(self) -> set[tuple[int, int]]:
+        """Barrier coordinates discovered on the currently active level."""
+        return self.level_learned_barriers.setdefault(self.current_level, set())
+
+    @learned_barriers.setter
+    def learned_barriers(self, val: set[tuple[int, int]]) -> None:
+        self.level_learned_barriers[self.current_level] = val
+
     def reset_episode(self, retain_long_term: bool = False) -> None:
         """Reset transient slot bindings while optionally preserving task-level stencil theories."""
         self.bound_slots.clear()
@@ -83,6 +100,11 @@ class VisuospatialWorkingMemory:
             self.discovered_stencils.clear()
             self.matching_evidence = 0
             self.is_pair_matching_task = False
+            self.level_learned_barriers.clear()
+            self.level_lethal_positions.clear()
+            self.level_learned_goals.clear()
+            self.learned_goal_positions.clear()
+            self.learned_receptacle_positions.clear()
 
     def record_probe(
         self,

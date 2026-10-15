@@ -32,6 +32,10 @@ class SubgoalType(StrEnum):
     DELIVER_TO_GOAL = "deliver_to_goal"
     UNLOCK_REMOTE_MECHANISM = "unlock_remote_mechanism"
     ALIGN_OPTICAL_REFLECTOR = "align_optical_reflector"
+    ACQUIRE_TOOL = "acquire_tool"
+    COLLECT_ITEM = "collect_item"
+    CLEAR_OBSTACLE = "clear_obstacle"
+    NAVIGATE_TO = "navigate_to"
 
 
 @dataclass
@@ -105,6 +109,10 @@ class FrontopolarSubgoalStack:
         self.stack.clear()
         self.completed_subgoals.clear()
         self.allocated_holding_bays.clear()
+
+    def clear_subgoals(self) -> None:
+        """Clear all active and pending subgoals."""
+        self.reset_episode()
 
     @property
     def current_subgoal(self) -> FrontopolarSubgoal | None:

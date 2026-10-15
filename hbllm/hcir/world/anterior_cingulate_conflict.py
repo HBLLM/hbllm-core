@@ -19,9 +19,13 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,8 @@ class FailureCluster:
     count: int = 1
     recent_steps: list[int] = field(default_factory=list)
     lethal_actions: list[int] = field(default_factory=list)
+    threat_positions: list[tuple[float, float]] = field(default_factory=list)
+    threat_velocities: list[tuple[float, float]] = field(default_factory=list)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export failure cluster as a declarative causal predicate."""
@@ -58,6 +64,8 @@ class FailureCluster:
                     "count": self.count,
                     "recent_steps": list(self.recent_steps),
                     "lethal_actions": list(self.lethal_actions),
+                    "threat_positions": list(self.threat_positions),
+                    "threat_velocities": list(self.threat_velocities),
                 },
             )
         ]
@@ -148,6 +156,95 @@ class AnteriorCingulateConflictMonitor:
                 max_recurrence,
             )
         return self.frustration
+
+    def register_threat_conflict(
+        self,
+        actor_pos: tuple[float, float],
+        threat_pos: tuple[float, float],
+        threat_velocity: tuple[float, float],
+        step: int,
+        last_action: int | None = None,
+    ) -> float:
+        """Register a conflict/death event associated with an oncoming kinetic threat."""
+        ar, ac = actor_pos
+        self.failure_history.append((ar, ac, step))
+
+        matched = False
+        for cl in self.clusters:
+            dist = math.hypot(cl.center_r - ar, cl.center_c - ac)
+            if dist <= self.cluster_radius:
+                cl.count += 1
+                cl.center_r = (cl.center_r * (cl.count - 1) + ar) / cl.count
+                cl.center_c = (cl.center_c * (cl.count - 1) + ac) / cl.count
+                cl.recent_steps.append(step)
+                if last_action is not None:
+                    cl.lethal_actions.append(last_action)
+                cl.threat_positions.append(threat_pos)
+                cl.threat_velocities.append(threat_velocity)
+                matched = True
+                break
+
+        if not matched:
+            self.clusters.append(
+                FailureCluster(
+                    center_r=ar,
+                    center_c=ac,
+                    count=1,
+                    recent_steps=[step],
+                    lethal_actions=[last_action] if last_action is not None else [],
+                    threat_positions=[threat_pos],
+                    threat_velocities=[threat_velocity],
+                )
+            )
+
+        max_recurrence = max((cl.count for cl in self.clusters), default=0)
+        self.frustration = (
+            1.0 - math.exp(-0.7 * (max_recurrence - 1)) if max_recurrence > 1 else 0.0
+        )
+        self.active_conflict = self.frustration >= self.frustration_threshold
+        return self.frustration
+
+    def is_frustrated(self) -> bool:
+        """Check if frustration level exceeds threshold or active conflict is triggered."""
+        return self.active_conflict or self.frustration >= self.frustration_threshold
+
+    def is_in_conflict_zone(self, pos: tuple[int, int], radius: float | None = None) -> bool:
+        """Check if pos falls within the radius of any recurrent failure cluster."""
+        r = radius or self.cluster_radius
+        pr, pc = pos
+        return any(
+            cl.count >= 2 and math.hypot(cl.center_r - pr, cl.center_c - pc) <= r
+            for cl in self.clusters
+        )
+
+    def should_advise_temporal_wait(
+        self,
+        current_pos: tuple[int, int],
+        candidate_pos: tuple[int, int],
+        collision_cones: SpatiotemporalCollisionCones | Any,
+        max_steps: int = 3,
+    ) -> tuple[bool, int]:
+        """Check whether temporal waiting is advised due to a transient collision cone crossing candidate_pos.
+
+        Returns:
+            (should_wait, wait_steps)
+        """
+        if collision_cones is None or not hasattr(collision_cones, "is_collision_hazard"):
+            return False, 0
+
+        cr, cc = candidate_pos
+        # If candidate_pos is an immediate collision hazard at step 1:
+        if collision_cones.is_collision_hazard(cr, cc, time_step=1):
+            # Check if it clears at step 2 or 3
+            for wait_step in range(2, max_steps + 1):
+                if not collision_cones.is_collision_hazard(cr, cc, time_step=wait_step):
+                    # Also ensure current position is safe to wait in during step 1
+                    if not collision_cones.is_collision_hazard(
+                        current_pos[0], current_pos[1], time_step=1
+                    ):
+                        return True, wait_step - 1
+            return False, 0
+        return False, 0
 
     def compute_heuristic_weight(self, default_weight: float = 1.0) -> float:
         """Compute modulated A* goal heuristic weight.
