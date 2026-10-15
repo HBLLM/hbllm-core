@@ -378,6 +378,8 @@ class PopperianFalsifier:
             return []
 
         cr, cc = context.curr_avatar_pos
+        if not (0 <= cr < context.prev_grid.shape[0] and 0 <= cc < context.prev_grid.shape[1]):
+            return []
         c_feat = int(context.prev_grid[cr, cc])
         falsified: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
 

@@ -1245,6 +1245,8 @@ class AutonomousEpistemicEngine:
         aff = self.action_affordances.get(action)
         if aff is not None:
             return aff.requires_spatial_target
+        if action == 6 or action == "6" or (isinstance(action, str) and "CLICK" in action.upper()):
+            return True
         return False
 
     def is_displacement_action(self, action: Any) -> bool:
@@ -1520,6 +1522,7 @@ class AutonomousEpistemicEngine:
             self.environmental_step_limit = None
             self.budget_governor.reset(max_budget=self.exploration_budget)
             self.dual_memory.reset_episodic_memory()
+            self.effective_click_targets.clear()
         else:
             eff_budget = (
                 self.environmental_step_limit

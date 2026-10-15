@@ -1434,7 +1434,10 @@ class MotorCortexEffector:
                 sr, sc = int(pos[0]), int(pos[1])
                 if not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid):
                     vis = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
-                    click_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
+                    is_mp = sg.get("is_midpoint", False)
+                    # Midpoints in void space without an avatar are weak speculative heuristics
+                    base_sg_score = 70.0 if (is_mp and engine.avatar_pos is None) else 180.0
+                    click_candidates.append((sr, sc, base_sg_score - float(vis) * 15.0))
 
         # 3. Modal Manipulandum Destination Affordances:
         # If an external manipulandum is currently focused, prioritize destination sockets/receptacles
@@ -1447,63 +1450,71 @@ class MotorCortexEffector:
                         vis = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                         click_candidates.append((int(cr), int(cc), 220.0 - float(vis) * 10.0))
 
-        # 6. Salient entities if no panel candidates exist
-        if not click_candidates:
-            for e in entities:
+        # 4. Confirmed Causal Actuators (Empirical Active Inference):
+        # Targets that previously produced substantial state diffs have proven causal power
+        for eff_r, eff_c in engine.effective_click_targets:
+            if not cls.is_peripheral_frame_cell(eff_r, eff_c, H, W, curr_grid):
+                vis = engine.entity_visit_counts.get(f"click_{eff_r}_{eff_c}", 0)
+                click_candidates.append((eff_r, eff_c, 260.0 - float(vis) * 10.0))
+
+        # 5. Salient Physical Entities & Perimeter Control Panels:
+        # Physical interactive entities are evaluated as viable candidates alongside structural goals
+        for e in entities:
+            if (
+                e.feature_id == bg
+                or e.feature_id in av_feats
+                or e.area > 120
+                or e.feature_id in engine.quiescent_features
+            ):
+                continue
+            cr, cc = e.grid_pos
+            if (
+                cr,
+                cc,
+            ) in engine.quiescent_click_targets or MotorCortexEffector.is_peripheral_frame_cell(
+                cr, cc, H, W, curr_grid
+            ):
+                continue
+            visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+            saliency = 100.0 / math.log2(2 + max(1, e.area))
+            affordance_bonus = 140.0 if (cr, cc) in engine.effective_click_targets else 0.0
+            lateral_actuator_bonus = (
+                100.0
+                if ((cc <= 10 or cc >= W - 11) and (4 <= cr <= H - 5) and 6 <= e.area <= 64)
+                else 0.0
+            )
+            feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
+            telic_bonus = (
+                150.0
                 if (
-                    e.feature_id == bg
-                    or e.feature_id in av_feats
-                    or e.area > 120
-                    or e.feature_id in engine.quiescent_features
+                    engine.symbolic_theory.telic_goal_type == "deplete"
+                    and e.feature_id == engine.symbolic_theory.telic_target_feature
+                )
+                else 0.0
+            )
+            ior_mult = 10.0 if (cr, cc) in engine.effective_click_targets else 30.0
+            ior_penalty = float(visit_count) * ior_mult
+            haben_pen = 0.0
+            if hasattr(engine, "working_memory") and hasattr(
+                engine.working_memory, "habenular_ior"
+            ):
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 ):
                     continue
-                cr, cc = e.grid_pos
-                if (
-                    cr,
-                    cc,
-                ) in engine.quiescent_click_targets or MotorCortexEffector.is_peripheral_frame_cell(
-                    cr, cc, H, W, curr_grid
-                ):
-                    continue
-                visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                saliency = 100.0 / math.log2(2 + max(1, e.area))
-                affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
-                lateral_actuator_bonus = (
-                    80.0
-                    if ((cc <= 10 or cc >= W - 11) and (6 <= cr <= H - 7) and 8 <= e.area <= 64)
-                    else 0.0
+                haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 )
-                feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
-                telic_bonus = (
-                    150.0
-                    if (
-                        engine.symbolic_theory.telic_goal_type == "deplete"
-                        and e.feature_id == engine.symbolic_theory.telic_target_feature
-                    )
-                    else 0.0
-                )
-                ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
-                haben_pen = 0.0
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
-                ):
-                    if engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    ):
-                        continue
-                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    )
-                cand_score = (
-                    saliency
-                    + affordance_bonus
-                    + lateral_actuator_bonus
-                    + feat_bias
-                    + telic_bonus
-                    - ior_penalty
-                    - haben_pen
-                )
-                click_candidates.append((cr, cc, cand_score))
+            cand_score = (
+                saliency
+                + affordance_bonus
+                + lateral_actuator_bonus
+                + feat_bias
+                + telic_bonus
+                - ior_penalty
+                - haben_pen
+            )
+            click_candidates.append((cr, cc, cand_score))
 
         # 7. Inferotemporal Affordance Centroid Segmentation
         if not click_candidates:

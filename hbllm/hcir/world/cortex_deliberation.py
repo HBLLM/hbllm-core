@@ -564,13 +564,14 @@ class PrefrontalDeliberationEngine:
         ]
         if index_selectors and value_mutators:
             mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
-            if mut_streak < 2:
-                chosen = value_mutators[engine.step_counter % len(value_mutators)]
+            max_streak = getattr(engine.working_memory, "dial_mutation_limit", 2)
+            if mut_streak < max_streak:
+                chosen = value_mutators[-1]
                 engine.working_memory.dial_mutation_streak = mut_streak + 1
                 engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
                 return chosen, None
             else:
-                chosen = index_selectors[engine.step_counter % len(index_selectors)]
+                chosen = index_selectors[-1]
                 engine.working_memory.dial_mutation_streak = 0
                 engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
                 return chosen, None
@@ -578,10 +579,14 @@ class PrefrontalDeliberationEngine:
         # Modal Select-Then-Direct Gating: If no avatar and no manipulandum bound, reach for interactive entities
         bg = getattr(engine, "bg_feature", getattr(engine, "background_color", 0))
         has_foreground = np.any(curr_grid != bg)
+        has_displacement_actions = any(engine.is_displacement_action(a) for a in available_actions)
         if (
             has_foreground
-            and engine.avatar_pos is None
-            and not engine.working_memory.body_schema.has_manipulandum()
+            and (engine.avatar_pos is None or not has_displacement_actions)
+            and (
+                not engine.working_memory.body_schema.has_manipulandum()
+                or not has_displacement_actions
+            )
             and spatial_effector_actions
         ):
             chosen_eff = spatial_effector_actions[0]
@@ -846,6 +851,11 @@ class PrefrontalDeliberationEngine:
             )
             if not has_progress:
                 for osc_act in osc_acts:
+                    if (
+                        osc_act in engine.value_mutator_actions
+                        and getattr(engine.working_memory, "dial_mutation_streak", 0) < 7
+                    ):
+                        continue
                     engine.inhibited_actions[osc_act] = max(
                         engine.inhibited_actions.get(osc_act, 0), 6
                     )

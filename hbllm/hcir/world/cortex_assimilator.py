@@ -655,20 +655,25 @@ class EpistemicFeedbackAssimilator:
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
         if action is not None and not is_effector_action:
-            if len(moved_entities) == 1 and diff.changed_pixel_count <= 48:
-                pe_sc, ce_sc, (dr_sc, dc_sc) = moved_entities[0]
-                if ce_sc.area <= 48 and (
-                    (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
-                ):
-                    engine.symbolic_theory.induce_index_selector(action)
-                    engine.index_selector_actions.add(action)
-                    if action in engine.action_affordances:
-                        engine.action_affordances[action].is_index_selector = True
+            if 1 <= len(moved_entities) <= 2 and diff.changed_pixel_count <= 48:
+                deltas = {m[2] for m in moved_entities}
+                if len(deltas) == 1:
+                    dr_sc, dc_sc = next(iter(deltas))
+                    ce_sc = moved_entities[0][1]
+                    if ce_sc.area <= 48 and (
+                        (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
+                    ):
+                        if action not in engine.value_mutator_actions:
+                            engine.symbolic_theory.induce_index_selector(action)
+                            engine.index_selector_actions.add(action)
+                            if action in engine.action_affordances:
+                                engine.action_affordances[action].is_index_selector = True
             elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 16:
-                engine.symbolic_theory.induce_value_mutator(action)
-                engine.value_mutator_actions.add(action)
-                if action in engine.action_affordances:
-                    engine.action_affordances[action].is_value_mutator = True
+                if action not in engine.index_selector_actions:
+                    engine.symbolic_theory.induce_value_mutator(action)
+                    engine.value_mutator_actions.add(action)
+                    if action in engine.action_affordances:
+                        engine.action_affordances[action].is_value_mutator = True
 
         # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
         if engine.deformation_tracker is not None:
@@ -1458,18 +1463,22 @@ class EpistemicFeedbackAssimilator:
                         return True
                     if r < 3 and engine.avatar_pos[0] >= 5:
                         return True
-                    min_r, max_r = min(engine.avatar_pos[0], r), max(engine.avatar_pos[0], r)
+                    min_r = max(0, min(engine.avatar_pos[0], r))
+                    max_r = min(engine.prev_grid.shape[0] - 1, max(engine.avatar_pos[0], r))
                     for div_r in range(min_r + 1, max_r):
-                        div_val = int(engine.prev_grid[div_r, 0])
-                        if div_val != bg and np.all(engine.prev_grid[div_r, :] == div_val):
-                            if div_r >= H - 16 or div_r <= 16:
-                                return True
-                    min_c, max_c = min(engine.avatar_pos[1], c), max(engine.avatar_pos[1], c)
+                        if 0 <= div_r < engine.prev_grid.shape[0]:
+                            div_val = int(engine.prev_grid[div_r, 0])
+                            if div_val != bg and np.all(engine.prev_grid[div_r, :] == div_val):
+                                if div_r >= H - 16 or div_r <= 16:
+                                    return True
+                    min_c = max(0, min(engine.avatar_pos[1], c))
+                    max_c = min(engine.prev_grid.shape[1] - 1, max(engine.avatar_pos[1], c))
                     for div_c in range(min_c + 1, max_c):
-                        div_val = int(engine.prev_grid[0, div_c])
-                        if div_val != bg and np.all(engine.prev_grid[:, div_c] == div_val):
-                            if div_c >= W - 16 or div_c <= 16:
-                                return True
+                        if 0 <= div_c < engine.prev_grid.shape[1]:
+                            div_val = int(engine.prev_grid[0, div_c])
+                            if div_val != bg and np.all(engine.prev_grid[:, div_c] == div_val):
+                                if div_c >= W - 16 or div_c <= 16:
+                                    return True
                 else:
                     if r >= H - 6 or r < 3:
                         return True
