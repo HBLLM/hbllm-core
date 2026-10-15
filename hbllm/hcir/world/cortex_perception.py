@@ -501,16 +501,45 @@ class GestaltAffordanceDetector:
                         }
                     )
 
-        # 4. Gestalt Relational Affordances: Symmetry completion and collinear alignment
-        if 0.50 <= sym_score:
+        # 4. Gestalt Relational Affordances: Physical Axis Symmetry & Alignment
+        # Core Knowledge: Prominent linear boundaries partition space into reflective hemifields.
+        divider_axes: list[tuple[str, int, int]] = []  # (orientation, axis_coord, feat)
+        struct_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+        for feat in np.unique(grid):
+            feat_int = int(feat)
+            if feat_int == bg or feat_int == 0 or feat_int in av_feats:
+                continue
+            mask = grid == feat_int
+            labeled_mask, num_clusters = label(mask, structure=struct_4)
+            for c_idx in range(1, num_clusters + 1):
+                pts = np.argwhere(labeled_mask == c_idx)
+                min_r, min_c = pts.min(axis=0)
+                max_r, max_c = pts.max(axis=0)
+                span_r = max_r - min_r + 1
+                span_c = max_c - min_c + 1
+                # Vertical divider axis (interior: not touching outer border)
+                if span_r >= max(12, int(H * 0.35)) and span_c <= 4:
+                    ax_c = int(round(float(np.mean(pts[:, 1]))))
+                    if 2 < ax_c < W - 3:
+                        divider_axes.append(("vertical", ax_c, feat_int))
+                # Horizontal divider axis
+                elif span_c >= max(12, int(W * 0.35)) and span_r <= 4:
+                    ax_r = int(round(float(np.mean(pts[:, 0]))))
+                    if 2 < ax_r < H - 3:
+                        divider_axes.append(("horizontal", ax_r, feat_int))
+
+        # If an explicit divider axis exists or global symmetry is present
+        if divider_axes or 0.50 <= sym_score:
             salient_clusters: list[tuple[int, tuple[int, int], np.ndarray]] = []
-            struct_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+            axis_feats = {feat for _, _, feat in divider_axes}
             for feat in np.unique(grid):
                 feat_int = int(feat)
                 if (
                     feat_int == bg
                     or feat_int == 0
                     or feat_int in av_feats
+                    or feat_int in axis_feats
                     or (barrier_features and feat_int in barrier_features)
                     or (known_lethal_features and feat_int in known_lethal_features)
                 ):
@@ -519,7 +548,7 @@ class GestaltAffordanceDetector:
                 labeled_mask, num_clusters = label(mask, structure=struct_4)
                 for c_idx in range(1, num_clusters + 1):
                     c_pts = np.argwhere(labeled_mask == c_idx)
-                    if 1 <= len(c_pts) <= 36:
+                    if 1 <= len(c_pts) <= int(H * W * 0.25):
                         min_cr, min_cc = c_pts.min(axis=0)
                         max_cr, max_cc = c_pts.max(axis=0)
                         if (max_cr - min_cr >= H - 4) or (max_cc - min_cc >= W - 4):
@@ -530,37 +559,61 @@ class GestaltAffordanceDetector:
                         )
                         salient_clusters.append((feat_int, c_centroid, c_pts))
 
-            # 3a. Dominant Axis Symmetry Relational Projections
-            for feat_int, (cr, cc), _ in salient_clusters:
-                ref_r, ref_c = cr, cc
-                if sym_type == "vertical":
-                    ref_c = W - 1 - cc
-                elif sym_type == "horizontal":
-                    ref_r = H - 1 - cr
-                elif sym_type == "main_diagonal" and H == W:
-                    ref_r, ref_c = cc, cr
-                elif sym_type == "anti_diagonal" and H == W:
-                    ref_r, ref_c = W - 1 - cc, H - 1 - cr
-                else:
-                    continue
+            # 4a. Projections across explicit divider axes
+            for ax_type, ax_coord, _ in divider_axes:
+                for feat_int, (cr, cc), c_pts in salient_clusters:
+                    if ax_type == "vertical":
+                        ref_r = cr
+                        ref_c = 2 * ax_coord - cc
+                    else:
+                        ref_r = 2 * ax_coord - cr
+                        ref_c = cc
 
-                if 0 <= ref_r < H and 0 <= ref_c < W and (ref_r, ref_c) != (cr, cc):
-                    target_val = int(grid[ref_r, ref_c])
-                    if target_val != feat_int:
+                    if 0 <= ref_r < H and 0 <= ref_c < W and (ref_r, ref_c) != (cr, cc):
+                        target_val = int(grid[ref_r, ref_c])
                         is_void = target_val == bg
-                        if is_void and sym_score < 0.85:
-                            continue
                         goals.append(
                             {
-                                "type": "relational_alignment",
+                                "type": "reflection_target",
                                 "position": (ref_r, ref_c),
                                 "feature": feat_int,
-                                "confidence": float(sym_score * 0.90)
-                                if not is_void
-                                else float(sym_score * 0.35),
+                                "confidence": 0.88 if not is_void else 0.70,
                                 "is_void": is_void,
                             }
                         )
+
+            # 4b. Projections across global dominant symmetry (if no physical axis)
+            if 0.50 <= sym_score and not divider_axes:
+                for feat_int, (cr, cc), _ in salient_clusters:
+                    ref_r, ref_c = cr, cc
+                    if sym_type == "vertical":
+                        ref_c = W - 1 - cc
+                    elif sym_type == "horizontal":
+                        ref_r = H - 1 - cr
+                    elif sym_type == "main_diagonal" and H == W:
+                        ref_r, ref_c = cc, cr
+                    elif sym_type == "anti_diagonal" and H == W:
+                        ref_r, ref_c = W - 1 - cc, H - 1 - cr
+                    else:
+                        continue
+
+                    if 0 <= ref_r < H and 0 <= ref_c < W and (ref_r, ref_c) != (cr, cc):
+                        target_val = int(grid[ref_r, ref_c])
+                        if target_val != feat_int:
+                            is_void = target_val == bg
+                            if is_void and sym_score < 0.85:
+                                continue
+                            goals.append(
+                                {
+                                    "type": "relational_alignment",
+                                    "position": (ref_r, ref_c),
+                                    "feature": feat_int,
+                                    "confidence": float(sym_score * 0.90)
+                                    if not is_void
+                                    else float(sym_score * 0.35),
+                                    "is_void": is_void,
+                                }
+                            )
 
             # 3b. Collinear Midpoints & Relational Alignment between distinct entity pairs
             for i in range(len(salient_clusters)):

@@ -655,16 +655,16 @@ class EpistemicFeedbackAssimilator:
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
         if action is not None and not is_effector_action:
-            if len(moved_entities) == 1 and diff.changed_pixel_count <= 16:
+            if len(moved_entities) == 1 and diff.changed_pixel_count <= 48:
                 pe_sc, ce_sc, (dr_sc, dc_sc) = moved_entities[0]
-                if ce_sc.area <= 16 and (
+                if ce_sc.area <= 48 and (
                     (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
                 ):
                     engine.symbolic_theory.induce_index_selector(action)
                     engine.index_selector_actions.add(action)
                     if action in engine.action_affordances:
                         engine.action_affordances[action].is_index_selector = True
-            elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 8:
+            elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 16:
                 engine.symbolic_theory.induce_value_mutator(action)
                 engine.value_mutator_actions.add(action)
                 if action in engine.action_affordances:

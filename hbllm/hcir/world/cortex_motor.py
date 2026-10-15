@@ -1468,6 +1468,11 @@ class MotorCortexEffector:
                 visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
+                lateral_actuator_bonus = (
+                    80.0
+                    if ((cc <= 10 or cc >= W - 11) and (6 <= cr <= H - 7) and 8 <= e.area <= 64)
+                    else 0.0
+                )
                 feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
                 telic_bonus = (
                     150.0
@@ -1490,7 +1495,13 @@ class MotorCortexEffector:
                         engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                     )
                 cand_score = (
-                    saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
+                    saliency
+                    + affordance_bonus
+                    + lateral_actuator_bonus
+                    + feat_bias
+                    + telic_bonus
+                    - ior_penalty
+                    - haben_pen
                 )
                 click_candidates.append((cr, cc, cand_score))
 
@@ -1684,28 +1695,9 @@ class MotorCortexEffector:
                     )
                     return dict(snapped_target)
 
-                # Fallback across valid targets: select least-visited target rather than returning None
                 if valid_targets:
-                    vt_scores = []
-                    for vt in valid_targets:
-                        if isinstance(vt, dict):
-                            raw_vx = vt.get("x", vt.get("c", 0))
-                            raw_vy = vt.get("y", vt.get("r", 0))
-                            vx = int(raw_vx) if raw_vx is not None else 0
-                            vy = int(raw_vy) if raw_vy is not None else 0
-                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
-                            vt_scores.append((vis, vt))
-                    if vt_scores:
-                        vt_scores.sort(key=lambda item: item[0])
-                        chosen_vt = vt_scores[0][1]
-                        raw_svx = chosen_vt.get("x", chosen_vt.get("c", 0))
-                        raw_svy = chosen_vt.get("y", chosen_vt.get("r", 0))
-                        svx = int(raw_svx) if raw_svx is not None else 0
-                        svy = int(raw_svy) if raw_svy is not None else 0
-                        engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
-                            engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
-                        )
-                        return dict(chosen_vt)
+                    engine.inhibited_actions[action] = 5
+                    return None
 
             coords: dict[str, Any] = {}
             for k in param_keys:
@@ -1717,23 +1709,12 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        # Robust Spatial Grounding Invariant: Effector actions must NEVER return None,
-        # ensuring environments requiring spatial parameters never receive empty dicts or None.
-        best_r, best_c = H // 2, W // 2
-        min_v = float("inf")
-        step_stride = max(1, min(H, W) // 16)
-        for r in range(1, H - 1, step_stride):
-            for c in range(1, W - 1, step_stride):
-                if cls.is_peripheral_frame_cell(r, c, H, W, curr_grid):
-                    continue
-                v = engine.entity_visit_counts.get(f"click_{r}_{c}", 0)
-                feat = int(curr_grid[r, c])
-                bonus = -20.0 if feat != bg else 0.0
-                score = float(v) + bonus
-                if score < min_v:
-                    min_v = score
-                    best_r, best_c = r, c
+        if engine.quiescent_click_targets:
+            engine.inhibited_actions[action] = 5
+            return None
 
+        # Clean-board fallback when no quiescent history exists
+        best_r, best_c = H // 2, W // 2
         engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
             engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
         )

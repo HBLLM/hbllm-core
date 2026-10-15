@@ -795,7 +795,9 @@ class MentalSimulationPlanner:
             engine._update_avatar_position_from_grid(curr_grid, known_av)
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            engine.avatar_pos = engine.working_memory.body_schema.active_manipulandum.pos
+            active_manip = engine.working_memory.body_schema.active_manipulandum
+            if active_manip is not None:
+                engine.avatar_pos = active_manip.pos
 
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
             return None

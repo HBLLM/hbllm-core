@@ -273,6 +273,9 @@ class RemoteMechanismObserver(HypothesisObserver):
             return []
 
         cr, cc = context.curr_avatar_pos
+        H, W = context.prev_grid.shape
+        if not (0 <= cr < H and 0 <= cc < W):
+            return []
         contact_feat = int(context.prev_grid[cr, cc])
         if contact_feat == context.background_feature:
             return []

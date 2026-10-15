@@ -3498,6 +3498,17 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         assert engine.action_dynamics[1].delta_r == -1
         assert engine.action_dynamics[1].delta_c == 0
 
+        # Deliberation active manipulandum localization when avatar_pos is None
+        engine.avatar_pos = None
+        act_delib, _ = engine.decide(grid1, available_actions=[1, 2, 3, 4, 6])
+        assert engine.avatar_pos == (4, 5)
+
+        # Robustness check: if active_manipulandum is None, deliberation safely handles without error
+        engine.avatar_pos = None
+        engine.working_memory.body_schema.active_manipulandum = None
+        act_fallback, _ = engine.decide(grid1, available_actions=[1, 2, 3, 4, 6])
+        assert act_fallback is not None
+
     def test_causal_undo_induction_and_safety_gate(self) -> None:
         """Test Faculty 2: Empirical state-reversion induction and prefrontal safety gate rejection."""
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine

@@ -576,8 +576,11 @@ class PrefrontalDeliberationEngine:
                 return chosen, None
 
         # Modal Select-Then-Direct Gating: If no avatar and no manipulandum bound, reach for interactive entities
+        bg = getattr(engine, "bg_feature", getattr(engine, "background_color", 0))
+        has_foreground = np.any(curr_grid != bg)
         if (
-            engine.avatar_pos is None
+            has_foreground
+            and engine.avatar_pos is None
             and not engine.working_memory.body_schema.has_manipulandum()
             and spatial_effector_actions
         ):
@@ -976,7 +979,9 @@ class PrefrontalDeliberationEngine:
 
         # Faculty: Active Manipulandum Localization
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            engine.avatar_pos = engine.working_memory.body_schema.active_manipulandum.pos
+            active_manip = engine.working_memory.body_schema.active_manipulandum
+            if active_manip is not None:
+                engine.avatar_pos = active_manip.pos
 
         # Observe creature motion
         engine._observe_oriented_threat_motion(curr_grid, available_actions, known_av_feats)
