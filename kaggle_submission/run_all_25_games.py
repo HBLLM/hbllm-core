@@ -20,6 +20,11 @@ if str(_core_dir) not in sys.path:
 
 from arc_agi import Arcade
 
+try:
+    import plugins.arc_agi_adapter  # noqa: F401
+except Exception:
+    pass
+
 from hbllm.drivers.base import (
     BaseDriver,
     DriverAction,

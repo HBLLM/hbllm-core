@@ -1150,12 +1150,31 @@ class RelationalNode:
     """Attributed spatial entity in relational scene graph."""
 
     node_id: str
-    feature_id: int
-    area: int
-    centroid: tuple[float, float]
-    bounding_box: tuple[int, int, int, int]
+    feature_id: int = 0
+    area: int = 0
+    centroid: tuple[float, float] = (0.0, 0.0)
+    bounding_box: tuple[int, int, int, int] = (0, 0, 0, 0)
     role: EntityRole = EntityRole.UNKNOWN
     properties: dict[str, Any] = field(default_factory=dict)
+
+    def __init__(
+        self,
+        node_id: str,
+        feature_id: int = 0,
+        area: int = 0,
+        centroid: tuple[float, float] = (0.0, 0.0),
+        bounding_box: tuple[int, int, int, int] = (0, 0, 0, 0),
+        role: EntityRole = EntityRole.UNKNOWN,
+        properties: dict[str, Any] | None = None,
+        color: int | None = None,
+    ) -> None:
+        self.node_id = node_id
+        self.feature_id = color if color is not None else feature_id
+        self.area = area
+        self.centroid = centroid
+        self.bounding_box = bounding_box
+        self.role = role
+        self.properties = properties or {}
 
     @property
     def color(self) -> int:

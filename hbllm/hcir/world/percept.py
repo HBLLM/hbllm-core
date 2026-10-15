@@ -176,6 +176,43 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             elif e.role == EntityRole.AGENT:
                 avatar_pos = e.grid_pos
 
+        if context and hasattr(context, "learned_barriers"):
+            barriers.update(context.learned_barriers)
+
+        candidate_goals: set[tuple[int, int]] = set(goals)
+        if context and hasattr(context, "learned_goal_positions"):
+            candidate_goals.update(context.learned_goal_positions)
+
+        # Detect structural exit markers, gateway notches, and target zones
+        detect_goals_fn = getattr(context, "detect_structural_goals", None)
+        if detect_goals_fn is None:
+            try:
+                from hbllm.hcir.world.cortex_perception import PerceptionEngine
+
+                detect_goals_fn = PerceptionEngine.detect_structural_goals
+            except Exception:
+                detect_goals_fn = None
+        if detect_goals_fn is not None:
+            try:
+                structural_goals = detect_goals_fn(grid=grid, bg=bg)
+                for sg in structural_goals:
+                    if sg.get("type") in ("exit_marker", "gateway_notch", "target_zone"):
+                        for cp in sg.get("cells", []):
+                            candidate_goals.add(cp)
+                        pos = sg.get("position")
+                        if pos:
+                            candidate_goals.add(pos)
+            except Exception:
+                pass
+
+        if candidate_goals:
+            for e in entities:
+                if e.grid_pos in candidate_goals and e.role not in (
+                    EntityRole.AGENT,
+                    EntityRole.DYNAMIC_HAZARD,
+                ):
+                    e.role = EntityRole.GOAL
+
         passable = np.ones((H, W), dtype=bool)
         for r, c in barriers | lethal_cells:
             if 0 <= r < H and 0 <= c < W:
@@ -185,7 +222,7 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             entities=entities,
             passable_topology=passable,
             avatar_pos=avatar_pos,
-            candidate_goals=goals,
+            candidate_goals=list(candidate_goals),
             static_barriers=barriers,
             lethal_cells=lethal_cells,
             shape=(H, W),

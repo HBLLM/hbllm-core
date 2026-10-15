@@ -319,6 +319,10 @@ class MyAgent(Agent):
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
                 self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
+                try:
+                    import plugins.arc_agi_adapter  # noqa: F401
+                except Exception as e:
+                    logger.debug("Could not load plugins.arc_agi_adapter: %s", e)
                 if not self.disable_archetypes:
                     try:
                         from plugins.arc_agi_adapter import install_arc3_solvers

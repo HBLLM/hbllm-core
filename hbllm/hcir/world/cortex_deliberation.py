@@ -930,33 +930,13 @@ class PrefrontalDeliberationEngine:
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
-            # 3A. Primary: Object-Centric Macro Action Planning (5 Executive Cognitive Directives)
-            macro_plan = engine.object_planner.plan_macro_option(
-                engine, curr_grid, available_actions
-            )
-            if (
-                macro_plan
-                and macro_plan[0].action in available_actions
-                and engine.inhibited_actions.get(macro_plan[0].action, 0) == 0
-                and not engine.working_memory.habenular_ior.is_action_inhibited(
-                    engine.avatar_pos, macro_plan[0].action, macro_plan[0].action_data
-                )
-            ):
-                engine.phase = EpistemicPhase.EXPLOITATION
-                engine.mental_plan = deque(macro_plan)
-                next_step = engine.mental_plan.popleft()
-                chosen_action = next_step.action
-                chosen_data = next_step.action_data
-                predicted_pos = next_step.predicted_avatar_pos
-                if not engine.mental_plan and engine.object_planner.active_target_object_id:
-                    engine.object_planner.ledger.record_interaction(
-                        engine.object_planner.active_target_object_id,
-                        predicted_pos or engine.avatar_pos or (0, 0),
-                    )
-                    engine.object_planner.active_target_object_id = None
+            chosen_action = None
+            chosen_data = None
+            predicted_pos = None
 
-            # 3B. Secondary: Forward Mental Simulation over learned dynamics
-            elif engine.is_motor_grounded() and engine.simulation_cooldown == 0:
+            # 3A. Primary: Forward Mental Simulation over learned dynamics & verified exits
+            # (Executive Directive 1 & 2: Check if exit is open, if open go through it)
+            if engine.is_motor_grounded() and engine.simulation_cooldown == 0:
                 simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
                 if simulated_plan:
                     engine.consecutive_simulation_failures = 0
@@ -992,21 +972,40 @@ class PrefrontalDeliberationEngine:
                     )
                     engine._last_sim_goal_count = len(engine.learned_goal_positions)
                     engine._last_sim_barrier_count = len(engine.learned_barriers)
+
+            # 3B. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
+            # If exit is not open/reachable or in search backoff, interact with intermediate objects
+            if chosen_action is None:
+                macro_plan = engine.object_planner.plan_macro_option(
+                    engine, curr_grid, available_actions
+                )
+                if (
+                    macro_plan
+                    and macro_plan[0].action in available_actions
+                    and engine.inhibited_actions.get(macro_plan[0].action, 0) == 0
+                    and not engine.working_memory.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, macro_plan[0].action, macro_plan[0].action_data
+                    )
+                ):
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(macro_plan)
+                    next_step = engine.mental_plan.popleft()
+                    chosen_action = next_step.action
+                    chosen_data = next_step.action_data
+                    predicted_pos = next_step.predicted_avatar_pos
+                    if not engine.mental_plan and engine.object_planner.active_target_object_id:
+                        engine.object_planner.ledger.record_interaction(
+                            engine.object_planner.active_target_object_id,
+                            predicted_pos or engine.avatar_pos or (0, 0),
+                        )
+                        engine.object_planner.active_target_object_id = None
+                else:
                     if engine.exploration_cooldown > 0:
                         engine.exploration_cooldown -= 1
                     engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
                     chosen_action, chosen_data = engine.plan_epistemic_probe(
                         curr_grid, available_actions
                     )
-
-            # 3C. Fallback: Epistemic Curiosity Probing & Motor Calibration
-            else:
-                if engine.exploration_cooldown > 0:
-                    engine.exploration_cooldown -= 1
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                chosen_action, chosen_data = engine.plan_epistemic_probe(
-                    curr_grid, available_actions
-                )
 
         # Effector Grounding Invariant
         if engine.is_spatial_effector(chosen_action):

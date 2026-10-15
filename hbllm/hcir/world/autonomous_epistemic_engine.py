@@ -729,12 +729,37 @@ class AutonomousEpistemicEngine:
                         max_stride = max(abs(d1[0]), abs(d2[0]))
                         if abs(d1[0]) < max_stride and max_stride % abs(d1[0]) == 0:
                             deltas[a1] = (-max_stride if d1[0] < 0 else max_stride, 0)
+
+        # Isotropic spatial lattice stride generalization:
+        # If any cardinal displacement action demonstrates an unconstrained stride S > 1,
+        # propagate S to uncalibrated or unit-prior cardinal actions (probes_tested == 0 or |d| <= 1).
+        calibrated_strides = [
+            max(abs(dyn.delta_r), abs(dyn.delta_c))
+            for dyn in self.action_dynamics.values()
+            if getattr(dyn, "probes_tested", 0) >= 1 and dyn.is_displacement_action()
+        ]
+        if calibrated_strides:
+            lattice_quantum = max(calibrated_strides)
+            if lattice_quantum > 1:
+                for act in list(deltas.keys()):
+                    dyn = self.action_dynamics.get(act)
+                    if dyn is None or getattr(dyn, "probes_tested", 0) == 0:
+                        dr, dc = deltas[act]
+                        if abs(dr) == 1 and dc == 0:
+                            deltas[act] = (dr * lattice_quantum, 0)
+                        elif abs(dc) == 1 and dr == 0:
+                            deltas[act] = (0, dc * lattice_quantum)
+
         _discrete_grid_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
         for act, d in _discrete_grid_convention.items():
             if act not in deltas and (
                 act in self.action_affordances or not self.action_affordances
             ):
-                deltas[act] = d
+                if calibrated_strides and max(calibrated_strides) > 1:
+                    lq = max(calibrated_strides)
+                    deltas[act] = (d[0] * lq, d[1] * lq)
+                else:
+                    deltas[act] = d
         return deltas
 
     def is_action_calibrated(self, action: Any) -> bool:

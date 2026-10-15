@@ -82,6 +82,30 @@ class EpistemicFeedbackAssimilator:
                 engine.verified_safe_features.add(wf)
 
     @staticmethod
+    def _synchronize_lattice_stride(engine: AutonomousEpistemicEngine, stride: int) -> None:
+        """Propagate discovered lattice quantum to uncalibrated cardinal action priors."""
+        if stride <= 1 or not hasattr(engine, "action_dynamics"):
+            return
+        for other_act, other_dyn in engine.action_dynamics.items():
+            if getattr(other_dyn, "probes_tested", 0) == 0:
+                if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
+                    other_dyn.delta_r *= stride
+                    other_dyn.displacement = (float(other_dyn.delta_r), 0.0)
+                    if (
+                        hasattr(engine, "action_affordances")
+                        and other_act in engine.action_affordances
+                    ):
+                        engine.action_affordances[other_act].delta = (other_dyn.delta_r, 0)
+                elif abs(other_dyn.delta_c) == 1 and other_dyn.delta_r == 0:
+                    other_dyn.delta_c *= stride
+                    other_dyn.displacement = (0.0, float(other_dyn.delta_c))
+                    if (
+                        hasattr(engine, "action_affordances")
+                        and other_act in engine.action_affordances
+                    ):
+                        engine.action_affordances[other_act].delta = (0, other_dyn.delta_c)
+
+    @staticmethod
     def _commit_avatar_identity(
         engine: AutonomousEpistemicEngine,
         pairs: list[tuple[SpatialEntity, SpatialEntity]],
@@ -145,6 +169,10 @@ class EpistemicFeedbackAssimilator:
                     action_id=action,
                     is_displacement=(dr != 0 or dc != 0),
                     delta=(dr, dc),
+                )
+            if dr != 0 or dc != 0:
+                EpistemicFeedbackAssimilator._synchronize_lattice_stride(
+                    engine, max(abs(dr), abs(dc))
                 )
 
         logger.info(
@@ -919,6 +947,10 @@ class EpistemicFeedbackAssimilator:
                         )
                     else:
                         engine.action_dynamics[action].update_from_trial((dr, dc), success=True)
+                    if dr != 0 or dc != 0:
+                        EpistemicFeedbackAssimilator._synchronize_lattice_stride(
+                            engine, max(abs(dr), abs(dc))
+                        )
                 logger.info(
                     "AutonomousEpistemicEngine: Avatar segregated/re-grounded via MT/V5 kinetic stream (feats=%s, size=%d, pos=%s)",
                     engine.avatar_features,
@@ -1032,6 +1064,10 @@ class EpistemicFeedbackAssimilator:
                             action_id=action,
                             is_displacement=(dr != 0 or dc != 0),
                             delta=(dr, dc),
+                        )
+                    if dr != 0 or dc != 0:
+                        EpistemicFeedbackAssimilator._synchronize_lattice_stride(
+                            engine, max(abs(dr), abs(dc))
                         )
 
                 if not is_win:
