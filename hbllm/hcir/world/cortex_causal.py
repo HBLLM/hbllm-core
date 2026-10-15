@@ -64,6 +64,9 @@ class ActionAffordance:
     delta: tuple[int, ...] | None = None
     is_state_transform: bool = False
     is_focus_switch: bool = False
+    is_undo: bool = False
+    is_value_mutator: bool = False
+    is_index_selector: bool = False
     confidence: float = 1.0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -90,6 +93,15 @@ class HCIRSymbolicWorldTheory:
     walkable_features: set[int] = field(default_factory=set)
     cargo_features: set[int] = field(default_factory=set)
     receptacle_features: set[int] = field(default_factory=set)
+
+    # Functional action categorization
+    undo_actions: set[Any] = field(default_factory=set)
+    focus_switch_actions: set[Any] = field(default_factory=set)
+    index_selector_actions: set[Any] = field(default_factory=set)
+    value_mutator_actions: set[Any] = field(default_factory=set)
+    active_manipulandum_id: str | None = None
+    last_effector_target_coord: tuple[int, int] | None = None
+    last_effector_target_entity_id: str | None = None
 
     # Telic global board goal induction
     telic_goal_type: str = ""  # e.g. "deplete", "navigate", "cargo"
@@ -247,6 +259,51 @@ class HCIRSymbolicWorldTheory:
         logger.info(
             "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %d", feature_id
         )
+
+    def induce_undo_action(self, action: Any) -> None:
+        """Induce universal empirical state-rollback / undo affordance."""
+        if action not in self.undo_actions:
+            self.undo_actions.add(action)
+            pred = CausalPredicate(
+                variable="action_role",
+                operator="==",
+                value="undo",
+                target_entity=str(action),
+            )
+            self.register_predicate(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Induced Empirical UNDO Operator: Action %s", action
+            )
+
+    def induce_index_selector(self, action: Any) -> None:
+        """Induce dial / cursor index navigation affordance."""
+        if action not in self.index_selector_actions:
+            self.index_selector_actions.add(action)
+            pred = CausalPredicate(
+                variable="action_role",
+                operator="==",
+                value="index_selector",
+                target_entity=str(action),
+            )
+            self.register_predicate(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Induced Empirical Index Selector: Action %s", action
+            )
+
+    def induce_value_mutator(self, action: Any) -> None:
+        """Induce dial / state value mutation affordance."""
+        if action not in self.value_mutator_actions:
+            self.value_mutator_actions.add(action)
+            pred = CausalPredicate(
+                variable="action_role",
+                operator="==",
+                value="value_mutator",
+                target_entity=str(action),
+            )
+            self.register_predicate(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Induced Empirical Value Mutator: Action %s", action
+            )
 
     def register_predicate(self, predicate: CausalPredicate) -> None:
         """Register a generic or learned causal predicate into the symbolic world theory."""

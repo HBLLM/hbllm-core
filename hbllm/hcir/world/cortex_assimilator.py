@@ -289,6 +289,32 @@ class EpistemicFeedbackAssimilator:
                 except (ValueError, TypeError):
                     pass
 
+        # Active Manipulandum Effector Binding (Modal Select-Then-Direct):
+        if target_coord is not None:
+            engine.working_memory.last_effector_target_coord = target_coord
+            tr_t, tc_t = target_coord
+            if 0 <= tr_t < H and 0 <= tc_t < W:
+                clicked_feat = int(curr_grid[tr_t, tc_t])
+                bg_val = engine.bg_feature if engine.bg_feature is not None else 0
+                if (
+                    clicked_feat != bg_val
+                    and not engine.symbolic_theory.is_barrier(clicked_feat)
+                    and clicked_feat not in engine.hazard_tracker.known_lethal_features
+                ):
+                    manip_id = f"manip_{clicked_feat}_{tr_t}_{tc_t}"
+                    engine.working_memory.last_effector_target_entity_id = manip_id
+                    engine.working_memory.body_schema.bind_manipulandum(
+                        entity_id=manip_id,
+                        feature_id=clicked_feat,
+                        pos=(tr_t, tc_t),
+                        cells=[(tr_t, tc_t)],
+                        step=engine.step_counter,
+                    )
+                    if engine.avatar_pos is None:
+                        engine.avatar_pos = (tr_t, tc_t)
+                        engine.avatar_features = {clicked_feat}
+                        engine.avatar_feature = clicked_feat
+
         # Empirical State-Reversion / Undo Action Discovery:
         # If executing this action restored the grid to the previous-previous state,
         # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
@@ -300,8 +326,11 @@ class EpistemicFeedbackAssimilator:
             and not engine.is_displacement_action(action)
         ):
             if np.array_equal(curr_grid, engine.grid_history[-2]):
+                engine.symbolic_theory.induce_undo_action(action)
                 engine.undo_actions.add(action)
-                engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 16)
+                if action in engine.action_affordances:
+                    engine.action_affordances[action].is_undo = True
+                engine.inhibited_actions[action] = 999999
                 logger.info(
                     "AutonomousEpistemicEngine: Grounded empirical UNDO / STATE_REVERSION affordance for action %s",
                     action,
@@ -576,6 +605,70 @@ class EpistemicFeedbackAssimilator:
             if best_ce_id is not None:
                 matched_ce = unmatched_curr.pop(best_ce_id)
                 moved_entities.append((pe, matched_ce, best_delta))
+
+        # Faculty: Active Manipulandum Dynamic Tracking
+        manip = engine.working_memory.body_schema.active_manipulandum
+        manip_moved = False
+        if manip is not None and moved_entities:
+            for pe_m, ce_m, delta_m in moved_entities:
+                if (
+                    ce_m.feature_id == manip.feature_id
+                    or pe_m.grid_pos == manip.pos
+                    or (
+                        abs(pe_m.grid_pos[0] - manip.pos[0]) <= 1
+                        and abs(pe_m.grid_pos[1] - manip.pos[1]) <= 1
+                    )
+                ):
+                    dr_m, dc_m = delta_m
+                    engine.working_memory.body_schema.update_manipulandum_pos(dr_m, dc_m)
+                    manip_moved = True
+                    if engine.avatar_pos is not None:
+                        engine.avatar_pos = (
+                            engine.avatar_pos[0] + dr_m,
+                            engine.avatar_pos[1] + dc_m,
+                        )
+                    else:
+                        engine.avatar_pos = manip.pos
+                    if action is not None:
+                        prev_tested = getattr(
+                            engine.action_dynamics.get(action), "probes_tested", 0
+                        )
+                        engine.action_dynamics[action] = ActionDynamicsModel(
+                            action_id=action,
+                            delta_r=dr_m,
+                            delta_c=dc_m,
+                            confidence=0.8,
+                            probes_tested=max(1, prev_tested + 1),
+                        )
+                        if action in engine.action_affordances:
+                            engine.action_affordances[action].is_displacement = (
+                                dr_m != 0 or dc_m != 0
+                            )
+                            engine.action_affordances[action].delta = (dr_m, dc_m)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Active manipulandum translated by (%d, %d) via action %s",
+                        dr_m,
+                        dc_m,
+                        action,
+                    )
+                    break
+
+        # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
+        if action is not None and not is_effector_action:
+            if len(moved_entities) == 1 and diff.changed_pixel_count <= 16:
+                pe_sc, ce_sc, (dr_sc, dc_sc) = moved_entities[0]
+                if ce_sc.area <= 16 and (
+                    (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
+                ):
+                    engine.symbolic_theory.induce_index_selector(action)
+                    engine.index_selector_actions.add(action)
+                    if action in engine.action_affordances:
+                        engine.action_affordances[action].is_index_selector = True
+            elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 8:
+                engine.symbolic_theory.induce_value_mutator(action)
+                engine.value_mutator_actions.add(action)
+                if action in engine.action_affordances:
+                    engine.action_affordances[action].is_value_mutator = True
 
         # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
         if engine.deformation_tracker is not None:
@@ -1125,9 +1218,12 @@ class EpistemicFeedbackAssimilator:
                             )
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
         avatar_moved = bool(
-            engine.avatar_pos is not None
-            and prev_avatar_pos is not None
-            and engine.avatar_pos != prev_avatar_pos
+            (
+                engine.avatar_pos is not None
+                and prev_avatar_pos is not None
+                and engine.avatar_pos != prev_avatar_pos
+            )
+            or manip_moved
         )
         if not is_effector_action and not is_known_displacement and not avatar_moved:
             engine.last_non_displacement_action = action

@@ -59,6 +59,28 @@ class HeldTool:
         )
 
 
+@dataclass
+class ActiveManipulandum:
+    """An external object currently focused/bound to directional motor actions."""
+
+    entity_id: str
+    feature_id: int
+    pos: tuple[int, int]
+    cells: list[tuple[int, int]] = field(default_factory=list)
+    bound_step: int = 0
+    role: str = "manipulandum"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export manipulandum state as a declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable="active_manipulandum",
+            operator="==",
+            value=self.feature_id,
+            relation=f"pos:{self.pos[0]},{self.pos[1]}",
+            target_entity=self.entity_id,
+        )
+
+
 class ExtendedBodySchema:
     """Parietal body schema tracking physical effector extent and tool-gated barrier affordances."""
 
@@ -66,12 +88,59 @@ class ExtendedBodySchema:
         self.held_tools: list[HeldTool] = []
         # tool_feature -> set of barrier_features it unlocks
         self.tool_barrier_affinities: dict[int, set[int]] = {}
+        self.active_manipulandum: ActiveManipulandum | None = None
 
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset currently held tools while optionally preserving cross-trial tool affinities."""
         self.held_tools.clear()
+        self.active_manipulandum = None
         if not retain_dynamics:
             self.tool_barrier_affinities.clear()
+
+    def bind_manipulandum(
+        self,
+        entity_id: str,
+        feature_id: int,
+        pos: tuple[int, int],
+        cells: list[tuple[int, int]] | None = None,
+        step: int = 0,
+        role: str = "manipulandum",
+    ) -> None:
+        """Bind an external entity as the active motor manipulandum."""
+        self.active_manipulandum = ActiveManipulandum(
+            entity_id=entity_id,
+            feature_id=feature_id,
+            pos=pos,
+            cells=cells or [pos],
+            bound_step=step,
+            role=role,
+        )
+        logger.info(
+            "ExtendedBodySchema: Bound entity %s (feature %d) at %s as active manipulandum at step %d.",
+            entity_id,
+            feature_id,
+            pos,
+            step,
+        )
+
+    def unbind_manipulandum(self) -> None:
+        """Release currently bound manipulandum."""
+        self.active_manipulandum = None
+
+    def has_manipulandum(self) -> bool:
+        """Return True if an external manipulandum is currently bound."""
+        return self.active_manipulandum is not None
+
+    def update_manipulandum_pos(self, dr: int, dc: int) -> tuple[int, int] | None:
+        """Translate the active manipulandum by displacement (dr, dc)."""
+        if self.active_manipulandum is None:
+            return None
+        r, c = self.active_manipulandum.pos
+        new_pos = (r + dr, c + dc)
+        new_cells = [(cr + dr, cc + dc) for cr, cc in self.active_manipulandum.cells]
+        self.active_manipulandum.pos = new_pos
+        self.active_manipulandum.cells = new_cells
+        return new_pos
 
     def acquire_tool(
         self,
@@ -162,6 +231,8 @@ class ExtendedBodySchema:
     def export_causal_predicates(self) -> list[CausalPredicate]:
         """Export tool possession and unlocked barrier permeability into formal causal predicates."""
         predicates: list[CausalPredicate] = []
+        if self.active_manipulandum is not None:
+            predicates.append(self.active_manipulandum.to_causal_predicate())
         for tool in self.held_tools:
             predicates.append(tool.to_causal_predicate())
         for tool_feat, barriers in self.tool_barrier_affinities.items():

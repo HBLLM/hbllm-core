@@ -396,6 +396,28 @@ class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
         return SafetyGateResult(is_safe=True)
 
 
+class CausalUndoSafetyPredicate(PlanSafetyPredicate):
+    """Rejects candidate trajectories that trigger empirical undo / state reversion rollbacks."""
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        undo_acts = getattr(engine, "undo_actions", set())
+        if next_step.action in undo_acts or (
+            next_step.action == 7 and 7 in available_actions and len(available_actions) > 1
+        ):
+            return SafetyGateResult(
+                is_safe=False,
+                reason=f"Action {next_step.action} is an empirical state-reversion undo operator",
+            )
+        return SafetyGateResult(is_safe=True)
+
+
 class PlanSafetyEvaluator:
     """Prefrontal safety arbitration engine composing typed PlanSafetyPredicates."""
 
@@ -410,6 +432,7 @@ class PlanSafetyEvaluator:
                 HabenularInhibitionPredicate(),
                 CerebellarPhaseGatePredicate(),
                 AnteriorCingulateConflictPredicate(),
+                CausalUndoSafetyPredicate(),
             ]
         )
 
@@ -527,6 +550,42 @@ class PrefrontalDeliberationEngine:
         if focus_switches:
             engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
             return focus_switches[0], None
+
+        # Faculty: Dial / State-Cycler Interleaved Deliberation (Norman Parameter Space Navigation)
+        index_selectors = [
+            a
+            for a in available_actions
+            if a in engine.index_selector_actions and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        value_mutators = [
+            a
+            for a in available_actions
+            if a in engine.value_mutator_actions and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if index_selectors and value_mutators:
+            mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
+            if mut_streak < 2:
+                chosen = value_mutators[engine.step_counter % len(value_mutators)]
+                engine.working_memory.dial_mutation_streak = mut_streak + 1
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                return chosen, None
+            else:
+                chosen = index_selectors[engine.step_counter % len(index_selectors)]
+                engine.working_memory.dial_mutation_streak = 0
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                return chosen, None
+
+        # Modal Select-Then-Direct Gating: If no avatar and no manipulandum bound, reach for interactive entities
+        if (
+            engine.avatar_pos is None
+            and not engine.working_memory.body_schema.has_manipulandum()
+            and spatial_effector_actions
+        ):
+            chosen_eff = spatial_effector_actions[0]
+            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if eff_data is not None:
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                return chosen_eff, eff_data
 
         if not spatial_effector_actions and discrete_transform_actions:
             has_displacement_actions = any(
@@ -914,6 +973,10 @@ class PrefrontalDeliberationEngine:
             ):
                 engine.avatar_feature = engine.prior_avatar_feature
                 engine.avatar_features.add(engine.prior_avatar_feature)
+
+        # Faculty: Active Manipulandum Localization
+        if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
+            engine.avatar_pos = engine.working_memory.body_schema.active_manipulandum.pos
 
         # Observe creature motion
         engine._observe_oriented_threat_motion(curr_grid, available_actions, known_av_feats)

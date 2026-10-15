@@ -264,6 +264,12 @@ class PrefrontalWorkingMemory:
         # Universal Dynamic Action Affordance Registry
         self.action_affordances: dict[Any, Any] = {}
         self.focus_switch_actions: set[Any] = set()
+        self.undo_actions: set[Any] = set()
+        self.index_selector_actions: set[Any] = set()
+        self.value_mutator_actions: set[Any] = set()
+        self.dial_mutation_streak: int = 0
+        self.last_effector_target_coord: tuple[int, int] | None = None
+        self.last_effector_target_entity_id: str | None = None
         self.last_non_displacement_action: Any | None = None
         self.level_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
@@ -368,9 +374,15 @@ class PrefrontalWorkingMemory:
         self.active_causal_actuator_coord = None
         self.consecutive_causal_probes = 0
         self.level_epistemic_probes = 0
+        self.dial_mutation_streak = 0
+        self.last_effector_target_coord = None
+        self.last_effector_target_entity_id = None
         if not retain_inhibitions:
             self.inhibited_actions.clear()
         if not retain_long_term:
+            self.undo_actions.clear()
+            self.index_selector_actions.clear()
+            self.value_mutator_actions.clear()
             self.tool_barrier_affinities.clear()
             self.habenular_ior.reset()
             self.avatar_controllability_evidence.clear()

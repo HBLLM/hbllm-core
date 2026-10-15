@@ -332,7 +332,13 @@ class EpistemicCuriosityExplorer:
         available_actions: Sequence[int],
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
-        undo_acts = getattr(engine, "undo_actions", set())
+        undo_acts = set(getattr(engine, "undo_actions", set()))
+        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
+            undo_acts.update(engine.working_memory.undo_actions)
+        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
+            undo_acts.update(engine.symbolic_theory.undo_actions)
+        if 7 in available_actions and len(available_actions) > 1:
+            undo_acts.add(7)
         uncalibrated = [
             a
             for a in available_actions
@@ -519,14 +525,23 @@ class EpistemicCuriosityExplorer:
                 exploration_mode="attractor_loop_effector",
             )
 
-        undo_acts = getattr(engine, "undo_actions", set())
+        undo_acts = set(getattr(engine, "undo_actions", set()))
+        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
+            undo_acts.update(engine.working_memory.undo_actions)
+        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
+            undo_acts.update(engine.symbolic_theory.undo_actions)
+        if 7 in available_actions and len(available_actions) > 1:
+            undo_acts.add(7)
         uninhibited_available = [
             a
             for a in available_actions
             if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
         ]
+        non_undo_available = [a for a in available_actions if a not in undo_acts]
         fallback_action = (
-            uninhibited_available[0] if uninhibited_available else available_actions[0]
+            uninhibited_available[0]
+            if uninhibited_available
+            else (non_undo_available[0] if non_undo_available else available_actions[0])
         )
         return EpistemicProbeProposal(
             action=fallback_action,
@@ -1406,6 +1421,32 @@ class MotorCortexEffector:
             except Exception as e:
                 logger.debug("Engine-local target scorer %s failed: %s", scorer, e)
 
+        # 2. Relational Structural Affordances (Optical Targets, Receptacles, Alignment Sockets)
+        structural_goals = PerceptionEngine.detect_structural_goals(
+            curr_grid,
+            bg=bg,
+            avatar_features=av_feats,
+            avatar_feature=engine.avatar_feature,
+        )
+        for sg in structural_goals:
+            pos = sg.get("position")
+            if pos is not None and isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                sr, sc = int(pos[0]), int(pos[1])
+                if not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid):
+                    vis = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
+                    click_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
+
+        # 3. Modal Manipulandum Destination Affordances:
+        # If an external manipulandum is currently focused, prioritize destination sockets/receptacles
+        if engine.working_memory.body_schema.has_manipulandum():
+            man = engine.working_memory.body_schema.active_manipulandum
+            if man is not None:
+                for r_feat in engine.symbolic_theory.receptacle_features:
+                    cells = np.argwhere(curr_grid == r_feat)
+                    for cr, cc in cells[:8]:
+                        vis = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+                        click_candidates.append((int(cr), int(cc), 220.0 - float(vis) * 10.0))
+
         # 6. Salient entities if no panel candidates exist
         if not click_candidates:
             for e in entities:
@@ -1643,12 +1684,28 @@ class MotorCortexEffector:
                     )
                     return dict(snapped_target)
 
-                # All discrete valid targets are exhausted and proven quiescent!
-                if action is not None:
-                    engine.inhibited_actions[action] = max(
-                        engine.inhibited_actions.get(action, 0), 6
-                    )
-                return None
+                # Fallback across valid targets: select least-visited target rather than returning None
+                if valid_targets:
+                    vt_scores = []
+                    for vt in valid_targets:
+                        if isinstance(vt, dict):
+                            raw_vx = vt.get("x", vt.get("c", 0))
+                            raw_vy = vt.get("y", vt.get("r", 0))
+                            vx = int(raw_vx) if raw_vx is not None else 0
+                            vy = int(raw_vy) if raw_vy is not None else 0
+                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                            vt_scores.append((vis, vt))
+                    if vt_scores:
+                        vt_scores.sort(key=lambda item: item[0])
+                        chosen_vt = vt_scores[0][1]
+                        raw_svx = chosen_vt.get("x", chosen_vt.get("c", 0))
+                        raw_svy = chosen_vt.get("y", chosen_vt.get("r", 0))
+                        svx = int(raw_svx) if raw_svx is not None else 0
+                        svy = int(raw_svy) if raw_svy is not None else 0
+                        engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
+                            engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
+                        )
+                        return dict(chosen_vt)
 
             coords: dict[str, Any] = {}
             for k in param_keys:
@@ -1660,12 +1717,36 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        # Ventral Stream Invariant: Never click featureless void background cells or border lines.
-        # When all candidates are exhausted and proven quiescent, inhibit click action
-        # so deliberation and exploration switch to locomotion / directional actions.
-        if action is not None:
-            engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
-        return None
+        # Robust Spatial Grounding Invariant: Effector actions must NEVER return None,
+        # ensuring environments requiring spatial parameters never receive empty dicts or None.
+        best_r, best_c = H // 2, W // 2
+        min_v = float("inf")
+        step_stride = max(1, min(H, W) // 16)
+        for r in range(1, H - 1, step_stride):
+            for c in range(1, W - 1, step_stride):
+                if cls.is_peripheral_frame_cell(r, c, H, W, curr_grid):
+                    continue
+                v = engine.entity_visit_counts.get(f"click_{r}_{c}", 0)
+                feat = int(curr_grid[r, c])
+                bonus = -20.0 if feat != bg else 0.0
+                score = float(v) + bonus
+                if score < min_v:
+                    min_v = score
+                    best_r, best_c = r, c
+
+        engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
+            engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
+        )
+        engine.last_effector_target_step[(best_r, best_c)] = engine.step_counter
+        coords_fallback: dict[str, Any] = {}
+        for k in param_keys:
+            if k in ("x", "col", "c", "column", "azimuth"):
+                coords_fallback[k] = best_c
+            elif k in ("y", "row", "r", "elevation", "distance"):
+                coords_fallback[k] = best_r
+            else:
+                coords_fallback[k] = 0
+        return coords_fallback
 
     @classmethod
     def to_causal_predicate(cls) -> CausalPredicate:

@@ -3425,3 +3425,181 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         assert (3, 4) in targets
         # Must include relative offset (3, 3 + 2) = (3, 5)
         assert (3, 5) in targets
+
+
+class TestMultiArchetypeNeuroSymbolicFaculties:
+    """Validation test suite for the 4 domain-general neuro-symbolic faculties:
+    1. Active Manipulandum Binding ("Select-Then-Direct")
+    2. Causal Undo Gating (State Reversion Prohibition)
+    3. Dial / State-Cycler Interleaved Deliberation
+    4. Robust Spatial Effector Grounding (No-None Invariant)
+    """
+
+    def test_active_manipulandum_binding_and_directional_control(self) -> None:
+        """Test Faculty 1: Parietal active manipulandum binding, translation, and causal predicate export."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+
+        schema = ExtendedBodySchema()
+        assert not schema.has_manipulandum()
+
+        schema.bind_manipulandum(
+            entity_id="mirror_1",
+            feature_id=4,
+            pos=(5, 5),
+            cells=[(5, 5), (5, 6)],
+            step=1,
+            role="optical_mirror",
+        )
+        assert schema.has_manipulandum()
+        assert schema.active_manipulandum is not None
+        assert schema.active_manipulandum.pos == (5, 5)
+
+        pred = schema.active_manipulandum.to_causal_predicate()
+        assert pred.variable == "active_manipulandum"
+        assert pred.value == 4
+        assert pred.target_entity == "mirror_1"
+
+        new_pos = schema.update_manipulandum_pos(-1, 0)
+        assert new_pos == (4, 5)
+        assert schema.active_manipulandum.pos == (4, 5)
+        assert (4, 5) in schema.active_manipulandum.cells
+        assert (4, 6) in schema.active_manipulandum.cells
+
+        schema.unbind_manipulandum()
+        assert not schema.has_manipulandum()
+
+        # Engine integration check
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        grid0 = np.zeros((10, 10), dtype=np.int32)
+        grid0[5, 5] = 4  # Clickable entity
+        engine.prev_grid = grid0.copy()
+
+        # Action 6 click at (5, 5)
+        engine.assimilate_feedback(
+            curr_grid=grid0,
+            available_actions=[1, 2, 3, 4, 6],
+            action=6,
+            action_data={"x": 5, "y": 5},
+        )
+        assert engine.working_memory.body_schema.has_manipulandum()
+        assert engine.working_memory.body_schema.active_manipulandum.feature_id == 4
+
+        # Action 1 (UP) translates entity
+        grid1 = np.zeros((10, 10), dtype=np.int32)
+        grid1[4, 5] = 4
+        engine.assimilate_feedback(
+            curr_grid=grid1,
+            available_actions=[1, 2, 3, 4, 6],
+            action=1,
+            action_data=None,
+        )
+        assert engine.working_memory.body_schema.active_manipulandum.pos == (4, 5)
+        assert engine.action_dynamics[1].delta_r == -1
+        assert engine.action_dynamics[1].delta_c == 0
+
+    def test_causal_undo_induction_and_safety_gate(self) -> None:
+        """Test Faculty 2: Empirical state-reversion induction and prefrontal safety gate rejection."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import (
+            CausalUndoSafetyPredicate,
+            PlanSafetyEvaluator,
+        )
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        g0 = np.zeros((6, 6), dtype=np.int32)
+        g1 = np.zeros((6, 6), dtype=np.int32)
+        g1[2, 2] = 3
+
+        engine.grid_history.append(g0.copy())
+        engine.grid_history.append(g1.copy())
+        engine.prev_grid = g1.copy()
+
+        # Taking Action 7 reverts grid from g1 back to g0
+        engine.assimilate_feedback(
+            curr_grid=g0,
+            available_actions=[1, 2, 6, 7],
+            action=7,
+        )
+
+        assert 7 in engine.undo_actions
+        assert 7 in engine.symbolic_theory.undo_actions
+        assert engine.inhibited_actions.get(7, 0) >= 999999
+
+        # Safety predicate check
+        safety_eval = PlanSafetyEvaluator([CausalUndoSafetyPredicate()])
+        bad_step = MentalSimulationStep(action=7, predicted_avatar_pos=(2, 2))
+        res = safety_eval.evaluate(
+            engine=engine,
+            curr_grid=g0,
+            next_step=bad_step,
+            available_actions=[1, 2, 6, 7],
+        )
+        assert not res.is_safe
+        assert "undo operator" in res.reason
+
+    def test_dial_state_cycler_induction_and_interleaved_deliberation(self) -> None:
+        """Test Faculty 3: Dial / State-Cycler discovery and prefrontal interleaved deliberation."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        g0 = np.zeros((5, 10), dtype=np.int32)
+        g0[2, 2] = 8  # 1D cursor indicator
+        engine.prev_grid = g0.copy()
+
+        # Step 1: Action 4 moves cursor to (2, 3) along horizontal axis
+        g1 = np.zeros((5, 10), dtype=np.int32)
+        g1[2, 3] = 8
+        engine.assimilate_feedback(
+            curr_grid=g1,
+            available_actions=[1, 2, 3, 4],
+            action=4,
+        )
+        assert 4 in engine.index_selector_actions
+
+        # Step 2: Action 1 mutates slot cell without moving cursor
+        g2 = g1.copy()
+        g2[1, 3] = 5  # mutates slot value
+        engine.prev_grid = g1.copy()
+        engine.assimilate_feedback(
+            curr_grid=g2,
+            available_actions=[1, 2, 3, 4],
+            action=1,
+        )
+        assert 1 in engine.value_mutator_actions
+
+        # Prefrontal deliberation arbitration
+        delib = PrefrontalDeliberationEngine()
+        available = [1, 2, 3, 4]
+
+        # Streak 0: should mutate
+        act0, _ = delib.arbitrate_affordances(engine, g2, available, set())
+        assert act0 in engine.value_mutator_actions
+        assert engine.working_memory.dial_mutation_streak == 1
+
+        # Streak 1: should mutate again
+        act1, _ = delib.arbitrate_affordances(engine, g2, available, set())
+        assert act1 in engine.value_mutator_actions
+        assert engine.working_memory.dial_mutation_streak == 2
+
+        # Streak 2: threshold reached, shifts index!
+        act2, _ = delib.arbitrate_affordances(engine, g2, available, set())
+        assert act2 in engine.index_selector_actions
+        assert engine.working_memory.dial_mutation_streak == 0
+
+    def test_robust_effector_grounding_no_none_invariant(self) -> None:
+        """Test Faculty 4: ground_effector_action NEVER returns None even on featureless boards."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        blank_grid = np.zeros((15, 15), dtype=np.int32)
+
+        coords = MotorCortexEffector.ground_effector_action(engine, blank_grid, action=6)
+        assert coords is not None
+        assert isinstance(coords, dict)
+        assert "x" in coords and "y" in coords
+        assert 0 <= coords["x"] < 15
+        assert 0 <= coords["y"] < 15
