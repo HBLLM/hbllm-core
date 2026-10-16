@@ -333,12 +333,10 @@ class EpistemicCuriosityExplorer:
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
         undo_acts = set(getattr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
         if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
             undo_acts.update(engine.symbolic_theory.undo_actions)
-        if 7 in available_actions and len(available_actions) > 1:
-            undo_acts.add(7)
+        elif hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
+            undo_acts.update(engine.working_memory.undo_actions)
         uncalibrated = [
             a
             for a in available_actions
@@ -526,12 +524,10 @@ class EpistemicCuriosityExplorer:
             )
 
         undo_acts = set(getattr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
         if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
             undo_acts.update(engine.symbolic_theory.undo_actions)
-        if 7 in available_actions and len(available_actions) > 1:
-            undo_acts.add(7)
+        elif hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
+            undo_acts.update(engine.working_memory.undo_actions)
         uninhibited_available = [
             a
             for a in available_actions

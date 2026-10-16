@@ -628,6 +628,21 @@ class PrefrontalDeliberationEngine:
             )
             and spatial_effector_actions
         ):
+            # Prioritize motor grounding of uncalibrated discrete actions when effector interactions are quiescent
+            uncalibrated_discrete = [
+                a
+                for a in discrete_transform_actions
+                if not engine.is_action_calibrated(a)
+                and engine.inhibited_actions.get(a, 0) == 0
+                and a not in engine.symbolic_theory.undo_actions
+                and (a, engine.avatar_pos) not in engine.tested_action_positions
+            ]
+            if uncalibrated_discrete and engine.consecutive_quiescent_actions >= 1:
+                chosen_disc = uncalibrated_discrete[0]
+                engine.tested_action_positions.add((chosen_disc, engine.avatar_pos))
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                return chosen_disc, None
+
             chosen_eff = spatial_effector_actions[0]
             eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
             if eff_data is not None:

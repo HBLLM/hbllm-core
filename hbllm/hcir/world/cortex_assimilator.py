@@ -339,7 +339,12 @@ class EpistemicFeedbackAssimilator:
                         cells=[(tr_t, tc_t)],
                         step=engine.step_counter,
                     )
-                    if engine.avatar_pos is None:
+                    has_disp = any(
+                        engine.is_displacement_action(a) for a in available_actions
+                    ) or any(
+                        dyn.is_displacement_action() for dyn in engine.action_dynamics.values()
+                    )
+                    if has_disp and engine.avatar_pos is None:
                         engine.avatar_pos = (tr_t, tc_t)
                         engine.avatar_features = {clicked_feat}
                         engine.avatar_feature = clicked_feat
@@ -447,9 +452,11 @@ class EpistemicFeedbackAssimilator:
                         target_coord, set(mut_cells)
                     )
 
-                if is_effector_action and diff.changed_pixel_count > 0:
-                    engine.avatar_pos = target_coord
+                has_displacement = any(
+                    engine.is_displacement_action(a) for a in available_actions
+                ) or any(dyn.is_displacement_action() for dyn in engine.action_dynamics.values())
 
+                if is_effector_action and diff.changed_pixel_count > 0:
                     # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
                     if diff.changed_mask is not None and engine.prev_grid is not None:
                         bg_val = engine.bg_feature or 0
@@ -468,34 +475,55 @@ class EpistemicFeedbackAssimilator:
                             elif dot < -0.5:
                                 engine.effector_kinetics_mode = -1
 
-                    clicked_feats = {
-                        int(f)
-                        for f in np.unique(
-                            curr_grid[
+                    # Only assign avatar position/features if the environment possesses displacement dynamics
+                    # (embodied agent with teleportation/movement), NOT in pure allocentric/click puzzle environments.
+                    if has_displacement:
+                        known_avs = engine.avatar_features or (
+                            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+                        )
+                        can_relocate = False
+                        if known_avs:
+                            nearby = curr_grid[
                                 max(0, tr - 2) : min(H, tr + 3), max(0, tc - 2) : min(W, tc + 3)
                             ]
-                        )
-                        if int(f) != engine.bg_feature
-                    }
-                    if clicked_feats:
-                        engine.avatar_features = clicked_feats
-                        engine.avatar_feature = next(iter(clicked_feats))
-                        from scipy.ndimage import label
+                            if any(int(f) in known_avs for f in np.unique(nearby)):
+                                can_relocate = True
+                        elif engine.avatar_pos is None:
+                            can_relocate = True
 
-                        mask_c = np.isin(curr_grid, list(clicked_feats))
-                        lab_c, _ = label(mask_c)
-                        if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
-                            comp_c = np.argwhere(lab_c == lab_c[tr, tc])
-                            engine.avatar_size = len(comp_c)
-                            engine.avatar_pos = (
-                                int(round(float(np.mean(comp_c[:, 0])))),
-                                int(round(float(np.mean(comp_c[:, 1])))),
+                        if can_relocate:
+                            engine.avatar_pos = target_coord
+                            clicked_feats = {
+                                int(f)
+                                for f in np.unique(
+                                    curr_grid[
+                                        max(0, tr - 2) : min(H, tr + 3),
+                                        max(0, tc - 2) : min(W, tc + 3),
+                                    ]
+                                )
+                                if int(f) != engine.bg_feature
+                            }
+                            if clicked_feats and not known_avs:
+                                engine.avatar_features = clicked_feats
+                                engine.avatar_feature = next(iter(clicked_feats))
+                            from scipy.ndimage import label
+
+                            active_feats = known_avs or clicked_feats
+                            if active_feats:
+                                mask_c = np.isin(curr_grid, list(active_feats))
+                                lab_c, _ = label(mask_c)
+                                if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
+                                    comp_c = np.argwhere(lab_c == lab_c[tr, tc])
+                                    engine.avatar_size = len(comp_c)
+                                    engine.avatar_pos = (
+                                        int(round(float(np.mean(comp_c[:, 0])))),
+                                        int(round(float(np.mean(comp_c[:, 1])))),
+                                    )
+                            engine.mental_plan.clear()
+                            engine.transition_to_phase(
+                                EpistemicPhase.MENTAL_SIMULATION,
+                                reason="avatar_relocation_assimilated",
                             )
-                    engine.mental_plan.clear()
-                    engine.transition_to_phase(
-                        EpistemicPhase.MENTAL_SIMULATION,
-                        reason="avatar_relocation_assimilated",
-                    )
 
                 # Numerical / neighborhood cardinality constraint discovery:
                 tr, tc = target_coord

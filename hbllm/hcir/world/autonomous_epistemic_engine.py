@@ -921,34 +921,38 @@ class AutonomousEpistemicEngine:
 
     @property
     def focus_switch_actions(self) -> set[Any]:
-        return self.working_memory.focus_switch_actions
+        return self.symbolic_theory.focus_switch_actions
 
     @focus_switch_actions.setter
     def focus_switch_actions(self, val: set[Any]) -> None:
+        self.symbolic_theory.focus_switch_actions = val
         self.working_memory.focus_switch_actions = val
 
     @property
     def undo_actions(self) -> set[Any]:
-        return self.working_memory.undo_actions
+        return self.symbolic_theory.undo_actions
 
     @undo_actions.setter
     def undo_actions(self, val: set[Any]) -> None:
+        self.symbolic_theory.undo_actions = val
         self.working_memory.undo_actions = val
 
     @property
     def index_selector_actions(self) -> set[Any]:
-        return self.working_memory.index_selector_actions
+        return self.symbolic_theory.index_selector_actions
 
     @index_selector_actions.setter
     def index_selector_actions(self, val: set[Any]) -> None:
+        self.symbolic_theory.index_selector_actions = val
         self.working_memory.index_selector_actions = val
 
     @property
     def value_mutator_actions(self) -> set[Any]:
-        return self.working_memory.value_mutator_actions
+        return self.symbolic_theory.value_mutator_actions
 
     @value_mutator_actions.setter
     def value_mutator_actions(self, val: set[Any]) -> None:
+        self.symbolic_theory.value_mutator_actions = val
         self.working_memory.value_mutator_actions = val
 
     @property
