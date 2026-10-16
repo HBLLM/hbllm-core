@@ -580,7 +580,6 @@ def run_all_25_games(
                     break
                 elif feedback.terminated or state_str == "GAME_OVER":
                     print(f"    ⚠️ Level retry / death at step {step}, retaining dynamics...")
-                    current_level_steps = 0
                     cognitive_engine.reset_episode(
                         retain_dynamics=True, is_new_level=False, level=lvl
                     )
