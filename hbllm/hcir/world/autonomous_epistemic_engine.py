@@ -1298,8 +1298,6 @@ class AutonomousEpistemicEngine:
         aff = self.action_affordances.get(action)
         if aff is not None:
             return aff.requires_spatial_target
-        if action == 6 or action == "6" or (isinstance(action, str) and "CLICK" in action.upper()):
-            return True
         return False
 
     def is_displacement_action(self, action: Any) -> bool:
@@ -2035,6 +2033,10 @@ class AutonomousEpistemicEngine:
                 step_size=self.infer_motor_step_size(available_actions),
                 avatar_pos=self.avatar_pos,
                 avatar_features=effective_av_feats,
+                goals=set(self.goals),
+                cargo_features=self.learned_cargo_features,
+                barrier_features=self.symbolic_theory.barrier_features,
+                walkable_features=self.symbolic_theory.walkable_features,
             )
         except Exception:
             self._prev_oriented_threats = []
@@ -2054,7 +2056,17 @@ class AutonomousEpistemicEngine:
             for t in threats:
                 curr_by_feat.setdefault(t.feature_id, set()).add(t.pos)
             for feat, cur_positions in curr_by_feat.items():
-                if feat in effective_av_feats or feat in self.mobile_threat_features:
+                if (
+                    feat == bg
+                    or feat == self.bg_feature
+                    or feat in effective_av_feats
+                    or feat in self.mobile_threat_features
+                    or self.symbolic_theory.is_walkable(feat)
+                    or self.symbolic_theory.is_barrier(feat)
+                    or feat in self.symbolic_theory.goal_features
+                    or feat in self.learned_goal_features
+                    or feat in self.learned_cargo_features
+                ):
                     continue
                 old_positions = prev_by_feat.get(feat, set())
                 appeared = cur_positions - old_positions

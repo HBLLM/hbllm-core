@@ -161,19 +161,40 @@ class ArcAgiConsoleDriver(BaseDriver):
             except Exception:
                 pass
 
-        game_actions = getattr(game_obj, "actions", None)
-        valid_targets: list[dict[str, Any]] = []
-        if game_actions and isinstance(game_actions, (list, tuple)):
-            for act_in in game_actions:
-                d = getattr(act_in, "data", None)
-                if isinstance(d, dict) and d:
-                    valid_targets.append(d)
+        valid_targets_by_action: dict[int, list[dict[str, Any]]] = {}
+        if game_obj is not None:
+            if hasattr(game_obj, "_get_valid_clickable_actions"):
+                try:
+                    for act_in in game_obj._get_valid_clickable_actions() or []:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                valid_targets_by_action.setdefault(int(aid), []).append(d)
+                except Exception:
+                    pass
+            if hasattr(game_obj, "_get_valid_actions"):
+                try:
+                    for act_in in game_obj._get_valid_actions() or []:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                targets = valid_targets_by_action.setdefault(int(aid), [])
+                                if d not in targets:
+                                    targets.append(d)
+                except Exception:
+                    pass
 
         schemas = [dict(s) for s in self.descriptor.action_schema]
-        if valid_targets:
-            for s in schemas:
-                if s.get("action_id") == 6:
-                    s["valid_targets"] = valid_targets
+        for s in schemas:
+            aid = s.get("action_id")
+            if aid in valid_targets_by_action:
+                s["valid_targets"] = valid_targets_by_action[aid]
         metadata["action_schemas"] = schemas
 
         return DriverInput(
@@ -468,6 +489,7 @@ def run_all_25_games(
             if env is None:
                 print(f"    ⚠️ Could not make game environment for {gid}")
                 continue
+            agent.arc_env = env
 
             driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
             manager = DriverManager()

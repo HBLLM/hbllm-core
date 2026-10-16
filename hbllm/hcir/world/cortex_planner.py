@@ -462,29 +462,6 @@ class EpistemicGoalScheduler:
         all_lethals = engine.current_level_lethal_positions
         goals = [g for g in goals if g not in all_lethals]
 
-        # Ground goals onto reachable affine motor lattice coset if discrete stride > 1
-        step_size = max(
-            [
-                max(abs(dr), abs(dc))
-                for dr, dc in engine.action_deltas.values()
-                if dr != 0 or dc != 0
-            ],
-            default=1,
-        )
-        if step_size > 1 and avatar_pos is not None and goals:
-            aligned_goals: list[tuple[int, int]] = []
-            for gr, gc in goals:
-                if (gr - avatar_pos[0]) % step_size == 0 and (gc - avatar_pos[1]) % step_size == 0:
-                    aligned_goals.append((gr, gc))
-                else:
-                    agr = avatar_pos[0] + int(round((gr - avatar_pos[0]) / step_size)) * step_size
-                    agc = avatar_pos[1] + int(round((gc - avatar_pos[1]) / step_size)) * step_size
-                    if 0 <= agr < H and 0 <= agc < W:
-                        aligned_goals.append((agr, agc))
-                    else:
-                        aligned_goals.append((gr, gc))
-            goals = aligned_goals
-
         # Extended avatar projection
         goals = cls._project_extended_avatar_goals(curr_grid, engine, goals, H, W)
 
@@ -708,30 +685,15 @@ class MentalSimulationPlanner:
                 )
                 else (-1, -1)
             )
-            if av_feats:
-                avatar_cells = [
-                    (int(r), int(c)) for r, c in np.argwhere(np.isin(curr_grid, list(av_feats)))
-                ]
-                avatar_on_bg = any(
-                    int(curr_grid[r, c]) == bg
-                    or any(
-                        0 <= r + dr_a < H
-                        and 0 <= c + dc_a < W
-                        and int(curr_grid[r + dr_a, c + dc_a]) == bg
-                        for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                    )
-                    for r, c in avatar_cells
+            avatar_on_bg = ar >= 0 and (
+                int(curr_grid[ar, ac]) == bg
+                or any(
+                    0 <= ar + dr_a < H
+                    and 0 <= ac + dc_a < W
+                    and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
+                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                 )
-            else:
-                avatar_on_bg = ar >= 0 and (
-                    int(curr_grid[ar, ac]) == bg
-                    or any(
-                        0 <= ar + dr_a < H
-                        and 0 <= ac + dc_a < W
-                        and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
-                        for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                    )
-                )
+            )
             if bg_ratio >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
 
@@ -1063,6 +1025,8 @@ class MentalSimulationPlanner:
             avatar_features=av_feats,
             goals=set(goals),
             cargo_features=cargos_known,
+            barrier_features=engine.symbolic_theory.barrier_features,
+            walkable_features=engine.symbolic_theory.walkable_features,
         )
 
         half_step = max(1, step_size // 2)
@@ -1319,10 +1283,21 @@ class MentalSimulationPlanner:
                 grid_shape=(H, W),
                 traversable=traversable_cells,
             )
-        # Gather all physical cells of confirmed/candidate goal entities targeted in goals
+        # Gather all physical cells of confirmed/candidate goal entities
         all_goal_cells: set[tuple[int, int]] = set(goals)
+        goal_features = (
+            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
+        )
+        for gf in goal_features:
+            if gf != bg and gf not in av_feats:
+                for gr_idx, gc_idx in np.argwhere(curr_grid == gf):
+                    all_goal_cells.add((int(gr_idx), int(gc_idx)))
         for e in entities:
-            if e.grid_pos in all_goal_cells:
+            if (
+                engine.symbolic_theory.is_goal(e)
+                or e.role == EntityRole.GOAL
+                or e.feature_id in goal_features
+            ):
                 for cr, cc in e.properties.get("cells", [e.grid_pos]):
                     all_goal_cells.add((int(cr), int(cc)))
 

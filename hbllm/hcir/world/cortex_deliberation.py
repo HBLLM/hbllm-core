@@ -408,9 +408,11 @@ class CausalUndoSafetyPredicate(PlanSafetyPredicate):
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
         undo_acts = getattr(engine, "undo_actions", set())
-        if next_step.action in undo_acts or (
-            next_step.action == 7 and 7 in available_actions and len(available_actions) > 1
-        ):
+        aff = engine.action_affordances.get(next_step.action)
+        is_undo = next_step.action in undo_acts or (
+            aff is not None and aff.name.upper() in ("UNDO", "RESET")
+        )
+        if is_undo and len(available_actions) > 1:
             return SafetyGateResult(
                 is_safe=False,
                 reason=f"Action {next_step.action} is an empirical state-reversion undo operator",
@@ -728,30 +730,9 @@ class PrefrontalDeliberationEngine:
                     avatar_cells = [
                         (int(r), int(c)) for r, c in np.argwhere(np.isin(curr_grid, list(av_feats)))
                     ]
-                    avatar_on_bg = any(
-                        int(curr_grid[r, c]) == bg
-                        or any(
-                            0 <= r + dr_a < H
-                            and 0 <= c + dc_a < W
-                            and int(curr_grid[r + dr_a, c + dc_a]) == bg
-                            for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                        )
-                        for r, c in avatar_cells
-                    )
+                    avatar_on_bg = any(int(curr_grid[r, c]) == bg for r, c in avatar_cells)
                 else:
-                    avatar_on_bg = (
-                        0 <= ar < H
-                        and 0 <= ac < W
-                        and (
-                            int(curr_grid[ar, ac]) == bg
-                            or any(
-                                0 <= ar + dr_a < H
-                                and 0 <= ac + dc_a < W
-                                and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
-                                for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                            )
-                        )
-                    )
+                    avatar_on_bg = 0 <= ar < H and 0 <= ac < W and int(curr_grid[ar, ac]) == bg
                 if bg_ratio >= 0.20 and not avatar_on_bg:
                     bg_is_impassable_void = True
 
@@ -858,7 +839,8 @@ class PrefrontalDeliberationEngine:
                 and not np.any(curr_grid == 0)
             ):
                 engine.symbolic_theory.walkable_features.discard(0)
-            engine.symbolic_theory.induce_walkable(engine.bg_feature)
+            if engine.bg_feature in engine.verified_safe_features:
+                engine.symbolic_theory.induce_walkable(engine.bg_feature)
         if engine.prev_grid is not None and not engine._feedback_assimilated:
             engine.assimilate_feedback(
                 curr_grid,
@@ -1105,7 +1087,7 @@ class PrefrontalDeliberationEngine:
             affordance_choice := self.arbitrate_affordances(
                 engine, curr_grid, available_actions, known_av_feats
             )
-        ) is not None:
+        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
             chosen_action, chosen_data = affordance_choice
 
         # 2. Check active mental plan during EXPLOITATION phase

@@ -270,6 +270,51 @@ class MyAgent(Agent):
                     return sorted(list(set(acts)))
         return [1, 2, 3, 4, 5, 6, 7]
 
+    def _extract_action_schemas(self, available_actions: list[int]) -> list[dict[str, Any]]:
+        """Dynamically extract typed action schemas and valid effector targets from the active game environment."""
+        g = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
+            getattr(self, "arc_env", None), "game", None
+        )
+        valid_targets_by_action: dict[int, list[dict[str, Any]]] = {}
+        if g is not None:
+            if hasattr(g, "_get_valid_clickable_actions"):
+                try:
+                    for act_in in g._get_valid_clickable_actions() or []:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                valid_targets_by_action.setdefault(int(aid), []).append(d)
+                except Exception:
+                    pass
+            if hasattr(g, "_get_valid_actions"):
+                try:
+                    for act_in in g._get_valid_actions() or []:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                targets = valid_targets_by_action.setdefault(int(aid), [])
+                                if d not in targets:
+                                    targets.append(d)
+                except Exception:
+                    pass
+
+        default_map = {s["action_id"]: dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS}
+        schemas: list[dict[str, Any]] = []
+        for aid in available_actions:
+            schema = default_map.get(aid, {"action_id": aid, "name": f"ACTION{aid}"}).copy()
+            if aid in valid_targets_by_action:
+                schema["valid_targets"] = valid_targets_by_action[aid]
+                if "parameters" not in schema:
+                    schema["parameters"] = {"x": "int", "y": "int"}
+            schemas.append(schema)
+        return schemas
+
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         state_obj = getattr(latest_frame, "state", None)
         state_name = getattr(state_obj, "name", str(state_obj))
@@ -392,24 +437,7 @@ class MyAgent(Agent):
         # Execute cognitive planning with resilient error recovery
         try:
             if hasattr(self.internal_engine, "decide"):
-                _arc_schema = getattr(self, "action_schemas", None)
-                if _arc_schema is None:
-                    g = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
-                        getattr(self, "arc_env", None), "game", None
-                    )
-                    v_targets = []
-                    if g and hasattr(g, "actions") and g.actions:
-                        v_targets = [
-                            getattr(a, "data", None)
-                            for a in g.actions
-                            if isinstance(getattr(a, "data", None), dict)
-                            and getattr(a, "data", None)
-                        ]
-                    _arc_schema = [dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS]
-                    if v_targets:
-                        for s in _arc_schema:
-                            if s.get("action_id") == 6:
-                                s["valid_targets"] = v_targets
+                _arc_schema = self._extract_action_schemas(available_actions)
                 action_id, action_data = self.internal_engine.decide(
                     grid, available_actions, action_schemas=_arc_schema
                 )

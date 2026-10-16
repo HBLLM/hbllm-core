@@ -111,6 +111,20 @@ class EpistemicFeedbackAssimilator:
                         engine.action_affordances[other_act].delta = (0, other_dyn.delta_c)
 
     @staticmethod
+    def _is_edge_hud(entity: SpatialEntity, H: int, W: int) -> bool:
+        """Check if an entity is a peripheral gauge / status meter along the outer edge."""
+        cells = entity.properties.get("cells", [entity.grid_pos])
+        if not cells:
+            return False
+        rs = [r for r, _ in cells]
+        cs = [c for _, c in cells]
+        min_r, max_r = min(rs), max(rs)
+        min_c, max_c = min(cs), max(cs)
+        return (min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)) or (
+            min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4)
+        )
+
+    @staticmethod
     def _commit_avatar_identity(
         engine: AutonomousEpistemicEngine,
         pairs: list[tuple[SpatialEntity, SpatialEntity]],
@@ -375,13 +389,7 @@ class EpistemicFeedbackAssimilator:
                     if probed_feat == engine.bg_feature or probed_feat == 0:
                         engine.quiescent_features.add(probed_feat)
                     else:
-                        q_count = getattr(engine, "feature_quiescent_counts", None)
-                        if q_count is None:
-                            q_count = getattr(engine, "_feature_quiescent_counts", None)
-                        if q_count is None:
-                            q_count = {}
-                            engine.feature_quiescent_counts = q_count
-                            engine._feature_quiescent_counts = q_count
+                        q_count = engine.working_memory.feature_quiescent_counts
                         q_count[probed_feat] = q_count.get(probed_feat, 0) + 1
                         if (
                             q_count[probed_feat] >= 2
@@ -601,10 +609,14 @@ class EpistemicFeedbackAssimilator:
 
         moved_entities: list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]] = []
         for pe in unmatched_prev:
+            if EpistemicFeedbackAssimilator._is_edge_hud(pe, H, W):
+                continue
             best_ce_id = None
             min_dist = float("inf")
             best_delta = (0, 0)
             for ce_id, ce in unmatched_curr.items():
+                if EpistemicFeedbackAssimilator._is_edge_hud(ce, H, W):
+                    continue
                 area_diff = abs(pe.area - ce.area)
                 area_match = (pe.area == ce.area) or (area_diff <= 2 and min(pe.area, ce.area) >= 4)
                 if pe.feature_id == ce.feature_id and area_match and pe.area <= 144:
@@ -693,10 +705,14 @@ class EpistemicFeedbackAssimilator:
                     curr_g = curr_grid
                     diff_mask = prev_g != curr_g
                     diff_coords = np.argwhere(diff_mask)
+                    from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
                     non_bg_diffs = [
                         (int(r), int(c))
                         for r, c in diff_coords
-                        if r < curr_g.shape[0] - 2  # exclude bottom step counter / HUD
+                        if not MotorCortexEffector.is_peripheral_frame_cell(
+                            int(r), int(c), curr_g.shape[0], curr_g.shape[1], curr_g
+                        )
                     ]
                     if len(non_bg_diffs) == 2:
                         c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
@@ -1156,10 +1172,26 @@ class EpistemicFeedbackAssimilator:
             )
             if avatar_still_present and not av_moved:
                 # Avatar is present but stationary (e.g., bumped a wall or barrier)
-                for ce in curr_entities:
-                    if ce.feature_id in known_av_feats:
-                        engine.avatar_pos = ce.grid_pos
-                        break
+                if prev_avatar_pos is not None:
+                    engine.avatar_pos = prev_avatar_pos
+                else:
+                    av_components = [
+                        ce
+                        for ce in curr_entities
+                        if ce.feature_id in known_av_feats
+                        and not EpistemicFeedbackAssimilator._is_edge_hud(ce, H, W)
+                    ]
+                    if av_components:
+                        all_cells = [
+                            cell
+                            for ce in av_components
+                            for cell in ce.properties.get("cells", [ce.grid_pos])
+                        ]
+                        if all_cells:
+                            engine.avatar_pos = (
+                                int(round(float(np.mean([r for r, _ in all_cells])))),
+                                int(round(float(np.mean([c for _, c in all_cells])))),
+                            )
             if (
                 not is_win
                 and not is_lost
@@ -1176,6 +1208,7 @@ class EpistemicFeedbackAssimilator:
                     and ce.feature_id != engine.bg_feature
                     and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
                     and ce.area <= max(49, int(H * W * 0.15))
+                    and not EpistemicFeedbackAssimilator._is_edge_hud(ce, H, W)
                 ]
                 if valid_moved:
                     delta_groups_remap: dict[
@@ -1383,29 +1416,33 @@ class EpistemicFeedbackAssimilator:
                                     else int(curr_grid[kr, kc])
                                 )
                                 # HCIR Attractor Invariant: Candidate goals are NEVER barriers
-                                # Proprioceptive obstacle grounding: any non-walkable feature blocking movement is an empirical barrier
+                                # Proprioceptive obstacle grounding: any feature blocking movement that is not
+                                # verified safe/traversable is an empirical barrier
                                 if (
-                                    val != bg
-                                    and val != engine.bg_feature
-                                    and val not in av_feats
+                                    val not in av_feats
                                     and val not in engine.learned_goal_features
                                     and val not in cand_goal_feats
                                     and (kr, kc) not in cand_goal_positions
-                                    and not engine.symbolic_theory.is_walkable(val)
                                 ):
                                     engine.record_learned_barrier((kr, kc))
-                                    if not engine.symbolic_theory.is_barrier(val):
-                                        engine.symbolic_theory.induce_barrier(val)
-                                        logger.info(
-                                            "AutonomousEpistemicEngine: Proprioceptive obstacle grounded along ray at (%d, %d) with feature %d",
-                                            kr,
-                                            kc,
-                                            val,
-                                        )
-                                        if engine.bg_feature == val:
-                                            engine.bg_feature = engine.estimate_background(
-                                                curr_grid
+                                    if (
+                                        val in engine.symbolic_theory.walkable_features
+                                        and val not in engine.verified_safe_features
+                                    ):
+                                        engine.symbolic_theory.walkable_features.discard(val)
+                                    if val not in engine.verified_safe_features:
+                                        if not engine.symbolic_theory.is_barrier(val):
+                                            engine.symbolic_theory.induce_barrier(val)
+                                            logger.info(
+                                                "AutonomousEpistemicEngine: Proprioceptive obstacle grounded along ray at (%d, %d) with feature %d",
+                                                kr,
+                                                kc,
+                                                val,
                                             )
+                                            if engine.bg_feature == val:
+                                                engine.bg_feature = engine.estimate_background(
+                                                    curr_grid
+                                                )
                                     break
                         else:
                             end_r = prev_avatar_pos[0] + step_r * dist
@@ -1415,13 +1452,15 @@ class EpistemicFeedbackAssimilator:
 
                     if engine.last_action is not None and prev_avatar_pos is not None:
                         engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
-                        engine.entity_action_failed_positions.setdefault(
-                            engine.last_action, set()
-                        ).add(prev_avatar_pos)
-                        if len(engine.entity_action_failed_positions[engine.last_action]) >= 2:
-                            engine.immobile_entity_actions.add(engine.last_action)
-                        prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
-                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
+                        is_known_disp = engine.is_displacement_action(engine.last_action)
+                        if not is_known_disp:
+                            engine.entity_action_failed_positions.setdefault(
+                                engine.last_action, set()
+                            ).add(prev_avatar_pos)
+                            if len(engine.entity_action_failed_positions[engine.last_action]) >= 2:
+                                engine.immobile_entity_actions.add(engine.last_action)
+                            prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                            engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
                         engine.simulation_cooldown = 0
                         engine.consecutive_simulation_failures = 0
 

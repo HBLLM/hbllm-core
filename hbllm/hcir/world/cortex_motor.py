@@ -1705,9 +1705,12 @@ class MotorCortexEffector:
                         engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
                     )
                     return dict(snapped_target)
-
-                if valid_targets:
-                    engine.inhibited_actions[action] = 5
+                elif valid_targets:
+                    # All explicit valid targets are quiescent / exhausted: inhibit action
+                    if action is not None:
+                        engine.inhibited_actions[action] = max(
+                            engine.inhibited_actions.get(action, 0), 6
+                        )
                     return None
 
             coords: dict[str, Any] = {}
@@ -1720,25 +1723,30 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        if engine.quiescent_click_targets:
-            engine.inhibited_actions[action] = 5
-            return None
+        # Robust Spatial Grounding Invariant: On featureless/blank boards with no entities,
+        # ground onto center of field to enable exploratory tactile motor babbling.
+        if len(entities) == 0 and not engine.quiescent_click_targets:
+            best_r, best_c = H // 2, W // 2
+            engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
+                engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
+            )
+            engine.last_effector_target_step[(best_r, best_c)] = engine.step_counter
+            coords_fallback: dict[str, Any] = {}
+            for k in param_keys:
+                if k in ("x", "col", "c", "column", "azimuth"):
+                    coords_fallback[k] = best_c
+                elif k in ("y", "row", "r", "elevation", "distance"):
+                    coords_fallback[k] = best_r
+                else:
+                    coords_fallback[k] = 0
+            return coords_fallback
 
-        # Clean-board fallback when no quiescent history exists
-        best_r, best_c = H // 2, W // 2
-        engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
-            engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
-        )
-        engine.last_effector_target_step[(best_r, best_c)] = engine.step_counter
-        coords_fallback: dict[str, Any] = {}
-        for k in param_keys:
-            if k in ("x", "col", "c", "column", "azimuth"):
-                coords_fallback[k] = best_c
-            elif k in ("y", "row", "r", "elevation", "distance"):
-                coords_fallback[k] = best_r
-            else:
-                coords_fallback[k] = 0
-        return coords_fallback
+        # Ventral Stream Invariant: Never click featureless void background cells or border lines.
+        # When all candidates are exhausted and proven quiescent, inhibit click action
+        # so deliberation and exploration switch to locomotion / directional actions.
+        if action is not None:
+            engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
+        return None
 
     @classmethod
     def to_causal_predicate(cls) -> CausalPredicate:

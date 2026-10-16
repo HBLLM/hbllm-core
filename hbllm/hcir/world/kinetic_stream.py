@@ -235,6 +235,12 @@ class DorsalKineticStream:
             cells = [(int(r), int(c)) for r, c in cluster_coords]
             min_r, max_r = int(np.min(cluster_coords[:, 0])), int(np.max(cluster_coords[:, 0]))
             min_c, max_c = int(np.min(cluster_coords[:, 1])), int(np.max(cluster_coords[:, 1]))
+            H, W = curr_grid.shape
+            is_edge_hud = (
+                min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
+            ) or (min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4))
+            if is_edge_hud:
+                continue
             bbox = (min_r, max_r, min_c, max_c)
 
             # Separate vacated (disappeared from prev) vs occupied (appeared in curr)
@@ -474,6 +480,10 @@ class DorsalKineticStream:
 
             for i, cand in enumerate(candidates):
                 if has_feat_match and not (cand.features & known_avatar_features):
+                    continue
+
+                # Stationary candidate cannot explain non-zero commanded displacement without prior feature match
+                if cand.velocity == (0.0, 0.0) and not has_feat_match:
                     continue
 
                 err = abs(cand.velocity[0] - exp_dr) + abs(cand.velocity[1] - exp_dc)
