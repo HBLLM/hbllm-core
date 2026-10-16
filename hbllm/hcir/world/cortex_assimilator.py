@@ -1741,7 +1741,7 @@ class EpistemicFeedbackAssimilator:
         # Faculty: Telic Depletion Goal Induction
         # When an interventional action clears pixels of a non-background, non-avatar feature,
         # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
-        if diff.mutated_pixels and not is_lost and engine.prev_grid is not None:
+        if diff.mutated_pixels and not is_lost and not is_win and engine.prev_grid is not None:
             for r, c, old_v, new_v in diff.mutated_pixels:
                 if (
                     new_v == bg
@@ -1753,7 +1753,7 @@ class EpistemicFeedbackAssimilator:
                 ):
                     prev_count = int(np.count_nonzero(engine.prev_grid == old_v))
                     curr_count = int(np.count_nonzero(curr_grid == old_v))
-                    if curr_count < prev_count:
+                    if curr_count < prev_count and prev_count <= 64:
                         if prev_avatar_pos is not None:
                             dist = abs(r - prev_avatar_pos[0]) + abs(c - prev_avatar_pos[1])
                             if dist <= 3 or engine.is_spatial_effector(action):

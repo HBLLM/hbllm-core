@@ -1495,21 +1495,25 @@ class MentalSimulationPlanner:
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
                 max_consecutive_waits = max(4, min(16, engine.hazard_tracker.environmental_period))
 
-                # Temporal Evasion: Determine safe waiting action (explicit wait or wall-bump in alcove)
+                living_gaze: set[tuple[int, int]] = set()
+                seen_threats: set[int] = set()
+                for t_pos in cur_threats:
+                    t = threat_map.get(t_pos)
+                    if t is not None and id(t) not in seen_threats:
+                        seen_threats.add(id(t))
+                        living_gaze.add(t.gaze_pos)
+                        if t.facing != (0, 0):
+                            d_r, d_c = t.facing
+                            step_r = int(np.sign(d_r))
+                            step_c = int(np.sign(d_c))
+                            dist_gaze = max(
+                                abs(t.gaze_pos[0] - t.pos[0]), abs(t.gaze_pos[1] - t.pos[1])
+                            )
+                            for k in range(1, dist_gaze + 1):
+                                living_gaze.add((t.pos[0] + step_r * k, t.pos[1] + step_c * k))
+
+                # Temporal Evasion: Determine safe waiting action (explicit non-displacement action)
                 bump_wait_action: Any | None = non_disp_wait_action
-                if bump_wait_action is None and (cur_patrols or has_periodic or has_temporal):
-                    for a_disp in available_actions:
-                        dyn = engine.action_dynamics.get(a_disp)
-                        if dyn is not None and dyn.is_displacement_action():
-                            dr_b, dc_b = dyn.delta_r, dyn.delta_c
-                            br, bc = cur_pos[0] + dr_b, cur_pos[1] + dc_b
-                            if (
-                                not (0 <= br < H and 0 <= bc < W)
-                                or (br, bc) in _grid_walls
-                                or (br, bc) in engine.hazard_tracker.static_lethal_positions
-                            ):
-                                bump_wait_action = a_disp
-                                break
 
                 if (
                     (cur_patrols or has_periodic or has_temporal)
@@ -1568,6 +1572,9 @@ class MentalSimulationPlanner:
                     for k in range(1, dist + 1):
                         kr = cur_pos[0] + step_r * k
                         kc = cur_pos[1] + step_c * k
+                        if (kr, kc) in living_gaze:
+                            ray_blocked = True
+                            break
                         is_barrier_cell = (kr, kc) in static_barriers and (kr, kc) not in cur_open
                         if is_barrier_cell:
                             cell_feat = (
@@ -1633,12 +1640,6 @@ class MentalSimulationPlanner:
                     ):
                         continue
 
-                    living_gaze: set[tuple[int, int]] = set()
-                    for t_pos in cur_threats:
-                        t = threat_map.get(t_pos)
-                        if t is not None:
-                            living_gaze.add(t.gaze_pos)
-
                     if (nr, nc) in living_gaze:
                         continue
 
@@ -1647,7 +1648,6 @@ class MentalSimulationPlanner:
                     if (nr, nc) in cur_threats:
                         flanked_t = threat_map.get((nr, nc))
                         if flanked_t is not None and cur_pos != flanked_t.gaze_pos:
-                            # Directional hazard neutralization: approaching oriented hazard outside its line of sight clears it
                             threat_cells_to_remove = {
                                 p
                                 for p, ot in threat_map.items()
@@ -1656,7 +1656,6 @@ class MentalSimulationPlanner:
                             new_threats = cur_threats - threat_cells_to_remove
                             threat_penalty = 5.0
                         else:
-                            # Direct approach into active hazard line of sight or unmapped hazard is lethal
                             continue
 
                     new_patrols = cur_patrols
@@ -1905,6 +1904,7 @@ class MentalSimulationPlanner:
                 static_barriers,
                 mutation_triggers,
                 movable_actions,
+                oriented_threats=oriented_threats,
             )
             if subgoal_plan:
                 return subgoal_plan
@@ -1936,6 +1936,7 @@ class MentalSimulationPlanner:
         static_barriers: set[tuple[int, int]],
         mutation_triggers: dict[tuple[int, int], set[tuple[int, int]]],
         movable_actions: list[tuple[int, int, int]],
+        oriented_threats: Sequence[Any] = (),
     ) -> list[MentalSimulationStep] | None:
         """Recursive multi-stage subgoal decomposition for locked barrier doors and remote switches."""
         H, W = curr_grid.shape
@@ -1946,6 +1947,17 @@ class MentalSimulationPlanner:
         open_barriers: set[tuple[int, int]] = set()
         accumulated_plan: list[MentalSimulationStep] = []
         max_stages = 8
+
+        threat_hazard_cells: set[tuple[int, int]] = set()
+        for t in oriented_threats:
+            threat_hazard_cells.add(t.gaze_pos)
+            if getattr(t, "facing", (0, 0)) != (0, 0):
+                d_r, d_c = t.facing
+                step_r = int(np.sign(d_r))
+                step_c = int(np.sign(d_c))
+                dist_gaze = max(abs(t.gaze_pos[0] - t.pos[0]), abs(t.gaze_pos[1] - t.pos[1]))
+                for k in range(1, dist_gaze + 1):
+                    threat_hazard_cells.add((t.pos[0] + step_r * k, t.pos[1] + step_c * k))
 
         def find_shortest_path(
             s_pos: tuple[int, int],
@@ -1964,7 +1976,7 @@ class MentalSimulationPlanner:
                     nr, nc = p[0] + dr, p[1] + dc
                     if not (0 <= nr < H and 0 <= nc < W):
                         continue
-                    if (nr, nc) in visited:
+                    if (nr, nc) in visited or (nr, nc) in threat_hazard_cells:
                         continue
 
                     step_r = int(np.sign(dr))
@@ -1974,6 +1986,9 @@ class MentalSimulationPlanner:
                     for k in range(1, dist + 1):
                         kr = p[0] + step_r * k
                         kc = p[1] + step_c * k
+                        if (kr, kc) in threat_hazard_cells:
+                            ray_blocked = True
+                            break
                         if (kr, kc) in active_barriers or (
                             kr,
                             kc,

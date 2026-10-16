@@ -377,6 +377,14 @@ class GestaltAffordanceDetector:
         if avatar_feature is not None:
             av_feats.add(avatar_feature)
 
+        threat_feats = set(known_lethal_features or ())
+        if kwargs.get("mobile_threat_features"):
+            threat_feats.update(kwargs["mobile_threat_features"])
+        if kwargs.get("threat_features"):
+            threat_feats.update(kwargs["threat_features"])
+        if kwargs.get("oriented_threat_features"):
+            threat_feats.update(kwargs["oriented_threat_features"])
+
         # 1. Detect target zones (medium-sized non-border rectangular entities)
         for feat in np.unique(grid):
             feat_int = int(feat)
@@ -384,8 +392,8 @@ class GestaltAffordanceDetector:
                 feat_int == bg
                 or feat_int == 0
                 or feat_int in av_feats
+                or feat_int in threat_feats
                 or (barrier_features and feat_int in barrier_features)
-                or (known_lethal_features and feat_int in known_lethal_features)
             ):
                 continue
             pts = np.argwhere(grid == feat_int)
@@ -398,6 +406,16 @@ class GestaltAffordanceDetector:
             is_interior = min_r > 1 and max_r < H - 2 and min_c > 1 and max_c < W - 2
             rect_area = (max_r - min_r + 1) * (max_c - min_c + 1)
             fill_ratio = len(pts) / max(1, rect_area)
+
+            patch = grid[min_r : max_r + 1, min_c : max_c + 1]
+            patch_vals = np.unique(patch)
+            if any(pv in threat_feats for pv in patch_vals):
+                continue
+            non_bg_vals = [v for v in patch_vals if v != bg and v != 0]
+            if len(non_bg_vals) >= 2:
+                v_counts = [np.count_nonzero(patch == v) for v in non_bg_vals]
+                if min(v_counts) <= 2:
+                    continue
 
             if is_interior and fill_ratio > 0.7 and 4 <= len(pts) <= H * W * 0.15:
                 centroid = (
@@ -421,8 +439,8 @@ class GestaltAffordanceDetector:
                 feat_int == bg
                 or feat_int == 0
                 or feat_int in av_feats
+                or feat_int in threat_feats
                 or (barrier_features and feat_int in barrier_features)
-                or (known_lethal_features and feat_int in known_lethal_features)
             ):
                 continue
             pts = np.argwhere(grid == feat_int)

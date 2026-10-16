@@ -699,6 +699,30 @@ class AutonomousEpistemicEngine:
     @property
     def goals(self) -> list[tuple[int, int]]:
         """Return unified list of active candidate goal coordinates."""
+        # 1. Prioritize verified goal features from causal theory (empirical invariant from past level wins)
+        if self.prev_grid is not None and self.symbolic_theory.goal_features:
+            av_feats = self.avatar_features or (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
+            verified_feats = (
+                set(self.symbolic_theory.goal_features) - av_feats - {self.bg_feature, 0}
+            )
+            verified_feats -= self.hazard_tracker.known_lethal_features
+            verified_feats -= self.mobile_threat_features
+            if verified_feats:
+                verified_goals: list[tuple[int, int]] = []
+                for vf in verified_feats:
+                    pts = np.argwhere(self.prev_grid == vf)
+                    if 0 < len(pts) <= 64:
+                        centroid = (
+                            int(round(float(np.mean(pts[:, 0])))),
+                            int(round(float(np.mean(pts[:, 1])))),
+                        )
+                        if centroid != self.avatar_pos and centroid not in verified_goals:
+                            verified_goals.append(centroid)
+                if verified_goals:
+                    return verified_goals
+
         res: list[tuple[int, int]] = list(self.learned_goal_positions)
         sgs = getattr(self.working_memory, "structural_goals", None)
         if not sgs and self.prev_grid is not None:
@@ -1700,9 +1724,30 @@ class AutonomousEpistemicEngine:
         return PerceptionEngine.compute_frame_diff(prev_grid, curr_grid)
 
     def detect_structural_goals(
-        self, grid: np.ndarray, bg: int | None = None, **kwargs: Any
+        self, grid: np.ndarray | None, bg: int | None = None, **kwargs: Any
     ) -> list[dict[str, Any]]:
+        if grid is None:
+            return []
         bg_val = bg if bg is not None else self.bg_feature
+        entities = self.extract_entities(grid, bg=bg_val)
+        step_sz = 1
+        if self.action_dynamics:
+            step_sz = max(
+                (
+                    max(abs(dr), abs(dc))
+                    for dr, dc in [ad.get_displacement() for ad in self.action_dynamics.values()]
+                ),
+                default=1,
+            )
+        oriented_threats = PerceptionEngine.detect_oriented_threats(
+            grid, entities, bg=bg_val, step_size=step_sz
+        )
+        oriented_feats = {ot.feature_id for ot in oriented_threats}
+        threat_feats = (
+            set(self.mobile_threat_features)
+            | set(self.hazard_tracker.known_lethal_features)
+            | oriented_feats
+        )
         return PerceptionEngine.detect_structural_goals(
             grid,
             bg=bg_val,
@@ -1710,6 +1755,9 @@ class AutonomousEpistemicEngine:
             avatar_feature=self.avatar_feature,
             barrier_features=self.symbolic_theory.barrier_features,
             known_lethal_features=self.hazard_tracker.known_lethal_features,
+            mobile_threat_features=self.mobile_threat_features,
+            threat_features=threat_feats,
+            oriented_threat_features=oriented_feats,
             avatar_pos=self.avatar_pos,
             **kwargs,
         )

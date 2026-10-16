@@ -277,9 +277,8 @@ class GeodesicManifoldRouter:
         hazard_cells: set[tuple[int, int]] = set()
         effective_traj_barriers = set(barrier_features)
         if not effective_traj_barriers:
-            effective_traj_barriers.add(bg)
             non_passable_feats = set(int(v) for v in np.unique(curr_grid[~passable_mask]))
-            effective_traj_barriers.update(non_passable_feats - avatar_features)
+            effective_traj_barriers.update(non_passable_feats - avatar_features - {bg})
 
         for t in oriented_threats:
             hazard_cells.add(t.pos)

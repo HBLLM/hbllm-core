@@ -68,14 +68,16 @@ class PredictionBudget:
         and acute cognitive step limits.
         """
         # Under acute step urgency (<= 25 steps remaining), cap search expansions to 600
-        # to ensure rapid anytime action emission without latency stalls.
-        if is_under_strict_budget or (remaining_steps is not None and remaining_steps <= 25):
+        # for static tasks, but preserve temporal horizon when dynamic threats exist.
+        if (
+            is_under_strict_budget or (remaining_steps is not None and remaining_steps <= 25)
+        ) and not has_temporal:
             return 600
 
         base = 1500
         if consecutive_failures > 0 and not has_temporal:
             return int(base * 0.8)
-        if has_temporal or has_threats:
+        if has_temporal:
             return int(base * 3.33)
         return base
 
