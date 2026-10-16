@@ -1553,11 +1553,10 @@ class EpistemicFeedbackAssimilator:
                 elif (
                     engine.last_predicted_pos is not None
                     and engine.avatar_pos is not None
-                    and max(
-                        abs(engine.avatar_pos[0] - engine.last_predicted_pos[0]),
-                        abs(engine.avatar_pos[1] - engine.last_predicted_pos[1]),
+                    and (
+                        engine.avatar_pos != engine.last_predicted_pos
+                        or (not avatar_moved and is_known_displacement)
                     )
-                    > 1
                 ):
                     discrepancy = True
                 elif (
@@ -1595,7 +1594,15 @@ class EpistemicFeedbackAssimilator:
                 ):
                     engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
                     prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
-                    engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
+                    engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 4)
+                    if expected_dr != 0 or expected_dc != 0:
+                        blocked_r = prev_avatar_pos[0] + expected_dr
+                        blocked_c = prev_avatar_pos[1] + expected_dc
+                        if (
+                            0 <= blocked_r < curr_grid.shape[0]
+                            and 0 <= blocked_c < curr_grid.shape[1]
+                        ):
+                            engine.record_learned_barrier((blocked_r, blocked_c))
                 if engine.mental_plan:
                     logger.debug(
                         "AutonomousEpistemicEngine: Sensory discrepancy/surprise detected (pred=%s, actual=%s, surprise=%.3f). Invalidating %d-step mental plan.",

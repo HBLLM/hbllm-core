@@ -1107,28 +1107,18 @@ class PrefrontalDeliberationEngine:
 
         # 2. Check active mental plan during EXPLOITATION phase
         elif engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
-            next_step = engine.mental_plan.popleft()
-            if not engine.mental_plan and engine.object_planner.active_target_object_id:
-                engine.object_planner.ledger.record_interaction(
-                    engine.object_planner.active_target_object_id,
-                    next_step.predicted_avatar_pos or engine.avatar_pos or (0, 0),
-                )
-                engine.object_planner.active_target_object_id = None
-
-            plan_safe, should_wait, wait_steps = self.validate_plan_safety(
-                engine, curr_grid, available_actions, next_step
-            )
-
-            if should_wait:
-                chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
-                    engine, curr_grid, available_actions, next_step, wait_steps
-                )
-            elif not plan_safe:
+            # Check for physical plan divergence: avatar failed to reach predicted location
+            if (
+                engine.last_predicted_pos is not None
+                and engine.avatar_pos is not None
+                and engine.avatar_pos != engine.last_predicted_pos
+            ):
                 engine.consecutive_pacing_steps = 0
                 engine.mental_plan.clear()
-
-                engine.phase = EpistemicPhase.REPLANNING
-                # Primary replanning: Object-Centric Macro Option
+                engine.transition_to_phase(
+                    EpistemicPhase.REPLANNING,
+                    reason="plan_divergence_from_predicted_avatar_pos",
+                )
                 macro_plan = engine.object_planner.plan_macro_option(
                     engine, curr_grid, available_actions
                 )
@@ -1140,14 +1130,7 @@ class PrefrontalDeliberationEngine:
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
                 else:
-                    danger_cells = (
-                        {next_step.predicted_avatar_pos}
-                        if next_step.predicted_avatar_pos is not None and not has_temporal
-                        else set()
-                    )
-                    simulated_plan = engine.simulate_in_mind(
-                        curr_grid, available_actions, blocked_cells=danger_cells
-                    )
+                    simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
                     if simulated_plan:
                         engine.consecutive_simulation_failures = 0
                         engine.simulation_cooldown = 0
@@ -1161,35 +1144,90 @@ class PrefrontalDeliberationEngine:
                         chosen_action, chosen_data = engine.plan_epistemic_probe(
                             curr_grid, available_actions
                         )
-            elif (
-                next_step.action in available_actions
-                and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
-                and not engine.working_memory.habenular_ior.is_action_inhibited(
-                    engine.avatar_pos, next_step.action, next_step.action_data
-                )
-            ):
-                engine.consecutive_pacing_steps = 0
-                chosen_action = next_step.action
-                chosen_data = next_step.action_data
-                predicted_pos = next_step.predicted_avatar_pos
-
             else:
-                engine.mental_plan.clear()
-                engine.phase = EpistemicPhase.REPLANNING
-                macro_plan = engine.object_planner.plan_macro_option(
-                    engine, curr_grid, available_actions
+                next_step = engine.mental_plan.popleft()
+                if not engine.mental_plan and engine.object_planner.active_target_object_id:
+                    engine.object_planner.ledger.record_interaction(
+                        engine.object_planner.active_target_object_id,
+                        next_step.predicted_avatar_pos or engine.avatar_pos or (0, 0),
+                    )
+                    engine.object_planner.active_target_object_id = None
+
+                plan_safe, should_wait, wait_steps = self.validate_plan_safety(
+                    engine, curr_grid, available_actions, next_step
                 )
-                if macro_plan:
-                    engine.phase = EpistemicPhase.EXPLOITATION
-                    engine.mental_plan = deque(macro_plan)
-                    next_step = engine.mental_plan.popleft()
+
+                if should_wait:
+                    chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
+                        engine, curr_grid, available_actions, next_step, wait_steps
+                    )
+                elif not plan_safe:
+                    engine.consecutive_pacing_steps = 0
+                    engine.mental_plan.clear()
+
+                    engine.phase = EpistemicPhase.REPLANNING
+                    # Primary replanning: Object-Centric Macro Option
+                    macro_plan = engine.object_planner.plan_macro_option(
+                        engine, curr_grid, available_actions
+                    )
+                    if macro_plan:
+                        engine.phase = EpistemicPhase.EXPLOITATION
+                        engine.mental_plan = deque(macro_plan)
+                        next_step = engine.mental_plan.popleft()
+                        chosen_action = next_step.action
+                        chosen_data = next_step.action_data
+                        predicted_pos = next_step.predicted_avatar_pos
+                    else:
+                        danger_cells = (
+                            {next_step.predicted_avatar_pos}
+                            if next_step.predicted_avatar_pos is not None and not has_temporal
+                            else set()
+                        )
+                        simulated_plan = engine.simulate_in_mind(
+                            curr_grid, available_actions, blocked_cells=danger_cells
+                        )
+                        if simulated_plan:
+                            engine.consecutive_simulation_failures = 0
+                            engine.simulation_cooldown = 0
+                            engine.phase = EpistemicPhase.EXPLOITATION
+                            engine.mental_plan = deque(simulated_plan)
+                            next_step = engine.mental_plan.popleft()
+                            chosen_action = next_step.action
+                            chosen_data = next_step.action_data
+                            predicted_pos = next_step.predicted_avatar_pos
+                        else:
+                            chosen_action, chosen_data = engine.plan_epistemic_probe(
+                                curr_grid, available_actions
+                            )
+                elif (
+                    next_step.action in available_actions
+                    and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
+                    and not engine.working_memory.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, next_step.action, next_step.action_data
+                    )
+                ):
+                    engine.consecutive_pacing_steps = 0
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+
                 else:
-                    chosen_action, chosen_data = engine.plan_epistemic_probe(
-                        curr_grid, available_actions
+                    engine.mental_plan.clear()
+                    engine.phase = EpistemicPhase.REPLANNING
+                    macro_plan = engine.object_planner.plan_macro_option(
+                        engine, curr_grid, available_actions
                     )
+                    if macro_plan:
+                        engine.phase = EpistemicPhase.EXPLOITATION
+                        engine.mental_plan = deque(macro_plan)
+                        next_step = engine.mental_plan.popleft()
+                        chosen_action = next_step.action
+                        chosen_data = next_step.action_data
+                        predicted_pos = next_step.predicted_avatar_pos
+                    else:
+                        chosen_action, chosen_data = engine.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:

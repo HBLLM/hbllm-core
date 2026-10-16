@@ -161,7 +161,14 @@ class ACCConflictMonitor:
         """
         acts = list(self.action_history)
         cyclic_acts: list[Any] = []
-        if len(acts) >= 4:
+
+        # Check 1-cycle static deadlock: e.g. [A, A, A] at the same coordinate (wall collision / failed progress)
+        if len(acts) >= 3 and acts[-1] == acts[-2] == acts[-3]:
+            pos_list = list(self.position_history)
+            if len(pos_list) >= 3 and pos_list[-1] == pos_list[-2] == pos_list[-3]:
+                cyclic_acts = [acts[-1]]
+
+        if not cyclic_acts and len(acts) >= 4:
             # Check 2-cycle: e.g. [A, B, A, B]
             if acts[-1] == acts[-3] and acts[-2] == acts[-4] and acts[-1] != acts[-2]:
                 cyclic_acts = [acts[-1], acts[-2]]
