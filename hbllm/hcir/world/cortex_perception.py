@@ -765,14 +765,12 @@ class GestaltAffordanceDetector:
         av_feats = avatar_features or set()
         goal_set = goals or set()
         cargos = cargo_features or set()
-        barriers = barrier_features or set()
-        walkables = walkable_features or set()
         oriented_threats: list[OrientedThreat] = []
 
         for e in entities:
             if e.area < 4 or e.area > 20:
                 continue
-            if getattr(e, "role", None) in (EntityRole.MANIPULABLE, EntityRole.GOAL):
+            if getattr(e, "role", None) == EntityRole.MANIPULABLE:
                 continue
             r0, r1, c0, c1 = e.bounding_box
             if not (2 <= r1 - r0 <= 4 and 2 <= c1 - c0 <= 4):
@@ -787,20 +785,11 @@ class GestaltAffordanceDetector:
                     or body_val == 0
                     or body_val in av_feats
                     or body_val in cargos
-                    or body_val in barriers
-                    or body_val in walkables
                     or e.feature_id in cargos
-                    or e.feature_id in barriers
-                    or e.feature_id in walkables
                 ):
                     continue
                 center = ((r0 + r1) // 2, (c0 + c1) // 2)
-                if (
-                    center == avatar_pos
-                    or center in goal_set
-                    or e.grid_pos in goal_set
-                    or any(c in goal_set for c in e.properties.get("cells", []))
-                ):
+                if center == avatar_pos or center in goal_set:
                     continue
                 eye_coords = np.argwhere(patch == eye_val)
                 hdr = int(np.sign(np.mean(eye_coords[:, 0]) - (r1 - r0) / 2))

@@ -195,25 +195,7 @@ class EpistemicGoalScheduler:
                     confirmed_goals.append(gp)
 
         goals: list[tuple[int, int]] = []
-        sgs = getattr(engine.working_memory, "structural_goals", None)
-        if not sgs and hasattr(engine, "detect_structural_goals"):
-            sgs = engine.detect_structural_goals(curr_grid, bg=bg)
-            if hasattr(engine.working_memory, "structural_goals"):
-                engine.working_memory.structural_goals = sgs
-        if sgs:
-            matched_constellations = [
-                sg
-                for sg in sgs
-                if sg.get("type") == "target_constellation"
-                and (sg.get("feature") in av_feats if av_feats else True)
-            ]
-            if matched_constellations:
-                for c in matched_constellations:
-                    pos = c.get("position")
-                    if pos and pos not in goals:
-                        goals.append(pos)
-
-        if not goals and confirmed_goals:
+        if confirmed_goals:
             goals = list(confirmed_goals)
 
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)

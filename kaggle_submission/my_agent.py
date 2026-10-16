@@ -286,6 +286,12 @@ class MyAgent(Agent):
                         if aid is not None:
                             d = getattr(act_in, "data", None)
                             if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
                                 valid_targets_by_action.setdefault(int(aid), []).append(d)
                 except Exception:
                     pass
@@ -298,6 +304,12 @@ class MyAgent(Agent):
                         if aid is not None:
                             d = getattr(act_in, "data", None)
                             if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
                                 targets = valid_targets_by_action.setdefault(int(aid), [])
                                 if d not in targets:
                                     targets.append(d)
@@ -510,9 +522,12 @@ class MyAgent(Agent):
                         int(round(self.internal_agent.current_actor_pos[0])),
                         int(round(self.internal_agent.current_actor_pos[1])),
                     )
-                coords = {"x": max(0, min(W - 1, fallback_x)), "y": max(0, min(H - 1, fallback_y))}
+                coords = {"x": max(0, min(63, fallback_x)), "y": max(0, min(63, fallback_y))}
             else:
-                coords = {"x": int(action_data["x"]), "y": int(action_data["y"])}
+                coords = {
+                    "x": max(0, min(63, int(action_data["x"]))),
+                    "y": max(0, min(63, int(action_data["y"]))),
+                }
             if hasattr(act_enum, "set_data"):
                 act_enum.set_data(coords)
             act_enum.data = coords

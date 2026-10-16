@@ -1647,7 +1647,10 @@ class MotorCortexEffector:
                         )
                         vx = int(raw_vx) if raw_vx is not None else 0
                         vy = int(raw_vy) if raw_vy is not None else 0
-                        if (vy, vx) in engine.quiescent_click_targets:
+                        if (
+                            not (0 <= vx <= 63 and 0 <= vy <= 63)
+                            or (vy, vx) in engine.quiescent_click_targets
+                        ):
                             continue
                         if hasattr(engine, "working_memory") and hasattr(
                             engine.working_memory, "habenular_ior"
@@ -1689,7 +1692,10 @@ class MotorCortexEffector:
                             raw_vy = vt.get("y", vt.get("r", 0))
                             vx = int(raw_vx) if raw_vx is not None else 0
                             vy = int(raw_vy) if raw_vy is not None else 0
-                            if (vy, vx) in engine.quiescent_click_targets:
+                            if (
+                                not (0 <= vx <= 63 and 0 <= vy <= 63)
+                                or (vy, vx) in engine.quiescent_click_targets
+                            ):
                                 continue
                             vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
                             if vis < min_vis:
@@ -1704,7 +1710,14 @@ class MotorCortexEffector:
                     engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
                         engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
                     )
-                    return dict(snapped_target)
+                    snapped = dict(snapped_target)
+                    for k in ("x", "c", "col", "column", "azimuth"):
+                        if k in snapped and isinstance(snapped[k], (int, float)):
+                            snapped[k] = max(0, min(63, int(snapped[k])))
+                    for k in ("y", "r", "row", "elevation", "distance"):
+                        if k in snapped and isinstance(snapped[k], (int, float)):
+                            snapped[k] = max(0, min(63, int(snapped[k])))
+                    return snapped
                 elif valid_targets:
                     # All explicit valid targets are quiescent / exhausted: inhibit action
                     if action is not None:
@@ -1716,9 +1729,9 @@ class MotorCortexEffector:
             coords: dict[str, Any] = {}
             for k in param_keys:
                 if k in ("x", "col", "c", "column", "azimuth"):
-                    coords[k] = target_c
+                    coords[k] = max(0, min(63, target_c))
                 elif k in ("y", "row", "r", "elevation", "distance"):
-                    coords[k] = target_r
+                    coords[k] = max(0, min(63, target_r))
                 else:
                     coords[k] = 0
             return coords
@@ -1734,9 +1747,9 @@ class MotorCortexEffector:
             coords_fallback: dict[str, Any] = {}
             for k in param_keys:
                 if k in ("x", "col", "c", "column", "azimuth"):
-                    coords_fallback[k] = best_c
+                    coords_fallback[k] = max(0, min(63, best_c))
                 elif k in ("y", "row", "r", "elevation", "distance"):
-                    coords_fallback[k] = best_r
+                    coords_fallback[k] = max(0, min(63, best_r))
                 else:
                     coords_fallback[k] = 0
             return coords_fallback

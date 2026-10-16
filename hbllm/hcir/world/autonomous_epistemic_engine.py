@@ -2042,7 +2042,12 @@ class AutonomousEpistemicEngine:
             self._prev_oriented_threats = []
             return
 
-        if self.step_counter <= 1 or self.prev_grid is None:
+        if (
+            self.step_counter <= 1
+            or self.prev_grid is None
+            or getattr(self, "_last_threat_obs_level", -1) != self._current_level
+        ):
+            self._last_threat_obs_level = self._current_level
             self._prev_oriented_threats = threats
             return
 
@@ -2061,11 +2066,10 @@ class AutonomousEpistemicEngine:
                     or feat == self.bg_feature
                     or feat in effective_av_feats
                     or feat in self.mobile_threat_features
-                    or self.symbolic_theory.is_walkable(feat)
-                    or self.symbolic_theory.is_barrier(feat)
+                    or feat in self.learned_cargo_features
+                    or feat in self.symbolic_theory.cargo_features
                     or feat in self.symbolic_theory.goal_features
                     or feat in self.learned_goal_features
-                    or feat in self.learned_cargo_features
                 ):
                     continue
                 old_positions = prev_by_feat.get(feat, set())
@@ -2079,6 +2083,7 @@ class AutonomousEpistemicEngine:
                             for v in vanished
                         ):
                             self.mobile_threat_features.add(feat)
+                            self.symbolic_theory.walkable_features.discard(feat)
                             self.consecutive_simulation_failures = 0
                             self.simulation_cooldown = 0
                             self.mental_plan.clear()

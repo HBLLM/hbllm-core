@@ -172,6 +172,12 @@ class ArcAgiConsoleDriver(BaseDriver):
                         if aid is not None:
                             d = getattr(act_in, "data", None)
                             if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
                                 valid_targets_by_action.setdefault(int(aid), []).append(d)
                 except Exception:
                     pass
@@ -184,6 +190,12 @@ class ArcAgiConsoleDriver(BaseDriver):
                         if aid is not None:
                             d = getattr(act_in, "data", None)
                             if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
                                 targets = valid_targets_by_action.setdefault(int(aid), [])
                                 if d not in targets:
                                     targets.append(d)
@@ -207,7 +219,16 @@ class ArcAgiConsoleDriver(BaseDriver):
     def send_output(self, action: DriverAction) -> Any:
         act_id = action.action_id
         params = action.parameters or {}
-        data = params if params else None
+        if isinstance(params, dict):
+            clamped_params = {}
+            for k, v in params.items():
+                if k in ("x", "y", "c", "r", "row", "col") and isinstance(v, (int, float)):
+                    clamped_params[k] = max(0, min(63, int(v)))
+                else:
+                    clamped_params[k] = v
+            data = clamped_params if clamped_params else None
+        else:
+            data = params if params else None
         next_frame = self.env.step(act_id, data=data)
         if (
             next_frame is not None
@@ -353,7 +374,7 @@ class CognitiveAgentAdapter:
                     action=action.action_id,
                     action_data=action.parameters,
                 )
-            if lvl > getattr(self, "_last_lvl", 0):
+            if lvl > getattr(self, "_last_lvl", 0) or is_lost:
                 self.history.clear()
                 self.last_frame = None
             self._last_lvl = lvl

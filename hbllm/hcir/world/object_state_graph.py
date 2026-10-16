@@ -913,7 +913,8 @@ class ObjectStateGraphPlanner:
                         )
                         vx = int(raw_vx) if raw_vx is not None else 0
                         vy = int(raw_vy) if raw_vy is not None else 0
-                        valid_targets_list.append((vy, vx, dict(vt)))
+                        if 0 <= vx <= 63 and 0 <= vy <= 63:
+                            valid_targets_list.append((vy, vx, dict(vt)))
 
             def _find_best_valid_target(
                 target_r: int, target_c: int

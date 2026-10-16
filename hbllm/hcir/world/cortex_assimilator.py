@@ -81,7 +81,7 @@ class EpistemicFeedbackAssimilator:
                 if not (0 <= r < H and 0 <= c < W):
                     continue
                 wf = int(engine.prev_grid[r, c])
-                if wf in av or wf in lethal:
+                if wf in av or wf in lethal or wf in engine.mobile_threat_features:
                     continue
                 engine.symbolic_theory.induce_walkable(wf)
                 engine.verified_safe_features.add(wf)
@@ -617,9 +617,7 @@ class EpistemicFeedbackAssimilator:
             for ce_id, ce in unmatched_curr.items():
                 if EpistemicFeedbackAssimilator._is_edge_hud(ce, H, W):
                     continue
-                area_diff = abs(pe.area - ce.area)
-                area_match = (pe.area == ce.area) or (area_diff <= 2 and min(pe.area, ce.area) >= 4)
-                if pe.feature_id == ce.feature_id and area_match and pe.area <= 144:
+                if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 144:
                     dr = int(round(ce.centroid[0] - pe.centroid[0]))
                     dc = int(round(ce.centroid[1] - pe.centroid[1]))
                     dist = abs(dr) + abs(dc)
@@ -1062,7 +1060,13 @@ class EpistemicFeedbackAssimilator:
             background_feature=bg,
             known_avatar_features=engine.avatar_features,
         )
-        if kinetic_res.external_agents and engine.prev_grid is not None and action is not None:
+        if (
+            not is_win
+            and not is_lost
+            and kinetic_res.external_agents
+            and engine.prev_grid is not None
+            and action is not None
+        ):
             self_feats = (
                 set(kinetic_res.self_avatar.features)
                 if kinetic_res.self_avatar is not None
@@ -1079,23 +1083,26 @@ class EpistemicFeedbackAssimilator:
                         and (engine.avatar_feature is None or f != engine.avatar_feature)
                         and f not in self_feats
                     }
+                    for f in valid_threat_feats:
+                        engine.symbolic_theory.walkable_features.discard(f)
                     engine.mobile_threat_features.update(valid_threat_feats)
 
         # Premotor Collision Cones: Update forward space-time trajectories
-        static_walls = set(engine.learned_barriers)
-        for r_w in range(H):
-            for c_w in range(W):
-                if int(curr_grid[r_w, c_w]) in engine.symbolic_theory.barrier_features:
-                    static_walls.add((r_w, c_w))
-        engine.collision_cones.update_trajectories(
-            kinetic_entities=kinetic_res.external_agents,
-            static_barriers=static_walls,
-            grid_shape=(H, W),
-            horizon=12,
-            oriented_threats=getattr(engine, "_prev_oriented_threats", None),
-            mobile_threat_features=engine.mobile_threat_features,
-            stride=getattr(engine, "spatial_lattice_stride", 1),
-        )
+        if not is_win:
+            static_walls = set(engine.learned_barriers)
+            for r_w in range(H):
+                for c_w in range(W):
+                    if int(curr_grid[r_w, c_w]) in engine.symbolic_theory.barrier_features:
+                        static_walls.add((r_w, c_w))
+            engine.collision_cones.update_trajectories(
+                kinetic_entities=kinetic_res.external_agents,
+                static_barriers=static_walls,
+                grid_shape=(H, W),
+                horizon=12,
+                oriented_threats=getattr(engine, "_prev_oriented_threats", None),
+                mobile_threat_features=engine.mobile_threat_features,
+                stride=getattr(engine, "spatial_lattice_stride", 1),
+            )
 
         if (
             not is_win
@@ -1117,24 +1124,16 @@ class EpistemicFeedbackAssimilator:
                 engine.avatar_feature = next(iter(valid_feats))
                 engine.mobile_threat_features.difference_update(valid_feats)
                 engine.avatar_size = kinetic_res.self_avatar.area
-                dr, dc = 0, 0
-                if kinetic_res.raw_delta is not None:
-                    raw_dr, raw_dc = kinetic_res.raw_delta
-                    if abs(raw_dc) >= 2 * abs(raw_dr):
-                        dr, dc = 0, raw_dc
-                    elif abs(raw_dr) >= 2 * abs(raw_dc):
-                        dr, dc = raw_dr, 0
-                    else:
-                        dr, dc = raw_dr, raw_dc
-
-                if prev_avatar_pos is not None and (dr != 0 or dc != 0):
-                    engine.avatar_pos = (prev_avatar_pos[0] + dr, prev_avatar_pos[1] + dc)
-                else:
-                    engine.avatar_pos = (
-                        int(round(kinetic_res.self_avatar.centroid[0])),
-                        int(round(kinetic_res.self_avatar.centroid[1])),
-                    )
-                if (dr != 0 or dc != 0) and action is not None:
+                engine.avatar_pos = (
+                    int(round(kinetic_res.self_avatar.centroid[0])),
+                    int(round(kinetic_res.self_avatar.centroid[1])),
+                )
+                if kinetic_res.raw_delta is not None and action is not None:
+                    dr, dc = kinetic_res.raw_delta
+                    if abs(dc) >= 2 * abs(dr):
+                        dr = 0
+                    elif abs(dr) >= 2 * abs(dc):
+                        dc = 0
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, kinetic_res.self_avatar.cells, (dr, dc), H, W
                     )
@@ -1240,26 +1239,6 @@ class EpistemicFeedbackAssimilator:
                     engine.last_non_displacement_action = None
 
             if av_moved:
-                # Gestalt Common Fate: If multiple avatar components moved, find consensus displacement
-                consensus_groups: dict[
-                    tuple[int, int], list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]]
-                ] = {}
-                for item in av_moved:
-                    consensus_groups.setdefault(item[2], []).append(item)
-
-                expected_delta = (
-                    (act_dyn.delta_r, act_dyn.delta_c)
-                    if act_dyn and act_dyn.is_displacement_action()
-                    else None
-                )
-                if expected_delta in consensus_groups:
-                    av_moved = consensus_groups[expected_delta]
-                elif consensus_groups:
-                    best_delta, best_items = max(
-                        consensus_groups.items(), key=lambda it: len(it[1])
-                    )
-                    av_moved = best_items
-
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
                     av_moved.sort(
                         key=lambda item: (
@@ -1285,19 +1264,16 @@ class EpistemicFeedbackAssimilator:
                     for _, ce, _ in av_moved
                     for cell in ce.properties.get("cells", [ce.grid_pos])
                 ]
-                if prev_avatar_pos is not None and (dr != 0 or dc != 0):
-                    engine.avatar_pos = (prev_avatar_pos[0] + dr, prev_avatar_pos[1] + dc)
-                else:
-                    engine.avatar_pos = (
-                        int(round(sum(c[0] for c in all_cells) / len(all_cells))),
-                        int(round(sum(c[1] for c in all_cells) / len(all_cells))),
-                    )
+                engine.avatar_pos = (
+                    int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                    int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+                )
                 if not is_win:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, all_cells, (dr, dc), H, W
                     )
 
-                if not is_effector_action:
+                if not is_effector_action and not is_win and not is_lost:
                     if action not in engine.action_dynamics:
                         engine.action_dynamics[action] = ActionDynamicsModel(
                             action_id=action,
@@ -1381,6 +1357,10 @@ class EpistemicFeedbackAssimilator:
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_win:
+                is_intentional_bump = (
+                    engine.last_predicted_pos is not None
+                    and engine.last_predicted_pos == prev_avatar_pos
+                )
                 if act_dyn is not None and act_dyn.is_displacement_action():
                     # Motor command failed to displace avatar! Ground obstacle cell regardless of other background motion
                     exp_dr, exp_dc = act_dyn.get_displacement()
@@ -1450,7 +1430,9 @@ class EpistemicFeedbackAssimilator:
                             if 0 <= end_r < H and 0 <= end_c < W:
                                 engine.record_learned_barrier((end_r, end_c))
 
-                    if engine.last_action is not None and prev_avatar_pos is not None:
+                    if is_intentional_bump:
+                        engine.working_memory.update_salience_baseline(engine)
+                    elif engine.last_action is not None and prev_avatar_pos is not None:
                         engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
                         is_known_disp = engine.is_displacement_action(engine.last_action)
                         if not is_known_disp:
@@ -1550,7 +1532,15 @@ class EpistemicFeedbackAssimilator:
                     > 1
                 ):
                     discrepancy = True
-                elif surprise_eval.is_surprising and not avatar_moved and is_known_displacement:
+                elif (
+                    surprise_eval.is_surprising
+                    and not avatar_moved
+                    and is_known_displacement
+                    and (
+                        engine.last_predicted_pos is None
+                        or engine.last_predicted_pos != prev_avatar_pos
+                    )
+                ):
                     discrepancy = True
 
             # Involuntary Orienting Reflex: When surprising visual change occurs,
@@ -1716,16 +1706,27 @@ class EpistemicFeedbackAssimilator:
         # Faculty: Telic Depletion Goal Induction
         # When an interventional action clears pixels of a non-background, non-avatar feature,
         # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
-        if diff.mutated_pixels and not is_lost:
+        if diff.mutated_pixels and not is_lost and engine.prev_grid is not None:
             for r, c, old_v, new_v in diff.mutated_pixels:
                 if (
                     new_v == bg
                     and old_v != bg
                     and old_v not in av_feats
                     and not engine.symbolic_theory.is_barrier(old_v)
+                    and old_v not in engine.mobile_threat_features
+                    and old_v not in engine.hazard_tracker.known_lethal_features
                 ):
-                    engine.symbolic_theory.induce_depletion_goal(old_v)
-                    break
+                    prev_count = int(np.count_nonzero(engine.prev_grid == old_v))
+                    curr_count = int(np.count_nonzero(curr_grid == old_v))
+                    if curr_count < prev_count:
+                        if prev_avatar_pos is not None:
+                            dist = abs(r - prev_avatar_pos[0]) + abs(c - prev_avatar_pos[1])
+                            if dist <= 3 or engine.is_spatial_effector(action):
+                                engine.symbolic_theory.induce_depletion_goal(old_v)
+                                break
+                        elif engine.is_spatial_effector(action):
+                            engine.symbolic_theory.induce_depletion_goal(old_v)
+                            break
 
         if is_win:
             win_target = None
