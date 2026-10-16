@@ -283,8 +283,6 @@ class AutonomousEpistemicEngine:
 
         # Motor calibration & dynamics
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
-        self.tested_actions: set[int] = set()
-        self.tested_action_positions: set[tuple[int, tuple[int, int] | None]] = set()
         self.effector_kinetics_mode: int | None = (
             None  # Active inference: +1 pull/attraction, -1 push/repulsion
         )
@@ -774,6 +772,24 @@ class AutonomousEpistemicEngine:
     @effective_click_targets.setter
     def effective_click_targets(self, val: set[tuple[int, int]]) -> None:
         self.working_memory.effective_click_targets = val
+
+    @property
+    def tested_actions(self) -> set[int]:
+        """Tested actions held in prefrontal working memory."""
+        return self.working_memory.tested_actions
+
+    @tested_actions.setter
+    def tested_actions(self, val: set[int]) -> None:
+        self.working_memory.tested_actions = val
+
+    @property
+    def tested_action_positions(self) -> set[tuple[int, tuple[int, int] | None]]:
+        """Action-position exploration history held in prefrontal working memory."""
+        return self.working_memory.tested_action_positions
+
+    @tested_action_positions.setter
+    def tested_action_positions(self, val: set[tuple[int, tuple[int, int] | None]]) -> None:
+        self.working_memory.tested_action_positions = val
 
     @property
     def last_effective_click_coord(self) -> tuple[int, int] | None:

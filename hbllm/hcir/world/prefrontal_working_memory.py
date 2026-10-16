@@ -244,6 +244,8 @@ class PrefrontalWorkingMemory:
         self.last_effector_target_step: dict[tuple[int, int], int] = {}
         self.active_goal_converging_coord: tuple[int, int] | None = None
         self.consecutive_goal_converging_clicks: int = 0
+        self.tested_action_positions: set[tuple[int, tuple[int, int] | None]] = set()
+        self.tested_actions: set[int] = set()
 
         # Active Causal Empowerment & Contingency Testing
         self.active_causal_actuator_coord: tuple[int, int] | None = None
@@ -349,6 +351,19 @@ class PrefrontalWorkingMemory:
         if is_new_level:
             self.target_constellations.clear()
             self.structural_goals.clear()
+            self.probed_entity_ids.clear()
+            self.entity_visit_counts.clear()
+            self.position_visit_counts.clear()
+            self.exhausted_candidate_goals.clear()
+            self.quiescent_click_targets.clear()
+            self.effective_click_targets.clear()
+            self.last_effective_click_coord = None
+            self.click_affordances.clear()
+            self.last_effector_target_step.clear()
+            self.active_goal_converging_coord = None
+            self.tested_action_positions.clear()
+            self.entity_action_failed_positions.clear()
+            self.immobile_entity_actions.clear()
         self.held_items.clear()
         self.active_schema = None
         self.unlocked_barriers.clear()
@@ -366,7 +381,9 @@ class PrefrontalWorkingMemory:
         self.exploration_cooldown = 0
         self.consecutive_stuck_steps = 0
         self.constraint_solver.reset_episode()
-        self.visuospatial.reset_episode(retain_long_term=retain_long_term)
+        self.visuospatial.reset_episode(
+            retain_long_term=retain_long_term, is_new_level=is_new_level
+        )
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         self.subgoal_stack.reset_episode()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
@@ -417,6 +434,8 @@ class PrefrontalWorkingMemory:
             self.last_non_displacement_action = None
             self.total_epistemic_probes = 0
             self.target_constellations.clear()
+            self.tested_action_positions.clear()
+            self.tested_actions.clear()
         else:
             self.habenular_ior.reset_episode(
                 retain_long_term=True,
