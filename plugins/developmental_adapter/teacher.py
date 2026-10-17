@@ -11,6 +11,7 @@ import logging
 import random
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
@@ -22,6 +23,7 @@ from .causal_discovery import InterventionalCausalDiscoveryEngine
 from .cohorts import generate_test_suites
 from .compositional_language import CompositionalLanguageEngine
 from .continual_development import ContinualDevelopmentEngine
+from .dictionary_store import LanguageDictionary
 from .environment import BabyWorldEnvironment
 from .goal_planning import GoalDirectedPlanningEngine
 from .language_grounding import LanguageGroundingEngine
@@ -90,28 +92,83 @@ class PedagogicalTeacher:
     def __init__(self, name: str = "Dr. Maria Vygotsky", seed: int = 42) -> None:
         self.name = name
         self.rng = random.Random(seed)
+        self.dictionary = LanguageDictionary.get_instance()
+
+    @classmethod
+    def load_kindergarten_primer(
+        cls, primer_path: Path | str | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Load kindergarten ostensive naming lesson pairs dynamically from a primer data file."""
+        if primer_path is None:
+            primer_path = Path(__file__).parent / "curriculum_data" / "kindergarten_primer.tsv"
+        else:
+            primer_path = Path(primer_path)
+
+        lessons: list[tuple[str, dict[str, Any]]] = []
+        if primer_path.exists():
+            try:
+                with open(primer_path, encoding="utf-8") as f:
+                    lines = f.read().strip().splitlines()
+                for line in lines[1:]:
+                    if not line.strip():
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        utt = parts[0].strip()
+                        ctype = parts[1].strip()
+                        cval = parts[2].strip()
+
+                        if ctype == "color":
+                            context = {"color": cval}
+                        elif ctype == "entity_type":
+                            try:
+                                context = {"entity_type": BabyObjectType(cval)}
+                            except ValueError:
+                                context = {"entity_type": cval}
+                        elif ctype == "action":
+                            try:
+                                context = {"action": BabyActionType(cval)}
+                            except ValueError:
+                                context = {"action": cval}
+                        elif ctype == "relation":
+                            try:
+                                context = {"relation": BabyRelationType(cval)}
+                            except ValueError:
+                                context = {"relation": cval}
+                        else:
+                            context = {ctype: cval}
+                        lessons.append((utt, context))
+            except Exception as e:
+                logger.warning(f"Failed to load kindergarten primer from {primer_path}: {e}")
+
+        if not lessons:
+            # Fallback if primer file is absent
+            lessons = [
+                ("red", {"color": "red"}),
+                ("blue", {"color": "blue"}),
+                ("green", {"color": "green"}),
+                ("ball", {"entity_type": BabyObjectType.BALL}),
+                ("block", {"entity_type": BabyObjectType.BLOCK}),
+                ("box", {"entity_type": BabyObjectType.BOX}),
+                ("tool", {"entity_type": BabyObjectType.TOOL}),
+                ("stick", {"entity_type": BabyObjectType.TOOL}),
+                ("push", {"action": BabyActionType.PUSH}),
+                ("pull", {"action": BabyActionType.PULL}),
+                ("inside", {"relation": BabyRelationType.INSIDE}),
+            ]
+        return lessons
 
     # ─────────────────────────────────────────────────────────────────────────
     # GRADE 1: KINDERGARTEN (Lexical & Perceptual Grounding)
     # ─────────────────────────────────────────────────────────────────────────
-    def conduct_kindergarten(self, student: StudentProfile) -> GradeAssessment:
+    def conduct_kindergarten(
+        self, student: StudentProfile, primer_file: Path | str | None = None
+    ) -> GradeAssessment:
         """Teach grounded lexicon via ostensive naming and administer comprehension exam."""
         logger.info(f"[{self.name}] Beginning Kindergarten instruction.")
 
         # Step 1: Paired Demonstrations (Ostensive Naming with Joint Attention)
-        lessons: list[tuple[str, dict[str, Any]]] = [
-            ("red", {"color": "red"}),
-            ("blue", {"color": "blue"}),
-            ("green", {"color": "green"}),
-            ("ball", {"entity_type": BabyObjectType.BALL}),
-            ("block", {"entity_type": BabyObjectType.BLOCK}),
-            ("box", {"entity_type": BabyObjectType.BOX}),
-            ("tool", {"entity_type": BabyObjectType.TOOL}),
-            ("stick", {"entity_type": BabyObjectType.TOOL}),
-            ("push", {"action": BabyActionType.PUSH}),
-            ("pull", {"action": BabyActionType.PULL}),
-            ("inside", {"relation": BabyRelationType.INSIDE}),
-        ]
+        lessons = self.load_kindergarten_primer(primer_file)
 
         # Present lessons repeatedly to establish cross-situational co-occurrence
         for utterance, context in lessons * 3:
@@ -689,7 +746,7 @@ class PedagogicalTeacher:
 
     def teach_from_textbook(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile,
         chapter: Any,
     ) -> dict[str, Any]:
         """Teach student formal definitions, simulation puzzles, and analogies from a textbook chapter."""
@@ -698,15 +755,16 @@ class PedagogicalTeacher:
         if isinstance(chapter, str):
             chapter = TextbookParser.parse_markdown(chapter)
 
-        curator = TextbookCurriculumCurator()
+        curator = TextbookCurriculumCurator(dictionary=self.dictionary)
         res = curator.teach_chapter(student, chapter)
         logger.info(f"[{self.name}] Taught from textbook chapter '{chapter.title}': {res}")
         return res
 
     def conduct_textbook_exam(
         self,
-        student: BlankBrainSubstrate,
+        student: StudentProfile,
         chapter: Any,
+        vocab_probes: int = 1,
     ) -> GradeAssessment:
         """Administer an un-mocked Socratic examination based directly on a textbook chapter."""
         from .textbook_curriculum import TextbookCurriculumCurator, TextbookParser
@@ -714,8 +772,8 @@ class PedagogicalTeacher:
         if isinstance(chapter, str):
             chapter = TextbookParser.parse_markdown(chapter)
 
-        curator = TextbookCurriculumCurator()
-        q_results = curator.conduct_chapter_examination(student, chapter)
+        curator = TextbookCurriculumCurator(dictionary=self.dictionary)
+        q_results = curator.conduct_chapter_examination(student, chapter, vocab_probes=vocab_probes)
 
         correct = sum(1 for q in q_results if q.is_correct)
         acc_val = round(correct / len(q_results), 4) if q_results else 0.0

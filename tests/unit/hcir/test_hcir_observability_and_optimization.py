@@ -23,6 +23,7 @@ from hbllm.hcir.optimizer import (
     DeadInstructionEliminationPass,
     HCIROptimizer,
     QueryMergingPass,
+    TransactionBatchingPass,
 )
 from hbllm.hcir.receipt import ExecutionReceipt, ReceiptStore
 from hbllm.hcir.validation import GraphValidator
@@ -233,3 +234,32 @@ class TestHCIROptimizer:
         opt_stream = optimizer.optimize(stream)
         assert opt_stream.length == 1
         assert opt_stream.instructions[0].opcode == Opcode.QUERY
+
+    def test_transaction_batching(self):
+        pass_opt = TransactionBatchingPass(max_batch_size=2)
+        stream = InstructionStream(
+            author="test",
+            instructions=[
+                Instruction(opcode=Opcode.ASSERT, params={"node_data": {"id": "n1"}}),
+                Instruction(opcode=Opcode.ASSERT, params={"node_data": {"id": "n2"}}),
+                Instruction(opcode=Opcode.ASSERT, params={"node_data": {"id": "n3"}}),
+                Instruction(opcode=Opcode.QUERY, params={"text": "search"}),
+                Instruction(opcode=Opcode.RETRACT, params={"node_id": "n1"}),
+            ],
+        )
+        opt_stream = pass_opt.run(stream)
+        assert opt_stream.length == 5
+        # n1 and n2 share first batch_id (max_batch_size=2)
+        batch_1 = opt_stream.instructions[0].params.get("batch_id")
+        assert batch_1 is not None
+        assert opt_stream.instructions[1].params.get("batch_id") == batch_1
+        # n3 is in a new batch
+        batch_2 = opt_stream.instructions[2].params.get("batch_id")
+        assert batch_2 is not None
+        assert batch_2 != batch_1
+        # QUERY is non-mutating, so no batch_id
+        assert "batch_id" not in opt_stream.instructions[3].params
+        # RETRACT starts a new batch
+        batch_3 = opt_stream.instructions[4].params.get("batch_id")
+        assert batch_3 is not None
+        assert batch_3 != batch_2

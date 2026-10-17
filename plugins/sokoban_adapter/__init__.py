@@ -12,7 +12,7 @@ from typing import Any
 
 from .action import SokobanActionAdapter
 from .benchmark import PureHCIRSokobanAgent, run_sokoban_benchmark, run_sokoban_tier
-from .environment import StandaloneSokobanEnv, make_sokoban_env
+from .environment import NativeSokobanWrapper, make_sokoban_env
 from .perception import SokobanPerceptionAdapter
 from .types import (
     SokobanAction,
@@ -48,6 +48,7 @@ def register(bus: Any = None, registry: Any = None) -> list[Any]:
 
 
 __all__ = [
+    "NativeSokobanWrapper",
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRSokobanAgent",
@@ -58,7 +59,6 @@ __all__ = [
     "SokobanPerceptionAdapter",
     "SokobanTier",
     "SokobanTile",
-    "StandaloneSokobanEnv",
     "make_sokoban_env",
     "register",
     "run_sokoban_benchmark",

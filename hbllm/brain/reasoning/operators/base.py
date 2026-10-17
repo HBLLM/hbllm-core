@@ -35,7 +35,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from hbllm.hcir.workspace import HCIRWorkspaceState
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -306,6 +309,21 @@ class FrozenGraphView:
     def edges_to(self, node_id: str) -> list[HCIREdge]:
         """Edges where node_id is a target."""
         return [e.model_copy(deep=True) for e in self._edges.values() if node_id in e.targets]
+
+    def to_workspace(self) -> HCIRWorkspaceState:
+        """Construct an active HCIRWorkspaceState container initialized with the frozen graph content."""
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+
+        g = CognitiveGraph()
+        for nid in self.all_node_ids():
+            n = self.get_node(nid)
+            if n is not None:
+                g.add_node(n)
+        for eid in self.all_edge_ids():
+            e = self.get_edge(eid)
+            if e is not None:
+                g.add_edge(e)
+        return HCIRWorkspaceState(graph=g)
 
     def __repr__(self) -> str:
         return (

@@ -29,14 +29,19 @@ class ConceptAbstractionEngine:
         self.env = env
         self.discovered_concepts: dict[str, ConceptCluster] = {}
 
-    def extract_entity_feature_bundle(self, obj: BabyObjectState) -> dict[str, Any]:
+    def extract_entity_feature_bundle(
+        self,
+        obj: BabyObjectState,
+        mass_threshold_heavy: float = 5.0,
+        mass_threshold_light: float = 2.5,
+    ) -> dict[str, Any]:
         """Extract invariant property signature from perceptual state."""
         return {
             "is_spherical": obj.object_type.value == "ball" or obj.rollable,
             "is_container": obj.is_container or obj.object_type.value in ("container", "box"),
             "is_elongated_tool": obj.is_tool or obj.tool_length > 0.4,
-            "is_heavy": obj.mass >= 5.0,
-            "is_light": obj.mass <= 2.5,
+            "is_heavy": obj.mass >= mass_threshold_heavy,
+            "is_light": obj.mass <= mass_threshold_light,
             "rollable": obj.rollable,
         }
 
@@ -45,6 +50,17 @@ class ConceptAbstractionEngine:
     ) -> dict[str, ConceptCluster]:
         """Cluster perceived objects into stable concept categories without human labels."""
         objs = objects if objects is not None else list(self.env.objects.values())
+
+        # Dynamically calibrate mass thresholds from observed distribution
+        masses = [o.mass for o in objs if hasattr(o, "mass")]
+        if len(masses) >= 3 and max(masses) > min(masses):
+            sorted_m = sorted(masses)
+            med = sorted_m[len(sorted_m) // 2]
+            heavy_thresh = (med + max(sorted_m)) / 2.0
+            light_thresh = (min(sorted_m) + med) / 2.0
+        else:
+            heavy_thresh = 5.0
+            light_thresh = 2.5
 
         clusters: dict[str, list[str]] = {
             "SPHERICAL_BALL": [],
@@ -55,7 +71,9 @@ class ConceptAbstractionEngine:
         }
 
         for obj in objs:
-            features = self.extract_entity_feature_bundle(obj)
+            features = self.extract_entity_feature_bundle(
+                obj, mass_threshold_heavy=heavy_thresh, mass_threshold_light=light_thresh
+            )
             if features["is_heavy"]:
                 clusters["HEAVY_OBSTACLE"].append(obj.id)
             elif features["is_elongated_tool"] and features["is_light"]:

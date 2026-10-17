@@ -13,7 +13,10 @@ import sys
 import uuid
 
 # And the tokenizer
-from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
+try:
+    from hbllm_tokenizer_rs import Vocab  # type: ignore[import-untyped]
+except ImportError:
+    from hbllm.model.tokenizer import PurePythonBPE as Vocab
 
 from hbllm.actions.api_node import ApiNode
 from hbllm.actions.browser_node import BrowserNode

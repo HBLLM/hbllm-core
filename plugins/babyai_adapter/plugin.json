@@ -11,7 +11,6 @@
   "benchmark_category": "upstream_external_benchmark",
   "upstream_package": "minigrid",
   "supports_native_execution": true,
-  "supports_standalone_fallback": true,
   "license": "GPL-3.0-only",
   "capabilities": [
     "babyai_observe",

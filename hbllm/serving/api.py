@@ -317,6 +317,16 @@ async def _boot_brain(
     await gateway.start()
     _state["synapse_gateway"] = gateway
 
+    # 4.1. Start DeviceBridge (cross-device session continuity & presence)
+    from hbllm.serving.device_bridge import DeviceBridge
+
+    device_bridge = getattr(brain, "device_bridge", None)
+    if device_bridge is None:
+        device_bridge = DeviceBridge(bus=brain.bus)
+        await device_bridge.start()
+        brain.device_bridge = device_bridge
+    _state["device_bridge"] = device_bridge
+
     # 5. Start WebRTC Gateway (optional high-bandwidth plane)
     try:
         from hbllm.network.webrtc_gateway import WebRTCGateway
@@ -356,6 +366,10 @@ async def _shutdown_brain() -> None:
     webrtc_gateway = _state.get("webrtc_gateway")
     if webrtc_gateway:
         await webrtc_gateway.stop()
+
+    device_bridge = _state.get("device_bridge")
+    if device_bridge:
+        await device_bridge.stop()
 
     brain = _state.get("brain")
     if brain:
@@ -1237,6 +1251,31 @@ async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
     config = _state.get("config") or BrainConfig()
     timeout = config.api_timeout
 
+    # Prefer direct Brain.process pipeline execution when brain is available
+    brain = _state.get("brain")
+    if brain is not None and hasattr(brain, "process"):
+        try:
+            pipeline_result = await asyncio.wait_for(
+                brain.process(
+                    text=request.text,
+                    tenant_id=request.tenant_id,
+                    session_id=request.session_id,
+                    model_size=request.model_size,
+                ),
+                timeout=timeout,
+            )
+            return ChatResponse(
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                device_id=request.device_id,
+                session_id=request.session_id,
+                correlation_id=pipeline_result.correlation_id,
+                response_text=pipeline_result.text,
+                source_node=pipeline_result.source_node,
+            )
+        except (TimeoutError, asyncio.TimeoutError):
+            raise HTTPException(status_code=504, detail=f"Pipeline timed out ({int(timeout)}s)")
+
     bus = _state["bus"]
     correlation_id = str(uuid.uuid4())
 
@@ -1975,6 +2014,294 @@ async def get_cognitive_telemetry():
     except Exception as e:
         logger.error("Failed to fetch cognitive telemetry: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Device & Driver Management Endpoints ──────────────────────────────
+
+
+@app.get("/v1/devices")
+async def list_devices(request: Request) -> dict[str, Any]:
+    """List all registered and active devices connected to the Brain's DriverManager and DeviceBridge."""
+    brain = _state.get("brain")
+    dm = getattr(brain, "driver_manager", None) if brain else None
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    tenant_id = getattr(request.state, "tenant_id", "default")
+
+    client_devices = []
+    if bridge is not None:
+        for c in bridge.get_active_devices(tenant_id):
+            client_devices.append(
+                {
+                    "device_id": c.device_id,
+                    "device_type": c.device_type,
+                    "capabilities": c.capabilities,
+                    "is_active": c.is_active,
+                    "age_seconds": round(c.age_seconds, 1),
+                    "current_session_id": c.current_session_id,
+                }
+            )
+
+    if dm is None:
+        return {
+            "devices": [],
+            "client_devices": client_devices,
+            "active_count": 0,
+            "total_count": 0,
+            "client_count": len(client_devices),
+            "streaming_active": False,
+        }
+
+    active_drivers = dm.get_active_drivers()
+    all_names = dm.list_drivers()
+    devices = []
+    for name in all_names:
+        driver = dm.get_driver(name) if name in dm._drivers else None
+        is_active = name in active_drivers
+        desc = driver.descriptor.to_dict() if driver and driver.descriptor else {"device_id": name}
+        devices.append(
+            {
+                "name": name,
+                "is_active": is_active,
+                "is_connected": driver.is_connected if driver else False,
+                "descriptor": desc,
+            }
+        )
+    return {
+        "devices": devices,
+        "client_devices": client_devices,
+        "active_count": len(active_drivers),
+        "total_count": len(all_names),
+        "client_count": len(client_devices),
+        "streaming_active": getattr(dm, "is_streaming", False),
+    }
+
+
+@app.get("/v1/devices/{device_id}")
+async def get_device(device_id: str, request: Request) -> dict[str, Any]:
+    """Retrieve details and descriptor for a specific connected device."""
+    brain = _state.get("brain")
+    dm = getattr(brain, "driver_manager", None) if brain else None
+    if dm is None:
+        raise HTTPException(status_code=503, detail="DriverManager not initialized")
+
+    try:
+        driver = dm.get_driver(device_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found")
+
+    desc = driver.descriptor.to_dict() if driver.descriptor else {"device_id": device_id}
+    return {
+        "device_id": device_id,
+        "is_connected": driver.is_connected,
+        "is_active": dm.is_driver_active(device_id),
+        "descriptor": desc,
+        "capabilities": [str(c) for c in driver.capabilities],
+    }
+
+
+@app.post("/v1/devices/{device_id}/action")
+async def dispatch_device_action(
+    device_id: str,
+    payload: dict[str, Any],
+    request: Request,
+) -> dict[str, Any]:
+    """Dispatch an action to a connected device via DriverManager."""
+    from hbllm.drivers.base import DriverAction
+
+    brain = _state.get("brain")
+    dm = getattr(brain, "driver_manager", None) if brain else None
+    if dm is None:
+        raise HTTPException(status_code=503, detail="DriverManager not initialized")
+
+    action_id = payload.get("action_id")
+    if action_id is None:
+        raise HTTPException(status_code=400, detail="Missing required 'action_id'")
+
+    action = DriverAction(
+        action_id=action_id,
+        semantic_intent=payload.get("semantic_intent", ""),
+        parameters=payload.get("parameters", {}),
+        confidence=float(payload.get("confidence", 1.0)),
+    )
+    try:
+        feedback = await dm.dispatch_action_async(device_id, action)
+        return {
+            "device_id": device_id,
+            "action_id": action_id,
+            "success": feedback.success,
+            "reward": feedback.reward,
+            "terminated": feedback.terminated,
+            "truncated": feedback.truncated,
+            "causal_delta": feedback.causal_delta,
+            "info": feedback.info,
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Device '{device_id}' not found")
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Error executing device action on '%s': %s", device_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/v1/devices/{device_id}")
+async def detach_device(device_id: str, request: Request) -> dict[str, Any]:
+    """Detach / disconnect an active device."""
+    brain = _state.get("brain")
+    dm = getattr(brain, "driver_manager", None) if brain else None
+    if dm is None:
+        raise HTTPException(status_code=503, detail="DriverManager not initialized")
+
+    success = await dm.detach_driver(device_id)
+    return {"device_id": device_id, "detached": success}
+
+
+@app.post("/v1/devices/presence/register")
+async def register_client_device(
+    payload: dict[str, Any],
+    request: Request,
+) -> dict[str, Any]:
+    """Register a client device (mobile, desktop, browser) for presence tracking and session handoff."""
+    from hbllm.serving.device_bridge import DeviceInfo
+
+    brain = _state.get("brain")
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="DeviceBridge not initialized")
+
+    device_id = payload.get("device_id")
+    if not device_id:
+        raise HTTPException(status_code=400, detail="Missing required 'device_id'")
+
+    tenant_id = getattr(request.state, "tenant_id", None) or payload.get("tenant_id", "default")
+    device = DeviceInfo(
+        device_id=str(device_id),
+        tenant_id=str(tenant_id),
+        device_type=payload.get("device_type", "unknown"),
+        capabilities=payload.get("capabilities", []),
+        push_token=payload.get("push_token"),
+        metadata=payload.get("metadata", {}),
+    )
+    bridge.register_device(device)
+    return {"status": "registered", "device_id": device.device_id, "tenant_id": device.tenant_id}
+
+
+@app.post("/v1/devices/presence/{device_id}/heartbeat")
+async def client_device_heartbeat(
+    device_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Keepalive heartbeat for a registered client device."""
+    brain = _state.get("brain")
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="DeviceBridge not initialized")
+
+    bridge.heartbeat(device_id)
+    return {"status": "ok", "device_id": device_id}
+
+
+@app.post("/v1/devices/presence/handoff")
+async def handoff_client_session(
+    payload: dict[str, Any],
+    request: Request,
+) -> dict[str, Any]:
+    """Transfer an active session from one device to another for cross-device continuity."""
+    brain = _state.get("brain")
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="DeviceBridge not initialized")
+
+    session_id = payload.get("session_id")
+    from_device = payload.get("from_device")
+    to_device = payload.get("to_device")
+    if not session_id or not from_device or not to_device:
+        raise HTTPException(
+            status_code=400, detail="Missing required 'session_id', 'from_device', or 'to_device'"
+        )
+
+    success = await bridge.handoff_session(
+        session_id=str(session_id),
+        from_device=str(from_device),
+        to_device=str(to_device),
+    )
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="Session handoff failed (device not found or cross-tenant transfer denied)",
+        )
+
+    return {
+        "status": "handed_off",
+        "session_id": session_id,
+        "from_device": from_device,
+        "to_device": to_device,
+    }
+
+
+@app.get("/v1/devices/presence/active")
+async def get_active_client_devices(
+    request: Request,
+) -> dict[str, Any]:
+    """Retrieve all active client devices for the authenticated tenant."""
+    brain = _state.get("brain")
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    if bridge is None:
+        return {"devices": [], "count": 0}
+
+    tenant_id = getattr(request.state, "tenant_id", "default")
+    active = bridge.get_active_devices(tenant_id)
+    return {
+        "devices": [
+            {
+                "device_id": d.device_id,
+                "device_type": d.device_type,
+                "capabilities": d.capabilities,
+                "age_seconds": round(d.age_seconds, 1),
+                "is_active": d.is_active,
+                "current_session_id": d.current_session_id,
+            }
+            for d in active
+        ],
+        "count": len(active),
+    }
+
+
+@app.get("/v1/devices/presence/best")
+async def get_best_client_device(
+    request: Request,
+    capabilities: str | None = None,
+) -> dict[str, Any]:
+    """Select the best active device for the authenticated tenant given required capabilities."""
+    brain = _state.get("brain")
+    bridge = _state.get("device_bridge") or (
+        getattr(brain, "device_bridge", None) if brain else None
+    )
+    if bridge is None:
+        raise HTTPException(status_code=503, detail="DeviceBridge not initialized")
+
+    tenant_id = getattr(request.state, "tenant_id", "default")
+    req_caps = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
+    best = bridge.get_best_device(tenant_id, required_capabilities=req_caps)
+    if not best:
+        raise HTTPException(status_code=404, detail="No matching active device found for tenant")
+
+    return {
+        "device_id": best.device_id,
+        "device_type": best.device_type,
+        "capabilities": best.capabilities,
+        "current_session_id": best.current_session_id,
+    }
 
 
 @app.websocket("/v1/synapse/ws")

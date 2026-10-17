@@ -368,6 +368,7 @@ class TestDataFlowChain:
 
         # 4. Should select the HBLLM goal
         assert decision.action == "switch_to_goal"
+        assert decision.target_goal is not None
         assert "asyncio" in decision.target_goal.lower() or "Fix" in decision.target_goal
 
     def test_relationship_to_context_chain(self, tmp_path):
@@ -388,3 +389,111 @@ class TestDataFlowChain:
         relevant = rm.get_relevant_people("HBLLM")
         assert len(relevant) >= 1
         assert relevant[0].name == "Alice Chen"
+
+
+class TestBrainFactoryContextFusionIntegration:
+    """Test that BrainFactory automatically registers all cognitive sources into ContextFusion."""
+
+    @pytest.mark.asyncio
+    async def test_brain_factory_context_fusion_wiring(self, tmp_path):
+        from hbllm.brain.core.factory import BrainConfig, BrainFactory
+        from hbllm.serving.provider import LLMProvider, LLMResponse
+
+        class LocalMockProvider(LLMProvider):
+            @property
+            def name(self) -> str:
+                return "mock"
+
+            async def generate(self, messages, **kwargs):
+                return LLMResponse(
+                    content='{"response": "test"}',
+                    model="mock",
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                )
+
+            async def stream(self, messages, **kwargs):
+                yield '{"response": "test"}'
+
+        cfg = BrainConfig(
+            data_dir=str(tmp_path),
+            inject_perception=False,
+            inject_memory=False,
+            inject_identity=False,
+            inject_curiosity=False,
+        )
+        provider = LocalMockProvider()
+        brain = await BrainFactory.create(provider=provider, config=cfg)
+
+        try:
+            assert brain.context_fusion is not None
+            assert brain.pipeline.context_fusion is not None
+            # Check registered sources
+            sources = brain.context_fusion._sources
+            assert "user_model" in sources
+            assert "active_project" in sources
+            assert "relationships" in sources
+            assert "reality_graph" in sources
+            assert "world_state" in sources
+        finally:
+            await brain.stop()
+
+    @pytest.mark.asyncio
+    async def test_cognitive_pipeline_augmented_prompt(self, tmp_path):
+        from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+        from hbllm.network.bus import InProcessBus
+        from hbllm.network.messages import Message, MessageType
+        from hbllm.serving.pipeline import CognitivePipeline, PipelineConfig
+
+        bus = InProcessBus()
+        await bus.start()
+
+        cf = ContextFusionEngine(token_budget=1000)
+
+        async def mock_user_provider(query, tenant, budget):
+            return "User Profile: Expert in Rust and AI systems"
+
+        cf.register_source("user_model", mock_user_provider, priority=0.9)
+
+        pipeline = CognitivePipeline(
+            bus=bus,
+            config=PipelineConfig(
+                inject_memory=False,
+                inject_identity=False,
+                inject_curiosity=False,
+                total_timeout=2.0,
+            ),
+        )
+        pipeline.context_fusion = cf
+        await pipeline.start()
+
+        captured_msgs: list[Message] = []
+
+        async def capture_router(msg: Message) -> None:
+            captured_msgs.append(msg)
+            # Send immediate response back on decision.output
+            resp = Message(
+                type=MessageType.EVENT,
+                source_node_id="decision",
+                topic="decision.output",
+                payload={"text": "Acknowledged", "confidence": 0.95},
+                correlation_id=msg.correlation_id or msg.id,
+            )
+            await bus.publish("decision.output", resp)
+
+        await bus.subscribe("router.query", capture_router)
+
+        try:
+            result = await pipeline.process(
+                text="How can I design a compiler for Rust?", tenant_id="t1"
+            )
+            assert not result.error
+            assert result.text == "Acknowledged"
+            assert len(captured_msgs) == 1
+            query_msg = captured_msgs[0]
+            metadata = query_msg.payload.get("metadata", {})
+            assert "augmented_prompt" in metadata
+            assert "User Profile: Expert in Rust and AI systems" in metadata["augmented_prompt"]
+            assert "How can I design a compiler for Rust?" in metadata["augmented_prompt"]
+        finally:
+            await pipeline.stop()
+            await bus.stop()

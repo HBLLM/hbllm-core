@@ -5,6 +5,7 @@ import pytest
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
+    FactNode,
     GoalNode,
     HCIREdge,
     HCIREdgeType,
@@ -87,6 +88,24 @@ class TestGraphValidator:
         report = validator.validate(graph)
         warnings = [i for i in report.issues if i.severity == ValidationSeverity.WARNING]
         assert len(warnings) >= 1
+
+    def test_orphan_node_detection(self):
+        graph = CognitiveGraph()
+        graph.add_node(GoalNode(id="g1", description="connected_goal"))
+        graph.add_node(BeliefNode(id="b1", claim="connected_belief"))
+        graph.add_node(FactNode(id="f_orphan", claim="standalone_fact"))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"])
+        )
+        validator = GraphValidator()
+        report_default = validator.validate(graph)
+        assert len([i for i in report_default.issues if i.code == "ORPHAN_NODE"]) == 0
+
+        report_with_orphans = validator.validate(graph, check_orphans=True)
+        orphans = [i for i in report_with_orphans.issues if i.code == "ORPHAN_NODE"]
+        assert len(orphans) == 1
+        assert orphans[0].node_id == "f_orphan"
+        assert orphans[0].severity == ValidationSeverity.INFO
 
 
 # ═══════════════════════════════════════════════════════════════════════════

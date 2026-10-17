@@ -7,6 +7,7 @@ environment (GoToObj and PickupObj) adhering strictly to Gymnasium/MiniGrid conv
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,8 @@ from .types import (
     MiniGridState,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class GridCell:
@@ -31,6 +34,14 @@ class GridCell:
 
     def to_tuple(self) -> tuple[int, int, int]:
         return (int(self.object_type), int(self.color), int(self.state))
+
+    @property
+    def type(self) -> str:
+        return IDX_TO_OBJECT.get(int(self.object_type), "")
+
+    @property
+    def color_str(self) -> str:
+        return IDX_TO_COLOR.get(int(self.color), "")
 
 
 class BabyAIEnvironment:
@@ -59,6 +70,14 @@ class BabyAIEnvironment:
             [GridCell() for _ in range(self.height)] for _ in range(self.width)
         ]
         self._init_outer_walls()
+
+    @property
+    def unwrapped(self) -> BabyAIEnvironment:
+        return self
+
+    def close(self) -> None:
+        """No-op close for hermetic simulation."""
+        pass
 
     def _init_outer_walls(self) -> None:
         """Surround room perimeter with wall cells."""
@@ -179,10 +198,12 @@ class BabyAIEnvironment:
 
         return False
 
-    def reset(self) -> MiniGridObservation:
+    def reset(
+        self, seed: int | None = None, **kwargs: Any
+    ) -> tuple[MiniGridObservation, dict[str, Any]]:
         """Reset step count and return initial observation."""
         self.step_count = 0
-        return self.gen_obs()
+        return self.gen_obs(), {"mission": self.mission}
 
     def step(
         self, action: int | MiniGridAction
@@ -566,7 +587,7 @@ def make_gym_babyai_level(
     render_mode: str | None = None,
     **kwargs: Any,
 ) -> Any:
-    """Instantiate the upstream official Farama Gymnasium BabyAI environment.
+    """Instantiate the upstream official Farama Gymnasium BabyAI environment strictly natively.
 
     Requires 'minigrid' and 'gymnasium'.
     """

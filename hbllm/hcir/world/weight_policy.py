@@ -1,10 +1,14 @@
-"""
-Weight Update Policy — Mathematical Delta Learning Rule for Predictor Weights.
+"""Weight Update Policy — Mathematical Delta Learning Rule for Predictor Weights.
+
+Mathematical delta learning policy updating predictor weights, lifted to
+declarative CausalPredicates for epistemic traceability.
 """
 
 from __future__ import annotations
 
 import logging
+
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -25,3 +29,12 @@ class WeightUpdatePolicy:
             return 0.5
         else:
             return -1.0
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export policy configuration as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="weight_update_policy",
+            operator="==",
+            value=self.learning_rate,
+            relation="learning_rate",
+        )

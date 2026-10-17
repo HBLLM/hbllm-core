@@ -173,9 +173,13 @@ class BrainConfig(BaseModel):
     inject_executive_cortex: bool = True
     inject_relationship_memory: bool = True
     inject_reality_graph: bool = True
+    inject_context_fusion: bool = True
     inject_autonomy_manager: bool = True
     inject_temporal: bool = True
     inject_swarm: bool = True
+    inject_driver_manager: bool = True  # PnP Peripheral & Device Manager (Cognitive USB)
+    watch_devices: bool = True  # Background watcher for hot-plugged USB/hardware devices
+    inject_device_bridge: bool = True  # Cross-device presence, heartbeat & session handoff bridge
 
     # ── Legacy flags (preserved for backward compatibility) ───────
     inject_memory: bool = True
@@ -365,6 +369,9 @@ class Brain:
         # Knowledge base
         self.knowledge_base: KnowledgeBase | None = None
 
+        # Context Fusion Engine
+        self.context_fusion: Any | None = None
+
         # Persistence
         self.state: Any = None  # BrainState reference
 
@@ -424,70 +431,77 @@ class Brain:
         text: str,
         tenant_id: str = "default",
         session_id: str = "default",
+        model_size: str | None = None,
+        media: list[dict[str, Any]] | None = None,
     ) -> PipelineResult:
         """Send a query through the full cognitive pipeline."""
-        if self._draining:
+        if not self.acquire_request():
             return PipelineResult(
                 text="Service is shutting down. Please retry shortly.",
                 correlation_id="drain",
                 error=True,
             )
-        import time as _time
+        try:
+            import time as _time
 
-        _start = _time.monotonic()
+            _start = _time.monotonic()
 
-        # Start hardware monitor on first query if not running
-        if not self._hardware_loop_task:
-            self._hardware_loop_task = asyncio.create_task(self._hardware_monitor_loop())
+            # Start hardware monitor on first query if not running
+            if not self._hardware_loop_task:
+                self._hardware_loop_task = asyncio.create_task(self._hardware_monitor_loop())
 
-        # Token optimization (pre-process)
-        if self.token_optimizer:
-            self.token_optimizer.optimize(text)
+            # Token optimization (pre-process)
+            if self.token_optimizer:
+                self.token_optimizer.optimize(text)
 
-        result = await self.pipeline.process(
-            text=text,
-            tenant_id=tenant_id,
-            session_id=session_id,
-        )
-
-        _elapsed = (_time.monotonic() - _start) * 1000
-
-        # ── HCIR cognitive cycle ──────────────────────────────────
-        if self.hcir_runtime is not None:
-            try:
-                # Ensure session is started
-                if self.hcir_runtime.session_id != session_id:
-                    await self.hcir_runtime.start_session(session_id)
-                # Run a workspace-driven cognitive cycle
-                await self.hcir_runtime.run_cycle()
-            except Exception as _hcir_ex:
-                logger.debug("[Brain] HCIR cycle error: %s", _hcir_ex)
-
-        # Post-process: record cognitive metrics
-        if self.cognitive_metrics:
-            self.cognitive_metrics.record_latency(_elapsed, "pipeline")
-            self.cognitive_metrics.record_reasoning(result.confidence)
-
-        # Post-process: self-model tracking
-        if self.self_model:
-            domain = result.metadata.get("domain_hint", "general")
-            self.self_model.record_outcome(
-                domain,
-                success=not result.error,
-                confidence=result.confidence,
-                latency_ms=_elapsed,
-            )
-
-        # Post-process: interaction mining
-        if self.interaction_miner and not result.error:
-            await self.interaction_miner.record_interaction(
-                query=text,
-                response=result.text,
-                reward=result.confidence,
+            result = await self.pipeline.process(
+                text=text,
                 tenant_id=tenant_id,
+                session_id=session_id,
+                model_size=model_size or "125M",
+                media=media,
             )
 
-        return result
+            _elapsed = (_time.monotonic() - _start) * 1000
+
+            # ── HCIR cognitive cycle ──────────────────────────────────
+            if self.hcir_runtime is not None:
+                try:
+                    # Ensure session is started
+                    if self.hcir_runtime.session_id != session_id:
+                        await self.hcir_runtime.start_session(session_id)
+                    # Run a workspace-driven cognitive cycle
+                    await self.hcir_runtime.run_cycle()
+                except Exception as _hcir_ex:
+                    logger.debug("[Brain] HCIR cycle error: %s", _hcir_ex)
+
+            # Post-process: record cognitive metrics
+            if self.cognitive_metrics:
+                self.cognitive_metrics.record_latency(_elapsed, "pipeline")
+                self.cognitive_metrics.record_reasoning(result.confidence)
+
+            # Post-process: self-model tracking
+            if self.self_model:
+                domain = result.metadata.get("domain_hint", "general")
+                self.self_model.record_outcome(
+                    domain,
+                    success=not result.error,
+                    confidence=result.confidence,
+                    latency_ms=_elapsed,
+                )
+
+            # Post-process: interaction mining
+            if self.interaction_miner and not result.error:
+                await self.interaction_miner.record_interaction(
+                    query=text,
+                    response=result.text,
+                    reward=result.confidence,
+                    tenant_id=tenant_id,
+                )
+
+            return result
+        finally:
+            self.release_request()
 
     def get_cognitive_authority(self) -> float:
         """Return the percentage of cognitive decisions made by HCIR (100.0 = full authority)."""
@@ -616,6 +630,24 @@ class Brain:
                 self.epistemic_loop.close()
             except Exception:
                 logger.debug("Error closing epistemic loop during shutdown", exc_info=True)
+        # Stop device discovery
+        if getattr(self, "device_discovery", None):
+            try:
+                await self.device_discovery.stop()
+            except Exception:
+                logger.debug("Error stopping device discovery during shutdown", exc_info=True)
+        # Stop driver manager
+        if getattr(self, "driver_manager", None):
+            try:
+                await self.driver_manager.shutdown()
+            except Exception:
+                logger.debug("Error stopping driver manager during shutdown", exc_info=True)
+        # Stop device bridge
+        if getattr(self, "device_bridge", None):
+            try:
+                await self.device_bridge.stop()
+            except Exception:
+                logger.debug("Error stopping device bridge during shutdown", exc_info=True)
         await self.registry.stop()
         await self.bus.stop()
         logger.info("Brain shutdown complete")
@@ -1057,6 +1089,7 @@ class BrainFactory:
             inject_memory=cfg.inject_memory,
             inject_identity=cfg.inject_identity,
             inject_curiosity=cfg.inject_curiosity,
+            inject_context_fusion=cfg.inject_context_fusion,
         )
         pipeline = CognitivePipeline(
             bus=message_bus,
@@ -1100,6 +1133,30 @@ class BrainFactory:
             llm=llm,
         )
         await wire_late_subsystems(brain, cfg, nodes, registry, message_bus)
+
+        # Wire ContextFusionEngine into standard brain pipeline if enabled
+        if getattr(cfg, "inject_context_fusion", True) and pipeline is not None:
+            from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+
+            cf_engine = getattr(pipeline, "context_fusion", None)
+            if cf_engine is None:
+                cf_engine = ContextFusionEngine()
+                pipeline.context_fusion = cf_engine
+
+            if getattr(brain, "world_state", None) is not None:
+                cf_engine.register_source(
+                    "world_state",
+                    ContextFusionEngine.world_state_provider(brain.world_state),
+                    priority=0.60,
+                )
+            if getattr(brain, "goal_manager", None) is not None:
+                cf_engine.register_source(
+                    "active_goals",
+                    ContextFusionEngine.goals_provider(brain.goal_manager),
+                    priority=0.70,
+                )
+            brain.context_fusion = cf_engine
+            logger.info("ContextFusionEngine wired into standard brain pipeline")
 
         # Wire HCIR Cognitive OS — event-sourced cognitive substrate
         await BrainFactory._wire_hcir_cognitive_os(brain, cfg, message_bus, nodes)
@@ -1244,6 +1301,19 @@ class BrainFactory:
                 brain.swarm._transaction_sync = sync_protocol
                 brain.swarm._hcir_workspace = hcir_ws
                 logger.info("[Factory] TransactionSyncProtocol injected into SwarmNode")
+
+            # 12. Embed CognitiveBlackbox with shared HCIR workspace into DriverManager
+            dm = getattr(brain, "driver_manager", None)
+            if dm is not None and dm.cognitive_engine is None:
+                try:
+                    from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
+
+                    cb = CognitiveBlackbox(workspace=hcir_ws)
+                    dm.set_cognitive_engine(cb)
+                    brain.cognitive_blackbox = cb
+                    logger.info("[Factory] Embedded CognitiveBlackbox (HCIR) into DriverManager")
+                except Exception as cb_err:
+                    logger.warning("[Factory] CognitiveBlackbox embedding skipped: %s", cb_err)
 
             logger.info(
                 "[Factory] HCIR Cognitive OS wired: %d capabilities, budget=%d tokens",
@@ -1654,6 +1724,58 @@ class BrainFactory:
             except Exception as e:
                 logger.warning("Failed to start IoT node: %s", e)
 
+        # Driver Manager & Hardware PnP Gateway Node (Cognitive USB)
+        driver_manager = None
+        driver_node = None
+        device_discovery = None
+        tool_registry = None
+        try:
+            from hbllm.actions.tool_registry import ToolRegistry
+
+            tool_registry = ToolRegistry(bus=message_bus)
+        except Exception as e:
+            logger.debug("ToolRegistry init skipped: %s", e)
+
+        if cfg.inject_driver_manager:
+            try:
+                from hbllm.drivers.discovery import DeviceDiscoveryEngine
+                from hbllm.drivers.manager import DriverManager
+                from hbllm.drivers.node import DriverManagerNode
+
+                driver_manager = DriverManager()
+                driver_node = DriverManagerNode(
+                    node_id="driver_manager",
+                    driver_manager=driver_manager,
+                    tool_registry=tool_registry,
+                )
+                await _register_node(registry, driver_node)
+                await driver_node.start(message_bus)
+                nodes.append(driver_node)
+
+                # Initialize physical port discovery engine
+                device_discovery = DeviceDiscoveryEngine(
+                    driver_manager=driver_manager,
+                    enable_physical_scan=getattr(cfg, "watch_devices", True),
+                )
+                await device_discovery.start()
+                logger.info(
+                    "DriverManagerNode & DeviceDiscoveryEngine (Cognitive USB / PnP Gateway) wired"
+                )
+            except Exception as e:
+                logger.warning("DriverManagerNode init failed (non-critical): %s", e)
+
+        # Cross-device presence & session continuity bridge
+        device_bridge = None
+        if getattr(cfg, "inject_device_bridge", True):
+            try:
+                from hbllm.serving.device_bridge import DeviceBridge
+
+                device_bridge = DeviceBridge(bus=message_bus)
+                await device_bridge.start()
+                logger.info("DeviceBridge wired (cross-device presence & session handoff active)")
+            except Exception as e:
+                logger.warning("DeviceBridge init failed (non-critical): %s", e)
+
         # Live World State Engine (environment graph)
         if cfg.inject_world_state:
             from hbllm.brain.world.world_state import WorldStateEngine
@@ -1789,6 +1911,7 @@ class BrainFactory:
             inject_memory=cfg.inject_memory,
             inject_identity=cfg.inject_identity,
             inject_curiosity=cfg.inject_curiosity,
+            inject_context_fusion=cfg.inject_context_fusion,
         )
         pipeline = CognitivePipeline(
             bus=message_bus,
@@ -1815,6 +1938,16 @@ class BrainFactory:
         # Attach world state if wired
         if world_state is not None:
             brain.world_state = world_state
+
+        # Wire driver and device discovery manager
+        if driver_manager is not None:
+            brain.driver_manager = driver_manager
+        if driver_node is not None:
+            brain.driver_node = driver_node
+        if device_discovery is not None:
+            brain.device_discovery = device_discovery
+        if device_bridge is not None:
+            brain.device_bridge = device_bridge
 
         # Wire composite references
         brain.reasoning_core = reasoning
@@ -2244,6 +2377,70 @@ class BrainFactory:
             )
             brain.reality_graph = reality_graph
             logger.info("RealityGraph wired — unified world model facade active")
+
+        # ContextFusionEngine — multi-provider cognitive context synthesis
+        if getattr(cfg, "inject_context_fusion", True) and pipeline is not None:
+            from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+
+            cf_engine = getattr(pipeline, "context_fusion", None)
+            if cf_engine is None:
+                cf_engine = ContextFusionEngine()
+                pipeline.context_fusion = cf_engine
+
+            if user_model_engine is not None:
+                cf_engine.register_source(
+                    "user_model",
+                    ContextFusionEngine.user_model_provider(user_model_engine),
+                    priority=0.85,
+                )
+            if project_graph is not None:
+                cf_engine.register_source(
+                    "active_project",
+                    ContextFusionEngine.project_provider(project_graph),
+                    priority=0.85,
+                )
+            if relationship_memory is not None:
+                cf_engine.register_source(
+                    "relationships",
+                    ContextFusionEngine.relationship_provider(relationship_memory),
+                    priority=0.55,
+                )
+            if getattr(brain, "reality_graph", None) is not None:
+                cf_engine.register_source(
+                    "reality_graph",
+                    ContextFusionEngine.reality_graph_provider(brain.reality_graph),
+                    priority=0.60,
+                )
+            if getattr(brain, "world_state", None) is not None:
+                cf_engine.register_source(
+                    "world_state",
+                    ContextFusionEngine.world_state_provider(brain.world_state),
+                    priority=0.60,
+                )
+            if getattr(brain, "emotion_engine", None) is not None:
+                cf_engine.register_source(
+                    "emotion_state",
+                    ContextFusionEngine.emotion_provider(brain.emotion_engine),
+                    priority=0.50,
+                )
+            if getattr(brain, "goal_manager", None) is not None:
+                cf_engine.register_source(
+                    "active_goals",
+                    ContextFusionEngine.goals_provider(brain.goal_manager),
+                    priority=0.70,
+                )
+            brain.context_fusion = cf_engine
+            logger.info(
+                "ContextFusionEngine wired with cognitive human-modeling and world providers"
+            )
+
+        if driver_manager is not None:
+            brain.driver_manager = driver_manager
+            brain.driver_node = driver_node
+            brain.device_discovery = device_discovery
+        if device_bridge is not None:
+            brain.device_bridge = device_bridge
+        brain.tool_registry = tool_registry
 
         logger.info(
             "v4 composite brain ready: %d top-level nodes, autonomy=ACTIVE",

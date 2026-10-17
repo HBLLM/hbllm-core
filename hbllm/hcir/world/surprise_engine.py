@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.prediction_error import PredictionErrorTypology, WorldPredictionError
 
 logger = logging.getLogger(__name__)
@@ -20,13 +22,57 @@ class SurpriseEvaluation:
     is_surprising: bool
     prediction_error_node: WorldPredictionError | None = None
     salience_boost: float = 0.0
+    is_persistent: bool = False
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export surprise evaluation as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="surprise_evaluation",
+            operator="==",
+            value=self.surprise_score,
+            relation=f"surprising:{self.is_surprising}",
+            target_entity=f"persistent:{self.is_persistent}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording surprise evaluation."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"surprise_eval_{hash(self.surprise_score) & 0xFFFFFFFF}",
+                node_data={
+                    "surprise_score": self.surprise_score,
+                    "is_surprising": self.is_surprising,
+                    "salience_boost": self.salience_boost,
+                    "is_persistent": self.is_persistent,
+                    "prediction_error_id": (
+                        self.prediction_error_node.prediction_id
+                        if self.prediction_error_node
+                        else None
+                    ),
+                },
+            )
+        ]
 
 
 class SurpriseEngine:
-    """Surprise engine computing error variance scaled by confidence and salience."""
+    """Surprise engine computing error variance scaled by confidence, salience, and persistence."""
 
-    def __init__(self, surprise_threshold: float = 0.15) -> None:
+    def __init__(
+        self,
+        surprise_threshold: float = 0.15,
+        persistent_surprise_threshold: int = 2,
+    ) -> None:
         self.surprise_threshold = surprise_threshold
+        self.persistent_surprise_threshold = persistent_surprise_threshold
+        self._surprise_ledger: dict[str, list[float]] = {}
+
+    def reset_ledger(self, context_key: str | None = None) -> None:
+        """Clear surprise history for a context key or entire ledger."""
+        if context_key is not None:
+            self._surprise_ledger.pop(context_key, None)
+        else:
+            self._surprise_ledger.clear()
 
     def evaluate_surprise(
         self,
@@ -36,6 +82,7 @@ class SurpriseEngine:
         confidence: float = 0.90,
         attention_salience: float = 1.0,
         prediction_source: str = "physics",
+        context_signature: str = "",
     ) -> SurpriseEvaluation:
         """Compute surprise score: Error * (0.5 + Confidence) * AttentionSalience."""
         # Calculate raw state variance
@@ -51,6 +98,10 @@ class SurpriseEngine:
                 norm = max(1.0, abs(v_exp))
                 total_diff += diff / norm
                 count += 1
+            elif v_exp != v_act:
+                # Qualitative state mismatch
+                total_diff += 1.0
+                count += 1
 
         raw_error = (total_diff / count) if count > 0 else 0.0
 
@@ -60,14 +111,29 @@ class SurpriseEngine:
 
         err_node = None
         salience_boost = 0.0
+        is_persistent = False
 
         if is_surprising:
             salience_boost = 0.35
-            typology = (
-                PredictionErrorTypology.MODEL_ERROR
-                if confidence > 0.70
-                else PredictionErrorTypology.ENVIRONMENT_CHANGE
-            )
+            context_key = context_signature or prediction_source
+            history = self._surprise_ledger.setdefault(context_key, [])
+            history.append(surprise_score)
+
+            if len(history) >= self.persistent_surprise_threshold:
+                is_persistent = True
+                typology = PredictionErrorTypology.LATENT_CONFOUNDER
+                logger.info(
+                    "SurpriseEngine PERSISTENT SURPRISE DETECTED (count=%d, key='%s') -> LATENT_CONFOUNDER",
+                    len(history),
+                    context_key,
+                )
+            else:
+                typology = (
+                    PredictionErrorTypology.MODEL_ERROR
+                    if confidence > 0.70
+                    else PredictionErrorTypology.ENVIRONMENT_CHANGE
+                )
+
             err_node = WorldPredictionError(
                 prediction_id=prediction_id,
                 prediction_source=prediction_source,
@@ -80,9 +146,10 @@ class SurpriseEngine:
                 weight_delta=-0.15 if typology == PredictionErrorTypology.MODEL_ERROR else 0.0,
             )
             logger.info(
-                "SurpriseEngine SURPRISE DETECTED: score=%.4f (boost=+%.2f)",
+                "SurpriseEngine SURPRISE DETECTED: score=%.4f (boost=+%.2f, typology=%s)",
                 surprise_score,
                 salience_boost,
+                typology.value,
             )
 
         return SurpriseEvaluation(
@@ -90,4 +157,45 @@ class SurpriseEngine:
             is_surprising=is_surprising,
             prediction_error_node=err_node,
             salience_boost=salience_boost,
+            is_persistent=is_persistent,
         )
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export surprise engine configuration as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="surprise_engine",
+            operator="==",
+            value=self.surprise_threshold,
+            relation=f"persistent_thresh:{self.persistent_surprise_threshold}",
+            target_entity="cortex_surprise",
+        )
+
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export surprise engine configuration and tracked ledger entries."""
+        preds = [self.to_causal_predicate()]
+        for k, history in self._surprise_ledger.items():
+            if history:
+                preds.append(
+                    CausalPredicate(
+                        variable=f"surprise_ledger:{k}",
+                        operator="==",
+                        value=history[-1],
+                        relation=f"count:{len(history)}",
+                        target_entity=k,
+                    )
+                )
+        return preds
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording surprise engine ledger."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="surprise_engine_summary",
+                node_data={
+                    "surprise_threshold": self.surprise_threshold,
+                    "persistent_surprise_threshold": self.persistent_surprise_threshold,
+                    "ledger_entries_count": len(self._surprise_ledger),
+                },
+            )
+        ]
