@@ -190,7 +190,7 @@ class MyAgent(Agent):
                 logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         self.internal_agent = self.internal_engine
         self.last_grid: np.ndarray | None = None
-        self.current_game_id: str | None = None
+        self.current_game_id: str | None = game_id.split("-")[0].strip() if game_id else None
         self.current_levels_completed: int = 0
 
     def load_instructions(self, instructions: Any) -> None:

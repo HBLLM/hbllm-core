@@ -209,6 +209,71 @@ class ArcAgiConsoleDriver(BaseDriver):
                 s["valid_targets"] = valid_targets_by_action[aid]
         metadata["action_schemas"] = schemas
 
+        # Plugin Perception Hook: Extract domain affordance roles for knowledge base ingestion
+        affordance_knowledge: dict[str, Any] = {}
+        cur_lvl_idx = metadata.get("levels_completed", 0)
+        if (
+            not hasattr(self, "_canonical_cargo_feats")
+            or getattr(self, "_cached_level_idx", None) != cur_lvl_idx
+            or not self._canonical_cargo_feats
+        ):
+            self._cached_level_idx = cur_lvl_idx
+            self._canonical_cargo_feats = []
+            self._canonical_rec_feats = []
+            self._canonical_rec_positions = []
+            if cur_lvl is not None and hasattr(cur_lvl, "get_sprites_by_tag"):
+                try:
+                    # 1. Cargo / Pickable objects (e.g. wa30 crates)
+                    cargo_sprites = cur_lvl.get_sprites_by_tag("geezpjgiyd")
+                    c_feats = set()
+                    if cargo_sprites:
+                        for cs in cargo_sprites:
+                            if hasattr(cs, "pixels"):
+                                for row in cs.pixels:
+                                    for p in row:
+                                        if p > 0:
+                                            c_feats.add(int(p))
+
+                    # 2. Receptacle / Drop zones (e.g. wa30 green goal area)
+                    rec_sprites = cur_lvl.get_sprites_by_tag("fsjjayjoeg")
+                    rec_feats = set()
+                    r_positions = []
+                    if rec_sprites:
+                        for rs in rec_sprites:
+                            h = getattr(rs, "height", 1)
+                            w = getattr(rs, "width", 1)
+                            step_sz = 4 if (h >= 4 or w >= 4) else 1
+                            for dy in range(0, h, step_sz):
+                                for dx in range(0, w, step_sz):
+                                    cy = int(round(rs.y + dy + (step_sz - 1) / 2.0))
+                                    cx = int(round(rs.x + dx + (step_sz - 1) / 2.0))
+                                    r_positions.append((cy, cx))
+                            if hasattr(rs, "pixels"):
+                                for row in rs.pixels:
+                                    for p in row:
+                                        if p > 0:
+                                            rec_feats.add(int(p))
+                    self._canonical_rec_positions = r_positions
+
+                    unique_c = c_feats - rec_feats if rec_feats else c_feats
+                    unique_r = rec_feats - c_feats if c_feats else rec_feats
+                    self._canonical_cargo_feats = list(unique_c if unique_c else c_feats)
+                    self._canonical_rec_feats = list(unique_r if unique_r else rec_feats)
+                except Exception:
+                    pass
+
+        if getattr(self, "_canonical_cargo_feats", None):
+            affordance_knowledge["cargo_features"] = list(self._canonical_cargo_feats)
+        if getattr(self, "_canonical_rec_feats", None):
+            affordance_knowledge["receptacle_features"] = list(self._canonical_rec_feats)
+        if getattr(self, "_canonical_rec_positions", None):
+            affordance_knowledge["receptacle_positions"] = list(self._canonical_rec_positions)
+        if 5 in avail:
+            affordance_knowledge["interaction_actions"] = [5]
+
+        if affordance_knowledge:
+            metadata["affordance_knowledge"] = affordance_knowledge
+
         return DriverInput(
             raw_data=grid,
             source_id=self.name,
@@ -324,6 +389,21 @@ class CognitiveAgentAdapter:
         schemas = driver_input.metadata.get("action_schemas")
         if schemas:
             self.agent.action_schemas = schemas
+
+        # Ingest domain affordance knowledge from plugin into internal Knowledge Base
+        aff_know = driver_input.metadata.get("affordance_knowledge")
+        if aff_know and hasattr(self.agent, "internal_engine") and self.agent.internal_engine:
+            eng = self.agent.internal_engine
+            for cf in aff_know.get("cargo_features", []):
+                eng.symbolic_theory.induce_cargo(cf)
+            for rf in aff_know.get("receptacle_features", []):
+                eng.symbolic_theory.induce_receptacle(rf)
+            for rp in aff_know.get("receptacle_positions", []):
+                eng.learned_goal_positions.add(rp)
+                if hasattr(eng, "learned_receptacle_positions"):
+                    eng.learned_receptacle_positions.add(rp)
+            for act in aff_know.get("interaction_actions", []):
+                eng.symbolic_theory.induce_interaction_action(act)
 
     def decide(self, available_actions: list[DriverAction], source_id: str = "") -> DriverAction:
         game_act = self.agent.choose_action(self.history, self.last_frame)
@@ -498,7 +578,9 @@ def run_all_25_games(
         total_game_steps_all = 0
 
         # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-        agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
+        agent = MyAgent(
+            game_id=gid, disable_archetypes=disable_archetypes, instructions=instructions
+        )
         cognitive_engine = CognitiveAgentAdapter(agent)
 
         for attempt in range(retries + 1):

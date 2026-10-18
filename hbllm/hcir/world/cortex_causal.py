@@ -48,6 +48,17 @@ class SpelkePhysicalAxiom(StrEnum):
     DIRECTIONAL_INERTIA = "directional_inertia"
 
 
+class AffordanceType(StrEnum):
+    """Categorical object and area affordance roles in neuro-symbolic world theory."""
+
+    CAN_PICKUP = "can_pickup"
+    CAN_CARRY = "can_carry"
+    RECEPTACLE = "receptacle"
+    SOLID_BARRIER = "solid_barrier"
+    WALKABLE = "walkable"
+    GOAL = "goal"
+
+
 @dataclass
 class ActionAffordance:
     """Declared or empirically discovered motor affordance for an embodied action.
@@ -99,6 +110,10 @@ class HCIRSymbolicWorldTheory:
     focus_switch_actions: set[Any] = field(default_factory=set)
     index_selector_actions: set[Any] = field(default_factory=set)
     value_mutator_actions: set[Any] = field(default_factory=set)
+    interaction_actions: set[Any] = field(default_factory=set)
+    primary_interaction_action: Any | None = None
+    action_cycle_periods: dict[Any, int] = field(default_factory=dict)
+    mutator_state_history: dict[Any, list[int]] = field(default_factory=dict)
     active_manipulandum_id: str | None = None
     last_effector_target_coord: tuple[int, int] | None = None
     last_effector_target_entity_id: str | None = None
@@ -109,6 +124,51 @@ class HCIRSymbolicWorldTheory:
 
     # Elizabeth Spelke's Core Knowledge physical axioms
     spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
+
+    def has_affordance(
+        self,
+        entity_or_feature: SpatialEntity | int,
+        affordance: AffordanceType | str,
+    ) -> bool:
+        """Query whether an entity or feature ID affords a specific functional property."""
+        aff = str(affordance).lower()
+        if "can_pickup" in aff or "cargo" in aff or "portable" in aff:
+            return self.is_cargo(entity_or_feature)
+        elif "receptacle" in aff or "drop_zone" in aff or "container" in aff:
+            return self.is_receptacle(entity_or_feature)
+        elif "barrier" in aff or "solid" in aff:
+            feat = (
+                entity_or_feature
+                if isinstance(entity_or_feature, int)
+                else entity_or_feature.feature_id
+            )
+            return self.is_barrier(feat)
+        elif "walkable" in aff:
+            feat = (
+                entity_or_feature
+                if isinstance(entity_or_feature, int)
+                else entity_or_feature.feature_id
+            )
+            return self.is_walkable(feat)
+        elif "goal" in aff:
+            return self.is_goal(entity_or_feature)
+        return False
+
+    def induce_interaction_action(self, action: Any) -> None:
+        """Induce universal empirical interaction / state-transformation affordance."""
+        self.interaction_actions.add(action)
+        self.undo_actions.discard(action)
+        self.primary_interaction_action = action
+        pred = CausalPredicate(
+            variable="action_role",
+            operator="==",
+            value="interaction",
+            target_entity=str(action),
+        )
+        self.register_predicate(pred)
+        logger.info(
+            "HCIRSymbolicWorldTheory: Induced Empirical Interaction Affordance: Action %s", action
+        )
 
     def is_goal(self, entity: SpatialEntity | int) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
@@ -208,7 +268,7 @@ class HCIRSymbolicWorldTheory:
 
     def induce_goal(self, feature_id: int) -> None:
         """Induce universal goal predicate with minimum description length."""
-        if feature_id == 0:
+        if feature_id == 0 or feature_id in self.cargo_features:
             return
         self.barrier_features.discard(feature_id)
         if feature_id not in self.goal_features:
@@ -221,6 +281,8 @@ class HCIRSymbolicWorldTheory:
     def induce_barrier(self, feature_id: int) -> None:
         """Induce universal barrier predicate (enforcing HCIR Attractor Invariant)."""
         if feature_id in self.goal_features or feature_id in self.candidate_goal_features:
+            return
+        if feature_id in self.cargo_features:
             return
         if feature_id in self.walkable_features:
             return
@@ -244,7 +306,11 @@ class HCIRSymbolicWorldTheory:
         """Induce pushable cargo predicate."""
         if feature_id in self.barrier_features:
             return
+        if feature_id in self.receptacle_features or feature_id in self.goal_features:
+            return
         self.walkable_features.discard(feature_id)
+        self.goal_features.discard(feature_id)
+        self.candidate_goal_features.discard(feature_id)
         if feature_id not in self.cargo_features:
             self.cargo_features.add(feature_id)
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
@@ -253,6 +319,8 @@ class HCIRSymbolicWorldTheory:
 
     def induce_depletion_goal(self, feature_id: int) -> None:
         """Induce a global board depletion goal (clear board of this feature)."""
+        if feature_id in self.cargo_features:
+            return
         self.telic_goal_type = "deplete"
         self.telic_target_feature = feature_id
         self.induce_goal(feature_id)
@@ -262,6 +330,8 @@ class HCIRSymbolicWorldTheory:
 
     def induce_undo_action(self, action: Any) -> None:
         """Induce universal empirical state-rollback / undo affordance."""
+        if action in self.interaction_actions:
+            return
         if action not in self.undo_actions:
             self.undo_actions.add(action)
             pred = CausalPredicate(
@@ -304,6 +374,41 @@ class HCIRSymbolicWorldTheory:
             logger.info(
                 "HCIRSymbolicWorldTheory: Induced Empirical Value Mutator: Action %s", action
             )
+
+    def record_state_mutation(
+        self,
+        action: Any,
+        state_sig: int,
+        prior_state_sig: int | None = None,
+    ) -> int | None:
+        """Record observed state signature under an empirical value-mutator action.
+
+        Dynamically learns the recurrence period k of parameter/dial spaces (s_{t+k} = s_t)
+        via Pearl's do(a) causal credit assignment, replacing magic dial limits.
+        """
+        history = self.mutator_state_history.setdefault(action, [])
+        if not history and prior_state_sig is not None:
+            history.append(prior_state_sig)
+
+        history.append(state_sig)
+
+        # Check if state_sig was seen before in history (s_{t+k} = s_t)
+        if len(history) > 1 and state_sig in history[:-1]:
+            prev_idx = history[:-1].index(state_sig)
+            k = len(history) - 1 - prev_idx
+            if k > 0:
+                self.action_cycle_periods[action] = k
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Learned Dynamic Recurrence Period k=%d for action %s",
+                    k,
+                    action,
+                )
+                return k
+        return self.action_cycle_periods.get(action)
+
+    def get_cycle_period(self, action: Any, default: int = 4) -> int:
+        """Return the dynamically learned recurrence period k for action, or fallback."""
+        return self.action_cycle_periods.get(action, default)
 
     def register_predicate(self, predicate: CausalPredicate) -> None:
         """Register a generic or learned causal predicate into the symbolic world theory."""
@@ -411,6 +516,7 @@ class HCIRSymbolicWorldTheory:
         agent_pos: tuple[int, int],
         target_pos: tuple[int, int],
         adjacency: Literal["4-way", "8-way"] | bool = "4-way",
+        stride: int = 1,
     ) -> bool:
         """Evaluate Spelke mechanical contact causality.
 
@@ -418,9 +524,10 @@ class HCIRSymbolicWorldTheory:
         """
         dr = abs(agent_pos[0] - target_pos[0])
         dc = abs(agent_pos[1] - target_pos[1])
+        s = max(1, stride)
         if adjacency == "8-way":
-            return max(dr, dc) == 1
-        return (dr + dc) == 1
+            return max(dr, dc) <= s and max(dr, dc) > 0
+        return (dr + dc) <= s and (dr + dc) > 0
 
     def evaluates_spelke_cohesion(
         self,
@@ -578,6 +685,23 @@ class HCIRSymbolicWorldTheory:
                     node_data=node.model_dump(),
                 )
             )
+
+        for act, period in self.action_cycle_periods.items():
+            node_id = f"causal_recurrence_action_{act}"
+            node = ConceptNode(
+                id=node_id,
+                label=f"recurrence_{act}_{period}",
+                definition=f"Learned dynamic recurrence period k={period} for action {act}",
+                domain="causal_dynamics",
+                properties={"action": act, "period": period},
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_dump(),
+                )
+            )
         return ops
 
     def clear(self) -> None:
@@ -594,6 +718,8 @@ class HCIRSymbolicWorldTheory:
         self.cargo_features.clear()
         self.receptacle_features.clear()
         self.spelke_axioms.clear()
+        self.action_cycle_periods.clear()
+        self.mutator_state_history.clear()
         self.telic_goal_type = ""
         self.telic_target_feature = None
 

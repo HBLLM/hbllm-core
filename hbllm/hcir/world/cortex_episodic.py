@@ -553,6 +553,17 @@ class HippocampalEpisodicCortex:
             engine.avatar_size = 0
             engine.prior_avatar_feature = None
         else:
+            # Validate avatar features: void 0 and background feature must never be retained as avatar
+            if (
+                engine.avatar_features == {0}
+                or (engine.bg_feature is not None and engine.bg_feature in engine.avatar_features)
+                or engine.avatar_feature == 0
+                or (engine.bg_feature is not None and engine.avatar_feature == engine.bg_feature)
+            ):
+                engine.avatar_features.clear()
+                engine.avatar_feature = None
+                engine.avatar_size = 0
+                engine.prior_avatar_feature = None
             # On same-level retry after death: preserve learned spatial negative affordances,
             # barriers, and quiescent inert coordinates so inert scenery/borders are not re-tested,
             # while decaying entity visit counts so interactive objects can be re-sampled with fresh hypotheses.

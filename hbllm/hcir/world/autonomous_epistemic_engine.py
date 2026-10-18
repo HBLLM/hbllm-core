@@ -26,6 +26,7 @@ from hbllm.hcir.graph import (
     ConstraintNode,
     GoalNode,
     ObservationNode,
+    SkillNode,
 )
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
@@ -261,7 +262,7 @@ class AutonomousEpistemicEngine:
         # Avatar self-model (Motor Grounding)
         self._avatar_feature: int | None = None
         self.avatar_features: set[int] = set()
-        self.avatar_pos: tuple[int, int] | None = None
+        self._avatar_pos: tuple[int, int] | None = None
         self.avatar_size: int = 1
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
@@ -446,10 +447,14 @@ class AutonomousEpistemicEngine:
         self.target_scorers: list[Any] = []
         self.deliberation_policies: list[Any] = []
 
-        # Tiered Cognitive Workspace & Transaction Manager live mirroring
-        self.tiered_workspace: TieredWorkspace | None = None
-        self.transaction_manager: TransactionManager | None = None
-        self.active_task_frame: TaskFrame | None = None
+        # Tiered Cognitive Workspace & Transaction Manager live mirroring (5-Tier Memory Hierarchy)
+        self.tiered_workspace: TieredWorkspace = TieredWorkspace()
+        self.active_task_frame: TaskFrame = self.tiered_workspace.create_task_frame(
+            goal_id="root_goal"
+        )
+        self.transaction_manager: TransactionManager = TransactionManager(
+            workspace=self.active_task_frame.workspace
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)
@@ -1126,12 +1131,25 @@ class AutonomousEpistemicEngine:
 
             # 3. Restore Learned Spatial Goals
             elif nid.startswith("learned_goal_") or ntype == "goal":
+                node_level = props.get("level")
+                if node_level is not None and node_level != self.current_level:
+                    continue
                 pos = props.get("position")
                 if pos and len(pos) == 2:
                     gp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_goal_").split("_")
-                    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                    if len(parts) >= 3 and parts[0].startswith("lvl"):
+                        lvl_num = parts[0].removeprefix("lvl")
+                        if lvl_num.isdigit() and int(lvl_num) != self.current_level:
+                            continue
+                        if parts[1].isdigit() and parts[2].isdigit():
+                            gp = (int(parts[1]), int(parts[2]))
+                        else:
+                            gp = None
+                    elif len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                        if self.current_level > 0:
+                            continue
                         gp = (int(parts[0]), int(parts[1]))
                     else:
                         gp = None
@@ -1141,12 +1159,25 @@ class AutonomousEpistemicEngine:
 
             # 4. Restore Learned Barriers
             elif nid.startswith("learned_barrier_") or ntype == "constraint":
+                node_level = props.get("level")
+                if node_level is not None and node_level != self.current_level:
+                    continue
                 pos = props.get("position")
                 if pos and len(pos) == 2:
                     bp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_barrier_").split("_")
-                    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                    if len(parts) >= 3 and parts[0].startswith("lvl"):
+                        lvl_num = parts[0].removeprefix("lvl")
+                        if lvl_num.isdigit() and int(lvl_num) != self.current_level:
+                            continue
+                        if parts[1].isdigit() and parts[2].isdigit():
+                            bp = (int(parts[1]), int(parts[2]))
+                        else:
+                            bp = None
+                    elif len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+                        if self.current_level > 0:
+                            continue
                         bp = (int(parts[0]), int(parts[1]))
                     else:
                         bp = None
@@ -1376,11 +1407,11 @@ class AutonomousEpistemicEngine:
                 if a1 != a2:
                     if d1[0] == 0 and d2[0] == 0 and d1[1] * d2[1] < 0:
                         max_stride = max(abs(d1[1]), abs(d2[1]))
-                        if abs(d1[1]) < max_stride and max_stride % abs(d1[1]) == 0:
+                        if abs(d1[1]) < max_stride and max_stride <= 16:
                             deltas[a1] = (0, -max_stride if d1[1] < 0 else max_stride)
                     elif d1[1] == 0 and d2[1] == 0 and d1[0] * d2[0] < 0:
                         max_stride = max(abs(d1[0]), abs(d2[0]))
-                        if abs(d1[0]) < max_stride and max_stride % abs(d1[0]) == 0:
+                        if abs(d1[0]) < max_stride and max_stride <= 16:
                             deltas[a1] = (-max_stride if d1[0] < 0 else max_stride, 0)
 
         # Isotropic spatial lattice stride generalization:
@@ -1398,10 +1429,10 @@ class AutonomousEpistemicEngine:
                     dyn = self.action_dynamics.get(act)
                     if dyn is None or getattr(dyn, "probes_tested", 0) == 0:
                         dr, dc = deltas[act]
-                        if abs(dr) == 1 and dc == 0:
-                            deltas[act] = (dr * lattice_quantum, 0)
-                        elif abs(dc) == 1 and dr == 0:
-                            deltas[act] = (0, dc * lattice_quantum)
+                        if dr != 0 and dc == 0:
+                            deltas[act] = (int(np.sign(dr)) * lattice_quantum, 0)
+                        elif dc != 0 and dr == 0:
+                            deltas[act] = (0, int(np.sign(dc)) * lattice_quantum)
 
         _discrete_grid_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
         for act, d in _discrete_grid_convention.items():
@@ -1425,6 +1456,46 @@ class AutonomousEpistemicEngine:
                 delta_c=d[1],
                 probes_tested=1,
             )
+
+    @property
+    def lattice_stride(self) -> int:
+        """Dominant spatial lattice stride (quantum) inferred from motor displacement dynamics."""
+        strides = [
+            max(abs(dyn.delta_r), abs(dyn.delta_c))
+            for dyn in self.action_dynamics.values()
+            if dyn.is_displacement_action() and (abs(dyn.delta_r) > 1 or abs(dyn.delta_c) > 1)
+        ]
+        if strides:
+            return max(strides)
+        if hasattr(self, "action_deltas") and self.action_deltas:
+            delta_strides = [
+                max(abs(dr), abs(dc))
+                for dr, dc in self.action_deltas.values()
+                if abs(dr) > 1 or abs(dc) > 1
+            ]
+            if delta_strides:
+                return max(delta_strides)
+        return 1
+
+    def snap_to_lattice(self, pos: tuple[int, int] | None) -> tuple[int, int] | None:
+        """Quantize continuous or pixel centroid coordinate to canonical discrete lattice cell center."""
+        if pos is None:
+            return None
+        stride = self.lattice_stride
+        if stride <= 1:
+            return pos
+        off_r, off_c = 0, 0
+        if self.learned_goal_positions:
+            any_g = next(iter(self.learned_goal_positions))
+            off_r = (any_g[0] - (stride // 2)) % stride
+            off_c = (any_g[1] - (stride // 2)) % stride
+        elif getattr(self, "learned_receptacle_positions", None):
+            any_r = next(iter(self.learned_receptacle_positions))
+            off_r = (any_r[0] - (stride // 2)) % stride
+            off_c = (any_r[1] - (stride // 2)) % stride
+        cell_r = ((pos[0] - off_r) // stride) * stride + off_r
+        cell_c = ((pos[1] - off_c) // stride) * stride + off_c
+        return (cell_r + stride // 2, cell_c + stride // 2)
 
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
@@ -1475,6 +1546,17 @@ class AutonomousEpistemicEngine:
                 self.avatar_features = {val}
         else:
             self.avatar_features.clear()
+
+    @property
+    def avatar_pos(self) -> tuple[int, int] | None:
+        return self._avatar_pos
+
+    @avatar_pos.setter
+    def avatar_pos(self, val: tuple[int, int] | None) -> None:
+        if val is not None and self.lattice_stride >= 2:
+            self._avatar_pos = self.snap_to_lattice(val) or val
+        else:
+            self._avatar_pos = val
 
     @property
     def current_actor_pos(self) -> tuple[int, int] | None:
@@ -1613,6 +1695,61 @@ class AutonomousEpistemicEngine:
             level=level,
         )
         self.step_counter = 0
+
+        # Automatic 5-Tier Workspace TaskFrame Management & Procedural Promotion
+        if self.tiered_workspace is not None:
+            if is_new_level:
+                # 1. Promote synthesized procedural skills to persistent tier
+                for s_name, skill in list(self.working_memory.procedural_library.items()):
+                    s_node_id = f"procedural_skill_{s_name}"
+                    if not self.tiered_workspace.persistent.get_node(s_node_id):
+                        s_node = SkillNode(
+                            id=s_node_id,
+                            name=s_name,
+                            description=getattr(skill, "description", f"Procedural skill {s_name}"),
+                            properties={
+                                "schema_name": s_name,
+                                "skill_name": getattr(skill, "skill_name", s_name),
+                            },
+                        )
+                        self.tiered_workspace.persistent.upsert_node(
+                            s_node, author="skill_promotion:working->persistent"
+                        )
+                # 2. Close completed task frame and cycle to new level task frame
+                if self.active_task_frame is not None:
+                    self.tiered_workspace.close_task_frame(
+                        self.active_task_frame.frame_id, reason="completed"
+                    )
+                new_goal = f"level_{level if level is not None else self._current_level}"
+                self.active_task_frame = self.tiered_workspace.create_task_frame(goal_id=new_goal)
+                self.transaction_manager = TransactionManager(
+                    workspace=self.active_task_frame.workspace
+                )
+                # 3. Hydrate persistent knowledge into new task frame
+                self.hydrate_from_persistent_tier()
+            elif self.active_task_frame is not None:
+                # Episode death/retry: close failed task frame and open retry frame
+                self.tiered_workspace.close_task_frame(
+                    self.active_task_frame.frame_id, reason="abandoned"
+                )
+                retry_goal = f"level_{level if level is not None else self._current_level}_retry"
+                self.active_task_frame = self.tiered_workspace.create_task_frame(goal_id=retry_goal)
+                self.transaction_manager = TransactionManager(
+                    workspace=self.active_task_frame.workspace
+                )
+
+        # Sanitize avatar features against empty void/0 or background feature
+        if (
+            self.avatar_features == {0}
+            or (self.bg_feature is not None and self.bg_feature in self.avatar_features)
+            or self.avatar_feature == 0
+            or (self.bg_feature is not None and self.avatar_feature == self.bg_feature)
+        ):
+            self.avatar_features.clear()
+            self.avatar_feature = None
+            self.avatar_size = 0
+            self.prior_avatar_feature = None
+
         if is_new_level:
             self.environmental_step_limit = None
             self.budget_governor.reset(max_budget=self.exploration_budget)
@@ -2053,6 +2190,8 @@ class AutonomousEpistemicEngine:
                 best_size = area
 
         if best_pos is not None:
+            if self.lattice_stride >= 2:
+                best_pos = self.snap_to_lattice(best_pos) or best_pos
             self.avatar_pos = best_pos
             if not is_tracking_active or preferred_pos is not None:
                 self.avatar_size = best_size
@@ -2130,7 +2269,8 @@ class AutonomousEpistemicEngine:
                 curr_by_feat.setdefault(t.feature_id, set()).add(t.pos)
             for feat, cur_positions in curr_by_feat.items():
                 if (
-                    feat == bg
+                    feat == 0
+                    or feat == bg
                     or feat == self.bg_feature
                     or feat in effective_av_feats
                     or feat in self.mobile_threat_features
@@ -2219,13 +2359,17 @@ class AutonomousEpistemicEngine:
         """Record learned barrier locally and propose atomic state transaction."""
         if barrier_pos not in self.learned_barriers:
             self.learned_barriers.add(barrier_pos)
-            bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"
+            bid = f"learned_barrier_lvl{self.current_level}_{barrier_pos[0]}_{barrier_pos[1]}"
             bnode = ConstraintNode(
                 id=bid,
-                name=f"barrier_{barrier_pos[0]}_{barrier_pos[1]}",
-                description=f"Learned impenetrable barrier at {barrier_pos}",
+                name=f"barrier_lvl{self.current_level}_{barrier_pos[0]}_{barrier_pos[1]}",
+                description=f"Learned impenetrable barrier at {barrier_pos} on level {self.current_level}",
                 target=f"position_{barrier_pos[0]}_{barrier_pos[1]}",
-                properties={"position": list(barrier_pos), "role": "BARRIER"},
+                properties={
+                    "position": list(barrier_pos),
+                    "role": "BARRIER",
+                    "level": self.current_level,
+                },
             )
             self.pending_transactions.append(
                 TransactionOperation(
@@ -2242,12 +2386,16 @@ class AutonomousEpistemicEngine:
         ).add(goal_pos)
         if goal_pos not in self.learned_goal_positions:
             self.learned_goal_positions.add(goal_pos)
-            gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+            gid = f"learned_goal_lvl{self.current_level}_{goal_pos[0]}_{goal_pos[1]}"
 
             gnode = GoalNode(
                 id=gid,
-                description=f"Learned goal location at {goal_pos}",
-                properties={"position": list(goal_pos), "role": "GOAL"},
+                description=f"Learned goal location at {goal_pos} on level {self.current_level}",
+                properties={
+                    "position": list(goal_pos),
+                    "role": "GOAL",
+                    "level": self.current_level,
+                },
             )
             self.pending_transactions.append(
                 TransactionOperation(

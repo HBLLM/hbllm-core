@@ -278,6 +278,22 @@ class PrefrontalWorkingMemory:
         self.target_constellations: dict[int, tuple[int, int]] = {}
         self.structural_goals: list[dict[str, Any]] = []
 
+        self._initialize_core_declarative_skills()
+
+    def _initialize_core_declarative_skills(self) -> None:
+        """Register foundational cognitive deliberation skills in procedural library."""
+        from hbllm.hcir.skills.declarative import (
+            DialCyclingSkill,
+            DiscreteGroundingSkill,
+            FocusSwitchSkill,
+            SpatialEffectorSkill,
+        )
+
+        self.register_procedural_skill("focus_switch", FocusSwitchSkill())
+        self.register_procedural_skill("dial_cycling", DialCyclingSkill())
+        self.register_procedural_skill("spatial_effector", SpatialEffectorSkill())
+        self.register_procedural_skill("discrete_grounding", DiscreteGroundingSkill())
+
     def has_salience_shift(self, engine: Any) -> bool:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise
         warrant an executive phase shift back to forward mental simulation.
@@ -436,6 +452,7 @@ class PrefrontalWorkingMemory:
             self.target_constellations.clear()
             self.tested_action_positions.clear()
             self.tested_actions.clear()
+            self._initialize_core_declarative_skills()
         else:
             self.habenular_ior.reset_episode(
                 retain_long_term=True,
@@ -721,6 +738,9 @@ class PrefrontalWorkingMemory:
     ) -> tuple[str, DeclarativeNeuroSymbolicSkill] | None:
         """Match stored procedural skills against available actions and context signature."""
         for name, skill in self.procedural_library.items():
+            # Planner only matches hierarchical skills with explicit subgoal programs
+            if getattr(skill, "program", None) is None:
+                continue
             sig = getattr(skill, "signature", None)
             if sig is None:
                 return name, skill

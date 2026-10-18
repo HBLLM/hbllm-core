@@ -246,6 +246,29 @@ class HabenularEpisodicIOR:
         self.recent_actions.clear()
         return record
 
+    def record_ineffectual_action(
+        self,
+        avatar_pos: tuple[int, int] | None,
+        action: Any,
+        action_data: dict[str, Any] | None = None,
+        streak: int = 1,
+    ) -> None:
+        """Habituation & action inhibition for ineffectual actions (e.g. wall bumps, zero-diff probes).
+
+        Applies exponential backoff to action inhibition duration and increases repulsion penalty.
+        """
+        act_token = self._make_action_token(action, action_data)
+        key = (avatar_pos, act_token)
+        duration = min(64, 4 * (2 ** min(max(0, streak - 1), 4)))
+        self.active_inhibitions[key] = duration
+        self.repulsion_table[key] += self.base_penalty * 0.3 * max(1, streak)
+        if avatar_pos is not None:
+            self.active_inhibitions[(avatar_pos, action)] = duration
+            self.repulsion_table[(avatar_pos, action)] += self.base_penalty * 0.3 * max(1, streak)
+        else:
+            self.active_inhibitions[(None, act_token)] = duration
+            self.repulsion_table[(None, act_token)] += self.base_penalty * 0.3 * max(1, streak)
+
     def is_action_inhibited(
         self,
         avatar_pos: tuple[int, int] | None,

@@ -77,8 +77,7 @@ class VisuospatialWorkingMemory:
         self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
         self.level_lethal_positions: dict[int, set[tuple[int, int]]] = {}
         self.level_learned_goals: dict[int, set[tuple[int, int]]] = {}
-        self.learned_goal_positions: set[tuple[int, int]] = set()
-        self.learned_receptacle_positions: set[tuple[int, int]] = set()
+        self.level_learned_receptacles: dict[int, set[tuple[int, int]]] = {}
 
     @property
     def learned_barriers(self) -> set[tuple[int, int]]:
@@ -88,6 +87,24 @@ class VisuospatialWorkingMemory:
     @learned_barriers.setter
     def learned_barriers(self, val: set[tuple[int, int]]) -> None:
         self.level_learned_barriers[self.current_level] = val
+
+    @property
+    def learned_goal_positions(self) -> set[tuple[int, int]]:
+        """Goal coordinates discovered on the currently active level."""
+        return self.level_learned_goals.setdefault(self.current_level, set())
+
+    @learned_goal_positions.setter
+    def learned_goal_positions(self, val: set[tuple[int, int]]) -> None:
+        self.level_learned_goals[self.current_level] = val
+
+    @property
+    def learned_receptacle_positions(self) -> set[tuple[int, int]]:
+        """Receptacle coordinates discovered on the currently active level."""
+        return self.level_learned_receptacles.setdefault(self.current_level, set())
+
+    @learned_receptacle_positions.setter
+    def learned_receptacle_positions(self, val: set[tuple[int, int]]) -> None:
+        self.level_learned_receptacles[self.current_level] = val
 
     def reset_episode(self, retain_long_term: bool = False, is_new_level: bool = False) -> None:
         """Reset transient slot bindings while optionally preserving task-level stencil theories."""
@@ -106,8 +123,7 @@ class VisuospatialWorkingMemory:
             self.level_learned_barriers.clear()
             self.level_lethal_positions.clear()
             self.level_learned_goals.clear()
-            self.learned_goal_positions.clear()
-            self.learned_receptacle_positions.clear()
+            self.level_learned_receptacles.clear()
 
     def record_probe(
         self,

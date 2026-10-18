@@ -301,6 +301,10 @@ class SpatialRoleClassifier:
             or (area > H * W * 0.35)
         )
 
+        is_edge_hud = (
+            min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
+        ) or (min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4))
+
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
         is_theory_cargo = (
             symbolic_theory.is_cargo(
@@ -330,7 +334,7 @@ class SpatialRoleClassifier:
             else False
         )
 
-        if is_border or is_theory_barrier:
+        if is_border or is_edge_hud or is_theory_barrier:
             return EntityRole.OBSTACLE
         elif val in av_set:
             return EntityRole.AGENT

@@ -151,18 +151,12 @@ class ActionDynamicsModel:
                 if 0 < abs(target_c) < abs(self.delta_c) and self.delta_c != 0:
                     self.delta_c = target_c
                 # If an action previously observed a partial/truncated step (e.g. 3) and now demonstrates
-                # a larger integer multiple stride along the same axis (e.g. 6), adopt the unconstrained stride.
-                if (
-                    abs(self.delta_r) > 0
-                    and abs(target_r) > abs(self.delta_r)
-                    and target_r % self.delta_r == 0
-                ):
+                # a larger integer stride along the same axis (e.g. 4 or 6), adopt the unconstrained stride.
+                same_dir_r = self.delta_r * target_r > 0
+                same_dir_c = self.delta_c * target_c > 0
+                if abs(self.delta_r) > 0 and abs(target_r) > abs(self.delta_r) and same_dir_r:
                     self.delta_r = target_r
-                if (
-                    abs(self.delta_c) > 0
-                    and abs(target_c) > abs(self.delta_c)
-                    and target_c % self.delta_c == 0
-                ):
+                if abs(self.delta_c) > 0 and abs(target_c) > abs(self.delta_c) and same_dir_c:
                     self.delta_c = target_c
 
                 # Multimodal contradiction detection:
@@ -178,7 +172,14 @@ class ActionDynamicsModel:
                     and target_c != 0
                     and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
                 )
-                if not is_quantum_multiple and self.confidence >= 0.7 and self.probes_tested >= 2:
+                is_same_axis_direction = (same_dir_r and target_c == 0 and self.delta_c == 0) or (
+                    same_dir_c and target_r == 0 and self.delta_r == 0
+                )
+                if (
+                    not (is_quantum_multiple or is_same_axis_direction)
+                    and self.confidence >= 0.7
+                    and self.probes_tested >= 2
+                ):
                     dist_dev = abs(target_r - self.delta_r) + abs(target_c - self.delta_c)
                     if dist_dev >= 1:
                         cond_key = f"cond_{target_r}_{target_c}"

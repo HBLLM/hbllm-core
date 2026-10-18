@@ -92,17 +92,22 @@ class EpistemicFeedbackAssimilator:
         if stride <= 1 or not hasattr(engine, "action_dynamics"):
             return
         for other_act, other_dyn in engine.action_dynamics.items():
-            if getattr(other_dyn, "probes_tested", 0) == 0:
-                if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
-                    other_dyn.delta_r *= stride
+            probes = getattr(other_dyn, "probes_tested", 0)
+            if probes == 0 or (
+                probes <= 2 and max(abs(other_dyn.delta_r), abs(other_dyn.delta_c)) < stride
+            ):
+                if other_dyn.delta_r != 0 and other_dyn.delta_c == 0:
+                    sign = 1 if other_dyn.delta_r > 0 else -1
+                    other_dyn.delta_r = sign * stride
                     other_dyn.displacement = (float(other_dyn.delta_r), 0.0)
                     if (
                         hasattr(engine, "action_affordances")
                         and other_act in engine.action_affordances
                     ):
                         engine.action_affordances[other_act].delta = (other_dyn.delta_r, 0)
-                elif abs(other_dyn.delta_c) == 1 and other_dyn.delta_r == 0:
-                    other_dyn.delta_c *= stride
+                elif other_dyn.delta_c != 0 and other_dyn.delta_r == 0:
+                    sign = 1 if other_dyn.delta_c > 0 else -1
+                    other_dyn.delta_c = sign * stride
                     other_dyn.displacement = (0.0, float(other_dyn.delta_c))
                     if (
                         hasattr(engine, "action_affordances")
@@ -151,12 +156,19 @@ class EpistemicFeedbackAssimilator:
             c_gap = max(0, b1[2] - b2[3] - 1, b2[2] - b1[3] - 1)
             return r_gap <= 1 and c_gap <= 1
 
-        comp_pairs: list[tuple[SpatialEntity, SpatialEntity]] = [pairs[0]]
-        for pe, ce in pairs[1:]:
+        bg_val = engine.bg_feature or 0
+        valid_initial_pairs = [(pe, ce) for pe, ce in pairs if ce.feature_id not in (0, bg_val)]
+        if not valid_initial_pairs:
+            return
+
+        comp_pairs: list[tuple[SpatialEntity, SpatialEntity]] = [valid_initial_pairs[0]]
+        for pe, ce in valid_initial_pairs[1:]:
             if any(_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
                 comp_pairs.append((pe, ce))
 
-        new_av_feats = {ce.feature_id for _, ce in comp_pairs}
+        new_av_feats = {ce.feature_id for _, ce in comp_pairs if ce.feature_id not in (0, bg_val)}
+        if not new_av_feats:
+            return
         if new_av_feats != engine.avatar_features:
             engine.mental_plan.clear()
         engine.avatar_features = new_av_feats
@@ -325,8 +337,11 @@ class EpistemicFeedbackAssimilator:
             if 0 <= tr_t < H and 0 <= tc_t < W:
                 clicked_feat = int(curr_grid[tr_t, tc_t])
                 bg_val = engine.bg_feature if engine.bg_feature is not None else 0
+                ambient_bg = {0, bg_val}
+                if engine.bg_feature is not None:
+                    ambient_bg.add(engine.bg_feature)
                 if (
-                    clicked_feat != bg_val
+                    clicked_feat not in ambient_bg
                     and not engine.symbolic_theory.is_barrier(clicked_feat)
                     and clicked_feat not in engine.hazard_tracker.known_lethal_features
                 ):
@@ -352,11 +367,19 @@ class EpistemicFeedbackAssimilator:
         # Empirical State-Reversion / Undo Action Discovery:
         # If executing this action restored the grid to the previous-previous state,
         # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
+        is_interaction_act = (
+            action in getattr(engine.symbolic_theory, "interaction_actions", set())
+            or action in getattr(engine, "interaction_actions", set())
+            or (aff is not None and getattr(aff, "is_interactive", False))
+            or (aff is not None and getattr(aff, "is_manipulation", False))
+            or engine.working_memory.body_schema.has_manipulandum()
+        )
         if (
             action is not None
             and hasattr(engine, "grid_history")
             and len(engine.grid_history) >= 2
             and not is_effector_action
+            and not is_interaction_act
             and not engine.is_displacement_action(action)
         ):
             if np.array_equal(curr_grid, engine.grid_history[-2]):
@@ -369,6 +392,12 @@ class EpistemicFeedbackAssimilator:
                     "AutonomousEpistemicEngine: Grounded empirical UNDO / STATE_REVERSION affordance for action %s",
                     action,
                 )
+        elif is_interaction_act and action is not None:
+            engine.undo_actions.discard(action)
+            if hasattr(engine.symbolic_theory, "undo_actions"):
+                engine.symbolic_theory.undo_actions.discard(action)
+            if action in engine.inhibited_actions and engine.inhibited_actions[action] >= 999999:
+                engine.inhibited_actions.pop(action, None)
 
         if diff.changed_pixel_count == 0:
             engine.consecutive_quiescent_actions += 1
@@ -493,6 +522,7 @@ class EpistemicFeedbackAssimilator:
 
                         if can_relocate:
                             engine.avatar_pos = target_coord
+                            ambient_bg = {0, engine.bg_feature or 0}
                             clicked_feats = {
                                 int(f)
                                 for f in np.unique(
@@ -501,7 +531,7 @@ class EpistemicFeedbackAssimilator:
                                         max(0, tc - 2) : min(W, tc + 3),
                                     ]
                                 )
-                                if int(f) != engine.bg_feature
+                                if int(f) not in ambient_bg
                             }
                             if clicked_feats and not known_avs:
                                 engine.avatar_features = clicked_feats
@@ -649,8 +679,8 @@ class EpistemicFeedbackAssimilator:
                     dr = int(round(ce.centroid[0] - pe.centroid[0]))
                     dc = int(round(ce.centroid[1] - pe.centroid[1]))
                     dist = abs(dr) + abs(dc)
-                    is_valid_displacement = (0 < dist < max(H, W) and (dr == 0 or dc == 0)) or (
-                        0 < dist <= 8 and abs(dr) <= 4 and abs(dc) <= 4
+                    is_valid_displacement = 0 < dist <= 8 and (
+                        dr == 0 or dc == 0 or (abs(dr) <= 4 and abs(dc) <= 4)
                     )
                     if is_valid_displacement:
                         if dist < min_dist:
@@ -677,13 +707,14 @@ class EpistemicFeedbackAssimilator:
                     dr_m, dc_m = delta_m
                     engine.working_memory.body_schema.update_manipulandum_pos(dr_m, dc_m)
                     manip_moved = True
-                    if engine.avatar_pos is not None:
-                        engine.avatar_pos = (
-                            engine.avatar_pos[0] + dr_m,
-                            engine.avatar_pos[1] + dc_m,
-                        )
-                    else:
-                        engine.avatar_pos = manip.pos
+                    if getattr(manip, "role", "") != "cargo":
+                        if engine.avatar_pos is not None:
+                            engine.avatar_pos = (
+                                engine.avatar_pos[0] + dr_m,
+                                engine.avatar_pos[1] + dc_m,
+                            )
+                        else:
+                            engine.avatar_pos = manip.pos
                     if action is not None:
                         prev_tested = getattr(
                             engine.action_dynamics.get(action), "probes_tested", 0
@@ -709,7 +740,11 @@ class EpistemicFeedbackAssimilator:
                     break
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
-        if action is not None and not is_effector_action:
+        if (
+            action is not None
+            and not is_effector_action
+            and not engine.is_displacement_action(action)
+        ):
             if 1 <= len(moved_entities) <= 2 and diff.changed_pixel_count <= 48:
                 deltas = {m[2] for m in moved_entities}
                 if len(deltas) == 1:
@@ -797,6 +832,27 @@ class EpistemicFeedbackAssimilator:
                     engine.value_mutator_actions.add(action)
                     if action in engine.action_affordances:
                         engine.action_affordances[action].is_value_mutator = True
+                    if engine.prev_grid is not None:
+                        diff_mask = engine.prev_grid != curr_grid
+                        if np.any(diff_mask):
+                            curr_sig = hash(curr_grid[diff_mask].tobytes())
+                            prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
+                            engine.symbolic_theory.record_state_mutation(
+                                action, curr_sig, prior_state_sig=prev_sig
+                            )
+
+            if (
+                action is not None
+                and action in engine.value_mutator_actions
+                and engine.prev_grid is not None
+            ):
+                diff_mask = engine.prev_grid != curr_grid
+                if np.any(diff_mask):
+                    curr_sig = hash(curr_grid[diff_mask].tobytes())
+                    prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
+                    engine.symbolic_theory.record_state_mutation(
+                        action, curr_sig, prior_state_sig=prev_sig
+                    )
 
         # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
         if engine.deformation_tracker is not None:
@@ -831,12 +887,29 @@ class EpistemicFeedbackAssimilator:
         # Only evaluate bilateral pairing if entities belong to controllable agent features,
         # never autonomous mobile threats, lethal hazards, or background void.
         if engine.bilateral_state is None and len(moved_entities) >= 2:
+            cargos_known = engine.symbolic_theory.cargo_features | getattr(
+                engine, "learned_cargo_features", set()
+            )
+            recs_known = engine.symbolic_theory.receptacle_features
+            active_m_id = (
+                engine.working_memory.body_schema.active_manipulandum.entity_id
+                if engine.working_memory.body_schema.has_manipulandum()
+                and engine.working_memory.body_schema.active_manipulandum is not None
+                else None
+            )
             candidate_bilat = [
                 (ce.grid_pos, delta, ce.feature_id)
                 for pe, ce, delta in moved_entities
                 if ce.area <= 64
                 and ce.feature_id not in engine.mobile_threat_features
                 and ce.feature_id not in engine.hazard_tracker.known_lethal_features
+                and ce.feature_id not in cargos_known
+                and ce.feature_id not in recs_known
+                and getattr(ce, "id", getattr(ce, "entity_id", None)) != active_m_id
+                and not engine.symbolic_theory.has_affordance(ce, "can_pickup")
+                and not engine.symbolic_theory.has_affordance(ce, "can_carry")
+                and not engine.symbolic_theory.has_affordance(ce, "cargo")
+                and not engine.symbolic_theory.has_affordance(ce, "receptacle")
                 and ce.feature_id != bg
                 and ce.feature_id != engine.bg_feature
                 and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
@@ -960,7 +1033,8 @@ class EpistemicFeedbackAssimilator:
             bb2 = e2.bounding_box
             r_gap = max(0, bb1[0] - bb2[1] - 1, bb2[0] - bb1[1] - 1)
             c_gap = max(0, bb1[2] - bb2[3] - 1, bb2[2] - bb1[3] - 1)
-            return r_gap <= 1 and c_gap <= 1
+            stride_tol = max(2, getattr(engine, "lattice_stride", 1) or 1)
+            return r_gap <= stride_tol and c_gap <= stride_tol
 
         if (
             not is_win
@@ -971,18 +1045,27 @@ class EpistemicFeedbackAssimilator:
             if moved_entities:
                 delta_groups: dict[tuple[int, int], list[tuple[SpatialEntity, SpatialEntity]]] = {}
                 for pe, ce, delta in moved_entities:
-                    delta_groups.setdefault(delta, []).append((pe, ce))
+                    if ce.feature_id not in (0, bg, engine.bg_feature):
+                        # Locality prior: an embodied avatar cannot teleport across > 8 cells in a single frame
+                        if 0 < max(abs(delta[0]), abs(delta[1])) <= 8:
+                            delta_groups.setdefault(delta, []).append((pe, ce))
 
                 has_retained_dynamics = any(
                     dyn.probes_tested > 0 for dyn in engine.action_dynamics.values()
                 )
 
-                if not has_retained_dynamics:
+                if delta_groups and not has_retained_dynamics:
                     # ── Fresh start (no prior knowledge) ──────────────────────
-                    # No dynamics to cross-reference. Use the original heuristic:
-                    # the largest group of entities sharing the same displacement
-                    # is most likely the avatar (first level, typically no enemies).
-                    best_delta, pairs = max(delta_groups.items(), key=lambda item: len(item[1]))
+                    # Prefer groups with cardinal displacement and sensible locomotion stride (1..4)
+                    def _delta_priority(
+                        item: tuple[tuple[int, int], list[Any]],
+                    ) -> tuple[int, int, int]:
+                        d, pair_list = item
+                        is_cardinal = 1 if (d[0] == 0 or d[1] == 0) else 0
+                        stride_score = 1 if max(abs(d[0]), abs(d[1])) <= 4 else 0
+                        return (len(pair_list), is_cardinal, stride_score)
+
+                    best_delta, pairs = max(delta_groups.items(), key=_delta_priority)
                     EpistemicFeedbackAssimilator._commit_avatar_identity(
                         engine,
                         pairs,
@@ -992,7 +1075,7 @@ class EpistemicFeedbackAssimilator:
                         W,
                         calibrate_dynamics=True,
                     )
-                else:
+                elif delta_groups:
                     # ── Controllability Test (retained dynamics) ───────────────
                     # The human brain identifies its avatar not from a single
                     # observation but from AGENCY: "I pressed up and THIS thing
@@ -1079,6 +1162,146 @@ class EpistemicFeedbackAssimilator:
                             len(engine._avatar_controllability_evidence),
                         )
 
+        # Differential Kinetic Motion Identification (Area MT/V5 Centroid Segregation):
+        # Fallback when connected components fail to extract moving agent (e.g. avatar touches same-color walls)
+        if (
+            not is_win
+            and not is_effector_action
+            and not engine.avatar_features
+            and engine.avatar_feature is None
+            and diff.changed_pixel_count > 0
+            and engine.prev_grid is not None
+            and 1 <= diff.changed_pixel_count <= 64
+        ):
+            bg_val = engine.bg_feature if engine.bg_feature is not None else bg
+            diff_mask = engine.prev_grid != curr_grid
+            diff_coords = np.argwhere(diff_mask)
+            # Universal physical invariant: spatial locomotion over a surface requires
+            # covering and uncovering ambient surface/background cells. If zero background/floor
+            # cells were involved in the difference, the change is entirely an internal
+            # state/value mutation of a foreground object (e.g. Norman dial/parameter), NOT spatial locomotion.
+            prev_diff_colors = set(engine.prev_grid[diff_mask].flatten())
+            curr_diff_colors = set(curr_grid[diff_mask].flatten())
+            ambient_bg = {0, bg_val}
+            if engine.bg_feature is not None:
+                ambient_bg.add(engine.bg_feature)
+            touches_bg = bool((prev_diff_colors | curr_diff_colors) & ambient_bg)
+            if not touches_bg:
+                if action is not None and action not in engine.index_selector_actions:
+                    engine.symbolic_theory.induce_value_mutator(action)
+                    engine.value_mutator_actions.add(action)
+                    if engine.prev_grid is not None and np.any(diff_mask):
+                        curr_sig = hash(curr_grid[diff_mask].tobytes())
+                        prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
+                        engine.symbolic_theory.record_state_mutation(
+                            action, curr_sig, prior_state_sig=prev_sig
+                        )
+                return
+
+            feats_in_diff = {
+                int(f) for f in (prev_diff_colors | curr_diff_colors) if int(f) not in ambient_bg
+            }
+            best_feat: int | None = None
+            diff_best_delta: tuple[int, int] | None = None
+            best_pos: tuple[int, int] | None = None
+            best_size: int = 0
+            for f in feats_in_diff:
+                c_prev = [
+                    (int(r), int(c)) for r, c in diff_coords if int(engine.prev_grid[r, c]) == f
+                ]
+                c_curr = [(int(r), int(c)) for r, c in diff_coords if int(curr_grid[r, c]) == f]
+                if c_prev and c_curr:
+                    min_r_prev, max_r_prev = min(r for r, _ in c_prev), max(r for r, _ in c_prev)
+                    min_c_prev, max_c_prev = min(c for _, c in c_prev), max(c for _, c in c_prev)
+                    min_r_curr, max_r_curr = min(r for r, _ in c_curr), max(r for r, _ in c_curr)
+                    min_c_curr, max_c_curr = min(c for _, c in c_curr), max(c for _, c in c_curr)
+                    bbox_dr = min_r_curr - min_r_prev
+                    bbox_dc = min_c_curr - min_c_prev
+                    # Geometric rigid-body expansion check:
+                    # If an entity translates by (dr, dc) != (0, 0), the total envelope containing
+                    # both old and new positions must be strictly larger than the entity.
+                    span_r = max(max_r_prev, max_r_curr) - min(min_r_prev, min_r_curr) + 1
+                    span_c = max(max_c_prev, max_c_curr) - min(min_c_prev, min_c_curr) + 1
+                    entity_h = max_r_prev - min_r_prev + 1
+                    entity_w = max_c_prev - min_c_prev + 1
+                    if span_r <= entity_h and span_c <= entity_w:
+                        if action is not None and action not in engine.index_selector_actions:
+                            engine.symbolic_theory.induce_value_mutator(action)
+                            engine.value_mutator_actions.add(action)
+                            if engine.prev_grid is not None and np.any(diff_mask):
+                                curr_sig = hash(curr_grid[diff_mask].tobytes())
+                                prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
+                                engine.symbolic_theory.record_state_mutation(
+                                    action, curr_sig, prior_state_sig=prev_sig
+                                )
+                        continue
+                    if bbox_dr == 0 and bbox_dc == 0:
+                        if action is not None and action not in engine.index_selector_actions:
+                            engine.symbolic_theory.induce_value_mutator(action)
+                            engine.value_mutator_actions.add(action)
+                            if engine.prev_grid is not None and np.any(diff_mask):
+                                curr_sig = hash(curr_grid[diff_mask].tobytes())
+                                prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
+                                engine.symbolic_theory.record_state_mutation(
+                                    action, curr_sig, prior_state_sig=prev_sig
+                                )
+                        continue
+
+                    dr = float(np.mean([r for r, _ in c_curr])) - float(
+                        np.mean([r for r, _ in c_prev])
+                    )
+                    dc = float(np.mean([c for _, c in c_curr])) - float(
+                        np.mean([c for _, c in c_prev])
+                    )
+                    k_dr = int(round(dr))
+                    k_dc = int(round(dc))
+                    if abs(k_dc) >= 2 * abs(k_dr):
+                        k_dr = 0
+                    elif abs(k_dr) >= 2 * abs(k_dc):
+                        k_dc = 0
+                    if (k_dr != 0 or k_dc != 0) and abs(k_dr) <= 8 and abs(k_dc) <= 8:
+                        is_concordant = True
+                        if action == 1 and k_dr >= 0:
+                            is_concordant = False
+                        elif action == 2 and k_dr <= 0:
+                            is_concordant = False
+                        elif action == 3 and k_dc >= 0:
+                            is_concordant = False
+                        elif action == 4 and k_dc <= 0:
+                            is_concordant = False
+                        if is_concordant:
+                            best_feat = f
+                            diff_best_delta = (k_dr, k_dc)
+                            best_pos = (
+                                int(round(float(np.mean([r for r, _ in c_curr])))),
+                                int(round(float(np.mean([c for _, c in c_curr])))),
+                            )
+                            best_size = len(c_curr)
+                            break
+            if best_feat is not None and diff_best_delta is not None and best_pos is not None:
+                engine.avatar_features = {best_feat}
+                engine.avatar_feature = best_feat
+                engine.avatar_pos = best_pos
+                engine.avatar_size = best_size
+                if action is not None:
+                    engine.action_dynamics[action] = ActionDynamicsModel(
+                        action_id=action,
+                        delta_r=diff_best_delta[0],
+                        delta_c=diff_best_delta[1],
+                        confidence=0.8,
+                        probes_tested=1,
+                    )
+                    if action in engine.action_affordances:
+                        engine.action_affordances[action].is_displacement = True
+                        engine.action_affordances[action].delta = best_delta
+                logger.info(
+                    "AutonomousEpistemicEngine: Avatar identified via differential kinetic stream — feature %s at pos %s (delta: %d, %d)",
+                    best_feat,
+                    best_pos,
+                    best_delta[0],
+                    best_delta[1],
+                )
+
         # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
         cmd_delta = act_dyn.get_displacement() if act_dyn else None
         kinetic_res = engine.dorsal_kinetic_stream.segregate_motion(
@@ -1102,18 +1325,24 @@ class EpistemicFeedbackAssimilator:
             )
             for ext in kinetic_res.external_agents:
                 if ext.velocity != (0.0, 0.0):
+                    cargos_known_threat = engine.symbolic_theory.cargo_features | getattr(
+                        engine, "learned_cargo_features", set()
+                    )
                     valid_threat_feats = {
                         f
                         for f in ext.features
-                        if f != bg
+                        if f != 0
+                        and f != bg
                         and f != engine.bg_feature
                         and f not in engine.avatar_features
                         and (engine.avatar_feature is None or f != engine.avatar_feature)
                         and f not in self_feats
+                        and f not in cargos_known_threat
                     }
                     for f in valid_threat_feats:
                         engine.symbolic_theory.walkable_features.discard(f)
                     engine.mobile_threat_features.update(valid_threat_feats)
+                    engine.mobile_threat_features.discard(0)
 
         # Premotor Collision Cones: Update forward space-time trajectories
         if not is_win:
@@ -1122,8 +1351,22 @@ class EpistemicFeedbackAssimilator:
                 for c_w in range(W):
                     if int(curr_grid[r_w, c_w]) in engine.symbolic_theory.barrier_features:
                         static_walls.add((r_w, c_w))
+            cargos_known_t = engine.symbolic_theory.cargo_features | getattr(
+                engine, "learned_cargo_features", set()
+            )
+            av_feats_t = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
+            threat_agents = [
+                e
+                for e in kinetic_res.external_agents
+                if (
+                    not e.features
+                    or not any(f in cargos_known_t or f in av_feats_t for f in e.features)
+                )
+            ]
             engine.collision_cones.update_trajectories(
-                kinetic_entities=kinetic_res.external_agents,
+                kinetic_entities=threat_agents,
                 static_barriers=static_walls,
                 grid_shape=(H, W),
                 horizon=12,
@@ -1143,19 +1386,45 @@ class EpistemicFeedbackAssimilator:
             valid_feats = {
                 f
                 for f in kinetic_res.self_avatar.features
-                if f != bg
-                and f != engine.bg_feature
-                and (f != 0 or (bg != 0 and engine.bg_feature != 0))
+                if f != 0 and f != bg and f != engine.bg_feature
             }
             if valid_feats:
-                engine.avatar_features = valid_feats
-                engine.avatar_feature = next(iter(valid_feats))
-                engine.mobile_threat_features.difference_update(valid_feats)
-                engine.avatar_size = kinetic_res.self_avatar.area
-                engine.avatar_pos = (
-                    int(round(kinetic_res.self_avatar.centroid[0])),
-                    int(round(kinetic_res.self_avatar.centroid[1])),
-                )
+                if not engine.avatar_features:
+                    engine.avatar_features = valid_feats
+                    sorted_vf = sorted(
+                        valid_feats,
+                        key=lambda feat: (
+                            kinetic_res.self_avatar.feature_distribution.get(feat, 0)
+                            if hasattr(kinetic_res.self_avatar, "feature_distribution")
+                            else 0
+                        ),
+                        reverse=True,
+                    )
+                    engine.avatar_feature = sorted_vf[0] if sorted_vf else next(iter(valid_feats))
+                    engine.mobile_threat_features.difference_update(valid_feats)
+                    engine.avatar_size = kinetic_res.self_avatar.area
+                    engine.avatar_pos = (
+                        int(round(kinetic_res.self_avatar.centroid[0])),
+                        int(round(kinetic_res.self_avatar.centroid[1])),
+                    )
+                elif valid_feats & engine.avatar_features:
+                    # Confirmed body schema: retain established avatar features against contamination
+                    matching_cells = [
+                        (r, c)
+                        for r, c in kinetic_res.self_avatar.cells
+                        if int(curr_grid[r, c]) in engine.avatar_features
+                    ]
+                    if matching_cells:
+                        engine.avatar_pos = (
+                            int(round(float(np.mean([r for r, _ in matching_cells])))),
+                            int(round(float(np.mean([c for _, c in matching_cells])))),
+                        )
+                        engine.avatar_size = len(matching_cells)
+                    else:
+                        engine.avatar_pos = (
+                            int(round(kinetic_res.self_avatar.centroid[0])),
+                            int(round(kinetic_res.self_avatar.centroid[1])),
+                        )
                 if kinetic_res.raw_delta is not None and action is not None:
                     dr, dc = kinetic_res.raw_delta
                     if abs(dc) >= 2 * abs(dr):
@@ -1250,16 +1519,24 @@ class EpistemicFeedbackAssimilator:
                     for pe, ce in pairs[1:]:
                         if any(_are_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
                             comp_pairs.append((pe, ce))
-                    engine.avatar_features = {
+                    candidate_feats = {
                         ce.feature_id
                         for _, ce in comp_pairs
-                        if ce.feature_id != bg
+                        if ce.feature_id != 0
+                        and ce.feature_id != bg
                         and ce.feature_id != engine.bg_feature
-                        and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
                     }
-                    if engine.avatar_features:
-                        engine.avatar_feature = next(iter(engine.avatar_features))
-                    engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
+                    if candidate_feats:
+                        if not engine.avatar_features:
+                            engine.avatar_features = candidate_feats
+                            engine.avatar_feature = next(iter(candidate_feats))
+                            engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
+                        elif candidate_feats & engine.avatar_features:
+                            engine.avatar_size = sum(
+                                ce.area
+                                for _, ce in comp_pairs
+                                if ce.feature_id in engine.avatar_features
+                            )
                     known_av_feats = engine.avatar_features
                     av_moved = [
                         item for item in moved_entities if item[1].feature_id in known_av_feats
@@ -1329,6 +1606,29 @@ class EpistemicFeedbackAssimilator:
                         )
 
                 if not is_win:
+                    manip_cargo_synced = False
+                    if engine.working_memory.body_schema.has_manipulandum():
+                        active_m = engine.working_memory.body_schema.active_manipulandum
+                        cargos_known = engine.symbolic_theory.cargo_features | getattr(
+                            engine, "learned_cargo_features", set()
+                        )
+                        for pe, ce, delta in moved_entities:
+                            if ce.feature_id in known_av_feats:
+                                continue
+                            if (
+                                active_m is not None
+                                and (
+                                    ce.feature_id == active_m.feature_id
+                                    or ce.feature_id in cargos_known
+                                    or engine.symbolic_theory.has_affordance(ce, "can_pickup")
+                                )
+                                and delta == (dr, dc)
+                            ):
+                                manip_cargo_synced = True
+                                active_m.pos = ce.grid_pos
+                                active_m.cells = ce.properties.get("cells", [ce.grid_pos])
+                                break
+
                     for pe, ce, delta in moved_entities:
                         if ce.feature_id in known_av_feats:
                             continue
@@ -1349,38 +1649,161 @@ class EpistemicFeedbackAssimilator:
                             ) * dc > 0
 
                         is_pushed = is_contact and is_ahead and (delta == (dr, dc))
-                        if is_pushed:
+                        is_towed = is_contact and not is_ahead and (delta == (dr, dc))
+
+                        if (
+                            (is_pushed or is_towed)
+                            and ce.feature_id != 0
+                            and ce.feature_id != bg
+                            and ce.feature_id != engine.bg_feature
+                        ):
+                            # Composite sprite guard: if this entity's bounding box
+                            # is contained within (or overlaps with) another moved
+                            # entity whose feature is already known cargo and that
+                            # moved identically, then this entity is a sub-component
+                            # of the same composite sprite — do NOT induce it as
+                            # standalone cargo.  This prevents e.g. a 4×4 crate's
+                            # inner-color from being inducted as a separate cargo type
+                            # when its border-color was already inducted.
+                            _existing_cargo = engine.symbolic_theory.cargo_features
+                            if ce.feature_id not in _existing_cargo:
+                                ce_bb = ce.bounding_box
+                                is_composite_sub = False
+                                if ce_bb is not None:
+                                    for pe2, ce2, delta2 in moved_entities:
+                                        if ce2.feature_id == ce.feature_id:
+                                            continue
+                                        if ce2.feature_id not in _existing_cargo:
+                                            continue
+                                        if delta2 != delta:
+                                            continue
+                                        ce2_bb = ce2.bounding_box
+                                        if ce2_bb is None:
+                                            continue
+                                        # Check if ce's bounding box is contained
+                                        # within ce2's bounding box (with 1-cell
+                                        # tolerance for stride alignment).
+                                        if (
+                                            ce_bb[0] >= ce2_bb[0] - 1
+                                            and ce_bb[1] <= ce2_bb[1] + 1
+                                            and ce_bb[2] >= ce2_bb[2] - 1
+                                            and ce_bb[3] <= ce2_bb[3] + 1
+                                        ):
+                                            is_composite_sub = True
+                                            break
+                                if is_composite_sub:
+                                    logger.debug(
+                                        "AutonomousEpistemicEngine: Skipping composite sub-feature %d "
+                                        "(bbox contained within known cargo feature)",
+                                        ce.feature_id,
+                                    )
+                                    continue
+
                             engine.symbolic_theory.induce_cargo(ce.feature_id)
                             logger.info(
-                                "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
+                                "AutonomousEpistemicEngine: Discovered %s CARGO (feat=%d, size=%d)",
+                                "TOWED" if is_towed else "PUSHABLE",
                                 ce.feature_id,
                                 ce.area,
                             )
-                        elif delta != (0, 0):
-                            # Autonomous dynamic entity (moved under its own agency) — not passive cargo
-                            engine.symbolic_theory.cargo_features.discard(ce.feature_id)
+                            if is_towed:
+                                engine.working_memory.body_schema.bind_manipulandum(
+                                    entity_id=f"cargo_{ce.feature_id}_{ce.grid_pos[0]}_{ce.grid_pos[1]}",
+                                    feature_id=ce.feature_id,
+                                    pos=ce.grid_pos,
+                                    cells=ce.properties.get("cells", [ce.grid_pos]),
+                                    step=engine.step_counter,
+                                    role="cargo",
+                                )
+                                manip_cargo_synced = True
                         elif delta == (dr, dc) and any(
                             _are_adjacent(ce, c_ce) for _, c_ce, _ in av_moved
                         ):
-                            engine.avatar_features.add(ce.feature_id)
-                            engine.avatar_size += ce.area
+                            # Ensure ce is an organic compound avatar part, not environmental cargo or goal drop zone
+                            if (
+                                ce.feature_id != 0
+                                and ce.feature_id != bg
+                                and ce.feature_id != engine.bg_feature
+                                and ce.feature_id not in engine.symbolic_theory.cargo_features
+                                and ce.feature_id not in engine.symbolic_theory.goal_features
+                                and ce.feature_id not in engine.symbolic_theory.receptacle_features
+                            ):
+                                engine.avatar_features.add(ce.feature_id)
+                                engine.avatar_size += ce.area
+                                logger.info(
+                                    "AutonomousEpistemicEngine: Discovered compound avatar component (feat=%d, size=%d)",
+                                    ce.feature_id,
+                                    ce.area,
+                                )
+                        elif delta != (0, 0) and delta != (dr, dc):
+                            # Autonomous dynamic entity (moved under its own agency) — not passive cargo
                             engine.symbolic_theory.cargo_features.discard(ce.feature_id)
-                            logger.info(
-                                "AutonomousEpistemicEngine: Discovered compound avatar component (feat=%d, size=%d)",
-                                ce.feature_id,
-                                ce.area,
-                            )
+
+                    if (
+                        not manip_cargo_synced
+                        and (dr != 0 or dc != 0)
+                        and engine.working_memory.body_schema.has_manipulandum()
+                        and getattr(
+                            engine.working_memory.body_schema.active_manipulandum,
+                            "role",
+                            "",
+                        )
+                        == "cargo"
+                    ):
+                        # Avatar moved independently without cargo — cargo was decoupled or released
+                        engine.working_memory.body_schema.unbind_manipulandum()
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
-        avatar_moved = bool(
-            (
-                engine.avatar_pos is not None
-                and prev_avatar_pos is not None
-                and engine.avatar_pos != prev_avatar_pos
-            )
-            or manip_moved
+        avatar_physically_displaced = bool(
+            engine.avatar_pos is not None
+            and prev_avatar_pos is not None
+            and engine.avatar_pos != prev_avatar_pos
         )
-        if not is_effector_action and not is_known_displacement and not avatar_moved:
+        avatar_moved = bool(avatar_physically_displaced or manip_moved)
+        if not is_effector_action and not is_known_displacement and not avatar_physically_displaced:
             engine.last_non_displacement_action = action
+            is_interaction_act = bool(
+                action in getattr(engine.symbolic_theory, "interaction_actions", set())
+                or action == getattr(engine.symbolic_theory, "primary_interaction_action", None)
+                or action == getattr(engine, "interaction_action", None)
+                or action == 5
+            )
+            if is_interaction_act:
+                if engine.working_memory.body_schema.has_manipulandum():
+                    engine.working_memory.body_schema.unbind_manipulandum()
+                    logger.info(
+                        "CortexAssimilator: Unbound active manipulandum upon interaction action %s",
+                        action,
+                    )
+                else:
+                    stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+                    av_p = engine.avatar_pos
+                    if av_p is not None:
+                        cargos_known = (
+                            engine.symbolic_theory.cargo_features | engine.learned_cargo_features
+                        )
+                        for e in curr_entities:
+                            if (
+                                e.feature_id in cargos_known
+                                or engine.symbolic_theory.has_affordance(e, "can_pickup")
+                                or getattr(e, "role", "") == EntityRole.MANIPULABLE
+                            ):
+                                er, ec = e.grid_pos
+                                if abs(er - av_p[0]) + abs(ec - av_p[1]) <= max(2, stride * 2):
+                                    engine.working_memory.body_schema.bind_manipulandum(
+                                        entity_id=f"cargo_{e.feature_id}_{er}_{ec}",
+                                        feature_id=e.feature_id,
+                                        pos=e.grid_pos,
+                                        cells=e.properties.get("cells", [e.grid_pos]),
+                                        step=engine.step_counter,
+                                        role="cargo",
+                                    )
+                                    logger.info(
+                                        "CortexAssimilator: Bound adjacent entity %s at %s as cargo upon interaction action %s",
+                                        e.id,
+                                        e.grid_pos,
+                                        action,
+                                    )
+                                    break
 
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
@@ -1482,13 +1905,58 @@ class EpistemicFeedbackAssimilator:
                         engine.inhibited_actions[engine.last_action] = max(
                             engine.inhibited_actions.get(engine.last_action, 0) + 4, 6
                         )
+                    if hasattr(engine, "working_memory") and hasattr(
+                        engine.working_memory, "habenular_ior"
+                    ):
+                        engine.working_memory.habenular_ior.record_ineffectual_action(
+                            avatar_pos=engine.avatar_pos or prev_avatar_pos,
+                            action=engine.last_action,
+                            action_data=engine.last_action_data,
+                            streak=engine.consecutive_stuck_steps,
+                        )
             elif prev_avatar_pos is not None and engine.avatar_pos is not None:
                 if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
                     engine.consecutive_stuck_steps += 1
+                    if engine.last_action is not None:
+                        if hasattr(engine, "working_memory") and hasattr(
+                            engine.working_memory, "habenular_ior"
+                        ):
+                            engine.working_memory.habenular_ior.record_ineffectual_action(
+                                avatar_pos=engine.avatar_pos,
+                                action=engine.last_action,
+                                action_data=engine.last_action_data,
+                                streak=engine.consecutive_stuck_steps,
+                            )
                 else:
                     engine.consecutive_stuck_steps = 0
             else:
                 engine.consecutive_stuck_steps = 0
+
+            # Avatar Agency Falsification Watchdog:
+            # If an entity was committed as an avatar, but after taking multiple actions
+            # it remains completely immobile (consecutive_stuck_steps >= 6) while diffs occur or actions fail,
+            # the avatar hypothesis is falsified. Drop the stale avatar identity to allow re-induction.
+            if (
+                engine.avatar_features
+                and engine.consecutive_stuck_steps >= 6
+                and not is_win
+                and not is_lost
+            ):
+                logger.info(
+                    "AutonomousEpistemicEngine: Avatar agency falsified after %d consecutive immobile steps. "
+                    "Invalidating stale avatar hypothesis %s at %s.",
+                    engine.consecutive_stuck_steps,
+                    engine.avatar_features,
+                    engine.avatar_pos,
+                )
+                engine.avatar_features.clear()
+                engine.avatar_feature = None
+                engine.avatar_pos = None
+                engine.avatar_size = 0
+                engine.prior_avatar_feature = None
+                engine.consecutive_stuck_steps = 0
+                engine.mental_plan.clear()
+                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
 
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (
@@ -1515,9 +1983,7 @@ class EpistemicFeedbackAssimilator:
             expected_state = {
                 "dr": expected_dr,
                 "dc": expected_dc,
-                "avatar_moved": 1
-                if (is_known_displacement or expected_dr != 0 or expected_dc != 0)
-                else 0,
+                "avatar_moved": 1 if (expected_dr != 0 or expected_dc != 0) else 0,
             }
             actual_state = {
                 "dr": actual_dr,
@@ -1550,15 +2016,25 @@ class EpistemicFeedbackAssimilator:
                     )
                 ):
                     discrepancy = True
-                elif (
-                    engine.last_predicted_pos is not None
-                    and engine.avatar_pos is not None
-                    and (
-                        engine.avatar_pos != engine.last_predicted_pos
-                        or (not avatar_moved and is_known_displacement)
-                    )
-                ):
-                    discrepancy = True
+                elif engine.last_predicted_pos is not None and engine.avatar_pos is not None:
+                    stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+                    max_tol = 1 if stride > 2 else 0
+                    dr_err = abs(engine.avatar_pos[0] - engine.last_predicted_pos[0])
+                    dc_err = abs(engine.avatar_pos[1] - engine.last_predicted_pos[1])
+                    if dr_err <= max_tol and dc_err <= max_tol:
+                        pos_mismatch = False
+                    else:
+                        pos_mismatch = True
+
+                    if pos_mismatch or (
+                        not avatar_moved
+                        and is_known_displacement
+                        and (
+                            engine.last_predicted_pos is None
+                            or engine.last_predicted_pos != prev_avatar_pos
+                        )
+                    ):
+                        discrepancy = True
                 elif (
                     surprise_eval.is_surprising
                     and not avatar_moved
@@ -1742,11 +2218,15 @@ class EpistemicFeedbackAssimilator:
         # When an interventional action clears pixels of a non-background, non-avatar feature,
         # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
         if diff.mutated_pixels and not is_lost and not is_win and engine.prev_grid is not None:
+            cargos_known = engine.symbolic_theory.cargo_features | getattr(
+                engine, "learned_cargo_features", set()
+            )
             for r, c, old_v, new_v in diff.mutated_pixels:
                 if (
                     new_v == bg
                     and old_v != bg
                     and old_v not in av_feats
+                    and old_v not in cargos_known
                     and not engine.symbolic_theory.is_barrier(old_v)
                     and old_v not in engine.mobile_threat_features
                     and old_v not in engine.hazard_tracker.known_lethal_features

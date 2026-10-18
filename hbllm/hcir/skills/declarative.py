@@ -40,6 +40,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+ActionSeq = list[tuple[int, dict[str, int] | None]]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Cognitive Lifting & Evaluation Context
@@ -199,8 +201,7 @@ class ActionAffordancePredicate(SymbolicPredicate):
         self.forbidden: set[int] = set(forbidden) if forbidden is not None else set()
         self.exact: set[int] | None = set(exact) if exact is not None else None
 
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        acts = ctx.available_actions_set
+    def matches(self, acts: set[int]) -> bool:
         if self.exact is not None and acts != self.exact:
             return False
         if self.required and not self.required.issubset(acts):
@@ -208,6 +209,9 @@ class ActionAffordancePredicate(SymbolicPredicate):
         if self.forbidden and not self.forbidden.isdisjoint(acts):
             return False
         return True
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        return self.matches(ctx.available_actions_set)
 
     def __repr__(self) -> str:
         return (
@@ -934,3 +938,359 @@ class CompositeDeclarativeSkill(DeclarativeNeuroSymbolicSkill):
                 if acts:
                     actions.extend(acts)
         return actions
+
+
+# ── Deliberation Affordance Predicates ─────────────────────────────────────
+
+
+class ParameterDialAffordancePredicate(SymbolicPredicate):
+    """Evaluates whether the environment affords Norman parameter dial manipulation."""
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return False
+        avail = ctx.available_actions_set
+        idx_sel = [
+            a
+            for a in avail
+            if a in getattr(engine, "index_selector_actions", set())
+            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
+        ]
+        val_mut = [
+            a
+            for a in avail
+            if a in getattr(engine, "value_mutator_actions", set())
+            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
+        ]
+        return bool(idx_sel and val_mut)
+
+    def __repr__(self) -> str:
+        return "ParameterDialAffordancePredicate()"
+
+
+class SpatialEffectorAffordancePredicate(SymbolicPredicate):
+    """Evaluates whether spatial effectors (clicks, touches) are available and indicated."""
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return False
+        avail = ctx.available_actions
+        spatial_effectors = [a for a in avail if engine.is_spatial_effector(a)]
+        if not spatial_effectors:
+            return False
+
+        bg = getattr(engine, "bg_feature", getattr(engine, "background_color", 0))
+        has_foreground = np.any(ctx.grid != bg)
+        has_displacement = any(engine.is_displacement_action(a) for a in avail)
+        no_avatar_or_disp = engine.avatar_pos is None or not has_displacement
+        unbound_manipulandum = (
+            not engine.working_memory.body_schema.has_manipulandum() or not has_displacement
+        )
+        return bool(has_foreground and (no_avatar_or_disp and unbound_manipulandum))
+
+    def __repr__(self) -> str:
+        return "SpatialEffectorAffordancePredicate()"
+
+
+class FocusSwitchAffordancePredicate(SymbolicPredicate):
+    """Evaluates whether focus-switching actions are affordant (e.g. avatar reached goal or stuck)."""
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return False
+        avail = ctx.available_actions
+        discrete_transform_actions = [
+            a
+            for a in avail
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        focus_switches = [
+            a
+            for a in discrete_transform_actions
+            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if not focus_switches:
+            return False
+
+        goals = list(getattr(engine, "goals", getattr(engine, "learned_goal_positions", [])))
+        if not goals and hasattr(engine, "detect_structural_goals"):
+            sgs = engine.detect_structural_goals(ctx.grid, bg=engine.bg_feature)
+            av_feats = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
+            constellations = [
+                sg
+                for sg in sgs
+                if sg.get("type") == "target_constellation"
+                and (sg.get("feature") in av_feats if av_feats else True)
+            ]
+            targets = constellations if constellations else sgs
+            for sg in targets:
+                if sg.get("position"):
+                    goals.append(sg["position"])
+
+        avatar_arrived = bool(
+            engine.avatar_pos is not None and goals and any(engine.avatar_pos == g for g in goals)
+        )
+        no_viable_plan = bool(
+            not engine.mental_plan
+            and engine.consecutive_plan_failures >= 3
+            and engine.consecutive_stuck_steps >= 2
+        )
+        return bool(avatar_arrived or no_viable_plan)
+
+    def __repr__(self) -> str:
+        return "FocusSwitchAffordancePredicate()"
+
+
+class DiscreteGroundingAffordancePredicate(SymbolicPredicate):
+    """Evaluates whether discrete transform actions should be probed when locomotion is unviable."""
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return False
+        avail = ctx.available_actions
+        spatial_effectors = [a for a in avail if engine.is_spatial_effector(a)]
+        if spatial_effectors:
+            return False
+
+        discrete_transform_actions = [
+            a
+            for a in avail
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        if not discrete_transform_actions:
+            return False
+
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+
+        if engine.mental_plan and getattr(engine, "phase", None) == EpistemicPhase.EXPLOITATION:
+            return False
+
+        has_displacement_actions = any(engine.is_displacement_action(a) for a in avail) or any(
+            not engine.is_spatial_effector(a) and a not in engine.action_dynamics for a in avail
+        )
+        is_stuck_or_looping = (
+            engine.consecutive_stuck_steps >= 2
+            or (
+                engine.avatar_pos is not None
+                and (
+                    engine.recent_positions.count(engine.avatar_pos) >= 4
+                    or (
+                        len(engine.recent_positions) >= 4
+                        and len(set(list(engine.recent_positions)[-4:])) <= 2
+                    )
+                )
+            )
+            or (engine.avatar_pos is None and engine.step_counter > 4)
+        )
+        return bool(not has_displacement_actions or is_stuck_or_looping)
+
+    def __repr__(self) -> str:
+        return "DiscreteGroundingAffordancePredicate()"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 5. Foundational Cognitive Deliberation Skills
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class FocusSwitchSkill(DeclarativeNeuroSymbolicSkill):
+    """Epistemic multi-avatar focus switching upon arrival or dead-end."""
+
+    skill_name = "focus_switch"
+    description = (
+        "Switches control focus when active avatar arrives at goal or exploration is blocked"
+    )
+    signature = FocusSwitchAffordancePredicate()
+
+    def solve(
+        self, ctx: SkillEvaluationContext, current_level: int = 0
+    ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return []
+        avail = ctx.available_actions
+        discrete_transform_actions = [
+            a
+            for a in avail
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        focus_switches = [
+            a
+            for a in discrete_transform_actions
+            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if not focus_switches:
+            return []
+
+        chosen_switch = focus_switches[0]
+        engine.inhibited_actions[chosen_switch] = max(
+            engine.inhibited_actions.get(chosen_switch, 0), 4
+        )
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+
+        engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+        engine.consecutive_plan_failures = 0
+        engine.consecutive_stuck_steps = 0
+        res_sw: ActionSeq = [(chosen_switch, None)]
+        return res_sw
+
+
+class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
+    """Interleaved Norman parameter dial cycling with dynamic causal recurrence."""
+
+    skill_name = "dial_cycling"
+    description = (
+        "Interleaves value mutations with index selections using learned causal recurrence period k"
+    )
+    signature = ParameterDialAffordancePredicate()
+
+    def solve(
+        self, ctx: SkillEvaluationContext, current_level: int = 0
+    ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return []
+        avail = ctx.available_actions
+        idx_sel = [
+            a
+            for a in avail
+            if a in getattr(engine, "index_selector_actions", set())
+            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
+        ]
+        val_mut = [
+            a
+            for a in avail
+            if a in getattr(engine, "value_mutator_actions", set())
+            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
+        ]
+        if not (idx_sel and val_mut):
+            return []
+
+        chosen_mut = val_mut[-1]
+        # Query learned recurrence period k dynamically from Pearl's do(a) causal theory
+        get_period = getattr(
+            getattr(engine, "symbolic_theory", None),
+            "get_cycle_period",
+            lambda a, default=4: default,
+        )
+        k = get_period(chosen_mut, default=4)
+        mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
+
+        # Coordinate-descent limit: visit distinct candidate states (k-1 steps) without looping back to s0
+        streak_limit = max(1, k - 1)
+
+        # Distal Trigger Gating: if mutation triggered distal surprise or salience shift, lock in and advance
+        wm = getattr(engine, "working_memory", None)
+        has_distal_trigger = getattr(engine, "last_surprise", 0.0) >= 0.4 or (
+            wm is not None and hasattr(wm, "has_salience_shift") and wm.has_salience_shift(engine)
+        )
+
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+
+        if not has_distal_trigger and mut_streak < streak_limit:
+            engine.working_memory.dial_mutation_streak = mut_streak + 1
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            res_mut: ActionSeq = [(chosen_mut, None)]
+            return res_mut
+        else:
+            chosen_idx = idx_sel[-1]
+            engine.working_memory.dial_mutation_streak = 0
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            res_idx: ActionSeq = [(chosen_idx, None)]
+            return res_idx
+
+
+class SpatialEffectorSkill(DeclarativeNeuroSymbolicSkill):
+    """Modal select-then-direct spatial effector targeting with discrete uncalibrated fallback."""
+
+    skill_name = "spatial_effector"
+    description = "Directs spatial touch/click effectors and grounds uncalibrated discrete actions"
+    signature = SpatialEffectorAffordancePredicate()
+
+    def solve(
+        self, ctx: SkillEvaluationContext, current_level: int = 0
+    ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return []
+        avail = ctx.available_actions
+        spatial_effectors = [a for a in avail if engine.is_spatial_effector(a)]
+        if not spatial_effectors:
+            return []
+
+        discrete_transform_actions = [
+            a
+            for a in avail
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        uncalibrated_discrete = [
+            a
+            for a in discrete_transform_actions
+            if not engine.is_action_calibrated(a)
+            and engine.inhibited_actions.get(a, 0) == 0
+            and a not in engine.symbolic_theory.undo_actions
+            and (a, engine.avatar_pos) not in engine.tested_action_positions
+        ]
+
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+
+        if uncalibrated_discrete and engine.consecutive_quiescent_actions >= 1:
+            chosen_disc = uncalibrated_discrete[0]
+            engine.tested_action_positions.add((chosen_disc, engine.avatar_pos))
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            res_disc: ActionSeq = [(chosen_disc, None)]
+            return res_disc
+
+        chosen_eff = spatial_effectors[0]
+        eff_data = engine.ground_effector_action(ctx.grid, chosen_eff)
+        if eff_data is not None:
+            engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            return [(chosen_eff, eff_data)]
+
+        return []
+
+
+class DiscreteGroundingSkill(DeclarativeNeuroSymbolicSkill):
+    """Epistemic discrete action exploration when spatial displacement is blocked or uncalibrated."""
+
+    skill_name = "discrete_grounding"
+    description = (
+        "Selects uninhibited discrete actions to probe environment state changes when stuck"
+    )
+    signature = DiscreteGroundingAffordancePredicate()
+
+    def solve(
+        self, ctx: SkillEvaluationContext, current_level: int = 0
+    ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
+        engine = ctx.metadata.get("engine")
+        if engine is None:
+            return []
+        avail = ctx.available_actions
+        discrete_transform_actions = [
+            a
+            for a in avail
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        if not discrete_transform_actions:
+            return []
+
+        undo_acts = getattr(engine, "undo_actions", set())
+        uninhibited_discrete = [
+            a
+            for a in discrete_transform_actions
+            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+        ]
+        chosen_action = (
+            uninhibited_discrete[0] if uninhibited_discrete else discrete_transform_actions[0]
+        )
+        from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+
+        engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+        res_act: ActionSeq = [(chosen_action, None)]
+        return res_act

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
@@ -178,10 +178,19 @@ class EpistemicGoalScheduler:
                 engine.symbolic_theory.goal_features.discard(e.feature_id)
                 continue
 
+            cargos_known_goals = engine.symbolic_theory.cargo_features | getattr(
+                engine, "learned_cargo_features", set()
+            )
             is_goal_candidate = (
                 e.feature_id in engine.symbolic_theory.goal_features
+                and e.feature_id not in cargos_known_goals
+                and not engine.symbolic_theory.has_affordance(e, "can_pickup")
                 and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
-            ) or e.role == EntityRole.GOAL
+            ) or (
+                e.role == EntityRole.GOAL
+                and e.feature_id not in cargos_known_goals
+                and not engine.symbolic_theory.has_affordance(e, "can_pickup")
+            )
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
@@ -197,7 +206,6 @@ class EpistemicGoalScheduler:
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
             goals = list(confirmed_goals)
-
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
         wm = getattr(engine, "working_memory", None)
         if wm is not None:
@@ -219,8 +227,31 @@ class EpistemicGoalScheduler:
             elif wm.active_schema is None and wm.procedural_library:
                 matched = wm.find_matching_skill(available_actions=available_actions)
                 if matched is not None:
-                    skill_name, _ = matched
-                    schema = wm.instantiate_skill_as_schema(skill_name)
+                    skill_name, skill = matched
+                    grounded_targets: dict[str, set[tuple[int, int]]] = {}
+                    for sg in getattr(getattr(skill, "program", None), "subgoals", []):
+                        q = getattr(sg, "target_query", {})
+                        st_id = q.get("stage_id", "")
+                        role = q.get("role", "")
+                        req_f = q.get("required_feature")
+                        if role in ("tool", "key") or req_f is not None:
+                            tool_cells = set()
+                            for e in entities:
+                                if (req_f is not None and e.feature_id == req_f) or (
+                                    req_f is None and e.role in ("tool", "key")
+                                ):
+                                    tool_cells.add(e.grid_pos)
+                            if tool_cells:
+                                grounded_targets[st_id] = tool_cells
+                        elif role == "barrier":
+                            if engine.learned_barriers:
+                                grounded_targets[st_id] = set(engine.learned_barriers)
+                        elif role == "goal":
+                            if goals:
+                                grounded_targets[st_id] = set(goals)
+                    schema = wm.instantiate_skill_as_schema(
+                        skill_name, target_positions_override=grounded_targets
+                    )
                     if schema and schema.current_stage and schema.current_stage.target_positions:
                         for sp in reversed(list(schema.current_stage.target_positions)):
                             if 0 <= sp[0] < H and 0 <= sp[1] < W:
@@ -266,6 +297,10 @@ class EpistemicGoalScheduler:
                 if e.feature_id == bg:
                     continue
                 if engine.symbolic_theory.is_barrier(e.feature_id) or e.role == EntityRole.OBSTACLE:
+                    continue
+                if e.feature_id in cargos_known_goals or engine.symbolic_theory.has_affordance(
+                    e, "can_pickup"
+                ):
                     continue
                 if (
                     e.feature_id in engine.hazard_tracker.known_lethal_features
@@ -667,13 +702,24 @@ class MentalSimulationPlanner:
                 )
                 else (-1, -1)
             )
+            stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+            av_span = max(stride + 1, 4)
             avatar_on_bg = ar >= 0 and (
                 int(curr_grid[ar, ac]) == bg
                 or any(
                     0 <= ar + dr_a < H
                     and 0 <= ac + dc_a < W
                     and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
-                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                    for dr_a, dc_a in [
+                        (-1, 0),
+                        (1, 0),
+                        (0, -1),
+                        (0, 1),
+                        (-av_span, 0),
+                        (av_span, 0),
+                        (0, -av_span),
+                        (0, av_span),
+                    ]
                 )
             )
             if bg_ratio >= 0.20 and not avatar_on_bg:
@@ -812,6 +858,12 @@ class MentalSimulationPlanner:
         blocked_cells: set[tuple[int, int]] | None = None,
     ) -> list[MentalSimulationStep] | None:
         """Simulate candidate action sequences internally in memory without taking physical steps."""
+        curr_grid = np.asarray(curr_grid)
+        if curr_grid.ndim == 3:
+            if curr_grid.shape[0] < min(curr_grid.shape[1], curr_grid.shape[2]):
+                curr_grid = curr_grid[-1]
+            elif curr_grid.shape[2] in (1, 3, 4):
+                curr_grid = curr_grid[:, :, 0]
         if engine.avatar_pos is None and (
             engine.avatar_features
             or engine.avatar_feature is not None
@@ -826,7 +878,7 @@ class MentalSimulationPlanner:
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
             active_manip = engine.working_memory.body_schema.active_manipulandum
-            if active_manip is not None:
+            if active_manip is not None and getattr(active_manip, "role", "") != "cargo":
                 engine.avatar_pos = active_manip.pos
 
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
@@ -865,7 +917,24 @@ class MentalSimulationPlanner:
         goals = proposal.goals
 
         # Faculty D: Bilateral Convergent Coordinate Frames
-        if engine.bilateral_state is not None and len(engine.action_dynamics) >= 2:
+        cargos_known_d = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
+        recs_known_d = engine.symbolic_theory.receptacle_features
+        is_bilat_valid = (
+            engine.bilateral_state is not None
+            and len(engine.action_dynamics) >= 2
+            and not engine.working_memory.body_schema.has_manipulandum()
+            and not bool(engine.bilateral_state.features & cargos_known_d)
+            and not bool(engine.bilateral_state.features & recs_known_d)
+            and not (cargos_known_d and (recs_known_d or engine.learned_goal_positions))
+            and (
+                abs(engine.bilateral_state.pos1[0] - engine.bilateral_state.pos2[0])
+                + abs(engine.bilateral_state.pos1[1] - engine.bilateral_state.pos2[1])
+                > 6
+            )
+        )
+        if is_bilat_valid:
             passable_mask = np.ones((H, W), dtype=bool)
             for r in range(H):
                 for c in range(W):
@@ -905,7 +974,16 @@ class MentalSimulationPlanner:
                     )
                 return steps
 
-        if not goals:
+        has_receptacle = bool(
+            engine.learned_goal_positions
+            or getattr(engine, "learned_receptacle_positions", None)
+            or any(
+                engine.symbolic_theory.has_affordance(e, "receptacle")
+                or getattr(e, "role", "") in (EntityRole.RECEPTACLE, EntityRole.GOAL)
+                for e in entities
+            )
+        )
+        if not goals and not has_receptacle:
             return None
 
         # 2. Identify candidate pushable blocks / cargo
@@ -926,6 +1004,34 @@ class MentalSimulationPlanner:
             )
             and e.feature_id not in engine.hazard_tracker.known_lethal_features
             and not engine.symbolic_theory.is_barrier(e.feature_id)
+        ]
+        if engine.working_memory.body_schema.has_manipulandum():
+            active_manip = engine.working_memory.body_schema.active_manipulandum
+            if (
+                active_manip is not None
+                and getattr(active_manip, "role", "") in ("cargo", "manipulandum")
+                and active_manip.pos not in pushable_blocks
+                and active_manip.pos not in goals
+            ):
+                pushable_blocks.append(active_manip.pos)
+
+        unattached_cargo = [
+            e
+            for e in entities
+            if (
+                engine.symbolic_theory.is_cargo(e)
+                or e.feature_id in engine.learned_cargo_features
+                or (
+                    e.role == EntityRole.MANIPULABLE
+                    and 1 <= e.area <= 64
+                    and e.feature_id not in engine.mobile_threat_features
+                )
+            )
+            and e.feature_id not in av_feats
+            and e.feature_id != bg
+            and e.grid_pos not in goals
+            and e.grid_pos not in engine.learned_goal_positions
+            and e.grid_pos not in engine.learned_receptacle_positions
         ]
 
         # 3. Static barriers & corridor continuity
@@ -1153,38 +1259,92 @@ class MentalSimulationPlanner:
                 nxt.add(dest)
             return frozenset(nxt)
 
-        is_block_delivery = bool(
-            1 <= len(pushable_blocks) <= 16
-            and any(
-                (
-                    engine.symbolic_theory.is_cargo(e)
-                    or e.feature_id in engine.learned_cargo_features
-                    or e.role == EntityRole.MANIPULABLE
-                )
-                and e.feature_id not in av_feats
-                and e.grid_pos in pushable_blocks
+        is_cargo_attached = False
+        attached_cargo_offset: tuple[int, int] | None = None
+        if engine.working_memory.body_schema.has_manipulandum():
+            active_manip = engine.working_memory.body_schema.active_manipulandum
+            if (
+                active_manip is not None
+                and getattr(active_manip, "role", "") in ("cargo", "manipulandum")
+                and start_pos is not None
+            ):
+                dr_m = active_manip.pos[0] - start_pos[0]
+                dc_m = active_manip.pos[1] - start_pos[1]
+                stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+                if abs(dr_m) + abs(dc_m) <= max(2, stride * 2):
+                    is_cargo_attached = True
+                    attached_cargo_offset = (dr_m, dc_m)
+
+        has_affordance_manip = bool(
+            is_cargo_attached
+            or unattached_cargo
+            or any(
+                engine.symbolic_theory.has_affordance(e, "can_pickup")
+                or e.feature_id in engine.symbolic_theory.cargo_features
+                or getattr(e, "role", "") == EntityRole.MANIPULABLE
                 for e in entities
+                if e.feature_id not in av_feats and e.feature_id != bg and e.feature_id != 0
             )
         )
 
+        cargos_known_temp = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
         has_periodic = (
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
+            and any(
+                not (p.hazardous_values <= (cargos_known_temp | av_feats | {bg, 0}))
+                for p in engine.hazard_tracker.periodic_cells.values()
+            )
         )
         has_temporal = (
             bool(init_patrols)
             or bool(init_chasers)
             or has_periodic
-            or bool(engine.collision_cones.projected_trajectories)
+            or any(
+                (
+                    proj.feature_id in engine.mobile_threat_features
+                    or proj.feature_id in engine.hazard_tracker.known_lethal_features
+                )
+                and proj.feature_id not in cargos_known_temp
+                and proj.feature_id not in av_feats
+                for proj in engine.collision_cones.projected_trajectories
+            )
         )
 
         # ─────────────────────────────────────────────────────────────────────
+        # Affordance-Driven Subgoal Sequencing (Brodmann Area 10 Apex Executive)
+        # When objects with CAN_PICKUP / CARGO affordances and a RECEPTACLE exist,
+        # or when an object is currently incorporated in the ExtendedBodySchema,
+        # formulate clean sequential subgoals:
+        #   [Navigate to Cargo -> Attach -> Compound Navigate to Receptacle -> Detach]
+        # Bypasses heuristic space-time search with deterministic modular geodesic routing.
+        # ─────────────────────────────────────────────────────────────────────
+        if has_affordance_manip and start_pos is not None:
+            dyn_obs = oriented_threat_positions | set(init_chasers) | {p[0] for p in init_patrols}
+            affordance_plan = MentalSimulationPlanner._plan_affordance_subgoals(
+                engine=engine,
+                curr_grid=curr_grid,
+                entities=entities,
+                bg=bg,
+                av_feats=av_feats,
+                available_actions=available_actions,
+                movable_actions=movable_actions,
+                static_barriers=static_barriers,
+                goals=goals,
+                dynamic_obstacles=dyn_obs,
+            )
+            if affordance_plan:
+                return affordance_plan
+
+        # ─────────────────────────────────────────────────────────────────────
         # Fast Topological Geodesic & Kinematics Router (Substrate Layer)
-        # For static navigation tasks (no blocks to push and no temporal threats),
+        # For static navigation tasks (no temporal threats),
         # route deterministic shortest action paths over traversable manifolds.
         # When temporal threats (patrols, chasers) exist, defer to Space-Time A*.
         # ─────────────────────────────────────────────────────────────────────
-        if goals and not is_block_delivery and not has_temporal and start_pos is not None:
+        if goals and not has_affordance_manip and not has_temporal and start_pos is not None:
             geodesic_movable_actions = [
                 (act, dr, dc)
                 for act, dr, dc in movable_actions
@@ -1285,7 +1445,7 @@ class MentalSimulationPlanner:
 
         # Precompute Vectorized 2D Geodesic Distance Field Matrix for O(1) heuristic lookup
         grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
-        if goals and not is_block_delivery:
+        if goals:
             b_step = step_size if step_size > 1 else 1
             bfs_q: deque[tuple[int, int]] = deque()
             for gr, gc in all_goal_cells:
@@ -1315,15 +1475,10 @@ class MentalSimulationPlanner:
                         grid_dist_field[unreached], d_mat[unreached]
                     )
 
-        def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
-            if is_block_delivery and blocks:
-                b_list = list(blocks)
-                goal_dist = 0.0
-                for g in goals:
-                    goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
-                avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
-                base_h = float(goal_dist * 2.0 + avatar_to_b)
-            elif goals:
+        def heuristic(
+            pos: tuple[int, int], blocks: frozenset[tuple[int, int]] | None = None
+        ) -> float:
+            if goals:
                 base_h = float(grid_dist_field[pos[0], pos[1]])
             else:
                 base_h = 0.0
@@ -1339,15 +1494,30 @@ class MentalSimulationPlanner:
             return base_h
 
         counter = 0
+        cargos_known_temp2 = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
         has_periodic = (
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
+            and any(
+                not (p.hazardous_values <= (cargos_known_temp2 | av_feats | {bg, 0}))
+                for p in engine.hazard_tracker.periodic_cells.values()
+            )
         )
         has_temporal = (
             bool(init_patrols)
             or bool(init_chasers)
             or has_periodic
-            or bool(engine.collision_cones.projected_trajectories)
+            or any(
+                (
+                    proj.feature_id in engine.mobile_threat_features
+                    or proj.feature_id in engine.hazard_tracker.known_lethal_features
+                )
+                and proj.feature_id not in cargos_known_temp2
+                and proj.feature_id not in av_feats
+                for proj in engine.collision_cones.projected_trajectories
+            )
         )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
             has_temporal=has_temporal,
@@ -1470,26 +1640,45 @@ class MentalSimulationPlanner:
                 visited_states.add(state_key)
 
                 if (
-                    not is_block_delivery
+                    not is_cargo_attached
                     and (cur_pos in goals or cur_pos in all_goal_cells)
                     and path_len > 0
                 ):
                     path = _reconstruct_path(node_id)
+                    if unattached_cargo:
+                        stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+                        if any(
+                            abs(cur_pos[0] - uc.grid_pos[0]) + abs(cur_pos[1] - uc.grid_pos[1])
+                            <= stride * 2
+                            for uc in unattached_cargo
+                        ):
+                            interact_act = next(
+                                (
+                                    a
+                                    for a in available_actions
+                                    if a not in [m[0] for m in movable_actions]
+                                    and (
+                                        engine.is_spatial_effector(a)
+                                        or a == 5
+                                        or getattr(engine, "interaction_action", None) == a
+                                    )
+                                ),
+                                None,
+                            )
+                            if interact_act is not None:
+                                path.append(
+                                    MentalSimulationStep(
+                                        action=interact_act,
+                                        predicted_avatar_pos=cur_pos,
+                                        expected_mutation="attach_cargo",
+                                    )
+                                )
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
                         len(path),
                         cur_pos,
                     )
                     engine.current_simulated_goal = cur_pos
-                    return path, had_relaxable_block
-
-                if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
-                    path = _reconstruct_path(node_id)
-                    logger.info(
-                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
-                        len(path),
-                    )
-                    engine.current_simulated_goal = list(goals)[0] if goals else None
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
@@ -1557,9 +1746,18 @@ class MentalSimulationPlanner:
                     if not (0 <= nr < H and 0 <= nc < W):
                         continue
 
+                    cur_cargo_pos: tuple[int, int] | None = None
+                    if is_cargo_attached and attached_cargo_offset is not None:
+                        cur_cargo_pos = (
+                            cur_pos[0] + attached_cargo_offset[0],
+                            cur_pos[1] + attached_cargo_offset[1],
+                        )
+
                     # Core Knowledge Physics: Evaluate Spelke Continuity along candidate path step
                     if hasattr(engine.symbolic_theory, "evaluates_spelke_continuity"):
                         active_barriers = static_barriers - cur_open
+                        if cur_cargo_pos is not None and cur_cargo_pos in active_barriers:
+                            active_barriers = active_barriers - {cur_cargo_pos}
                         if not engine.symbolic_theory.evaluates_spelke_continuity(
                             cur_pos, (nr, nc), active_barriers, (H, W)
                         ):
@@ -1575,7 +1773,11 @@ class MentalSimulationPlanner:
                         if (kr, kc) in living_gaze:
                             ray_blocked = True
                             break
-                        is_barrier_cell = (kr, kc) in static_barriers and (kr, kc) not in cur_open
+                        is_barrier_cell = (
+                            (kr, kc) in static_barriers
+                            and (kr, kc) not in cur_open
+                            and (cur_cargo_pos is None or (kr, kc) != cur_cargo_pos)
+                        )
                         if is_barrier_cell:
                             cell_feat = (
                                 int(curr_grid[kr, kc]) if 0 <= kr < H and 0 <= kc < W else -1
@@ -1730,7 +1932,98 @@ class MentalSimulationPlanner:
                     new_blocks = cur_blocks
                     new_pos = (nr, nc)
 
-                    if (nr, nc) in cur_blocks:
+                    if (
+                        is_cargo_attached
+                        and cur_cargo_pos is not None
+                        and attached_cargo_offset is not None
+                    ):
+                        # Cannot walk directly into another unattached obstacle/block
+                        if (nr, nc) in cur_blocks and (nr, nc) != cur_cargo_pos:
+                            continue
+
+                        next_cargo_pos = (
+                            nr + attached_cargo_offset[0],
+                            nc + attached_cargo_offset[1],
+                        )
+
+                        # Cargo boundary check
+                        if not (0 <= next_cargo_pos[0] < H and 0 <= next_cargo_pos[1] < W):
+                            continue
+
+                        # Cargo collision against walls and static barriers (can enter cur_pos vacated by avatar)
+                        if next_cargo_pos in _grid_walls:
+                            continue
+                        if (
+                            next_cargo_pos in static_barriers
+                            and next_cargo_pos not in cur_open
+                            and next_cargo_pos != cur_pos
+                        ):
+                            continue
+
+                        # Continuous ray check for cargo along motion step
+                        cargo_ray_blocked = False
+                        for pk in range(1, dist + 1):
+                            ckr = cur_cargo_pos[0] + step_r * pk
+                            ckc = cur_cargo_pos[1] + step_c * pk
+                            if (ckr, ckc) in living_gaze:
+                                cargo_ray_blocked = True
+                                break
+                            if (ckr, ckc) in _grid_walls:
+                                cargo_ray_blocked = True
+                                break
+                            if (
+                                (ckr, ckc) in static_barriers
+                                and (ckr, ckc) not in cur_open
+                                and (ckr, ckc) != cur_pos
+                            ):
+                                cargo_ray_blocked = True
+                                break
+                            if (
+                                bg_is_impassable_void
+                                and 0 <= ckr < H
+                                and 0 <= ckc < W
+                                and int(curr_grid[ckr, ckc]) == bg
+                                and (ckr, ckc) not in goals
+                                and (ckr, ckc) not in all_goal_cells
+                            ):
+                                cargo_ray_blocked = True
+                                break
+                        if cargo_ray_blocked:
+                            continue
+
+                        # Hazard check for cargo
+                        if engine.hazard_tracker.is_hazard_at(
+                            next_cargo_pos[0],
+                            next_cargo_pos[1],
+                            sim_step,
+                            bg,
+                            avatar_features=av_feats,
+                            walkable_features=walkable_feats,
+                        ):
+                            continue
+
+                        # Deadlock evaluation for cargo if not delivering to a goal cell
+                        if next_cargo_pos not in goals and next_cargo_pos not in all_goal_cells:
+                            candidate_block_set = (set(cur_blocks) - {cur_cargo_pos}) | {
+                                next_cargo_pos
+                            }
+                            dl_eval = CounterfactualDeadlockDetector.evaluate_deadlock(
+                                next_cargo_pos,
+                                set(goals),
+                                static_barriers,
+                                candidate_block_set,
+                                (H, W),
+                            )
+                            if dl_eval.is_deadlock:
+                                continue
+
+                        block_set = set(cur_blocks)
+                        if cur_cargo_pos in block_set:
+                            block_set.remove(cur_cargo_pos)
+                        block_set.add(next_cargo_pos)
+                        new_blocks = frozenset(block_set)
+
+                    elif (nr, nc) in cur_blocks:
                         # Core Knowledge Physics: Evaluate Spelke Contact Causality (must be adjacent)
                         if hasattr(engine.symbolic_theory, "evaluates_spelke_contact"):
                             if not engine.symbolic_theory.evaluates_spelke_contact(
@@ -1799,10 +2092,14 @@ class MentalSimulationPlanner:
                                     continue
                                 pushed_r, pushed_c = land_b
 
-                        if (is_block_delivery or bool(cur_blocks)) and (
-                            pushed_r,
-                            pushed_c,
-                        ) not in goals:
+                        if (
+                            bool(cur_blocks)
+                            and (
+                                pushed_r,
+                                pushed_c,
+                            )
+                            not in goals
+                        ):
                             candidate_block_set = (set(cur_blocks) - {(nr, nc)}) | {
                                 (pushed_r, pushed_c)
                             }
@@ -1923,6 +2220,454 @@ class MentalSimulationPlanner:
             )
             if teleo_plan:
                 return teleo_plan
+
+        return None
+
+    @staticmethod
+    def _plan_affordance_subgoals(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        entities: list[SpatialEntity],
+        bg: int,
+        av_feats: set[int],
+        available_actions: Sequence[Any],
+        movable_actions: list[tuple[Any, int, int]],
+        static_barriers: set[tuple[int, int]],
+        goals: Sequence[tuple[int, int]] | set[tuple[int, int]],
+        dynamic_obstacles: set[tuple[int, int]] | None = None,
+    ) -> list[MentalSimulationStep] | None:
+        """Formulate multi-stage frontopolar affordance subgoals for portable/cargo entities and receptacles.
+
+        Decomposes object manipulation into clean, modular subgoals:
+        [Approach Cargo -> Attach via Interaction -> Compound Navigate to Receptacle -> Detach].
+        Eliminates entangled space-time search heuristics.
+        """
+        start_pos = engine.avatar_pos
+        if start_pos is None:
+            return None
+
+        step_sz = max(1, getattr(engine, "lattice_stride", 1) or 1)
+        for _, dr, dc in movable_actions:
+            dist = max(abs(dr), abs(dc))
+            if dist > step_sz:
+                step_sz = dist
+        stride = step_sz
+
+        if hasattr(engine, "snap_to_lattice"):
+            start_pos = engine.snap_to_lattice(start_pos) or start_pos
+
+        # 1. Identify destination Receptacle / Goal Drop Zone
+        receptacle_candidates: list[tuple[int, int]] = []
+        if getattr(engine, "learned_receptacle_positions", None):
+            for r_pos in engine.learned_receptacle_positions:
+                if r_pos not in receptacle_candidates:
+                    receptacle_candidates.append(r_pos)
+        for g_pos in engine.learned_goal_positions:
+            if g_pos not in receptacle_candidates:
+                receptacle_candidates.append(g_pos)
+        for e in entities:
+            if engine.symbolic_theory.has_affordance(e, "receptacle") or getattr(e, "role", "") in (
+                EntityRole.RECEPTACLE,
+                EntityRole.GOAL,
+            ):
+                if e.grid_pos not in receptacle_candidates:
+                    receptacle_candidates.append(e.grid_pos)
+        if not receptacle_candidates and goals:
+            for g in goals:
+                receptacle_candidates.append(g)
+
+        if not receptacle_candidates:
+            return None
+
+        # 2. Check if avatar is currently carrying an incorporated object
+        is_holding = engine.working_memory.body_schema.has_manipulandum()
+        active_manip = engine.working_memory.body_schema.active_manipulandum if is_holding else None
+
+        # 3. Identify all uncollected pickable entities on the board
+        cargos_known = engine.symbolic_theory.cargo_features | engine.learned_cargo_features
+        learned_recs = getattr(engine, "learned_receptacle_positions", set())
+
+        def _is_receptacle_component(e: SpatialEntity) -> bool:
+            if e.feature_id in engine.symbolic_theory.receptacle_features:
+                return True
+            if e.feature_id in cargos_known or engine.symbolic_theory.has_affordance(
+                e, "can_pickup"
+            ):
+                return False
+            e_p = (
+                engine.snap_to_lattice(e.grid_pos)
+                if hasattr(engine, "snap_to_lattice")
+                else e.grid_pos
+            )
+            if (
+                e.grid_pos in receptacle_candidates
+                or e.grid_pos in learned_recs
+                or e_p in receptacle_candidates
+                or e_p in learned_recs
+            ):
+                return True
+            for r_pos in receptacle_candidates:
+                if (
+                    e.bounding_box[0] <= r_pos[0] <= e.bounding_box[1]
+                    and e.bounding_box[2] <= r_pos[1] <= e.bounding_box[3]
+                ):
+                    return True
+            for r_pos in learned_recs:
+                if (
+                    e.bounding_box[0] <= r_pos[0] <= e.bounding_box[1]
+                    and e.bounding_box[2] <= r_pos[1] <= e.bounding_box[3]
+                ):
+                    return True
+            return False
+
+        filled_receptacle_slots: set[tuple[int, int]] = {
+            (
+                engine.snap_to_lattice(e.grid_pos)
+                if hasattr(engine, "snap_to_lattice")
+                else e.grid_pos
+            )
+            for e in entities
+            if (
+                e.feature_id in cargos_known
+                or engine.symbolic_theory.has_affordance(e, "can_pickup")
+            )
+            and e.feature_id not in engine.symbolic_theory.receptacle_features
+            and (
+                e.grid_pos in learned_recs
+                or e.grid_pos in receptacle_candidates
+                or (
+                    engine.snap_to_lattice(e.grid_pos)
+                    if hasattr(engine, "snap_to_lattice")
+                    else e.grid_pos
+                )
+                in learned_recs
+                or (
+                    engine.snap_to_lattice(e.grid_pos)
+                    if hasattr(engine, "snap_to_lattice")
+                    else e.grid_pos
+                )
+                in receptacle_candidates
+            )
+            and (not is_holding or active_manip is None or e.grid_pos != active_manip.pos)
+        }
+
+        pickable_entities: list[SpatialEntity] = []
+        seen_pickable_pos: set[tuple[int, int]] = set()
+        for e in entities:
+            if (
+                e.feature_id in av_feats
+                or e.feature_id == bg
+                or e.feature_id == 0
+                or getattr(e, "role", "") == EntityRole.OBSTACLE
+                or (
+                    e.bounding_box[0] == e.bounding_box[1] or e.bounding_box[2] == e.bounding_box[3]
+                )
+                or engine.symbolic_theory.is_barrier(e.feature_id)
+            ):
+                continue
+            if not (
+                engine.symbolic_theory.has_affordance(e, "can_pickup")
+                or e.feature_id in cargos_known
+                or getattr(e, "role", "") == EntityRole.MANIPULABLE
+            ):
+                continue
+            if _is_receptacle_component(e):
+                continue
+            e_p = (
+                engine.snap_to_lattice(e.grid_pos)
+                if hasattr(engine, "snap_to_lattice")
+                else e.grid_pos
+            )
+            if e_p is None or e_p in seen_pickable_pos or e_p in filled_receptacle_slots:
+                continue
+            seen_pickable_pos.add(e_p)
+            pickable_entities.append(e)
+
+        if not is_holding and not pickable_entities:
+            return None
+
+        # 4. Resolve interaction action
+        interact_act = getattr(engine.symbolic_theory, "primary_interaction_action", None)
+        if interact_act is None and getattr(engine.symbolic_theory, "interaction_actions", None):
+            interact_act = next(iter(engine.symbolic_theory.interaction_actions))
+        if interact_act is None:
+            interact_act = getattr(engine, "interaction_action", None)
+        if interact_act is None:
+            movable_act_ids = {m[0] for m in movable_actions}
+            interact_act = next(
+                (
+                    a
+                    for a in available_actions
+                    if a not in movable_act_ids
+                    and (
+                        a == 5
+                        or engine.is_spatial_effector(a)
+                        or not engine.is_displacement_action(a)
+                    )
+                ),
+                None,
+            )
+        if interact_act is None:
+            return None
+
+        H, W = curr_grid.shape
+
+        # Clean Geodesic BFS router for a single subgoal segment
+        def _route_segment(
+            from_pos: tuple[int, int],
+            to_pos: tuple[int, int],
+            held_offset: tuple[int, int] | None = None,
+            obstacles: set[tuple[int, int]] = set(),
+        ) -> list[tuple[Any, tuple[int, int]]] | None:
+            if from_pos == to_pos:
+                return []
+            q: deque[tuple[int, int]] = deque([from_pos])
+            parent: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+            visited: set[tuple[int, int]] = {from_pos}
+            while q:
+                curr = q.popleft()
+                if curr == to_pos:
+                    path: list[tuple[Any, tuple[int, int]]] = []
+                    c = curr
+                    while c in parent:
+                        p, act = parent[c]
+                        path.append((act, c))
+                        c = p
+                    path.reverse()
+                    return path
+                for act, dr, dc in movable_actions:
+                    nr, nc = curr[0] + dr, curr[1] + dc
+                    nxt = (nr, nc)
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    if nxt in static_barriers or nxt in obstacles:
+                        continue
+                    step_r = int(np.sign(dr))
+                    step_c = int(np.sign(dc))
+                    dist = max(abs(dr), abs(dc))
+                    ray_blocked = False
+                    for k in range(1, dist + 1):
+                        kr, kc = curr[0] + step_r * k, curr[1] + step_c * k
+                        if (kr, kc) in static_barriers or (kr, kc) in obstacles:
+                            ray_blocked = True
+                            break
+                    if ray_blocked:
+                        continue
+                    if held_offset is not None:
+                        cr, cc = nr + held_offset[0], nc + held_offset[1]
+                        if not (0 <= cr < H and 0 <= cc < W):
+                            continue
+                        if (cr, cc) in static_barriers or (cr, cc) in obstacles:
+                            continue
+                        for k in range(1, dist + 1):
+                            ckr = (curr[0] + held_offset[0]) + step_r * k
+                            ckc = (curr[1] + held_offset[1]) + step_c * k
+                            if (ckr, ckc) in static_barriers or (ckr, ckc) in obstacles:
+                                ray_blocked = True
+                                break
+                        if ray_blocked:
+                            continue
+                    if nxt not in visited:
+                        visited.add(nxt)
+                        parent[nxt] = (curr, act)
+                        q.append(nxt)
+            return None
+
+        plan_steps: list[MentalSimulationStep] = []
+        curr_av = start_pos
+        remaining_entities = list(pickable_entities)
+
+        # Subgoal Stage A: If avatar is already carrying cargo, deliver it first
+        if is_holding and active_manip is not None:
+            held_offset = (active_manip.pos[0] - curr_av[0], active_manip.pos[1] - curr_av[1])
+            other_obs = {
+                p
+                for e in remaining_entities
+                if e.grid_pos != active_manip.pos
+                and (
+                    p := (
+                        engine.snap_to_lattice(e.grid_pos)
+                        if hasattr(engine, "snap_to_lattice")
+                        else e.grid_pos
+                    )
+                )
+                is not None
+            }
+            other_obs.update(filled_receptacle_slots)
+            if dynamic_obstacles:
+                other_obs.update(dynamic_obstacles)
+            deliv_seg = None
+            dest_rec = None
+            for cand_rec in receptacle_candidates:
+                if cand_rec in filled_receptacle_slots or cand_rec in other_obs:
+                    continue
+                target_av = (cand_rec[0] - held_offset[0], cand_rec[1] - held_offset[1])
+                seg = _route_segment(
+                    curr_av, target_av, held_offset=held_offset, obstacles=other_obs
+                )
+                if seg is not None and (deliv_seg is None or len(seg) < len(deliv_seg)):
+                    deliv_seg = seg
+                    dest_rec = cand_rec
+            if deliv_seg is not None and dest_rec is not None:
+                for act, nxt_p in deliv_seg:
+                    plan_steps.append(
+                        MentalSimulationStep(
+                            action=act,
+                            predicted_avatar_pos=nxt_p,
+                            expected_mutation="deliver_cargo",
+                        )
+                    )
+                curr_av = (dest_rec[0] - held_offset[0], dest_rec[1] - held_offset[1])
+                plan_steps.append(
+                    MentalSimulationStep(
+                        action=interact_act,
+                        predicted_avatar_pos=curr_av,
+                        expected_mutation="detach_cargo_at_goal",
+                    )
+                )
+                filled_receptacle_slots.add(dest_rec)
+            else:
+                return None
+
+        # Subgoal Stage B: Collect and deliver each remaining pickable entity
+        uncollected_pickable = [
+            e
+            for e in remaining_entities
+            if not (is_holding and active_manip is not None and e.grid_pos == active_manip.pos)
+        ]
+        for ent in uncollected_pickable:
+            ent_pos = (
+                engine.snap_to_lattice(ent.grid_pos)
+                if hasattr(engine, "snap_to_lattice")
+                else ent.grid_pos
+            )
+            if ent_pos is None:
+                continue
+            other_obs = {
+                p
+                for e in remaining_entities
+                if (
+                    p := (
+                        engine.snap_to_lattice(e.grid_pos)
+                        if hasattr(engine, "snap_to_lattice")
+                        else e.grid_pos
+                    )
+                )
+                is not None
+                and p != ent_pos
+                and (not is_holding or active_manip is None or p != active_manip.pos)
+            }
+            other_obs.update(filled_receptacle_slots)
+            if dynamic_obstacles:
+                other_obs.update(dynamic_obstacles)
+
+            adj_candidates = [
+                (ent_pos[0] + dr, ent_pos[1] + dc)
+                for dr, dc in [(-stride, 0), (stride, 0), (0, -stride), (0, stride)]
+                if 0 <= ent_pos[0] + dr < H
+                and 0 <= ent_pos[1] + dc < W
+                and (ent_pos[0] + dr, ent_pos[1] + dc) not in static_barriers
+                and (ent_pos[0] + dr, ent_pos[1] + dc) not in other_obs
+            ]
+            best_pickup_seg: list[tuple[Any, tuple[int, int]]] | None = None
+            best_pickup_cell: tuple[int, int] | None = None
+            for cand in adj_candidates:
+                seg = _route_segment(curr_av, cand, obstacles=other_obs | {ent_pos})
+                if seg is not None:
+                    if best_pickup_seg is None or len(seg) < len(best_pickup_seg):
+                        best_pickup_seg = seg
+                        best_pickup_cell = cand
+            if best_pickup_seg is None or best_pickup_cell is None:
+                continue
+
+            # Orient towards cargo if approaching from a non-aligned heading
+            dr_to_box = ent_pos[0] - best_pickup_cell[0]
+            dc_to_box = ent_pos[1] - best_pickup_cell[1]
+            face_act = next(
+                (
+                    act
+                    for act, dr, dc in movable_actions
+                    if (dr * dr_to_box > 0 or dc * dc_to_box > 0)
+                ),
+                None,
+            )
+            last_mov = best_pickup_seg[-1][0] if best_pickup_seg else None
+            held_offset = (ent_pos[0] - best_pickup_cell[0], ent_pos[1] - best_pickup_cell[1])
+
+            # Compound navigate to deliver cargo into an available receptacle slot
+            deliv_seg = None
+            dest_rec = None
+            for cand_rec in receptacle_candidates:
+                if cand_rec in filled_receptacle_slots or cand_rec in other_obs:
+                    continue
+                target_av = (cand_rec[0] - held_offset[0], cand_rec[1] - held_offset[1])
+                seg = _route_segment(
+                    best_pickup_cell, target_av, held_offset=held_offset, obstacles=other_obs
+                )
+                if seg is not None and (deliv_seg is None or len(seg) < len(deliv_seg)):
+                    deliv_seg = seg
+                    dest_rec = cand_rec
+            if deliv_seg is None or dest_rec is None:
+                continue
+
+            # BOTH pickup and delivery segments are verified! Commit all steps atomically:
+            for act, nxt_p in best_pickup_seg:
+                plan_steps.append(
+                    MentalSimulationStep(
+                        action=act,
+                        predicted_avatar_pos=nxt_p,
+                        expected_mutation="approach_cargo",
+                    )
+                )
+            curr_av = best_pickup_cell
+            if face_act is not None and (last_mov is None or last_mov != face_act):
+                plan_steps.append(
+                    MentalSimulationStep(
+                        action=face_act,
+                        predicted_avatar_pos=curr_av,
+                        expected_mutation="orient_towards_cargo",
+                    )
+                )
+
+            plan_steps.append(
+                MentalSimulationStep(
+                    action=interact_act,
+                    predicted_avatar_pos=curr_av,
+                    expected_mutation="attach_cargo",
+                )
+            )
+
+            for act, nxt_p in deliv_seg:
+                plan_steps.append(
+                    MentalSimulationStep(
+                        action=act,
+                        predicted_avatar_pos=nxt_p,
+                        expected_mutation="deliver_cargo",
+                    )
+                )
+            curr_av = (dest_rec[0] - held_offset[0], dest_rec[1] - held_offset[1])
+
+            # Detach cargo inside receptacle
+            plan_steps.append(
+                MentalSimulationStep(
+                    action=interact_act,
+                    predicted_avatar_pos=curr_av,
+                    expected_mutation="detach_cargo_at_goal",
+                )
+            )
+            filled_receptacle_slots.add(dest_rec)
+            if ent in remaining_entities:
+                remaining_entities.remove(ent)
+            if dynamic_obstacles:
+                break
+
+        if plan_steps:
+            logger.info(
+                "MentalSimulationPlanner: Formulated Affordance-Driven Subgoal Plan (%d steps for %d entities)",
+                len(plan_steps),
+                len(pickable_entities),
+            )
+            return plan_steps
 
         return None
 

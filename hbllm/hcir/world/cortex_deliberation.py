@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.skills.declarative import SkillEvaluationContext
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
@@ -186,6 +187,8 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
             av_feats = engine.avatar_features or (
                 {engine.avatar_feature} if engine.avatar_feature is not None else set()
             )
+            cargos_known = engine.symbolic_theory.cargo_features | engine.learned_cargo_features
+            goals_known = set(engine.learned_goal_positions)
             live_threats = PerceptionEngine.detect_oriented_threats(
                 curr_grid,
                 entities,
@@ -193,13 +196,22 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 step_size=step_size,
                 avatar_pos=engine.avatar_pos,
                 avatar_features=av_feats,
+                goals=goals_known,
+                cargo_features=cargos_known,
+                barrier_features=engine.symbolic_theory.barrier_features,
+                walkable_features=engine.symbolic_theory.walkable_features,
             )
             if not live_threats and not engine.mobile_threat_features:
                 return SafetyGateResult(is_safe=True)
 
             # Oriented stationary hazard line-of-sight gate (e.g., directional sensors, optical cones)
             stationary_threats = [
-                t for t in live_threats if t.feature_id not in engine.mobile_threat_features
+                t
+                for t in live_threats
+                if t.feature_id not in engine.mobile_threat_features
+                and t.feature_id not in cargos_known
+                and t.feature_id not in engine.symbolic_theory.goal_features
+                and t.feature_id not in engine.symbolic_theory.receptacle_features
             ]
             oriented_hazard_cells = {t.gaze_pos for t in stationary_threats if t.facing != (0, 0)}
             if (
@@ -302,10 +314,35 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        has_temporal = (
+        cargos_known_temp = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
+        av_feats_temp = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
+        has_periodic = (
             bool(engine.hazard_tracker.periodic_cells)
+            and engine.hazard_tracker.environmental_period >= 2
+            and any(
+                not (
+                    p.hazardous_values
+                    <= (cargos_known_temp | av_feats_temp | {0, getattr(engine, "bg_feature", 0)})
+                )
+                for p in engine.hazard_tracker.periodic_cells.values()
+            )
+        )
+        has_temporal = (
+            has_periodic
             or bool(engine.mobile_threat_features)
-            or bool(engine.collision_cones.projected_trajectories)
+            or any(
+                (
+                    proj.feature_id in engine.mobile_threat_features
+                    or proj.feature_id in engine.hazard_tracker.known_lethal_features
+                )
+                and proj.feature_id not in cargos_known_temp
+                and proj.feature_id not in av_feats_temp
+                for proj in engine.collision_cones.projected_trajectories
+            )
         )
         if not has_temporal and engine.inhibited_actions.get(next_step.action, 0) > 0:
             return SafetyGateResult(
@@ -407,6 +444,16 @@ class CausalUndoSafetyPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
+        if next_step.expected_mutation in (
+            "attach_cargo",
+            "detach_cargo_at_goal",
+            "orient_towards_cargo",
+            "approach_cargo",
+            "deliver_cargo",
+            "interact",
+        ) or next_step.action in getattr(engine.symbolic_theory, "interaction_actions", set()):
+            return SafetyGateResult(is_safe=True)
+
         undo_acts = getattr(engine, "undo_actions", set())
         aff = engine.action_affordances.get(next_step.action)
         is_undo = next_step.action in undo_acts or (
@@ -541,143 +588,24 @@ class PrefrontalDeliberationEngine:
                 if res is not None:
                     return res
 
-        # 2. Domain-agnostic fallback for discrete transform / focus switch actions
-        spatial_effector_actions = [a for a in available_actions if engine.is_spatial_effector(a)]
-        discrete_transform_actions = [
-            a
-            for a in available_actions
-            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-        ]
-        focus_switches = [
-            a
-            for a in discrete_transform_actions
-            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
-        ]
-        if focus_switches:
-            goals = list(getattr(engine, "goals", getattr(engine, "learned_goal_positions", [])))
-            if not goals and hasattr(engine, "detect_structural_goals"):
-                sgs = engine.detect_structural_goals(curr_grid, bg=engine.bg_feature)
-                av_feats = engine.avatar_features or (
-                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
-                )
-                constellations = [
-                    sg
-                    for sg in sgs
-                    if sg.get("type") == "target_constellation"
-                    and (sg.get("feature") in av_feats if av_feats else True)
-                ]
-                targets = constellations if constellations else sgs
-                for sg in targets:
-                    if sg.get("position"):
-                        goals.append(sg["position"])
-            avatar_arrived = bool(
-                engine.avatar_pos is not None
-                and goals
-                and any(engine.avatar_pos == g for g in goals)
-            )
-            no_viable_plan = bool(
-                not engine.mental_plan
-                and engine.consecutive_plan_failures >= 3
-                and engine.consecutive_stuck_steps >= 2
-            )
-            if avatar_arrived or no_viable_plan:
-                chosen_switch = focus_switches[0]
-                engine.inhibited_actions[chosen_switch] = max(
-                    engine.inhibited_actions.get(chosen_switch, 0), 4
-                )
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                engine.consecutive_plan_failures = 0
-                engine.consecutive_stuck_steps = 0
-                return chosen_switch, None
-
-        # Faculty: Dial / State-Cycler Interleaved Deliberation (Norman Parameter Space Navigation)
-        index_selectors = [
-            a
-            for a in available_actions
-            if a in engine.index_selector_actions and engine.inhibited_actions.get(a, 0) == 0
-        ]
-        value_mutators = [
-            a
-            for a in available_actions
-            if a in engine.value_mutator_actions and engine.inhibited_actions.get(a, 0) == 0
-        ]
-        if index_selectors and value_mutators:
-            mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
-            max_streak = getattr(engine.working_memory, "dial_mutation_limit", 2)
-            if mut_streak < max_streak:
-                chosen = value_mutators[-1]
-                engine.working_memory.dial_mutation_streak = mut_streak + 1
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen, None
-            else:
-                chosen = index_selectors[-1]
-                engine.working_memory.dial_mutation_streak = 0
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen, None
-
-        # Modal Select-Then-Direct Gating: If no avatar and no manipulandum bound, reach for interactive entities
-        bg = getattr(engine, "bg_feature", getattr(engine, "background_color", 0))
-        has_foreground = np.any(curr_grid != bg)
-        has_displacement_actions = any(engine.is_displacement_action(a) for a in available_actions)
-        if (
-            has_foreground
-            and (engine.avatar_pos is None or not has_displacement_actions)
-            and (
-                not engine.working_memory.body_schema.has_manipulandum()
-                or not has_displacement_actions
-            )
-            and spatial_effector_actions
-        ):
-            # Prioritize motor grounding of uncalibrated discrete actions when effector interactions are quiescent
-            uncalibrated_discrete = [
-                a
-                for a in discrete_transform_actions
-                if not engine.is_action_calibrated(a)
-                and engine.inhibited_actions.get(a, 0) == 0
-                and a not in engine.symbolic_theory.undo_actions
-                and (a, engine.avatar_pos) not in engine.tested_action_positions
-            ]
-            if uncalibrated_discrete and engine.consecutive_quiescent_actions >= 1:
-                chosen_disc = uncalibrated_discrete[0]
-                engine.tested_action_positions.add((chosen_disc, engine.avatar_pos))
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen_disc, None
-
-            chosen_eff = spatial_effector_actions[0]
-            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
-            if eff_data is not None:
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen_eff, eff_data
-
-        if not spatial_effector_actions and discrete_transform_actions:
-            has_displacement_actions = any(
-                engine.is_displacement_action(a) for a in available_actions
-            ) or any(
-                not engine.is_spatial_effector(a) and a not in engine.action_dynamics
-                for a in available_actions
-            )
-            is_stuck_or_looping = (
-                engine.consecutive_stuck_steps >= 2
-                or (
-                    engine.avatar_pos is not None
-                    and engine.recent_positions.count(engine.avatar_pos) >= 2
-                )
-                or (engine.avatar_pos is None and engine.step_counter > 4)
-            )
-            if not has_displacement_actions or is_stuck_or_looping:
-                undo_acts = getattr(engine, "undo_actions", set())
-                uninhibited_discrete = [
-                    a
-                    for a in discrete_transform_actions
-                    if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
-                ]
-                chosen_action = (
-                    uninhibited_discrete[0]
-                    if uninhibited_discrete
-                    else discrete_transform_actions[0]
-                )
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen_action, None
+        # 2. Declarative Neuro-Symbolic Skill Arbitration via PrefrontalWorkingMemory Procedural Library
+        ctx = SkillEvaluationContext(
+            grid=curr_grid,
+            available_actions=list(available_actions),
+            metadata={"engine": engine, "known_av_feats": known_av_feats},
+        )
+        for skill_name, skill in engine.working_memory.procedural_library.items():
+            if skill.can_handle(
+                curr_grid,
+                list(available_actions),
+                metadata={"engine": engine, "known_av_feats": known_av_feats},
+            ):
+                res = skill.solve(ctx)
+                if res:
+                    first = res[0]
+                    if isinstance(first, tuple):
+                        return first[0], first[1]
+                    return first, None
 
         return None
 
@@ -872,17 +800,43 @@ class PrefrontalDeliberationEngine:
         if engine.working_memory.has_salience_shift(engine):
             engine.simulation_cooldown = 0
             engine.consecutive_simulation_failures = 0
-            engine.mental_plan.clear()
-            engine.phase = (
-                EpistemicPhase.MENTAL_SIMULATION
-                if engine.is_motor_grounded()
-                else EpistemicPhase.EPISTEMIC_EXPLORATION
-            )
+            if not (engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan):
+                engine.mental_plan.clear()
+                engine.phase = (
+                    EpistemicPhase.MENTAL_SIMULATION
+                    if engine.is_motor_grounded()
+                    else EpistemicPhase.EPISTEMIC_EXPLORATION
+                )
 
-        has_temporal = (
+        cargos_known_temp2 = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
+        av_feats_temp2 = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
+        has_periodic2 = (
             bool(engine.hazard_tracker.periodic_cells)
+            and engine.hazard_tracker.environmental_period >= 2
+            and any(
+                not (
+                    p.hazardous_values
+                    <= (cargos_known_temp2 | av_feats_temp2 | {0, getattr(engine, "bg_feature", 0)})
+                )
+                for p in engine.hazard_tracker.periodic_cells.values()
+            )
+        )
+        has_temporal = (
+            has_periodic2
             or bool(engine.mobile_threat_features)
-            or bool(engine.collision_cones.projected_trajectories)
+            or any(
+                (
+                    proj.feature_id in engine.mobile_threat_features
+                    or proj.feature_id in engine.hazard_tracker.known_lethal_features
+                )
+                and proj.feature_id not in cargos_known_temp2
+                and proj.feature_id not in av_feats_temp2
+                for proj in engine.collision_cones.projected_trajectories
+            )
         )
 
         # Metacognitive Refractory Inhibition: decay refractory timers
@@ -913,9 +867,14 @@ class PrefrontalDeliberationEngine:
             )
             if not has_progress:
                 for osc_act in osc_acts:
+                    k = getattr(
+                        getattr(engine, "symbolic_theory", None),
+                        "get_cycle_period",
+                        lambda a, default=4: default,
+                    )(osc_act, default=4)
                     if (
                         osc_act in engine.value_mutator_actions
-                        and getattr(engine.working_memory, "dial_mutation_streak", 0) < 7
+                        and getattr(engine.working_memory, "dial_mutation_streak", 0) < k
                     ):
                         continue
                     engine.inhibited_actions[osc_act] = max(
@@ -1097,45 +1056,42 @@ class PrefrontalDeliberationEngine:
             chosen_action = forced_acc_perturbation
             chosen_data = None
 
-        # 1. Prefrontal Affordance Panel & Optical Symmetry Gating
-        elif (
-            affordance_choice := self.arbitrate_affordances(
-                engine, curr_grid, available_actions, known_av_feats
-            )
-        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
-            chosen_action, chosen_data = affordance_choice
-
-        # 2. Check active mental plan during EXPLOITATION phase
+        # 1. Check active mental plan during EXPLOITATION phase
         elif engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
             # Check for physical plan divergence: avatar failed to reach predicted location
-            if (
-                engine.last_predicted_pos is not None
-                and engine.avatar_pos is not None
-                and engine.avatar_pos != engine.last_predicted_pos
-            ):
+            diverged = False
+            if engine.last_predicted_pos is not None and engine.avatar_pos is not None:
+                dr_err = abs(engine.avatar_pos[0] - engine.last_predicted_pos[0])
+                dc_err = abs(engine.avatar_pos[1] - engine.last_predicted_pos[1])
+                stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
+                max_tol = 1 if stride > 2 else 0
+                if dr_err > max_tol or dc_err > max_tol:
+                    diverged = True
+
+            if diverged:
                 engine.consecutive_pacing_steps = 0
                 engine.mental_plan.clear()
                 engine.transition_to_phase(
                     EpistemicPhase.REPLANNING,
                     reason="plan_divergence_from_predicted_avatar_pos",
                 )
-                macro_plan = engine.object_planner.plan_macro_option(
-                    engine, curr_grid, available_actions
-                )
-                if macro_plan:
+                simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
+                if simulated_plan:
+                    engine.consecutive_simulation_failures = 0
+                    engine.simulation_cooldown = 0
                     engine.phase = EpistemicPhase.EXPLOITATION
-                    engine.mental_plan = deque(macro_plan)
+                    engine.mental_plan = deque(simulated_plan)
                     next_step = engine.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
                 else:
-                    simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
-                    if simulated_plan:
-                        engine.consecutive_simulation_failures = 0
-                        engine.simulation_cooldown = 0
+                    macro_plan = engine.object_planner.plan_macro_option(
+                        engine, curr_grid, available_actions
+                    )
+                    if macro_plan:
                         engine.phase = EpistemicPhase.EXPLOITATION
-                        engine.mental_plan = deque(simulated_plan)
+                        engine.mental_plan = deque(macro_plan)
                         next_step = engine.mental_plan.popleft()
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
@@ -1166,31 +1122,30 @@ class PrefrontalDeliberationEngine:
                     engine.mental_plan.clear()
 
                     engine.phase = EpistemicPhase.REPLANNING
-                    # Primary replanning: Object-Centric Macro Option
-                    macro_plan = engine.object_planner.plan_macro_option(
-                        engine, curr_grid, available_actions
+                    danger_cells = (
+                        {next_step.predicted_avatar_pos}
+                        if next_step.predicted_avatar_pos is not None and not has_temporal
+                        else set()
                     )
-                    if macro_plan:
+                    simulated_plan = engine.simulate_in_mind(
+                        curr_grid, available_actions, blocked_cells=danger_cells
+                    )
+                    if simulated_plan:
+                        engine.consecutive_simulation_failures = 0
+                        engine.simulation_cooldown = 0
                         engine.phase = EpistemicPhase.EXPLOITATION
-                        engine.mental_plan = deque(macro_plan)
+                        engine.mental_plan = deque(simulated_plan)
                         next_step = engine.mental_plan.popleft()
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
                         predicted_pos = next_step.predicted_avatar_pos
                     else:
-                        danger_cells = (
-                            {next_step.predicted_avatar_pos}
-                            if next_step.predicted_avatar_pos is not None and not has_temporal
-                            else set()
+                        macro_plan = engine.object_planner.plan_macro_option(
+                            engine, curr_grid, available_actions
                         )
-                        simulated_plan = engine.simulate_in_mind(
-                            curr_grid, available_actions, blocked_cells=danger_cells
-                        )
-                        if simulated_plan:
-                            engine.consecutive_simulation_failures = 0
-                            engine.simulation_cooldown = 0
+                        if macro_plan:
                             engine.phase = EpistemicPhase.EXPLOITATION
-                            engine.mental_plan = deque(simulated_plan)
+                            engine.mental_plan = deque(macro_plan)
                             next_step = engine.mental_plan.popleft()
                             chosen_action = next_step.action
                             chosen_data = next_step.action_data
@@ -1201,7 +1156,6 @@ class PrefrontalDeliberationEngine:
                             )
                 elif (
                     next_step.action in available_actions
-                    and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
                     and not engine.working_memory.habenular_ior.is_action_inhibited(
                         engine.avatar_pos, next_step.action, next_step.action_data
                     )
@@ -1214,20 +1168,39 @@ class PrefrontalDeliberationEngine:
                 else:
                     engine.mental_plan.clear()
                     engine.phase = EpistemicPhase.REPLANNING
-                    macro_plan = engine.object_planner.plan_macro_option(
-                        engine, curr_grid, available_actions
-                    )
-                    if macro_plan:
+                    simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
+                    if simulated_plan:
+                        engine.consecutive_simulation_failures = 0
+                        engine.simulation_cooldown = 0
                         engine.phase = EpistemicPhase.EXPLOITATION
-                        engine.mental_plan = deque(macro_plan)
+                        engine.mental_plan = deque(simulated_plan)
                         next_step = engine.mental_plan.popleft()
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
                         predicted_pos = next_step.predicted_avatar_pos
                     else:
-                        chosen_action, chosen_data = engine.plan_epistemic_probe(
-                            curr_grid, available_actions
+                        macro_plan = engine.object_planner.plan_macro_option(
+                            engine, curr_grid, available_actions
                         )
+                        if macro_plan:
+                            engine.phase = EpistemicPhase.EXPLOITATION
+                            engine.mental_plan = deque(macro_plan)
+                            next_step = engine.mental_plan.popleft()
+                            chosen_action = next_step.action
+                            chosen_data = next_step.action_data
+                            predicted_pos = next_step.predicted_avatar_pos
+                        else:
+                            chosen_action, chosen_data = engine.plan_epistemic_probe(
+                                curr_grid, available_actions
+                            )
+
+        # 2. Prefrontal Affordance Panel & Optical Symmetry Gating
+        elif (
+            affordance_choice := self.arbitrate_affordances(
+                engine, curr_grid, available_actions, known_av_feats
+            )
+        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
+            chosen_action, chosen_data = affordance_choice
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
@@ -1255,7 +1228,6 @@ class PrefrontalDeliberationEngine:
                     elif (
                         plan_safe
                         and next_step.action in available_actions
-                        and (has_temporal or engine.inhibited_actions.get(next_step.action, 0) == 0)
                         and not engine.working_memory.habenular_ior.is_action_inhibited(
                             engine.avatar_pos, next_step.action, next_step.action_data
                         )

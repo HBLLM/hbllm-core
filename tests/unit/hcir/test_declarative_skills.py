@@ -222,3 +222,73 @@ def test_tile_frame_predicate() -> None:
     assert TileFramePredicate(frame_size=7, min_frames=2).evaluate(ctx) is True
     assert TileFramePredicate(frame_size=7, min_frames=3).evaluate(ctx) is False
     assert TileFramePredicate(frame_size=5, min_frames=1).evaluate(ctx) is False
+
+
+def test_dial_cycling_coordinate_descent_and_distal_gating() -> None:
+    from types import SimpleNamespace
+
+    from hbllm.hcir.skills.declarative import DialCyclingSkill
+
+    class MockSymbolicTheory:
+        def __init__(self) -> None:
+            self.action_cycle_periods = {2: 4}
+
+        def get_cycle_period(self, action: int, default: int = 4) -> int:
+            return self.action_cycle_periods.get(action, default)
+
+    class MockWorkingMemory:
+        def __init__(self) -> None:
+            self.dial_mutation_streak = 0
+            self._shift = False
+
+        def has_salience_shift(self, engine: object) -> bool:
+            return self._shift
+
+    theory = MockSymbolicTheory()
+    wm = MockWorkingMemory()
+    engine = SimpleNamespace(
+        symbolic_theory=theory,
+        working_memory=wm,
+        index_selector_actions={3, 4},
+        value_mutator_actions={1, 2},
+        inhibited_actions={},
+        last_surprise=0.0,
+        phase=None,
+    )
+
+    grid = np.zeros((10, 10), dtype=int)
+    ctx = SkillEvaluationContext(
+        grid=grid,
+        available_actions=[1, 2, 3, 4],
+        metadata={"engine": engine},
+    )
+
+    skill = DialCyclingSkill()
+
+    # Step 1: streak 0 < 3 (k-1) -> mutate (chosen_mut=2), streak becomes 1
+    res1 = skill.solve(ctx)
+    assert res1 == [(2, None)]
+    assert wm.dial_mutation_streak == 1
+
+    # Step 2: streak 1 < 3 -> mutate, streak becomes 2
+    res2 = skill.solve(ctx)
+    assert res2 == [(2, None)]
+    assert wm.dial_mutation_streak == 2
+
+    # Step 3: streak 2 < 3 -> mutate, streak becomes 3
+    res3 = skill.solve(ctx)
+    assert res3 == [(2, None)]
+    assert wm.dial_mutation_streak == 3
+
+    # Step 4: streak 3 >= 3 -> advances index (chosen_idx=4), streak resets to 0
+    res4 = skill.solve(ctx)
+    assert res4 == [(4, None)]
+    assert wm.dial_mutation_streak == 0
+
+    # Test Distal Trigger Gating:
+    # When a mutation causes surprise >= 0.4 or salience shift, lock in immediately!
+    wm.dial_mutation_streak = 1
+    engine.last_surprise = 0.6
+    res_distal = skill.solve(ctx)
+    assert res_distal == [(4, None)]
+    assert wm.dial_mutation_streak == 0

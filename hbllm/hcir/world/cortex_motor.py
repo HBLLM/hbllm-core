@@ -1458,7 +1458,13 @@ class MotorCortexEffector:
         for eff_r, eff_c in engine.effective_click_targets:
             if not cls.is_peripheral_frame_cell(eff_r, eff_c, H, W, curr_grid):
                 vis = engine.entity_visit_counts.get(f"click_{eff_r}_{eff_c}", 0)
-                click_candidates.append((eff_r, eff_c, 260.0 - float(vis) * 10.0))
+                consec = (
+                    engine.consecutive_effective_clicks
+                    if engine.last_effective_click_coord == (eff_r, eff_c)
+                    else 0
+                )
+                satiation = float(consec) * 50.0
+                click_candidates.append((eff_r, eff_c, 260.0 - float(vis) * 15.0 - satiation))
 
         # 5. Salient Physical Entities & Perimeter Control Panels:
         # Physical interactive entities are evaluated as viable candidates alongside structural goals
