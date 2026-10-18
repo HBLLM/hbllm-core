@@ -1411,6 +1411,30 @@ class MotorCortexEffector:
 
         click_candidates: list[tuple[int, int, float]] = []
 
+        # 0. Visuospatial Pattern Completion (CA3 & dlPFC Pair Matching):
+        # If the most recent probe revealed feature F, check working memory for another
+        # coordinate known to hold feature F. If found, emit it with maximum score.
+        vm = getattr(engine.working_memory, "visuospatial", None)
+        if (
+            vm is not None
+            and vm.last_probed_coord is not None
+            and vm.last_probed_feature is not None
+        ):
+            pair_target = vm.find_matching_pair(vm.last_probed_coord, vm.last_probed_feature)
+            if pair_target is not None:
+                pr, pc = pair_target
+                if not cls.is_peripheral_frame_cell(pr, pc, H, W, curr_grid):
+                    click_candidates.append((pr, pc, 1000.0))
+
+        # 0.1 Constraint Solver Deduction (Arc-Consistency & Unit Propagation):
+        cs = getattr(engine.working_memory, "constraint_solver", None)
+        if cs is not None and getattr(cs, "known_safe_cells", None):
+            for sr, sc in cs.known_safe_cells:
+                if (sr, sc) not in cs.revealed_cells and not cls.is_peripheral_frame_cell(
+                    sr, sc, H, W, curr_grid
+                ):
+                    click_candidates.append((sr, sc, 900.0))
+
         # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
         for scorer in cls._registered_target_scorers:
             try:

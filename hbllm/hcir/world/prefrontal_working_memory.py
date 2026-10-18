@@ -233,8 +233,8 @@ class PrefrontalWorkingMemory:
         self.probed_entity_ids: set[str] = set()
         self.entity_visit_counts: dict[str, int] = {}
         self.position_visit_counts: dict[tuple[int, int], int] = {}
-        self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
-        self.recent_actions: deque[Any] = deque(maxlen=16)
+        self.recent_positions: deque[tuple[int, int]] = deque(maxlen=64)
+        self.recent_actions: deque[Any] = deque(maxlen=64)
         self.exhausted_candidate_goals: set[tuple[int, int]] = set()
         self.quiescent_click_targets: set[tuple[int, int]] = set()
         self.effective_click_targets: set[tuple[int, int]] = set()

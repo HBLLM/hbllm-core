@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -1607,7 +1608,23 @@ class MentalSimulationPlanner:
             max_expansions = max_expansions_budget
             had_relaxable_block = False
 
+            sim_start_time = time.monotonic()
+            max_sim_wall_seconds = 0.045
+            best_frontier_node: int | None = None
+            best_frontier_h: float = h0
+            expansions_done = 0
+
             while open_set and max_expansions > 0:
+                expansions_done += 1
+                if (expansions_done & 31 == 0) and (
+                    time.monotonic() - sim_start_time > max_sim_wall_seconds
+                ):
+                    logger.debug(
+                        "MentalSimulationPlanner: Any-time RTA* deadline exceeded (%.3fs, %d expansions). Returning best partial path.",
+                        time.monotonic() - sim_start_time,
+                        expansions_done,
+                    )
+                    break
                 max_expansions -= 1
                 (
                     f_score,
@@ -2155,6 +2172,9 @@ class MentalSimulationPlanner:
                     new_step = MentalSimulationStep(action=real_act, predicted_avatar_pos=new_pos)
                     counter += 1
                     parent_map[counter] = (node_id, new_step)
+                    if new_h < best_frontier_h:
+                        best_frontier_h = new_h
+                        best_frontier_node = counter
                     new_waits = consecutive_waits + 1 if (is_wait or new_pos == cur_pos) else 0
                     heapq.heappush(
                         open_set,
@@ -2172,6 +2192,19 @@ class MentalSimulationPlanner:
                             new_waits,
                         ),
                     )
+
+            if best_frontier_node is not None and best_frontier_h < h0:
+                partial_path = _reconstruct_path(best_frontier_node)
+                if partial_path:
+                    logger.info(
+                        "AutonomousEpistemicEngine: Any-time RTA* partial plan found (%d steps, h: %.1f -> %.1f).",
+                        len(partial_path),
+                        h0,
+                        best_frontier_h,
+                    )
+                    if partial_path[-1].predicted_avatar_pos is not None:
+                        engine.current_simulated_goal = partial_path[-1].predicted_avatar_pos
+                    return partial_path, had_relaxable_block
 
             return None, had_relaxable_block
 

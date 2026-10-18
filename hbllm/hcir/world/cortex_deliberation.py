@@ -849,9 +849,13 @@ class PrefrontalDeliberationEngine:
         for act in to_uninhibited:
             engine.inhibited_actions.pop(act, None)
 
-        # Track recent avatar position on every decision step
+        # Track recent avatar position and visit counts on every decision step
+        H, W = curr_grid.shape
         if engine.avatar_pos is not None:
             engine.recent_positions.append(engine.avatar_pos)
+            engine.position_visit_counts[engine.avatar_pos] = (
+                engine.position_visit_counts.get(engine.avatar_pos, 0) + 1
+            )
 
         # Anterior Mid-Cingulate & Lateral Habenula: Limit Cycle / Oscillation Detection
         osc_acts = engine.working_memory.habenular_ior.detect_cyclic_actions()
@@ -934,6 +938,64 @@ class PrefrontalDeliberationEngine:
                 else:
                     forced_acc_perturbation = cand_a
                     break
+
+        # Metacognitive Spatial Cluster Deadlock / Stagnation Breakoff:
+        # If the avatar has spent 30+ steps confined within a tiny spatial bounding box (<= 3x3)
+        # without achieving goals or leaving the cluster, break off immediately.
+        if (
+            forced_acc_perturbation is None
+            and engine.avatar_pos is not None
+            and len(engine.recent_positions) >= 30
+            and (H > 5 or W > 5)
+        ):
+            recent_cluster = list(engine.recent_positions)[-30:]
+            min_r = min(p[0] for p in recent_cluster)
+            max_r = max(p[0] for p in recent_cluster)
+            min_c = min(p[1] for p in recent_cluster)
+            max_c = max(p[1] for p in recent_cluster)
+            span_r = max_r - min_r
+            span_c = max_c - min_c
+            if span_r <= 3 and span_c <= 3:
+                logger.warning(
+                    "Metacognitive Executive Control: Spatial cluster deadlock detected in %dx%d area over 30 steps. Triggering cluster breakoff.",
+                    span_r + 1,
+                    span_c + 1,
+                )
+                if engine.mental_plan:
+                    engine.mental_plan.clear()
+                    engine.current_simulated_goal = None
+
+                # Inhibit recent actions executed within this stagnant cluster
+                recent_acts = list(engine.recent_actions)[-10:]
+                for act_used in set(recent_acts):
+                    engine.inhibited_actions[act_used] = max(
+                        engine.inhibited_actions.get(act_used, 0), 10
+                    )
+
+                bg_feat = getattr(engine, "background_feature", 0)
+                bg_void = getattr(engine, "background_is_impassable_void", False)
+                disp_acts = [
+                    (a, engine.action_dynamics[a].get_displacement())
+                    for a in available_actions
+                    if a in engine.action_dynamics
+                    and engine.action_dynamics[a].is_displacement_action()
+                ]
+                from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
+
+                esc_act = EpistemicCuriosityExplorer._probe_frontier_escape(
+                    engine=engine,
+                    curr_grid=curr_grid,
+                    disp_actions=disp_acts,
+                    bg=bg_feat,
+                    bg_is_impassable_void=bg_void,
+                )
+                if esc_act is not None:
+                    forced_acc_perturbation = esc_act
+                else:
+                    engine.transition_to_phase(
+                        EpistemicPhase.REPLANNING,
+                        reason="spatial_cluster_deadlock_breakoff",
+                    )
 
         # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
         acc_death_conflict = getattr(engine.working_memory, "acc_conflict", None)

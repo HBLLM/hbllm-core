@@ -104,7 +104,7 @@ class HabenularEpisodicIOR:
         self.active_inhibitions: dict[tuple[tuple[int, int] | None, Any], int] = {}
 
         # Limit cycle detector (recent action history)
-        self.recent_actions: deque[Any] = deque(maxlen=16)
+        self.recent_actions: deque[Any] = deque(maxlen=64)
 
         # Negative transition archives (Preserved per-level across attempts)
         self.current_level: int = 0
