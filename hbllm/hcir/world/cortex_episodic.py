@@ -672,9 +672,41 @@ class HippocampalEpisodicCortex:
             engine.consecutive_simulation_failures = 0
             engine.simulation_cooldown = 0
         else:
+            # Level Regression Guard: When the game resets the agent to a
+            # *different* (earlier) level upon death, level-specific spatial
+            # goals and receptacle coordinates from the failed level must be
+            # purged.  Without this, the planner sees phantom goals from
+            # the previous level and cannot generate valid cargo-delivery plans.
+            is_level_regression = level is not None and level != engine._current_level
+            if is_level_regression and level is not None:
+                engine.learned_goal_positions.clear()
+                engine.learned_receptacle_positions.clear()
+                engine.exhausted_candidate_goals.clear()
+                engine.tested_action_positions.clear()
+                engine.topology_rooms.clear()
+                engine.topology_doors.clear()
+                engine.room_adjacency.clear()
+                engine.current_room_id = None
+                engine.failed_transitions = engine.level_failed_transitions.setdefault(level, set())
+                engine.learned_barriers = engine.level_learned_barriers.setdefault(level, set())
+                engine.hazard_tracker.static_lethal_positions = (
+                    engine.level_lethal_positions.setdefault(level, set())
+                )
+                engine.symbolic_theory.candidate_goal_features.clear()
+                engine.symbolic_theory.goal_features.clear()
+                engine.symbolic_theory.goal_predicates.clear()
+                logger.info(
+                    "HippocampalEpisodicCortex: Level regression detected (%d -> %d). "
+                    "Purging level-specific spatial goals, receptacle coordinates, "
+                    "and goal features to prevent cross-level contamination.",
+                    engine._current_level,
+                    level,
+                )
+
             engine.hazard_tracker.grid_history.clear()
             engine.hazard_tracker.step_history.clear()
-            engine.tested_action_positions.clear()
+            if not is_level_regression:
+                engine.tested_action_positions.clear()
             engine.last_surprise = 0.0
             engine.last_surprise_eval = None
             engine.collision_cones.reset_episode()

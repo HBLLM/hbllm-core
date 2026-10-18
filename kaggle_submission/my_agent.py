@@ -396,7 +396,8 @@ class MyAgent(Agent):
         # Detect level completion / transition or reset
         lvl_completed = getattr(latest_frame, "levels_completed", 0)
         if lvl_completed != self.current_levels_completed:
-            if lvl_completed > self.current_levels_completed:
+            is_forward_transition = lvl_completed > self.current_levels_completed
+            if is_forward_transition:
                 print(
                     f"[ARC] Level completed: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,
@@ -414,7 +415,14 @@ class MyAgent(Agent):
             self.current_levels_completed = lvl_completed
             if hasattr(self.internal_agent, "current_level"):
                 self.internal_agent.current_level = lvl_completed
-            self.reset_episode(retain_dynamics=True, is_new_level=True, level=lvl_completed)
+            # Forward level transition: hydrate persistent knowledge into new level.
+            # Backward regression (death): skip hydration to avoid stale goal contamination
+            # from the prior level; the cortex_episodic regression guard handles cleanup.
+            self.reset_episode(
+                retain_dynamics=True,
+                is_new_level=is_forward_transition,
+                level=lvl_completed,
+            )
 
         self.last_grid = grid.copy()
 
