@@ -1041,10 +1041,28 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="untested_non_displacement",
                 )
 
+            undo_acts = set(getattr(engine, "undo_actions", set()))
+            if hasattr(engine, "symbolic_theory") and hasattr(
+                engine.symbolic_theory, "undo_actions"
+            ):
+                undo_acts.update(engine.symbolic_theory.undo_actions)
+            elif hasattr(engine, "working_memory") and hasattr(
+                engine.working_memory, "undo_actions"
+            ):
+                undo_acts.update(engine.working_memory.undo_actions)
+
+            focus_acts = set(getattr(engine, "focus_switch_actions", set()))
+            if hasattr(engine, "symbolic_theory") and hasattr(
+                engine.symbolic_theory, "focus_switch_actions"
+            ):
+                focus_acts.update(engine.symbolic_theory.focus_switch_actions)
+            excluded_from_exploratory = undo_acts | focus_acts
+
             uninhibited_acts = [
                 a
                 for a in available_actions
                 if engine.inhibited_actions.get(a, 0) == 0
+                and a not in excluded_from_exploratory
                 and not engine.working_memory.habenular_ior.is_action_inhibited(
                     engine.avatar_pos, a
                 )
@@ -1052,7 +1070,13 @@ class EpistemicCuriosityExplorer:
             cand_pool = (
                 uninhibited_acts
                 if uninhibited_acts
-                else [a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0]
+                else [
+                    a
+                    for a in available_actions
+                    if engine.inhibited_actions.get(a, 0) == 0
+                    and a not in excluded_from_exploratory
+                ]
+                or [a for a in available_actions if a not in excluded_from_exploratory]
                 or list(available_actions)
             )
             # Metacognitive Entropy & Habenular Regret Minimization:
@@ -1095,16 +1119,33 @@ class EpistemicCuriosityExplorer:
                     action_data=eff_data,
                     exploration_mode="effector_global_fallback",
                 )
+
+        undo_acts = set(getattr(engine, "undo_actions", set()))
+        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
+            undo_acts.update(engine.symbolic_theory.undo_actions)
+        elif hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
+            undo_acts.update(engine.working_memory.undo_actions)
+
+        focus_acts = set(getattr(engine, "focus_switch_actions", set()))
+        if hasattr(engine, "symbolic_theory") and hasattr(
+            engine.symbolic_theory, "focus_switch_actions"
+        ):
+            focus_acts.update(engine.symbolic_theory.focus_switch_actions)
+        excluded_from_exploratory = undo_acts | focus_acts
+
         uninhibited_global = [
             a
             for a in available_actions
             if engine.inhibited_actions.get(a, 0) == 0
+            and a not in excluded_from_exploratory
             and not engine.working_memory.habenular_ior.is_action_inhibited(engine.avatar_pos, a)
         ]
         if not uninhibited_global:
             uninhibited_global = [
-                a for a in available_actions if engine.inhibited_actions.get(a, 0) == 0
-            ]
+                a
+                for a in available_actions
+                if engine.inhibited_actions.get(a, 0) == 0 and a not in excluded_from_exploratory
+            ] or [a for a in available_actions if a not in excluded_from_exploratory]
         recent_rev = list(reversed(engine.recent_actions))
 
         def _global_key(a: int) -> tuple[float, int, int]:
@@ -1120,7 +1161,9 @@ class EpistemicCuriosityExplorer:
             uninhibited_global.sort(key=_global_key)
             fallback_global = uninhibited_global[0]
         else:
-            cand = list(available_actions)
+            cand = [a for a in available_actions if a not in excluded_from_exploratory] or list(
+                available_actions
+            )
             cand.sort(key=_global_key)
             fallback_global = cand[0] if cand else available_actions[0]
 

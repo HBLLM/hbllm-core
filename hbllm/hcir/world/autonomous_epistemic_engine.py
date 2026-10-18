@@ -2029,28 +2029,36 @@ class AutonomousEpistemicEngine:
 
         # Attribute environmental mutations to active object interaction
         active_obj_id = getattr(self.object_planner, "active_target_object_id", None)
-        if active_obj_id and self.prev_grid is not None and self.prev_grid.shape == curr_grid.shape:
-            diff_mask = self.prev_grid != curr_grid
-            if (
-                prev_av_pos
-                and 0 <= prev_av_pos[0] < curr_grid.shape[0]
-                and 0 <= prev_av_pos[1] < curr_grid.shape[1]
-            ):
-                diff_mask[prev_av_pos[0], prev_av_pos[1]] = False
-            if (
-                self.avatar_pos
-                and 0 <= self.avatar_pos[0] < curr_grid.shape[0]
-                and 0 <= self.avatar_pos[1] < curr_grid.shape[1]
-            ):
-                diff_mask[self.avatar_pos[0], self.avatar_pos[1]] = False
-            diff_coords = np.argwhere(diff_mask)
-            if len(diff_coords) > 0:
-                mutated_cells = {(int(r), int(c)) for r, c in diff_coords}
-                self.object_planner.ledger.record_causal_effect(
-                    object_id=active_obj_id,
-                    effect_type="MUTATED_CELLS",
-                    affected_coords=mutated_cells,
+        if active_obj_id:
+            if not self.mental_plan:
+                self.object_planner.ledger.record_interaction(
+                    active_obj_id,
+                    self.avatar_pos or (0, 0),
                 )
+            if self.prev_grid is not None and self.prev_grid.shape == curr_grid.shape:
+                diff_mask = self.prev_grid != curr_grid
+                if (
+                    prev_av_pos
+                    and 0 <= prev_av_pos[0] < curr_grid.shape[0]
+                    and 0 <= prev_av_pos[1] < curr_grid.shape[1]
+                ):
+                    diff_mask[prev_av_pos[0], prev_av_pos[1]] = False
+                if (
+                    self.avatar_pos
+                    and 0 <= self.avatar_pos[0] < curr_grid.shape[0]
+                    and 0 <= self.avatar_pos[1] < curr_grid.shape[1]
+                ):
+                    diff_mask[self.avatar_pos[0], self.avatar_pos[1]] = False
+                diff_coords = np.argwhere(diff_mask)
+                if len(diff_coords) > 0:
+                    mutated_cells = {(int(r), int(c)) for r, c in diff_coords}
+                    self.object_planner.ledger.record_causal_effect(
+                        object_id=active_obj_id,
+                        effect_type="MUTATED_CELLS",
+                        affected_coords=mutated_cells,
+                    )
+            if not self.mental_plan:
+                self.object_planner.active_target_object_id = None
 
     def simulate_in_mind(
         self,

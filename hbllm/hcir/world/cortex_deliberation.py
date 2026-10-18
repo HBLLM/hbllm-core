@@ -1169,12 +1169,6 @@ class PrefrontalDeliberationEngine:
                         )
             else:
                 next_step = engine.mental_plan.popleft()
-                if not engine.mental_plan and engine.object_planner.active_target_object_id:
-                    engine.object_planner.ledger.record_interaction(
-                        engine.object_planner.active_target_object_id,
-                        next_step.predicted_avatar_pos or engine.avatar_pos or (0, 0),
-                    )
-                    engine.object_planner.active_target_object_id = None
 
                 plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                     engine, curr_grid, available_actions, next_step
@@ -1305,9 +1299,6 @@ class PrefrontalDeliberationEngine:
                     else:
                         engine.mental_plan.clear()
                         engine.phase = EpistemicPhase.REPLANNING
-                        chosen_action, chosen_data = engine.plan_epistemic_probe(
-                            curr_grid, available_actions
-                        )
 
                 else:
                     engine.consecutive_simulation_failures += 1
@@ -1336,12 +1327,6 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
-                    if not engine.mental_plan and engine.object_planner.active_target_object_id:
-                        engine.object_planner.ledger.record_interaction(
-                            engine.object_planner.active_target_object_id,
-                            predicted_pos or engine.avatar_pos or (0, 0),
-                        )
-                        engine.object_planner.active_target_object_id = None
                 else:
                     focus_switch = next(
                         (
