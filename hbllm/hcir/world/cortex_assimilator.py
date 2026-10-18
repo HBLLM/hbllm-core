@@ -749,11 +749,7 @@ class EpistemicFeedbackAssimilator:
                     break
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
-        if (
-            action is not None
-            and not is_effector_action
-            and not engine.is_displacement_action(action)
-        ):
+        if action is not None and not is_effector_action:
             if 1 <= len(moved_entities) <= 2 and diff.changed_pixel_count <= 48:
                 deltas = {m[2] for m in moved_entities}
                 if len(deltas) == 1:

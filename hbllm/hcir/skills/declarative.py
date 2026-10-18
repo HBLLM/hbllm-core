@@ -963,7 +963,27 @@ class ParameterDialAffordancePredicate(SymbolicPredicate):
             if a in getattr(engine, "value_mutator_actions", set())
             and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
         ]
-        return bool(idx_sel and val_mut)
+        if not (idx_sel and val_mut):
+            return False
+        # If the environment has full 2D spatial navigation with exit goals, do not hijack with dial cycling
+        if (
+            hasattr(engine, "is_motor_grounded")
+            and engine.is_motor_grounded()
+            and (
+                getattr(engine, "learned_goal_positions", set())
+                or getattr(engine.symbolic_theory, "goal_features", set())
+            )
+        ):
+            disp_deltas = [
+                dyn.get_displacement()
+                for a, dyn in engine.action_dynamics.items()
+                if a in avail and dyn.is_displacement_action()
+            ]
+            has_dr = any(dr != 0 for dr, _ in disp_deltas)
+            has_dc = any(dc != 0 for _, dc in disp_deltas)
+            if has_dr and has_dc:
+                return False
+        return True
 
     def __repr__(self) -> str:
         return "ParameterDialAffordancePredicate()"
@@ -1185,18 +1205,9 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
         # Coordinate-descent limit: visit distinct candidate states (k-1 steps)
         streak_limit = getattr(engine, "dial_mutation_streak_limit", max(1, k - 1))
 
-        # Distal Trigger Gating: if mutation triggered distal goal discovery, high surprise, or salience shift
+        # Distal Trigger Gating: if mutation triggered distal goal discovery or very high surprise
         has_distal_trigger = bool(
-            getattr(engine, "mental_plan", None)
-            or (getattr(engine, "last_surprise", 0.0) >= 0.4)
-            or (
-                hasattr(engine.working_memory, "has_salience_shift")
-                and engine.working_memory.has_salience_shift(engine)
-            )
-            or (
-                getattr(engine, "symbolic_theory", None)
-                and bool(getattr(engine.symbolic_theory, "goal_features", set()))
-            )
+            getattr(engine, "mental_plan", None) or (getattr(engine, "last_surprise", 0.0) >= 0.8)
         )
 
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
