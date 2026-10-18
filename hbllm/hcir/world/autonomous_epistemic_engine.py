@@ -1508,6 +1508,39 @@ class AutonomousEpistemicEngine:
         aff = self.action_affordances.get(action)
         return bool(aff is not None and getattr(aff, "is_focus_switch", False))
 
+    def is_calibrated_wait_action(self, action: Any) -> bool:
+        """Returns True if this action has been verified as an explicit wait/noop action."""
+        aff = self.action_affordances.get(action)
+        if aff is not None:
+            if getattr(aff, "is_wait", False) or getattr(aff, "name", "").lower() in (
+                "wait",
+                "noop",
+                "pass",
+            ):
+                return True
+        dyn = self.action_dynamics.get(action)
+        if dyn is not None:
+            if dyn.is_displacement_action() and dyn.get_displacement() == (0, 0):
+                return not getattr(dyn, "is_state_transform", False)
+        return False
+
+    def get_interaction_action(self, available_actions: Sequence[Any]) -> Any | None:
+        """Returns the canonical grounded interaction action if present."""
+        for a in available_actions:
+            aff = self.action_affordances.get(a)
+            if aff is not None and getattr(aff, "is_interaction", False):
+                return a
+        # If an uncalibrated non-displacement, non-effector action exists that is not undo
+        undo_acts = getattr(self, "undo_actions", set())
+        for a in available_actions:
+            if (
+                not self.is_displacement_action(a)
+                and not self.is_spatial_effector(a)
+                and a not in undo_acts
+            ):
+                return a
+        return None
+
     def mark_focus_switch_action(self, action: Any) -> None:
         """Empirically register an action as an entity focus switcher."""
         self.focus_switch_actions.add(action)

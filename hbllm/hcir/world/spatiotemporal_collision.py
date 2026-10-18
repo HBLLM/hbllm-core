@@ -273,6 +273,22 @@ class SpatiotemporalCollisionCones:
                                 step, set()
                             ).add((cell_r, cell_c))
 
+                    # Dynamic Sentry Gaze Sweeping: project future hazard gaze cone along facing heading
+                    if cur_vr != 0 or cur_vc != 0:
+                        f_dr = 1 if cur_vr > 0 else (-1 if cur_vr < 0 else 0)
+                        f_dc = 1 if cur_vc > 0 else (-1 if cur_vc < 0 else 0)
+                        max_gaze_dist = min(2, max(1, step_mult))
+                        for d in range(1, max_gaze_dist + 1):
+                            gr = next_r + f_dr * d
+                            gc = next_c + f_dc * d
+                            if 0 <= gr < H and 0 <= gc < W and (gr, gc) not in static_barriers:
+                                self.step_occupied_cells[step].add((gr, gc))
+                                self.step_occupied_by_feat.setdefault(t_feat, {}).setdefault(
+                                    step, set()
+                                ).add((gr, gc))
+                            else:
+                                break
+
                     curr_r, curr_c = next_r, next_c
 
                 self.projected_trajectories.append(

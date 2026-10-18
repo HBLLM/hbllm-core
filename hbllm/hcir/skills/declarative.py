@@ -1182,15 +1182,20 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
         k = get_period(chosen_mut, default=3)
         mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
 
-        # Coordinate-descent limit: visit distinct candidate states (k-1 steps, default 2)
-        streak_limit = getattr(engine, "dial_mutation_streak_limit", min(2, max(1, k - 1)))
+        # Coordinate-descent limit: visit distinct candidate states (k-1 steps)
+        streak_limit = getattr(engine, "dial_mutation_streak_limit", max(1, k - 1))
 
-        # Distal Trigger Gating: if mutation triggered distal goal discovery or active mental plan
+        # Distal Trigger Gating: if mutation triggered distal goal discovery, high surprise, or salience shift
         has_distal_trigger = bool(
             getattr(engine, "mental_plan", None)
+            or (getattr(engine, "last_surprise", 0.0) >= 0.4)
+            or (
+                hasattr(engine.working_memory, "has_salience_shift")
+                and engine.working_memory.has_salience_shift(engine)
+            )
             or (
                 getattr(engine, "symbolic_theory", None)
-                and bool(engine.symbolic_theory.goal_features)
+                and bool(getattr(engine.symbolic_theory, "goal_features", set()))
             )
         )
 

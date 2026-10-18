@@ -634,18 +634,21 @@ class PrefrontalDeliberationEngine:
             return act, data, None
 
         engine.mental_plan.appendleft(next_step)
-        engine.pending_phase_wait_steps = wait_steps
         undo_acts = getattr(engine, "undo_actions", set())
-        non_disp = [
+        calibrated_waits = [
             a
             for a in available_actions
-            if not engine.is_displacement_action(a)
-            and not engine.is_spatial_effector(a)
+            if hasattr(engine, "is_calibrated_wait_action")
+            and engine.is_calibrated_wait_action(a)
             and a not in undo_acts
+            and engine.inhibited_actions.get(a, 0) == 0
         ]
         curr_pos = engine.avatar_pos or getattr(engine, "current_actor_pos", None)
-        if non_disp:
-            return non_disp[0], None, curr_pos
+        if calibrated_waits:
+            engine.pending_phase_wait_steps = wait_steps
+            return calibrated_waits[0], None, curr_pos
+
+        engine.pending_phase_wait_steps = 0
 
         H, W = curr_grid.shape
         reverse_map: dict[Any, Any] = {}
@@ -1086,15 +1089,17 @@ class PrefrontalDeliberationEngine:
         if engine.pending_phase_wait_steps > 0:
             engine.pending_phase_wait_steps -= 1
             undo_acts = getattr(engine, "undo_actions", set())
-            non_disp = [
+            calibrated_waits = [
                 a
                 for a in available_actions
-                if not engine.is_displacement_action(a)
-                and not engine.is_spatial_effector(a)
+                if hasattr(engine, "is_calibrated_wait_action")
+                and engine.is_calibrated_wait_action(a)
                 and a not in undo_acts
+                and engine.inhibited_actions.get(a, 0) == 0
             ]
-            if non_disp:
-                return non_disp[0], None
+            if calibrated_waits:
+                return calibrated_waits[0], None
+            engine.pending_phase_wait_steps = 0
 
         # Faculty: Brodmann Area 10 (aPFC) Hierarchical Subgoal Stack & Cognitive Branching
         if engine.subgoal_stack.has_pending_goals:
@@ -1350,11 +1355,13 @@ class PrefrontalDeliberationEngine:
                         ),
                         None,
                     )
-                    if focus_switch is not None and (
-                        engine.consecutive_simulation_failures >= 1
-                        or (
-                            getattr(engine, "bilateral_state", None) is not None
-                            and engine.last_action != focus_switch
+                    if (
+                        focus_switch is not None
+                        and getattr(engine, "bilateral_state", None) is not None
+                        and engine.last_action != focus_switch
+                        and (
+                            engine.consecutive_simulation_failures >= 1
+                            or getattr(engine, "is_avatar_immobile", False)
                         )
                     ):
                         logger.info(

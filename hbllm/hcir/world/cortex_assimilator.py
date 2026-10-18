@@ -784,8 +784,13 @@ class EpistemicFeedbackAssimilator:
                         c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
                         v1_prev, v1_curr = int(prev_g[c1]), int(curr_g[c1])
                         v2_prev, v2_curr = int(prev_g[c2]), int(curr_g[c2])
-                        if (v1_curr == v2_prev and v1_prev != bg and v2_curr != bg) or (
-                            v2_curr == v1_prev and v2_prev != bg and v1_curr != bg
+                        has_bilateral = (
+                            getattr(engine, "bilateral_state", None) is not None
+                            or len(getattr(engine, "avatar_features", set())) > 1
+                        )
+                        if has_bilateral and (
+                            (v1_curr == v2_prev and v1_prev != bg and v2_curr != bg)
+                            or (v2_curr == v1_prev and v2_prev != bg and v1_curr != bg)
                         ):
                             is_marker_transfer = True
 

@@ -169,6 +169,8 @@ class ObjectStateLedger:
 
     def __init__(self) -> None:
         self.interaction_counts: dict[str, int] = {}
+        self.last_interacted_object_id: str | None = None
+        self.consecutive_counts: dict[str, int] = {}
         self.interacted_positions: set[tuple[int, int]] = set()
         self.interacted_features: set[int] = set()
         self.observed_mutations: list[Any] = []
@@ -179,6 +181,8 @@ class ObjectStateLedger:
     def reset_level(self) -> None:
         """Reset transient level-specific interaction state."""
         self.interaction_counts.clear()
+        self.last_interacted_object_id = None
+        self.consecutive_counts.clear()
         self.interacted_positions.clear()
         self.interacted_features.clear()
         self.observed_mutations.clear()
@@ -194,6 +198,11 @@ class ObjectStateLedger:
     ) -> None:
         """Record an interaction event with an object."""
         self.interaction_counts[object_id] = self.interaction_counts.get(object_id, 0) + 1
+        if object_id == self.last_interacted_object_id:
+            self.consecutive_counts[object_id] = self.consecutive_counts.get(object_id, 0) + 1
+        else:
+            self.consecutive_counts[object_id] = 1
+            self.last_interacted_object_id = object_id
         self.interacted_positions.add(pos)
         if feature_id is not None:
             self.interacted_features.add(feature_id)
@@ -217,6 +226,12 @@ class ObjectStateLedger:
     def get_interaction_count(self, object_id: str) -> int:
         """Return the number of times an object has been interacted with."""
         return self.interaction_counts.get(object_id, 0)
+
+    def get_consecutive_interaction_count(self, object_id: str) -> int:
+        """Return the number of consecutive times an object has been interacted with."""
+        if object_id == self.last_interacted_object_id:
+            return self.consecutive_counts.get(object_id, 0)
+        return 0
 
     def is_interacted(self, object_id: str) -> bool:
         """True if the object has been probed at least once."""
@@ -754,8 +769,17 @@ class ObjectStateGraphPlanner:
                         continue
 
                     visit_count = self.ledger.get_interaction_count(obj.object_id)
+                    consec_count = self.ledger.get_consecutive_interaction_count(obj.object_id)
                     untouched_bonus = 100.0 if visit_count == 0 else 0.0
                     recency_penalty = 15.0 * float(visit_count)
+                    # Habituation penalty for repetitive manipulation of the same object
+                    habituation_penalty = (
+                        200.0 if consec_count >= 2 else (60.0 * float(consec_count))
+                    )
+                    if path_len == 0 and consec_count >= 1:
+                        # Avatar is already at stance and just manipulated this object
+                        habituation_penalty += 300.0
+
                     # Under strict step budget, prioritize nearby objects to unlock exits before timeout
                     distance_penalty = float(path_len) * (2.0 if is_strict_budget else 0.5)
                     small_item_bonus = 25.0 if obj.category == ObjectCategory.KEY else 0.0
@@ -770,6 +794,7 @@ class ObjectStateGraphPlanner:
                         - recency_penalty
                         - distance_penalty
                         - inert_penalty
+                        - habituation_penalty
                     )
                     scored_candidates.append((obj, path, score))
 
@@ -1103,12 +1128,18 @@ class ObjectStateGraphPlanner:
         """Finalize the primitive action sequence, attaching terminal interaction if necessary."""
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
 
+        interact_act = (
+            engine.get_interaction_action(available_actions)
+            if hasattr(engine, "get_interaction_action")
+            else (5 if 5 in available_actions else None)
+        )
+
         if not path:
             # Avatar is already at or adjacent to the object stance!
-            if 5 in available_actions:
+            if interact_act is not None:
                 return [
                     MentalSimulationStep(
-                        action=5,
+                        action=interact_act,
                         predicted_avatar_pos=engine.avatar_pos,
                         expected_mutation="INTERACT",
                     )
@@ -1119,9 +1150,9 @@ class ObjectStateGraphPlanner:
 
         # If the object is solid and the stance is adjacent to it, execute terminal interaction
         if obj.is_solid and target_stance not in obj.cells:
-            if 5 in available_actions:
+            if interact_act is not None:
                 interact_step = MentalSimulationStep(
-                    action=5,
+                    action=interact_act,
                     predicted_avatar_pos=target_stance,
                     expected_mutation="INTERACT",
                 )
