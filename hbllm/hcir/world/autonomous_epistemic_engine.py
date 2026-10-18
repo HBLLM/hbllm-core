@@ -256,6 +256,7 @@ class AutonomousEpistemicEngine:
         self.prev_grid: np.ndarray | None = None
         self.last_action: int | None = None
         self.last_action_data: dict[str, Any] | None = None
+        self.last_action_confidence: float = 1.0
         self.consecutive_quiescent_actions: int = 0
         self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 

@@ -1335,6 +1335,31 @@ class PrefrontalDeliberationEngine:
                     chosen_action = non_eff[0] if non_eff else available_actions[0]
                     chosen_data = None
 
+        # Compute principled epistemic confidence based on decision source & motor dynamics
+        base_dyn_conf = 0.95
+        if chosen_action in engine.action_dynamics:
+            base_dyn_conf = float(engine.action_dynamics[chosen_action].confidence)
+
+        if engine.phase == EpistemicPhase.EXPLOITATION:
+            # Deterministic plan rollout towards verified goal/exit
+            last_conf = min(0.98, max(0.70, base_dyn_conf))
+        elif getattr(engine.object_planner, "active_target_object_id", None) is not None:
+            # Macro option (Directive 4 known tool vs Directive 5 curious probe)
+            if any(
+                chosen_action in affs
+                for affs in getattr(engine.symbolic_theory, "tool_barrier_affinities", {}).values()
+            ):
+                last_conf = 0.85
+            else:
+                last_conf = 0.60
+        elif forced_acc_perturbation is not None:
+            # ACC deadlock breakoff
+            last_conf = 0.25
+        else:
+            # Epistemic probe / frontier curiosity exploration
+            last_conf = max(0.20, min(0.50, base_dyn_conf * 0.5))
+
+        engine.last_action_confidence = float(last_conf)
         engine.prev_grid = curr_grid.copy()
         if hasattr(engine, "grid_history"):
             engine.grid_history.append(curr_grid.copy())

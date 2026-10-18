@@ -486,7 +486,7 @@ class MyAgent(Agent):
                 action_id, action_data = self.internal_engine.decide(
                     grid, available_actions, action_schemas=_arc_schema
                 )
-                conf = 1.0
+                conf = getattr(self.internal_engine, "last_action_confidence", 1.0)
             else:
                 action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
                 action_data = getattr(self.internal_agent, "last_action_data", None)
