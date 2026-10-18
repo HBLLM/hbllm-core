@@ -699,36 +699,6 @@ class ObjectStateGraphPlanner:
                     reachable_objects.append((obj, path))
 
             if reachable_objects:
-                # ── DIRECTIVE 4: If you know what they already do and those can unlock the door, use it. ──
-                unlocking_candidates: list[tuple[SalientObject, list[Any]]] = []
-                for obj, path in reachable_objects:
-                    is_known_trigger = obj.object_id in self.ledger.unlocked_by_object or any(
-                        m.trigger_pos in obj.cells
-                        or (m.trigger_feature is not None and m.trigger_feature == obj.feature_id)
-                        for m in engine.state_mutations
-                    )
-                    is_tool_affinity = (
-                        obj.feature_id in engine.working_memory.tool_barrier_affinities
-                        or engine.working_memory.is_holding(obj.feature_id)
-                    )
-                    if is_known_trigger or is_tool_affinity:
-                        unlocking_candidates.append((obj, path))
-
-                if unlocking_candidates:
-                    unlocking_candidates.sort(key=lambda x: len(x[1]))
-                    chosen_obj, chosen_path = unlocking_candidates[0]
-                    logger.info(
-                        "ObjectStateGraphPlanner: Directive 4 SATISFIED! Actuating known unlocking object "
-                        "[%s, category=%s] (%d steps).",
-                        chosen_obj.object_id,
-                        chosen_obj.category.value,
-                        len(chosen_path),
-                    )
-                    self.active_target_object_id = chosen_obj.object_id
-                    return self._finalize_option_path(
-                        engine, chosen_obj, chosen_path, available_actions, movable_actions
-                    )
-
                 # Identify features of barriers blocking access or adjacent to exit via entity adjacency
                 barrier_features = engine.symbolic_theory.barrier_features
                 blocking_barrier_feats: set[int] = set()
@@ -747,6 +717,70 @@ class ObjectStateGraphPlanner:
                     ):
                         if not o.cells.isdisjoint(exit_adjacent_coords):
                             blocking_barrier_feats.add(o.feature_id)
+
+                # ── DIRECTIVE 4: If you know what they already do and those can unlock the door, use it. ──
+                unlocking_candidates: list[tuple[SalientObject, list[Any]]] = []
+                for obj, path in reachable_objects:
+                    # Skip already-actuated static objects if the door remains locked
+                    if self.ledger.get_interaction_count(
+                        obj.object_id
+                    ) >= 1 and not engine.working_memory.is_holding(obj.feature_id):
+                        continue
+
+                    # Check tool-barrier affinity
+                    tool_affinities: set[int] = set()
+                    if hasattr(engine.working_memory, "tool_barrier_affinities"):
+                        tool_affinities.update(
+                            engine.working_memory.tool_barrier_affinities.get(obj.feature_id, set())
+                        )
+                    if hasattr(engine.symbolic_theory, "tool_barrier_affinities"):
+                        tool_affinities.update(
+                            getattr(engine.symbolic_theory, "tool_barrier_affinities", {}).get(
+                                obj.feature_id, set()
+                            )
+                        )
+
+                    is_relevant_tool = bool(tool_affinities & blocking_barrier_feats) or (
+                        not blocking_barrier_feats and bool(tool_affinities)
+                    )
+                    is_held_tool = engine.working_memory.is_holding(obj.feature_id)
+
+                    # Check remote switch/trigger records
+                    is_known_trigger = obj.object_id in self.ledger.unlocked_by_object or any(
+                        (
+                            m.trigger_pos in obj.cells
+                            or (
+                                m.trigger_feature is not None
+                                and m.trigger_feature == obj.feature_id
+                            )
+                        )
+                        and (
+                            not blocking_barrier_feats
+                            or (
+                                m.prior_value is not None
+                                and m.prior_value in blocking_barrier_feats
+                            )
+                        )
+                        for m in engine.state_mutations
+                    )
+
+                    if is_relevant_tool or is_held_tool or is_known_trigger:
+                        unlocking_candidates.append((obj, path))
+
+                if unlocking_candidates:
+                    unlocking_candidates.sort(key=lambda x: len(x[1]))
+                    chosen_obj, chosen_path = unlocking_candidates[0]
+                    logger.info(
+                        "ObjectStateGraphPlanner: Directive 4 SATISFIED! Actuating known unlocking object "
+                        "[%s, category=%s] (%d steps).",
+                        chosen_obj.object_id,
+                        chosen_obj.category.value,
+                        len(chosen_path),
+                    )
+                    self.active_target_object_id = chosen_obj.object_id
+                    return self._finalize_option_path(
+                        engine, chosen_obj, chosen_path, available_actions, movable_actions
+                    )
 
                 # Step-budget and temporal horizon awareness
                 remaining_budget = (
@@ -786,6 +820,19 @@ class ObjectStateGraphPlanner:
                     color_affinity_bonus = 80.0 if obj.feature_id in blocking_barrier_feats else 0.0
                     inert_penalty = 120.0 if self.ledger.is_inert(obj.object_id) else 0.0
 
+                    # Penalize objects known to trigger effects unrelated to blocking barriers
+                    unrelated_mutation_penalty = 0.0
+                    if any(
+                        (m.trigger_feature == obj.feature_id or m.trigger_pos in obj.cells)
+                        and blocking_barrier_feats
+                        and (
+                            m.prior_value is not None
+                            and m.prior_value not in blocking_barrier_feats
+                        )
+                        for m in engine.state_mutations
+                    ):
+                        unrelated_mutation_penalty = 80.0
+
                     score = (
                         untouched_bonus
                         + small_item_bonus
@@ -795,6 +842,7 @@ class ObjectStateGraphPlanner:
                         - distance_penalty
                         - inert_penalty
                         - habituation_penalty
+                        - unrelated_mutation_penalty
                     )
                     scored_candidates.append((obj, path, score))
 
