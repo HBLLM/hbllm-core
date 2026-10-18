@@ -749,11 +749,7 @@ class EpistemicFeedbackAssimilator:
                     break
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
-        if (
-            action is not None
-            and not is_effector_action
-            and not engine.is_displacement_action(action)
-        ):
+        if action is not None and not is_effector_action:
             if 1 <= len(moved_entities) <= 2 and diff.changed_pixel_count <= 48:
                 deltas = {m[2] for m in moved_entities}
                 if len(deltas) == 1:
@@ -849,19 +845,6 @@ class EpistemicFeedbackAssimilator:
                             engine.symbolic_theory.record_state_mutation(
                                 action, curr_sig, prior_state_sig=prev_sig
                             )
-
-            if (
-                action is not None
-                and action in engine.value_mutator_actions
-                and engine.prev_grid is not None
-            ):
-                diff_mask = engine.prev_grid != curr_grid
-                if np.any(diff_mask):
-                    curr_sig = hash(curr_grid[diff_mask].tobytes())
-                    prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
-                    engine.symbolic_theory.record_state_mutation(
-                        action, curr_sig, prior_state_sig=prev_sig
-                    )
 
         # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
         if engine.deformation_tracker is not None:

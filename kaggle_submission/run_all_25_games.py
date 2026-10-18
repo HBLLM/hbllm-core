@@ -99,6 +99,10 @@ class ArcAgiConsoleDriver(BaseDriver):
         self.env = env
         self.game_id = game_id
         self.current_frame = None
+        self._canonical_cargo_feats: list[int] = []
+        self._canonical_rec_feats: list[int] = []
+        self._canonical_rec_positions: list[tuple[int, int]] = []
+        self._cached_level_idx: int = -1
 
     def connect(self, target: Any) -> bool:
         self.env = target
@@ -184,6 +188,26 @@ class ArcAgiConsoleDriver(BaseDriver):
             if hasattr(game_obj, "_get_valid_actions"):
                 try:
                     for act_in in game_obj._get_valid_actions() or []:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
+                                targets = valid_targets_by_action.setdefault(int(aid), [])
+                                if d not in targets:
+                                    targets.append(d)
+                except Exception:
+                    pass
+            if hasattr(game_obj, "actions") and isinstance(game_obj.actions, (list, tuple)):
+                try:
+                    for act_in in game_obj.actions:
                         aid = getattr(act_in, "id", None)
                         if hasattr(aid, "value"):
                             aid = aid.value
@@ -844,8 +868,12 @@ if __name__ == "__main__":
     if args.list:
         arcade = Arcade()
         envs = arcade.get_environments()
-        seen = set()
-        deduped_envs = [e for e in envs if not (e.game_id in seen or seen.add(e.game_id))]
+        seen: set[str] = set()
+        deduped_envs = []
+        for e in envs:
+            if e.game_id not in seen:
+                seen.add(e.game_id)
+                deduped_envs.append(e)
         print(f"Available ARC-AGI-3 games ({len(deduped_envs)} total):")
         for i, e in enumerate(deduped_envs, 1):
             print(f"  {i:2d}. {e.game_id:<12} | Title: {getattr(e, 'title', e.game_id)}")

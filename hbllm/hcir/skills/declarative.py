@@ -1177,18 +1177,21 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
         get_period = getattr(
             getattr(engine, "symbolic_theory", None),
             "get_cycle_period",
-            lambda a, default=4: default,
+            lambda a, default=3: default,
         )
-        k = get_period(chosen_mut, default=4)
+        k = get_period(chosen_mut, default=3)
         mut_streak = getattr(engine.working_memory, "dial_mutation_streak", 0)
 
-        # Coordinate-descent limit: visit distinct candidate states (k-1 steps) without looping back to s0
-        streak_limit = max(1, k - 1)
+        # Coordinate-descent limit: visit distinct candidate states (k-1 steps, default 2)
+        streak_limit = getattr(engine, "dial_mutation_streak_limit", min(2, max(1, k - 1)))
 
-        # Distal Trigger Gating: if mutation triggered distal surprise or salience shift, lock in and advance
-        wm = getattr(engine, "working_memory", None)
-        has_distal_trigger = getattr(engine, "last_surprise", 0.0) >= 0.4 or (
-            wm is not None and hasattr(wm, "has_salience_shift") and wm.has_salience_shift(engine)
+        # Distal Trigger Gating: if mutation triggered distal goal discovery or active mental plan
+        has_distal_trigger = bool(
+            getattr(engine, "mental_plan", None)
+            or (
+                getattr(engine, "symbolic_theory", None)
+                and bool(engine.symbolic_theory.goal_features)
+            )
         )
 
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase

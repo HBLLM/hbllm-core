@@ -315,6 +315,26 @@ class MyAgent(Agent):
                                     targets.append(d)
                 except Exception:
                     pass
+            if hasattr(g, "actions") and isinstance(g.actions, (list, tuple)):
+                try:
+                    for act_in in g.actions:
+                        aid = getattr(act_in, "id", None)
+                        if hasattr(aid, "value"):
+                            aid = aid.value
+                        if aid is not None:
+                            d = getattr(act_in, "data", None)
+                            if isinstance(d, dict) and d:
+                                raw_x = d.get("x", d.get("c", None))
+                                raw_y = d.get("y", d.get("r", None))
+                                if raw_x is not None and (int(raw_x) < 0 or int(raw_x) > 63):
+                                    continue
+                                if raw_y is not None and (int(raw_y) < 0 or int(raw_y) > 63):
+                                    continue
+                                targets = valid_targets_by_action.setdefault(int(aid), [])
+                                if d not in targets:
+                                    targets.append(d)
+                except Exception:
+                    pass
 
         default_map = {s["action_id"]: dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS}
         schemas: list[dict[str, Any]] = []

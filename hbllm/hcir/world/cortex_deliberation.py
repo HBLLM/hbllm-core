@@ -1338,12 +1338,36 @@ class PrefrontalDeliberationEngine:
                         )
                         engine.object_planner.active_target_object_id = None
                 else:
-                    if engine.exploration_cooldown > 0:
-                        engine.exploration_cooldown -= 1
-                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    chosen_action, chosen_data = engine.plan_epistemic_probe(
-                        curr_grid, available_actions
+                    focus_switch = next(
+                        (
+                            a
+                            for a in available_actions
+                            if engine.is_focus_switch_action(a)
+                            and engine.inhibited_actions.get(a, 0) == 0
+                            and not engine.working_memory.habenular_ior.is_action_inhibited(
+                                engine.avatar_pos, a, None
+                            )
+                        ),
+                        None,
                     )
+                    if focus_switch is not None and (
+                        engine.consecutive_simulation_failures >= 1
+                        or getattr(engine, "bilateral_state", None) is not None
+                    ):
+                        logger.info(
+                            "PrefrontalDeliberationEngine: Intentional Bilateral Focus Switch via action %s (active agent at %s failed simulation or reached plateau)",
+                            focus_switch,
+                            engine.avatar_pos,
+                        )
+                        chosen_action = focus_switch
+                        chosen_data = None
+                    else:
+                        if engine.exploration_cooldown > 0:
+                            engine.exploration_cooldown -= 1
+                        engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                        chosen_action, chosen_data = engine.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
 
         # Effector Grounding Invariant
         if engine.is_spatial_effector(chosen_action):

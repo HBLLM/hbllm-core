@@ -236,10 +236,7 @@ class SpatiotemporalHazardTracker:
             if best_period is not None and best_period >= 2:
                 cycle = series[-best_period:]
                 haz_vals = {
-                    v
-                    for v in cycle
-                    if v in self.known_lethal_features
-                    or (v not in safe_features and not self.known_lethal_features)
+                    v for v in cycle if v in self.known_lethal_features or v not in safe_features
                 }
                 if haz_vals:
                     self.periodic_cells[(r_idx, c_idx)] = DynamicCellPhase(

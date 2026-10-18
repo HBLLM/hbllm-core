@@ -430,6 +430,9 @@ class EpistemicGoalScheduler:
                 and e.role
                 in (
                     EntityRole.UNKNOWN,
+                    EntityRole.GOAL,
+                    EntityRole.PORTAL,
+                    EntityRole.RECEPTACLE,
                     EntityRole.AGENT,
                     EntityRole.ACTUATOR,
                     EntityRole.MANIPULABLE,
@@ -437,7 +440,16 @@ class EpistemicGoalScheduler:
                 )
                 and 1 <= e.area <= 64
                 and e.feature_id != bg
-                and not engine.symbolic_theory.is_walkable(e.feature_id)
+                and (
+                    e.role
+                    in (
+                        EntityRole.GOAL,
+                        EntityRole.PORTAL,
+                        EntityRole.RECEPTACLE,
+                        EntityRole.RESOURCE,
+                    )
+                    or not engine.symbolic_theory.is_walkable(e.feature_id)
+                )
                 and e.feature_id not in engine.hazard_tracker.known_lethal_features
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and (
@@ -1182,14 +1194,39 @@ class MentalSimulationPlanner:
                     return None
                 dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
                 if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in _grid_walls:
-                    new_f = (-f[0], -f[1])
-                    nxt.add((p, new_f))
+                    # Check for 90-degree rotational turn at corners before reversing
+                    turned = False
+                    for rot_f in [(f[1], -f[0]), (-f[1], f[0])]:
+                        rot_dest = (p[0] + rot_f[0] * step_size, p[1] + rot_f[1] * step_size)
+                        if (
+                            0 <= rot_dest[0] < H
+                            and 0 <= rot_dest[1] < W
+                            and rot_dest not in _grid_walls
+                        ):
+                            nxt.add((rot_dest, rot_f))
+                            turned = True
+                            break
+                    if not turned:
+                        new_f = (-f[0], -f[1])
+                        nxt.add((p, new_f))
                     continue
                 if dest == avatar_new:
                     return None
                 new_f = f
                 if _corridor_blocked(dest, f):
-                    new_f = (-f[0], -f[1])
+                    turned = False
+                    for rot_f in [(f[1], -f[0]), (-f[1], f[0])]:
+                        rot_dest = (dest[0] + rot_f[0] * step_size, dest[1] + rot_f[1] * step_size)
+                        if (
+                            0 <= rot_dest[0] < H
+                            and 0 <= rot_dest[1] < W
+                            and rot_dest not in _grid_walls
+                        ):
+                            new_f = rot_f
+                            turned = True
+                            break
+                    if not turned:
+                        new_f = (-f[0], -f[1])
                 nxt.add((dest, new_f))
             return frozenset(nxt)
 
@@ -1224,6 +1261,7 @@ class MentalSimulationPlanner:
         )
 
         oriented_threat_positions = {t.pos for t in oriented_threats}
+        bilat_feats = engine.bilateral_state.features if engine.bilateral_state else set()
         init_chasers: frozenset[tuple[int, int]] = frozenset(
             e.grid_pos
             for e in entities
@@ -1233,7 +1271,15 @@ class MentalSimulationPlanner:
                     e.role == EntityRole.AGENT
                     and e.grid_pos != start_pos
                     and e.feature_id not in av_feats
+                    and e.feature_id not in bilat_feats
                     and e.feature_id != bg
+                    and (
+                        e.feature_id in engine.hazard_tracker.known_lethal_features
+                        or any(
+                            proj.feature_id == e.feature_id
+                            for proj in engine.collision_cones.projected_trajectories
+                        )
+                    )
                 )
             )
             and e.grid_pos not in init_threats
@@ -1750,6 +1796,16 @@ class MentalSimulationPlanner:
                             )
                             for k in range(1, dist_gaze + 1):
                                 living_gaze.add((t.pos[0] + step_r * k, t.pos[1] + step_c * k))
+
+                if cur_patrols:
+                    for pp, pf in cur_patrols:
+                        if pf != (0, 0):
+                            for k in range(1, 8):
+                                gr = pp[0] + pf[0] * k
+                                gc = pp[1] + pf[1] * k
+                                if not (0 <= gr < H and 0 <= gc < W) or (gr, gc) in _grid_walls:
+                                    break
+                                living_gaze.add((gr, gc))
 
                 # Temporal Evasion: Determine safe waiting action (explicit non-displacement action)
                 bump_wait_action: Any | None = non_disp_wait_action
