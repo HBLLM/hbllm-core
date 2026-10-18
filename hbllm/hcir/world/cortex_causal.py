@@ -125,6 +125,44 @@ class HCIRSymbolicWorldTheory:
     # Elizabeth Spelke's Core Knowledge physical axioms
     spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
 
+    # Tool-Barrier Causal Resonance (persistent across level resets)
+    tool_barrier_affinities: dict[int, set[int]] = field(default_factory=dict)
+
+    def record_tool_barrier_affinity(self, tool_feature: int, barrier_feature: int) -> None:
+        """Record causal affinity: tool_feature acts upon / clears barrier_feature."""
+        if tool_feature == barrier_feature:
+            return
+        aff_set = self.tool_barrier_affinities.setdefault(tool_feature, set())
+        if barrier_feature not in aff_set:
+            aff_set.add(barrier_feature)
+            pred = CausalPredicate(
+                variable="clears_barrier",
+                operator="==",
+                value=barrier_feature,
+                target_entity=str(tool_feature),
+            )
+            self.register_predicate(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Learned Causal Affinity: Tool/Trigger %d -> Barrier %d",
+                tool_feature,
+                barrier_feature,
+            )
+
+    def get_causal_affinity(
+        self,
+        entity_feature: int,
+        target_barrier_features: set[int] | Sequence[int] | None = None,
+    ) -> float:
+        """Compute causal mutual information / affinity score P(Delta CutSet | do(O)) > 0."""
+        known_barriers = self.tool_barrier_affinities.get(entity_feature)
+        if not known_barriers:
+            return 0.0
+        if not target_barrier_features:
+            return 1.0
+        if known_barriers.intersection(target_barrier_features):
+            return 1.0
+        return 0.0
+
     def has_affordance(
         self,
         entity_or_feature: SpatialEntity | int,

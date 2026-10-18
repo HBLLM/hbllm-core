@@ -2203,6 +2203,20 @@ class EpistemicFeedbackAssimilator:
                 )
                 engine.state_mutations.append(mutation_model)
                 engine.exhausted_candidate_goals.clear()
+                if trigger_feat is not None and distant_mutations:
+                    for dm_r, dm_c, dm_old, dm_new in distant_mutations:
+                        if (
+                            dm_old in engine.symbolic_theory.barrier_features
+                            or (dm_r, dm_c) in engine.learned_barriers
+                        ) and (
+                            dm_new == engine.bg_feature
+                            or dm_new == 0
+                            or engine.symbolic_theory.is_walkable(dm_new)
+                        ):
+                            engine.symbolic_theory.record_tool_barrier_affinity(
+                                trigger_feat, dm_old
+                            )
+                            engine.working_memory.register_tool_unlock(trigger_feat, dm_old)
                 logger.info(
                     "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
                     mutation_model.trigger_type,
@@ -2526,6 +2540,9 @@ class EpistemicFeedbackAssimilator:
                 ):
                     for h_item in engine.working_memory.held_items:
                         engine.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
+                        engine.symbolic_theory.record_tool_barrier_affinity(
+                            h_item.feature_id, orig_val
+                        )
 
         # Faculty: Hippocampal CA1/CA3 Experiential Trace Buffer
         engine.episodic_cortex.record_transition(

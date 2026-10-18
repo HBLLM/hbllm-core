@@ -345,12 +345,12 @@ class ObjectStateGraphPlanner:
             elif is_cargo:
                 category = ObjectCategory.MANIPULABLE
                 is_solid = True
-            elif e.area <= 16:
-                category = ObjectCategory.KEY
-                is_solid = is_barrier
             elif is_barrier:
                 category = ObjectCategory.BARRIER
                 is_solid = True
+            elif e.area <= 16:
+                category = ObjectCategory.KEY
+                is_solid = False
             else:
                 category = ObjectCategory.UNKNOWN
                 is_solid = e.role == EntityRole.OBSTACLE
@@ -718,6 +718,26 @@ class ObjectStateGraphPlanner:
                         if not o.cells.isdisjoint(exit_adjacent_coords):
                             blocking_barrier_feats.add(o.feature_id)
 
+                # Identify barriers along the geodesic corridor separating avatar and exit
+                if not blocking_barrier_feats and exit_objects and av_pos is not None:
+                    target_stances = [
+                        st for eo in exit_objects for st in (eo.interaction_stances or eo.cells)
+                    ]
+                    if target_stances:
+                        closest_stance = min(
+                            target_stances,
+                            key=lambda s: abs(av_pos[0] - s[0]) + abs(av_pos[1] - s[1]),
+                        )
+                        r0, c0 = av_pos
+                        r1, c1 = closest_stance
+                        for r in range(min(r0, r1), max(r0, r1) + 1):
+                            for c in range(min(c0, c1), max(c0, c1) + 1):
+                                feat = int(grid_arr[r, c])
+                                if feat in barrier_features or engine.symbolic_theory.is_barrier(
+                                    feat
+                                ):
+                                    blocking_barrier_feats.add(feat)
+
                 # ── DIRECTIVE 4: If you know what they already do and those can unlock the door, use it. ──
                 unlocking_candidates: list[tuple[SalientObject, list[Any]]] = []
                 for obj, path in reachable_objects:
@@ -727,22 +747,32 @@ class ObjectStateGraphPlanner:
                     ) >= 1 and not engine.working_memory.is_holding(obj.feature_id):
                         continue
 
-                    # Check tool-barrier affinity
-                    tool_affinities: set[int] = set()
-                    if hasattr(engine.working_memory, "tool_barrier_affinities"):
-                        tool_affinities.update(
-                            engine.working_memory.tool_barrier_affinities.get(obj.feature_id, set())
-                        )
-                    if hasattr(engine.symbolic_theory, "tool_barrier_affinities"):
-                        tool_affinities.update(
-                            getattr(engine.symbolic_theory, "tool_barrier_affinities", {}).get(
-                                obj.feature_id, set()
+                    # Check tool-barrier causal affinity
+                    is_relevant_tool = False
+                    if hasattr(engine.symbolic_theory, "get_causal_affinity"):
+                        is_relevant_tool = (
+                            engine.symbolic_theory.get_causal_affinity(
+                                obj.feature_id, blocking_barrier_feats
                             )
+                            > 0.0
                         )
-
-                    is_relevant_tool = bool(tool_affinities & blocking_barrier_feats) or (
-                        not blocking_barrier_feats and bool(tool_affinities)
-                    )
+                    if not is_relevant_tool:
+                        tool_affinities: set[int] = set()
+                        if hasattr(engine.working_memory, "tool_barrier_affinities"):
+                            tool_affinities.update(
+                                engine.working_memory.tool_barrier_affinities.get(
+                                    obj.feature_id, set()
+                                )
+                            )
+                        if hasattr(engine.symbolic_theory, "tool_barrier_affinities"):
+                            tool_affinities.update(
+                                getattr(engine.symbolic_theory, "tool_barrier_affinities", {}).get(
+                                    obj.feature_id, set()
+                                )
+                            )
+                        is_relevant_tool = bool(tool_affinities & blocking_barrier_feats) or (
+                            not blocking_barrier_feats and bool(tool_affinities)
+                        )
                     is_held_tool = engine.working_memory.is_holding(obj.feature_id)
 
                     # Check remote switch/trigger records
@@ -817,12 +847,29 @@ class ObjectStateGraphPlanner:
                     # Under strict step budget, prioritize nearby objects to unlock exits before timeout
                     distance_penalty = float(path_len) * (2.0 if is_strict_budget else 0.5)
                     small_item_bonus = 25.0 if obj.category == ObjectCategory.KEY else 0.0
-                    color_affinity_bonus = 80.0 if obj.feature_id in blocking_barrier_feats else 0.0
+                    color_affinity_bonus = (
+                        80.0
+                        if (
+                            obj.category != ObjectCategory.BARRIER
+                            and obj.feature_id in blocking_barrier_feats
+                        )
+                        else 0.0
+                    )
+                    barrier_penalty = 150.0 if obj.category == ObjectCategory.BARRIER else 0.0
                     inert_penalty = 120.0 if self.ledger.is_inert(obj.object_id) else 0.0
 
                     # Penalize objects known to trigger effects unrelated to blocking barriers
                     unrelated_mutation_penalty = 0.0
-                    if any(
+                    known_affs = getattr(engine.symbolic_theory, "tool_barrier_affinities", {}).get(
+                        obj.feature_id, set()
+                    )
+                    if (
+                        blocking_barrier_feats
+                        and known_affs
+                        and known_affs.isdisjoint(blocking_barrier_feats)
+                    ):
+                        unrelated_mutation_penalty = 80.0
+                    elif any(
                         (m.trigger_feature == obj.feature_id or m.trigger_pos in obj.cells)
                         and blocking_barrier_feats
                         and (
@@ -843,6 +890,7 @@ class ObjectStateGraphPlanner:
                         - inert_penalty
                         - habituation_penalty
                         - unrelated_mutation_penalty
+                        - barrier_penalty
                     )
                     scored_candidates.append((obj, path, score))
 
@@ -1179,7 +1227,7 @@ class ObjectStateGraphPlanner:
         interact_act = (
             engine.get_interaction_action(available_actions)
             if hasattr(engine, "get_interaction_action")
-            else (5 if 5 in available_actions else None)
+            else None
         )
 
         if not path:

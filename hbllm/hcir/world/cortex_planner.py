@@ -3058,6 +3058,13 @@ class MentalSimulationPlanner:
                             item.feature_id if isinstance(item, HeldItem) else int(item)
                             for item in items
                         }
+                merged_tool_affs: dict[int, set[int]] = {}
+                for src in (
+                    getattr(engine.symbolic_theory, "tool_barrier_affinities", {}),
+                    getattr(engine.working_memory, "tool_barrier_affinities", {}),
+                ):
+                    for k, v in src.items():
+                        merged_tool_affs.setdefault(k, set()).update(v)
                 mcts_res = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
                     avatar_pos=cur_pos,
                     candidate_subgoals=c_subgoals,
@@ -3068,9 +3075,7 @@ class MentalSimulationPlanner:
                     lethal_positions=engine.current_level_lethal_positions,
                     max_iterations=32,
                     body_schema=getattr(engine.working_memory, "body_schema", None),
-                    tool_barrier_affinities=getattr(
-                        engine.working_memory, "tool_barrier_affinities", None
-                    ),
+                    tool_barrier_affinities=merged_tool_affs,
                     curr_grid=curr_grid,
                 )
                 if mcts_res.best_subgoals:
@@ -3380,6 +3385,13 @@ class MentalSimulationPlanner:
                         item.feature_id if isinstance(item, HeldItem) else int(item)
                         for item in items
                     }
+            merged_tool_affs: dict[int, set[int]] = {}
+            for src in (
+                getattr(engine.symbolic_theory, "tool_barrier_affinities", {}),
+                getattr(engine.working_memory, "tool_barrier_affinities", {}),
+            ):
+                for k, v in src.items():
+                    merged_tool_affs.setdefault(k, set()).update(v)
             mcts_res = FrontopolarSubgoalMCTSPlanner.plan_subgoal_mcts(
                 avatar_pos=start_pos,
                 candidate_subgoals=c_subgoals,
@@ -3390,9 +3402,7 @@ class MentalSimulationPlanner:
                 lethal_positions=engine.current_level_lethal_positions,
                 max_iterations=32,
                 body_schema=getattr(engine.working_memory, "body_schema", None),
-                tool_barrier_affinities=getattr(
-                    engine.working_memory, "tool_barrier_affinities", None
-                ),
+                tool_barrier_affinities=merged_tool_affs,
                 curr_grid=curr_grid,
             )
             if mcts_res.best_subgoals:

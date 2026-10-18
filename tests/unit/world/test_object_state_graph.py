@@ -447,3 +447,52 @@ def test_motor_effector_discrete_valid_targets_quiescence() -> None:
     coords2 = MotorCortexEffector.ground_effector_action(engine, grid, 6)
     assert coords2 is None
     assert engine.inhibited_actions.get(6, 0) > 0
+
+
+def test_cross_level_causal_affinity_unlocking() -> None:
+    """Verify that tool-barrier affinities in symbolic_theory immediately guide Directive 4 across levels."""
+    engine = AutonomousEpistemicEngine()
+
+    engine.action_dynamics[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[2] = ActionDynamicsModel(
+        action_id=2, delta_r=1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[3] = ActionDynamicsModel(
+        action_id=3, delta_r=0, delta_c=-1, confidence=1.0
+    )
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0
+    )
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[2, 2] = 2  # Avatar
+    engine.avatar_feature = 2
+    engine.avatar_pos = (2, 2)
+
+    # Goal at (2, 8)
+    grid[2, 8] = 3
+    engine.symbolic_theory.goal_features.add(3)
+
+    # Barrier 1 blocking exit
+    grid[:, 6] = 1
+    engine.symbolic_theory.barrier_features.add(1)
+
+    # Tool A (feature 6) at (2, 4) - closer (2 steps) but unlocks unrelated barrier 99
+    grid[2, 4] = 6
+    engine.symbolic_theory.record_tool_barrier_affinity(tool_feature=6, barrier_feature=99)
+
+    # Tool B (feature 5) at (5, 2) - farther (3 steps) but unlocks barrier 1!
+    grid[5, 2] = 5
+    engine.symbolic_theory.record_tool_barrier_affinity(tool_feature=5, barrier_feature=1)
+
+    # Working memory is fresh (simulating level reset)
+    engine.working_memory.tool_barrier_affinities.clear()
+
+    # Directive 4 should pick Tool B (feature 5) because of causal affinity with blocking barrier 1!
+    plan = engine.object_planner.plan_macro_option(engine, grid, [1, 2, 3, 4, 5])
+    assert plan is not None
+    assert len(plan) == 3  # 3 steps DOWN towards (5, 2)
+    assert all(step.action == 2 for step in plan)
+    assert plan[-1].predicted_avatar_pos == (5, 2)
