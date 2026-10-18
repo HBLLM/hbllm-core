@@ -36,6 +36,8 @@ class SubgoalType(StrEnum):
     COLLECT_ITEM = "collect_item"
     CLEAR_OBSTACLE = "clear_obstacle"
     NAVIGATE_TO = "navigate_to"
+    BILATERAL_COORDINATION = "bilateral_coordination"
+    SWITCH_FOCUS = "switch_focus"
 
 
 @dataclass
@@ -198,6 +200,10 @@ class FrontopolarSubgoalStack:
             SubgoalType.TRANSIT_CORRIDOR,
             SubgoalType.UNLOCK_REMOTE_MECHANISM,
             SubgoalType.ALIGN_OPTICAL_REFLECTOR,
+            SubgoalType.BILATERAL_COORDINATION,
+            SubgoalType.SWITCH_FOCUS,
+            SubgoalType.CLEAR_OBSTACLE,
+            SubgoalType.NAVIGATE_TO,
         ):
             return avatar_pos == dest
         return False
@@ -218,6 +224,27 @@ class FrontopolarSubgoalStack:
             target_destination=trigger_pos,
             required_feature=trigger_feat,
             priority=2.0,
+        )
+        self.push_subgoal(subgoal)
+        return subgoal
+
+    def spawn_bilateral_switch_subgoal(
+        self,
+        partner_pos: tuple[int, int],
+        partner_feat: int,
+        target_destination: tuple[int, int],
+        switch_action_id: Any = 5,
+    ) -> FrontopolarSubgoal:
+        """Spawn a frontopolar bilateral switch subgoal when the active agent's path is obstructed by a remote gate."""
+        switch_id = f"switch_to_partner_{partner_feat}_{partner_pos[0]}_{partner_pos[1]}"
+        subgoal = FrontopolarSubgoal(
+            subgoal_id=switch_id,
+            subgoal_type=SubgoalType.BILATERAL_COORDINATION,
+            target_entity_pos=partner_pos,
+            target_destination=target_destination,
+            required_feature=partner_feat,
+            priority=2.5,
+            metadata={"switch_action": switch_action_id},
         )
         self.push_subgoal(subgoal)
         return subgoal

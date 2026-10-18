@@ -1242,6 +1242,21 @@ class MentalSimulationPlanner:
                     cells.add(p)
             return cells
 
+        def _patrol_gaze_cells(
+            patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]],
+            max_dist: int = 7,
+        ) -> set[tuple[int, int]]:
+            gaze: set[tuple[int, int]] = set()
+            for p, f in patrols:
+                if f != (0, 0):
+                    for k in range(1, max_dist + 1):
+                        gr = p[0] + f[0] * k
+                        gc = p[1] + f[1] * k
+                        if not (0 <= gr < H and 0 <= gc < W) or (gr, gc) in _grid_walls:
+                            break
+                        gaze.add((gr, gc))
+            return gaze
+
         start_pos = engine.avatar_pos
         init_blocks = frozenset(pushable_blocks)
         init_open: frozenset[tuple[int, int]] = frozenset()
@@ -1798,14 +1813,7 @@ class MentalSimulationPlanner:
                                 living_gaze.add((t.pos[0] + step_r * k, t.pos[1] + step_c * k))
 
                 if cur_patrols:
-                    for pp, pf in cur_patrols:
-                        if pf != (0, 0):
-                            for k in range(1, 8):
-                                gr = pp[0] + pf[0] * k
-                                gc = pp[1] + pf[1] * k
-                                if not (0 <= gr < H and 0 <= gc < W) or (gr, gc) in _grid_walls:
-                                    break
-                                living_gaze.add((gr, gc))
+                    living_gaze.update(_patrol_gaze_cells(cur_patrols))
 
                 # Temporal Evasion: Determine safe waiting action (explicit non-displacement action)
                 bump_wait_action: Any | None = non_disp_wait_action
@@ -1978,6 +1986,14 @@ class MentalSimulationPlanner:
                         if (nr, nc) in upcoming:
                             if _relaxed_safety:
                                 patrol_proximity_cost += 15.0
+                            else:
+                                had_relaxable_block = True
+                                continue
+
+                        new_patrol_gaze = _patrol_gaze_cells(new_patrols)
+                        if (nr, nc) in new_patrol_gaze:
+                            if _relaxed_safety:
+                                patrol_proximity_cost += 25.0
                             else:
                                 had_relaxable_block = True
                                 continue

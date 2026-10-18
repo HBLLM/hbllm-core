@@ -270,16 +270,19 @@ class MyAgent(Agent):
                     return sorted(list(set(acts)))
         return [1, 2, 3, 4, 5, 6, 7]
 
-    def _extract_action_schemas(self, available_actions: list[int]) -> list[dict[str, Any]]:
+    def _extract_action_schemas(
+        self, available_actions: list[int], latest_frame: Any = None
+    ) -> list[dict[str, Any]]:
         """Dynamically extract typed action schemas and valid effector targets from the active game environment."""
         g = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
             getattr(self, "arc_env", None), "game", None
         )
         valid_targets_by_action: dict[int, list[dict[str, Any]]] = {}
-        if g is not None:
-            if hasattr(g, "_get_valid_clickable_actions"):
+        target_sources = [s for s in (g, latest_frame) if s is not None]
+        for src in target_sources:
+            if hasattr(src, "_get_valid_clickable_actions"):
                 try:
-                    for act_in in g._get_valid_clickable_actions() or []:
+                    for act_in in src._get_valid_clickable_actions() or []:
                         aid = getattr(act_in, "id", None)
                         if hasattr(aid, "value"):
                             aid = aid.value
@@ -295,9 +298,9 @@ class MyAgent(Agent):
                                 valid_targets_by_action.setdefault(int(aid), []).append(d)
                 except Exception:
                     pass
-            if hasattr(g, "_get_valid_actions"):
+            if hasattr(src, "_get_valid_actions"):
                 try:
-                    for act_in in g._get_valid_actions() or []:
+                    for act_in in src._get_valid_actions() or []:
                         aid = getattr(act_in, "id", None)
                         if hasattr(aid, "value"):
                             aid = aid.value
@@ -315,9 +318,9 @@ class MyAgent(Agent):
                                     targets.append(d)
                 except Exception:
                     pass
-            if hasattr(g, "actions") and isinstance(g.actions, (list, tuple)):
+            if hasattr(src, "actions") and isinstance(src.actions, (list, tuple)):
                 try:
-                    for act_in in g.actions:
+                    for act_in in src.actions:
                         aid = getattr(act_in, "id", None)
                         if hasattr(aid, "value"):
                             aid = aid.value
@@ -477,7 +480,9 @@ class MyAgent(Agent):
         # Execute cognitive planning with resilient error recovery
         try:
             if hasattr(self.internal_engine, "decide"):
-                _arc_schema = self._extract_action_schemas(available_actions)
+                _arc_schema = self._extract_action_schemas(
+                    available_actions, latest_frame=latest_frame
+                )
                 action_id, action_data = self.internal_engine.decide(
                     grid, available_actions, action_schemas=_arc_schema
                 )

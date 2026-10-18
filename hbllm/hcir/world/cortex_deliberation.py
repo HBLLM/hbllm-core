@@ -1352,7 +1352,10 @@ class PrefrontalDeliberationEngine:
                     )
                     if focus_switch is not None and (
                         engine.consecutive_simulation_failures >= 1
-                        or getattr(engine, "bilateral_state", None) is not None
+                        or (
+                            getattr(engine, "bilateral_state", None) is not None
+                            and engine.last_action != focus_switch
+                        )
                     ):
                         logger.info(
                             "PrefrontalDeliberationEngine: Intentional Bilateral Focus Switch via action %s (active agent at %s failed simulation or reached plateau)",
@@ -1361,6 +1364,7 @@ class PrefrontalDeliberationEngine:
                         )
                         chosen_action = focus_switch
                         chosen_data = None
+                        engine.consecutive_simulation_failures = 0
                     else:
                         if engine.exploration_cooldown > 0:
                             engine.exploration_cooldown -= 1

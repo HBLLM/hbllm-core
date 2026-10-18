@@ -1435,6 +1435,38 @@ class MotorCortexEffector:
                 ):
                     click_candidates.append((sr, sc, 900.0))
 
+        # 0.2 Discrete Action Affordance Targets (e.g. interactive UI buttons & levers):
+        valid_targets = aff.metadata.get("valid_targets") if aff else None
+        if valid_targets and isinstance(valid_targets, (list, tuple)):
+            for vt in valid_targets:
+                if isinstance(vt, dict):
+                    raw_vx = vt.get("x", vt.get("c", None))
+                    raw_vy = vt.get("y", vt.get("r", None))
+                    if raw_vx is None or raw_vy is None:
+                        continue
+                    vx, vy = int(raw_vx), int(raw_vy)
+                    if not (0 <= vx < W and 0 <= vy < H):
+                        continue
+                    if (vy, vx) in engine.quiescent_click_targets:
+                        continue
+                    feat = int(curr_grid[vy, vx])
+                    vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                    eff_bonus = 150.0 if (vy, vx) in engine.effective_click_targets else 0.0
+                    feat_bonus = 30.0 if (feat != bg and feat != engine.bg_feature) else 0.0
+                    haben_pen = 0.0
+                    if hasattr(engine, "working_memory") and hasattr(
+                        engine.working_memory, "habenular_ior"
+                    ):
+                        if engine.working_memory.habenular_ior.is_action_inhibited(
+                            engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                        ):
+                            continue
+                        haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                            engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                        )
+                    score = 250.0 + eff_bonus + feat_bonus - float(vis) * 20.0 - haben_pen
+                    click_candidates.append((vy, vx, score))
+
         # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
         for scorer in cls._registered_target_scorers:
             try:
