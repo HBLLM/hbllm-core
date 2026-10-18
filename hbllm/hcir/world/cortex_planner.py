@@ -1244,8 +1244,10 @@ class MentalSimulationPlanner:
 
         def _patrol_gaze_cells(
             patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]],
-            max_dist: int = 7,
+            max_dist: int | None = None,
         ) -> set[tuple[int, int]]:
+            if max_dist is None:
+                max_dist = min(2, max(1, step_size))
             gaze: set[tuple[int, int]] = set()
             for p, f in patrols:
                 if f != (0, 0):
