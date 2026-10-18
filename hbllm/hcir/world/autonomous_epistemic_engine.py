@@ -1553,10 +1553,7 @@ class AutonomousEpistemicEngine:
 
     @avatar_pos.setter
     def avatar_pos(self, val: tuple[int, int] | None) -> None:
-        if val is not None and self.lattice_stride >= 2:
-            self._avatar_pos = self.snap_to_lattice(val) or val
-        else:
-            self._avatar_pos = val
+        self._avatar_pos = val
 
     @property
     def current_actor_pos(self) -> tuple[int, int] | None:

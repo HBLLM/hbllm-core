@@ -157,6 +157,8 @@ class HabenularEpisodicIOR:
         for k in to_remove:
             self.active_inhibitions.pop(k, None)
 
+    record_transition = record_step
+
     def record_catastrophe(self, final_step: int, is_lost: bool = True) -> FatalPrefixRecord | None:
         """Lateral Habenula punishment signal: backpropagate penalties along the fatal trace.
 

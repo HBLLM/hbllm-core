@@ -244,6 +244,15 @@ class EpistemicFeedbackAssimilator:
         if action is not None:
             engine.last_action = action
             engine.recent_actions.append(action)
+            if hasattr(engine, "working_memory") and hasattr(
+                engine.working_memory, "habenular_ior"
+            ):
+                engine.working_memory.habenular_ior.record_transition(
+                    step=engine.step_counter,
+                    avatar_pos=engine.avatar_pos,
+                    action=action,
+                    action_data=action_data,
+                )
         if action_data is not None:
             engine.last_action_data = action_data
 

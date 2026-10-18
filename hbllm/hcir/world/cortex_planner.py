@@ -147,6 +147,9 @@ class EpistemicGoalScheduler:
 
         # 1. Confirmed goals — causal evidence from past wins
         confirmed_goals: list[tuple[int, int]] = []
+        cargos_known_goals = engine.symbolic_theory.cargo_features | getattr(
+            engine, "learned_cargo_features", set()
+        )
         for e in entities:
             if avatar_pos is not None and e.grid_pos == avatar_pos:
                 continue
@@ -179,9 +182,6 @@ class EpistemicGoalScheduler:
                 engine.symbolic_theory.goal_features.discard(e.feature_id)
                 continue
 
-            cargos_known_goals = engine.symbolic_theory.cargo_features | getattr(
-                engine, "learned_cargo_features", set()
-            )
             is_goal_candidate = (
                 e.feature_id in engine.symbolic_theory.goal_features
                 and e.feature_id not in cargos_known_goals
@@ -1209,6 +1209,20 @@ class MentalSimulationPlanner:
         init_blocks = frozenset(pushable_blocks)
         init_open: frozenset[tuple[int, int]] = frozenset()
 
+        is_block_delivery = bool(
+            1 <= len(pushable_blocks) <= 16
+            and any(
+                (
+                    engine.symbolic_theory.is_cargo(e)
+                    or e.feature_id in engine.learned_cargo_features
+                    or getattr(e, "role", None) == EntityRole.MANIPULABLE
+                )
+                and e.feature_id not in av_feats
+                and e.grid_pos in pushable_blocks
+                for e in entities
+            )
+        )
+
         oriented_threat_positions = {t.pos for t in oriented_threats}
         init_chasers: frozenset[tuple[int, int]] = frozenset(
             e.grid_pos
@@ -1479,7 +1493,14 @@ class MentalSimulationPlanner:
         def heuristic(
             pos: tuple[int, int], blocks: frozenset[tuple[int, int]] | None = None
         ) -> float:
-            if goals:
+            if is_block_delivery and blocks:
+                b_list = list(blocks)
+                goal_dist = 0.0
+                for g in goals:
+                    goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
+                avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
+                base_h = float(goal_dist * 2.0 + avatar_to_b)
+            elif goals:
                 base_h = float(grid_dist_field[pos[0], pos[1]])
             else:
                 base_h = 0.0
@@ -1613,12 +1634,14 @@ class MentalSimulationPlanner:
             best_frontier_node: int | None = None
             best_frontier_h: float = h0
             expansions_done = 0
+            timed_out = False
 
             while open_set and max_expansions > 0:
                 expansions_done += 1
                 if (expansions_done & 31 == 0) and (
                     time.monotonic() - sim_start_time > max_sim_wall_seconds
                 ):
+                    timed_out = True
                     logger.debug(
                         "MentalSimulationPlanner: Any-time RTA* deadline exceeded (%.3fs, %d expansions). Returning best partial path.",
                         time.monotonic() - sim_start_time,
@@ -1658,6 +1681,7 @@ class MentalSimulationPlanner:
 
                 if (
                     not is_cargo_attached
+                    and not is_block_delivery
                     and (cur_pos in goals or cur_pos in all_goal_cells)
                     and path_len > 0
                 ):
@@ -1696,6 +1720,15 @@ class MentalSimulationPlanner:
                         cur_pos,
                     )
                     engine.current_simulated_goal = cur_pos
+                    return path, had_relaxable_block
+
+                if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
+                    path = _reconstruct_path(node_id)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
+                        len(path),
+                    )
+                    engine.current_simulated_goal = list(goals)[0] if goals else None
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
@@ -2193,7 +2226,11 @@ class MentalSimulationPlanner:
                         ),
                     )
 
-            if best_frontier_node is not None and best_frontier_h < h0:
+            if (
+                (timed_out or max_expansions <= 0)
+                and best_frontier_node is not None
+                and best_frontier_h < h0
+            ):
                 partial_path = _reconstruct_path(best_frontier_node)
                 if partial_path:
                     logger.info(
