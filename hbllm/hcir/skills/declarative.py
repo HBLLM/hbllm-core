@@ -951,23 +951,14 @@ class ParameterDialAffordancePredicate(SymbolicPredicate):
         if engine is None:
             return False
         avail = ctx.available_actions_set
-        idx_sel = [
-            a
-            for a in avail
-            if a in getattr(engine, "index_selector_actions", set())
-            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
-        ]
-        val_mut = [
-            a
-            for a in avail
-            if a in getattr(engine, "value_mutator_actions", set())
-            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
-        ]
+        idx_sel = [a for a in avail if a in getattr(engine, "index_selector_actions", set())]
+        val_mut = [a for a in avail if a in getattr(engine, "value_mutator_actions", set())]
         if not (idx_sel and val_mut):
             return False
         # If the environment has full 2D spatial navigation with exit goals, do not hijack with dial cycling
         if (
-            hasattr(engine, "is_motor_grounded")
+            engine.avatar_pos is not None
+            and hasattr(engine, "is_motor_grounded")
             and engine.is_motor_grounded()
             and (
                 getattr(engine, "learned_goal_positions", set())
@@ -1027,11 +1018,7 @@ class FocusSwitchAffordancePredicate(SymbolicPredicate):
             for a in avail
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
-        focus_switches = [
-            a
-            for a in discrete_transform_actions
-            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
-        ]
+        focus_switches = [a for a in discrete_transform_actions if engine.is_focus_switch_action(a)]
         if not focus_switches:
             return False
 
@@ -1055,12 +1042,21 @@ class FocusSwitchAffordancePredicate(SymbolicPredicate):
         avatar_arrived = bool(
             engine.avatar_pos is not None and goals and any(engine.avatar_pos == g for g in goals)
         )
+        trigger_reg = getattr(getattr(engine, "causal_cortex", None), "causal_attributor", None)
+        triggers = (
+            set(getattr(trigger_reg, "trigger_registry", {}).keys()) if trigger_reg else set()
+        )
+        triggers.update(getattr(engine, "learned_triggers", set()))
+        on_trigger = bool(engine.avatar_pos is not None and engine.avatar_pos in triggers)
+        if engine.last_action in focus_switches:
+            return False
+
         no_viable_plan = bool(
             not engine.mental_plan
-            and engine.consecutive_plan_failures >= 3
+            and engine.consecutive_plan_failures >= 2
             and engine.consecutive_stuck_steps >= 2
         )
-        return bool(avatar_arrived or no_viable_plan)
+        return bool(avatar_arrived or on_trigger or no_viable_plan)
 
     def __repr__(self) -> str:
         return "FocusSwitchAffordancePredicate()"
@@ -1140,20 +1136,21 @@ class FocusSwitchSkill(DeclarativeNeuroSymbolicSkill):
             for a in avail
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
-        focus_switches = [
-            a
-            for a in discrete_transform_actions
-            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
-        ]
+        focus_switches = [a for a in discrete_transform_actions if engine.is_focus_switch_action(a)]
         if not focus_switches:
             return []
 
-        chosen_switch = focus_switches[0]
-        engine.inhibited_actions[chosen_switch] = max(
-            engine.inhibited_actions.get(chosen_switch, 0), 4
+        uninhibited = [a for a in focus_switches if engine.inhibited_actions.get(a, 0) == 0]
+        chosen_switch = (
+            uninhibited[0]
+            if uninhibited
+            else min(focus_switches, key=lambda a: engine.inhibited_actions.get(a, 0))
         )
+
+        engine.inhibited_actions[chosen_switch] = 1
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 
+        engine.mental_plan.clear()
         engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
         engine.consecutive_plan_failures = 0
         engine.consecutive_stuck_steps = 0
@@ -1177,22 +1174,14 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
         if engine is None:
             return []
         avail = ctx.available_actions
-        idx_sel = [
-            a
-            for a in avail
-            if a in getattr(engine, "index_selector_actions", set())
-            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
-        ]
-        val_mut = [
-            a
-            for a in avail
-            if a in getattr(engine, "value_mutator_actions", set())
-            and getattr(engine, "inhibited_actions", {}).get(a, 0) == 0
-        ]
-        if not (idx_sel and val_mut):
+        raw_idx = [a for a in avail if a in getattr(engine, "index_selector_actions", set())]
+        raw_mut = [a for a in avail if a in getattr(engine, "value_mutator_actions", set())]
+        if not (raw_idx and raw_mut):
             return []
 
-        chosen_mut = val_mut[-1]
+        # Select consistent canonical forward mutator and selector to prevent bidirectional cancellation oscillation
+        chosen_mut = max(raw_mut)
+        chosen_idx = max(raw_idx)
         # Query learned recurrence period k dynamically from Pearl's do(a) causal theory
         get_period = getattr(
             getattr(engine, "symbolic_theory", None),
@@ -1205,9 +1194,18 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
         # Coordinate-descent limit: visit distinct candidate states (k-1 steps)
         streak_limit = getattr(engine, "dial_mutation_streak_limit", max(1, k - 1))
 
-        # Distal Trigger Gating: if mutation triggered distal goal discovery or very high surprise
+        # Distal Trigger Gating: if a value mutation (mut_streak > 0) triggered distal goal discovery or high surprise / salience shift
+        wm = getattr(engine, "working_memory", None)
+        has_salience_shift = bool(
+            wm is not None and hasattr(wm, "has_salience_shift") and wm.has_salience_shift(engine)
+        )
         has_distal_trigger = bool(
-            getattr(engine, "mental_plan", None) or (getattr(engine, "last_surprise", 0.0) >= 0.8)
+            mut_streak > 0
+            and (
+                getattr(engine, "mental_plan", None)
+                or (getattr(engine, "last_surprise", 0.0) >= 0.4)
+                or has_salience_shift
+            )
         )
 
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
@@ -1218,7 +1216,6 @@ class DialCyclingSkill(DeclarativeNeuroSymbolicSkill):
             res_mut: ActionSeq = [(chosen_mut, None)]
             return res_mut
         else:
-            chosen_idx = idx_sel[-1]
             engine.working_memory.dial_mutation_streak = 0
             engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
             res_idx: ActionSeq = [(chosen_idx, None)]

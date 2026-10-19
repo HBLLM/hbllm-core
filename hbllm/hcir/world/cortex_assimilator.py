@@ -688,7 +688,8 @@ class EpistemicFeedbackAssimilator:
                     dr = int(round(ce.centroid[0] - pe.centroid[0]))
                     dc = int(round(ce.centroid[1] - pe.centroid[1]))
                     dist = abs(dr) + abs(dc)
-                    is_valid_displacement = 0 < dist <= 8 and (
+                    max_disp = max(H, W) if (dr == 0 or dc == 0) else 8
+                    is_valid_displacement = 0 < dist <= max_disp and (
                         dr == 0 or dc == 0 or (abs(dr) <= 4 and abs(dc) <= 4)
                     )
                     if is_valid_displacement:
@@ -749,20 +750,40 @@ class EpistemicFeedbackAssimilator:
                     break
 
         # Faculty: Empirical Dial / State-Cycler Affordance Induction (Norman 1988 Parameter Control)
+        # Outcome-based guard: inspect what ACTUALLY moved rather than the action's
+        # prior classification.  If the only entities that displaced are the avatar
+        # and/or carried cargo (pure ego-motion), this is navigation — skip induction.
+        # Otherwise (a dial, selector, or non-avatar entity moved), allow induction.
         if action is not None and not is_effector_action:
             if 1 <= len(moved_entities) <= 2 and diff.changed_pixel_count <= 48:
-                deltas = {m[2] for m in moved_entities}
-                if len(deltas) == 1:
-                    dr_sc, dc_sc = next(iter(deltas))
-                    ce_sc = moved_entities[0][1]
-                    if ce_sc.area <= 48 and (
-                        (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
-                    ):
-                        if action not in engine.value_mutator_actions:
-                            engine.symbolic_theory.induce_index_selector(action)
-                            engine.index_selector_actions.add(action)
-                            if action in engine.action_affordances:
-                                engine.action_affordances[action].is_index_selector = True
+                # Compute ego-motion feature set: avatar + any known cargo features
+                _av_feats = engine.avatar_features or (
+                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
+                )
+                _ego_feats = _av_feats | engine.symbolic_theory.cargo_features
+                _avatar_displaced = (
+                    bool(_av_feats)
+                    and prev_avatar_pos is not None
+                    and engine.avatar_pos is not None
+                    and engine.avatar_pos != prev_avatar_pos
+                )
+                _is_pure_ego_motion = _avatar_displaced and all(
+                    m[1].feature_id in _ego_feats for m in moved_entities
+                )
+
+                if not _is_pure_ego_motion:
+                    deltas = {m[2] for m in moved_entities}
+                    if len(deltas) == 1:
+                        dr_sc, dc_sc = next(iter(deltas))
+                        ce_sc = moved_entities[0][1]
+                        if ce_sc.area <= 48 and (
+                            (dr_sc == 0 and dc_sc != 0) or (dr_sc != 0 and dc_sc == 0)
+                        ):
+                            if action not in engine.value_mutator_actions:
+                                engine.symbolic_theory.induce_index_selector(action)
+                                engine.index_selector_actions.add(action)
+                                if action in engine.action_affordances:
+                                    engine.action_affordances[action].is_index_selector = True
             elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 16:
                 # Check if a single focal indicator/marker transferred between entities
                 is_marker_transfer = False
@@ -784,13 +805,13 @@ class EpistemicFeedbackAssimilator:
                         c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
                         v1_prev, v1_curr = int(prev_g[c1]), int(curr_g[c1])
                         v2_prev, v2_curr = int(prev_g[c2]), int(curr_g[c2])
-                        has_bilateral = (
-                            getattr(engine, "bilateral_state", None) is not None
-                            or len(getattr(engine, "avatar_features", set())) > 1
-                        )
-                        if has_bilateral and (
-                            (v1_curr == v2_prev and v1_prev != bg and v2_curr != bg)
-                            or (v2_curr == v1_prev and v2_prev != bg and v1_curr != bg)
+                        # A marker transfer occurs when an indicator pixel moves from c2 to c1 (v1_curr == v2_prev)
+                        # or from c1 to c2 (v2_curr == v1_prev), with both locations undergoing a state change.
+                        if (
+                            c1 != c2
+                            and v1_prev != v1_curr
+                            and v2_prev != v2_curr
+                            and (v1_curr == v2_prev or v2_curr == v1_prev)
                         ):
                             is_marker_transfer = True
 
@@ -798,13 +819,12 @@ class EpistemicFeedbackAssimilator:
                     engine.mark_focus_switch_action(action)
                     engine.working_memory.focus_switch_actions.add(action)
                     # The new focus locus is the coordinate where the marker appeared in curr_g
-                    new_locus = None
-                    if curr_g[c1] == 0 or (v1_curr != v1_prev and v1_curr == v2_prev):
+                    if v1_curr == v2_prev:
                         new_locus = c1
-                    elif curr_g[c2] == 0 or (v2_curr != v2_prev and v2_curr == v1_prev):
-                        new_locus = c2
+                        old_locus = c2
                     else:
                         new_locus = c2
+                        old_locus = c1
 
                     new_feat = None
                     if new_locus is not None:
@@ -814,15 +834,30 @@ class EpistemicFeedbackAssimilator:
                                 nr, nc = lr + dr, lc + dc
                                 if 0 <= nr < H and 0 <= nc < W:
                                     val = int(curr_g[nr, nc])
-                                    if val not in (bg, engine.bg_feature, 0):
+                                    if val not in (bg, engine.bg_feature, curr_g[new_locus]):
                                         new_feat = val
                                         break
                             if new_feat is not None:
                                 break
 
-                    old_feat = (
-                        getattr(engine, "prior_avatar_feature", None) or engine.avatar_feature
-                    )
+                    old_feat = None
+                    if old_locus is not None:
+                        lr, lc = old_locus
+                        for dr in range(-2, 3):
+                            for dc in range(-2, 3):
+                                nr, nc = lr + dr, lc + dc
+                                if 0 <= nr < H and 0 <= nc < W:
+                                    val = int(curr_g[nr, nc])
+                                    if val not in (bg, engine.bg_feature, prev_g[old_locus]):
+                                        old_feat = val
+                                        break
+                            if old_feat is not None:
+                                break
+                    if old_feat is None:
+                        old_feat = (
+                            getattr(engine, "prior_avatar_feature", None) or engine.avatar_feature
+                        )
+
                     if new_feat is not None:
                         engine.prior_avatar_feature = old_feat
                         engine.avatar_features = {new_feat}
@@ -843,8 +878,21 @@ class EpistemicFeedbackAssimilator:
                     if action in engine.action_affordances:
                         engine.action_affordances[action].is_value_mutator = True
                     if engine.prev_grid is not None:
-                        diff_mask = engine.prev_grid != curr_grid
-                        if np.any(diff_mask):
+                        from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
+                        raw_diff = engine.prev_grid != curr_grid
+                        H, W = curr_grid.shape
+                        diff_coords = [
+                            (int(r), int(c))
+                            for r, c in np.argwhere(raw_diff)
+                            if not MotorCortexEffector.is_peripheral_frame_cell(
+                                int(r), int(c), H, W, curr_grid
+                            )
+                        ]
+                        if diff_coords:
+                            diff_mask = np.zeros_like(raw_diff)
+                            for r, c in diff_coords:
+                                diff_mask[r, c] = True
                             curr_sig = hash(curr_grid[diff_mask].tobytes())
                             prev_sig = hash(engine.prev_grid[diff_mask].tobytes())
                             engine.symbolic_theory.record_state_mutation(
@@ -894,6 +942,9 @@ class EpistemicFeedbackAssimilator:
                 and engine.working_memory.body_schema.active_manipulandum is not None
                 else None
             )
+            av_feats = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
             candidate_bilat = [
                 (ce.grid_pos, delta, ce.feature_id)
                 for pe, ce, delta in moved_entities
@@ -909,7 +960,8 @@ class EpistemicFeedbackAssimilator:
                 and not engine.symbolic_theory.has_affordance(ce, "receptacle")
                 and ce.feature_id != bg
                 and ce.feature_id != engine.bg_feature
-                and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
+                and ce.feature_id != 0
+                and (not av_feats or ce.feature_id in av_feats)
             ]
             if len(candidate_bilat) >= 2:
                 bilat_state = engine.bilateral_integrator.detect_bilateral_pairing(

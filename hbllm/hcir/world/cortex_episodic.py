@@ -612,10 +612,11 @@ class HippocampalEpisodicCortex:
         engine.symbolic_theory.candidate_goal_features.clear()
 
         if not retain_dynamics:
+            target_lvl = 0 if level is None else level
+            engine.set_current_level(target_lvl)
             engine.level_failed_transitions.clear()
             engine.level_learned_barriers.clear()
             engine.level_lethal_positions.clear()
-            engine._current_level = 0 if level is None else level
             engine.failed_transitions = engine.level_failed_transitions.setdefault(
                 engine._current_level, set()
             )
@@ -638,6 +639,8 @@ class HippocampalEpisodicCortex:
             engine.last_surprise_eval = None
         elif is_new_level:
             # Level transition: point episodic spatial memory to the target level
+            if level is not None:
+                engine.set_current_level(level)
             engine.failed_transitions = engine.level_failed_transitions.setdefault(
                 engine._current_level, set()
             )
@@ -668,6 +671,7 @@ class HippocampalEpisodicCortex:
             engine.prev_grid = None
             engine.last_action = None
             engine.last_predicted_pos = None
+            engine.avatar_pos = None
             engine.mental_plan.clear()
             engine.consecutive_simulation_failures = 0
             engine.simulation_cooldown = 0

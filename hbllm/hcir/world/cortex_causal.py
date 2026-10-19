@@ -428,13 +428,16 @@ class HCIRSymbolicWorldTheory:
         if not history and prior_state_sig is not None:
             history.append(prior_state_sig)
 
+        if history and history[-1] == state_sig:
+            return self.action_cycle_periods.get(action)
+
         history.append(state_sig)
 
         # Check if state_sig was seen before in history (s_{t+k} = s_t)
         if len(history) > 1 and state_sig in history[:-1]:
-            prev_idx = history[:-1].index(state_sig)
+            prev_idx = len(history) - 2 - history[:-1][::-1].index(state_sig)
             k = len(history) - 1 - prev_idx
-            if k > 0:
+            if k >= 2:
                 self.action_cycle_periods[action] = k
                 logger.info(
                     "HCIRSymbolicWorldTheory: Learned Dynamic Recurrence Period k=%d for action %s",

@@ -1135,22 +1135,26 @@ class AutonomousEpistemicEngine:
                 node_level = props.get("level")
                 if node_level is not None and node_level != self.current_level:
                     continue
+                parts = nid.removeprefix("learned_goal_").split("_")
+                if len(parts) >= 3 and parts[0].startswith("lvl"):
+                    lvl_num = parts[0].removeprefix("lvl")
+                    if lvl_num.isdigit() and int(lvl_num) != self.current_level:
+                        continue
+                elif node_level is None and self.current_level > 0:
+                    continue
+
                 pos = props.get("position")
                 if pos and len(pos) == 2:
                     gp = (int(pos[0]), int(pos[1]))
                 else:
-                    parts = nid.removeprefix("learned_goal_").split("_")
-                    if len(parts) >= 3 and parts[0].startswith("lvl"):
-                        lvl_num = parts[0].removeprefix("lvl")
-                        if lvl_num.isdigit() and int(lvl_num) != self.current_level:
-                            continue
-                        if parts[1].isdigit() and parts[2].isdigit():
-                            gp = (int(parts[1]), int(parts[2]))
-                        else:
-                            gp = None
+                    if (
+                        len(parts) >= 3
+                        and parts[0].startswith("lvl")
+                        and parts[1].isdigit()
+                        and parts[2].isdigit()
+                    ):
+                        gp = (int(parts[1]), int(parts[2]))
                     elif len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-                        if self.current_level > 0:
-                            continue
                         gp = (int(parts[0]), int(parts[1]))
                     else:
                         gp = None
@@ -1163,22 +1167,26 @@ class AutonomousEpistemicEngine:
                 node_level = props.get("level")
                 if node_level is not None and node_level != self.current_level:
                     continue
+                parts = nid.removeprefix("learned_barrier_").split("_")
+                if len(parts) >= 3 and parts[0].startswith("lvl"):
+                    lvl_num = parts[0].removeprefix("lvl")
+                    if lvl_num.isdigit() and int(lvl_num) != self.current_level:
+                        continue
+                elif node_level is None and self.current_level > 0:
+                    continue
+
                 pos = props.get("position")
                 if pos and len(pos) == 2:
                     bp = (int(pos[0]), int(pos[1]))
                 else:
-                    parts = nid.removeprefix("learned_barrier_").split("_")
-                    if len(parts) >= 3 and parts[0].startswith("lvl"):
-                        lvl_num = parts[0].removeprefix("lvl")
-                        if lvl_num.isdigit() and int(lvl_num) != self.current_level:
-                            continue
-                        if parts[1].isdigit() and parts[2].isdigit():
-                            bp = (int(parts[1]), int(parts[2]))
-                        else:
-                            bp = None
+                    if (
+                        len(parts) >= 3
+                        and parts[0].startswith("lvl")
+                        and parts[1].isdigit()
+                        and parts[2].isdigit()
+                    ):
+                        bp = (int(parts[1]), int(parts[2]))
                     elif len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
-                        if self.current_level > 0:
-                            continue
                         bp = (int(parts[0]), int(parts[1]))
                     else:
                         bp = None
@@ -2165,6 +2173,10 @@ class AutonomousEpistemicEngine:
                         0.15 * self.avatar_size <= comp_area <= 6.0 * self.avatar_size
                     ):
                         self.avatar_size = comp_area
+                        self.avatar_pos = (
+                            int(round(float(np.mean(coords[:, 0])))),
+                            int(round(float(np.mean(coords[:, 1])))),
+                        )
                         return
 
         # Collect candidates

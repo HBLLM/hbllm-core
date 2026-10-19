@@ -938,9 +938,11 @@ class MentalSimulationPlanner:
             engine.bilateral_state is not None
             and len(engine.action_dynamics) >= 2
             and not engine.working_memory.body_schema.has_manipulandum()
+            and (not av_feats or bool(engine.bilateral_state.features & av_feats))
             and not bool(engine.bilateral_state.features & cargos_known_d)
             and not bool(engine.bilateral_state.features & recs_known_d)
             and not (cargos_known_d and (recs_known_d or engine.learned_goal_positions))
+            and len(engine.learned_goal_positions) != 1
             and (
                 abs(engine.bilateral_state.pos1[0] - engine.bilateral_state.pos2[0])
                 + abs(engine.bilateral_state.pos1[1] - engine.bilateral_state.pos2[1])
@@ -977,7 +979,13 @@ class MentalSimulationPlanner:
                 steps = []
                 for act in bilateral_plan:
                     dr_b, dc_b = action_deltas.get(act, (0, 0))
-                    curr_b_pos = (curr_b_pos[0] + dr_b, curr_b_pos[1] + dc_b)
+                    cand_b_pos = (curr_b_pos[0] + dr_b, curr_b_pos[1] + dc_b)
+                    if (
+                        0 <= cand_b_pos[0] < H
+                        and 0 <= cand_b_pos[1] < W
+                        and passable_mask[cand_b_pos[0], cand_b_pos[1]]
+                    ):
+                        curr_b_pos = cand_b_pos
                     steps.append(
                         MentalSimulationStep(
                             action=act,

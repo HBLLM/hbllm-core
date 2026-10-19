@@ -624,7 +624,7 @@ class WallpaperTilingInducer:
                 (canvas[:valid_rows, :] == canvas[pr:, :]) & (canvas[:valid_rows, :] != bg)
             )
             total = np.count_nonzero(canvas[:valid_rows, :] != bg)
-            score = matches / float(max(1, total))
+            score = matches / float(max(1, int(total)))
             if score > 0.70 and score > best_score_r:
                 best_score_r = score
                 best_pr = pr
@@ -636,7 +636,7 @@ class WallpaperTilingInducer:
                 (canvas[:, :valid_cols] == canvas[:, pc:]) & (canvas[:, :valid_cols] != bg)
             )
             total = np.count_nonzero(canvas[:, :valid_cols] != bg)
-            score = matches / float(max(1, total))
+            score = matches / float(max(1, int(total)))
             if score > 0.70 and score > best_score_c:
                 best_score_c = score
                 best_pc = pc

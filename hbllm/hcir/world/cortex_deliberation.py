@@ -262,38 +262,118 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 return False
 
             sim_patrols = frozenset(live_patrols)
-            for future_step in future_steps:
+            gaze_range = min(3, max(1, step_size * 2))
+
+            for step_idx, future_step in enumerate(future_steps):
                 avatar_dest = future_step.predicted_avatar_pos
+                if avatar_dest is None:
+                    continue
                 new_patrol_set: set[tuple[tuple[int, int], tuple[int, int]]] = set()
                 collision = False
+
                 for pat_pos, pat_facing in sim_patrols:
                     if pat_pos == avatar_dest:
                         collision = True
                         break
+
                     dest = (
                         pat_pos[0] + pat_facing[0] * step_size,
                         pat_pos[1] + pat_facing[1] * step_size,
                     )
+                    turned = False
+                    new_f = pat_facing
+
                     if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in patrol_walls:
-                        new_f = (-pat_facing[0], -pat_facing[1])
-                        new_patrol_set.add((pat_pos, new_f))
-                        continue
+                        # 90-degree rotational turn at corner before 180-degree reversal
+                        for rot_f in [
+                            (pat_facing[1], -pat_facing[0]),
+                            (-pat_facing[1], pat_facing[0]),
+                        ]:
+                            rot_dest = (
+                                pat_pos[0] + rot_f[0] * step_size,
+                                pat_pos[1] + rot_f[1] * step_size,
+                            )
+                            if (
+                                0 <= rot_dest[0] < H
+                                and 0 <= rot_dest[1] < W
+                                and rot_dest not in patrol_walls
+                            ):
+                                dest = rot_dest
+                                new_f = rot_f
+                                turned = True
+                                break
+                        if not turned:
+                            new_f = (-pat_facing[0], -pat_facing[1])
+                            dest = pat_pos
+                    elif _blocked(dest, pat_facing):
+                        for rot_f in [
+                            (pat_facing[1], -pat_facing[0]),
+                            (-pat_facing[1], pat_facing[0]),
+                        ]:
+                            rot_dest = (
+                                dest[0] + rot_f[0] * step_size,
+                                dest[1] + rot_f[1] * step_size,
+                            )
+                            if (
+                                0 <= rot_dest[0] < H
+                                and 0 <= rot_dest[1] < W
+                                and rot_dest not in patrol_walls
+                            ):
+                                new_f = rot_f
+                                turned = True
+                                break
+                        if not turned:
+                            new_f = (-pat_facing[0], -pat_facing[1])
+
+                    new_patrol_set.add((dest, new_f))
+
+                    # 1. Direct body collision at projected patroller position
                     if dest == avatar_dest:
                         collision = True
                         break
-                    new_f = pat_facing
-                    if _blocked(dest, pat_facing):
-                        new_f = (-pat_facing[0], -pat_facing[1])
-                    new_patrol_set.add((dest, new_f))
+
+                    # 2. Dynamic sentry gaze / sightline projection along projected heading new_f
+                    if new_f != (0, 0):
+                        for k in range(1, gaze_range + 1):
+                            gr = dest[0] + new_f[0] * k
+                            gc = dest[1] + new_f[1] * k
+                            if not (0 <= gr < H and 0 <= gc < W) or (gr, gc) in patrol_walls:
+                                break
+                            if (gr, gc) == avatar_dest:
+                                collision = True
+                                break
+                    if collision:
+                        break
+
                 if collision:
                     if (
                         next_step.expected_mutation == "oscillatory_return_step"
                         and future_step != next_step
                     ):
                         continue
+                    # Check if next_step collision clears within 1 or 2 steps (temporal pacing window)
+                    should_wait = False
+                    wait_steps = 1
+                    if step_idx == 0 and len(new_patrol_set) > 0:
+                        # Forward probe patrollers 1 more step to check if avatar_dest becomes clear
+                        next_next_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+                        for p2, f2 in new_patrol_set:
+                            d2 = (p2[0] + f2[0] * step_size, p2[1] + f2[1] * step_size)
+                            if 0 <= d2[0] < H and 0 <= d2[1] < W and d2 not in patrol_walls:
+                                next_next_patrols.add((d2, f2))
+                            else:
+                                next_next_patrols.add((p2, (-f2[0], -f2[1])))
+                        # If destination and gaze are free on the next phase tick, advise pacing
+                        is_still_hazard = any(p == avatar_dest for p, _ in next_next_patrols)
+                        if not is_still_hazard:
+                            should_wait = True
+                            wait_steps = 1
+
                     return SafetyGateResult(
                         is_safe=False,
-                        reason="Collision with simulated patrol threat along plan: space-time replanning required",
+                        should_wait=should_wait,
+                        wait_steps=wait_steps,
+                        reason="Collision with projected sentry trajectory or gaze cone along plan",
                     )
                 sim_patrols = frozenset(new_patrol_set)
 
@@ -1223,6 +1303,7 @@ class PrefrontalDeliberationEngine:
         chosen_action: Any
         chosen_data: dict[str, Any] | None = None
         predicted_pos: tuple[int, int] | None = None
+        affordance_choice: tuple[Any, dict[str, Any] | None] | None = None
 
         # 0. ACC Forced Perturbation: break limit-cycle oscillation immediately
         if forced_acc_perturbation is not None:
@@ -1303,8 +1384,9 @@ class PrefrontalDeliberationEngine:
             affordance_choice := self.arbitrate_affordances(
                 engine, curr_grid, available_actions, known_av_feats
             )
-        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
+        ) is not None:
             chosen_action, chosen_data = affordance_choice
+            engine.inhibited_actions.pop(chosen_action, None)
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
@@ -1343,6 +1425,9 @@ class PrefrontalDeliberationEngine:
         if engine.phase == EpistemicPhase.EXPLOITATION:
             # Deterministic plan rollout towards verified goal/exit
             last_conf = min(0.98, max(0.70, base_dyn_conf))
+        elif affordance_choice is not None:
+            # Procedural declarative neuro-symbolic skill execution (dials, effectors, focus switches)
+            last_conf = min(0.90, max(0.75, base_dyn_conf * 0.90))
         elif getattr(engine.object_planner, "active_target_object_id", None) is not None:
             # Macro option (Directive 4 known tool vs Directive 5 curious probe)
             if any(
