@@ -731,7 +731,12 @@ class AutonomousEpistemicEngine:
 
         res: list[tuple[int, int]] = list(self.learned_goal_positions)
         sgs = getattr(self.working_memory, "structural_goals", None)
-        if not sgs and self.prev_grid is not None:
+        av_feats = self.avatar_features or (
+            {self.avatar_feature} if self.avatar_feature is not None else set()
+        )
+        if (
+            not sgs or (av_feats and any(sg.get("feature") in av_feats for sg in sgs))
+        ) and self.prev_grid is not None:
             sgs = self.detect_structural_goals(self.prev_grid, bg=self.bg_feature)
             if hasattr(self.working_memory, "structural_goals"):
                 self.working_memory.structural_goals = sgs
@@ -747,9 +752,6 @@ class AutonomousEpistemicEngine:
                     ):
                         self.working_memory.target_constellations.setdefault(f, pos)
 
-            av_feats = self.avatar_features or (
-                {self.avatar_feature} if self.avatar_feature is not None else set()
-            )
             constellations = [
                 sg
                 for sg in sgs
@@ -759,6 +761,9 @@ class AutonomousEpistemicEngine:
             if constellations:
                 c_goals: list[tuple[int, int]] = []
                 for c in constellations:
+                    for cp in c.get("cells", []):
+                        if cp and cp not in c_goals:
+                            c_goals.append(cp)
                     pos = c.get("position")
                     if pos and pos not in c_goals:
                         c_goals.append(pos)
@@ -770,6 +775,8 @@ class AutonomousEpistemicEngine:
                         return [self.working_memory.target_constellations[av_f]]
 
             for sg in sgs:
+                if sg.get("feature") in av_feats:
+                    continue
                 pos = sg.get("position")
                 if pos and pos not in res:
                     res.append(pos)

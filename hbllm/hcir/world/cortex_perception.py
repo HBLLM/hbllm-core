@@ -400,41 +400,43 @@ class GestaltAffordanceDetector:
                 or (barrier_features and feat_int in barrier_features)
             ):
                 continue
-            pts = np.argwhere(grid == feat_int)
-            if len(pts) < 4 or len(pts) > H * W * 0.3:
-                continue
-
-            min_r, min_c = pts.min(axis=0)
-            max_r, max_c = pts.max(axis=0)
-
-            is_interior = min_r > 1 and max_r < H - 2 and min_c > 1 and max_c < W - 2
-            rect_area = (max_r - min_r + 1) * (max_c - min_c + 1)
-            fill_ratio = len(pts) / max(1, rect_area)
-
-            patch = grid[min_r : max_r + 1, min_c : max_c + 1]
-            patch_vals = np.unique(patch)
-            if any(pv in threat_feats for pv in patch_vals):
-                continue
-            non_bg_vals = [v for v in patch_vals if v != bg and v != 0]
-            if len(non_bg_vals) >= 2:
-                v_counts = [np.count_nonzero(patch == v) for v in non_bg_vals]
-                if min(v_counts) <= 2:
+            labeled_feat, num_comps = label(grid == feat_int)
+            for c_idx in range(1, num_comps + 1):
+                pts = np.argwhere(labeled_feat == c_idx)
+                if len(pts) < 4 or len(pts) > H * W * 0.3:
                     continue
 
-            if is_interior and fill_ratio > 0.7 and 4 <= len(pts) <= H * W * 0.15:
-                centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
-                )
-                goals.append(
-                    {
-                        "type": "target_zone",
-                        "position": centroid,
-                        "feature": feat_int,
-                        "size": len(pts),
-                        "confidence": 0.8,
-                    }
-                )
+                min_r, min_c = pts.min(axis=0)
+                max_r, max_c = pts.max(axis=0)
+
+                is_interior = min_r > 1 and max_r < H - 2 and min_c > 1 and max_c < W - 2
+                rect_area = (max_r - min_r + 1) * (max_c - min_c + 1)
+                fill_ratio = len(pts) / max(1, rect_area)
+
+                patch = grid[min_r : max_r + 1, min_c : max_c + 1]
+                patch_vals = np.unique(patch)
+                if any(pv in threat_feats for pv in patch_vals):
+                    continue
+                non_bg_vals = [v for v in patch_vals if v != bg and v != 0 and v != feat_int]
+                if len(non_bg_vals) >= 2:
+                    v_counts = [np.count_nonzero(patch == v) for v in non_bg_vals]
+                    if min(v_counts) <= 2:
+                        continue
+
+                if is_interior and fill_ratio > 0.60 and 4 <= len(pts) <= H * W * 0.15:
+                    centroid = (
+                        int(round(float(np.mean(pts[:, 0])))),
+                        int(round(float(np.mean(pts[:, 1])))),
+                    )
+                    goals.append(
+                        {
+                            "type": "target_zone",
+                            "position": centroid,
+                            "feature": feat_int,
+                            "size": len(pts),
+                            "confidence": 0.8,
+                        }
+                    )
 
         # 2. Detect edge and near-edge exit markers
         for feat in np.unique(grid):

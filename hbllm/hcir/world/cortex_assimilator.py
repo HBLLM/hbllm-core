@@ -805,72 +805,66 @@ class EpistemicFeedbackAssimilator:
                         c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
                         v1_prev, v1_curr = int(prev_g[c1]), int(curr_g[c1])
                         v2_prev, v2_curr = int(prev_g[c2]), int(curr_g[c2])
-                        # A marker transfer occurs when an indicator pixel moves from c2 to c1 (v1_curr == v2_prev)
-                        # or from c1 to c2 (v2_curr == v1_prev), with both locations undergoing a state change.
-                        if (
+                        ambient_transfer_bg = {0, bg, getattr(engine, "bg_feature", 0)}
+                        is_complementary = (
+                            v1_curr not in ambient_transfer_bg
+                            and v2_curr in ambient_transfer_bg
+                            and v1_prev in ambient_transfer_bg
+                            and v2_prev not in ambient_transfer_bg
+                        ) or (
+                            v2_curr not in ambient_transfer_bg
+                            and v1_curr in ambient_transfer_bg
+                            and v2_prev in ambient_transfer_bg
+                            and v1_prev not in ambient_transfer_bg
+                        )
+                        is_value_transfer = (
                             c1 != c2
                             and v1_prev != v1_curr
                             and v2_prev != v2_curr
                             and (v1_curr == v2_prev or v2_curr == v1_prev)
-                        ):
+                            and (
+                                v1_curr not in ambient_transfer_bg
+                                or v2_curr not in ambient_transfer_bg
+                            )
+                        )
+                        if is_complementary or is_value_transfer:
                             is_marker_transfer = True
 
                 if is_marker_transfer:
                     engine.mark_focus_switch_action(action)
                     engine.working_memory.focus_switch_actions.add(action)
-                    # The new focus locus is the coordinate where the marker appeared in curr_g
-                    if v1_curr == v2_prev:
+                    ambient_transfer_bg = {0, bg, getattr(engine, "bg_feature", 0)}
+                    # The new focus locus is the coordinate where the marker appeared / became active in curr_g
+                    if v1_curr not in ambient_transfer_bg:
                         new_locus = c1
-                        old_locus = c2
+                        new_feat = v1_curr
+                        old_feat = (
+                            v2_prev
+                            if v2_prev not in ambient_transfer_bg
+                            else (v1_prev if v1_prev not in ambient_transfer_bg else None)
+                        )
                     else:
                         new_locus = c2
-                        old_locus = c1
+                        new_feat = v2_curr
+                        old_feat = (
+                            v1_prev
+                            if v1_prev not in ambient_transfer_bg
+                            else (v2_prev if v2_prev not in ambient_transfer_bg else None)
+                        )
 
-                    new_feat = None
-                    if new_locus is not None:
-                        lr, lc = new_locus
-                        for dr in range(-2, 3):
-                            for dc in range(-2, 3):
-                                nr, nc = lr + dr, lc + dc
-                                if 0 <= nr < H and 0 <= nc < W:
-                                    val = int(curr_g[nr, nc])
-                                    if val not in (bg, engine.bg_feature, curr_g[new_locus]):
-                                        new_feat = val
-                                        break
-                            if new_feat is not None:
-                                break
-
-                    old_feat = None
-                    if old_locus is not None:
-                        lr, lc = old_locus
-                        for dr in range(-2, 3):
-                            for dc in range(-2, 3):
-                                nr, nc = lr + dr, lc + dc
-                                if 0 <= nr < H and 0 <= nc < W:
-                                    val = int(curr_g[nr, nc])
-                                    if val not in (bg, engine.bg_feature, prev_g[old_locus]):
-                                        old_feat = val
-                                        break
-                            if old_feat is not None:
-                                break
-                    if old_feat is None:
+                    if old_feat is None or old_feat in ambient_transfer_bg:
                         old_feat = (
                             getattr(engine, "prior_avatar_feature", None) or engine.avatar_feature
                         )
 
-                    if new_feat is not None:
-                        engine.prior_avatar_feature = old_feat
-                        engine.avatar_features = {new_feat}
-                        engine.avatar_feature = new_feat
-                        engine.avatar_pos = None
-                        engine.avatar_size = 0
-                        engine._update_avatar_position_from_grid(
-                            curr_g, {new_feat}, preferred_pos=new_locus
-                        )
-                    else:
-                        engine.avatar_features.clear()
-                        engine.avatar_feature = None
-                        engine.avatar_pos = None
+                    engine.prior_avatar_feature = old_feat
+                    engine.avatar_features = {new_feat}
+                    engine.avatar_feature = new_feat
+                    engine.avatar_pos = new_locus
+                    engine.avatar_size = 1
+                    engine._update_avatar_position_from_grid(
+                        curr_g, {new_feat}, preferred_pos=new_locus
+                    )
                     engine.mental_plan.clear()
                 elif action not in engine.index_selector_actions:
                     engine.symbolic_theory.induce_value_mutator(action)
@@ -1248,13 +1242,20 @@ class EpistemicFeedbackAssimilator:
                 return
 
             feats_in_diff = {
-                int(f) for f in (prev_diff_colors | curr_diff_colors) if int(f) not in ambient_bg
+                int(f)
+                for f in (prev_diff_colors | curr_diff_colors)
+                if int(f) not in ambient_bg and int(f) != 0 and int(f) != bg
             }
+            sorted_feats = list(feats_in_diff)
+            if engine.avatar_feature is not None and engine.avatar_feature in feats_in_diff:
+                sorted_feats = [engine.avatar_feature] + [
+                    f for f in feats_in_diff if f != engine.avatar_feature
+                ]
             best_feat: int | None = None
             diff_best_delta: tuple[int, int] | None = None
             best_pos: tuple[int, int] | None = None
             best_size: int = 0
-            for f in feats_in_diff:
+            for f in sorted_feats:
                 c_prev = [
                     (int(r), int(c)) for r, c in diff_coords if int(engine.prev_grid[r, c]) == f
                 ]
@@ -1342,13 +1343,13 @@ class EpistemicFeedbackAssimilator:
                     )
                     if action in engine.action_affordances:
                         engine.action_affordances[action].is_displacement = True
-                        engine.action_affordances[action].delta = best_delta
+                        engine.action_affordances[action].delta = diff_best_delta
                 logger.info(
                     "AutonomousEpistemicEngine: Avatar identified via differential kinetic stream — feature %s at pos %s (delta: %d, %d)",
                     best_feat,
                     best_pos,
-                    best_delta[0],
-                    best_delta[1],
+                    diff_best_delta[0],
+                    diff_best_delta[1],
                 )
 
         # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
