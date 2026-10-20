@@ -494,11 +494,27 @@ class MyAgent(Agent):
                 _arc_schema = self._extract_action_schemas(
                     available_actions, latest_frame=latest_frame
                 )
+                game_obj = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
+                    getattr(self, "arc_env", None), "game", None
+                )
+                _objects = None
+                try:
+                    from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+
+                    _objects = extract_arc_objects(
+                        grid,
+                        engine=self.internal_engine,
+                        game_obj=game_obj or latest_frame,
+                    )
+                except Exception as _e:
+                    logger.debug("extract_arc_objects failed: %s", _e)
+
                 action_id, action_data = self.internal_engine.decide(
                     grid,
                     available_actions,
                     action_schemas=_arc_schema,
                     micro_actions=_arc_schema,
+                    objects=_objects,
                 )
                 conf = getattr(self.internal_engine, "last_action_confidence", 1.0)
             else:

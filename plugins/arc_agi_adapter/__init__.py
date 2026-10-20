@@ -10,7 +10,7 @@ from .arc_macro_actions import (
     arc_macro_plan_synthesis_hook,
     register_arc_macro_actions,
 )
-from .arc_perception import ARCPerceptionAdapter
+from .arc_perception import ARCPerceptionAdapter, extract_arc_objects
 from .solvers import (
     ARC3ArchetypeScorer,
     ARC3DeliberationPolicy,
@@ -36,6 +36,7 @@ __all__ = [
     "ARC3Driver",
     "ArcadeDriver",
     "ARCPerceptionAdapter",
+    "extract_arc_objects",
     "ARCTaskAdapter",
     "ARCBenchmarkRunner",
     "ARC3ArchetypeScorer",

@@ -801,6 +801,9 @@ class MacroActionPlan:
     def current(self) -> MacroAction | None:
         return self.actions[0] if self.actions else None
 
+    def current_action(self) -> MacroAction | None:
+        return self.current()
+
     def append(self, op: MacroAction) -> None:
         self.actions.append(op)
 

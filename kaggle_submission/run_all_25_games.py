@@ -298,6 +298,13 @@ class ArcAgiConsoleDriver(BaseDriver):
         if affordance_knowledge:
             metadata["affordance_knowledge"] = affordance_knowledge
 
+        try:
+            from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+
+            metadata["objects"] = extract_arc_objects(grid, game_obj=game_obj)
+        except Exception:
+            pass
+
         return DriverInput(
             raw_data=grid,
             source_id=self.name,
