@@ -767,6 +767,9 @@ class PrefrontalDeliberationEngine:
         is_win: bool = False,
         is_lost: bool = False,
         action_schemas: Sequence[Any] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+        **kwargs: Any,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Unified cognitive decision function:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
@@ -796,6 +799,37 @@ class PrefrontalDeliberationEngine:
                 action_data=engine.last_action_data,
             )
         engine._feedback_assimilated = False
+
+        # Faculty: Executive Macro-Action Plan Execution & Synthesis
+        macro_plan = getattr(engine.working_memory, "macro_plan", None)
+        if macro_plan is not None and not macro_plan.is_empty():
+            macro_step = macro_plan.step(
+                engine, curr_grid, available_actions, prev_grid=engine.prev_grid
+            )
+            if macro_step is not None:
+                m_act, m_data = macro_step
+                if m_act in available_actions:
+                    return self._finalize_step(engine, curr_grid, m_act, m_data)
+
+        if macro_plan is None or macro_plan.is_empty():
+            from hbllm.hcir.world.macro_actions import MacroPlanSynthesizer
+
+            synthesized = MacroPlanSynthesizer.synthesize_plan(
+                engine,
+                curr_grid,
+                available_actions,
+                objects=objects,
+                micro_actions=micro_actions,
+            )
+            if synthesized is not None and not synthesized.is_empty():
+                engine.working_memory.macro_plan = synthesized
+                macro_step = synthesized.step(
+                    engine, curr_grid, available_actions, prev_grid=engine.prev_grid
+                )
+                if macro_step is not None:
+                    m_act, m_data = macro_step
+                    if m_act in available_actions:
+                        return self._finalize_step(engine, curr_grid, m_act, m_data)
 
         # Phasic Salience Reset: Environmental discovery, dynamic threat emergence, or high surprise
         # Query prefrontal working memory for salience shift to awaken deliberate forward search
@@ -1216,6 +1250,19 @@ class PrefrontalDeliberationEngine:
                     chosen_action = non_eff[0] if non_eff else available_actions[0]
                     chosen_data = None
 
+        return self._finalize_step(
+            engine, curr_grid, chosen_action, chosen_data, predicted_pos=predicted_pos
+        )
+
+    @classmethod
+    def _finalize_step(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        chosen_action: Any,
+        chosen_data: dict[str, Any] | None,
+        predicted_pos: tuple[int, int] | None = None,
+    ) -> tuple[Any, dict[str, Any] | None]:
         engine.prev_grid = curr_grid.copy()
         if hasattr(engine, "grid_history"):
             engine.grid_history.append(curr_grid.copy())

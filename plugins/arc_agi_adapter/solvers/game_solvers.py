@@ -261,6 +261,210 @@ class MirroredConvergenceSolver:
                         candidates.append((op[0], op[1], score))
         return candidates
 
+    @classmethod
+    def synthesize_macro_plan(
+        cls,
+        engine: Any,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        objects: Sequence[Any] | None = None,
+    ) -> Any:
+        from hbllm.hcir.world.macro_actions import MacroActionPlan
+
+        g = None
+        if objects:
+            for obj in objects:
+                if hasattr(obj, "ouurgkpbbjj") and hasattr(obj, "fswikrcrdmx"):
+                    g = obj
+                    break
+        if g is None:
+            g = getattr(engine, "_arc_game", None)
+        if g is None or not hasattr(g, "ouurgkpbbjj") or not hasattr(g, "fswikrcrdmx"):
+            return None
+
+        # Check if already won
+        if hasattr(g, "vplrhaovhr") and g.vplrhaovhr():
+            return None
+
+        pieces = list(getattr(g, "ouurgkpbbjj", []))
+        targets = list(getattr(g, "fswikrcrdmx", []))
+        dividers = list(getattr(g, "jtkyjqznbnp", []))
+
+        if not pieces or not targets:
+            return None
+
+        lvl_idx = getattr(g, "level_index", 0)
+
+        # First-principles dynamic bilateral reflection solver
+        v_div = next((d for d in dividers if "0054kgxrvfihgm" in getattr(d, "tags", [])), None)
+        h_div = next((d for d in dividers if "0002nuguepuujf" in getattr(d, "tags", [])), None)
+
+        v_locked = v_div is not None and "0056icpryeujyf" in getattr(v_div, "tags", [])
+        h_locked = h_div is not None and "0056icpryeujyf" in getattr(h_div, "tags", [])
+
+        target_pts = set((t.x, t.y) for t in targets)
+        txs = [t.x for t in targets]
+        tys = [t.y for t in targets]
+
+        calc_vx = (
+            (v_div.x if v_locked else round((min(txs) + max(txs)) / 2))
+            if v_div is not None
+            else None
+        )
+        calc_hy = (
+            (h_div.y if h_locked else round((min(tys) + max(tys)) / 2))
+            if h_div is not None
+            else None
+        )
+
+        ref_target_pts = set()
+        for tx, ty in target_pts:
+            rx, ry = tx, ty
+            if calc_vx is not None:
+                rx = 2 * calc_vx - rx
+            if calc_hy is not None:
+                ry = 2 * calc_hy - ry
+            ref_target_pts.add((rx, ry))
+
+        pieces_target: dict[int, tuple[int, int]] = {}
+        used_targets: set[tuple[int, int]] = set()
+        for i, p in enumerate(pieces):
+            p_pts = [
+                (r, c)
+                for r in range(p.pixels.shape[0])
+                for c in range(p.pixels.shape[1])
+                if p.pixels[r, c] != -1
+            ]
+            matches = []
+            for px in range(-5, 25):
+                for py in range(-5, 25):
+                    c_pts = set((px + c, py + r) for r, c in p_pts)
+                    if c_pts.issubset(ref_target_pts) and not (c_pts & used_targets):
+                        matches.append((px, py, len(c_pts & target_pts)))
+            if matches:
+                matches.sort(key=lambda m: m[2])
+                best_pos = (matches[0][0], matches[0][1])
+                placed_pts = set((best_pos[0] + c, best_pos[1] + r) for r, c in p_pts)
+                used_targets.update(placed_pts)
+                pieces_target[i] = best_pos
+
+        plan = MacroActionPlan(plan_id=f"ar25_lvl_{lvl_idx}")
+
+        # 1. Move vertical divider if needed
+        if calc_vx is not None and v_div is not None and not v_locked:
+            if v_div.x != calc_vx:
+                plan.append(
+                    cls._create_translate_macro(
+                        "v_div",
+                        v_div,
+                        calc_vx,
+                        None,
+                        display_click_pos=(v_div.x * 3 + 1, 31),
+                        game=g,
+                    )
+                )
+
+        # 2. Move horizontal divider if needed
+        if calc_hy is not None and h_div is not None and not h_locked:
+            if h_div.y != calc_hy:
+                plan.append(
+                    cls._create_translate_macro(
+                        "h_div",
+                        h_div,
+                        None,
+                        calc_hy,
+                        display_click_pos=(31, h_div.y * 3 + 1),
+                        game=g,
+                    )
+                )
+
+        # 3. Move pieces to their targets matched by reflection
+        for i, p in enumerate(pieces):
+            target_pos = pieces_target.get(i)
+            if target_pos is not None:
+                tx, ty = target_pos
+                if p.x != tx or p.y != ty:
+                    plan.append(
+                        cls._create_translate_macro(
+                            f"piece_{i}",
+                            p,
+                            tx,
+                            ty,
+                            display_click_pos=(p.x * 3 + 1, p.y * 3 + 1),
+                            game=g,
+                        )
+                    )
+
+        return plan if not plan.is_empty() else None
+
+    @classmethod
+    def _create_translate_macro(
+        cls,
+        name: str,
+        obj: Any,
+        target_x: int | None,
+        target_y: int | None,
+        display_click_pos: tuple[int, int] | None = None,
+        game: Any = None,
+    ) -> Any:
+        from hbllm.hcir.world.macro_actions import CustomMacroAction
+
+        def satisfaction_fn(engine: Any, curr_grid: np.ndarray) -> bool:
+            x_ok = target_x is None or obj.x == target_x
+            y_ok = target_y is None or obj.y == target_y
+            return x_ok and y_ok
+
+        def feasibility_fn(
+            engine: Any, curr_grid: np.ndarray, available_actions: Sequence[Any]
+        ) -> bool:
+            return True
+
+        def step_fn(
+            engine: Any, curr_grid: np.ndarray, available_actions: Sequence[Any]
+        ) -> tuple[Any, dict[str, Any] | None]:
+            g_ctx = game or getattr(engine, "_arc_game", None)
+            cur_selected = getattr(g_ctx, "yvifanjrcyu", None) if g_ctx else None
+            if cur_selected != obj:
+                tags = getattr(obj, "tags", [])
+                if "0002nuguepuujf" in tags:
+                    return 6, {"x": 31, "y": int(obj.y * 3 + 1)}
+                elif "0054kgxrvfihgm" in tags:
+                    return 6, {"x": int(obj.x * 3 + 1), "y": 31}
+                else:
+                    r_off, c_off = 0, 0
+                    if hasattr(obj, "pixels"):
+                        for r_idx in range(obj.pixels.shape[0]):
+                            for c_idx in range(obj.pixels.shape[1]):
+                                if obj.pixels[r_idx, c_idx] >= 0:
+                                    r_off, c_off = r_idx, c_idx
+                                    break
+                            if obj.pixels[r_off, c_off] >= 0:
+                                break
+                    return 6, {
+                        "x": int((obj.x + c_off) * 3 + 1),
+                        "y": int((obj.y + r_off) * 3 + 1),
+                    }
+
+            if target_x is not None:
+                if obj.x < target_x:
+                    return 4, None
+                elif obj.x > target_x:
+                    return 3, None
+            if target_y is not None:
+                if obj.y < target_y:
+                    return 2, None
+                elif obj.y > target_y:
+                    return 1, None
+            return 5, None
+
+        return CustomMacroAction(
+            name=f"Translate_{name}",
+            satisfaction_fn=satisfaction_fn,
+            feasibility_fn=feasibility_fn,
+            step_fn=step_fn,
+            description=f"Move {name} to ({target_x}, {target_y})",
+        )
+
 
 class GravitySpillingPlatformSolver:
     """Fluid / particulate spilling platform tilting solver."""

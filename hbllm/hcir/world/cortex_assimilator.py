@@ -1319,6 +1319,12 @@ class EpistemicFeedbackAssimilator:
             elif prev_avatar_pos is not None and engine.avatar_pos is not None:
                 if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
                     engine.consecutive_stuck_steps += 1
+                    if engine.last_action is not None and engine.is_displacement_action(
+                        engine.last_action
+                    ):
+                        engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
+                        prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
                 else:
                     engine.consecutive_stuck_steps = 0
             else:
@@ -1449,30 +1455,44 @@ class EpistemicFeedbackAssimilator:
         movable_features.update(engine.avatar_features)
         if engine.avatar_feature is not None:
             movable_features.add(engine.avatar_feature)
+        if hasattr(engine, "hazard_tracker") and hasattr(
+            engine.hazard_tracker, "mobile_threat_features"
+        ):
+            movable_features.update(engine.hazard_tracker.mobile_threat_features)
 
         def is_hud_mutation(r: int, c: int) -> bool:
             """Perimeter status bar / HUD isolation: detects mutations in edge bands or behind solid non-background divider lines."""
-            if H >= 24 and engine.prev_grid is not None:
-                if engine.avatar_pos is not None:
-                    if r >= H - 6 and engine.avatar_pos[0] < H - 8:
-                        return True
-                    if r < 3 and engine.avatar_pos[0] >= 5:
-                        return True
-                    min_r, max_r = min(engine.avatar_pos[0], r), max(engine.avatar_pos[0], r)
-                    for div_r in range(min_r + 1, max_r):
+            if engine.prev_grid is None:
+                return False
+            pH, pW = engine.prev_grid.shape
+            if pH < 24 or pW < 24:
+                return False
+
+            if engine.avatar_pos is not None:
+                ar, ac = int(engine.avatar_pos[0]), int(engine.avatar_pos[1])
+                if r >= pH - 6 and ar < pH - 8:
+                    return True
+                if r < 3 and ar >= 5:
+                    return True
+
+                min_r, max_r = max(0, min(ar, r)), min(pH, max(ar, r))
+                for div_r in range(min_r + 1, max_r):
+                    if 0 <= div_r < pH:
                         div_val = int(engine.prev_grid[div_r, 0])
                         if div_val != bg and np.all(engine.prev_grid[div_r, :] == div_val):
-                            if div_r >= H - 16 or div_r <= 16:
+                            if div_r >= pH - 16 or div_r <= 16:
                                 return True
-                    min_c, max_c = min(engine.avatar_pos[1], c), max(engine.avatar_pos[1], c)
-                    for div_c in range(min_c + 1, max_c):
+
+                min_c, max_c = max(0, min(ac, c)), min(pW, max(ac, c))
+                for div_c in range(min_c + 1, max_c):
+                    if 0 <= div_c < pW:
                         div_val = int(engine.prev_grid[0, div_c])
                         if div_val != bg and np.all(engine.prev_grid[:, div_c] == div_val):
-                            if div_c >= W - 16 or div_c <= 16:
+                            if div_c >= pW - 16 or div_c <= 16:
                                 return True
-                else:
-                    if r >= H - 6 or r < 3:
-                        return True
+            else:
+                if r >= pH - 6 or r < 3:
+                    return True
             return False
 
         av_radius = max(2, int(round(math.sqrt(max(1, engine.avatar_size)))))
@@ -1485,6 +1505,28 @@ class EpistemicFeedbackAssimilator:
                 if max(abs(r - prev_avatar_pos[0]), abs(c - prev_avatar_pos[1])) <= av_radius:
                     return True
             return False
+
+        # Autonomous Dynamic Entities & Rigid Mass Conservation Detection:
+        # If pixels of a feature appear and disappear elsewhere in balanced numbers,
+        # it is a translating dynamic entity (patroller/hazard), NOT an environmental toggle.
+        lost_counts: dict[int, int] = {}
+        gained_counts: dict[int, int] = {}
+        for r, c, old_v, new_v in diff.mutated_pixels:
+            if not is_hud_mutation(r, c) and not is_local_to_avatar(r, c):
+                if old_v != bg and old_v != engine.bg_feature:
+                    lost_counts[old_v] = lost_counts.get(old_v, 0) + 1
+                if new_v != bg and new_v != engine.bg_feature:
+                    gained_counts[new_v] = gained_counts.get(new_v, 0) + 1
+
+        for feat, count in lost_counts.items():
+            if feat in gained_counts and abs(count - gained_counts[feat]) <= max(
+                2, int(count * 0.25)
+            ):
+                movable_features.add(feat)
+                if hasattr(engine, "hazard_tracker") and hasattr(
+                    engine.hazard_tracker, "mobile_threat_features"
+                ):
+                    engine.hazard_tracker.mobile_threat_features.add(feat)
 
         distant_mutations = [
             (r, c, old_v, new_v)
@@ -1515,38 +1557,43 @@ class EpistemicFeedbackAssimilator:
             ):
                 trigger_feat = None
 
-            existing_mut = next(
-                (
-                    m
-                    for m in engine.state_mutations
-                    if m.trigger_pos == trigger_pos
-                    and m.trigger_feature == trigger_feat
-                    and m.prior_value == distant_mutations[0][2]
-                ),
-                None,
-            )
-            if existing_mut is not None:
-                existing_mut.record_observation(distant_mutations[0][3])
+            # Stepping onto empty background or normal walkable terrain during displacement
+            # cannot be an ungrounded contact trigger for an environmental toggle.
+            if is_known_displacement and trigger_feat is None:
+                pass
             else:
-                mutation_model = StateMutationModel(
-                    trigger_type="CONTACT" if is_known_displacement else "ACTION",
-                    trigger_pos=trigger_pos,
-                    trigger_feature=trigger_feat,
-                    mutation_type="ENVIRONMENTAL_TOGGLE",
-                    prior_value=distant_mutations[0][2],
-                    posterior_value=distant_mutations[0][3],
-                    confidence=0.8,
-                    occurrences=1,
-                    metadata={"action_id": action},
+                existing_mut = next(
+                    (
+                        m
+                        for m in engine.state_mutations
+                        if m.trigger_pos == trigger_pos
+                        and m.trigger_feature == trigger_feat
+                        and m.prior_value == distant_mutations[0][2]
+                    ),
+                    None,
                 )
-                engine.state_mutations.append(mutation_model)
-                engine.exhausted_candidate_goals.clear()
-                logger.info(
-                    "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
-                    mutation_model.trigger_type,
-                    trigger_pos,
-                    len(distant_mutations),
-                )
+                if existing_mut is not None:
+                    existing_mut.record_observation(distant_mutations[0][3])
+                else:
+                    mutation_model = StateMutationModel(
+                        trigger_type="CONTACT" if is_known_displacement else "ACTION",
+                        trigger_pos=trigger_pos,
+                        trigger_feature=trigger_feat,
+                        mutation_type="ENVIRONMENTAL_TOGGLE",
+                        prior_value=distant_mutations[0][2],
+                        posterior_value=distant_mutations[0][3],
+                        confidence=0.8,
+                        occurrences=1,
+                        metadata={"action_id": action},
+                    )
+                    engine.state_mutations.append(mutation_model)
+                    engine.exhausted_candidate_goals.clear()
+                    logger.info(
+                        "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
+                        mutation_model.trigger_type,
+                        trigger_pos,
+                        len(distant_mutations),
+                    )
 
         # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
         av_feats = engine.avatar_features or (

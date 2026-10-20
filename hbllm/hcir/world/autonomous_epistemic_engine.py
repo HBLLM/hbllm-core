@@ -1989,6 +1989,9 @@ class AutonomousEpistemicEngine:
         is_win: bool = False,
         is_lost: bool = False,
         action_schemas: Sequence[Any] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+        **kwargs: Any,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Unified cognitive decision function:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
@@ -2001,6 +2004,9 @@ class AutonomousEpistemicEngine:
             is_win=is_win,
             is_lost=is_lost,
             action_schemas=action_schemas,
+            objects=objects,
+            micro_actions=micro_actions,
+            **kwargs,
         )
 
     def to_causal_predicate(self) -> CausalPredicate:

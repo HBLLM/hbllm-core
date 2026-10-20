@@ -272,7 +272,11 @@ class RemoteMechanismObserver(HypothesisObserver):
         if context.curr_avatar_pos is None or context.prev_avatar_pos is None:
             return []
 
+        H, W = context.prev_grid.shape
         cr, cc = context.curr_avatar_pos
+        if not (0 <= cr < H and 0 <= cc < W):
+            return []
+
         contact_feat = int(context.prev_grid[cr, cc])
         if contact_feat == context.background_feature:
             return []
@@ -374,7 +378,11 @@ class PopperianFalsifier:
         if context.curr_avatar_pos is None or context.is_dead:
             return []
 
+        H, W = context.prev_grid.shape
         cr, cc = context.curr_avatar_pos
+        if not (0 <= cr < H and 0 <= cc < W):
+            return []
+
         c_feat = int(context.prev_grid[cr, cc])
         falsified: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
 

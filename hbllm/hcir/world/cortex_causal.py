@@ -84,6 +84,7 @@ class HCIRSymbolicWorldTheory:
     walkable_predicates: list[CausalPredicate] = field(default_factory=list)
     cargo_predicates: list[CausalPredicate] = field(default_factory=list)
     receptacle_predicates: list[CausalPredicate] = field(default_factory=list)
+    actuator_predicates: list[CausalPredicate] = field(default_factory=list)
     domain_predicates: list[CausalPredicate] = field(default_factory=list)
 
     # Fast-lookup cached sets
@@ -93,6 +94,7 @@ class HCIRSymbolicWorldTheory:
     walkable_features: set[int] = field(default_factory=set)
     cargo_features: set[int] = field(default_factory=set)
     receptacle_features: set[int] = field(default_factory=set)
+    actuator_features: set[int] = field(default_factory=set)
 
     # Functional action categorization
     undo_actions: set[Any] = field(default_factory=set)
@@ -109,6 +111,44 @@ class HCIRSymbolicWorldTheory:
 
     # Elizabeth Spelke's Core Knowledge physical axioms
     spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
+
+    # Tool-barrier empirical affinities and distal actuation ledger
+    tool_barrier_affinities: dict[int, set[int]] = field(default_factory=dict)
+    tool_barrier_incompatibilities: dict[int, set[int]] = field(default_factory=dict)
+    distal_actuations: list[dict[str, Any]] = field(default_factory=list)
+
+    def record_tool_barrier_affinity(self, tool_feat: int, barrier_feat: int) -> None:
+        """Record empirical causal resonance where tool_feat cleared barrier_feat."""
+        self.tool_barrier_affinities.setdefault(tool_feat, set()).add(barrier_feat)
+
+    def record_tool_barrier_incompatibility(self, tool_feat: int, barrier_feat: int) -> None:
+        """Record empirical causal failure where tool_feat failed to clear barrier_feat."""
+        self.tool_barrier_incompatibilities.setdefault(tool_feat, set()).add(barrier_feat)
+
+    def record_distal_actuation(
+        self,
+        trigger_feature: int | tuple[int, int] | None = None,
+        target_feature: int | tuple[int, int] | None = None,
+        affected_pos: tuple[int, int] | None = None,
+        trigger_coord: tuple[int, int] | None = None,
+        target_coord: tuple[int, int] | None = None,
+        trigger_feat: int | None = None,
+        target_feat: int | None = None,
+    ) -> None:
+        """Record distal causal coupling between actuator switch and target gate."""
+        self.distal_actuations.append(
+            {
+                "trigger_coord": trigger_coord
+                or (trigger_feature if isinstance(trigger_feature, tuple) else None),
+                "target_coord": target_coord
+                or affected_pos
+                or (target_feature if isinstance(target_feature, tuple) else None),
+                "trigger_feat": trigger_feat
+                or (trigger_feature if isinstance(trigger_feature, int) else None),
+                "target_feat": target_feat
+                or (target_feature if isinstance(target_feature, int) else None),
+            }
+        )
 
     def is_goal(self, entity: SpatialEntity | int) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
@@ -687,6 +727,21 @@ class CausalInductionCortex:
                     return (None, t_feat)
 
         return (None, None)
+
+    def attribute_macro_outcome(
+        self,
+        intent: Any,
+        target_pos: tuple[int, int] | None,
+        tool_feat: int | None = None,
+        barrier_feat: int | None = None,
+        is_success: bool = True,
+    ) -> None:
+        """Record high-level causal attribution of macro-action outcome."""
+        if tool_feat is not None and barrier_feat is not None:
+            if is_success:
+                self.symbolic_theory.record_tool_barrier_affinity(tool_feat, barrier_feat)
+            else:
+                self.symbolic_theory.record_tool_barrier_incompatibility(tool_feat, barrier_feat)
 
     def is_passable(self, feature_id: int, pos: tuple[int, int] | None = None) -> bool:
         """Determine if a grid tile is passable considering symbolic theory and tools."""

@@ -452,4 +452,9 @@ def install_arc3_solvers(engine: AutonomousEpistemicEngine) -> None:
         engine.register_target_scorer(scorer)
     if hasattr(engine, "register_deliberation_policy"):
         engine.register_deliberation_policy(ARC3DeliberationPolicy())
+    from hbllm.hcir.world.macro_actions import MacroActionDriverManager
+
+    MacroActionDriverManager.register_synthesis_hook(
+        MirroredConvergenceSolver.synthesize_macro_plan
+    )
     logger.info("Installed ARC-AGI-3 modular game solvers and archetype scorers.")

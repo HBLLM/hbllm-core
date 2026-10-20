@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+import numpy as np
+
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
@@ -36,6 +38,7 @@ class SubgoalType(StrEnum):
     COLLECT_ITEM = "collect_item"
     CLEAR_OBSTACLE = "clear_obstacle"
     NAVIGATE_TO = "navigate_to"
+    SWITCH_FOCUS = "switch_focus"
 
 
 @dataclass
@@ -189,6 +192,9 @@ class FrontopolarSubgoalStack:
         subgoal: FrontopolarSubgoal,
         current_entity_positions: set[tuple[int, int]],
         avatar_pos: tuple[int, int] | None = None,
+        held_features: set[int] | None = None,
+        grid: np.ndarray | None = None,
+        background_feature: int | None = None,
     ) -> bool:
         """Evaluate if the current subgoal's postconditions are satisfied."""
         dest = subgoal.target_destination
@@ -199,7 +205,14 @@ class FrontopolarSubgoalStack:
             SubgoalType.UNLOCK_REMOTE_MECHANISM,
             SubgoalType.ALIGN_OPTICAL_REFLECTOR,
         ):
-            return avatar_pos == dest
+            if avatar_pos is not None and avatar_pos == dest:
+                return True
+            if grid is not None and background_feature is not None and dest is not None:
+                dr, dc = dest
+                if 0 <= dr < grid.shape[0] and 0 <= dc < grid.shape[1]:
+                    if int(grid[dr, dc]) == background_feature:
+                        return True
+            return False
         return False
 
     def spawn_causal_unlock_subgoal(
@@ -221,6 +234,69 @@ class FrontopolarSubgoalStack:
         )
         self.push_subgoal(subgoal)
         return subgoal
+
+    def decompose_target_goal(
+        self,
+        target_goal: tuple[int, int],
+        grid: np.ndarray,
+        avatar_pos: tuple[int, int],
+        static_barriers: set[tuple[int, int]],
+        tools: list[Any],
+        receptacles_or_gates: list[tuple[int, int]],
+        held_features: set[int] | None = None,
+        theory: Any = None,
+    ) -> list[FrontopolarSubgoal]:
+        """Decompose a high-level target goal into prerequisite frontopolar subgoals.
+
+        If transit to target_goal is obstructed by gates/receptacles requiring tools/keys:
+        Schedules: [ACQUIRE_TOOL / COLLECT_ITEM] -> [CLEAR_OBSTACLE] -> [DELIVER_TO_GOAL].
+        """
+        held = held_features or set()
+        subgoals: list[FrontopolarSubgoal] = []
+
+        if tools and not held:
+            closest_tool = min(
+                tools,
+                key=lambda t: (
+                    abs(t.grid_pos[0] - avatar_pos[0]) + abs(t.grid_pos[1] - avatar_pos[1])
+                ),
+            )
+            subgoals.append(
+                FrontopolarSubgoal(
+                    subgoal_id=f"acquire_tool_{closest_tool.grid_pos[0]}_{closest_tool.grid_pos[1]}",
+                    subgoal_type=SubgoalType.ACQUIRE_TOOL,
+                    target_entity_pos=closest_tool.grid_pos,
+                    target_destination=closest_tool.grid_pos,
+                    required_feature=getattr(closest_tool, "feature_id", None),
+                    priority=2.0,
+                )
+            )
+
+        if receptacles_or_gates:
+            closest_gate = min(
+                receptacles_or_gates,
+                key=lambda g: abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1]),
+            )
+            subgoals.append(
+                FrontopolarSubgoal(
+                    subgoal_id=f"clear_gate_{closest_gate[0]}_{closest_gate[1]}",
+                    subgoal_type=SubgoalType.CLEAR_OBSTACLE,
+                    target_entity_pos=closest_gate,
+                    target_destination=closest_gate,
+                    priority=1.5,
+                )
+            )
+
+        subgoals.append(
+            FrontopolarSubgoal(
+                subgoal_id=f"reach_goal_{target_goal[0]}_{target_goal[1]}",
+                subgoal_type=SubgoalType.DELIVER_TO_GOAL,
+                target_entity_pos=target_goal,
+                target_destination=target_goal,
+                priority=1.0,
+            )
+        )
+        return subgoals
 
     @staticmethod
     def find_safe_holding_bay(

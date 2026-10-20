@@ -36,6 +36,7 @@ from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
+from hbllm.hcir.world.macro_actions import MacroActionPlan
 from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
@@ -217,6 +218,7 @@ class PrefrontalWorkingMemory:
         self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
         self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
         self.subgoal_stack: FrontopolarSubgoalStack = FrontopolarSubgoalStack()
+        self.macro_plan: MacroActionPlan = MacroActionPlan()
         self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
         self.optical_projector: OpticalRayProjector = OpticalRayProjector()
@@ -361,6 +363,7 @@ class PrefrontalWorkingMemory:
         self.visuospatial.reset_episode(retain_long_term=retain_long_term)
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         self.subgoal_stack.reset_episode()
+        self.macro_plan.clear()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
         self.hypothesis_engine.reset_episode(retain_confirmed=retain_long_term)

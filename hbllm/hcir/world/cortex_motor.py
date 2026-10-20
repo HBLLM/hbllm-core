@@ -1684,28 +1684,12 @@ class MotorCortexEffector:
                     )
                     return dict(snapped_target)
 
-                # Fallback across valid targets: select least-visited target rather than returning None
-                if valid_targets:
-                    vt_scores = []
-                    for vt in valid_targets:
-                        if isinstance(vt, dict):
-                            raw_vx = vt.get("x", vt.get("c", 0))
-                            raw_vy = vt.get("y", vt.get("r", 0))
-                            vx = int(raw_vx) if raw_vx is not None else 0
-                            vy = int(raw_vy) if raw_vy is not None else 0
-                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
-                            vt_scores.append((vis, vt))
-                    if vt_scores:
-                        vt_scores.sort(key=lambda item: item[0])
-                        chosen_vt = vt_scores[0][1]
-                        raw_svx = chosen_vt.get("x", chosen_vt.get("c", 0))
-                        raw_svy = chosen_vt.get("y", chosen_vt.get("r", 0))
-                        svx = int(raw_svx) if raw_svx is not None else 0
-                        svy = int(raw_svy) if raw_svy is not None else 0
-                        engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
-                            engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
-                        )
-                        return dict(chosen_vt)
+                # All discrete valid targets are exhausted and proven quiescent!
+                if action is not None:
+                    engine.inhibited_actions[action] = max(
+                        engine.inhibited_actions.get(action, 0), 6
+                    )
+                return None
 
             coords: dict[str, Any] = {}
             for k in param_keys:

@@ -190,7 +190,9 @@ class MyAgent(Agent):
                 logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         self.internal_agent = self.internal_engine
         self.last_grid: np.ndarray | None = None
-        self.current_game_id: str | None = None
+        self.current_game_id: str | None = (
+            game_id.split("-")[0].strip() if game_id not in ("default_game", "", None) else None
+        )
         self.current_levels_completed: int = 0
 
     def load_instructions(self, instructions: Any) -> None:
@@ -410,8 +412,30 @@ class MyAgent(Agent):
                         for s in _arc_schema:
                             if s.get("action_id") == 6:
                                 s["valid_targets"] = v_targets
+                g_ctx = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
+                    getattr(self, "arc_env", None), "game", None
+                )
+                _objects = None
+                try:
+                    from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+
+                    _objects = extract_arc_objects(
+                        grid,
+                        engine=self.internal_engine,
+                        game_obj=g_ctx or latest_frame,
+                    )
+                except Exception as _e:
+                    logger.debug("extract_arc_objects failed: %s", _e)
+
+                if g_ctx is not None:
+                    self.internal_engine._arc_game = g_ctx
+
                 action_id, action_data = self.internal_engine.decide(
-                    grid, available_actions, action_schemas=_arc_schema
+                    grid,
+                    available_actions,
+                    action_schemas=_arc_schema,
+                    micro_actions=_arc_schema,
+                    objects=_objects,
                 )
                 conf = 1.0
             else:

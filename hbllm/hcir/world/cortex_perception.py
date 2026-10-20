@@ -334,9 +334,16 @@ class SpatialRoleClassifier:
             return EntityRole.OBSTACLE
         elif val in av_set:
             return EntityRole.AGENT
-        elif any(
-            getattr(m, "trigger_feature", None) == val
-            or getattr(m, "trigger_pos", None) == grid_pos
+        elif not is_theory_walkable and any(
+            (
+                getattr(m, "trigger_feature", None) is not None
+                and getattr(m, "trigger_feature", None) == val
+            )
+            or (
+                getattr(m, "trigger_pos", None) == grid_pos
+                and getattr(m, "occurrences", 0) >= 2
+                and getattr(m, "confidence", 0.0) >= 0.75
+            )
             for m in mutation_list
         ):
             return EntityRole.ACTUATOR

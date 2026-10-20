@@ -469,6 +469,8 @@ def run_all_25_games(
                 print(f"    ⚠️ Could not make game environment for {gid}")
                 continue
 
+            agent.arc_env = env
+
             driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
             manager = DriverManager()
             manager.set_cognitive_engine(cognitive_engine)

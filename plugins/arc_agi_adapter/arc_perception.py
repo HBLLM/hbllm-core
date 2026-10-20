@@ -16,7 +16,9 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.macro_actions import ObjectSpec
 from hbllm.hcir.world.percept import BasePerceptionAdapter, PerceptionFrame
 
 logger = logging.getLogger(__name__)
@@ -185,3 +187,262 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             diff=diff,
             metadata={"bg": bg, "grid": grid},
         )
+
+
+def extract_arc_objects(
+    grid: Any,
+    engine: Any = None,
+    game_obj: Any = None,
+    adapter: ARCPerceptionAdapter | None = None,
+) -> list[ObjectSpec]:
+    """Domain perception lifting: transforms raw ARC-AGI 2D matrices into formal ObjectSpec instances.
+
+    Lifts:
+    1. Spatial entities segmented by PerceptionEngine (doors, keys, switches, barriers, hazards).
+    2. Candidate exit and gateway goals detected structurally.
+    3. Learned goals and receptacle memory anchors from engine.
+    4. Sprite tag metadata when running within ARC-AGI arcade environments.
+
+    Conforms strictly to AGENTS.md Rule 1.7 (domain-agnostic core): all ARC-specific visual
+    lifting, palette symmetries, and sprite tags remain decoupled in the plugin layer.
+    """
+    if isinstance(grid, np.ndarray):
+        g = grid[-1] if grid.ndim == 3 else grid
+    elif hasattr(grid, "frame") and getattr(grid, "frame") is not None:
+        f = grid.frame
+        g = f[-1] if isinstance(f, np.ndarray) and f.ndim == 3 else np.asarray(f, dtype=int)
+    elif hasattr(grid, "grid") and getattr(grid, "grid") is not None:
+        g = np.asarray(grid.grid, dtype=int)
+    else:
+        try:
+            g = np.asarray(grid, dtype=int)
+            if g.ndim == 3 and len(g) > 0:
+                g = g[-1]
+        except Exception:
+            return []
+
+    if not isinstance(g, np.ndarray) or g.ndim != 2:
+        return []
+
+    H, W = g.shape
+    adapter = adapter or ARCPerceptionAdapter()
+    try:
+        frame = adapter.lift_percept(g, context=engine)
+    except Exception as exc:
+        logger.debug("ARCPerceptionAdapter.lift_percept failed in extract_arc_objects: %s", exc)
+        frame = None
+
+    seen_positions: set[tuple[int, int]] = set()
+    objects: list[ObjectSpec] = []
+
+    # Identify avatar features/pos to avoid lifting avatar as a target object
+    av_pos = getattr(engine, "avatar_pos", None)
+    av_feat = getattr(engine, "avatar_feature", None)
+    av_feats = set(getattr(engine, "avatar_features", set()) or set())
+    if av_feat is not None:
+        av_feats.add(av_feat)
+    if frame is not None:
+        if frame.avatar_pos is not None:
+            av_pos = frame.avatar_pos
+        if frame.avatar_features:
+            av_feats.update(frame.avatar_features)
+
+    # Ingest from symbolic theory if available
+    symbolic_theory = getattr(engine, "symbolic_theory", None)
+    goal_feats: set[int] = set()
+    cargo_feats: set[int] = set()
+    rec_feats: set[int] = set()
+    barrier_feats: set[int] = set()
+    actuator_feats: set[int] = set()
+
+    if symbolic_theory is not None:
+        goal_feats.update(getattr(symbolic_theory, "goal_features", set()))
+        cargo_feats.update(getattr(symbolic_theory, "cargo_features", set()))
+        rec_feats.update(getattr(symbolic_theory, "receptacle_features", set()))
+        barrier_feats.update(getattr(symbolic_theory, "barrier_features", set()))
+        actuator_feats.update(getattr(symbolic_theory, "actuator_features", set()))
+
+    # 1. Ingest arcade sprite tags if available in environment game_obj
+    cur_lvl = getattr(game_obj, "current_level", None) if game_obj is not None else None
+    if cur_lvl is not None and hasattr(cur_lvl, "get_sprites_by_tag"):
+        try:
+            # Cargo / crate sprites (tag geezpjgiyd)
+            cargo_sprites = cur_lvl.get_sprites_by_tag("geezpjgiyd")
+            if cargo_sprites:
+                for cs in cargo_sprites:
+                    h = getattr(cs, "height", 1)
+                    w = getattr(cs, "width", 1)
+                    cy = int(round(cs.y + (h - 1) / 2.0))
+                    cx = int(round(cs.x + (w - 1) / 2.0))
+                    c_pos = (cy, cx)
+                    p_val = 0
+                    if hasattr(cs, "pixels") and cs.pixels:
+                        for row in cs.pixels:
+                            for p in row:
+                                if p > 0:
+                                    p_val = int(p)
+                                    cargo_feats.add(p_val)
+                                    break
+                            if p_val > 0:
+                                break
+                    if (
+                        0 <= cy < H
+                        and 0 <= cx < W
+                        and c_pos != av_pos
+                        and c_pos not in seen_positions
+                    ):
+                        seen_positions.add(c_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"cargo_sprite_{cy}_{cx}",
+                                pos=c_pos,
+                                feature_id=p_val or int(g[cy, cx]),
+                                role="cargo",
+                                properties={"source": "sprite_tag_cargo"},
+                            )
+                        )
+
+            # Receptacle sprites (tag fsjjayjoeg)
+            rec_sprites = cur_lvl.get_sprites_by_tag("fsjjayjoeg")
+            if rec_sprites:
+                for rs in rec_sprites:
+                    h = getattr(rs, "height", 1)
+                    w = getattr(rs, "width", 1)
+                    step_sz = 4 if (h >= 4 or w >= 4) else 1
+                    r_val = 0
+                    if hasattr(rs, "pixels") and rs.pixels:
+                        for row in rs.pixels:
+                            for p in row:
+                                if p > 0:
+                                    r_val = int(p)
+                                    rec_feats.add(r_val)
+                                    break
+                            if r_val > 0:
+                                break
+                    for dy in range(0, h, step_sz):
+                        for dx in range(0, w, step_sz):
+                            cy = int(round(rs.y + dy + (step_sz - 1) / 2.0))
+                            cx = int(round(rs.x + dx + (step_sz - 1) / 2.0))
+                            r_pos = (cy, cx)
+                            if 0 <= cy < H and 0 <= cx < W and r_pos not in seen_positions:
+                                seen_positions.add(r_pos)
+                                objects.append(
+                                    ObjectSpec(
+                                        id=f"rec_sprite_{cy}_{cx}",
+                                        pos=r_pos,
+                                        feature_id=r_val or int(g[cy, cx]),
+                                        role="receptacle",
+                                        properties={"source": "sprite_tag_receptacle"},
+                                    )
+                                )
+        except Exception as exc:
+            logger.debug("Failed extracting sprites from cur_lvl: %s", exc)
+
+    # 2. Convert segmented SpatialEntity instances into ObjectSpec
+    if frame is not None and frame.entities:
+        for ent in frame.entities:
+            # Skip avatar
+            if ent.role == EntityRole.AGENT:
+                continue
+            pos = (int(ent.grid_pos[0]), int(ent.grid_pos[1]))
+            if pos == av_pos or pos in seen_positions:
+                continue
+
+            feat = int(
+                ent.properties.get(
+                    "feature_id", g[pos[0], pos[1]] if 0 <= pos[0] < H and 0 <= pos[1] < W else 0
+                )
+            )
+            if feat in av_feats:
+                continue
+
+            # Determine role: Prioritize learned symbolic theory ontology over heuristic visual defaults
+            role: str = "unknown"
+            if pos in getattr(engine, "learned_goal_positions", set()) or feat in goal_feats:
+                role = "goal"
+            elif feat in cargo_feats:
+                role = "cargo"
+            elif pos in getattr(engine, "learned_receptacle_positions", set()) or feat in rec_feats:
+                role = "receptacle"
+            elif feat in actuator_feats:
+                role = "switch"
+            elif pos in frame.static_barriers or feat in barrier_feats:
+                role = "barrier"
+            elif pos in frame.lethal_cells:
+                role = "hazard"
+            elif ent.role == EntityRole.GOAL:
+                role = "goal"
+            elif ent.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE):
+                role = "cargo"
+            elif ent.role in (EntityRole.RECEPTACLE, EntityRole.PORTAL):
+                role = "receptacle"
+            elif ent.role == EntityRole.ACTUATOR:
+                role = "switch"
+            elif ent.role == EntityRole.OBSTACLE:
+                role = "barrier"
+            elif ent.role == EntityRole.DYNAMIC_HAZARD:
+                role = "hazard"
+            else:
+                role = str(ent.role.value if hasattr(ent.role, "value") else ent.role).lower()
+
+            if role != "unknown":
+                seen_positions.add(pos)
+                objects.append(
+                    ObjectSpec(
+                        id=ent.id or f"{role}_{pos[0]}_{pos[1]}",
+                        pos=pos,
+                        feature_id=feat,
+                        role=role,
+                        properties=dict(ent.properties),
+                    )
+                )
+
+    # 3. Ingest Candidate Goals / Exits from PerceptionFrame
+    if frame is not None and frame.candidate_goals:
+        for gp in frame.candidate_goals:
+            pos = (int(gp[0]), int(gp[1]))
+            if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
+                seen_positions.add(pos)
+                objects.append(
+                    ObjectSpec(
+                        id=f"exit_goal_{pos[0]}_{pos[1]}",
+                        pos=pos,
+                        feature_id=int(g[pos[0], pos[1]]),
+                        role="candidate_goal",
+                        properties={"source": "candidate_goal"},
+                    )
+                )
+
+    # 4. Ingest Learned Goal Positions from engine
+    if engine is not None and hasattr(engine, "learned_goal_positions"):
+        for gp in engine.learned_goal_positions:
+            pos = (int(gp[0]), int(gp[1]))
+            if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
+                seen_positions.add(pos)
+                objects.append(
+                    ObjectSpec(
+                        id=f"learned_goal_{pos[0]}_{pos[1]}",
+                        pos=pos,
+                        feature_id=int(g[pos[0], pos[1]]),
+                        role="goal",
+                        properties={"source": "learned_goal"},
+                    )
+                )
+
+    # 5. Ingest Learned Receptacle Positions from engine
+    if engine is not None and hasattr(engine, "learned_receptacle_positions"):
+        for rp in engine.learned_receptacle_positions:
+            pos = (int(rp[0]), int(rp[1]))
+            if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
+                seen_positions.add(pos)
+                objects.append(
+                    ObjectSpec(
+                        id=f"learned_receptacle_{pos[0]}_{pos[1]}",
+                        pos=pos,
+                        feature_id=int(g[pos[0], pos[1]]),
+                        role="receptacle",
+                        properties={"source": "learned_receptacle"},
+                    )
+                )
+
+    return objects
