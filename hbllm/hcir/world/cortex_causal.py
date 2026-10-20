@@ -26,7 +26,7 @@ from typing import Any, Literal
 import numpy as np
 
 from hbllm.hcir.graph import ConceptNode
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
@@ -868,6 +868,23 @@ class CausalInductionCortex:
             # Not confirmed as barrier
             return True
         return False
+
+    def attribute_macro_outcome(
+        self,
+        macro_intent: SpatialActionIntent | str | Any,
+        target_pos: tuple[int, int] | None = None,
+        tool_feature: int | None = None,
+        barrier_feature: int | None = None,
+        is_success: bool = True,
+    ) -> None:
+        """Bind high-level macro-action outcome into symbolic world theory and body schema."""
+        if is_success:
+            if tool_feature is not None and barrier_feature is not None:
+                self.symbolic_theory.record_tool_barrier_affinity(tool_feature, barrier_feature)
+                self.body_schema.register_resonance(tool_feature, barrier_feature)
+        else:
+            if barrier_feature is not None:
+                self.symbolic_theory.barrier_features.add(barrier_feature)
 
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset episode state, optionally preserving discovered causal affordances."""

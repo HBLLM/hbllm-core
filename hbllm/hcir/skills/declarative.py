@@ -33,10 +33,11 @@ from hbllm.hcir.primitives import (
     segment_entities,
 )
 from hbllm.hcir.skills.base import BaseHierarchicalSkill
-from hbllm.hcir.spatial_planner import SpatialActionIntent
+from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent
 
 if TYPE_CHECKING:
-    pass
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.macro_actions import MacroActionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -784,6 +785,185 @@ class SymbolicSubgoal:
         return instructions
 
 
+def resolve_subgoal_target(
+    engine: AutonomousEpistemicEngine,
+    curr_grid: np.ndarray,
+    subgoal: SymbolicSubgoal,
+) -> tuple[tuple[int, int] | None, int | None]:
+    """Resolve target coordinate and feature_id for a SymbolicSubgoal against cognitive state."""
+    # 1. Direct explicit position from parameters or target_query
+    for key in ("pos", "coord", "destination", "target", "target_coord"):
+        if key in subgoal.parameters:
+            raw_pos = subgoal.parameters[key]
+            if raw_pos is not None:
+                return (int(raw_pos[0]), int(raw_pos[1])), subgoal.parameters.get("feature")
+        if key in subgoal.target_query:
+            raw_pos = subgoal.target_query[key]
+            if raw_pos is not None:
+                return (int(raw_pos[0]), int(raw_pos[1])), subgoal.target_query.get("feature")
+
+    # 2. Extract entities and background
+    bg = engine.estimate_background(curr_grid) if hasattr(engine, "estimate_background") else 0
+    entities = engine.extract_entities(curr_grid, bg) if hasattr(engine, "extract_entities") else []
+
+    # 3. Resolve by feature/color query
+    feat_val = subgoal.target_query.get("feature", subgoal.target_query.get("color"))
+    if feat_val is not None:
+        target_feat = int(feat_val)
+        matches = [e for e in entities if e.feature_id == target_feat]
+        if matches:
+            if engine.avatar_pos is not None:
+                matches.sort(
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - engine.avatar_pos[0])
+                        + abs(e.grid_pos[1] - engine.avatar_pos[1])
+                    )
+                )
+            return matches[0].grid_pos, target_feat
+        # Fallback to direct grid search
+        r_indices, c_indices = np.where(curr_grid == target_feat)
+        if len(r_indices) > 0:
+            if engine.avatar_pos is not None:
+                coords = list(zip(r_indices, c_indices))
+                coords.sort(
+                    key=lambda p: (
+                        abs(p[0] - engine.avatar_pos[0]) + abs(p[1] - engine.avatar_pos[1])
+                    )
+                )
+                return (int(coords[0][0]), int(coords[0][1])), target_feat
+            return (int(r_indices[0]), int(c_indices[0])), target_feat
+
+    # 4. Resolve by role query
+    role = str(subgoal.target_query.get("role", "")).lower()
+    if not role:
+        intent = subgoal.intent
+        if intent == SpatialActionIntent.PICKUP:
+            role = "cargo"
+        elif intent in (SpatialActionIntent.DROP, SpatialActionIntent.MANIPULATE):
+            role = "receptacle"
+        elif intent in (SpatialActionIntent.INTERACT, SpatialActionIntent.ACTUATE):
+            role = "switch"
+        elif intent == SpatialActionIntent.NAVIGATE:
+            role = "goal"
+
+    if "goal" in role or "exit" in role:
+        if engine.learned_goal_positions:
+            goals = list(engine.learned_goal_positions)
+            if engine.avatar_pos is not None:
+                goals.sort(
+                    key=lambda p: (
+                        abs(p[0] - engine.avatar_pos[0]) + abs(p[1] - engine.avatar_pos[1])
+                    )
+                )
+            target_pos = goals[0]
+            target_feat = (
+                int(curr_grid[target_pos[0], target_pos[1]])
+                if 0 <= target_pos[0] < curr_grid.shape[0]
+                and 0 <= target_pos[1] < curr_grid.shape[1]
+                else None
+            )
+            return target_pos, target_feat
+        goal_ents = [
+            e
+            for e in entities
+            if e.role == EntityRole.GOAL
+            or e.feature_id in engine.symbolic_theory.goal_features
+            or (
+                hasattr(engine, "learned_goal_features")
+                and e.feature_id in engine.learned_goal_features
+            )
+        ]
+        if goal_ents:
+            if engine.avatar_pos is not None:
+                goal_ents.sort(
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - engine.avatar_pos[0])
+                        + abs(e.grid_pos[1] - engine.avatar_pos[1])
+                    )
+                )
+            return goal_ents[0].grid_pos, goal_ents[0].feature_id
+
+    elif "cargo" in role or "key" in role or "manipulable" in role or "item" in role:
+        cargo_ents = [
+            e
+            for e in entities
+            if e.role == EntityRole.MANIPULABLE
+            or e.feature_id in engine.symbolic_theory.cargo_features
+            or (
+                hasattr(engine, "learned_cargo_features")
+                and e.feature_id in engine.learned_cargo_features
+            )
+        ]
+        if cargo_ents:
+            if engine.avatar_pos is not None:
+                cargo_ents.sort(
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - engine.avatar_pos[0])
+                        + abs(e.grid_pos[1] - engine.avatar_pos[1])
+                    )
+                )
+            return cargo_ents[0].grid_pos, cargo_ents[0].feature_id
+
+    elif "receptacle" in role or "door" in role or "container" in role or "barrier" in role:
+        if engine.learned_receptacle_positions:
+            recs = list(engine.learned_receptacle_positions)
+            if engine.avatar_pos is not None:
+                recs.sort(
+                    key=lambda p: (
+                        abs(p[0] - engine.avatar_pos[0]) + abs(p[1] - engine.avatar_pos[1])
+                    )
+                )
+            target_pos = recs[0]
+            target_feat = (
+                int(curr_grid[target_pos[0], target_pos[1]])
+                if 0 <= target_pos[0] < curr_grid.shape[0]
+                and 0 <= target_pos[1] < curr_grid.shape[1]
+                else None
+            )
+            return target_pos, target_feat
+        rec_ents = [
+            e
+            for e in entities
+            if e.role == EntityRole.RECEPTACLE
+            or e.feature_id in engine.symbolic_theory.receptacle_features
+            or (
+                "barrier" in role
+                and (
+                    e.role == EntityRole.OBSTACLE
+                    or e.feature_id in engine.symbolic_theory.barrier_features
+                )
+            )
+        ]
+        if rec_ents:
+            if engine.avatar_pos is not None:
+                rec_ents.sort(
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - engine.avatar_pos[0])
+                        + abs(e.grid_pos[1] - engine.avatar_pos[1])
+                    )
+                )
+            return rec_ents[0].grid_pos, rec_ents[0].feature_id
+
+    elif "switch" in role or "actuator" in role or "button" in role:
+        sw_ents = [
+            e
+            for e in entities
+            if e.role == EntityRole.ACTUATOR
+            or e.feature_id in engine.symbolic_theory.actuator_features
+        ]
+        if sw_ents:
+            if engine.avatar_pos is not None:
+                sw_ents.sort(
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - engine.avatar_pos[0])
+                        + abs(e.grid_pos[1] - engine.avatar_pos[1])
+                    )
+                )
+            return sw_ents[0].grid_pos, sw_ents[0].feature_id
+
+    return None, None
+
+
 class SubgoalSequence:
     """An ordered sequence of declarative subgoals representing a skill program."""
 
@@ -809,6 +989,93 @@ class SubgoalSequence:
             for ins in subgoal.compile_to_instructions(author=skill_name):
                 stream.append(ins)
         return stream
+
+    def compile_to_macro_plan(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        skill_name: str = "declarative_skill",
+    ) -> MacroActionPlan:
+        """Compile this declarative SubgoalSequence into an executable MacroActionPlan."""
+        from hbllm.hcir.world.macro_actions import (
+            DepositCargo,
+            ExploreFrontier,
+            InteractWith,
+            MacroAction,
+            MacroActionPlan,
+            NavigateTo,
+            PickUpCargo,
+            SwitchFocus,
+        )
+
+        plan = MacroActionPlan(plan_id=f"plan_{skill_name}")
+
+        for i, subgoal in enumerate(self.subgoals):
+            target_pos, target_feat = resolve_subgoal_target(engine, curr_grid, subgoal)
+            intent = subgoal.intent
+
+            op: MacroAction | None = None
+            if intent == SpatialActionIntent.PICKUP:
+                if target_pos is not None:
+                    feat = subgoal.parameters.get("cargo_feature", target_feat)
+                    rad = subgoal.parameters.get("radius", 1)
+                    op = PickUpCargo(
+                        cargo_pos=target_pos,
+                        cargo_feature=feat,
+                        approach_radius=rad,
+                        description=f"{skill_name}[{i}]: PickUpCargo",
+                    )
+            elif intent in (SpatialActionIntent.DROP, SpatialActionIntent.MANIPULATE):
+                if target_pos is not None:
+                    cargo_feat = subgoal.parameters.get("cargo_feature")
+                    barrier_feat = subgoal.parameters.get("barrier_feature", target_feat)
+                    rad = subgoal.parameters.get("radius", 1)
+                    op = DepositCargo(
+                        receptacle_pos=target_pos,
+                        cargo_feature=cargo_feat,
+                        barrier_feature=barrier_feat,
+                        approach_radius=rad,
+                        description=f"{skill_name}[{i}]: DepositCargo",
+                    )
+            elif intent in (SpatialActionIntent.INTERACT, SpatialActionIntent.ACTUATE):
+                if target_pos is not None:
+                    eff_act = subgoal.parameters.get("action")
+                    op = InteractWith(
+                        target_coord=target_pos,
+                        effector_action=eff_act,
+                        description=f"{skill_name}[{i}]: InteractWith",
+                    )
+            elif intent == SpatialActionIntent.ALIGN:
+                sw_act = subgoal.parameters.get("action")
+                t_feat = subgoal.parameters.get("feature", target_feat)
+                op = SwitchFocus(
+                    switch_action=sw_act,
+                    target_feature=t_feat,
+                    description=f"{skill_name}[{i}]: SwitchFocus",
+                )
+            elif intent == SpatialActionIntent.NAVIGATE:
+                if target_pos is not None:
+                    rad = subgoal.parameters.get("radius", 0)
+                    op = NavigateTo(
+                        destination=target_pos,
+                        radius=rad,
+                        description=f"{skill_name}[{i}]: NavigateTo",
+                    )
+                else:
+                    op = ExploreFrontier(description=f"{skill_name}[{i}]: ExploreFrontier")
+
+            if op is not None:
+                plan.append(op)
+            else:
+                logger.warning(
+                    "SubgoalSequence: Could not resolve target for subgoal %d (%s, query=%s)",
+                    i,
+                    intent,
+                    subgoal.target_query,
+                )
+
+        return plan
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -870,6 +1137,22 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
         return InstructionStream(
             author=self.skill_name,
             description=f"Empty instruction stream for {self.skill_name}",
+        )
+
+    def compile_to_macro_plan(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> MacroActionPlan | None:
+        """Compile this declarative skill's program into an executable MacroActionPlan."""
+        if self.program is None:
+            return None
+        return self.program.compile_to_macro_plan(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            skill_name=self.__class__.__name__,
         )
 
     def solve(

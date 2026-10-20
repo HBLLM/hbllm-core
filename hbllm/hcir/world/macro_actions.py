@@ -383,19 +383,25 @@ class PickUpCargo(MacroAction):
         self,
         cargo_pos: tuple[int, int],
         cargo_feature: int | None = None,
+        approach_radius: int = 1,
         description: str = "",
     ) -> None:
         super().__init__(name=f"PickUpCargo({cargo_pos})", intent=SpatialActionIntent.PICKUP)
         self.cargo_pos = (int(cargo_pos[0]), int(cargo_pos[1]))
         self.cargo_feature = cargo_feature
+        self.approach_radius = approach_radius
         self.description = description or f"Pick up cargo at {self.cargo_pos}"
-        self.nav_op = NavigateTo(destination=self.cargo_pos, radius=1)
+        self.nav_op = NavigateTo(destination=self.cargo_pos, radius=approach_radius)
 
     def is_satisfied(
         self,
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
     ) -> bool:
+        if self.cargo_feature is not None and engine.working_memory.body_schema.is_holding(
+            self.cargo_feature
+        ):
+            return True
         if engine.working_memory.body_schema.has_manipulandum():
             return True
         if engine.avatar_pos is None:
@@ -403,8 +409,8 @@ class PickUpCargo(MacroAction):
         # Also satisfied if avatar is touching cargo
         dr = abs(engine.avatar_pos[0] - self.cargo_pos[0])
         dc = abs(engine.avatar_pos[1] - self.cargo_pos[1])
-        return dr + dc <= 1 and (
-            engine.avatar_pos == self.cargo_pos or self.nav_op.consecutive_steps > 0
+        return dr + dc <= self.approach_radius and (
+            engine.avatar_pos == self.cargo_pos or self.consecutive_steps > 0
         )
 
     def is_feasible(
@@ -449,23 +455,37 @@ class DepositCargo(MacroAction):
     def __init__(
         self,
         receptacle_pos: tuple[int, int],
+        cargo_feature: int | None = None,
+        barrier_feature: int | None = None,
+        approach_radius: int = 1,
         description: str = "",
     ) -> None:
         super().__init__(name=f"DepositCargo({receptacle_pos})", intent=SpatialActionIntent.DROP)
         self.receptacle_pos = (int(receptacle_pos[0]), int(receptacle_pos[1]))
+        self.cargo_feature = cargo_feature
+        self.barrier_feature = barrier_feature
+        self.approach_radius = approach_radius
         self.description = description or f"Deposit cargo at {self.receptacle_pos}"
-        self.nav_op = NavigateTo(destination=self.receptacle_pos, radius=1)
+        self.nav_op = NavigateTo(destination=self.receptacle_pos, radius=approach_radius)
 
     def is_satisfied(
         self,
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
     ) -> bool:
-        # Satisfied if cargo is at or adjacent to receptacle
+        # 1. If barrier at receptacle was cleared
+        r, c = self.receptacle_pos
+        if 0 <= r < curr_grid.shape[0] and 0 <= c < curr_grid.shape[1]:
+            if self.barrier_feature is not None and curr_grid[r, c] != self.barrier_feature:
+                return True
+        # 2. Satisfied if cargo is at or adjacent to receptacle
         active_manip = engine.working_memory.body_schema.active_manipulandum
         if active_manip is not None:
             mr, mc = active_manip.pos
-            if abs(mr - self.receptacle_pos[0]) + abs(mc - self.receptacle_pos[1]) <= 1:
+            if (
+                abs(mr - self.receptacle_pos[0]) + abs(mc - self.receptacle_pos[1])
+                <= self.approach_radius
+            ):
                 return True
         return self.nav_op.is_satisfied(engine, curr_grid)
 
@@ -643,8 +663,129 @@ class CustomMacroAction(MacroAction):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. MacroActionPlan Scheduler
+# 9. MacroActionPlan Scheduler & Causal Attribution
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def attribute_macro_action_outcome(
+    engine: AutonomousEpistemicEngine,
+    macro_action: MacroAction,
+    prev_grid: np.ndarray | None,
+    curr_grid: np.ndarray,
+    is_success: bool,
+    action_used: Any | None = None,
+    action_data: dict[str, Any] | None = None,
+) -> None:
+    """Attribute macro-action completion or failure into Pearl's do(a) causal theory and body schema."""
+    if prev_grid is None and hasattr(engine, "grid_history") and len(engine.grid_history) >= 2:
+        prev_grid = engine.grid_history[-2]
+
+    if is_success:
+        macro_action.status = MacroActionStatus.SATISFIED
+        if isinstance(macro_action, PickUpCargo):
+            feat = macro_action.cargo_feature
+            if feat is None and prev_grid is not None:
+                r, c = macro_action.cargo_pos
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
+                    feat = int(prev_grid[r, c])
+            if feat is not None and feat != 0:
+                step_cnt = getattr(engine, "step_count", 0)
+                engine.working_memory.body_schema.acquire_tool(feat, step=step_cnt, role="key")
+                engine.symbolic_theory.cargo_features.add(feat)
+                if hasattr(engine, "learned_cargo_features"):
+                    engine.learned_cargo_features.add(feat)
+                logger.info(
+                    "ExtendedBodySchema: Acquired tool/cargo feature %d into body schema at %s",
+                    feat,
+                    macro_action.cargo_pos,
+                )
+        elif isinstance(macro_action, DepositCargo):
+            tool_feat = macro_action.cargo_feature
+            if tool_feat is None:
+                held = engine.working_memory.body_schema.held_tools
+                if held:
+                    tool_feat = held[-1].feature_id
+            r, c = macro_action.receptacle_pos
+            barrier_feat = macro_action.barrier_feature
+            if barrier_feat is None and prev_grid is not None:
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
+                    bg = engine.estimate_background(prev_grid)
+                    val = int(prev_grid[r, c])
+                    if val != bg:
+                        barrier_feat = val
+
+            cell_cleared = False
+            if (
+                prev_grid is not None
+                and 0 <= r < curr_grid.shape[0]
+                and 0 <= c < curr_grid.shape[1]
+            ):
+                bg = engine.estimate_background(curr_grid)
+                cell_cleared = (prev_grid[r, c] != curr_grid[r, c]) or (curr_grid[r, c] == bg)
+
+            if (
+                tool_feat is not None
+                and barrier_feat is not None
+                and (cell_cleared or barrier_feat in engine.symbolic_theory.barrier_features)
+            ):
+                engine.symbolic_theory.record_tool_barrier_affinity(tool_feat, barrier_feat)
+                engine.working_memory.body_schema.register_resonance(tool_feat, barrier_feat)
+                engine.working_memory.body_schema.expend_tool(tool_feat)
+                if hasattr(engine, "causal_cortex"):
+                    engine.causal_cortex.attribute_macro_outcome(
+                        SpatialActionIntent.DROP,
+                        macro_action.receptacle_pos,
+                        tool_feat,
+                        barrier_feat,
+                        is_success=True,
+                    )
+                logger.info(
+                    "Pearl do(a) causal attribution: tool %d cleared barrier %d at %s",
+                    tool_feat,
+                    barrier_feat,
+                    macro_action.receptacle_pos,
+                )
+        elif isinstance(macro_action, InteractWith):
+            if prev_grid is not None:
+                bg = engine.estimate_background(curr_grid)
+                av_feats = engine.avatar_features or (
+                    {engine.avatar_feature} if engine.avatar_feature is not None else None
+                )
+                attributor = getattr(
+                    engine,
+                    "remote_causal",
+                    getattr(getattr(engine, "causal_cortex", None), "causal_attributor", None),
+                )
+                if attributor is not None:
+                    attributor.record_transition(
+                        prev_grid=prev_grid,
+                        curr_grid=curr_grid,
+                        action_pos=macro_action.target_coord,
+                        background_feature=bg,
+                        avatar_features=av_feats,
+                    )
+        elif isinstance(macro_action, NavigateTo):
+            if macro_action.destination in engine.learned_goal_positions:
+                r, c = macro_action.destination
+                if 0 <= r < curr_grid.shape[0] and 0 <= c < curr_grid.shape[1]:
+                    dest_feat = int(curr_grid[r, c])
+                    bg = engine.estimate_background(curr_grid)
+                    if dest_feat != bg:
+                        engine.symbolic_theory.goal_features.add(dest_feat)
+                        engine.learned_goal_features.add(dest_feat)
+    else:
+        macro_action.status = MacroActionStatus.FAILED
+        if isinstance(macro_action, NavigateTo):
+            engine.learned_barriers.add(macro_action.destination)
+            if prev_grid is not None:
+                r, c = macro_action.destination
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
+                    feat = int(prev_grid[r, c])
+                    bg = engine.estimate_background(prev_grid)
+                    if feat != bg:
+                        engine.symbolic_theory.barrier_features.add(feat)
+            if engine.avatar_pos is not None and action_used is not None:
+                engine.failed_transitions.add((engine.avatar_pos, action_used))
 
 
 @dataclass
@@ -673,16 +814,25 @@ class MacroActionPlan:
         self,
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
+        prev_grid: np.ndarray | None = None,
     ) -> bool:
         """Advance the plan if the active operator's postconditions are met."""
         while self.actions:
             cur = self.actions[0]
             if cur.is_satisfied(engine, curr_grid):
                 popped = self.actions.popleft()
+                popped.status = MacroActionStatus.SATISFIED
                 logger.info(
                     "MacroActionPlan: Completed and popped %s (%d remaining)",
                     popped.name,
                     len(self.actions),
+                )
+                attribute_macro_action_outcome(
+                    engine=engine,
+                    macro_action=popped,
+                    prev_grid=prev_grid,
+                    curr_grid=curr_grid,
+                    is_success=True,
                 )
             else:
                 break
@@ -693,19 +843,57 @@ class MacroActionPlan:
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
+        prev_grid: np.ndarray | None = None,
     ) -> tuple[Any, dict[str, Any] | None] | None:
         """Execute the current macro-action."""
-        self.advance_if_satisfied(engine, curr_grid)
+        self.advance_if_satisfied(engine, curr_grid, prev_grid=prev_grid)
         if not self.actions:
             return None
         cur = self.actions[0]
+        if cur.consecutive_steps >= cur.max_steps:
+            logger.warning(
+                "MacroAction %s exceeded max steps (%d); aborting operator",
+                cur.name,
+                cur.max_steps,
+            )
+            popped = self.actions.popleft()
+            popped.status = MacroActionStatus.FAILED
+            attribute_macro_action_outcome(
+                engine=engine,
+                macro_action=popped,
+                prev_grid=prev_grid,
+                curr_grid=curr_grid,
+                is_success=False,
+            )
+            return None
         if not cur.is_feasible(engine, curr_grid, available_actions):
             logger.warning(
                 "MacroAction %s is infeasible in current state; dropping operator", cur.name
             )
-            self.actions.popleft()
+            popped = self.actions.popleft()
+            popped.status = MacroActionStatus.FAILED
+            attribute_macro_action_outcome(
+                engine=engine,
+                macro_action=popped,
+                prev_grid=prev_grid,
+                curr_grid=curr_grid,
+                is_success=False,
+            )
             return None
         return cur.step(engine, curr_grid, available_actions)
+
+    @classmethod
+    def from_skill(
+        cls,
+        skill: Any,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> MacroActionPlan | None:
+        """Compile a MacroActionPlan directly from a declarative skill."""
+        if hasattr(skill, "compile_to_macro_plan"):
+            return skill.compile_to_macro_plan(engine, curr_grid, available_actions)
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -850,6 +1038,16 @@ class MacroPlanSynthesizer:
         if driver_plan is not None and not driver_plan.is_empty():
             return driver_plan
 
+        # 0B. Query declarative skills registered on engine
+        skills = getattr(engine, "declarative_skills", [])
+        for skill in skills:
+            if hasattr(skill, "can_handle") and skill.can_handle(
+                curr_grid, list(available_actions), metadata={"engine": engine}
+            ):
+                skill_plan = MacroActionPlan.from_skill(skill, engine, curr_grid, available_actions)
+                if skill_plan is not None and not skill_plan.is_empty():
+                    return skill_plan
+
         plan = MacroActionPlan()
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
@@ -900,7 +1098,7 @@ class MacroPlanSynthesizer:
             cargo = cargo_entities[0]
             receptacle = receptacles[0]
             plan.append(PickUpCargo(cargo_pos=cargo.grid_pos, cargo_feature=cargo.feature_id))
-            plan.append(DepositCargo(receptacle_pos=receptacle))
+            plan.append(DepositCargo(receptacle_pos=receptacle, cargo_feature=cargo.feature_id))
             if goals:
                 plan.append(NavigateTo(destination=goals[0]))
             return plan
