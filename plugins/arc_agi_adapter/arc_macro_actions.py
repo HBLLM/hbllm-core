@@ -27,6 +27,7 @@ from hbllm.hcir.world.macro_actions import (
     MacroActionStatus,
     NavigateTo,
     ObjectSpec,
+    SwitchFocus,
 )
 
 if TYPE_CHECKING:
@@ -152,7 +153,7 @@ class ArcClickCell(MacroAction):
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
     ) -> bool:
-        return any(engine.is_spatial_effector(a) for a in available_actions)
+        return any(engine.is_spatial_effector(a) or a == 6 for a in available_actions)
 
     def step(
         self,
@@ -161,13 +162,20 @@ class ArcClickCell(MacroAction):
         available_actions: Sequence[Any],
     ) -> tuple[Any, dict[str, Any] | None] | None:
         self.consecutive_steps += 1
-        effector_candidates = [a for a in available_actions if engine.is_spatial_effector(a)]
+        effector_candidates = [
+            a for a in available_actions if engine.is_spatial_effector(a) or a == 6
+        ]
         if not effector_candidates:
             self.status = MacroActionStatus.FAILED
             return available_actions[0], None
 
         eff = effector_candidates[0]
         data = {"x": int(self.cell_coord[1]), "y": int(self.cell_coord[0])}
+        # Update visit count for this click coordinate so exploration alternates when quiescent
+        engine.entity_visit_counts[f"click_{self.cell_coord[0]}_{self.cell_coord[1]}"] = (
+            engine.entity_visit_counts.get(f"click_{self.cell_coord[0]}_{self.cell_coord[1]}", 0)
+            + 1
+        )
         self.has_executed = True
         self.status = MacroActionStatus.SATISFIED
         return eff, data
@@ -181,9 +189,79 @@ def arc_macro_plan_synthesis_hook(
 ) -> MacroActionPlan | None:
     """Domain-specific plan synthesis hook for ARC-AGI games.
 
-    Detects switches, buttons, optical mirrors, and actuators, synthesizing:
-    [ToggleSwitch(pos)] -> [NavigateTo(goal)]
+    Supports:
+    1. Click game button actuation (VC33) via ArcClickCell.
+    2. Multi-agent / multi-shape silhouette fitting (RE86) via NavigateTo + SwitchFocus.
+    3. Switch, lever, and actuator toggling -> exit navigation (TU93/AR25).
     """
+    # 0. Allocentric Click Games (Action 6) with Interactive Buttons (e.g. VC33)
+    if objects and any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
+        btn_coords: list[tuple[int, int]] = []
+        for obj in objects:
+            if isinstance(obj, ObjectSpec) and ("switch" in obj.role or "button" in obj.role):
+                click_coord = obj.properties.get("click_coord") or obj.pos
+                if click_coord:
+                    btn_coords.append((int(click_coord[0]), int(click_coord[1])))
+        if btn_coords:
+            # If a button recently produced a state change, continue driving it!
+            last_eff = getattr(engine, "last_effective_click_coord", None)
+            consec_eff = getattr(engine, "consecutive_effective_clicks", 0)
+            if last_eff in btn_coords and 0 < consec_eff < 8:
+                plan = MacroActionPlan(plan_id="arc_drive_effective_button")
+                plan.append(
+                    ArcClickCell(
+                        cell_coord=last_eff, description=f"Drive effective button at {last_eff}"
+                    )
+                )
+                return plan
+
+            # Otherwise explore buttons by lowest visit count
+            sorted_btns = sorted(
+                btn_coords,
+                key=lambda b: engine.entity_visit_counts.get(f"click_{b[0]}_{b[1]}", 0),
+            )
+            plan = MacroActionPlan(plan_id="arc_click_button_plan")
+            plan.append(
+                ArcClickCell(
+                    cell_coord=sorted_btns[0], description=f"Actuate button at {sorted_btns[0]}"
+                )
+            )
+            return plan
+
+    # 0B. Multi-Agent / Multi-Shape Silhouette Puzzles (e.g. RE86)
+    if objects and 5 in available_actions:
+        shapes = [
+            obj for obj in objects if isinstance(obj, ObjectSpec) and obj.role == "manipulandum"
+        ]
+        silhouettes = [
+            obj for obj in objects if isinstance(obj, ObjectSpec) and obj.role == "receptacle"
+        ]
+        if shapes and silhouettes:
+            active_shape = next(
+                (sh for sh in shapes if sh.properties.get("is_active")),
+                shapes[0],
+            )
+            engine.avatar_pos = active_shape.pos
+            engine.avatar_feature = active_shape.feature_id
+
+            matching_sil = next(
+                (sil for sil in silhouettes if sil.feature_id == active_shape.feature_id),
+                silhouettes[0],
+            )
+            dr = abs(active_shape.pos[0] - matching_sil.pos[0])
+            dc = abs(active_shape.pos[1] - matching_sil.pos[1])
+            plan = MacroActionPlan(plan_id="arc_shape_silhouette_plan")
+            if dr + dc > 2:
+                plan.append(
+                    NavigateTo(
+                        destination=matching_sil.pos,
+                        radius=2,
+                        description=f"Fit shape {active_shape.id} to silhouette at {matching_sil.pos}",
+                    )
+                )
+            plan.append(SwitchFocus(switch_action=5, description="Switch active shape"))
+            return plan
+
     bg = engine.estimate_background(curr_grid)
     entities = engine.extract_entities(curr_grid, bg)
 

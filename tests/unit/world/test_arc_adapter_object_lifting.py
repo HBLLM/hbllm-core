@@ -199,3 +199,118 @@ def test_my_agent_choose_action_wires_objects_to_core() -> None:
     from plugins.arc_agi_adapter.arc_macro_actions import ToggleSwitch
 
     assert isinstance(macro_plan.current_action(), (ToggleSwitch, NavigateTo))
+
+
+def test_extract_arc_objects_sys_click_and_shapes() -> None:
+    """Test lifting sys_click buttons, shapes, and silhouettes from game_obj."""
+    grid = np.zeros((64, 64), dtype=int)
+    grid[24:28, 60:64] = 9  # Button 1
+
+    # Mock game_obj with level and camera
+    game_obj = MagicMock()
+    cur_lvl = MagicMock()
+    cam = MagicMock()
+    cam.width = 32
+    cam.height = 32
+    game_obj.camera = cam
+    game_obj.current_level = cur_lvl
+
+    # Mock button sprite
+    btn_sprite = MagicMock()
+    btn_sprite.name = "btn_1"
+    btn_sprite.tags = ["sys_click"]
+    btn_sprite.x = 30
+    btn_sprite.y = 12
+    btn_sprite.width = 2
+    btn_sprite.height = 2
+
+    # Mock shape sprite
+    shape_sprite = MagicMock()
+    shape_sprite.name = "shape_1"
+    shape_sprite.tags = ["0031cppcuvqlbi"]
+    shape_sprite.x = 10
+    shape_sprite.y = 16
+    shape_sprite.width = 20
+    shape_sprite.height = 20
+    shape_sprite.pixels = np.full((20, 20), 11)
+
+    # Mock silhouette sprite
+    sil_sprite = MagicMock()
+    sil_sprite.name = "sil_1"
+    sil_sprite.tags = ["0054xnsuqceejm"]
+    sil_pixels = np.full((64, 64), -1)
+    sil_pixels[10:20, 15:25] = 11
+    sil_sprite.pixels = sil_pixels
+
+    def get_sprites_by_tag(tag: str) -> list[Any]:
+        if tag == "sys_click":
+            return [btn_sprite]
+        elif tag == "0031cppcuvqlbi":
+            return [shape_sprite]
+        elif tag == "0054xnsuqceejm":
+            return [sil_sprite]
+        return []
+
+    cur_lvl.get_sprites_by_tag.side_effect = get_sprites_by_tag
+
+    engine = AutonomousEpistemicEngine()
+    objects = extract_arc_objects(grid, engine=engine, game_obj=game_obj)
+
+    btn_objs = [o for o in objects if "btn" in o.id or "button" in o.role or o.role == "switch"]
+    assert len(btn_objs) >= 1
+    assert btn_objs[0].properties.get("click_data") == {"x": 62, "y": 26}
+
+    shape_objs = [o for o in objects if o.role == "manipulandum"]
+    assert len(shape_objs) >= 1
+    assert shape_objs[0].feature_id == 11
+
+    sil_objs = [o for o in objects if "silhouette" in o.id]
+    assert len(sil_objs) >= 1
+    assert sil_objs[0].feature_id == 11
+
+
+def test_arc_macro_actions_click_and_silhouette_planning() -> None:
+    """Test synthesizing ArcClickCell and SwitchFocus plans via arc_macro_plan_synthesis_hook."""
+    from hbllm.hcir.world.macro_actions import ObjectSpec, SwitchFocus
+    from plugins.arc_agi_adapter.arc_macro_actions import (
+        ArcClickCell,
+        arc_macro_plan_synthesis_hook,
+    )
+
+    engine = AutonomousEpistemicEngine()
+    grid = np.zeros((64, 64), dtype=int)
+
+    # 1. Test click button synthesis
+    btn_obj = ObjectSpec(
+        id="btn_1",
+        pos=(26, 62),
+        feature_id=9,
+        role="switch",
+        properties={"click_coord": (26, 62)},
+    )
+    click_plan = arc_macro_plan_synthesis_hook(
+        engine, grid, available_actions=[6], objects=[btn_obj]
+    )
+    assert click_plan is not None
+    assert len(click_plan.actions) == 1
+    assert isinstance(click_plan.actions[0], ArcClickCell)
+
+    # 2. Test silhouette matching synthesis
+    shape_obj = ObjectSpec(
+        id="shape_1",
+        pos=(20, 20),
+        feature_id=11,
+        role="manipulandum",
+    )
+    sil_obj = ObjectSpec(
+        id="sil_1",
+        pos=(15, 15),
+        feature_id=11,
+        role="receptacle",
+    )
+    shape_plan = arc_macro_plan_synthesis_hook(
+        engine, grid, available_actions=[1, 2, 3, 4, 5], objects=[shape_obj, sil_obj]
+    )
+    assert shape_plan is not None
+    assert any(isinstance(s, SwitchFocus) for s in shape_plan.actions)
+    assert any(isinstance(s, NavigateTo) for s in shape_plan.actions)

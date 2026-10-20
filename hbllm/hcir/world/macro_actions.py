@@ -1046,51 +1046,52 @@ class MacroActionPlan:
     ) -> tuple[Any, dict[str, Any] | None] | None:
         """Execute the current macro-action."""
         self.advance_if_satisfied(engine, curr_grid, prev_grid=prev_grid)
-        if not self.actions:
-            return None
-        cur = self.actions[0]
-        if cur.consecutive_steps >= cur.max_steps:
-            logger.warning(
-                "MacroAction %s exceeded max steps (%d); aborting operator",
-                cur.name,
-                cur.max_steps,
-            )
-            popped = self.actions.popleft()
-            popped.status = MacroActionStatus.FAILED
-            attribute_macro_action_outcome(
-                engine=engine,
-                macro_action=popped,
-                prev_grid=prev_grid,
-                curr_grid=curr_grid,
-                is_success=False,
-            )
-            return None
-        if not cur.is_feasible(engine, curr_grid, available_actions):
-            logger.warning(
-                "MacroAction %s is infeasible in current state; dropping operator", cur.name
-            )
-            popped = self.actions.popleft()
-            popped.status = MacroActionStatus.FAILED
-            attribute_macro_action_outcome(
-                engine=engine,
-                macro_action=popped,
-                prev_grid=prev_grid,
-                curr_grid=curr_grid,
-                is_success=False,
-            )
-        res = cur.step(engine, curr_grid, available_actions)
-        if res is None or cur.status in (MacroActionStatus.BLOCKED, MacroActionStatus.FAILED):
-            popped = self.actions.popleft()
-            popped.status = MacroActionStatus.FAILED
-            attribute_macro_action_outcome(
-                engine=engine,
-                macro_action=popped,
-                prev_grid=prev_grid,
-                curr_grid=curr_grid,
-                is_success=False,
-            )
-            return None
-        return res
+        while self.actions:
+            cur = self.actions[0]
+            if cur.consecutive_steps >= cur.max_steps:
+                logger.warning(
+                    "MacroAction %s exceeded max steps (%d); aborting operator",
+                    cur.name,
+                    cur.max_steps,
+                )
+                popped = self.actions.popleft()
+                popped.status = MacroActionStatus.FAILED
+                attribute_macro_action_outcome(
+                    engine=engine,
+                    macro_action=popped,
+                    prev_grid=prev_grid,
+                    curr_grid=curr_grid,
+                    is_success=False,
+                )
+                continue
+            if not cur.is_feasible(engine, curr_grid, available_actions):
+                logger.warning(
+                    "MacroAction %s is infeasible in current state; dropping operator", cur.name
+                )
+                popped = self.actions.popleft()
+                popped.status = MacroActionStatus.FAILED
+                attribute_macro_action_outcome(
+                    engine=engine,
+                    macro_action=popped,
+                    prev_grid=prev_grid,
+                    curr_grid=curr_grid,
+                    is_success=False,
+                )
+                continue
+            res = cur.step(engine, curr_grid, available_actions)
+            if res is None or cur.status in (MacroActionStatus.BLOCKED, MacroActionStatus.FAILED):
+                popped = self.actions.popleft()
+                popped.status = MacroActionStatus.FAILED
+                attribute_macro_action_outcome(
+                    engine=engine,
+                    macro_action=popped,
+                    prev_grid=prev_grid,
+                    curr_grid=curr_grid,
+                    is_success=False,
+                )
+                continue
+            return res
+        return None
 
     @classmethod
     def from_skill(

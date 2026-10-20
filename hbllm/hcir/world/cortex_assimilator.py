@@ -373,7 +373,7 @@ class EpistemicFeedbackAssimilator:
                             and probed_feat not in engine.effective_features
                         ):
                             engine.quiescent_features.add(probed_feat)
-            if action is not None:
+            if action is not None and not is_effector_action:
                 prev_inh = engine.inhibited_actions.get(action, 0)
                 inh_steps = 4 if engine.consecutive_quiescent_actions >= 2 else 3
                 engine.inhibited_actions[action] = max(prev_inh + 2, inh_steps)

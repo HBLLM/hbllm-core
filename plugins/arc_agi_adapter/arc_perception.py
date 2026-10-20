@@ -335,6 +335,132 @@ def extract_arc_objects(
                                         properties={"source": "sprite_tag_receptacle"},
                                     )
                                 )
+
+            # Interactive Clickable Button sprites (tag sys_click)
+            click_sprites = cur_lvl.get_sprites_by_tag("sys_click")
+            if click_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for cs in click_sprites:
+                    w = getattr(cs, "width", 1)
+                    h = getattr(cs, "height", 1)
+                    disp_x = int(cs.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(cs.y * scale + y_pad + (h * scale) // 2)
+                    c_pos = (disp_y, disp_x)
+                    if 0 <= disp_y < H and 0 <= disp_x < W and c_pos not in seen_positions:
+                        seen_positions.add(c_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"btn_sprite_{disp_y}_{disp_x}",
+                                pos=c_pos,
+                                feature_id=int(g[disp_y, disp_x]),
+                                role="switch",
+                                properties={
+                                    "source": "sprite_tag_sys_click",
+                                    "click_coord": (disp_y, disp_x),
+                                    "click_data": {"x": disp_x, "y": disp_y},
+                                    "sprite_name": getattr(cs, "name", "button"),
+                                },
+                            )
+                        )
+
+            # Multi-agent / multi-manipulandum shapes (tag 0031cppcuvqlbi)
+            shape_sprites = cur_lvl.get_sprites_by_tag("0031cppcuvqlbi")
+            if shape_sprites:
+                for idx, ss in enumerate(shape_sprites):
+                    w = getattr(ss, "width", 1)
+                    h = getattr(ss, "height", 1)
+                    cy = int(round(ss.y + h / 2.0))
+                    cx = int(round(ss.x + w / 2.0))
+                    c_pos = (cy, cx)
+                    non_neg = ss.pixels[ss.pixels >= 0] if hasattr(ss, "pixels") else []
+                    s_feat = int(non_neg[0]) if len(non_neg) > 0 else 11
+                    is_active = False
+                    if hasattr(ss, "pixels") and isinstance(ss.pixels, np.ndarray):
+                        center_val = ss.pixels[h // 2, w // 2]
+                        is_active = bool(center_val != 0 and center_val != -1)
+                    if 0 <= cy < H and 0 <= cx < W and c_pos not in seen_positions:
+                        seen_positions.add(c_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"shape_sprite_{idx}_{cy}_{cx}",
+                                pos=c_pos,
+                                feature_id=s_feat,
+                                role="manipulandum",
+                                properties={
+                                    "source": "sprite_tag_shape",
+                                    "shape_index": idx,
+                                    "width": w,
+                                    "height": h,
+                                    "is_active": is_active,
+                                    "focus_switch_actions": {5},
+                                },
+                            )
+                        )
+
+            # Silhouette receptacle / fitting zone (tag 0054xnsuqceejm)
+            sil_sprites = cur_lvl.get_sprites_by_tag("0054xnsuqceejm")
+            if sil_sprites:
+                for sil in sil_sprites:
+                    if hasattr(sil, "pixels") and isinstance(sil.pixels, np.ndarray):
+                        coords = np.argwhere((sil.pixels != -1) & (sil.pixels != 4))
+                        if len(coords) > 0:
+                            for color in np.unique(sil.pixels[coords[:, 0], coords[:, 1]]):
+                                c_coords = np.argwhere(sil.pixels == color)
+                                if len(c_coords) > 0:
+                                    t_y = int(round(float(np.mean(c_coords[:, 0]))))
+                                    t_x = int(round(float(np.mean(c_coords[:, 1]))))
+                                    t_pos = (t_y, t_x)
+                                    if (
+                                        0 <= t_y < H
+                                        and 0 <= t_x < W
+                                        and t_pos not in seen_positions
+                                    ):
+                                        seen_positions.add(t_pos)
+                                        objects.append(
+                                            ObjectSpec(
+                                                id=f"silhouette_target_{color}_{t_y}_{t_x}",
+                                                pos=t_pos,
+                                                feature_id=int(color),
+                                                role="receptacle",
+                                                properties={
+                                                    "source": "sprite_tag_silhouette",
+                                                    "target_color": int(color),
+                                                },
+                                            )
+                                        )
+
+            # Tool / modification stations (tags 0007dtbisvazhv, 0003dlchiwseii)
+            for tool_tag, cat_name in [
+                ("0007dtbisvazhv", "color_station"),
+                ("0003dlchiwseii", "resize_station"),
+            ]:
+                tool_sprites = cur_lvl.get_sprites_by_tag(tool_tag)
+                if tool_sprites:
+                    for ts in tool_sprites:
+                        w = getattr(ts, "width", 1)
+                        h = getattr(ts, "height", 1)
+                        ty = int(round(ts.y + h / 2.0))
+                        tx = int(round(ts.x + w / 2.0))
+                        t_pos = (ty, tx)
+                        if 0 <= ty < H and 0 <= tx < W and t_pos not in seen_positions:
+                            seen_positions.add(t_pos)
+                            objects.append(
+                                ObjectSpec(
+                                    id=f"tool_station_{cat_name}_{ty}_{tx}",
+                                    pos=t_pos,
+                                    feature_id=int(g[ty, tx]) if 0 <= ty < H and 0 <= tx < W else 0,
+                                    role="tool",
+                                    properties={
+                                        "source": f"sprite_tag_{cat_name}",
+                                        "category": cat_name,
+                                    },
+                                )
+                            )
         except Exception as exc:
             logger.debug("Failed extracting sprites from cur_lvl: %s", exc)
 

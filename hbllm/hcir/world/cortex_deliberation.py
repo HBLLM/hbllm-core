@@ -801,6 +801,30 @@ class PrefrontalDeliberationEngine:
         engine._feedback_assimilated = False
 
         # Faculty: Executive Macro-Action Plan Execution & Synthesis
+        def _is_macro_step_safe(act: Any, data: dict[str, Any] | None) -> bool:
+            is_effector = engine.is_spatial_effector(act) or (
+                data is not None and any(k in data for k in ("x", "y", "col", "row"))
+            )
+            if not is_effector and engine.inhibited_actions.get(act, 0) > 0:
+                return False
+            if hasattr(engine, "working_memory") and hasattr(
+                engine.working_memory, "habenular_ior"
+            ):
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, act, action_data=data
+                ):
+                    return False
+            if engine.avatar_pos is not None and act in engine.action_dynamics:
+                dyn = engine.action_dynamics[act]
+                if dyn.is_displacement_action():
+                    dr, dc = dyn.delta_r, dyn.delta_c
+                    nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
+                    if hasattr(
+                        engine, "collision_cones"
+                    ) and engine.collision_cones.is_collision_hazard(nr, nc, 1):
+                        return False
+            return True
+
         macro_plan = getattr(engine.working_memory, "macro_plan", None)
         if macro_plan is not None and not macro_plan.is_empty():
             macro_step = macro_plan.step(
@@ -809,7 +833,10 @@ class PrefrontalDeliberationEngine:
             if macro_step is not None:
                 m_act, m_data = macro_step
                 if m_act in available_actions:
-                    return self._finalize_step(engine, curr_grid, m_act, m_data)
+                    if _is_macro_step_safe(m_act, m_data):
+                        return self._finalize_step(engine, curr_grid, m_act, m_data)
+                    else:
+                        macro_plan.clear()
 
         if macro_plan is None or macro_plan.is_empty():
             from hbllm.hcir.world.macro_actions import MacroPlanSynthesizer
@@ -829,7 +856,10 @@ class PrefrontalDeliberationEngine:
                 if macro_step is not None:
                     m_act, m_data = macro_step
                     if m_act in available_actions:
-                        return self._finalize_step(engine, curr_grid, m_act, m_data)
+                        if _is_macro_step_safe(m_act, m_data):
+                            return self._finalize_step(engine, curr_grid, m_act, m_data)
+                        else:
+                            engine.working_memory.macro_plan.clear()
 
         # Phasic Salience Reset: Environmental discovery, dynamic threat emergence, or high surprise
         # Query prefrontal working memory for salience shift to awaken deliberate forward search
