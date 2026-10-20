@@ -128,6 +128,11 @@ class HCIRSymbolicWorldTheory:
 
     # Tool-Barrier Causal Resonance (persistent across level resets)
     tool_barrier_affinities: dict[int, set[int]] = field(default_factory=dict)
+    # Tool-Barrier Causal Incompatibilities (recorded when tool fails on barrier)
+    tool_barrier_incompatibilities: dict[int, set[int]] = field(default_factory=dict)
+    # Distal / Remote Actuations: trigger_feature -> set of affected_features / coords
+    distal_actuations: dict[int, set[int]] = field(default_factory=dict)
+    distal_actuation_coords: dict[int, set[tuple[int, int]]] = field(default_factory=dict)
 
     def record_tool_barrier_affinity(self, tool_feature: int, barrier_feature: int) -> None:
         """Record causal affinity: tool_feature acts upon / clears barrier_feature."""
@@ -148,6 +153,58 @@ class HCIRSymbolicWorldTheory:
                 tool_feature,
                 barrier_feature,
             )
+
+    def record_tool_barrier_incompatibility(self, tool_feature: int, barrier_feature: int) -> None:
+        """Record causal incompatibility: tool_feature does NOT clear barrier_feature."""
+        incomp_set = self.tool_barrier_incompatibilities.setdefault(tool_feature, set())
+        if barrier_feature not in incomp_set:
+            incomp_set.add(barrier_feature)
+            if tool_feature in self.tool_barrier_affinities:
+                self.tool_barrier_affinities[tool_feature].discard(barrier_feature)
+            pred = CausalPredicate(
+                variable="incompatible_barrier",
+                operator="!=",
+                value=barrier_feature,
+                target_entity=str(tool_feature),
+            )
+            self.register_predicate(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Learned Causal Incompatibility: Tool %d !=> Barrier %d",
+                tool_feature,
+                barrier_feature,
+            )
+
+    def is_tool_compatible(self, tool_feature: int, barrier_feature: int) -> bool:
+        """Check whether tool_feature is considered compatible with barrier_feature."""
+        incomps = self.tool_barrier_incompatibilities.get(tool_feature, set())
+        return barrier_feature not in incomps
+
+    def record_distal_actuation(
+        self,
+        trigger_feature: int,
+        affected_feature: int,
+        affected_pos: tuple[int, int] | None = None,
+    ) -> None:
+        """Record causal distal actuation: interacting with trigger alters affected entity."""
+        act_set = self.distal_actuations.setdefault(trigger_feature, set())
+        act_set.add(affected_feature)
+        if affected_pos is not None:
+            coord_set = self.distal_actuation_coords.setdefault(trigger_feature, set())
+            coord_set.add(affected_pos)
+        self.record_tool_barrier_affinity(trigger_feature, affected_feature)
+        pred = CausalPredicate(
+            variable="distal_actuation",
+            operator="==",
+            value=affected_feature,
+            target_entity=str(trigger_feature),
+        )
+        self.register_predicate(pred)
+        logger.info(
+            "HCIRSymbolicWorldTheory: Learned Distal Actuation: Trigger %d -> Affected %d (pos=%s)",
+            trigger_feature,
+            affected_feature,
+            affected_pos,
+        )
 
     def get_causal_affinity(
         self,
@@ -744,6 +801,43 @@ class HCIRSymbolicWorldTheory:
                     node_data=node.model_dump(),
                 )
             )
+
+        for tool_feat, barriers in self.tool_barrier_incompatibilities.items():
+            for b_feat in barriers:
+                node_id = f"causal_incompatibility_tool_{tool_feat}_barrier_{b_feat}"
+                node = ConceptNode(
+                    id=node_id,
+                    label=f"incomp_{tool_feat}_{b_feat}",
+                    definition=f"Learned tool {tool_feat} does not clear barrier {b_feat}",
+                    domain="causal_incompatibility",
+                    properties={"tool_feature": tool_feat, "barrier_feature": b_feat},
+                )
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node_id,
+                        node_data=node.model_dump(),
+                    )
+                )
+
+        for trig_feat, aff_feats in self.distal_actuations.items():
+            for a_feat in aff_feats:
+                node_id = f"causal_distal_actuation_trig_{trig_feat}_aff_{a_feat}"
+                node = ConceptNode(
+                    id=node_id,
+                    label=f"distal_actuation_{trig_feat}_{a_feat}",
+                    definition=f"Interacting with trigger {trig_feat} actuates distal feature {a_feat}",
+                    domain="causal_distal_actuation",
+                    properties={"trigger_feature": trig_feat, "affected_feature": a_feat},
+                )
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node_id,
+                        node_data=node.model_dump(),
+                    )
+                )
+
         return ops
 
     def clear(self) -> None:
@@ -759,6 +853,9 @@ class HCIRSymbolicWorldTheory:
         self.walkable_features.clear()
         self.cargo_features.clear()
         self.receptacle_features.clear()
+        self.tool_barrier_incompatibilities.clear()
+        self.distal_actuations.clear()
+        self.distal_actuation_coords.clear()
         self.spelke_axioms.clear()
         self.action_cycle_periods.clear()
         self.mutator_state_history.clear()

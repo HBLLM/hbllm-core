@@ -506,6 +506,28 @@ class DepositCargo(MacroAction):
         return self.nav_op.step(engine, curr_grid, available_actions)
 
 
+class UseToolOnBarrier(DepositCargo):
+    """Macro-action targeting using a tool/key on an obstructing barrier."""
+
+    def __init__(
+        self,
+        barrier_pos: tuple[int, int],
+        tool_feature: int | None = None,
+        barrier_feature: int | None = None,
+        approach_radius: int = 1,
+        description: str = "",
+    ) -> None:
+        super().__init__(
+            receptacle_pos=barrier_pos,
+            cargo_feature=tool_feature,
+            barrier_feature=barrier_feature,
+            approach_radius=approach_radius,
+            description=description or f"Use tool {tool_feature} on barrier at {barrier_pos}",
+        )
+        self.name = f"UseToolOnBarrier({barrier_pos})"
+        self.intent = SpatialActionIntent.INTERACT
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. ExploreFrontier Operator (Epistemic Curiosity)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -699,6 +721,16 @@ def attribute_macro_action_outcome(
                     feat,
                     macro_action.cargo_pos,
                 )
+            if engine.subgoal_stack.has_pending_goals:
+                cur_sg = engine.subgoal_stack.current_subgoal
+                if cur_sg and cur_sg.subgoal_type in (
+                    SubgoalType.ACQUIRE_TOOL,
+                    SubgoalType.COLLECT_ITEM,
+                ):
+                    if cur_sg.target_entity_pos == macro_action.cargo_pos or (
+                        feat is not None and cur_sg.required_feature == feat
+                    ):
+                        engine.subgoal_stack.pop_subgoal()
         elif isinstance(macro_action, DepositCargo):
             tool_feat = macro_action.cargo_feature
             if tool_feat is None:
@@ -731,6 +763,7 @@ def attribute_macro_action_outcome(
                 engine.symbolic_theory.record_tool_barrier_affinity(tool_feat, barrier_feat)
                 engine.working_memory.body_schema.register_resonance(tool_feat, barrier_feat)
                 engine.working_memory.body_schema.expend_tool(tool_feat)
+                engine.learned_barriers.discard((r, c))
                 if hasattr(engine, "causal_cortex"):
                     engine.causal_cortex.attribute_macro_outcome(
                         SpatialActionIntent.DROP,
@@ -745,6 +778,13 @@ def attribute_macro_action_outcome(
                     barrier_feat,
                     macro_action.receptacle_pos,
                 )
+            elif cell_cleared:
+                engine.learned_barriers.discard((r, c))
+
+            if engine.subgoal_stack.has_pending_goals:
+                cur_sg = engine.subgoal_stack.current_subgoal
+                if cur_sg and cur_sg.target_destination == macro_action.receptacle_pos:
+                    engine.subgoal_stack.pop_subgoal()
         elif isinstance(macro_action, InteractWith):
             if prev_grid is not None:
                 bg = engine.estimate_background(curr_grid)
@@ -764,6 +804,40 @@ def attribute_macro_action_outcome(
                         background_feature=bg,
                         avatar_features=av_feats,
                     )
+                # Active Causal Induction for Distal Actuations
+                diff_coords = np.argwhere(prev_grid != curr_grid)
+                trig_coord = macro_action.target_coord
+                trig_feat = (
+                    int(prev_grid[trig_coord])
+                    if 0 <= trig_coord[0] < prev_grid.shape[0]
+                    and 0 <= trig_coord[1] < prev_grid.shape[1]
+                    else 0
+                )
+                for d_coord in diff_coords:
+                    dr, dc = int(d_coord[0]), int(d_coord[1])
+                    if (dr, dc) == trig_coord or (av_feats and int(curr_grid[dr, dc]) in av_feats):
+                        continue
+                    orig_feat = int(prev_grid[dr, dc])
+                    new_feat = int(curr_grid[dr, dc])
+                    if (
+                        (dr, dc) in engine.learned_barriers
+                        or orig_feat in engine.symbolic_theory.barrier_features
+                        or new_feat == bg
+                    ):
+                        engine.learned_barriers.discard((dr, dc))
+                        engine.symbolic_theory.record_distal_actuation(
+                            trig_feat, orig_feat, affected_pos=(dr, dc)
+                        )
+                        logger.info(
+                            "Distal actuation unblocked barrier at (%d, %d) via trigger %d",
+                            dr,
+                            dc,
+                            trig_feat,
+                        )
+                        if engine.subgoal_stack.has_pending_goals:
+                            top_sg = engine.subgoal_stack.current_subgoal
+                            if top_sg and top_sg.target_destination in ((dr, dc), trig_coord):
+                                engine.subgoal_stack.pop_subgoal()
         elif isinstance(macro_action, NavigateTo):
             if macro_action.destination in engine.learned_goal_positions:
                 r, c = macro_action.destination
@@ -773,9 +847,35 @@ def attribute_macro_action_outcome(
                     if dest_feat != bg:
                         engine.symbolic_theory.goal_features.add(dest_feat)
                         engine.learned_goal_features.add(dest_feat)
+            if engine.subgoal_stack.has_pending_goals:
+                cur_sg = engine.subgoal_stack.current_subgoal
+                if cur_sg and cur_sg.target_destination == macro_action.destination:
+                    engine.subgoal_stack.pop_subgoal()
     else:
         macro_action.status = MacroActionStatus.FAILED
-        if isinstance(macro_action, NavigateTo):
+        if isinstance(macro_action, DepositCargo):
+            tool_feat = macro_action.cargo_feature
+            if tool_feat is None:
+                held = engine.working_memory.body_schema.held_tools
+                if held:
+                    tool_feat = held[-1].feature_id
+            barrier_feat = macro_action.barrier_feature
+            if barrier_feat is None and prev_grid is not None:
+                r, c = macro_action.receptacle_pos
+                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
+                    bg = engine.estimate_background(prev_grid)
+                    val = int(prev_grid[r, c])
+                    if val != bg:
+                        barrier_feat = val
+            if tool_feat is not None and barrier_feat is not None:
+                engine.symbolic_theory.record_tool_barrier_incompatibility(tool_feat, barrier_feat)
+                logger.info(
+                    "Causal Incompatibility: Tool %d failed to clear barrier %d at %s",
+                    tool_feat,
+                    barrier_feat,
+                    macro_action.receptacle_pos,
+                )
+        elif isinstance(macro_action, NavigateTo):
             engine.learned_barriers.add(macro_action.destination)
             if prev_grid is not None:
                 r, c = macro_action.destination
@@ -839,6 +939,23 @@ class MacroActionPlan:
                 )
             else:
                 break
+
+        # Check and advance BA10 frontopolar subgoal stack
+        if engine.subgoal_stack.has_pending_goals:
+            top_sg = engine.subgoal_stack.current_subgoal
+            if top_sg is not None:
+                held_feats = {t.feature_id for t in engine.working_memory.body_schema.held_tools}
+                bg = engine.estimate_background(curr_grid)
+                if engine.subgoal_stack.is_subgoal_satisfied(
+                    top_sg,
+                    current_entity_positions=set(),
+                    avatar_pos=engine.avatar_pos,
+                    held_features=held_feats,
+                    grid=curr_grid,
+                    background_feature=bg,
+                ):
+                    engine.subgoal_stack.pop_subgoal()
+
         return len(self.actions) > 0
 
     def step(
@@ -1052,6 +1169,58 @@ class MacroPlanSynthesizer:
                     return skill_plan
 
         plan = MacroActionPlan()
+
+        # 0C. Check active executive subgoal stack (Brodmann Area 10)
+        if engine.subgoal_stack.has_pending_goals:
+            top_sg = engine.subgoal_stack.current_subgoal
+            if top_sg is not None:
+                if top_sg.subgoal_type in (SubgoalType.ACQUIRE_TOOL, SubgoalType.COLLECT_ITEM):
+                    plan.append(
+                        PickUpCargo(
+                            cargo_pos=top_sg.target_entity_pos,
+                            cargo_feature=top_sg.required_feature,
+                            description=f"Acquire tool at {top_sg.target_entity_pos}",
+                        )
+                    )
+                    return plan
+                elif top_sg.subgoal_type in (
+                    SubgoalType.CLEAR_OBSTACLE,
+                    SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                ):
+                    held_feats = {
+                        t.feature_id for t in engine.working_memory.body_schema.held_tools
+                    }
+                    if top_sg.required_feature in held_feats or not top_sg.prerequisite_features:
+                        plan.append(
+                            UseToolOnBarrier(
+                                barrier_pos=top_sg.target_destination,
+                                tool_feature=top_sg.required_feature,
+                                description=f"Clear obstacle at {top_sg.target_destination}",
+                            )
+                        )
+                    else:
+                        plan.append(
+                            InteractWith(
+                                target_coord=top_sg.target_destination,
+                                description=f"Actuate mechanism at {top_sg.target_destination}",
+                            )
+                        )
+                    return plan
+                elif top_sg.subgoal_type in (SubgoalType.DELIVER_TO_GOAL, SubgoalType.NAVIGATE_TO):
+                    plan.append(
+                        NavigateTo(
+                            destination=top_sg.target_destination, description="Navigate to goal"
+                        )
+                    )
+                    return plan
+                elif top_sg.subgoal_type == SubgoalType.SWITCH_FOCUS:
+                    sw_act = top_sg.metadata.get("switch_action")
+                    if sw_act is None and engine.focus_switch_actions:
+                        sw_act = next(iter(engine.focus_switch_actions))
+                    if sw_act is not None:
+                        plan.append(SwitchFocus(switch_action=sw_act, description="Handover focus"))
+                        return plan
+
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
 
@@ -1082,7 +1251,7 @@ class MacroPlanSynthesizer:
             None,
         )
 
-        # 1. Multi-Stage Subgoals: Key / Cargo Delivery to Receptacle
+        # 1. Multi-Stage Subgoals: Recursive BA10 Subgoal Decomposition
         cargo_entities = [
             e
             for e in entities
@@ -1098,13 +1267,37 @@ class MacroPlanSynthesizer:
                 receptacles.append(r_pos)
 
         if cargo_entities and receptacles and engine.avatar_pos is not None:
-            cargo = cargo_entities[0]
-            receptacle = receptacles[0]
-            plan.append(PickUpCargo(cargo_pos=cargo.grid_pos, cargo_feature=cargo.feature_id))
-            plan.append(DepositCargo(receptacle_pos=receptacle, cargo_feature=cargo.feature_id))
-            if goals:
-                plan.append(NavigateTo(destination=goals[0]))
-            return plan
+            target_g = goals[0] if goals else receptacles[0]
+            decomposed = engine.subgoal_stack.decompose_target_goal(
+                target_goal=target_g,
+                grid=curr_grid,
+                avatar_pos=engine.avatar_pos,
+                static_barriers=engine.learned_barriers,
+                tools=cargo_entities,
+                receptacles_or_gates=receptacles,
+                held_features={t.feature_id for t in engine.working_memory.body_schema.held_tools},
+                theory=engine.symbolic_theory,
+            )
+            for sg in decomposed:
+                if sg.subgoal_type in (SubgoalType.ACQUIRE_TOOL, SubgoalType.COLLECT_ITEM):
+                    plan.append(
+                        PickUpCargo(
+                            cargo_pos=sg.target_entity_pos, cargo_feature=sg.required_feature
+                        )
+                    )
+                elif sg.subgoal_type in (
+                    SubgoalType.CLEAR_OBSTACLE,
+                    SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                ):
+                    plan.append(
+                        UseToolOnBarrier(
+                            barrier_pos=sg.target_destination, tool_feature=sg.required_feature
+                        )
+                    )
+                elif sg.subgoal_type in (SubgoalType.DELIVER_TO_GOAL, SubgoalType.NAVIGATE_TO):
+                    plan.append(NavigateTo(destination=sg.target_destination))
+            if not plan.is_empty():
+                return plan
 
         # 2. Terminal Goal: Direct Geodesic Navigation to Verified Exit
         if goals and engine.avatar_pos is not None:

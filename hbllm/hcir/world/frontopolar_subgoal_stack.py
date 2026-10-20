@@ -13,9 +13,12 @@ Modeled on human frontopolar branching (Koechlin & Hyafil, 2007; Ramnani & Owen,
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -191,22 +194,160 @@ class FrontopolarSubgoalStack:
         subgoal: FrontopolarSubgoal,
         current_entity_positions: set[tuple[int, int]],
         avatar_pos: tuple[int, int] | None = None,
+        held_features: set[int] | None = None,
+        grid: np.ndarray | None = None,
+        background_feature: int | None = None,
     ) -> bool:
         """Evaluate if the current subgoal's postconditions are satisfied."""
         dest = subgoal.target_destination
         if subgoal.subgoal_type in (SubgoalType.PARK_IN_HOLDING_BAY, SubgoalType.DELIVER_TO_GOAL):
-            return dest in current_entity_positions
+            return dest in current_entity_positions or avatar_pos == dest
+        if subgoal.subgoal_type in (SubgoalType.ACQUIRE_TOOL, SubgoalType.COLLECT_ITEM):
+            if held_features is not None and subgoal.required_feature is not None:
+                if subgoal.required_feature in held_features:
+                    return True
+            return avatar_pos == dest or (
+                avatar_pos is not None
+                and abs(avatar_pos[0] - dest[0]) + abs(avatar_pos[1] - dest[1]) <= 1
+            )
+        if subgoal.subgoal_type in (
+            SubgoalType.CLEAR_OBSTACLE,
+            SubgoalType.UNLOCK_REMOTE_MECHANISM,
+        ):
+            if grid is not None:
+                r, c = dest
+                if 0 <= r < grid.shape[0] and 0 <= c < grid.shape[1]:
+                    bg = background_feature if background_feature is not None else 0
+                    obs_feat = subgoal.metadata.get("obstacle_feature")
+                    if grid[r, c] == bg or (obs_feat is not None and grid[r, c] != obs_feat):
+                        return True
+            return False
         if subgoal.subgoal_type in (
             SubgoalType.TRANSIT_CORRIDOR,
-            SubgoalType.UNLOCK_REMOTE_MECHANISM,
             SubgoalType.ALIGN_OPTICAL_REFLECTOR,
             SubgoalType.BILATERAL_COORDINATION,
             SubgoalType.SWITCH_FOCUS,
-            SubgoalType.CLEAR_OBSTACLE,
             SubgoalType.NAVIGATE_TO,
         ):
             return avatar_pos == dest
         return False
+
+    def decompose_target_goal(
+        self,
+        target_goal: tuple[int, int],
+        grid: np.ndarray,
+        avatar_pos: tuple[int, int],
+        static_barriers: set[tuple[int, int]] | None = None,
+        tools: Sequence[Any] | None = None,
+        receptacles_or_gates: Sequence[Any] | None = None,
+        switches_or_triggers: Sequence[Any] | None = None,
+        held_features: set[int] | None = None,
+        theory: Any | None = None,
+    ) -> list[FrontopolarSubgoal]:
+        """Brodmann Area 10 Cognitive Branching: Decompose obstructed master goal into nested subgoals.
+
+        Pushes subgoals onto the stack such that the immediate prerequisite
+        is at the top of the stack (TOS), and returns the sequence in execution order (TOS first).
+        """
+        master_goal = FrontopolarSubgoal(
+            subgoal_id=f"terminal_goal_{target_goal[0]}_{target_goal[1]}",
+            subgoal_type=SubgoalType.DELIVER_TO_GOAL,
+            target_entity_pos=target_goal,
+            target_destination=target_goal,
+            priority=1.0,
+            is_terminal=True,
+        )
+
+        subgoals_to_push: list[FrontopolarSubgoal] = [master_goal]
+        held = held_features or set()
+
+        gate_entities = list(receptacles_or_gates or [])
+        tool_entities = list(tools or [])
+        switch_entities = list(switches_or_triggers or [])
+
+        for gate in gate_entities:
+            gate_pos = gate.grid_pos if hasattr(gate, "grid_pos") else getattr(gate, "pos", None)
+            if gate_pos is None and isinstance(gate, tuple):
+                gate_pos = gate
+            gate_feat = getattr(gate, "feature_id", None)
+            if gate_feat is None and gate_pos is not None:
+                r, c = gate_pos
+                if 0 <= r < grid.shape[0] and 0 <= c < grid.shape[1]:
+                    gate_feat = int(grid[r, c])
+
+            matching_tool = None
+            for tool in tool_entities:
+                tool_feat = getattr(tool, "feature_id", None)
+                if tool_feat is not None:
+                    if theory is not None and gate_feat is not None:
+                        if not theory.is_tool_compatible(tool_feat, gate_feat):
+                            continue
+                    matching_tool = tool
+                    break
+
+            if gate_pos is not None:
+                clear_sg = FrontopolarSubgoal(
+                    subgoal_id=f"clear_gate_{gate_pos[0]}_{gate_pos[1]}",
+                    subgoal_type=SubgoalType.CLEAR_OBSTACLE,
+                    target_entity_pos=gate_pos,
+                    target_destination=gate_pos,
+                    required_feature=getattr(matching_tool, "feature_id", None)
+                    if matching_tool
+                    else None,
+                    priority=2.0,
+                    prerequisite_features={getattr(matching_tool, "feature_id", 0)}
+                    if matching_tool and getattr(matching_tool, "feature_id", 0) not in held
+                    else set(),
+                    metadata={"obstacle_feature": gate_feat},
+                )
+                subgoals_to_push.append(clear_sg)
+
+            if matching_tool is not None:
+                tool_pos = (
+                    matching_tool.grid_pos
+                    if hasattr(matching_tool, "grid_pos")
+                    else getattr(matching_tool, "pos", None)
+                )
+                tool_feat = getattr(matching_tool, "feature_id", None)
+                if tool_pos is not None and (tool_feat is None or tool_feat not in held):
+                    tool_sg = FrontopolarSubgoal(
+                        subgoal_id=f"acquire_tool_{tool_pos[0]}_{tool_pos[1]}",
+                        subgoal_type=SubgoalType.ACQUIRE_TOOL,
+                        target_entity_pos=tool_pos,
+                        target_destination=tool_pos,
+                        required_feature=tool_feat,
+                        priority=3.0,
+                    )
+                    subgoals_to_push.append(tool_sg)
+
+        if not tool_entities and switch_entities:
+            for sw in switch_entities:
+                sw_pos = sw.grid_pos if hasattr(sw, "grid_pos") else getattr(sw, "pos", None)
+                if sw_pos is None and isinstance(sw, tuple):
+                    sw_pos = sw
+                sw_feat = getattr(sw, "feature_id", None)
+                if sw_pos is not None:
+                    switch_sg = FrontopolarSubgoal(
+                        subgoal_id=f"actuate_switch_{sw_pos[0]}_{sw_pos[1]}",
+                        subgoal_type=SubgoalType.UNLOCK_REMOTE_MECHANISM,
+                        target_entity_pos=sw_pos,
+                        target_destination=sw_pos,
+                        required_feature=sw_feat,
+                        priority=2.5,
+                    )
+                    subgoals_to_push.append(switch_sg)
+
+        self.clear_subgoals()
+        for sg in subgoals_to_push:
+            self.push_subgoal(sg)
+
+        logger.info(
+            "FrontopolarSubgoalStack: Decomposed goal %s into %d subgoals (TOS=%s)",
+            target_goal,
+            len(subgoals_to_push),
+            self.current_subgoal.subgoal_type if self.current_subgoal else None,
+        )
+        return list(reversed(subgoals_to_push))
 
     def spawn_causal_unlock_subgoal(
         self,
