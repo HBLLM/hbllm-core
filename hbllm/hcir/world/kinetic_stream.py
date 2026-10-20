@@ -220,8 +220,8 @@ class DorsalKineticStream:
         if motion_energy == 0:
             return KineticSegregationResult(motion_energy=0)
 
-        # 4-connected morphological labeling of changed visual clusters
-        labeled_diff, num_features = label(diff_mask)
+        # 8-connected morphological labeling of changed visual clusters (supports diagonal contours and outlines)
+        labeled_diff, num_features = label(diff_mask, structure=np.ones((3, 3)))
 
         candidates: list[KineticEntity] = []
         vacated_clusters: list[dict[str, Any]] = []

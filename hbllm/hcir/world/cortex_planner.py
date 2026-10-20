@@ -171,15 +171,17 @@ class EpistemicGoalScheduler:
                 ):
                     confirmed_goals.append(e.grid_pos)
                 continue
-            # Causal Disambiguation: Pervasive walkable substrates (e.g. tracks, floors)
+            # Causal Disambiguation: Pervasive substrates (e.g. tracks, floors)
             # that recur in large quantities cannot be the singular exit/goal.
             feat_total_cells = int(np.count_nonzero(curr_grid == e.feature_id))
             feat_instance_count = sum(1 for ent in entities if ent.feature_id == e.feature_id)
-            is_pervasive_substrate = (
+            is_pervasive_substrate = (feat_instance_count >= 5 or feat_total_cells > 64) or (
                 e.feature_id in engine.symbolic_theory.walkable_features
-            ) and (feat_instance_count > 2 or feat_total_cells > 64)
+                and (feat_instance_count > 2 or feat_total_cells > 48)
+            )
             if is_pervasive_substrate:
                 engine.symbolic_theory.goal_features.discard(e.feature_id)
+                engine.symbolic_theory.candidate_goal_features.discard(e.feature_id)
                 continue
 
             is_goal_candidate = (
@@ -318,6 +320,14 @@ class EpistemicGoalScheduler:
                     continue
                 if e.grid_pos in panel_coords:
                     continue
+                feat_total_cells_hyp = int(np.count_nonzero(curr_grid == e.feature_id))
+                feat_instance_count_hyp = sum(
+                    1 for ent in entities if ent.feature_id == e.feature_id
+                )
+                if feat_instance_count_hyp >= 5 or feat_total_cells_hyp > 64:
+                    engine.symbolic_theory.candidate_goal_features.discard(e.feature_id)
+                    continue
+
                 if (
                     e.feature_id in engine.symbolic_theory.goal_features
                     and e.feature_id != 0
@@ -347,9 +357,42 @@ class EpistemicGoalScheduler:
                 if 0 <= g[0] < H and 0 <= g[1] < W and g not in panel_coords
             ]
         if not goals:
-            structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
-            if hasattr(engine.working_memory, "structural_goals"):
-                engine.working_memory.structural_goals = structural_goals
+            wm_sgs = getattr(engine.working_memory, "structural_goals", None)
+            if wm_sgs:
+                structural_goals = wm_sgs
+            else:
+                structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
+                if hasattr(engine.working_memory, "structural_goals"):
+                    engine.working_memory.structural_goals = structural_goals
+
+            # Synchronize pristine target constellations in working memory
+            if hasattr(engine.working_memory, "target_constellations") and structural_goals:
+                for sg in structural_goals:
+                    if sg.get("type") == "target_constellation":
+                        f = sg.get("feature")
+                        pos = sg.get("position")
+                        if f is not None and pos is not None:
+                            engine.working_memory.target_constellations.setdefault(f, pos)
+
+            # Check if pristine target constellations exist in working memory for the active avatar
+            if (
+                hasattr(engine.working_memory, "target_constellations")
+                and engine.working_memory.target_constellations
+            ):
+                matched_tc = [
+                    engine.working_memory.target_constellations[f]
+                    for f in av_feats
+                    if f in engine.working_memory.target_constellations
+                ]
+                if matched_tc:
+                    return EpistemicGoalProposal(
+                        goals=matched_tc,
+                        confirmed_goals=list(matched_tc),
+                        new_learned_goal_positions=set(),
+                        new_candidate_features=set(),
+                        subgoal_to_pop=False,
+                        clear_exhausted_goals=False,
+                    )
             primary_sgs = [
                 sg
                 for sg in structural_goals
@@ -404,7 +447,7 @@ class EpistemicGoalScheduler:
                     pos
                     and 0 <= pos[0] < H
                     and 0 <= pos[1] < W
-                    and pos != avatar_pos
+                    and (pos != avatar_pos or is_docking)
                     and pos not in panel_coords
                 ):
                     if pos not in goals:
@@ -421,57 +464,102 @@ class EpistemicGoalScheduler:
                             if cp not in goals:
                                 goals.append(cp)
 
-        # (d) Exploratory guesses: unknown entities
+        # (d) Exploratory guesses: unknown entities ranked by Outlier Salience (Zeki / Itti-Koch)
         if not goals:
-            exploratory_goals = [
-                e.grid_pos
-                for e in entities
-                if e.grid_pos not in panel_coords
-                and e.role
-                in (
-                    EntityRole.UNKNOWN,
-                    EntityRole.GOAL,
-                    EntityRole.PORTAL,
-                    EntityRole.RECEPTACLE,
-                    EntityRole.AGENT,
-                    EntityRole.ACTUATOR,
-                    EntityRole.MANIPULABLE,
-                    EntityRole.RESOURCE,
-                )
-                and 1 <= e.area <= 64
-                and e.feature_id != bg
-                and (
-                    e.role
+            feat_counts: dict[int, int] = {}
+            feat_areas: dict[int, int] = {}
+            for ent in entities:
+                feat_counts[ent.feature_id] = feat_counts.get(ent.feature_id, 0) + 1
+                feat_areas[ent.feature_id] = feat_areas.get(ent.feature_id, 0) + ent.area
+
+            cand_exploratory: list[tuple[float, Any]] = []
+            for e in entities:
+                if e.grid_pos in panel_coords:
+                    continue
+                if e.feature_id == bg:
+                    continue
+                if engine.symbolic_theory.is_barrier(e.feature_id) or e.role == EntityRole.OBSTACLE:
+                    continue
+                if (
+                    e.feature_id in engine.hazard_tracker.known_lethal_features
+                    or e.feature_id in engine.mobile_threat_features
+                ):
+                    continue
+                if e.feature_id in av_feats:
+                    if (
+                        avatar_pos is not None
+                        and (
+                            abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
+                        )
+                        <= 4
+                    ):
+                        continue
+                if e.feature_id in cargos_known_goals or engine.symbolic_theory.has_affordance(
+                    e, "can_pickup"
+                ):
+                    continue
+                if not (1 <= e.area <= 64):
+                    continue
+
+                cnt = feat_counts.get(e.feature_id, 1)
+                total_cells = feat_areas.get(e.feature_id, e.area)
+
+                # Pervasive repeating substrate (e.g. tracks, floors) is environmental terrain, not an exit/goal
+                if cnt >= 5 or total_cells > 64:
+                    continue
+
+                # Salience scoring:
+                role_prior = (
+                    50.0
+                    if e.role
                     in (
                         EntityRole.GOAL,
                         EntityRole.PORTAL,
                         EntityRole.RECEPTACLE,
                         EntityRole.RESOURCE,
                     )
-                    or not engine.symbolic_theory.is_walkable(e.feature_id)
+                    else 0.0
                 )
-                and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                and not engine.symbolic_theory.is_barrier(e.feature_id)
-                and (
-                    e.feature_id not in av_feats
-                    or (
-                        avatar_pos is not None
-                        and (
-                            abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
-                        )
-                        > 4
-                    )
-                )
-            ]
-            if exploratory_goals:
-                goals = exploratory_goals
+                rarity_prior = 100.0 / cnt
+                compactness = max(0.0, 30.0 - abs(e.area - 4))
+                score = role_prior + rarity_prior + compactness
+                cand_exploratory.append((score, e))
+
+            # If no singular/compact outlier entity exists, relax count filter
+            if not cand_exploratory:
                 for e in entities:
+                    if e.grid_pos in panel_coords or e.feature_id == bg:
+                        continue
                     if (
-                        e.grid_pos in goals
-                        and e.feature_id not in av_feats
-                        and e.grid_pos not in panel_coords
-                        and e.feature_id not in engine.mobile_threat_features
-                        and e.feature_id not in engine.hazard_tracker.known_lethal_features
+                        engine.symbolic_theory.is_barrier(e.feature_id)
+                        or e.role == EntityRole.OBSTACLE
+                    ):
+                        continue
+                    if (
+                        e.feature_id in engine.hazard_tracker.known_lethal_features
+                        or e.feature_id in engine.mobile_threat_features
+                    ):
+                        continue
+                    if e.feature_id in av_feats:
+                        continue
+                    if e.feature_id in cargos_known_goals or engine.symbolic_theory.has_affordance(
+                        e, "can_pickup"
+                    ):
+                        continue
+                    if 1 <= e.area <= 64:
+                        cnt = feat_counts.get(e.feature_id, 1)
+                        cand_exploratory.append((50.0 / cnt, e))
+
+            if cand_exploratory:
+                cand_exploratory.sort(key=lambda item: item[0], reverse=True)
+                top_score = cand_exploratory[0][0]
+                top_entities = [e for score, e in cand_exploratory if score >= top_score * 0.8]
+                goals = [e.grid_pos for e in top_entities]
+                for e in top_entities:
+                    if (
+                        e.feature_id not in av_feats
+                        and e.feature_id != bg
+                        and feat_counts.get(e.feature_id, 1) <= 3
                     ):
                         new_candidate_feats.add(e.feature_id)
 
@@ -735,6 +823,15 @@ class MentalSimulationPlanner:
                     ]
                 )
             )
+            if not avatar_on_bg and av_feats:
+                pts = np.argwhere(np.isin(curr_grid, list(av_feats)))
+                if len(pts) > 0:
+                    min_r, min_c = np.min(pts, axis=0)
+                    max_r, max_c = np.max(pts, axis=0)
+                    r_slice = slice(max(0, min_r - 2), min(H, max_r + 3))
+                    c_slice = slice(max(0, min_c - 2), min(W, max_c + 3))
+                    avatar_on_bg = bool(np.any(curr_grid[r_slice, c_slice] == bg))
+
             if bg_ratio >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
 
@@ -934,22 +1031,21 @@ class MentalSimulationPlanner:
             engine, "learned_cargo_features", set()
         )
         recs_known_d = engine.symbolic_theory.receptacle_features
+        bilat = engine.bilateral_state
         is_bilat_valid = (
-            engine.bilateral_state is not None
+            bilat is not None
+            and bilat.pos1 is not None
+            and bilat.pos2 is not None
             and len(engine.action_dynamics) >= 2
             and not engine.working_memory.body_schema.has_manipulandum()
-            and (not av_feats or bool(engine.bilateral_state.features & av_feats))
-            and not bool(engine.bilateral_state.features & cargos_known_d)
-            and not bool(engine.bilateral_state.features & recs_known_d)
+            and (not av_feats or bool(bilat.features & av_feats))
+            and not bool(bilat.features & cargos_known_d)
+            and not bool(bilat.features & recs_known_d)
             and not (cargos_known_d and (recs_known_d or engine.learned_goal_positions))
             and len(engine.learned_goal_positions) != 1
-            and (
-                abs(engine.bilateral_state.pos1[0] - engine.bilateral_state.pos2[0])
-                + abs(engine.bilateral_state.pos1[1] - engine.bilateral_state.pos2[1])
-                > 6
-            )
+            and (abs(bilat.pos1[0] - bilat.pos2[0]) + abs(bilat.pos1[1] - bilat.pos2[1]) > 6)
         )
-        if is_bilat_valid:
+        if is_bilat_valid and bilat is not None:
             passable_mask = np.ones((H, W), dtype=bool)
             for r in range(H):
                 for c in range(W):
@@ -963,9 +1059,9 @@ class MentalSimulationPlanner:
 
             action_deltas = engine.action_deltas
             bilateral_plan = engine.bilateral_integrator.plan_convergence_sequence(
-                pos1=engine.bilateral_state.pos1,
-                pos2=engine.bilateral_state.pos2,
-                axis=engine.bilateral_state.symmetry_axis,
+                pos1=bilat.pos1,
+                pos2=bilat.pos2,
+                axis=bilat.symmetry_axis,
                 passable_mask=passable_mask,
                 action_deltas=action_deltas,
                 target_positions=goals if goals else None,
@@ -975,7 +1071,7 @@ class MentalSimulationPlanner:
                     "MentalSimulationPlanner: Formulated Bilateral Callosal Convergence plan (%d steps)",
                     len(bilateral_plan),
                 )
-                curr_b_pos = engine.avatar_pos or engine.bilateral_state.pos1
+                curr_b_pos = engine.avatar_pos or bilat.pos1
                 steps = []
                 for act in bilateral_plan:
                     dr_b, dc_b = action_deltas.get(act, (0, 0))
@@ -1431,13 +1527,13 @@ class MentalSimulationPlanner:
         # When temporal threats (patrols, chasers) exist, defer to Space-Time A*.
         # ─────────────────────────────────────────────────────────────────────
         if goals and not has_affordance_manip and not has_temporal and start_pos is not None:
-            geodesic_movable_actions = [
-                (act, dr, dc)
-                for act, dr, dc in movable_actions
-                if (start_pos, act) not in engine.failed_transitions
-                and not engine.working_memory.habenular_ior.is_action_inhibited(start_pos, act)
-                and engine.inhibited_actions.get(act, 0) == 0
-            ]
+            geodesic_movable_actions = list(movable_actions)
+            blocked_transitions = set(getattr(engine, "failed_transitions", set()))
+            if blocked_cells:
+                for b_pos in blocked_cells:
+                    for act, _, _ in geodesic_movable_actions:
+                        blocked_transitions.add((b_pos, act))
+
             action_plan = (
                 GeodesicManifoldRouter.route_geodesic(
                     curr_grid=curr_grid,
@@ -1452,6 +1548,7 @@ class MentalSimulationPlanner:
                     barrier_features=set(_barrier_feats),
                     avatar_features=av_feats,
                     max_candidate_goals=5,
+                    failed_transitions=blocked_transitions,
                 )
                 if geodesic_movable_actions
                 else None
@@ -1460,24 +1557,10 @@ class MentalSimulationPlanner:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    if (
-                        (curr_p, act) in engine.failed_transitions
-                        or engine.working_memory.habenular_ior.is_action_inhibited(curr_p, act)
-                    ):
+                    if (curr_p, act) in engine.failed_transitions:
                         plan_valid = False
                         break
                     curr_p = next_p
-                if (
-                    plan_valid
-                    and action_plan
-                    and (
-                        engine.inhibited_actions.get(action_plan[0][0], 0) > 0
-                        or engine.working_memory.habenular_ior.is_action_inhibited(
-                            start_pos, action_plan[0][0]
-                        )
-                    )
-                ):
-                    plan_valid = False
 
                 if plan_valid:
                     topo_steps = [
@@ -1754,8 +1837,15 @@ class MentalSimulationPlanner:
                     not is_cargo_attached
                     and not is_block_delivery
                     and (cur_pos in goals or cur_pos in all_goal_cells)
-                    and path_len > 0
                 ):
+                    if path_len == 0:
+                        logger.info(
+                            "AutonomousEpistemicEngine: Avatar already at goal %s (0 steps).",
+                            cur_pos,
+                        )
+                        engine.current_simulated_goal = cur_pos
+                        return [], had_relaxable_block
+
                     path = _reconstruct_path(node_id)
                     if unattached_cargo:
                         stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
@@ -1846,6 +1936,7 @@ class MentalSimulationPlanner:
                     if (
                         not is_wait
                         and not has_temporal
+                        and not goals
                         and path_len == 0
                         and engine.inhibited_actions.get(act, 0) > 0
                     ):
@@ -1853,7 +1944,12 @@ class MentalSimulationPlanner:
 
                     if not is_wait and (
                         (cur_pos, act) in engine.failed_transitions
-                        or engine.working_memory.habenular_ior.is_action_inhibited(cur_pos, act)
+                        or (
+                            not goals
+                            and engine.working_memory.habenular_ior.is_action_inhibited(
+                                cur_pos, act
+                            )
+                        )
                     ):
                         dest_r, dest_c = cur_pos[0] + dr, cur_pos[1] + dc
                         is_temporal_dynamic_cell = (
@@ -3248,7 +3344,14 @@ class MentalSimulationPlanner:
             curr = dest
             while curr in parent_map:
                 prev_p, act = parent_map[curr]
-                steps.append(MentalSimulationStep(action=act, predicted_avatar_pos=curr))
+                steps.append(
+                    MentalSimulationStep(
+                        action=act,
+                        predicted_avatar_pos=curr,
+                        expected_mutation="geodesic_path_step",
+                        is_deterministic_geodesic=True,
+                    )
+                )
                 curr = prev_p
             steps.reverse()
             return steps
@@ -3320,7 +3423,10 @@ class MentalSimulationPlanner:
                     if adj_p in reachable_cells:
                         p_to_adj = reconstruct_path(adj_p)
                         step_into = MentalSimulationStep(
-                            action=act, predicted_avatar_pos=e.grid_pos
+                            action=act,
+                            predicted_avatar_pos=e.grid_pos,
+                            expected_mutation="geodesic_path_step",
+                            is_deterministic_geodesic=True,
                         )
                         full_p = p_to_adj + [step_into]
                         if best_adj_p is None or len(full_p) < len(best_adj_p):

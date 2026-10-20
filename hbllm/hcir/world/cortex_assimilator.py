@@ -307,16 +307,9 @@ class EpistemicFeedbackAssimilator:
         if is_effector_action or is_focus_switch:
             engine.entity_action_failed_positions.clear()
             engine.immobile_entity_actions.clear()
+            engine.mental_plan.clear()
             if is_focus_switch:
-                engine.avatar_features.clear()
-                # Preserve prior avatar feature for re-grounding recovery
-                # in case the focus switch was actually an INTERACT action
-                if engine.avatar_feature is not None:
-                    engine.prior_avatar_feature = engine.avatar_feature
-                engine.avatar_feature = None
-                engine.avatar_pos = None
-                engine.avatar_size = 0
-                engine.mental_plan.clear()
+                engine.failed_transitions.clear()
 
         if is_effector_action and action not in engine.action_affordances:
             engine.action_affordances[action] = ActionAffordance(
@@ -381,7 +374,6 @@ class EpistemicFeedbackAssimilator:
             or action in getattr(engine, "interaction_actions", set())
             or (aff is not None and getattr(aff, "is_interactive", False))
             or (aff is not None and getattr(aff, "is_manipulation", False))
-            or engine.working_memory.body_schema.has_manipulandum()
         )
         if (
             action is not None
@@ -443,7 +435,7 @@ class EpistemicFeedbackAssimilator:
                 prev_inh = engine.inhibited_actions.get(action, 0)
                 inh_steps = 4 if engine.consecutive_quiescent_actions >= 2 else 3
                 engine.inhibited_actions[action] = max(prev_inh + 2, inh_steps)
-                if prev_avatar_pos is not None:
+                if prev_avatar_pos is not None and engine.is_displacement_action(action):
                     engine.failed_transitions.add((prev_avatar_pos, action))
 
             if is_effector_action and not is_win and not is_lost:
@@ -542,27 +534,31 @@ class EpistemicFeedbackAssimilator:
                                 )
                                 if int(f) not in ambient_bg
                             }
-                            if clicked_feats and not known_avs:
-                                engine.avatar_features = clicked_feats
-                                engine.avatar_feature = next(iter(clicked_feats))
-                            from scipy.ndimage import label
-
-                            active_feats = known_avs or clicked_feats
-                            if active_feats:
-                                mask_c = np.isin(curr_grid, list(active_feats))
-                                lab_c, _ = label(mask_c)
-                                if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
-                                    comp_c = np.argwhere(lab_c == lab_c[tr, tc])
-                                    engine.avatar_size = len(comp_c)
-                                    engine.avatar_pos = (
-                                        int(round(float(np.mean(comp_c[:, 0])))),
-                                        int(round(float(np.mean(comp_c[:, 1])))),
-                                    )
-                            engine.mental_plan.clear()
-                            engine.transition_to_phase(
-                                EpistemicPhase.MENTAL_SIMULATION,
-                                reason="avatar_relocation_assimilated",
+                            has_displacement = any(
+                                engine.is_displacement_action(a) for a in available_actions
                             )
+                            if has_displacement:
+                                if clicked_feats and not known_avs:
+                                    engine.avatar_features = clicked_feats
+                                    engine.avatar_feature = next(iter(clicked_feats))
+                                from scipy.ndimage import label
+
+                                active_feats = known_avs or clicked_feats
+                                if active_feats:
+                                    mask_c = np.isin(curr_grid, list(active_feats))
+                                    lab_c, _ = label(mask_c)
+                                    if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
+                                        comp_c = np.argwhere(lab_c == lab_c[tr, tc])
+                                        engine.avatar_size = len(comp_c)
+                                        engine.avatar_pos = (
+                                            int(round(float(np.mean(comp_c[:, 0])))),
+                                            int(round(float(np.mean(comp_c[:, 1])))),
+                                        )
+                                engine.mental_plan.clear()
+                                engine.transition_to_phase(
+                                    EpistemicPhase.MENTAL_SIMULATION,
+                                    reason="avatar_relocation_assimilated",
+                                )
 
                 # Numerical / neighborhood cardinality constraint discovery:
                 tr, tc = target_coord
@@ -784,88 +780,199 @@ class EpistemicFeedbackAssimilator:
                                 engine.index_selector_actions.add(action)
                                 if action in engine.action_affordances:
                                     engine.action_affordances[action].is_index_selector = True
-            elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 16:
+            elif len(moved_entities) == 0 and 1 <= diff.changed_pixel_count <= 48:
                 # Check if a single focal indicator/marker transferred between entities
                 is_marker_transfer = False
-                if engine.prev_grid is not None and 2 <= diff.changed_pixel_count <= 8:
+                if engine.prev_grid is not None and 2 <= diff.changed_pixel_count <= 48:
                     prev_g = engine.prev_grid
                     curr_g = curr_grid
                     diff_mask = prev_g != curr_g
                     diff_coords = np.argwhere(diff_mask)
-                    from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+                    ambient_transfer_bg = {bg}
+                    if getattr(engine, "bg_feature", None) is not None:
+                        ambient_transfer_bg.add(engine.bg_feature)
+                    coords_list = [(int(r), int(c)) for r, c in diff_coords]
 
-                    non_bg_diffs = [
-                        (int(r), int(c))
-                        for r, c in diff_coords
-                        if not MotorCortexEffector.is_peripheral_frame_cell(
-                            int(r), int(c), curr_g.shape[0], curr_g.shape[1], curr_g
-                        )
-                    ]
-                    if len(non_bg_diffs) == 2:
-                        c1, c2 = non_bg_diffs[0], non_bg_diffs[1]
-                        v1_prev, v1_curr = int(prev_g[c1]), int(curr_g[c1])
-                        v2_prev, v2_curr = int(prev_g[c2]), int(curr_g[c2])
-                        ambient_transfer_bg = {0, bg, getattr(engine, "bg_feature", 0)}
-                        is_complementary = (
-                            v1_curr not in ambient_transfer_bg
-                            and v2_curr in ambient_transfer_bg
-                            and v1_prev in ambient_transfer_bg
-                            and v2_prev not in ambient_transfer_bg
-                        ) or (
-                            v2_curr not in ambient_transfer_bg
-                            and v1_curr in ambient_transfer_bg
-                            and v2_prev in ambient_transfer_bg
-                            and v1_prev not in ambient_transfer_bg
-                        )
-                        is_value_transfer = (
-                            c1 != c2
-                            and v1_prev != v1_curr
-                            and v2_prev != v2_curr
-                            and (v1_curr == v2_prev or v2_curr == v1_prev)
-                            and (
-                                v1_curr not in ambient_transfer_bg
-                                or v2_curr not in ambient_transfer_bg
+                    # Combinatorially search for any pair of coordinates exhibiting indicator transfer
+                    for i in range(len(coords_list)):
+                        for j in range(i + 1, len(coords_list)):
+                            cand1, cand2 = coords_list[i], coords_list[j]
+                            p1, c1_val = int(prev_g[cand1]), int(curr_g[cand1])
+                            p2, c2_val = int(prev_g[cand2]), int(curr_g[cand2])
+                            comp = (
+                                c1_val not in ambient_transfer_bg
+                                and c2_val in ambient_transfer_bg
+                                and p1 in ambient_transfer_bg
+                                and p2 not in ambient_transfer_bg
+                            ) or (
+                                c2_val not in ambient_transfer_bg
+                                and c1_val in ambient_transfer_bg
+                                and p2 in ambient_transfer_bg
+                                and p1 not in ambient_transfer_bg
                             )
-                        )
-                        if is_complementary or is_value_transfer:
-                            is_marker_transfer = True
+                            val_trans = (
+                                p1 != c1_val
+                                and p2 != c2_val
+                                and (
+                                    (c1_val == p2 and c1_val not in ambient_transfer_bg)
+                                    or (c2_val == p1 and c2_val not in ambient_transfer_bg)
+                                )
+                            )
+                            if comp or val_trans:
+                                c1, c2 = cand1, cand2
+                                v1_prev, v1_curr = p1, c1_val
+                                v2_prev, v2_curr = p2, c2_val
+                                is_complementary = comp
+                                is_value_transfer = val_trans
+                                is_marker_transfer = True
+                                break
+                        if is_marker_transfer:
+                            break
 
                 if is_marker_transfer:
-                    engine.mark_focus_switch_action(action)
-                    engine.working_memory.focus_switch_actions.add(action)
-                    ambient_transfer_bg = {0, bg, getattr(engine, "bg_feature", 0)}
-                    # The new focus locus is the coordinate where the marker appeared / became active in curr_g
-                    if v1_curr not in ambient_transfer_bg:
+                    new_locus = None
+                    new_feat = None
+                    old_feat = None
+                    marker_val = None
+                    curr_av = getattr(engine, "avatar_feature", None)
+
+                    def _find_surrounding_feature(
+                        grid: np.ndarray, pos: tuple[int, int], bg_set: set[int]
+                    ) -> int | None:
+                        r, c = pos
+                        H, W = grid.shape
+                        cand_scores: dict[int, float] = {}
+                        for radius in (3, 5, 8, 12):
+                            r_min, r_max = max(0, r - radius), min(H, r + radius + 1)
+                            c_min, c_max = max(0, c - radius), min(W, c + radius + 1)
+                            patch = grid[r_min:r_max, c_min:c_max]
+                            for v in np.unique(patch):
+                                feat = int(v)
+                                if feat in bg_set:
+                                    continue
+                                coords = np.argwhere(patch == feat)
+                                cnt = len(coords)
+                                g_coords = coords + np.array([r_min, c_min])
+                                min_gr, max_gr = g_coords[:, 0].min(), g_coords[:, 0].max()
+                                min_gc, max_gc = g_coords[:, 1].min(), g_coords[:, 1].max()
+                                encloses = (min_gr <= r <= max_gr) and (min_gc <= c <= max_gc)
+                                cr, cc = float(g_coords[:, 0].mean()), float(g_coords[:, 1].mean())
+                                dist = abs(cr - r) + abs(cc - c)
+                                score = (
+                                    (50.0 if encloses else 0.0) + min(cnt, 64) * 2.0 - dist * 3.0
+                                )
+                                if feat not in cand_scores or score > cand_scores[feat]:
+                                    cand_scores[feat] = score
+                        if cand_scores:
+                            return max(cand_scores, key=lambda k: cand_scores[k])
+                        return None
+
+                    if is_value_transfer and v2_curr == v1_prev:
+                        # Marker v1_prev transferred from c1 to c2
+                        new_locus = c2
+                        marker_val = v1_prev
+                        if v2_prev not in ambient_transfer_bg:
+                            new_feat = v2_prev
+                        else:
+                            surr = _find_surrounding_feature(
+                                curr_g, c2, ambient_transfer_bg | {marker_val}
+                            )
+                            new_feat = surr if surr is not None else v2_curr
+
+                        if v1_curr not in ambient_transfer_bg:
+                            old_feat = v1_curr
+                        else:
+                            surr_old = _find_surrounding_feature(
+                                prev_g, c1, ambient_transfer_bg | {marker_val}
+                            )
+                            old_feat = surr_old if surr_old is not None else (curr_av or v1_prev)
+                    elif is_value_transfer and v1_curr == v2_prev:
+                        # Marker v2_prev transferred from c2 to c1
+                        new_locus = c1
+                        marker_val = v2_prev
+                        if v1_prev not in ambient_transfer_bg:
+                            new_feat = v1_prev
+                        else:
+                            surr = _find_surrounding_feature(
+                                curr_g, c1, ambient_transfer_bg | {marker_val}
+                            )
+                            new_feat = surr if surr is not None else v1_curr
+
+                        if v2_curr not in ambient_transfer_bg:
+                            old_feat = v2_curr
+                        else:
+                            surr_old = _find_surrounding_feature(
+                                prev_g, c2, ambient_transfer_bg | {marker_val}
+                            )
+                            old_feat = surr_old if surr_old is not None else (curr_av or v2_prev)
+                    elif is_complementary and c2_val not in ambient_transfer_bg:
+                        new_locus = c2
+                        marker_val = c2_val
+                        new_feat = c2_val
+                        old_feat = p1 if p1 not in ambient_transfer_bg else curr_av
+                    elif is_complementary and c1_val not in ambient_transfer_bg:
+                        new_locus = c1
+                        marker_val = c1_val
+                        new_feat = c1_val
+                        old_feat = p2 if p2 not in ambient_transfer_bg else curr_av
+                    elif curr_av is not None and curr_av in (v1_prev, v1_curr):
+                        new_locus = c2
+                        new_feat = v2_prev if v2_prev not in ambient_transfer_bg else v2_curr
+                        old_feat = curr_av
+                    elif curr_av is not None and curr_av in (v2_prev, v2_curr):
+                        new_locus = c1
+                        new_feat = v1_prev if v1_prev not in ambient_transfer_bg else v1_curr
+                        old_feat = curr_av
+                    elif v1_curr not in ambient_transfer_bg:
                         new_locus = c1
                         new_feat = v1_curr
-                        old_feat = (
-                            v2_prev
-                            if v2_prev not in ambient_transfer_bg
-                            else (v1_prev if v1_prev not in ambient_transfer_bg else None)
-                        )
-                    else:
+                        old_feat = v2_prev if v2_prev not in ambient_transfer_bg else curr_av
+                    elif v2_curr not in ambient_transfer_bg:
                         new_locus = c2
                         new_feat = v2_curr
-                        old_feat = (
-                            v1_prev
-                            if v1_prev not in ambient_transfer_bg
-                            else (v2_prev if v2_prev not in ambient_transfer_bg else None)
-                        )
+                        old_feat = v1_prev if v1_prev not in ambient_transfer_bg else curr_av
 
-                    if old_feat is None or old_feat in ambient_transfer_bg:
-                        old_feat = (
-                            getattr(engine, "prior_avatar_feature", None) or engine.avatar_feature
-                        )
+                    # If new_feat resolves to an indicator/marker (count <= 2 or in ambient_bg), resolve to surrounding body
+                    if new_locus is not None:
+                        feat_cnt = int(np.sum(curr_g == new_feat)) if new_feat is not None else 0
+                        if feat_cnt <= 2 or new_feat in ambient_transfer_bg or new_feat is None:
+                            exclude_bg = set(ambient_transfer_bg)
+                            if new_feat is not None:
+                                exclude_bg.add(new_feat)
+                            if marker_val is not None:
+                                exclude_bg.add(marker_val)
+                            surr = _find_surrounding_feature(curr_g, new_locus, exclude_bg)
+                            if surr is not None:
+                                new_feat = surr
 
-                    engine.prior_avatar_feature = old_feat
-                    engine.avatar_features = {new_feat}
-                    engine.avatar_feature = new_feat
-                    engine.avatar_pos = new_locus
-                    engine.avatar_size = 1
-                    engine._update_avatar_position_from_grid(
-                        curr_g, {new_feat}, preferred_pos=new_locus
-                    )
-                    engine.mental_plan.clear()
+                    if new_feat is None or new_feat in ambient_transfer_bg:
+                        is_marker_transfer = False
+                    else:
+                        engine.mark_focus_switch_action(action)
+                        engine.working_memory.focus_switch_actions.add(action)
+
+                        old_cnt = int(np.sum(curr_g == old_feat)) if old_feat is not None else 0
+                        if old_feat is None or old_feat in ambient_transfer_bg or old_cnt <= 2:
+                            old_feat = (
+                                getattr(engine, "prior_avatar_feature", None)
+                                or engine.avatar_feature
+                            )
+
+                        engine.prior_avatar_feature = old_feat
+                        engine.avatar_features = {new_feat}
+                        engine.avatar_feature = new_feat
+                        if hasattr(engine.working_memory, "controllable_avatar_features"):
+                            if old_feat is not None:
+                                engine.working_memory.controllable_avatar_features.add(old_feat)
+                            if new_feat is not None:
+                                engine.working_memory.controllable_avatar_features.add(new_feat)
+                        engine.avatar_pos = new_locus
+                        engine.avatar_size = 1
+                        engine._update_avatar_position_from_grid(
+                            curr_g, {new_feat}, preferred_pos=new_locus
+                        )
+                        engine.mental_plan.clear()
+                        engine.last_predicted_pos = None
                 elif action not in engine.index_selector_actions:
                     engine.symbolic_theory.induce_value_mutator(action)
                     engine.value_mutator_actions.add(action)
@@ -1354,12 +1461,17 @@ class EpistemicFeedbackAssimilator:
 
         # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
         cmd_delta = act_dyn.get_displacement() if act_dyn else None
+        av_known = (
+            set(engine.avatar_features)
+            | set(getattr(engine.working_memory, "controllable_avatar_features", set()))
+            | ({engine.avatar_feature} if engine.avatar_feature is not None else set())
+        )
         kinetic_res = engine.dorsal_kinetic_stream.segregate_motion(
             prev_grid=engine.prev_grid,
             curr_grid=curr_grid,
             commanded_delta=cmd_delta,
             background_feature=bg,
-            known_avatar_features=engine.avatar_features,
+            known_avatar_features=av_known,
         )
         if (
             not is_win
@@ -1404,15 +1516,30 @@ class EpistemicFeedbackAssimilator:
             cargos_known_t = engine.symbolic_theory.cargo_features | getattr(
                 engine, "learned_cargo_features", set()
             )
-            av_feats_t = engine.avatar_features or (
-                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            av_feats_t = (
+                set(getattr(engine.working_memory, "controllable_avatar_features", set()))
+                | set(engine.avatar_features)
+                | ({engine.avatar_feature} if engine.avatar_feature is not None else set())
+                | (
+                    {engine.prior_avatar_feature}
+                    if getattr(engine, "prior_avatar_feature", None) is not None
+                    else set()
+                )
             )
+            is_focus_sw = hasattr(
+                engine, "is_focus_switch_action"
+            ) and engine.is_focus_switch_action(action)
+            if is_focus_sw:
+                engine.collision_cones.persistent_velocities.clear()
+
             threat_agents = [
                 e
                 for e in kinetic_res.external_agents
                 if (
-                    not e.features
-                    or not any(f in cargos_known_t or f in av_feats_t for f in e.features)
+                    not is_focus_sw
+                    and e.features
+                    and not all(f == 0 or f == bg or f == engine.bg_feature for f in e.features)
+                    and not any(f in cargos_known_t or f in av_feats_t for f in e.features)
                 )
             ]
             engine.collision_cones.update_trajectories(
@@ -1517,27 +1644,10 @@ class EpistemicFeedbackAssimilator:
                 else False
             )
             if avatar_still_present and not av_moved:
-                # Avatar is present but stationary (e.g., bumped a wall or barrier)
-                if prev_avatar_pos is not None:
+                # Avatar is present on grid — localize actual physical position via connected component
+                engine._update_avatar_position_from_grid(curr_grid, known_av_feats)
+                if engine.avatar_pos is None and prev_avatar_pos is not None:
                     engine.avatar_pos = prev_avatar_pos
-                else:
-                    av_components = [
-                        ce
-                        for ce in curr_entities
-                        if ce.feature_id in known_av_feats
-                        and not EpistemicFeedbackAssimilator._is_edge_hud(ce, H, W)
-                    ]
-                    if av_components:
-                        all_cells = [
-                            cell
-                            for ce in av_components
-                            for cell in ce.properties.get("cells", [ce.grid_pos])
-                        ]
-                        if all_cells:
-                            engine.avatar_pos = (
-                                int(round(float(np.mean([r for r, _ in all_cells])))),
-                                int(round(float(np.mean([c for _, c in all_cells])))),
-                            )
             if (
                 not is_win
                 and not is_lost
@@ -1595,10 +1705,19 @@ class EpistemicFeedbackAssimilator:
 
             if av_moved:
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
+                    exp_dr, exp_dc = (0, 0)
+                    has_exp = False
+                    if action is not None and action in engine.action_dynamics:
+                        act_dyn_ref = engine.action_dynamics[action]
+                        if act_dyn_ref.is_displacement_action() and act_dyn_ref.confidence >= 0.6:
+                            exp_dr, exp_dc = act_dyn_ref.get_displacement()
+                            has_exp = True
+
                     av_moved.sort(
                         key=lambda item: (
+                            (abs(item[2][0] - exp_dr) + abs(item[2][1] - exp_dc)) if has_exp else 0,
                             abs(item[0].grid_pos[0] - prev_avatar_pos[0])
-                            + abs(item[0].grid_pos[1] - prev_avatar_pos[1])
+                            + abs(item[0].grid_pos[1] - prev_avatar_pos[1]),
                         )
                     )
                     primary_ce = av_moved[0][1]
@@ -1809,6 +1928,8 @@ class EpistemicFeedbackAssimilator:
             and engine.avatar_pos != prev_avatar_pos
         )
         avatar_moved = bool(avatar_physically_displaced or manip_moved)
+        if avatar_moved and prev_avatar_pos is not None and action is not None:
+            engine.failed_transitions.discard((prev_avatar_pos, action))
         if not is_effector_action and not is_known_displacement and not avatar_physically_displaced:
             engine.last_non_displacement_action = action
             is_interaction_act = bool(
@@ -1950,6 +2071,20 @@ class EpistemicFeedbackAssimilator:
             if diff.changed_pixel_count == 0 and not is_win and not is_lost:
                 engine.consecutive_stuck_steps += 1
                 if engine.last_action is not None:
+                    if prev_avatar_pos is not None and engine.is_displacement_action(
+                        engine.last_action
+                    ):
+                        engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
+                    if engine.is_spatial_effector(engine.last_action) and engine.last_action_data:
+                        ex = engine.last_action_data.get("x")
+                        ey = engine.last_action_data.get("y")
+                        if ex is not None and ey is not None:
+                            if hasattr(engine, "working_memory") and hasattr(
+                                engine.working_memory, "record_ineffectual_effector_coord"
+                            ):
+                                engine.working_memory.record_ineffectual_effector_coord(
+                                    (int(ey), int(ex))
+                                )
                     recent_acts = list(engine.recent_actions)[-3:]
                     if len(recent_acts) >= 3 and all(a == engine.last_action for a in recent_acts):
                         engine.inhibited_actions[engine.last_action] = max(
@@ -1968,6 +2103,17 @@ class EpistemicFeedbackAssimilator:
                 if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
                     engine.consecutive_stuck_steps += 1
                     if engine.last_action is not None:
+                        engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
+                        had_plan = bool(engine.mental_plan)
+                        engine.mental_plan.clear()
+                        if had_plan:
+                            engine.transition_to_phase(
+                                EpistemicPhase.REPLANNING,
+                                reason="zero_displacement_collision_wall",
+                            )
+                        engine.inhibited_actions[engine.last_action] = max(
+                            engine.inhibited_actions.get(engine.last_action, 0) + 3, 4
+                        )
                         if hasattr(engine, "working_memory") and hasattr(
                             engine.working_memory, "habenular_ior"
                         ):
@@ -2068,7 +2214,11 @@ class EpistemicFeedbackAssimilator:
                     discrepancy = True
                 elif engine.last_predicted_pos is not None and engine.avatar_pos is not None:
                     stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
-                    max_tol = 1 if stride > 2 else 0
+                    av_sz = getattr(engine, "avatar_size", 1) or 1
+                    max_tol = max(
+                        1 if stride > 2 else 0,
+                        int(round(np.sqrt(av_sz) / 2)) if av_sz > 1 else 0,
+                    )
                     dr_err = abs(engine.avatar_pos[0] - engine.last_predicted_pos[0])
                     dc_err = abs(engine.avatar_pos[1] - engine.last_predicted_pos[1])
                     if dr_err <= max_tol and dc_err <= max_tol:
@@ -2076,8 +2226,11 @@ class EpistemicFeedbackAssimilator:
                     else:
                         pos_mismatch = True
 
-                    if pos_mismatch or (
-                        not avatar_moved
+                    if pos_mismatch:
+                        discrepancy = True
+                    elif (
+                        prev_avatar_pos is not None
+                        and not avatar_moved
                         and is_known_displacement
                         and (
                             engine.last_predicted_pos is None
@@ -2116,7 +2269,8 @@ class EpistemicFeedbackAssimilator:
                 if (
                     engine.last_action is not None
                     and prev_avatar_pos is not None
-                    and not did_displace_correctly
+                    and not avatar_moved
+                    and engine.is_displacement_action(engine.last_action)
                 ):
                     engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
                     prev_inh = engine.inhibited_actions.get(engine.last_action, 0)

@@ -104,6 +104,7 @@ class HCIRSymbolicWorldTheory:
     walkable_features: set[int] = field(default_factory=set)
     cargo_features: set[int] = field(default_factory=set)
     receptacle_features: set[int] = field(default_factory=set)
+    actuator_features: set[int] = field(default_factory=set)
 
     # Functional action categorization
     undo_actions: set[Any] = field(default_factory=set)

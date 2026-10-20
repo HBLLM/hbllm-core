@@ -78,6 +78,9 @@ from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
 )
+from hbllm.hcir.world.macro_actions import (
+    MacroActionPlan,
+)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -703,6 +706,14 @@ class AutonomousEpistemicEngine:
         self.working_memory.recent_actions = val
 
     @property
+    def macro_plan(self) -> MacroActionPlan:
+        return self.working_memory.macro_plan
+
+    @macro_plan.setter
+    def macro_plan(self, val: MacroActionPlan) -> None:
+        self.working_memory.macro_plan = val
+
+    @property
     def goals(self) -> list[tuple[int, int]]:
         """Return unified list of active candidate goal coordinates."""
         # 1. Prioritize verified goal features from causal theory (empirical invariant from past level wins)
@@ -713,6 +724,7 @@ class AutonomousEpistemicEngine:
             verified_feats = (
                 set(self.symbolic_theory.goal_features) - av_feats - {self.bg_feature, 0}
             )
+            verified_feats -= getattr(self.working_memory, "controllable_avatar_features", set())
             verified_feats -= self.hazard_tracker.known_lethal_features
             verified_feats -= self.mobile_threat_features
             if verified_feats:
@@ -734,10 +746,28 @@ class AutonomousEpistemicEngine:
         av_feats = self.avatar_features or (
             {self.avatar_feature} if self.avatar_feature is not None else set()
         )
+        has_matching_constellation = (
+            any(
+                sg.get("type") == "target_constellation"
+                and (sg.get("feature") in av_feats if av_feats else True)
+                for sg in sgs
+            )
+            if sgs
+            else False
+        )
+        has_zone_collision = (
+            any(sg.get("type") == "target_zone" and sg.get("feature") in av_feats for sg in sgs)
+            if sgs and av_feats
+            else False
+        )
+
+        grid_for_goals = getattr(self, "curr_grid", None)
+        if grid_for_goals is None:
+            grid_for_goals = self.prev_grid
         if (
-            not sgs or (av_feats and any(sg.get("feature") in av_feats for sg in sgs))
-        ) and self.prev_grid is not None:
-            sgs = self.detect_structural_goals(self.prev_grid, bg=self.bg_feature)
+            not sgs or (has_zone_collision and not has_matching_constellation)
+        ) and grid_for_goals is not None:
+            sgs = self.detect_structural_goals(grid_for_goals, bg=self.bg_feature)
             if hasattr(self.working_memory, "structural_goals"):
                 self.working_memory.structural_goals = sgs
         if sgs:
@@ -752,6 +782,18 @@ class AutonomousEpistemicEngine:
                     ):
                         self.working_memory.target_constellations.setdefault(f, pos)
 
+            if (
+                hasattr(self.working_memory, "target_constellations")
+                and self.working_memory.target_constellations
+            ):
+                matched_tc = [
+                    self.working_memory.target_constellations[av_f]
+                    for av_f in av_feats
+                    if av_f in self.working_memory.target_constellations
+                ]
+                if matched_tc:
+                    return matched_tc
+
             constellations = [
                 sg
                 for sg in sgs
@@ -761,22 +803,30 @@ class AutonomousEpistemicEngine:
             if constellations:
                 c_goals: list[tuple[int, int]] = []
                 for c in constellations:
-                    for cp in c.get("cells", []):
-                        if cp and cp not in c_goals:
-                            c_goals.append(cp)
                     pos = c.get("position")
                     if pos and pos not in c_goals:
                         c_goals.append(pos)
+                    for cp in c.get("cells", []):
+                        if cp and cp not in c_goals:
+                            c_goals.append(cp)
                 return c_goals
 
-            if hasattr(self.working_memory, "target_constellations"):
-                for av_f in av_feats:
-                    if av_f in self.working_memory.target_constellations:
-                        return [self.working_memory.target_constellations[av_f]]
-
+            matching_sgs = []
+            other_sgs = []
             for sg in sgs:
                 if sg.get("feature") in av_feats:
                     continue
+                interior_f = sg.get("interior_feature")
+                if interior_f is not None and av_feats:
+                    if interior_f in av_feats:
+                        matching_sgs.append(sg)
+                    else:
+                        other_sgs.append(sg)
+                else:
+                    matching_sgs.append(sg)
+
+            target_list = matching_sgs if matching_sgs else other_sgs
+            for sg in target_list:
                 pos = sg.get("position")
                 if pos and pos not in res:
                     res.append(pos)
@@ -1296,6 +1346,9 @@ class AutonomousEpistemicEngine:
         """Formal event-sourced phase transition."""
         if self._phase != new_phase:
             old = self._phase
+            print(
+                f"   [PHASE TRANSITION] {old.name if hasattr(old, 'name') else old} -> {new_phase.name if hasattr(new_phase, 'name') else new_phase} (reason: {reason})"
+            )
             logger.info(
                 "AutonomousEpistemicEngine: Phase transition [%s -> %s] (reason: %s)",
                 old,
@@ -1501,17 +1554,24 @@ class AutonomousEpistemicEngine:
         if stride <= 1:
             return pos
         off_r, off_c = 0, 0
-        if self.learned_goal_positions:
+        if self.avatar_pos is not None:
+            off_r = self.avatar_pos[0] % stride
+            off_c = self.avatar_pos[1] % stride
+        elif self.learned_goal_positions:
             any_g = next(iter(self.learned_goal_positions))
-            off_r = (any_g[0] - (stride // 2)) % stride
-            off_c = (any_g[1] - (stride // 2)) % stride
+            off_r = any_g[0] % stride
+            off_c = any_g[1] % stride
         elif getattr(self, "learned_receptacle_positions", None):
             any_r = next(iter(self.learned_receptacle_positions))
-            off_r = (any_r[0] - (stride // 2)) % stride
-            off_c = (any_r[1] - (stride // 2)) % stride
-        cell_r = ((pos[0] - off_r) // stride) * stride + off_r
-        cell_c = ((pos[1] - off_c) // stride) * stride + off_c
-        return (cell_r + stride // 2, cell_c + stride // 2)
+            off_r = any_r[0] % stride
+            off_c = any_r[1] % stride
+        elif self.goals:
+            any_g = self.goals[0]
+            off_r = any_g[0] % stride
+            off_c = any_g[1] % stride
+        cell_r = int(round((pos[0] - off_r) / stride)) * stride + off_r
+        cell_c = int(round((pos[1] - off_c) / stride)) * stride + off_c
+        return (cell_r, cell_c)
 
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
@@ -1593,8 +1653,15 @@ class AutonomousEpistemicEngine:
         if val is not None:
             if not self.avatar_features or val not in self.avatar_features:
                 self.avatar_features = {val}
+            if hasattr(self.working_memory, "controllable_avatar_features"):
+                self.working_memory.controllable_avatar_features.add(val)
         else:
             self.avatar_features.clear()
+
+    @property
+    def controllable_avatar_features(self) -> set[int]:
+        """Returns the set of all features verified to be player-controllable avatar pieces."""
+        return getattr(self.working_memory, "controllable_avatar_features", set())
 
     @property
     def avatar_pos(self) -> tuple[int, int] | None:
@@ -1942,6 +2009,7 @@ class AutonomousEpistemicEngine:
             threat_features=threat_feats,
             oriented_threat_features=oriented_feats,
             avatar_pos=self.avatar_pos,
+            step_size=step_sz,
             **kwargs,
         )
 
@@ -1963,6 +2031,12 @@ class AutonomousEpistemicEngine:
         # Synthesize active subgoal schema into reusable procedural skill upon level win
         if is_win and self.working_memory.active_schema is not None:
             self.working_memory.synthesize_skill_from_schema(self.working_memory.active_schema)
+
+        winning_goal_features: set[int] = set()
+        winning_learned_goals: set[tuple[int, int]] = set()
+        if is_win:
+            winning_goal_features = set(self.symbolic_theory.goal_features)
+            winning_learned_goals = set(self.learned_goal_positions)
 
         EpistemicFeedbackAssimilator.assimilate(
             self,
@@ -2016,7 +2090,7 @@ class AutonomousEpistemicEngine:
             self.commit_working_memory_transactions()
 
             # Promote verified goals, ontology, and procedural skills to WorkspaceTier.PERSISTENT
-            for goal_feat in self.symbolic_theory.goal_features:
+            for goal_feat in winning_goal_features or self.symbolic_theory.goal_features:
                 node_id = f"ontology_goal_{goal_feat}"
                 self.tiered_workspace.promote(
                     node_id=node_id,
@@ -2024,7 +2098,9 @@ class AutonomousEpistemicEngine:
                     to_tier=WorkspaceTier.PERSISTENT,
                 )
 
-            all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
+            all_goals: set[tuple[int, int]] = set(
+                winning_learned_goals or self.learned_goal_positions
+            )
             for g_set in self.working_memory.visuospatial.level_learned_goals.values():
                 all_goals.update(g_set)
             for goal_pos in all_goals:
@@ -2145,7 +2221,7 @@ class AutonomousEpistemicEngine:
 
         # Perform 3x3 topological morphological closing to integrate multi-part bodies or cutouts with internal markers
         closed_mask = binary_closing(mask, structure=np.ones((3, 3)))
-        labeled, num_features = label(closed_mask)
+        labeled, num_features = label(closed_mask, structure=np.ones((3, 3)))
         if num_features == 0:
             return
 
@@ -2179,11 +2255,13 @@ class AutonomousEpistemicEngine:
                     if self.avatar_size == 0 or (
                         0.15 * self.avatar_size <= comp_area <= 6.0 * self.avatar_size
                     ):
-                        self.avatar_size = comp_area
-                        self.avatar_pos = (
+                        new_centroid = (
                             int(round(float(np.mean(coords[:, 0])))),
                             int(round(float(np.mean(coords[:, 1])))),
                         )
+                        self.avatar_pos = new_centroid
+                        self.avatar_size = comp_area
+                        # Avatar position verified and centered on grid
                         return
 
         # Collect candidates
@@ -2253,6 +2331,11 @@ class AutonomousEpistemicEngine:
             self.avatar_pos = best_pos
             if not is_tracking_active or preferred_pos is not None:
                 self.avatar_size = best_size
+            if 0 <= best_pos[0] < H and 0 <= best_pos[1] < W:
+                found_feat = int(curr_grid[best_pos[0], best_pos[1]])
+                if found_feat in known_av_feats:
+                    self.avatar_feature = found_feat
+                    self.avatar_features = {found_feat}
 
     def ground_effector_action(
         self, curr_grid: np.ndarray, action: Any = None
@@ -2374,6 +2457,9 @@ class AutonomousEpistemicEngine:
         is_win: bool = False,
         is_lost: bool = False,
         action_schemas: Sequence[Any] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+        macro_actions: Sequence[Any] | None = None,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Unified cognitive decision function:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
@@ -2386,6 +2472,9 @@ class AutonomousEpistemicEngine:
             is_win=is_win,
             is_lost=is_lost,
             action_schemas=action_schemas,
+            objects=objects,
+            micro_actions=micro_actions,
+            macro_actions=macro_actions,
         )
 
     def to_causal_predicate(self) -> CausalPredicate:

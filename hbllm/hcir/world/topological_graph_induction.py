@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import binary_dilation, label
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -164,6 +165,8 @@ class GridTopologyGraph:
         goal_coord: tuple[int, int],
         actions_with_deltas: list[tuple[Any, int, int]],
         goal_radius: int = 0,
+        body_offsets: Sequence[tuple[int, int]] | None = None,
+        failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find minimum-hop shortest action sequence directly in action transition space.
 
@@ -175,6 +178,19 @@ class GridTopologyGraph:
 
         def _at_goal(r: int, c: int) -> bool:
             return abs(r - gr) <= goal_radius and abs(c - gc) <= goal_radius
+
+        def _cell_walkable(r: int, c: int) -> bool:
+            if not (0 <= r < H and 0 <= c < W):
+                return False
+            if body_offsets:
+                for b_dr, b_dc in body_offsets:
+                    br, bc = r + b_dr, c + b_dc
+                    if not (0 <= br < H and 0 <= bc < W):
+                        return False
+                    if not passable_mask[br, bc] and not _at_goal(br, bc):
+                        return False
+                return True
+            return bool(passable_mask[r, c] or _at_goal(r, c))
 
         if _at_goal(sr, sc):
             return []
@@ -197,21 +213,20 @@ class GridTopologyGraph:
                 break
 
             for act, dr, dc in valid_actions:
+                if failed_transitions and ((curr_r, curr_c), act) in failed_transitions:
+                    continue
                 nr, nc = curr_r + dr, curr_c + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
+                if (nr, nc) not in visited:
                     step_mag = max(abs(dr), abs(dc))
                     blocked = False
                     if step_mag > 1:
                         for s_i in range(1, step_mag + 1):
                             inter_r = curr_r + int(round(dr * s_i / step_mag))
                             inter_c = curr_c + int(round(dc * s_i / step_mag))
-                            if not (0 <= inter_r < H and 0 <= inter_c < W) or (
-                                not passable_mask[inter_r, inter_c]
-                                and not _at_goal(inter_r, inter_c)
-                            ):
+                            if not _cell_walkable(inter_r, inter_c):
                                 blocked = True
                                 break
-                    elif not passable_mask[nr, nc] and not _at_goal(nr, nc):
+                    elif not _cell_walkable(nr, nc):
                         blocked = True
 
                     if not blocked:
@@ -254,6 +269,7 @@ class GeodesicManifoldRouter:
         barrier_features: set[int],
         avatar_features: set[int],
         max_candidate_goals: int = 5,
+        failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
@@ -339,9 +355,31 @@ class GeodesicManifoldRouter:
                     harmonized_actions.append((act, clean_dr * max_stride, clean_dc * max_stride))
                 else:
                     harmonized_actions.append((act, clean_dr, clean_dc))
-            effective_actions = harmonized_actions
+        effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride - 1)
 
-        effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
+        body_offsets: list[tuple[int, int]] | None = None
+        if avatar_features:
+            av_mask = np.isin(curr_grid, list(avatar_features))
+            if np.any(av_mask):
+                dilated = binary_dilation(av_mask, structure=np.ones((3, 3)))
+                lbl, num_comp = label(dilated, structure=np.ones((3, 3)))
+                best_comp: np.ndarray | None = None
+                min_d = float("inf")
+                for c_i in range(1, num_comp + 1):
+                    c_pts = np.argwhere(av_mask & (lbl == c_i))
+                    if len(c_pts) == 0:
+                        continue
+                    cent = np.mean(c_pts, axis=0)
+                    d = (cent[0] - start_pos[0]) ** 2 + (cent[1] - start_pos[1]) ** 2
+                    if d < min_d:
+                        min_d = d
+                        best_comp = c_pts
+                if best_comp is not None and 1 < len(best_comp) < 300:
+                    body_offsets = [
+                        (int(r - start_pos[0]), int(c - start_pos[1])) for r, c in best_comp
+                    ]
+                    for r, c in best_comp:
+                        passable_mask[r, c] = True
 
         for cand_goal in sorted_goals[:max_candidate_goals]:
             passable_mask[cand_goal[0], cand_goal[1]] = True
@@ -351,9 +389,27 @@ class GeodesicManifoldRouter:
                 goal_coord=cand_goal,
                 actions_with_deltas=effective_actions,
                 goal_radius=effective_goal_radius,
+                body_offsets=body_offsets,
+                failed_transitions=failed_transitions,
             )
             if action_plan:
                 return action_plan
+
+        # Fallback: if rigid body envelope proved overconstrained on traversable manifold,
+        # route center-mass trajectory.
+        if body_offsets is not None:
+            for cand_goal in sorted_goals[:max_candidate_goals]:
+                action_plan = GridTopologyGraph.shortest_path_with_actions(
+                    passable_mask=passable_mask,
+                    start_coord=start_pos,
+                    goal_coord=cand_goal,
+                    actions_with_deltas=effective_actions,
+                    goal_radius=effective_goal_radius,
+                    body_offsets=None,
+                    failed_transitions=failed_transitions,
+                )
+                if action_plan:
+                    return action_plan
 
         return None
 

@@ -98,7 +98,9 @@ class SpatiotemporalCollisionCones:
 
         # Update persistent velocities from kinetic entities
         for entity in kinetic_entities:
-            feat_id = next(iter(entity.features)) if entity.features else 0
+            feat_id = next(iter(entity.features)) if entity.features else None
+            if feat_id is None or feat_id == 0:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
             if vr != 0 or vc != 0:
@@ -108,7 +110,9 @@ class SpatiotemporalCollisionCones:
         projected_feats: set[int] = set()
 
         for idx, entity in enumerate(kinetic_entities):
-            feat_id = next(iter(entity.features)) if entity.features else 0
+            feat_id = next(iter(entity.features)) if entity.features else None
+            if feat_id is None or feat_id == 0:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
 

@@ -164,11 +164,13 @@ class ActionDynamicsModel:
                 # observation consistently deviates on a different axis/non-multiple, do not corrupt the established EMA.
                 # Instead, fork into an alternative conditional branch.
                 is_quantum_multiple = (
-                    self.delta_r != 0
+                    same_dir_r
+                    and self.delta_r != 0
                     and target_r != 0
                     and (target_r % self.delta_r == 0 or self.delta_r % target_r == 0)
                 ) or (
-                    self.delta_c != 0
+                    same_dir_c
+                    and self.delta_c != 0
                     and target_c != 0
                     and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
                 )

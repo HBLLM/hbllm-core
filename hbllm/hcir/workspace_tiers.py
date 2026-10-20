@@ -306,12 +306,18 @@ class WorkingWorkspace:
         frame.close(reason)
         return True
 
-    def get_node_across_frames(self, node_id: str) -> HCIRNode | None:
-        """Search for a node across all active task frames."""
+    def get_node_across_frames(self, node_id: str, include_closed: bool = True) -> HCIRNode | None:
+        """Search for a node across task frames (active first, then recently closed)."""
         for frame in self.active_frames:
             node = frame.workspace.get_node(node_id)
             if node is not None:
                 return node
+        if include_closed:
+            for frame in self._frames.values():
+                if not frame.is_active:
+                    node = frame.workspace.get_node(node_id)
+                    if node is not None:
+                        return node
         return None
 
     def cleanup_closed(self, max_age_seconds: float = 3600) -> int:

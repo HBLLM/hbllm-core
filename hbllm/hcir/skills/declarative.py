@@ -1087,6 +1087,9 @@ class DiscreteGroundingAffordancePredicate(SymbolicPredicate):
         if engine.mental_plan and getattr(engine, "phase", None) == EpistemicPhase.EXPLOITATION:
             return False
 
+        if engine.last_action in discrete_transform_actions:
+            return False
+
         has_displacement_actions = any(engine.is_displacement_action(a) for a in avail) or any(
             not engine.is_spatial_effector(a) and a not in engine.action_dynamics for a in avail
         )
@@ -1240,28 +1243,26 @@ class SpatialEffectorSkill(DeclarativeNeuroSymbolicSkill):
         if not spatial_effectors:
             return []
 
-        discrete_transform_actions = [
+        # Manipulation Alternation: If an effector click was just performed, allow uncalibrated
+        # actions (discrete transforms or uncalibrated displacements) to be probed on the selected target
+        uncalibrated_non_eff = [
             a
             for a in avail
-            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-        ]
-        uncalibrated_discrete = [
-            a
-            for a in discrete_transform_actions
-            if not engine.is_action_calibrated(a)
+            if not engine.is_spatial_effector(a)
+            and not engine.is_action_calibrated(a)
             and engine.inhibited_actions.get(a, 0) == 0
-            and a not in engine.symbolic_theory.undo_actions
+            and a not in getattr(engine.symbolic_theory, "undo_actions", set())
             and (a, engine.avatar_pos) not in engine.tested_action_positions
         ]
 
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 
-        if uncalibrated_discrete and engine.consecutive_quiescent_actions >= 1:
-            chosen_disc = uncalibrated_discrete[0]
-            engine.tested_action_positions.add((chosen_disc, engine.avatar_pos))
+        if uncalibrated_non_eff:
+            chosen_act = uncalibrated_non_eff[0]
+            engine.tested_action_positions.add((chosen_act, engine.avatar_pos))
             engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-            res_disc: ActionSeq = [(chosen_disc, None)]
-            return res_disc
+            res_act: ActionSeq = [(chosen_act, None)]
+            return res_act
 
         chosen_eff = spatial_effectors[0]
         eff_data = engine.ground_effector_action(ctx.grid, chosen_eff)
@@ -1300,11 +1301,14 @@ class DiscreteGroundingSkill(DeclarativeNeuroSymbolicSkill):
         uninhibited_discrete = [
             a
             for a in discrete_transform_actions
-            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+            if engine.inhibited_actions.get(a, 0) == 0
+            and a not in undo_acts
+            and a != engine.last_action
         ]
-        chosen_action = (
-            uninhibited_discrete[0] if uninhibited_discrete else discrete_transform_actions[0]
-        )
+        if not uninhibited_discrete:
+            return []
+        chosen_action = uninhibited_discrete[0]
+        engine.inhibited_actions[chosen_action] = 2
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 
         engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION

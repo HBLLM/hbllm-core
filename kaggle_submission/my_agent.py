@@ -135,12 +135,17 @@ except ImportError:
         from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
     except ImportError:
         ARC_DEFAULT_ACTION_SCHEMAS = [
-            {"name": "MOVE_UP", "action_id": 1},
-            {"name": "MOVE_DOWN", "action_id": 2},
-            {"name": "MOVE_LEFT", "action_id": 3},
-            {"name": "MOVE_RIGHT", "action_id": 4},
+            {"name": "MOVE_UP", "action_id": 1, "delta_r": -1, "delta_c": 0},
+            {"name": "MOVE_DOWN", "action_id": 2, "delta_r": 1, "delta_c": 0},
+            {"name": "MOVE_LEFT", "action_id": 3, "delta_r": 0, "delta_c": -1},
+            {"name": "MOVE_RIGHT", "action_id": 4, "delta_r": 0, "delta_c": 1},
             {"name": "INTERACT", "action_id": 5},
-            {"name": "CLICK_CELL", "action_id": 6, "parameters": {"x": "int", "y": "int"}},
+            {
+                "name": "CLICK_CELL",
+                "action_id": 6,
+                "parameters": {"x": "int", "y": "int"},
+                "is_spatial_effector": True,
+            },
             {"name": "ACTION7", "action_id": 7},
         ]
 
@@ -181,6 +186,12 @@ class MyAgent(Agent):
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
         self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
+        try:
+            from plugins.arc_agi_adapter.arc_macro_actions import register_arc_macro_actions
+
+            register_arc_macro_actions()
+        except Exception as e:
+            logger.debug("Could not register ARC macro actions: %s", e)
         if not self.disable_archetypes:
             try:
                 from plugins.arc_agi_adapter import install_arc3_solvers
@@ -484,7 +495,10 @@ class MyAgent(Agent):
                     available_actions, latest_frame=latest_frame
                 )
                 action_id, action_data = self.internal_engine.decide(
-                    grid, available_actions, action_schemas=_arc_schema
+                    grid,
+                    available_actions,
+                    action_schemas=_arc_schema,
+                    micro_actions=_arc_schema,
                 )
                 conf = getattr(self.internal_engine, "last_action_confidence", 1.0)
             else:

@@ -3614,3 +3614,130 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         assert "x" in coords and "y" in coords
         assert 0 <= coords["x"] < 15
         assert 0 <= coords["y"] < 15
+
+    def test_spatial_cluster_deadlock_breakoff_outward_escape(self) -> None:
+        """Test metacognitive spatial cluster deadlock breakoff and centrifugal outward escape."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+        from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.action_dynamics = {
+            1: ActionDynamicsModel(action_id=1, displacement=(-1, 0)),
+            2: ActionDynamicsModel(action_id=2, displacement=(1, 0)),
+            3: ActionDynamicsModel(action_id=3, displacement=(0, -1)),
+            4: ActionDynamicsModel(action_id=4, displacement=(0, 1)),
+        }
+        grid = np.zeros((20, 20), dtype=np.int32)
+        engine.avatar_pos = (10, 10)
+        engine.avatar_feature = 2
+        grid[10, 10] = 2
+
+        # Simulate 30 steps confined in a 2x2 box
+        for _ in range(15):
+            engine.recent_positions.append((10, 10))
+            engine.recent_positions.append((10, 11))
+            engine.recent_actions.append(4)
+            engine.recent_actions.append(3)
+
+        delib = PrefrontalDeliberationEngine()
+        action, data = delib.decide(engine, grid, available_actions=[1, 2, 3, 4])
+
+        # Deadlock breakoff must have cleared recent_positions to break infinite loops
+        assert len(engine.recent_positions) == 0
+        # Chosen action must be a legal displacement action escaping the cluster
+        assert action in [1, 2, 3, 4]
+        # Chosen escape action must not be inhibited
+        assert action not in engine.inhibited_actions
+
+    def test_effector_ping_pong_habituation_and_suppression(self) -> None:
+        """Test that alternating 2-cycle effector clicks are detected and habituated."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.action_affordances[6] = type(
+            "Aff", (), {"target_param_keys": ("x", "y"), "metadata": {}}
+        )()
+
+        # Simulate 2-cycle alternating clicks between (10, 10) and (20, 20)
+        engine.working_memory.record_effector_coord((10, 10))
+        engine.working_memory.record_effector_coord((20, 20))
+        engine.working_memory.record_effector_coord((10, 10))
+        engine.working_memory.record_effector_coord((20, 20))
+
+        assert engine.working_memory.is_effector_ping_pong() is True
+        assert engine.working_memory.get_effector_coord_habituation((10, 10)) == 2.0
+        assert engine.working_memory.get_effector_coord_habituation((20, 20)) == 2.0
+
+        # Mark both as effective targets, plus a fresh third target (30, 30)
+        engine.effective_click_targets = {(10, 10), (20, 20), (30, 30)}
+        grid = np.zeros((40, 40), dtype=np.int32)
+        grid[10, 10] = 5
+        grid[20, 20] = 6
+        grid[30, 30] = 7
+
+        coords = MotorCortexEffector.ground_effector_action(engine, grid, action=6)
+        assert coords is not None
+        # Must suppress oscillating ping-pong coords (10, 10) and (20, 20) and pick fresh (30, 30)
+        assert (coords["y"], coords["x"]) == (30, 30)
+
+    def test_non_displacement_deadlock_orthogonal_perturbation(self) -> None:
+        """Test ACC deadlock resolution when calibrated displacement escape is unavailable."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        # No calibrated displacement actions in engine.action_dynamics
+        engine.action_dynamics = {}
+        grid = np.zeros((20, 20), dtype=np.int32)
+        engine.avatar_pos = (5, 5)
+
+        # Simulate 30 stagnant steps using Action 6
+        for _ in range(30):
+            engine.recent_positions.append((5, 5))
+            engine.recent_actions.append(6)
+
+        delib = PrefrontalDeliberationEngine()
+        action, data = delib.decide(engine, grid, available_actions=[1, 2, 3, 4, 5, 6])
+
+        # Action 6 must have been inhibited for stagnation
+        assert engine.inhibited_actions.get(6, 0) > 0
+        # Chosen action must be an orthogonal unexplored action (1, 2, 3, 4, or 5)
+        assert action in [1, 2, 3, 4, 5]
+        # Recent positions cleared
+        assert len(engine.recent_positions) == 0
+
+    def test_effector_manipulation_alternation(self) -> None:
+        """Test that after an effector click, uncalibrated actions are probed on the entity."""
+        from hbllm.hcir.skills.declarative import SkillEvaluationContext, SpatialEffectorSkill
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.action_affordances[6] = type(
+            "Aff",
+            (),
+            {
+                "target_param_keys": ("x", "y"),
+                "is_spatial_effector": True,
+                "requires_spatial_target": True,
+                "metadata": {},
+            },
+        )()
+        # Last action was an effector click
+        engine.last_action = 6
+        grid = np.zeros((20, 20), dtype=np.int32)
+        grid[5, 5] = 4
+
+        skill = SpatialEffectorSkill()
+        ctx = SkillEvaluationContext(
+            grid=grid,
+            available_actions=[1, 2, 3, 4, 5, 6],
+            metadata={"engine": engine, "known_av_feats": set()},
+        )
+
+        res = skill.solve(ctx)
+        assert res
+        first_act = res[0][0] if isinstance(res[0], tuple) else res[0]
+        # Must probe an uncalibrated non-effector action (Actions 1–5) rather than re-clicking 6
+        assert first_act in [1, 2, 3, 4, 5]

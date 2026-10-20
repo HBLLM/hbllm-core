@@ -36,6 +36,7 @@ from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
+from hbllm.hcir.world.macro_actions import MacroActionPlan
 from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
@@ -217,6 +218,7 @@ class PrefrontalWorkingMemory:
         self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
         self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
         self.subgoal_stack: FrontopolarSubgoalStack = FrontopolarSubgoalStack()
+        self.macro_plan: MacroActionPlan = MacroActionPlan()
         self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
         self.optical_projector: OpticalRayProjector = OpticalRayProjector()
@@ -263,6 +265,8 @@ class PrefrontalWorkingMemory:
         self.prior_avatar_feature: int | None = None
         self.entity_action_failed_positions: dict[Any, set[tuple[int, int]]] = {}
         self.immobile_entity_actions: set[Any] = set()
+        self.consecutive_focus_switches: int = 0
+        self.controllable_avatar_features: set[int] = set()
 
         # Universal Dynamic Action Affordance Registry
         self.action_affordances: dict[Any, Any] = {}
@@ -273,6 +277,8 @@ class PrefrontalWorkingMemory:
         self.dial_mutation_streak: int = 0
         self.last_effector_target_coord: tuple[int, int] | None = None
         self.last_effector_target_entity_id: str | None = None
+        self.recent_effector_coords: deque[tuple[int, int]] = deque(maxlen=8)
+        self.ineffectual_effector_coords: set[tuple[int, int]] = set()
         self.last_non_displacement_action: Any | None = None
         self.level_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
@@ -280,6 +286,34 @@ class PrefrontalWorkingMemory:
         self.structural_goals: list[dict[str, Any]] = []
 
         self._initialize_core_declarative_skills()
+
+    def record_effector_coord(self, coord: tuple[int, int]) -> None:
+        """Record an executed allocentric effector coordinate in working memory."""
+        self.recent_effector_coords.append(coord)
+        self.last_effector_target_coord = coord
+
+    def record_ineffectual_effector_coord(self, coord: tuple[int, int]) -> None:
+        """Record an allocentric effector click coordinate that produced zero world mutation."""
+        self.ineffectual_effector_coords.add(coord)
+
+    def is_ineffectual_effector_coord(self, coord: tuple[int, int]) -> bool:
+        """Check whether candidate coordinate has already been established as ineffectual."""
+        return coord in self.ineffectual_effector_coords
+
+    def is_effector_ping_pong(self) -> bool:
+        """Detect whether recent effector clicks constitute an alternating 2-cycle ping-pong trap."""
+        if len(self.recent_effector_coords) < 3:
+            return False
+        c = list(self.recent_effector_coords)
+        if len(c) >= 4 and len(set(c[-4:])) == 2 and c[-1] == c[-3] and c[-2] == c[-4]:
+            return True
+        if len(c) >= 3 and c[-1] == c[-3] and c[-1] != c[-2]:
+            return True
+        return False
+
+    def get_effector_coord_habituation(self, coord: tuple[int, int]) -> float:
+        """Compute habituation frequency count for a candidate effector coordinate."""
+        return float(self.recent_effector_coords.count(coord))
 
     def _initialize_core_declarative_skills(self) -> None:
         """Register foundational cognitive deliberation skills in procedural library."""
@@ -308,13 +342,15 @@ class PrefrontalWorkingMemory:
         n_threats = len(getattr(engine, "mobile_threat_features", set()))
 
         b = self._salience_baseline
+        surprise_val = getattr(engine, "last_surprise", 0.0)
+
         shift = (
             n_act > b.calibrated_actions
             or n_goals > b.goal_positions
             or n_barriers != b.barriers
             or n_traj > b.trajectories
             or n_threats > b.mobile_threats
-            or getattr(engine, "last_surprise", 0.0) >= 0.4
+            or surprise_val >= 0.4
         )
         if shift:
             self._salience_baseline = WorkingMemorySalienceState(
@@ -342,6 +378,8 @@ class PrefrontalWorkingMemory:
             trajectories=n_traj,
             mobile_threats=n_threats,
         )
+        if hasattr(engine, "last_surprise"):
+            engine.last_surprise = 0.0
 
     def reset_salience_baseline(self) -> None:
         """Reset the salience baseline snapshot to zeroes."""
@@ -367,7 +405,10 @@ class PrefrontalWorkingMemory:
         """Reset transient working memory for a new trial while optionally retaining cross-trial tool affinities."""
         if is_new_level:
             self.target_constellations.clear()
-            self.structural_goals.clear()
+            if self.structural_goals is not None:
+                self.structural_goals.clear()
+            else:
+                self.structural_goals = []
             self.probed_entity_ids.clear()
             self.entity_visit_counts.clear()
             self.position_visit_counts.clear()
@@ -381,6 +422,7 @@ class PrefrontalWorkingMemory:
             self.tested_action_positions.clear()
             self.entity_action_failed_positions.clear()
             self.immobile_entity_actions.clear()
+            self.controllable_avatar_features.clear()
         self.held_items.clear()
         self.active_schema = None
         self.unlocked_barriers.clear()
@@ -397,12 +439,14 @@ class PrefrontalWorkingMemory:
         self.consecutive_plan_failures = 0
         self.exploration_cooldown = 0
         self.consecutive_stuck_steps = 0
+        self.consecutive_focus_switches = 0
         self.constraint_solver.reset_episode()
         self.visuospatial.reset_episode(
             retain_long_term=retain_long_term, is_new_level=is_new_level
         )
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         self.subgoal_stack.reset_episode()
+        self.macro_plan.clear()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
         self.hypothesis_engine.reset_episode(retain_confirmed=retain_long_term)
@@ -419,6 +463,7 @@ class PrefrontalWorkingMemory:
         self.dial_mutation_streak = 0
         self.last_effector_target_coord = None
         self.last_effector_target_entity_id = None
+        self.recent_effector_coords.clear()
         if not retain_inhibitions:
             self.inhibited_actions.clear()
         if not retain_long_term:
@@ -436,6 +481,7 @@ class PrefrontalWorkingMemory:
             self.exhausted_candidate_goals.clear()
             self.quiescent_click_targets.clear()
             self.effective_click_targets.clear()
+            self.ineffectual_effector_coords.clear()
             self.last_effective_click_coord = None
             self.click_affordances.clear()
             self.last_effector_target_step.clear()

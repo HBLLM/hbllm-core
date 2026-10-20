@@ -22,7 +22,7 @@ from enum import StrEnum
 from typing import Any
 
 import numpy as np
-from scipy.ndimage import label
+from scipy.ndimage import binary_dilation, label
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
@@ -234,7 +234,11 @@ class FigureGroundSegregator:
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
     ) -> int:
+        if grid is None or grid.size == 0 or grid.ndim < 2:
+            return bg_feature
         H, W = grid.shape
+        if H == 0 or W == 0:
+            return bg_feature
         border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
         vals, counts = np.unique(border_pixels, return_counts=True)
         top_val = int(vals[np.argmax(counts)])
@@ -428,11 +432,20 @@ class GestaltAffordanceDetector:
                         int(round(float(np.mean(pts[:, 0])))),
                         int(round(float(np.mean(pts[:, 1])))),
                     )
+                    center_val = int(grid[centroid[0], centroid[1]])
+                    if center_val != bg and center_val != 0 and center_val != feat_int:
+                        interior_feat = center_val
+                    elif len(non_bg_vals) == 1:
+                        interior_feat = int(non_bg_vals[0])
+                    else:
+                        interior_feat = None
+
                     goals.append(
                         {
                             "type": "target_zone",
                             "position": centroid,
                             "feature": feat_int,
+                            "interior_feature": interior_feat,
                             "size": len(pts),
                             "confidence": 0.8,
                         }
@@ -710,9 +723,55 @@ class GestaltAffordanceDetector:
         for target_feat, coords in enclaves_by_target.items():
             if len(coords) >= 2:
                 pts_arr = np.array(coords)
+                s_min_r, s_max_r = pts_arr[:, 0].min(), pts_arr[:, 0].max()
+                s_min_c, s_max_c = pts_arr[:, 1].min(), pts_arr[:, 1].max()
+                mid_r = int(round((s_min_r + s_max_r) / 2.0))
+                mid_c = int(round((s_min_c + s_max_c) / 2.0))
+
+                exact_centroid = None
+                mask = grid == target_feat
+                if np.count_nonzero(mask) > len(coords):
+                    dilated = binary_dilation(mask, structure=np.ones((3, 3)))
+                    lbl, num_comp = label(dilated, structure=np.ones((3, 3)))
+                    best_comp = None
+                    max_c_count = 0
+                    for c_i in range(1, num_comp + 1):
+                        c_pts = np.argwhere(mask & (lbl == c_i))
+                        if len(c_pts) > max_c_count and len(c_pts) > len(coords):
+                            max_c_count = len(c_pts)
+                            best_comp = c_pts
+                    if best_comp is not None:
+                        p_cent = np.mean(best_comp, axis=0)
+                        p_cent_int = (int(round(p_cent[0])), int(round(p_cent[1])))
+                        p_offsets = set(
+                            (int(r - p_cent_int[0]), int(c - p_cent_int[1])) for r, c in best_comp
+                        )
+                        stride = int(kwargs.get("step_size", 1))
+                        best_cand = None
+                        max_score = -float("inf")
+                        for dr in range(-8, 9):
+                            for dc in range(-8, 9):
+                                cand_r = mid_r + dr
+                                cand_c = mid_c + dc
+                                cov = sum(
+                                    1
+                                    for tr, tc in coords
+                                    if (tr - cand_r, tc - cand_c) in p_offsets
+                                )
+                                if cov >= len(coords) * 0.7:
+                                    on_lat = stride <= 1 or (
+                                        (cand_r - p_cent_int[0]) % stride == 0
+                                        and (cand_c - p_cent_int[1]) % stride == 0
+                                    )
+                                    score = cov * 100 + (50 if on_lat else 0) - (dr**2 + dc**2)
+                                    if score > max_score:
+                                        max_score = score
+                                        best_cand = (cand_r, cand_c)
+                        if best_cand is not None:
+                            exact_centroid = best_cand
+
                 constellation_centroid = (
-                    int(round(float(np.median(pts_arr[:, 0])))),
-                    int(round(float(np.median(pts_arr[:, 1])))),
+                    exact_centroid if exact_centroid is not None else (mid_r, mid_c)
                 )
                 goals.append(
                     {

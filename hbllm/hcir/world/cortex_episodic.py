@@ -547,7 +547,13 @@ class HippocampalEpisodicCortex:
         if is_new_level or not retain_dynamics:
             engine.entity_action_failed_positions = {}
             engine.immobile_entity_actions = set()
-        if not retain_dynamics:
+        has_focus_switches = (
+            len(engine.focus_switch_actions) > 0
+            or len(getattr(getattr(engine, "working_memory", None), "focus_switch_actions", set()))
+            > 0
+            or getattr(engine, "is_multi_agent", False)
+        )
+        if not retain_dynamics or (is_new_level and has_focus_switches):
             engine.avatar_features.clear()
             engine.avatar_feature = None
             engine.avatar_size = 0
@@ -607,8 +613,13 @@ class HippocampalEpisodicCortex:
         engine.consecutive_simulation_failures = 0
         engine.simulation_cooldown = 0
         engine.working_memory.reset_salience_baseline()
+        engine.working_memory.reset_episode(
+            retain_long_term=retain_dynamics,
+            is_new_level=is_new_level,
+        )
         engine.current_simulated_goal = None
         engine._feedback_assimilated = False
+        engine.failed_transitions.clear()
         engine.symbolic_theory.candidate_goal_features.clear()
 
         if not retain_dynamics:
@@ -672,6 +683,13 @@ class HippocampalEpisodicCortex:
             engine.last_action = None
             engine.last_predicted_pos = None
             engine.avatar_pos = None
+            if not retain_dynamics or has_focus_switches:
+                engine.avatar_features.clear()
+                engine.avatar_feature = None
+                engine.avatar_size = 0
+            if hasattr(engine, "working_memory"):
+                engine.working_memory.target_constellations.clear()
+                engine.working_memory.structural_goals.clear()
             engine.mental_plan.clear()
             engine.consecutive_simulation_failures = 0
             engine.simulation_cooldown = 0
@@ -699,6 +717,8 @@ class HippocampalEpisodicCortex:
                 engine.symbolic_theory.candidate_goal_features.clear()
                 engine.symbolic_theory.goal_features.clear()
                 engine.symbolic_theory.goal_predicates.clear()
+                engine.working_memory.target_constellations.clear()
+                engine.working_memory.structural_goals.clear()
                 logger.info(
                     "HippocampalEpisodicCortex: Level regression detected (%d -> %d). "
                     "Purging level-specific spatial goals, receptacle coordinates, "
@@ -725,12 +745,22 @@ class HippocampalEpisodicCortex:
 
         if is_new_level and retain_dynamics:
             # Carry forward hypotheses & semantics as priors
-            if engine.avatar_feature is not None:
-                engine.prior_avatar_feature = engine.avatar_feature
-                engine.avatar_features = {engine.avatar_feature}
-            else:
+            engine.avatar_pos = None
+            if has_focus_switches:
+                engine.avatar_feature = None
                 engine.avatar_features.clear()
             engine._avatar_controllability_evidence.clear()
+            if hasattr(engine.working_memory, "target_constellations"):
+                engine.working_memory.target_constellations.clear()
+            if hasattr(engine.working_memory, "structural_goals"):
+                engine.working_memory.structural_goals = []
+            if hasattr(engine, "learned_goal_positions"):
+                engine.learned_goal_positions.clear()
+            if hasattr(engine, "symbolic_theory"):
+                if hasattr(engine.symbolic_theory, "goal_features"):
+                    engine.symbolic_theory.goal_features.clear()
+                if hasattr(engine.symbolic_theory, "candidate_goal_features"):
+                    engine.symbolic_theory.candidate_goal_features.clear()
             engine.state_mutations.clear()
             engine.bilateral_state = None
             engine.bilateral_integrator.active_bilateral_state = None

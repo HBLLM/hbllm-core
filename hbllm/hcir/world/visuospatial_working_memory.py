@@ -71,6 +71,7 @@ class VisuospatialWorkingMemory:
         # Pair-matching task evidence counter
         self.matching_evidence: int = 0
         self.is_pair_matching_task: bool = False
+        self.attempted_pairs: set[frozenset[tuple[int, int]]] = set()
 
         # Spatial Layout Facts (Preserved per-level across attempts)
         self.current_level: int = 0
@@ -111,6 +112,7 @@ class VisuospatialWorkingMemory:
         self.bound_slots.clear()
         self.feature_to_coords.clear()
         self.resolved_coords.clear()
+        self.attempted_pairs.clear()
         self.last_probed_coord = None
         self.last_probed_feature = None
         if is_new_level:
@@ -177,21 +179,25 @@ class VisuospatialWorkingMemory:
         candidates = [
             p
             for p in self.feature_to_coords.get(current_feature, set())
-            if p != current_pos and p not in self.resolved_coords
+            if p != current_pos
+            and p not in self.resolved_coords
+            and frozenset((current_pos, p)) not in self.attempted_pairs
         ]
         if candidates:
             # Sort by most recent observation
             candidates.sort(key=lambda p: self.bound_slots[p].step_observed, reverse=True)
+            chosen_pair = candidates[0]
+            self.attempted_pairs.add(frozenset((current_pos, chosen_pair)))
             logger.info(
                 "VisuospatialWorkingMemory: Matching pair found! Feature %d at %s matches previous observation at %s.",
                 current_feature,
                 current_pos,
-                candidates[0],
+                chosen_pair,
             )
             self.matching_evidence += 1
             if self.matching_evidence >= 2:
                 self.is_pair_matching_task = True
-            return candidates[0]
+            return chosen_pair
 
         return None
 

@@ -1105,6 +1105,19 @@ class ObjectStateGraphPlanner:
             clickable_candidates: list[
                 tuple[SalientObject, tuple[int, int], dict[str, Any], float]
             ] = []
+            wm = getattr(engine, "working_memory", None)
+            is_ping_pong = (
+                wm.is_effector_ping_pong()
+                if (wm and hasattr(wm, "is_effector_ping_pong"))
+                else False
+            )
+            recent_pp = (
+                set(list(wm.recent_effector_coords)[-4:]) if (is_ping_pong and wm) else set()
+            )
+            ineffectual_coords = (
+                set(getattr(wm, "ineffectual_effector_coords", set())) if wm else set()
+            )
+
             for obj in non_exit_objects:
                 unprobed_cells = [c for c in obj.cells if c not in quiescent_coords]
                 if not unprobed_cells:
@@ -1150,9 +1163,26 @@ class ObjectStateGraphPlanner:
                     else False
                 )
                 frame_pen = 150.0 if is_frame_cell else 0.0
+                is_ineffectual = (target_r, target_c) in ineffectual_coords
+                ineffectual_pen = 300.0 if is_ineffectual else 0.0
+                pp_pen = 400.0 if (target_r, target_c) in recent_pp else 0.0
+                rec_hits = (
+                    wm.get_effector_coord_habituation((target_r, target_c))
+                    if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                    else 0.0
+                )
+                habituation = float(rec_hits) * 60.0
                 saliency = obj.salience_score or (100.0 / math.log2(2 + max(1, obj.area)))
                 score = (
-                    untouched_bonus + saliency - ior_penalty - quiescent_pen - frame_pen - inert_pen
+                    untouched_bonus
+                    + saliency
+                    - ior_penalty
+                    - quiescent_pen
+                    - frame_pen
+                    - inert_pen
+                    - ineffectual_pen
+                    - pp_pen
+                    - habituation
                 )
                 clickable_candidates.append((obj, (target_r, target_c), action_data, score))
 

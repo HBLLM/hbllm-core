@@ -412,16 +412,17 @@ class EpistemicCuriosityExplorer:
             and engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0) < 3
             for p in engine.effective_click_targets
         )
-        interleaved_reach = engine.level_epistemic_probes % 4 == 0
-
-        should_probe = (
-            not displacement_actions
-            or (engine.avatar_pos is None and engine.level_epistemic_probes > 4)
-            or is_stuck_or_looping
-            or has_effective_target
-            or interleaved_reach
-            or has_optical_targets
-        )
+        if displacement_actions:
+            if engine.avatar_pos is not None:
+                should_probe = is_stuck_or_looping or (
+                    has_optical_targets and engine.level_epistemic_probes % 6 == 0
+                )
+            else:
+                should_probe = engine.level_epistemic_probes > 4 and (
+                    has_effective_target or has_optical_targets
+                )
+        else:
+            should_probe = True
         if should_probe:
             chosen_eff = spatial_effector_actions[0]
             action_data = engine.ground_effector_action(curr_grid, chosen_eff)
@@ -1110,7 +1111,19 @@ class EpistemicCuriosityExplorer:
         eff_fallbacks = [
             a for a in spatial_effector_actions if engine.inhibited_actions.get(a, 0) == 0
         ]
-        if eff_fallbacks:
+        # Manipulation Alternation: If an effector action was just executed, allow uncalibrated
+        # non-effector actions to be probed on the selected entity before re-clicking
+        uncalibrated_non_eff = [
+            a
+            for a in available_actions
+            if not engine.is_spatial_effector(a)
+            and a not in getattr(engine.symbolic_theory, "undo_actions", set())
+            and a not in engine.action_dynamics
+            and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if eff_fallbacks and not (
+            engine.is_spatial_effector(engine.last_action) and uncalibrated_non_eff
+        ):
             chosen_eff = eff_fallbacks[0]
             eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
             if eff_data is not None:
@@ -1454,6 +1467,15 @@ class MotorCortexEffector:
 
         click_candidates: list[tuple[int, int, float]] = []
 
+        wm = getattr(engine, "working_memory", None)
+        is_ping_pong = (
+            wm.is_effector_ping_pong() if (wm and hasattr(wm, "is_effector_ping_pong")) else False
+        )
+        recent_ping_pong_coords = (
+            set(list(wm.recent_effector_coords)[-4:]) if (is_ping_pong and wm) else set()
+        )
+        ineffectual_coords = set(getattr(wm, "ineffectual_effector_coords", set())) if wm else set()
+
         # 0. Visuospatial Pattern Completion (CA3 & dlPFC Pair Matching):
         # If the most recent probe revealed feature F, check working memory for another
         # coordinate known to hold feature F. If found, emit it with maximum score.
@@ -1466,8 +1488,13 @@ class MotorCortexEffector:
             pair_target = vm.find_matching_pair(vm.last_probed_coord, vm.last_probed_feature)
             if pair_target is not None:
                 pr, pc = pair_target
-                if not cls.is_peripheral_frame_cell(pr, pc, H, W, curr_grid):
-                    click_candidates.append((pr, pc, 1000.0))
+                rec_hits = wm.get_effector_coord_habituation((pr, pc)) if wm else 0.0
+                if (
+                    not cls.is_peripheral_frame_cell(pr, pc, H, W, curr_grid)
+                    and (pr, pc) not in recent_ping_pong_coords
+                    and rec_hits < 2.0
+                ):
+                    click_candidates.append((pr, pc, 1000.0 - float(rec_hits) * 350.0))
 
         # 0.1 Constraint Solver Deduction (Arc-Consistency & Unit Propagation):
         cs = getattr(engine.working_memory, "constraint_solver", None)
@@ -1492,9 +1519,15 @@ class MotorCortexEffector:
                         continue
                     if (vy, vx) in engine.quiescent_click_targets:
                         continue
+                    if (vy, vx) in recent_ping_pong_coords:
+                        continue
                     feat = int(curr_grid[vy, vx])
                     vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
-                    eff_bonus = 150.0 if (vy, vx) in engine.effective_click_targets else 0.0
+                    eff_bonus = (
+                        max(0.0, 150.0 - float(vis) * 50.0)
+                        if (vy, vx) in engine.effective_click_targets
+                        else 0.0
+                    )
                     feat_bonus = 30.0 if (feat != bg and feat != engine.bg_feature) else 0.0
                     haben_pen = 0.0
                     if hasattr(engine, "working_memory") and hasattr(
@@ -1507,7 +1540,35 @@ class MotorCortexEffector:
                         haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
                             engine.avatar_pos, action, action_data={"x": vx, "y": vy}
                         )
-                    score = 250.0 + eff_bonus + feat_bonus - float(vis) * 20.0 - haben_pen
+                    rec_hits = (
+                        wm.get_effector_coord_habituation((vy, vx))
+                        if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                        else 0.0
+                    )
+                    consec = (
+                        engine.consecutive_effective_clicks
+                        if engine.last_effective_click_coord == (vy, vx)
+                        else 0
+                    )
+                    if 0 < consec < 4:
+                        # Pearlean Causal Momentum: Actuator was empirically verified to produce changes.
+                        # Persist with momentum rather than immediately switching to opposite buttons.
+                        momentum = 140.0 - float(consec) * 20.0
+                        vis_pen = float(vis) * 15.0
+                        habituation = float(rec_hits) * 15.0
+                    else:
+                        momentum = 0.0
+                        vis_pen = float(vis) * 80.0
+                        habituation = float(rec_hits) * 80.0
+                    score = (
+                        250.0
+                        + eff_bonus
+                        + feat_bonus
+                        + momentum
+                        - vis_pen
+                        - habituation
+                        - haben_pen
+                    )
                     click_candidates.append((vy, vx, score))
 
         # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
@@ -1535,11 +1596,19 @@ class MotorCortexEffector:
             if pos is not None and isinstance(pos, (tuple, list)) and len(pos) >= 2:
                 sr, sc = int(pos[0]), int(pos[1])
                 if not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid):
+                    if (sr, sc) in recent_ping_pong_coords:
+                        continue
                     vis = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
+                    rec_hits = (
+                        wm.get_effector_coord_habituation((sr, sc))
+                        if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                        else 0.0
+                    )
                     is_mp = sg.get("is_midpoint", False)
                     # Midpoints in void space without an avatar are weak speculative heuristics
                     base_sg_score = 70.0 if (is_mp and engine.avatar_pos is None) else 180.0
-                    click_candidates.append((sr, sc, base_sg_score - float(vis) * 15.0))
+                    score = base_sg_score - float(vis) * 20.0 - float(rec_hits) * 80.0
+                    click_candidates.append((sr, sc, score))
 
         # 3. Modal Manipulandum Destination Affordances:
         # If an external manipulandum is currently focused, prioritize destination sockets/receptacles
@@ -1549,21 +1618,45 @@ class MotorCortexEffector:
                 for r_feat in engine.symbolic_theory.receptacle_features:
                     cells = np.argwhere(curr_grid == r_feat)
                     for cr, cc in cells[:8]:
-                        vis = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                        click_candidates.append((int(cr), int(cc), 220.0 - float(vis) * 10.0))
+                        icr, icc = int(cr), int(cc)
+                        if (icr, icc) in recent_ping_pong_coords:
+                            continue
+                        vis = engine.entity_visit_counts.get(f"click_{icr}_{icc}", 0)
+                        rec_hits = (
+                            wm.get_effector_coord_habituation((icr, icc))
+                            if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                            else 0.0
+                        )
+                        click_candidates.append(
+                            (icr, icc, 220.0 - float(vis) * 15.0 - float(rec_hits) * 80.0)
+                        )
 
         # 4. Confirmed Causal Actuators (Empirical Active Inference):
         # Targets that previously produced substantial state diffs have proven causal power
         for eff_r, eff_c in engine.effective_click_targets:
             if not cls.is_peripheral_frame_cell(eff_r, eff_c, H, W, curr_grid):
+                if (eff_r, eff_c) in recent_ping_pong_coords:
+                    continue
                 vis = engine.entity_visit_counts.get(f"click_{eff_r}_{eff_c}", 0)
+                rec_hits = (
+                    wm.get_effector_coord_habituation((eff_r, eff_c))
+                    if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                    else 0.0
+                )
                 consec = (
                     engine.consecutive_effective_clicks
                     if engine.last_effective_click_coord == (eff_r, eff_c)
                     else 0
                 )
-                satiation = float(consec) * 50.0
-                click_candidates.append((eff_r, eff_c, 260.0 - float(vis) * 15.0 - satiation))
+                if 0 < consec < 4:
+                    momentum = 120.0 - float(consec) * 20.0
+                    satiation = 0.0
+                    vis_pen = float(vis) * 10.0
+                else:
+                    momentum = 0.0
+                    satiation = float(consec) * 50.0 + float(rec_hits) * 90.0
+                    vis_pen = float(vis) * 20.0
+                click_candidates.append((eff_r, eff_c, 260.0 + momentum - vis_pen - satiation))
 
         # 5. Salient Physical Entities & Perimeter Control Panels:
         # Physical interactive entities are evaluated as viable candidates alongside structural goals
@@ -1583,6 +1676,8 @@ class MotorCortexEffector:
                 cr, cc, H, W, curr_grid
             ):
                 continue
+            if (cr, cc) in recent_ping_pong_coords:
+                continue
             visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
             saliency = 100.0 / math.log2(2 + max(1, e.area))
             affordance_bonus = 140.0 if (cr, cc) in engine.effective_click_targets else 0.0
@@ -1600,7 +1695,7 @@ class MotorCortexEffector:
                 )
                 else 0.0
             )
-            ior_mult = 10.0 if (cr, cc) in engine.effective_click_targets else 30.0
+            ior_mult = 15.0 if (cr, cc) in engine.effective_click_targets else 30.0
             ior_penalty = float(visit_count) * ior_mult
             haben_pen = 0.0
             if hasattr(engine, "working_memory") and hasattr(
@@ -1613,6 +1708,12 @@ class MotorCortexEffector:
                 haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
                     engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 )
+            rec_hits = (
+                wm.get_effector_coord_habituation((cr, cc))
+                if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                else 0.0
+            )
+            habituation = float(rec_hits) * 60.0
             cand_score = (
                 saliency
                 + affordance_bonus
@@ -1621,6 +1722,7 @@ class MotorCortexEffector:
                 + telic_bonus
                 - ior_penalty
                 - haben_pen
+                - habituation
             )
             click_candidates.append((cr, cc, cand_score))
 
@@ -1719,18 +1821,24 @@ class MotorCortexEffector:
 
         # 10. Fallback: re-probe confirmed effective targets
         if not click_candidates and engine.effective_click_targets:
+            non_pp_eff = [
+                p for p in engine.effective_click_targets if p not in recent_ping_pong_coords
+            ]
+            eff_pool = non_pp_eff if non_pp_eff else list(engine.effective_click_targets)
             eff_sorted = sorted(
-                engine.effective_click_targets,
+                eff_pool,
                 key=lambda p: engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0),
             )
             click_candidates.append((eff_sorted[0][0], eff_sorted[0][1], 50.0))
 
         if click_candidates:
+            if ineffectual_coords:
+                click_candidates = [
+                    (r, c, score - 300.0 if (r, c) in ineffectual_coords else score)
+                    for r, c, score in click_candidates
+                ]
             click_candidates.sort(key=lambda x: x[2], reverse=True)
             best_r, best_c, _ = click_candidates[0]
-            engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
-                engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
-            )
             target_r, target_c = int(best_r), int(best_c)
             engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
 
@@ -1758,8 +1866,12 @@ class MotorCortexEffector:
                         if (
                             not (0 <= vx <= 63 and 0 <= vy <= 63)
                             or (vy, vx) in engine.quiescent_click_targets
+                            or (vy, vx) in recent_ping_pong_coords
                         ):
                             continue
+                        if vx == target_c and vy == target_r:
+                            snapped_target = vt
+                            break
                         if hasattr(engine, "working_memory") and hasattr(
                             engine.working_memory, "habenular_ior"
                         ):
@@ -1780,10 +1892,16 @@ class MotorCortexEffector:
                                 engine.avatar_pos, action, action_data={"x": vx, "y": vy}
                             )
                         vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
-                        # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
+                        rec_hits = (
+                            wm.get_effector_coord_habituation((vy, vx))
+                            if (wm and hasattr(wm, "get_effector_coord_habituation"))
+                            else 0.0
+                        )
+                        # Distance penalization with inhibition-of-return visit penalty, habituation, and Habenular repulsion
                         d = (
                             float(abs(vx - target_c) + abs(vy - target_r))
                             + float(vis) * 25.0
+                            + float(rec_hits) * 60.0
                             + haben_pen
                         )
                         if d < best_score:
@@ -1792,24 +1910,38 @@ class MotorCortexEffector:
 
                 # If all un-quiescent candidates were exhausted, select least-visited un-quiescent valid target
                 if snapped_target is None and valid_targets:
-                    least_visited_vt: dict[str, Any] | None = None
-                    min_vis = float("inf")
-                    for vt in valid_targets:
-                        if isinstance(vt, dict):
+                    # Directional Persistence vs Alternating Oscillation:
+                    # If in an active oscillatory ping-pong lock over valid targets, commit to persistent thrust
+                    # on ONE target rather than alternating every step.
+                    consec = getattr(engine, "consecutive_effective_clicks", 0)
+                    last_eff = getattr(engine, "last_effective_click_coord", None)
+                    if last_eff is not None and 0 < consec < 4:
+                        for vt in valid_targets:
                             raw_vx = vt.get("x", vt.get("c", 0))
                             raw_vy = vt.get("y", vt.get("r", 0))
-                            vx = int(raw_vx) if raw_vx is not None else 0
-                            vy = int(raw_vy) if raw_vy is not None else 0
-                            if (
-                                not (0 <= vx <= 63 and 0 <= vy <= 63)
-                                or (vy, vx) in engine.quiescent_click_targets
-                            ):
-                                continue
-                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
-                            if vis < min_vis:
-                                min_vis = vis
-                                least_visited_vt = vt
-                    snapped_target = least_visited_vt
+                            if (int(raw_vy), int(raw_vx)) == last_eff:
+                                snapped_target = vt
+                                break
+
+                    if snapped_target is None:
+                        least_visited_vt: dict[str, Any] | None = None
+                        min_vis = float("inf")
+                        for vt in valid_targets:
+                            if isinstance(vt, dict):
+                                raw_vx = vt.get("x", vt.get("c", 0))
+                                raw_vy = vt.get("y", vt.get("r", 0))
+                                vx = int(raw_vx) if raw_vx is not None else 0
+                                vy = int(raw_vy) if raw_vy is not None else 0
+                                if (
+                                    not (0 <= vx <= 63 and 0 <= vy <= 63)
+                                    or (vy, vx) in engine.quiescent_click_targets
+                                ):
+                                    continue
+                                vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                                if vis < min_vis:
+                                    min_vis = vis
+                                    least_visited_vt = vt
+                        snapped_target = least_visited_vt
 
                 if snapped_target is not None:
                     # Update visit count for snapped coordinate
@@ -1842,6 +1974,9 @@ class MotorCortexEffector:
                     coords[k] = max(0, min(63, target_r))
                 else:
                     coords[k] = 0
+            engine.entity_visit_counts[f"click_{target_r}_{target_c}"] = (
+                engine.entity_visit_counts.get(f"click_{target_r}_{target_c}", 0) + 1
+            )
             return coords
 
         # Robust Spatial Grounding Invariant: On featureless/blank boards with no entities,

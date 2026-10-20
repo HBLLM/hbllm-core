@@ -18,7 +18,7 @@ and striatal gating:
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -31,6 +31,9 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+from hbllm.hcir.world.macro_actions import (
+    MacroPlanSynthesizer,
+)
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -424,6 +427,48 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
                 for proj in engine.collision_cones.projected_trajectories
             )
         )
+        # 0. Physical Feasibility Invariant:
+        # A known failed physical transition can NEVER be safely executed from this avatar position,
+        # regardless of whether it originates from an executive geodesic plan or exploratory option.
+        if (
+            engine.avatar_pos is not None
+            and (engine.avatar_pos, next_step.action) in engine.failed_transitions
+        ):
+            return SafetyGateResult(
+                is_safe=False,
+                reason=f"Action {next_step.action} from {engine.avatar_pos} is a physically verified impassable transition",
+            )
+
+        # 1. Deliberate goal plans (deterministic geodesics, teleological subgoals) are executive-driven
+        # and override stochastic exploratory refractory inhibition timers.
+        is_executive_plan = (
+            getattr(next_step, "is_deterministic_geodesic", False)
+            or getattr(next_step, "expected_mutation", "")
+            in (
+                "topological_geodesic_step",
+                "geodesic_path_step",
+                "bilateral_convergence",
+            )
+            or engine.phase == EpistemicPhase.EXPLOITATION
+        )
+        if is_executive_plan:
+            return SafetyGateResult(is_safe=True)
+
+        # 2. Emergency escape / sole transit action:
+        # If all alternative displacement actions are blocked by physical transition failures,
+        # allow the sole unfailed escape route even if it has an exploratory habituation timer.
+        if engine.avatar_pos is not None:
+            viable_displacement_acts = [
+                a
+                for a in available_actions
+                if (engine.avatar_pos, a) not in engine.failed_transitions
+            ]
+            if (
+                len(viable_displacement_acts) == 1
+                and viable_displacement_acts[0] == next_step.action
+            ):
+                return SafetyGateResult(is_safe=True)
+
         if not has_temporal and engine.inhibited_actions.get(next_step.action, 0) > 0:
             return SafetyGateResult(
                 is_safe=False, reason=f"Action {next_step.action} in refractory inhibition"
@@ -649,6 +694,14 @@ class PrefrontalDeliberationEngine:
             next_step=next_step,
             available_actions=available_actions,
         )
+        if not res.is_safe or res.should_wait:
+            logger.debug(
+                "Plan safety check: is_safe=%s should_wait=%s reason=%s next_act=%s",
+                res.is_safe,
+                res.should_wait,
+                res.reason,
+                next_step.action,
+            )
         return res.is_safe, res.should_wait, res.wait_steps
 
     def arbitrate_affordances(
@@ -836,19 +889,132 @@ class PrefrontalDeliberationEngine:
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
         blocked_cells: set[tuple[int, int]] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
     ) -> tuple[Any, dict[str, Any] | None, tuple[int, int] | None]:
         """Deliberate a new master plan via mental simulation -> macro option -> epistemic probe."""
         chosen_action: Any = None
         chosen_data: dict[str, Any] | None = None
         predicted_pos: tuple[int, int] | None = None
 
-        # 3A. Primary: Forward Mental Simulation over learned dynamics & verified exits
+        # Multi-agent focus switch resolver
+        focus_switch = next(
+            (
+                a
+                for a in available_actions
+                if (engine.is_focus_switch_action(a) or a in engine.focus_switch_actions)
+                and engine.inhibited_actions.get(a, 0) == 0
+                and not engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, a, None
+                )
+            ),
+            None,
+        )
+        has_multi_agent = (
+            getattr(engine, "bilateral_state", None) is not None
+            or getattr(engine, "prior_avatar_feature", None) is not None
+            or len(engine.working_memory.focus_switch_actions) > 0
+            or len(engine.focus_switch_actions) > 0
+        )
+        if focus_switch is None and has_multi_agent:
+            undo_acts = getattr(engine, "undo_actions", set())
+            focus_switch = next(
+                (
+                    a
+                    for a in available_actions
+                    if not engine.is_displacement_action(a)
+                    and not engine.is_spatial_effector(a)
+                    and a not in undo_acts
+                    and engine.inhibited_actions.get(a, 0) == 0
+                    and not engine.working_memory.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, a, None
+                    )
+                ),
+                None,
+            )
+
+        is_at_terminal_goal = bool(
+            engine.avatar_pos is not None
+            and (
+                engine.avatar_pos in engine.goals
+                or engine.avatar_pos in getattr(engine, "learned_goal_positions", set())
+                or (
+                    hasattr(engine.working_memory, "target_constellations")
+                    and any(
+                        (
+                            abs(engine.avatar_pos[0] - pos[0]) <= 1
+                            and abs(engine.avatar_pos[1] - pos[1]) <= 1
+                        )
+                        for f, pos in engine.working_memory.target_constellations.items()
+                        if (
+                            f in engine.avatar_features
+                            if engine.avatar_features
+                            else f == engine.avatar_feature
+                        )
+                        and pos is not None
+                    )
+                )
+            )
+        )
+
+        consecutive_focus_switches = getattr(engine.working_memory, "consecutive_focus_switches", 0)
+        focus_switch_allowed = engine.last_action != focus_switch or consecutive_focus_switches < 4
+
+        # 3A. Multi-Agent Terminal Goal Focus Switch:
+        # If the active agent is already at its terminal goal, do not execute excursions away from the goal.
+        # Immediately hand over control via focus switch.
+        if (
+            chosen_action is None
+            and focus_switch is not None
+            and has_multi_agent
+            and focus_switch_allowed
+            and is_at_terminal_goal
+        ):
+            logger.info(
+                "PrefrontalDeliberationEngine: Intentional Multi-Agent Focus Switch at Terminal Goal via action %s (pos=%s)",
+                focus_switch,
+                engine.avatar_pos,
+            )
+            chosen_action = focus_switch
+            chosen_data = None
+        # 3B1. Discrete Macro-Action Synthesis (Options Framework)
+        if chosen_action is None and engine.is_motor_grounded() and not blocked_cells:
+            synth_plan = MacroPlanSynthesizer.synthesize_plan(
+                engine, curr_grid, available_actions, objects=objects, micro_actions=micro_actions
+            )
+            if synth_plan is not None and not synth_plan.is_empty():
+                engine.working_memory.macro_plan = synth_plan
+                step_res = engine.working_memory.macro_plan.step(
+                    engine, curr_grid, available_actions
+                )
+                if step_res is not None:
+                    chosen_action, chosen_data = step_res
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    return chosen_action, chosen_data, None
+
+        # 3B. Primary: Forward Mental Simulation over learned dynamics & verified exits
         # (Executive Directive 1 & 2: Check if exit is open, if open go through it)
-        if engine.is_motor_grounded() and (engine.simulation_cooldown == 0 or blocked_cells):
+        simulated_plan = None
+        if (
+            chosen_action is None
+            and engine.is_motor_grounded()
+            and (engine.simulation_cooldown == 0 or blocked_cells)
+        ):
             simulated_plan = engine.simulate_in_mind(
                 curr_grid, available_actions, blocked_cells=blocked_cells
             )
-            if simulated_plan:
+            if simulated_plan is not None and len(simulated_plan) == 0:
+                engine.consecutive_simulation_failures = 0
+                engine.simulation_cooldown = 0
+                # Active agent has reached its goal: if multi-agent focus switch is available, trigger handover
+                if focus_switch is not None and has_multi_agent and focus_switch_allowed:
+                    logger.info(
+                        "PrefrontalDeliberationEngine: Multi-agent active avatar reached goal (0 steps). Switching control via %s",
+                        focus_switch,
+                    )
+                    chosen_action = focus_switch
+                    chosen_data = None
+            elif simulated_plan:
                 engine.consecutive_simulation_failures = 0
                 engine.simulation_cooldown = 0
                 engine.phase = EpistemicPhase.EXPLOITATION
@@ -864,8 +1030,17 @@ class PrefrontalDeliberationEngine:
                 elif (
                     plan_safe
                     and next_step.action in available_actions
-                    and not engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, next_step.action, next_step.action_data
+                    and (
+                        getattr(next_step, "is_deterministic_geodesic", False)
+                        or getattr(next_step, "expected_mutation", "")
+                        in (
+                            "topological_geodesic_step",
+                            "geodesic_path_step",
+                            "bilateral_convergence",
+                        )
+                        or not engine.working_memory.habenular_ior.is_action_inhibited(
+                            engine.avatar_pos, next_step.action, next_step.action_data
+                        )
                     )
                 ):
                     chosen_action = next_step.action
@@ -874,6 +1049,11 @@ class PrefrontalDeliberationEngine:
                 else:
                     engine.mental_plan.clear()
                     engine.phase = EpistemicPhase.REPLANNING
+                    engine.consecutive_simulation_failures += 1
+                    engine.simulation_cooldown = min(
+                        12, 2 ** min(engine.consecutive_simulation_failures, 4)
+                    )
+                    engine.working_memory.update_salience_baseline(engine)
             else:
                 engine.consecutive_simulation_failures += 1
                 engine.simulation_cooldown = min(
@@ -881,7 +1061,7 @@ class PrefrontalDeliberationEngine:
                 )
                 engine.working_memory.update_salience_baseline(engine)
 
-        # 3B. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
+        # 3C. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
         # If exit is not open/reachable or in search backoff, interact with intermediate objects
         if chosen_action is None:
             macro_plan = engine.object_planner.plan_macro_option(
@@ -902,31 +1082,20 @@ class PrefrontalDeliberationEngine:
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos
             else:
-                focus_switch = next(
-                    (
-                        a
-                        for a in available_actions
-                        if engine.is_focus_switch_action(a)
-                        and engine.inhibited_actions.get(a, 0) == 0
-                        and not engine.working_memory.habenular_ior.is_action_inhibited(
-                            engine.avatar_pos, a, None
-                        )
-                    ),
-                    None,
-                )
                 if (
                     focus_switch is not None
-                    and getattr(engine, "bilateral_state", None) is not None
-                    and engine.last_action != focus_switch
+                    and has_multi_agent
+                    and focus_switch_allowed
                     and (
                         engine.consecutive_simulation_failures >= 1
                         or getattr(engine, "is_avatar_immobile", False)
                     )
                 ):
                     logger.info(
-                        "PrefrontalDeliberationEngine: Intentional Bilateral Focus Switch via action %s (active agent at %s failed simulation or reached plateau)",
+                        "PrefrontalDeliberationEngine: Intentional Multi-Agent Focus Switch via action %s (active agent at %s failed=%d)",
                         focus_switch,
                         engine.avatar_pos,
+                        engine.consecutive_simulation_failures,
                     )
                     chosen_action = focus_switch
                     chosen_data = None
@@ -939,6 +1108,11 @@ class PrefrontalDeliberationEngine:
                         curr_grid, available_actions
                     )
 
+        if focus_switch is not None and chosen_action == focus_switch:
+            engine.working_memory.consecutive_focus_switches = consecutive_focus_switches + 1
+        else:
+            engine.working_memory.consecutive_focus_switches = 0
+
         return chosen_action, chosen_data, predicted_pos
 
     def decide(
@@ -949,6 +1123,9 @@ class PrefrontalDeliberationEngine:
         is_win: bool = False,
         is_lost: bool = False,
         action_schemas: Sequence[Any] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+        macro_actions: Sequence[Any] | None = None,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Unified cognitive decision function:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
@@ -956,6 +1133,14 @@ class PrefrontalDeliberationEngine:
         engine.step_counter += 1
         if action_schemas:
             engine.register_action_space(action_schemas)
+        if objects or micro_actions:
+            from hbllm.hcir.world.macro_actions import MacroPlanSynthesizer
+
+            MacroPlanSynthesizer.ingest_knowledge(
+                engine, objects=objects, micro_actions=micro_actions
+            )
+        if macro_actions:
+            engine.working_memory.macro_plan.extend(macro_actions)
 
         curr_grid = engine.normalize_sensory_input(curr_grid)
 
@@ -1088,14 +1273,22 @@ class PrefrontalDeliberationEngine:
             # planned by the prefrontal cortex must not be aborted as an unintentional deadlock
             # if the active mental plan progresses to novel coordinates beyond the cyclic positions.
             if engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
-                cyclic_positions = set(list(engine.acc_conflict_monitor.position_history)[-4:])
-                future_plan_positions = {
-                    s.predicted_avatar_pos
-                    for s in engine.mental_plan
-                    if s.predicted_avatar_pos is not None
-                }
-                if any(p not in cyclic_positions for p in future_plan_positions):
-                    is_osc = False
+                pos_hist = list(engine.acc_conflict_monitor.position_history)
+                if len(pos_hist) >= 4:
+                    cyclic_positions = set(pos_hist[-4:])
+                    is_true_bounce = (
+                        len(cyclic_positions) <= 2
+                        and pos_hist[-1] == pos_hist[-3]
+                        and pos_hist[-2] == pos_hist[-4]
+                    )
+                    if not is_true_bounce:
+                        future_plan_positions = {
+                            s.predicted_avatar_pos
+                            for s in engine.mental_plan
+                            if s.predicted_avatar_pos is not None
+                        }
+                        if any(p not in cyclic_positions for p in future_plan_positions):
+                            is_osc = False
         if is_osc:
             for cyc_a in cyclic_acts:
                 engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
@@ -1150,6 +1343,7 @@ class PrefrontalDeliberationEngine:
             span_r = max_r - min_r
             span_c = max_c - min_c
             if span_r <= 3 and span_c <= 3:
+                # Metacognitive Executive Control: Spatial cluster deadlock detected
                 logger.warning(
                     "Metacognitive Executive Control: Spatial cluster deadlock detected in %dx%d area over 30 steps. Triggering cluster breakoff.",
                     span_r + 1,
@@ -1159,12 +1353,8 @@ class PrefrontalDeliberationEngine:
                     engine.mental_plan.clear()
                     engine.current_simulated_goal = None
 
-                # Inhibit recent actions executed within this stagnant cluster
-                recent_acts = list(engine.recent_actions)[-10:]
-                for act_used in set(recent_acts):
-                    engine.inhibited_actions[act_used] = max(
-                        engine.inhibited_actions.get(act_used, 0), 10
-                    )
+                # Reset stagnant position history so deadlock check does not repeatedly fire on consecutive frames
+                engine.recent_positions.clear()
 
                 bg_feat = getattr(engine, "background_feature", 0)
                 bg_void = getattr(engine, "background_is_impassable_void", False)
@@ -1183,13 +1373,102 @@ class PrefrontalDeliberationEngine:
                     bg=bg_feat,
                     bg_is_impassable_void=bg_void,
                 )
+
+                # Fallback if BFS escape failed: deliberately choose displacement action that maximizes
+                # distance outward from cluster center and minimizes visits, avoiding lethal features.
+                if esc_act is None and disp_acts and engine.avatar_pos is not None:
+                    cluster_center_r = (min_r + max_r) / 2.0
+                    cluster_center_c = (min_c + max_c) / 2.0
+                    best_cand: int | None = None
+                    best_cand_score = -float("inf")
+
+                    for cand_a, (dr, dc) in disp_acts:
+                        nr = engine.avatar_pos[0] + dr
+                        nc = engine.avatar_pos[1] + dc
+                        if not (0 <= nr < H and 0 <= nc < W):
+                            continue
+                        dest_feat = int(curr_grid[nr, nc])
+                        if dest_feat in engine.hazard_tracker.known_lethal_features:
+                            continue
+                        if engine.collision_cones.is_collision_hazard(nr, nc, 1):
+                            continue
+
+                        # Score candidate: outward displacement from cluster center, lower visit count, lower failure count
+                        dist_from_center = abs(nr - cluster_center_r) + abs(nc - cluster_center_c)
+                        pos_visits = engine.position_visit_counts.get((nr, nc), 0)
+                        is_failed = (engine.avatar_pos, cand_a) in engine.failed_transitions
+                        fail_penalty = 50.0 if is_failed else 0.0
+
+                        score = (dist_from_center * 10.0) - (pos_visits * 2.0) - fail_penalty
+                        if score > best_cand_score:
+                            best_cand_score = score
+                            best_cand = cand_a
+
+                    if best_cand is not None:
+                        esc_act = best_cand
+
                 if esc_act is not None:
                     forced_acc_perturbation = esc_act
+                    # Ensure chosen escape action is NOT inhibited
+                    engine.inhibited_actions.pop(esc_act, None)
+
+                    # Inhibit the OTHER recent actions executed within this stagnant cluster
+                    recent_acts = list(engine.recent_actions)[-10:]
+                    for act_used in set(recent_acts):
+                        if act_used != esc_act:
+                            engine.inhibited_actions[act_used] = max(
+                                engine.inhibited_actions.get(act_used, 0), 10
+                            )
                 else:
-                    engine.transition_to_phase(
-                        EpistemicPhase.REPLANNING,
-                        reason="spatial_cluster_deadlock_breakoff",
+                    # Anterior Cingulate Cortex (ACC) Conflict Resolution:
+                    # When calibrated displacement escape is unavailable (e.g. manipulandum mode,
+                    # click space deadlock, or uncalibrated actions in games like CN04, M0R0, SC25),
+                    # identify the dominant stagnant action(s) and forcibly perturb to an orthogonal
+                    # uncalibrated or least-recently executed action from available_actions.
+                    recent_acts = list(engine.recent_actions)[-10:]
+                    cluster_act_counts = Counter(recent_acts)
+                    stagnant_act = (
+                        cluster_act_counts.most_common(1)[0][0] if cluster_act_counts else None
                     )
+                    if stagnant_act is not None:
+                        engine.inhibited_actions[stagnant_act] = max(
+                            engine.inhibited_actions.get(stagnant_act, 0), 8
+                        )
+                    undo_acts = set(getattr(engine, "undo_actions", set()))
+                    if hasattr(engine, "symbolic_theory") and hasattr(
+                        engine.symbolic_theory, "undo_actions"
+                    ):
+                        undo_acts.update(engine.symbolic_theory.undo_actions)
+                    cand_orthogonal = [
+                        a
+                        for a in available_actions
+                        if a != stagnant_act
+                        and a not in undo_acts
+                        and engine.inhibited_actions.get(a, 0) == 0
+                    ]
+                    if cand_orthogonal:
+                        recent_list = list(engine.recent_actions)
+
+                        def _orth_key(a: Any) -> int:
+                            try:
+                                return recent_list.index(a)
+                            except ValueError:
+                                return -1
+
+                        cand_orthogonal.sort(key=_orth_key)
+                        chosen_orth = cand_orthogonal[0]
+                        forced_acc_perturbation = chosen_orth
+                        engine.inhibited_actions.pop(chosen_orth, None)
+                        logger.info(
+                            "Anterior Cingulate Cortex (ACC): Resolving non-displacement cluster deadlock by inhibiting %s and selecting orthogonal perturbation action %s",
+                            stagnant_act,
+                            chosen_orth,
+                        )
+                    else:
+                        engine.transition_to_phase(
+                            EpistemicPhase.REPLANNING,
+                            reason="spatial_cluster_deadlock_breakoff",
+                        )
 
         # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
         acc_death_conflict = getattr(engine.working_memory, "acc_conflict", None)
@@ -1315,15 +1594,41 @@ class PrefrontalDeliberationEngine:
             chosen_action = forced_acc_perturbation
             chosen_data = None
 
-        # 1. Check active mental plan during EXPLOITATION phase
+        # 1. Macro-Action Plan Execution (Discrete Operators: NavigateTo, InteractWith, PickUpCargo, etc.)
+        elif (
+            hasattr(engine.working_memory, "macro_plan")
+            and not engine.working_memory.macro_plan.is_empty()
+            and (
+                macro_step := engine.working_memory.macro_plan.step(
+                    engine, curr_grid, available_actions
+                )
+            )
+            is not None
+        ):
+            chosen_action, chosen_data = macro_step
+            engine.phase = EpistemicPhase.EXPLOITATION
+
+        # 2. Check active mental plan during EXPLOITATION phase
         elif engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
             # Check for physical plan divergence: avatar failed to reach predicted location
             diverged = False
+            if (
+                engine.is_focus_switch_action(engine.last_action)
+                or engine.last_action in getattr(engine, "focus_switch_actions", set())
+                or engine.last_action
+                in getattr(getattr(engine, "working_memory", None), "focus_switch_actions", set())
+            ):
+                engine.last_predicted_pos = None
+
             if engine.last_predicted_pos is not None and engine.avatar_pos is not None:
                 dr_err = abs(engine.avatar_pos[0] - engine.last_predicted_pos[0])
                 dc_err = abs(engine.avatar_pos[1] - engine.last_predicted_pos[1])
                 stride = max(1, getattr(engine, "lattice_stride", 1) or 1)
-                max_tol = 1 if stride > 2 else 0
+                av_sz = getattr(engine, "avatar_size", 1) or 1
+                max_tol = max(
+                    1 if stride > 2 else 0,
+                    int(round(np.sqrt(av_sz) / 2)) if av_sz > 1 else 0,
+                )
                 if dr_err > max_tol or dc_err > max_tol:
                     diverged = True
 
@@ -1361,9 +1666,15 @@ class PrefrontalDeliberationEngine:
                     chosen_action, chosen_data, predicted_pos = self._deliberate_master_plan(
                         engine, curr_grid, available_actions, blocked_cells=danger_cells
                     )
-                elif (
-                    next_step.action in available_actions
-                    and not engine.working_memory.habenular_ior.is_action_inhibited(
+                elif next_step.action in available_actions and (
+                    getattr(next_step, "is_deterministic_geodesic", False)
+                    or getattr(next_step, "expected_mutation", "")
+                    in (
+                        "topological_geodesic_step",
+                        "geodesic_path_step",
+                        "bilateral_convergence",
+                    )
+                    or not engine.working_memory.habenular_ior.is_action_inhibited(
                         engine.avatar_pos, next_step.action, next_step.action_data
                     )
                 ):
@@ -1386,12 +1697,17 @@ class PrefrontalDeliberationEngine:
             )
         ) is not None:
             chosen_action, chosen_data = affordance_choice
-            engine.inhibited_actions.pop(chosen_action, None)
+            if not engine.is_spatial_effector(chosen_action):
+                engine.inhibited_actions.pop(chosen_action, None)
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
             chosen_action, chosen_data, predicted_pos = self._deliberate_master_plan(
-                engine, curr_grid, available_actions
+                engine,
+                curr_grid,
+                available_actions,
+                objects=objects,
+                micro_actions=micro_actions,
             )
 
         # Effector Grounding Invariant
@@ -1451,6 +1767,14 @@ class PrefrontalDeliberationEngine:
         engine.last_action = chosen_action
         engine.last_action_data = chosen_data
         engine.last_predicted_pos = predicted_pos
+        if engine.is_spatial_effector(chosen_action) and isinstance(chosen_data, dict):
+            raw_r = chosen_data.get("y", chosen_data.get("r", chosen_data.get("row")))
+            raw_c = chosen_data.get("x", chosen_data.get("c", chosen_data.get("col")))
+            if raw_r is not None and raw_c is not None:
+                if hasattr(engine, "working_memory") and hasattr(
+                    engine.working_memory, "record_effector_coord"
+                ):
+                    engine.working_memory.record_effector_coord((int(raw_r), int(raw_c)))
         return chosen_action, chosen_data
 
     @classmethod

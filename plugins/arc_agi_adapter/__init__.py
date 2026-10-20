@@ -4,6 +4,12 @@ from hbllm.hcir.world.percept import PerceptionRegistry
 
 from .arc_driver import ARC3Driver, ArcadeDriver
 from .arc_evaluator import ARCBenchmarkRunner, ARCTaskAdapter
+from .arc_macro_actions import (
+    ArcClickCell,
+    ToggleSwitch,
+    arc_macro_plan_synthesis_hook,
+    register_arc_macro_actions,
+)
 from .arc_perception import ARCPerceptionAdapter
 from .solvers import (
     ARC3ArchetypeScorer,
@@ -23,6 +29,9 @@ from .solvers import (
 # Register plugin adapter into core registry
 PerceptionRegistry.register("arc_agi", ARCPerceptionAdapter(), set_default=True)
 
+# Register ARC domain macro actions and driver hooks into Core MacroActionDriverManager
+register_arc_macro_actions()
+
 __all__ = [
     "ARC3Driver",
     "ArcadeDriver",
@@ -41,4 +50,8 @@ __all__ = [
     "TrackMazeSolver",
     "MirroredConvergenceSolver",
     "GravitySpillingPlatformSolver",
+    "ToggleSwitch",
+    "ArcClickCell",
+    "arc_macro_plan_synthesis_hook",
+    "register_arc_macro_actions",
 ]
