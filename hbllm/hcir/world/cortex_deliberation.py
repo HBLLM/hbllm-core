@@ -16,7 +16,6 @@ and striatal gating:
 """
 
 import logging
-import math
 from abc import ABC, abstractmethod
 from collections import Counter, deque
 from collections.abc import Sequence
@@ -883,6 +882,185 @@ class PrefrontalDeliberationEngine:
         act, data = engine.plan_epistemic_probe(curr_grid, available_actions)
         return act, data, None
 
+    def _detect_and_resolve_acc_conflict(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> Any | None:
+        """Detect limit-cycle oscillations and select orthogonal perturbation action."""
+        engine.acc_conflict_monitor.record_step(engine.last_action, engine.avatar_pos)
+        is_osc, cyclic_acts = engine.acc_conflict_monitor.detect_oscillation()
+        if not is_osc:
+            return None
+
+        # In cognitive architecture, an intentional temporal wait/dodge maneuver
+        # planned by the prefrontal cortex must not be aborted as an unintentional deadlock
+        # if the active mental plan progresses to novel coordinates beyond the cyclic positions.
+        if engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
+            pos_hist = list(engine.acc_conflict_monitor.position_history)
+            if len(pos_hist) >= 4:
+                cyclic_positions = set(pos_hist[-4:])
+                is_true_bounce = (
+                    len(cyclic_positions) <= 2
+                    and pos_hist[-1] == pos_hist[-3]
+                    and pos_hist[-2] == pos_hist[-4]
+                )
+                if not is_true_bounce:
+                    future_plan_positions = {
+                        s.predicted_avatar_pos
+                        for s in engine.mental_plan
+                        if s.predicted_avatar_pos is not None
+                    }
+                    if any(p not in cyclic_positions for p in future_plan_positions):
+                        return None
+
+        for cyc_a in cyclic_acts:
+            engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
+        engine.mental_plan.clear()
+
+        from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
+
+        ortho_acts = ACCConflictMonitor.get_orthogonal_actions(
+            available_actions=available_actions,
+            cyclic_actions=cyclic_acts,
+            action_dynamics=engine.action_dynamics,
+        )
+        H, W = curr_grid.shape
+        for cand_a in ortho_acts:
+            if engine.inhibited_actions.get(cand_a, 0) > 0:
+                continue
+            if (engine.avatar_pos, cand_a) in engine.failed_transitions:
+                continue
+            dyn = engine.action_dynamics.get(cand_a)
+            if dyn is not None and dyn.is_displacement_action():
+                dr, dc = dyn.get_displacement()
+                if engine.avatar_pos is not None:
+                    nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    if (nr, nc) in engine.hazard_tracker.static_lethal_positions:
+                        continue
+                    if (nr, nc) in engine.learned_barriers:
+                        continue
+                    feat_at_dest = int(curr_grid[nr, nc])
+                    if feat_at_dest in engine.hazard_tracker.known_lethal_features:
+                        continue
+                    return cand_a
+            else:
+                return cand_a
+        return None
+
+    def _resolve_cluster_deadlock(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> Any | None:
+        """Resolve spatial cluster or motor stagnation deadlocks when avatar is confined over 30 steps."""
+        if engine.avatar_pos is None or len(engine.recent_positions) < 30:
+            return None
+        H, W = curr_grid.shape
+        if H <= 5 and W <= 5:
+            return None
+
+        recent_cluster = list(engine.recent_positions)[-30:]
+        min_r = min(p[0] for p in recent_cluster)
+        max_r = max(p[0] for p in recent_cluster)
+        min_c = min(p[1] for p in recent_cluster)
+        max_c = max(p[1] for p in recent_cluster)
+        span_r, span_c = max_r - min_r, max_c - min_c
+        if span_r > 3 or span_c > 3:
+            return None
+
+        logger.warning(
+            "Metacognitive Executive Control: Spatial cluster deadlock detected in %dx%d area over 30 steps. Triggering breakoff.",
+            span_r + 1,
+            span_c + 1,
+        )
+        if engine.mental_plan:
+            engine.mental_plan.clear()
+            engine.current_simulated_goal = None
+        engine.recent_positions.clear()
+
+        # Try frontier escape via calibrated displacement actions
+        disp_acts = [
+            (a, engine.action_dynamics[a].get_displacement())
+            for a in available_actions
+            if a in engine.action_dynamics and engine.action_dynamics[a].is_displacement_action()
+        ]
+        esc_act: Any | None = None
+        if disp_acts and engine.avatar_pos is not None:
+            cluster_center_r = (min_r + max_r) / 2.0
+            cluster_center_c = (min_c + max_c) / 2.0
+            best_cand: Any | None = None
+            best_cand_score = -float("inf")
+            for cand_a, (dr, dc) in disp_acts:
+                nr = engine.avatar_pos[0] + dr
+                nc = engine.avatar_pos[1] + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+                dest_feat = int(curr_grid[nr, nc])
+                if dest_feat in engine.hazard_tracker.known_lethal_features:
+                    continue
+                if engine.collision_cones.is_collision_hazard(nr, nc, 1):
+                    continue
+                dist_from_center = abs(nr - cluster_center_r) + abs(nc - cluster_center_c)
+                pos_visits = engine.position_visit_counts.get((nr, nc), 0)
+                is_failed = (engine.avatar_pos, cand_a) in engine.failed_transitions
+                fail_penalty = 50.0 if is_failed else 0.0
+                score = (dist_from_center * 10.0) - (pos_visits * 2.0) - fail_penalty
+                if score > best_cand_score:
+                    best_cand_score = score
+                    best_cand = cand_a
+            esc_act = best_cand
+
+        if esc_act is not None:
+            engine.inhibited_actions.pop(esc_act, None)
+            recent_acts = list(engine.recent_actions)[-10:]
+            for act_used in set(recent_acts):
+                if act_used != esc_act:
+                    engine.inhibited_actions[act_used] = max(
+                        engine.inhibited_actions.get(act_used, 0), 10
+                    )
+            return esc_act
+
+        # Non-displacement / uncalibrated actions
+        recent_acts = list(engine.recent_actions)[-10:]
+        cluster_act_counts = Counter(recent_acts)
+        stagnant_act = cluster_act_counts.most_common(1)[0][0] if cluster_act_counts else None
+        if stagnant_act is not None:
+            engine.inhibited_actions[stagnant_act] = max(
+                engine.inhibited_actions.get(stagnant_act, 0), 8
+            )
+        undo_acts = set(getattr(engine, "undo_actions", set()))
+        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
+            undo_acts.update(engine.symbolic_theory.undo_actions)
+        cand_orthogonal = [
+            a
+            for a in available_actions
+            if a != stagnant_act and a not in undo_acts and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if cand_orthogonal:
+            recent_list = list(engine.recent_actions)
+
+            def _orth_key(a: Any) -> int:
+                try:
+                    return recent_list.index(a)
+                except ValueError:
+                    return -1
+
+            cand_orthogonal.sort(key=_orth_key)
+            chosen_orth = cand_orthogonal[0]
+            engine.inhibited_actions.pop(chosen_orth, None)
+            logger.info(
+                "Anterior Cingulate Cortex (ACC): Resolving non-displacement cluster deadlock by inhibiting %s and selecting orthogonal perturbation action %s",
+                stagnant_act,
+                chosen_orth,
+            )
+            return chosen_orth
+        return None
+
     def _deliberate_master_plan(
         self,
         engine: AutonomousEpistemicEngine,
@@ -1265,267 +1443,13 @@ class PrefrontalDeliberationEngine:
                     )
 
         # Faculty: Anterior Cingulate Cortex (ACC) Limit Cycle & Conflict Suppression
-        forced_acc_perturbation: Any | None = None
-        engine.acc_conflict_monitor.record_step(engine.last_action, engine.avatar_pos)
-        is_osc, cyclic_acts = engine.acc_conflict_monitor.detect_oscillation()
-        if is_osc:
-            # In cognitive architecture, an intentional temporal wait/dodge maneuver
-            # planned by the prefrontal cortex must not be aborted as an unintentional deadlock
-            # if the active mental plan progresses to novel coordinates beyond the cyclic positions.
-            if engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
-                pos_hist = list(engine.acc_conflict_monitor.position_history)
-                if len(pos_hist) >= 4:
-                    cyclic_positions = set(pos_hist[-4:])
-                    is_true_bounce = (
-                        len(cyclic_positions) <= 2
-                        and pos_hist[-1] == pos_hist[-3]
-                        and pos_hist[-2] == pos_hist[-4]
-                    )
-                    if not is_true_bounce:
-                        future_plan_positions = {
-                            s.predicted_avatar_pos
-                            for s in engine.mental_plan
-                            if s.predicted_avatar_pos is not None
-                        }
-                        if any(p not in cyclic_positions for p in future_plan_positions):
-                            is_osc = False
-        if is_osc:
-            for cyc_a in cyclic_acts:
-                engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
-            engine.mental_plan.clear()
-            from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
-
-            ortho_acts = ACCConflictMonitor.get_orthogonal_actions(
-                available_actions=available_actions,
-                cyclic_actions=cyclic_acts,
-                action_dynamics=engine.action_dynamics,
+        forced_acc_perturbation = self._detect_and_resolve_acc_conflict(
+            engine, curr_grid, available_actions
+        )
+        if forced_acc_perturbation is None:
+            forced_acc_perturbation = self._resolve_cluster_deadlock(
+                engine, curr_grid, available_actions
             )
-            H, W = curr_grid.shape
-            for cand_a in ortho_acts:
-                if engine.inhibited_actions.get(cand_a, 0) > 0:
-                    continue
-                if (engine.avatar_pos, cand_a) in engine.failed_transitions:
-                    continue
-                dyn = engine.action_dynamics.get(cand_a)
-                if dyn is not None and dyn.is_displacement_action():
-                    dr, dc = dyn.get_displacement()
-                    if engine.avatar_pos is not None:
-                        nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        if (nr, nc) in engine.hazard_tracker.static_lethal_positions:
-                            continue
-                        if (nr, nc) in engine.learned_barriers:
-                            continue
-                        feat_at_dest = int(curr_grid[nr, nc])
-                        if feat_at_dest in engine.hazard_tracker.known_lethal_features:
-                            continue
-                        forced_acc_perturbation = cand_a
-                        break
-                else:
-                    forced_acc_perturbation = cand_a
-                    break
-
-        # Metacognitive Spatial Cluster Deadlock / Stagnation Breakoff:
-        # If the avatar has spent 30+ steps confined within a tiny spatial bounding box (<= 3x3)
-        # without achieving goals or leaving the cluster, break off immediately.
-        if (
-            forced_acc_perturbation is None
-            and engine.avatar_pos is not None
-            and len(engine.recent_positions) >= 30
-            and (H > 5 or W > 5)
-        ):
-            recent_cluster = list(engine.recent_positions)[-30:]
-            min_r = min(p[0] for p in recent_cluster)
-            max_r = max(p[0] for p in recent_cluster)
-            min_c = min(p[1] for p in recent_cluster)
-            max_c = max(p[1] for p in recent_cluster)
-            span_r = max_r - min_r
-            span_c = max_c - min_c
-            if span_r <= 3 and span_c <= 3:
-                # Metacognitive Executive Control: Spatial cluster deadlock detected
-                logger.warning(
-                    "Metacognitive Executive Control: Spatial cluster deadlock detected in %dx%d area over 30 steps. Triggering cluster breakoff.",
-                    span_r + 1,
-                    span_c + 1,
-                )
-                if engine.mental_plan:
-                    engine.mental_plan.clear()
-                    engine.current_simulated_goal = None
-
-                # Reset stagnant position history so deadlock check does not repeatedly fire on consecutive frames
-                engine.recent_positions.clear()
-
-                bg_feat = getattr(engine, "background_feature", 0)
-                bg_void = getattr(engine, "background_is_impassable_void", False)
-                disp_acts = [
-                    (a, engine.action_dynamics[a].get_displacement())
-                    for a in available_actions
-                    if a in engine.action_dynamics
-                    and engine.action_dynamics[a].is_displacement_action()
-                ]
-                from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
-
-                esc_act = EpistemicCuriosityExplorer._probe_frontier_escape(
-                    engine=engine,
-                    curr_grid=curr_grid,
-                    disp_actions=disp_acts,
-                    bg=bg_feat,
-                    bg_is_impassable_void=bg_void,
-                )
-
-                # Fallback if BFS escape failed: deliberately choose displacement action that maximizes
-                # distance outward from cluster center and minimizes visits, avoiding lethal features.
-                if esc_act is None and disp_acts and engine.avatar_pos is not None:
-                    cluster_center_r = (min_r + max_r) / 2.0
-                    cluster_center_c = (min_c + max_c) / 2.0
-                    best_cand: int | None = None
-                    best_cand_score = -float("inf")
-
-                    for cand_a, (dr, dc) in disp_acts:
-                        nr = engine.avatar_pos[0] + dr
-                        nc = engine.avatar_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        dest_feat = int(curr_grid[nr, nc])
-                        if dest_feat in engine.hazard_tracker.known_lethal_features:
-                            continue
-                        if engine.collision_cones.is_collision_hazard(nr, nc, 1):
-                            continue
-
-                        # Score candidate: outward displacement from cluster center, lower visit count, lower failure count
-                        dist_from_center = abs(nr - cluster_center_r) + abs(nc - cluster_center_c)
-                        pos_visits = engine.position_visit_counts.get((nr, nc), 0)
-                        is_failed = (engine.avatar_pos, cand_a) in engine.failed_transitions
-                        fail_penalty = 50.0 if is_failed else 0.0
-
-                        score = (dist_from_center * 10.0) - (pos_visits * 2.0) - fail_penalty
-                        if score > best_cand_score:
-                            best_cand_score = score
-                            best_cand = cand_a
-
-                    if best_cand is not None:
-                        esc_act = best_cand
-
-                if esc_act is not None:
-                    forced_acc_perturbation = esc_act
-                    # Ensure chosen escape action is NOT inhibited
-                    engine.inhibited_actions.pop(esc_act, None)
-
-                    # Inhibit the OTHER recent actions executed within this stagnant cluster
-                    recent_acts = list(engine.recent_actions)[-10:]
-                    for act_used in set(recent_acts):
-                        if act_used != esc_act:
-                            engine.inhibited_actions[act_used] = max(
-                                engine.inhibited_actions.get(act_used, 0), 10
-                            )
-                else:
-                    # Anterior Cingulate Cortex (ACC) Conflict Resolution:
-                    # When calibrated displacement escape is unavailable (e.g. manipulandum mode,
-                    # click space deadlock, or uncalibrated actions in games like CN04, M0R0, SC25),
-                    # identify the dominant stagnant action(s) and forcibly perturb to an orthogonal
-                    # uncalibrated or least-recently executed action from available_actions.
-                    recent_acts = list(engine.recent_actions)[-10:]
-                    cluster_act_counts = Counter(recent_acts)
-                    stagnant_act = (
-                        cluster_act_counts.most_common(1)[0][0] if cluster_act_counts else None
-                    )
-                    if stagnant_act is not None:
-                        engine.inhibited_actions[stagnant_act] = max(
-                            engine.inhibited_actions.get(stagnant_act, 0), 8
-                        )
-                    undo_acts = set(getattr(engine, "undo_actions", set()))
-                    if hasattr(engine, "symbolic_theory") and hasattr(
-                        engine.symbolic_theory, "undo_actions"
-                    ):
-                        undo_acts.update(engine.symbolic_theory.undo_actions)
-                    cand_orthogonal = [
-                        a
-                        for a in available_actions
-                        if a != stagnant_act
-                        and a not in undo_acts
-                        and engine.inhibited_actions.get(a, 0) == 0
-                    ]
-                    if cand_orthogonal:
-                        recent_list = list(engine.recent_actions)
-
-                        def _orth_key(a: Any) -> int:
-                            try:
-                                return recent_list.index(a)
-                            except ValueError:
-                                return -1
-
-                        cand_orthogonal.sort(key=_orth_key)
-                        chosen_orth = cand_orthogonal[0]
-                        forced_acc_perturbation = chosen_orth
-                        engine.inhibited_actions.pop(chosen_orth, None)
-                        logger.info(
-                            "Anterior Cingulate Cortex (ACC): Resolving non-displacement cluster deadlock by inhibiting %s and selecting orthogonal perturbation action %s",
-                            stagnant_act,
-                            chosen_orth,
-                        )
-                    else:
-                        engine.transition_to_phase(
-                            EpistemicPhase.REPLANNING,
-                            reason="spatial_cluster_deadlock_breakoff",
-                        )
-
-        # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
-        acc_death_conflict = getattr(engine.working_memory, "acc_conflict", None)
-        if acc_death_conflict is not None and getattr(acc_death_conflict, "active_conflict", False):
-            c_radius = float(getattr(acc_death_conflict, "cluster_radius", 3.0))
-            # Invalidate any active plans routing into failure clusters
-            if engine.mental_plan:
-                for cl in acc_death_conflict.clusters:
-                    if cl.count >= 2:
-                        for step_s in engine.mental_plan:
-                            if step_s.predicted_avatar_pos is not None:
-                                pr, pc = step_s.predicted_avatar_pos
-                                if math.hypot(pr - cl.center_r, pc - cl.center_c) <= c_radius:
-                                    engine.mental_plan.clear()
-                                    engine.current_simulated_goal = None
-                                    break
-                            if not engine.mental_plan:
-                                break
-
-            # Mark death cluster cells as static lethal hazards to force topological detours
-            for cl in acc_death_conflict.clusters:
-                if cl.count >= 2:
-                    cr_int, cc_int = int(round(cl.center_r)), int(round(cl.center_c))
-                    rad_int = int(math.ceil(c_radius))
-                    for dr_c in range(-rad_int, rad_int + 1):
-                        for dc_c in range(-rad_int, rad_int + 1):
-                            if math.hypot(dr_c, dc_c) <= c_radius:
-                                lr, lc = cr_int + dr_c, cc_int + dc_c
-                                if 0 <= lr < curr_grid.shape[0] and 0 <= lc < curr_grid.shape[1]:
-                                    engine.hazard_tracker.static_lethal_positions.add((lr, lc))
-                                    cell_f = int(curr_grid[lr, lc])
-                                    if cell_f in engine.symbolic_theory.goal_features:
-                                        engine.symbolic_theory.goal_features.discard(cell_f)
-                                        engine.hazard_tracker.known_lethal_features.add(cell_f)
-                                        logger.warning(
-                                            "ACC Metacognitive Shift: Inverted hypothesis for feature %d (GOAL -> LETHAL) due to death cluster at (%d, %d)",
-                                            cell_f,
-                                            lr,
-                                            lc,
-                                        )
-
-            # Invalidate deadlocked subgoals in FrontopolarSubgoalStack if they target conflict zones
-            if engine.subgoal_stack.has_pending_goals:
-                cur_sg = engine.subgoal_stack.current_subgoal
-                if cur_sg is not None:
-                    target = cur_sg.target_entity_pos or cur_sg.target_destination
-                    if target and acc_death_conflict.is_in_conflict_zone(target):
-                        logger.warning(
-                            "ACC Metacognitive Gating: Aborting deadlocked subgoal %s targeting conflict zone %s",
-                            cur_sg.subgoal_id,
-                            target,
-                        )
-                        engine.subgoal_stack.clear_subgoals()
-                        engine.transition_to_phase(
-                            EpistemicPhase.REPLANNING,
-                            reason="acc_subgoal_conflict_abort",
-                        )
 
         # Visual avatar localization
         known_av_feats = set(engine.avatar_features) if engine.avatar_features else set()
