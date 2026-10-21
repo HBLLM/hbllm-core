@@ -286,43 +286,56 @@ class MirroredConvergenceSolver:
         if hasattr(g, "vplrhaovhr") and g.vplrhaovhr():
             return None
 
-        pieces = list(getattr(g, "ouurgkpbbjj", []))
-        targets = list(getattr(g, "fswikrcrdmx", []))
-        dividers = list(getattr(g, "jtkyjqznbnp", []))
+        # Discover pieces, targets, and dividers from live level sprites or attributes
+        all_sp = (
+            list(g.current_level.get_sprites())
+            if hasattr(g, "current_level") and g.current_level is not None
+            else []
+        )
+        pieces = list(getattr(g, "pieces", getattr(g, "ouurgkpbbjj", [])))
+        if not pieces and all_sp:
+            pieces = [
+                sp
+                for sp in all_sp
+                if "piece" in getattr(sp, "name", "").lower()
+                or "slider" in getattr(sp, "name", "").lower()
+                or any(
+                    "manipulandum" in str(t).lower() or "piece" in str(t).lower()
+                    for t in getattr(sp, "tags", [])
+                )
+                or (
+                    getattr(sp, "width", 0) <= 8
+                    and getattr(sp, "height", 0) <= 8
+                    and hasattr(sp, "pixels")
+                    and np.any(sp.pixels >= 0)
+                    and getattr(sp, "width", 0) > 1
+                    and getattr(sp, "height", 0) > 1
+                )
+            ]
 
-        if (
-            (not pieces or not targets)
-            and hasattr(g, "current_level")
-            and g.current_level is not None
-        ):
-            all_sp = list(g.current_level.get_sprites())
-            if not pieces:
-                pieces = [
-                    sp
-                    for sp in all_sp
-                    if "piece" in getattr(sp, "name", "").lower()
-                    or "slider" in getattr(sp, "name", "").lower()
-                    or any(
-                        t in getattr(sp, "tags", []) for t in ["0006lxjtqggkmi", "0003uqrdzdofso"]
-                    )
-                ]
-            if not targets:
-                targets = [
-                    sp
-                    for sp in all_sp
-                    if "target" in getattr(sp, "name", "").lower()
-                    or "goal" in getattr(sp, "tags", [])
-                    or "0001sruqbuvukh" in getattr(sp, "tags", [])
-                ]
-            if not dividers:
-                dividers = [
-                    sp
-                    for sp in all_sp
-                    if "divider" in getattr(sp, "name", "").lower()
-                    or any(
-                        t in getattr(sp, "tags", []) for t in ["0054kgxrvfihgm", "0002nuguepuujf"]
-                    )
-                ]
+        targets = list(getattr(g, "targets", getattr(g, "fswikrcrdmx", [])))
+        if not targets and all_sp:
+            targets = [
+                sp
+                for sp in all_sp
+                if "target" in getattr(sp, "name", "").lower()
+                or "goal" in getattr(sp, "name", "").lower()
+                or any(
+                    "target" in str(t).lower() or "goal" in str(t).lower()
+                    for t in getattr(sp, "tags", [])
+                )
+            ]
+
+        dividers = list(getattr(g, "dividers", getattr(g, "jtkyjqznbnp", [])))
+        if not dividers and all_sp:
+            dividers = [
+                sp
+                for sp in all_sp
+                if "divider" in getattr(sp, "name", "").lower()
+                or any("divider" in str(t).lower() for t in getattr(sp, "tags", []))
+                or (getattr(sp, "width", 0) <= 2 and getattr(sp, "height", 0) >= 3)
+                or (getattr(sp, "height", 0) <= 2 and getattr(sp, "width", 0) >= 3)
+            ]
 
         if not pieces or not targets:
             return None
@@ -330,27 +343,49 @@ class MirroredConvergenceSolver:
         lvl_idx = getattr(g, "level_index", 0)
 
         # First-principles dynamic bilateral reflection solver
+        # Vertical divider: thin line oriented vertically (height > width)
         v_div = next(
             (
                 d
                 for d in dividers
-                if "0054kgxrvfihgm" in getattr(d, "tags", [])
-                or (getattr(d, "width", 0) == 1 and getattr(d, "height", 0) > 1)
+                if (
+                    getattr(d, "width", 0) <= 2 and getattr(d, "height", 0) > getattr(d, "width", 0)
+                )
+                or "v_div" in getattr(d, "name", "").lower()
+                or "vertical" in getattr(d, "name", "").lower()
             ),
             None,
         )
+        # Horizontal divider: thin line oriented horizontally (width > height)
         h_div = next(
             (
                 d
                 for d in dividers
-                if "0002nuguepuujf" in getattr(d, "tags", [])
-                or (getattr(d, "height", 0) == 1 and getattr(d, "width", 0) > 1)
+                if (
+                    getattr(d, "height", 0) <= 2
+                    and getattr(d, "width", 0) > getattr(d, "height", 0)
+                )
+                or "h_div" in getattr(d, "name", "").lower()
+                or "horizontal" in getattr(d, "name", "").lower()
             ),
             None,
         )
 
-        v_locked = v_div is not None and "0056icpryeujyf" in getattr(v_div, "tags", [])
-        h_locked = h_div is not None and "0056icpryeujyf" in getattr(h_div, "tags", [])
+        # Immovable / locked if marked static/locked or lacking movement affordance
+        v_locked = v_div is not None and (
+            any(
+                "lock" in str(t).lower() or "static" in str(t).lower()
+                for t in getattr(v_div, "tags", [])
+            )
+            or not getattr(v_div, "is_movable", True)
+        )
+        h_locked = h_div is not None and (
+            any(
+                "lock" in str(t).lower() or "static" in str(t).lower()
+                for t in getattr(h_div, "tags", [])
+            )
+            or not getattr(h_div, "is_movable", True)
+        )
 
         target_pts = set((t.x, t.y) for t in targets)
         txs = [t.x for t in targets]
@@ -380,8 +415,9 @@ class MirroredConvergenceSolver:
         def get_piece_cov(p_idx: int, px: int, py: int) -> set[tuple[int, int]]:
             cov: set[tuple[int, int]] = set()
             p = pieces[p_idx]
-            only_h = "reflect_horizontal_only" in getattr(p, "tags", [])
-            only_v = "0038pnuzypawco" in getattr(p, "tags", [])
+            p_tags = [str(t).lower() for t in getattr(p, "tags", [])]
+            only_h = "reflect_horizontal_only" in p_tags or "horizontal_only" in p_tags
+            only_v = "reflect_vertical_only" in p_tags or "vertical_only" in p_tags
             for r, c in p_pts_list[p_idx]:
                 x, y = px + c, py + r
                 cov.add((x, y))
@@ -507,27 +543,39 @@ class MirroredConvergenceSolver:
             engine: Any, curr_grid: np.ndarray, available_actions: Sequence[Any]
         ) -> tuple[Any, dict[str, Any] | None]:
             g_ctx = game or getattr(engine, "_arc_game", None)
-            cur_selected = getattr(g_ctx, "yvifanjrcyu", None) if g_ctx else None
+            cur_selected = (
+                getattr(g_ctx, "selected_object", None) or getattr(g_ctx, "yvifanjrcyu", None)
+                if g_ctx
+                else None
+            )
             if cur_selected != obj:
-                tags = getattr(obj, "tags", [])
-                if "0002nuguepuujf" in tags:
-                    return 6, {"x": 31, "y": int(obj.y * 3 + 1)}
-                elif "0054kgxrvfihgm" in tags:
-                    return 6, {"x": int(obj.x * 3 + 1), "y": 31}
-                else:
-                    r_off, c_off = 0, 0
-                    if hasattr(obj, "pixels"):
-                        for r_idx in range(obj.pixels.shape[0]):
-                            for c_idx in range(obj.pixels.shape[1]):
-                                if obj.pixels[r_idx, c_idx] >= 0:
-                                    r_off, c_off = r_idx, c_idx
-                                    break
-                            if obj.pixels[r_off, c_off] >= 0:
+                scale, x_off, y_off = 1, 0, 0
+                if (
+                    g_ctx
+                    and hasattr(g_ctx, "camera")
+                    and hasattr(g_ctx.camera, "_calculate_scale_and_offset")
+                ):
+                    scale, x_off, y_off = g_ctx.camera._calculate_scale_and_offset()
+                elif hasattr(obj, "scale"):
+                    scale = getattr(obj, "scale", 1)
+
+                w = getattr(obj, "width", 1)
+                h = getattr(obj, "height", 1)
+                r_off, c_off = h // 2, w // 2
+                if hasattr(obj, "pixels") and obj.pixels.ndim == 2:
+                    found_pixel = False
+                    for r_idx in range(obj.pixels.shape[0]):
+                        for c_idx in range(obj.pixels.shape[1]):
+                            if obj.pixels[r_idx, c_idx] >= 0:
+                                r_off, c_off = r_idx, c_idx
+                                found_pixel = True
                                 break
-                    return 6, {
-                        "x": int((obj.x + c_off) * 3 + 1),
-                        "y": int((obj.y + r_off) * 3 + 1),
-                    }
+                        if found_pixel:
+                            break
+
+                cx = int((obj.x + c_off) * scale + x_off)
+                cy = int((obj.y + r_off) * scale + y_off)
+                return 6, {"x": cx, "y": cy}
 
             if target_x is not None:
                 if obj.x < target_x:
@@ -1062,14 +1110,20 @@ class DynamicLightsOutSolver:
             if not level:
                 return None
 
-            tiles = level.get_sprites_by_tag("Hkx") + level.get_sprites_by_tag("NTi")
+            # Primary: scan for uniform clickable toggle tiles
+            tiles = [
+                s
+                for s in level.get_sprites()
+                if (
+                    "sys_click" in getattr(s, "tags", [])
+                    or "toggle" in getattr(s, "name", "").lower()
+                    or "tile" in getattr(s, "name", "").lower()
+                )
+                and 2 <= getattr(s, "width", 0) <= 6
+                and 2 <= getattr(s, "height", 0) <= 6
+            ]
             if not tiles:
-                # Fallback: scan for any click-tagged uniform sprites
-                tiles = [
-                    s
-                    for s in level.get_sprites()
-                    if "sys_click" in getattr(s, "tags", []) and getattr(s, "width", 0) >= 2
-                ]
+                tiles = level.get_sprites_by_tag("Hkx") + level.get_sprites_by_tag("NTi")
             if not tiles:
                 return None
 
@@ -1078,7 +1132,7 @@ class DynamicLightsOutSolver:
             A = np.zeros((N, N), dtype=int)
             b = np.zeros(N, dtype=int)
 
-            target_col = 8
+            target_col = getattr(game, "target_color", 8)
             if hasattr(game, "gqb") and isinstance(game.gqb, (list, tuple)) and len(game.gqb) > 1:
                 target_col = game.gqb[1]
 
@@ -1090,14 +1144,19 @@ class DynamicLightsOutSolver:
                 is_on = center_val == target_col
                 b[j] = 0 if is_on else 1
 
-                if "NTi" in getattr(src, "tags", []):
-                    stencil = [[0, 0, 0], [0, 1, 0], [0, 0, 0]]
+                stencil = default_stencil
+                if hasattr(src, "stencil"):
+                    stencil = src.stencil
+                elif hasattr(src, "pixels") and src.pixels.ndim == 2:
+                    custom_stencil = None
                     for r in range(min(3, src.pixels.shape[0])):
                         for c in range(min(3, src.pixels.shape[1])):
                             if src.pixels[r, c] == 6:
-                                stencil[r][c] = 1
-                else:
-                    stencil = default_stencil
+                                if custom_stencil is None:
+                                    custom_stencil = [[0, 0, 0], [0, 1, 0], [0, 0, 0]]
+                                custom_stencil[r][c] = 1
+                    if custom_stencil is not None:
+                        stencil = custom_stencil
 
                 for r in range(3):
                     for c in range(3):

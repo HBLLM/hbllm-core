@@ -395,10 +395,63 @@ def solve_vc33_level_plan(game: Any, engine: Any = None) -> MacroActionPlan | No
             return plan
 
         # 2. Dynamic state-space search (Learn from experience)
-        buttons = cur.get_sprites_by_tag("0022jvmlspyigc")
-        valves = cur.get_sprites_by_tag("0004sttgkofqwb")
-        cyls = cur.get_sprites_by_tag("0043nzrtobajqi")
-        marks = cur.get_sprites_by_tag("0016uciqlhjlom")
+        all_sp = list(cur.get_sprites())
+        buttons = [
+            s
+            for s in all_sp
+            if "button" in getattr(s, "name", "").lower()
+            or "click" in getattr(s, "name", "").lower()
+            or "switch" in getattr(s, "name", "").lower()
+            or (
+                getattr(s, "width", 0) <= 4
+                and getattr(s, "height", 0) <= 4
+                and any(
+                    "click" in str(t).lower() or "button" in str(t).lower()
+                    for t in getattr(s, "tags", [])
+                )
+            )
+            or getattr(s, "clickable", False)
+        ]
+        valves = [
+            s
+            for s in all_sp
+            if "valve" in getattr(s, "name", "").lower()
+            or "lever" in getattr(s, "name", "").lower()
+            or "tap" in getattr(s, "name", "").lower()
+            or any(
+                "valve" in str(t).lower() or "lever" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+        ]
+        cyls = [
+            s
+            for s in all_sp
+            if (
+                getattr(s, "height", 0) >= 2 * getattr(s, "width", 1)
+                and getattr(s, "height", 0) >= 6
+            )
+            or "cyl" in getattr(s, "name", "").lower()
+            or "column" in getattr(s, "name", "").lower()
+            or "tube" in getattr(s, "name", "").lower()
+            or any(
+                "cyl" in str(t).lower() or "column" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+        ]
+        marks = [
+            s
+            for s in all_sp
+            if "mark" in getattr(s, "name", "").lower()
+            or "indicator" in getattr(s, "name", "").lower()
+            or "target" in getattr(s, "name", "").lower()
+            or "level" in getattr(s, "name", "").lower()
+            or any(
+                "mark" in str(t).lower()
+                or "indicator" in str(t).lower()
+                or "target" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+        ]
 
         if not cyls:
             return None
@@ -549,18 +602,20 @@ def solve_tu93_level_plan(game: Any, engine: Any = None) -> MacroActionPlan | No
                 None,
             )
 
-        exit_sp = next((s for s in cur_lvl.get_sprites_by_tag("0015msvpvzxhqf")), None)
-        if not exit_sp:
-            exit_sp = next(
-                (
-                    s
-                    for s in cur_lvl.get_sprites()
-                    if "exit" in getattr(s, "name", "").lower()
-                    or "goal" in getattr(s, "name", "").lower()
-                    or "0015msvpvzxhqf" in getattr(s, "tags", [])
-                ),
-                None,
-            )
+        exit_sp = next(
+            (
+                s
+                for s in cur_lvl.get_sprites()
+                if "exit" in getattr(s, "name", "").lower()
+                or "goal" in getattr(s, "name", "").lower()
+                or any(
+                    "exit" in str(t).lower() or "goal" in str(t).lower()
+                    for t in getattr(s, "tags", [])
+                )
+                or getattr(s, "is_goal", False)
+            ),
+            None,
+        )
 
         if not avatar_sp or not exit_sp:
             return None
@@ -568,16 +623,17 @@ def solve_tu93_level_plan(game: Any, engine: Any = None) -> MacroActionPlan | No
         start_pt = (int(avatar_sp.x), int(avatar_sp.y))
         goal_pt = (int(exit_sp.x), int(exit_sp.y))
 
-        track_sprites = cur_lvl.get_sprites_by_tag("0031dpsydfmswk") + cur_lvl.get_sprites_by_tag(
-            "0020yqphhquvce"
-        )
-        if not track_sprites:
-            track_sprites = [
-                s
-                for s in cur_lvl.get_sprites()
-                if "track" in getattr(s, "name", "").lower()
-                or "rail" in getattr(s, "name", "").lower()
-            ]
+        track_sprites = [
+            s
+            for s in cur_lvl.get_sprites()
+            if "track" in getattr(s, "name", "").lower()
+            or "rail" in getattr(s, "name", "").lower()
+            or "path" in getattr(s, "name", "").lower()
+            or any(
+                "track" in str(t).lower() or "rail" in str(t).lower() or "path" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+        ]
 
         passable_coords = set((int(s.x), int(s.y)) for s in track_sprites)
         passable_coords.add(start_pt)
@@ -715,22 +771,33 @@ def solve_re86_level_plan(game: Any, engine: Any = None) -> MacroActionPlan | No
         if cur_lvl is None:
             return None
 
-        shapes = cur_lvl.get_sprites_by_tag("0031cppcuvqlbi")
-        if not shapes:
-            shapes = [
-                s
-                for s in cur_lvl.get_sprites()
-                if "shape" in getattr(s, "name", "").lower()
-                or (getattr(s, "tags", None) and "manipulandum" in s.tags)
-            ]
-        silhouettes = cur_lvl.get_sprites_by_tag("0054xnsuqceejm")
-        if not silhouettes:
-            silhouettes = [
-                s
-                for s in cur_lvl.get_sprites()
-                if "silhouette" in getattr(s, "name", "").lower()
-                or "target" in getattr(s, "name", "").lower()
-            ]
+        shapes = [
+            s
+            for s in cur_lvl.get_sprites()
+            if "shape" in getattr(s, "name", "").lower()
+            or "piece" in getattr(s, "name", "").lower()
+            or any(
+                "manipulandum" in str(t).lower()
+                or "shape" in str(t).lower()
+                or "piece" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+            or getattr(s, "movable", False)
+        ]
+        silhouettes = [
+            s
+            for s in cur_lvl.get_sprites()
+            if "silhouette" in getattr(s, "name", "").lower()
+            or "target" in getattr(s, "name", "").lower()
+            or "slot" in getattr(s, "name", "").lower()
+            or any(
+                "receptacle" in str(t).lower()
+                or "silhouette" in str(t).lower()
+                or "target" in str(t).lower()
+                for t in getattr(s, "tags", [])
+            )
+            or getattr(s, "is_receptacle", False)
+        ]
 
         if not shapes or not silhouettes:
             return None
