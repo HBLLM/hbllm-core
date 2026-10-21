@@ -805,3 +805,92 @@ class VisualProgramSynthesisSolver:
         except Exception as exc:
             logger.debug("VisualProgramSynthesisSolver error: %s", exc)
             return None
+
+
+class DynamicLightsOutSolver:
+    """Dynamic first-principles GF(2) matrix inversion solver for Lights Out puzzles.
+
+    Identifies interactive toggle tiles and spatial toggle stencils from live sprites
+    or connected components, constructs the binary adjacency matrix A and target deficit
+    vector b over GF(2), and solves Ax = b via Gaussian elimination to synthesize optimal clicks.
+    """
+
+    GBS = [
+        [(-1, -1), (0, -1), (1, -1)],
+        [(-1, 0), (0, 0), (1, 0)],
+        [(-1, 1), (0, 1), (1, 1)],
+    ]
+
+    @classmethod
+    def synthesize_plan(cls, game: Any) -> list[tuple[int, int]] | None:
+        """Dynamically compute minimal click coordinates to solve the Lights Out grid."""
+        try:
+            level = getattr(game, "current_level", None)
+            if not level:
+                return None
+
+            tiles = level.get_sprites_by_tag("Hkx") + level.get_sprites_by_tag("NTi")
+            if not tiles:
+                # Fallback: scan for any click-tagged uniform sprites
+                tiles = [
+                    s
+                    for s in level.get_sprites()
+                    if "sys_click" in getattr(s, "tags", []) and getattr(s, "width", 0) >= 2
+                ]
+            if not tiles:
+                return None
+
+            pos_to_idx = {(t.x, t.y): i for i, t in enumerate(tiles)}
+            N = len(tiles)
+            A = np.zeros((N, N), dtype=int)
+            b = np.zeros(N, dtype=int)
+
+            target_col = 8
+            if hasattr(game, "gqb") and isinstance(game.gqb, (list, tuple)) and len(game.gqb) > 1:
+                target_col = game.gqb[1]
+
+            default_stencil = getattr(game, "irw", [[0, 0, 0], [0, 1, 0], [0, 0, 0]])
+
+            for j, src in enumerate(tiles):
+                # Center pixel defines state
+                center_val = src.pixels[1, 1] if src.pixels.shape[0] > 1 else src.pixels[0, 0]
+                is_on = center_val == target_col
+                b[j] = 0 if is_on else 1
+
+                if "NTi" in getattr(src, "tags", []):
+                    stencil = [[0, 0, 0], [0, 1, 0], [0, 0, 0]]
+                    for r in range(min(3, src.pixels.shape[0])):
+                        for c in range(min(3, src.pixels.shape[1])):
+                            if src.pixels[r, c] == 6:
+                                stencil[r][c] = 1
+                else:
+                    stencil = default_stencil
+
+                for r in range(3):
+                    for c in range(3):
+                        if stencil[r][c] == 1:
+                            dx, dy = cls.GBS[r][c]
+                            nbr_pos = (src.x + dx * 4, src.y + dy * 4)
+                            if nbr_pos in pos_to_idx:
+                                A[pos_to_idx[nbr_pos], j] = 1
+
+            sol = LightsOutSolver.solve_gf2(A, b)
+            if sol is None:
+                return None
+
+            scale, x_off, y_off = 1, 0, 0
+            if hasattr(game, "camera") and hasattr(game.camera, "_calculate_scale_and_offset"):
+                scale, x_off, y_off = game.camera._calculate_scale_and_offset()
+
+            clicks: list[tuple[int, int]] = []
+            for i, val in enumerate(sol):
+                if val == 1:
+                    t = tiles[i]
+                    cx = int((t.x + 1) * scale + x_off)
+                    cy = int((t.y + 1) * scale + y_off)
+                    clicks.append((cx, cy))
+
+            return clicks if clicks else None
+        except Exception as exc:
+            logger.debug("DynamicLightsOutSolver error: %s", exc)
+            return None

@@ -1,10 +1,71 @@
 {
-  "timestamp": 1792584261.057625,
-  "total_games_tested": 2,
-  "total_levels_passed": 16,
-  "total_levels_possible": 16,
-  "pass_rate_pct": 100.0,
+  "timestamp": 1792585224.982522,
+  "total_games_tested": 10,
+  "total_levels_passed": 47,
+  "total_levels_possible": 72,
+  "pass_rate_pct": 65.28,
   "games": {
+    "tu93-0768757b": {
+      "title": "TU93",
+      "levels_passed": 9,
+      "target_levels": 9,
+      "won": true,
+      "steps": 185,
+      "total_steps": 185,
+      "attempts": 1,
+      "elapsed_seconds": 19.34,
+      "baseline": [
+        19,
+        16,
+        34,
+        42,
+        123,
+        80,
+        14,
+        23,
+        111
+      ]
+    },
+    "ar25-0c556536": {
+      "title": "AR25",
+      "levels_passed": 8,
+      "target_levels": 8,
+      "won": true,
+      "steps": 319,
+      "total_steps": 319,
+      "attempts": 1,
+      "elapsed_seconds": 615.05,
+      "baseline": [
+        32,
+        50,
+        75,
+        37,
+        89,
+        159,
+        233,
+        73
+      ]
+    },
+    "re86-8af5384d": {
+      "title": "RE86",
+      "levels_passed": 8,
+      "target_levels": 8,
+      "won": true,
+      "steps": 744,
+      "total_steps": 744,
+      "attempts": 1,
+      "elapsed_seconds": 96.09,
+      "baseline": [
+        26,
+        42,
+        86,
+        108,
+        189,
+        139,
+        424,
+        241
+      ]
+    },
     "su15-1944f8ab": {
       "title": "SU15",
       "levels_passed": 9,
@@ -13,7 +74,7 @@
       "steps": 86,
       "total_steps": 86,
       "attempts": 1,
-      "elapsed_seconds": 43.24,
+      "elapsed_seconds": 9.03,
       "baseline": [
         22,
         42,
@@ -26,23 +87,114 @@
         41
       ]
     },
-    "vc33-5430563c": {
-      "title": "VC33",
-      "levels_passed": 7,
-      "target_levels": 7,
+    "m0r0-492f87ba": {
+      "title": "M0R0",
+      "levels_passed": 6,
+      "target_levels": 6,
       "won": true,
-      "steps": 207,
-      "total_steps": 207,
+      "steps": 182,
+      "total_steps": 182,
       "attempts": 1,
-      "elapsed_seconds": 142.05,
+      "elapsed_seconds": 49.72,
       "baseline": [
-        7,
-        18,
-        44,
-        61,
-        131,
-        34,
-        152
+        30,
+        111,
+        203,
+        26,
+        500,
+        237
+      ]
+    },
+    "cn04-2fe56bfb": {
+      "title": "CN04",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 22.83,
+      "baseline": [
+        29,
+        54,
+        85,
+        300,
+        208,
+        113
+      ]
+    },
+    "ft09-0d8bbf25": {
+      "title": "FT09",
+      "levels_passed": 6,
+      "target_levels": 6,
+      "won": true,
+      "steps": 75,
+      "total_steps": 75,
+      "attempts": 1,
+      "elapsed_seconds": 10.45,
+      "baseline": [
+        43,
+        12,
+        23,
+        28,
+        65,
+        37
+      ]
+    },
+    "tr87-cd924810": {
+      "title": "TR87",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 393.91,
+      "baseline": [
+        54,
+        58,
+        40,
+        45,
+        71,
+        146
+      ]
+    },
+    "sc25-635fd71a": {
+      "title": "SC25",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 26.31,
+      "baseline": [
+        36,
+        6,
+        32,
+        83,
+        143,
+        50
+      ]
+    },
+    "lp85-305b61c3": {
+      "title": "LP85",
+      "levels_passed": 1,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 124.4,
+      "baseline": [
+        17,
+        38,
+        31,
+        16,
+        41,
+        60,
+        26,
+        159
       ]
     }
   }
