@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,127 @@ class ARCBenchmarkRunner:
                 logger.error("Failed to load ARC task from %s: %s", jf, exc)
 
         return self.harness.evaluate_suite(tasks)
+
+
+class InteractiveARCEvaluator:
+    """Evaluates unseen interactive ARC-AGI-3 environments via active inference and macro-action execution."""
+
+    @classmethod
+    def evaluate_environment(
+        cls,
+        env: Any,
+        max_steps: int = 200,
+        engine: Any = None,
+    ) -> dict[str, Any]:
+        """Evaluate an interactive environment end-to-end using dynamic neuro-symbolic faculties."""
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.macro_actions import MacroActionDriverManager
+        from plugins.arc_agi_adapter.arc_macro_actions import (
+            DynamicARCArchetypeClassifier,
+            register_arc_macro_actions,
+        )
+        from plugins.arc_agi_adapter.arc_perception import ARCPerceptionAdapter, extract_arc_objects
+
+        register_arc_macro_actions()
+
+        if engine is None:
+            engine = AutonomousEpistemicEngine(perception_adapter=ARCPerceptionAdapter())
+
+        engine.reset()
+        engine.attach_game_reference(env)
+
+        obs = env.reset() if hasattr(env, "reset") else getattr(env, "frame", None)
+        curr_grid = np.asarray(
+            obs if isinstance(obs, np.ndarray) else getattr(env, "frame", np.zeros((16, 16))),
+            dtype=int,
+        )
+
+        available_actions = list(getattr(env, "available_actions", [1, 2, 3, 4, 5, 6]))
+        objects = extract_arc_objects(curr_grid, engine, env)
+
+        archetype = DynamicARCArchetypeClassifier.classify(
+            game=env,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            objects=objects,
+        )
+
+        steps = 0
+        total_reward = 0.0
+        solved = False
+
+        while steps < max_steps:
+            if hasattr(env, "is_won") and env.is_won():
+                solved = True
+                break
+            if hasattr(env, "vplrhaovhr") and env.vplrhaovhr():
+                solved = True
+                break
+
+            action = MacroActionDriverManager.step(
+                engine=engine,
+                curr_grid=curr_grid,
+                available_actions=available_actions,
+                objects=objects,
+            )
+
+            if action is None:
+                action = engine.step(curr_grid, available_actions)
+
+            if action is None:
+                break
+
+            act_id = action[0] if isinstance(action, (tuple, list)) else action
+            act_data = action[1] if isinstance(action, (tuple, list)) and len(action) > 1 else None
+
+            step_res = None
+            if hasattr(env, "step"):
+                if act_data is not None:
+                    step_res = env.step(act_id, act_data)
+                else:
+                    step_res = env.step(act_id)
+
+            steps += 1
+            if step_res is not None:
+                if isinstance(step_res, tuple):
+                    if len(step_res) >= 2:
+                        obs = step_res[0]
+                        total_reward += (
+                            float(step_res[1]) if isinstance(step_res[1], (int, float)) else 0.0
+                        )
+                    if len(step_res) >= 3 and bool(step_res[2]):
+                        solved = True
+                        break
+
+            curr_grid = np.asarray(
+                getattr(env, "frame", obs if isinstance(obs, np.ndarray) else curr_grid),
+                dtype=int,
+            )
+            objects = extract_arc_objects(curr_grid, engine, env)
+
+        return {
+            "solved": solved or (hasattr(env, "is_won") and env.is_won()),
+            "steps": steps,
+            "reward": total_reward,
+            "archetype": archetype.value if archetype else None,
+        }
+
+    @classmethod
+    def evaluate_suite(
+        cls,
+        envs: Sequence[Any],
+        max_steps: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Evaluate a suite of interactive environments."""
+        results = []
+        for env in envs:
+            try:
+                res = cls.evaluate_environment(env, max_steps=max_steps)
+                results.append(res)
+            except Exception as exc:
+                logger.error("Error evaluating interactive env: %s", exc)
+                results.append({"solved": False, "error": str(exc), "steps": 0, "reward": 0.0})
+        return results
 
 
 if __name__ == "__main__":

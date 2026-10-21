@@ -647,6 +647,128 @@ def extract_arc_objects(
                                     },
                                 )
                             )
+
+            # Dynamic Universal Sprite Property Ingestion for Unseen Environments
+            cam = getattr(game_obj, "camera", None)
+            scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+            scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+            scale = min(scale_x, scale_y) if cam else 1
+            x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+            y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+
+            for sp in cur_lvl.get_sprites():
+                s_name = getattr(sp, "name", "").lower()
+                s_tags = [t.lower() for t in getattr(sp, "tags", [])]
+                w = getattr(sp, "width", 1)
+                h = getattr(sp, "height", 1)
+                disp_x = int(sp.x * scale + x_pad + (w * scale) // 2)
+                disp_y = int(sp.y * scale + y_pad + (h * scale) // 2)
+                s_pos = (disp_y, disp_x)
+
+                if (
+                    not (0 <= disp_y < H and 0 <= disp_x < W)
+                    or s_pos in seen_positions
+                    or s_pos == av_pos
+                ):
+                    continue
+
+                feat_val = int(g[disp_y, disp_x])
+
+                # 1. Interactive clickable switches & buttons
+                if (
+                    "sys_click" in s_tags
+                    or "button" in s_name
+                    or "switch" in s_name
+                    or "lever" in s_name
+                    or "valve" in s_name
+                ):
+                    seen_positions.add(s_pos)
+                    objects.append(
+                        ObjectSpec(
+                            id=f"dyn_switch_{disp_y}_{disp_x}",
+                            pos=s_pos,
+                            feature_id=feat_val,
+                            role="switch",
+                            properties={
+                                "source": "dynamic_sprite_switch",
+                                "click_coord": s_pos,
+                                "click_data": {"x": disp_x, "y": disp_y},
+                                "sprite_name": s_name,
+                            },
+                        )
+                    )
+                # 2. Goals, targets, and exits
+                elif (
+                    "exit" in s_name
+                    or "goal" in s_name
+                    or "target" in s_name
+                    or any("goal" in t or "exit" in t for t in s_tags)
+                ):
+                    seen_positions.add(s_pos)
+                    objects.append(
+                        ObjectSpec(
+                            id=f"dyn_goal_{disp_y}_{disp_x}",
+                            pos=s_pos,
+                            feature_id=feat_val,
+                            role="goal",
+                            properties={"source": "dynamic_sprite_goal", "sprite_name": s_name},
+                        )
+                    )
+                # 3. Hazards & enemies
+                elif (
+                    "hazard" in s_name
+                    or "enemy" in s_name
+                    or "threat" in s_name
+                    or any("hazard" in t or "enemy" in t for t in s_tags)
+                ):
+                    seen_positions.add(s_pos)
+                    objects.append(
+                        ObjectSpec(
+                            id=f"dyn_hazard_{disp_y}_{disp_x}",
+                            pos=s_pos,
+                            feature_id=feat_val,
+                            role="hazard",
+                            properties={"source": "dynamic_sprite_hazard", "sprite_name": s_name},
+                        )
+                    )
+                # 4. Cargo / movable blocks
+                elif (
+                    "cargo" in s_name
+                    or "block" in s_name
+                    or "box" in s_name
+                    or "gem" in s_name
+                    or any("cargo" in t or "item" in t for t in s_tags)
+                ):
+                    seen_positions.add(s_pos)
+                    objects.append(
+                        ObjectSpec(
+                            id=f"dyn_cargo_{disp_y}_{disp_x}",
+                            pos=s_pos,
+                            feature_id=feat_val,
+                            role="cargo",
+                            properties={"source": "dynamic_sprite_cargo", "sprite_name": s_name},
+                        )
+                    )
+                # 5. Receptacles & baskets
+                elif (
+                    "basket" in s_name
+                    or "receptacle" in s_name
+                    or "bin" in s_name
+                    or any("receptacle" in t for t in s_tags)
+                ):
+                    seen_positions.add(s_pos)
+                    objects.append(
+                        ObjectSpec(
+                            id=f"dyn_receptacle_{disp_y}_{disp_x}",
+                            pos=s_pos,
+                            feature_id=feat_val,
+                            role="receptacle",
+                            properties={
+                                "source": "dynamic_sprite_receptacle",
+                                "sprite_name": s_name,
+                            },
+                        )
+                    )
         except Exception as exc:
             logger.debug("Failed extracting sprites from cur_lvl: %s", exc)
 
