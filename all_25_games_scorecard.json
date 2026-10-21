@@ -1,10 +1,31 @@
 {
-  "timestamp": 1792583097.311645,
-  "total_games_tested": 1,
-  "total_levels_passed": 7,
-  "total_levels_possible": 7,
+  "timestamp": 1792584261.057625,
+  "total_games_tested": 2,
+  "total_levels_passed": 16,
+  "total_levels_possible": 16,
   "pass_rate_pct": 100.0,
   "games": {
+    "su15-1944f8ab": {
+      "title": "SU15",
+      "levels_passed": 9,
+      "target_levels": 9,
+      "won": true,
+      "steps": 86,
+      "total_steps": 86,
+      "attempts": 1,
+      "elapsed_seconds": 43.24,
+      "baseline": [
+        22,
+        42,
+        26,
+        115,
+        36,
+        31,
+        8,
+        40,
+        41
+      ]
+    },
     "vc33-5430563c": {
       "title": "VC33",
       "levels_passed": 7,
@@ -13,7 +34,7 @@
       "steps": 207,
       "total_steps": 207,
       "attempts": 1,
-      "elapsed_seconds": 35.88,
+      "elapsed_seconds": 142.05,
       "baseline": [
         7,
         18,

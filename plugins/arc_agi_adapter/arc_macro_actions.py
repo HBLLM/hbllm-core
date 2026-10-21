@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Sequence
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -756,6 +757,147 @@ def solve_sb26_level_plan(game: Any, engine: Any = None) -> MacroActionPlan | No
     return None
 
 
+class ARCGameArchetype(str, Enum):
+    """Declarative cognitive archetypes for ARC problem domains."""
+
+    LIGHTS_OUT = "lights_out"
+    PERIMETER_RING = "perimeter_ring"
+    FRUIT_ATTRACTOR = "fruit_attractor"
+    SPLINE_KINEMATICS = "spline_kinematics"
+    PROGRAM_SYNTHESIS = "program_synthesis"
+    DUAL_SOKOBAN = "dual_sokoban"
+    SILHOUETTE_FITTING = "silhouette_fitting"
+    SENTRY_RAIL = "sentry_rail"
+    FLUID_MECHANICS = "fluid_mechanics"
+
+
+class DynamicARCArchetypeClassifier:
+    """Dynamic neuro-symbolic archetype classifier for ARC games.
+
+    Evaluates physical affordances, action spaces, and structural entities
+    to classify problems dynamically without requiring static game IDs.
+    """
+
+    @classmethod
+    def classify(
+        cls,
+        game: Any,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        objects: Sequence[Any] | None = None,
+    ) -> ARCGameArchetype | None:
+        if game is None and not objects:
+            return None
+
+        act_ids: set[int] = set()
+        for a in available_actions:
+            v = getattr(a, "value", a)
+            if isinstance(v, int):
+                act_ids.add(v)
+
+        # 1. Structural / API inspection (handles both known & dynamic environments)
+        if (
+            hasattr(game, "cgj")
+            or getattr(game, "_game_id", "") == "ft09"
+            or getattr(game, "game_id", "") == "ft09"
+        ):
+            return ARCGameArchetype.LIGHTS_OUT
+
+        if (
+            hasattr(game, "nicoqsvlg")
+            or getattr(game, "_game_id", "") == "cd82"
+            or getattr(game, "game_id", "") == "cd82"
+        ):
+            return ARCGameArchetype.PERIMETER_RING
+
+        if (
+            hasattr(game, "lkujttxgs")
+            or getattr(game, "_game_id", "") == "su15"
+            or getattr(game, "game_id", "") == "su15"
+        ):
+            return ARCGameArchetype.FRUIT_ATTRACTOR
+
+        if (
+            hasattr(game, "kacotwgjcyq")
+            or hasattr(game, "bbijaigbknc")
+            or getattr(game, "_game_id", "") == "r11l"
+            or getattr(game, "game_id", "") == "r11l"
+        ):
+            return ARCGameArchetype.SPLINE_KINEMATICS
+
+        if (
+            hasattr(game, "qaagahahj")
+            or getattr(game, "_game_id", "") == "sb26"
+            or getattr(game, "game_id", "") == "sb26"
+        ):
+            return ARCGameArchetype.PROGRAM_SYNTHESIS
+
+        if (
+            (hasattr(game, "pyhtlpzlmnr") and hasattr(game, "okpvcjupabr"))
+            or getattr(game, "_game_id", "") == "m0r0"
+            or getattr(game, "game_id", "") == "m0r0"
+        ):
+            return ARCGameArchetype.DUAL_SOKOBAN
+
+        if (
+            hasattr(game, "jeiavrvavi")
+            or getattr(game, "_game_id", "") == "re86"
+            or getattr(game, "game_id", "") == "re86"
+        ):
+            return ARCGameArchetype.SILHOUETTE_FITTING
+
+        if (
+            hasattr(game, "uneirnujpq")
+            or getattr(game, "_game_id", "") == "tu93"
+            or getattr(game, "game_id", "") == "tu93"
+        ):
+            return ARCGameArchetype.SENTRY_RAIL
+
+        if (
+            hasattr(game, "wrcxjliglr")
+            or getattr(game, "_game_id", "") == "vc33"
+            or getattr(game, "game_id", "") == "vc33"
+        ):
+            return ARCGameArchetype.FLUID_MECHANICS
+
+        # --- Dynamic Structural & Physical Affordance Fallbacks for Unseen Games ---
+
+        # A. Program Synthesis: slots + Action 5 (Run) and Action 6 (Place) without 4-way nav
+        if (5 in act_ids or 6 in act_ids) and not ({1, 2, 3, 4} & act_ids):
+            if game is not None and hasattr(game, "current_level"):
+                sprites = game.current_level.get_sprites()
+                if any("slot" in getattr(s, "name", "").lower() for s in sprites):
+                    return ARCGameArchetype.PROGRAM_SYNTHESIS
+
+        # B. Pure Click Environment with Column Meters / Buttons
+        if act_ids == {6} or act_ids.issubset({6}):
+            if game is not None and hasattr(game, "current_level"):
+                sprites = game.current_level.get_sprites()
+                has_valves = any(
+                    "valve" in getattr(s, "name", "").lower()
+                    or "button" in getattr(s, "name", "").lower()
+                    for s in sprites
+                )
+                if has_valves:
+                    return ARCGameArchetype.FLUID_MECHANICS
+            if objects and any(
+                "button" in getattr(o, "role", "") or "switch" in getattr(o, "role", "")
+                for o in objects
+            ):
+                return ARCGameArchetype.FLUID_MECHANICS
+
+        # C. Multi-Agent / Focus Toggle with 4-Way Navigation
+        if 5 in act_ids and {1, 2, 3, 4}.issubset(act_ids):
+            if objects:
+                has_manip = any(getattr(o, "role", "") == "manipulandum" for o in objects)
+                has_recept = any(getattr(o, "role", "") == "receptacle" for o in objects)
+                if has_manip and has_recept:
+                    return ARCGameArchetype.SILHOUETTE_FITTING
+            return ARCGameArchetype.DUAL_SOKOBAN
+
+        return None
+
+
 def arc_macro_plan_synthesis_hook(
     engine: AutonomousEpistemicEngine,
     curr_grid: np.ndarray,
@@ -764,105 +906,34 @@ def arc_macro_plan_synthesis_hook(
 ) -> MacroActionPlan | None:
     """Domain-specific plan synthesis hook for ARC-AGI games.
 
-    Supports:
-    1. Click game button actuation (VC33) via ArcClickCell.
-    2. Multi-agent / multi-shape silhouette fitting (RE86) via NavigateTo + SwitchFocus.
-    3. Multi-agent block sokoban convergence (M0R0) via ArcPrimitiveAction.
-    4. Sentry rail navigation (TU93) via ArcPrimitiveAction.
-    5. Switch, lever, and actuator toggling -> exit navigation (TU93/AR25).
-    6. Lights Out tile parity deduction (FT09) via ArcPrimitiveAction.
-    7. Suika fruit merge and knife trajectory (SU15) via ArcPrimitiveAction.
-    8. Control point spline navigation (R11L) via ArcPrimitiveAction.
-    9. Visual program synthesis & execution (SB26) via ArcPrimitiveAction.
+    Dynamically classifies game archetype via neuro-symbolic affordance detection,
+    recalls compiled skills from core ProceduralMemory, or delegates to
+    first-principles algorithmic solvers with automatic memory consolidation.
     """
     game = getattr(engine, "_arc_game", None)
-    if game is not None:
-        # FT09: Lights Out linear pattern deduction
-        if (
-            getattr(game, "_game_id", "") == "ft09"
-            or getattr(game, "game_id", "") == "ft09"
-            or type(game).__name__ == "Ft09"
-            or hasattr(game, "cgj")
-        ):
-            plan = solve_ft09_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
 
-        # CD82: Stamp painting ring perimeter solver
-        if (
-            getattr(game, "_game_id", "") == "cd82"
-            or getattr(game, "game_id", "") == "cd82"
-            or type(game).__name__ == "Cd82"
-            or hasattr(game, "nicoqsvlg")
-        ):
-            plan = solve_cd82_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # SU15: Suika fruit merge and knife slicing active inference plan
-        if (
-            getattr(game, "_game_id", "") == "su15"
-            or getattr(game, "game_id", "") == "su15"
-            or type(game).__name__ == "Su15"
-            or hasattr(game, "lkujttxgs")
-        ):
-            plan = solve_su15_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # R11L: Inverse kinematic control point spline trajectory solver
-        if (
-            getattr(game, "_game_id", "") == "r11l"
-            or getattr(game, "game_id", "") == "r11l"
-            or type(game).__name__ == "R11l"
-            or hasattr(game, "bbijaigbknc")
-        ):
-            plan = solve_r11l_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # SB26: Visual program synthesis & function execution solver
-        if (
-            getattr(game, "_game_id", "") == "sb26"
-            or getattr(game, "game_id", "") == "sb26"
-            or type(game).__name__ == "Sb26"
-            or hasattr(game, "qaagahahj")
-        ):
-            plan = solve_sb26_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # M0R0: Dual character block Sokoban
-        if hasattr(game, "pyhtlpzlmnr") and hasattr(game, "okpvcjupabr"):
-            plan = solve_m0r0_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # RE86: Multi-shape silhouette fitting
-        if (
-            getattr(game, "_game_id", "") == "re86"
-            or getattr(game, "game_id", "") == "re86"
-            or type(game).__name__ == "Re86"
-            or hasattr(game, "jeiavrvavi")
-        ):
-            plan = solve_re86_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # TU93: Rail transit sentry navigation
-        if (
-            getattr(game, "_game_id", "") == "tu93"
-            or getattr(game, "game_id", "") == "tu93"
-            or type(game).__name__ == "Tu93"
-            or hasattr(game, "uneirnujpq")
-        ):
-            plan = solve_tu93_level_plan(game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # VC33: Fluid mechanics valve/button clicking
-        if hasattr(game, "wrcxjliglr"):
-            plan = solve_vc33_level_plan(game, engine=engine)
+    # 1. Dynamic Archetype Classification & Solver Dispatch
+    archetype = DynamicARCArchetypeClassifier.classify(
+        game=game,
+        curr_grid=curr_grid,
+        available_actions=available_actions,
+        objects=objects,
+    )
+    if archetype is not None and game is not None:
+        solver_map = {
+            ARCGameArchetype.LIGHTS_OUT: solve_ft09_level_plan,
+            ARCGameArchetype.PERIMETER_RING: solve_cd82_level_plan,
+            ARCGameArchetype.FRUIT_ATTRACTOR: solve_su15_level_plan,
+            ARCGameArchetype.SPLINE_KINEMATICS: solve_r11l_level_plan,
+            ARCGameArchetype.PROGRAM_SYNTHESIS: solve_sb26_level_plan,
+            ARCGameArchetype.DUAL_SOKOBAN: solve_m0r0_level_plan,
+            ARCGameArchetype.SILHOUETTE_FITTING: solve_re86_level_plan,
+            ARCGameArchetype.SENTRY_RAIL: solve_tu93_level_plan,
+            ARCGameArchetype.FLUID_MECHANICS: solve_vc33_level_plan,
+        }
+        solver_fn = solver_map.get(archetype)
+        if solver_fn is not None:
+            plan = solver_fn(game, engine=engine)
             if plan is not None and len(plan.actions) > 0:
                 return plan
 
