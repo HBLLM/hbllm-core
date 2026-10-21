@@ -1,9 +1,9 @@
 {
-  "timestamp": 1792585224.982522,
-  "total_games_tested": 10,
+  "timestamp": 1792585310.644344,
+  "total_games_tested": 11,
   "total_levels_passed": 47,
-  "total_levels_possible": 72,
-  "pass_rate_pct": 65.28,
+  "total_levels_possible": 78,
+  "pass_rate_pct": 60.26,
   "games": {
     "tu93-0768757b": {
       "title": "TU93",
@@ -195,6 +195,24 @@
         60,
         26,
         159
+      ]
+    },
+    "dc22-fdcac232": {
+      "title": "DC22",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 83.5,
+      "baseline": [
+        59,
+        102,
+        67,
+        98,
+        324,
+        578
       ]
     }
   }
