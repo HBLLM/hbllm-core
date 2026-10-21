@@ -524,7 +524,7 @@ class EpistemicFeedbackAssimilator:
                 bg = engine.bg_feature if engine.bg_feature is not None else 0
                 disappeared_pts = np.argwhere(diff.changed_mask & (engine.prev_grid != bg))
                 appeared_pts = np.argwhere(diff.changed_mask & (curr_grid != bg))
-                if 1 <= len(disappeared_pts) <= 36 and 1 <= len(appeared_pts) <= 36:
+                if 1 <= len(disappeared_pts) <= 256 and 1 <= len(appeared_pts) <= 256:
                     p_old = np.mean(disappeared_pts, axis=0)
                     p_new = np.mean(appeared_pts, axis=0)
                     goal_positions: list[tuple[int, int]] = list(engine.learned_goal_positions)
@@ -551,6 +551,15 @@ class EpistemicFeedbackAssimilator:
                             if engine.active_goal_converging_coord == target_coord:
                                 engine.active_goal_converging_coord = None
                                 engine.consecutive_goal_converging_clicks = 0
+                            if target_coord is not None:
+                                engine.entity_visit_counts[
+                                    f"click_{target_coord[0]}_{target_coord[1]}"
+                                ] = (
+                                    engine.entity_visit_counts.get(
+                                        f"click_{target_coord[0]}_{target_coord[1]}", 0
+                                    )
+                                    + 5
+                                )
 
         # ── Intuitive Physics Transition Tracking ────────────────────────────
         engine.physics_engine.record_transition(

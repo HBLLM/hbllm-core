@@ -188,6 +188,17 @@ class NavigateTo(MacroAction):
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
         )
 
+        threats = getattr(engine, "_prev_oriented_threats", [])
+        if not threats:
+            from hbllm.hcir.world.cortex_perception import PerceptionEngine
+
+            threats = PerceptionEngine.detect_oriented_threats(
+                curr_grid,
+                getattr(engine, "previous_entities", []),
+                engine.bg_feature or 0,
+                avatar_pos=av_pos,
+            )
+
         # Plan next geodesic step
         plan = GeodesicManifoldRouter.route_geodesic(
             curr_grid=curr_grid,
@@ -196,7 +207,7 @@ class NavigateTo(MacroAction):
             static_barriers=engine.learned_barriers,
             grid_walls=set(),
             unknown_entity_cells=set(),
-            oriented_threats=[],
+            oriented_threats=threats,
             movable_actions=movable_actions,
             bg=engine.bg_feature or 0,
             barrier_features=engine.symbolic_theory.barrier_features,
@@ -973,6 +984,7 @@ class MacroActionPlan:
 
     actions: deque[MacroAction] = field(default_factory=deque)
     plan_id: str = "macro_plan_default"
+    is_strict: bool = False
 
     def is_empty(self) -> bool:
         return len(self.actions) == 0

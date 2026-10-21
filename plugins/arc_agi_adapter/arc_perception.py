@@ -337,7 +337,16 @@ def extract_arc_objects(
                                 )
 
             # Interactive Clickable Button sprites (tag sys_click)
-            click_sprites = cur_lvl.get_sprites_by_tag("sys_click")
+            click_sprites: list[Any] = []
+            for ctag in ["sys_click", "0022jvmlspyigc", "0004sttgkofqwb"]:
+                for cs in cur_lvl.get_sprites_by_tag(ctag):
+                    tags = getattr(cs, "tags", [])
+                    if any(
+                        t in tags for t in ["0006lxjtqggkmi", "0003uqrdzdofso", "0031cppcuvqlbi"]
+                    ):
+                        continue
+                    if cs not in click_sprites:
+                        click_sprites.append(cs)
             if click_sprites:
                 cam = getattr(game_obj, "camera", None)
                 scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
@@ -364,6 +373,183 @@ def extract_arc_objects(
                                     "click_coord": (disp_y, disp_x),
                                     "click_data": {"x": disp_x, "y": disp_y},
                                     "sprite_name": getattr(cs, "name", "button"),
+                                },
+                            )
+                        )
+
+            # Target detector sprites (AR25 tag 0001sruqbuvukh)
+            target_sprites = cur_lvl.get_sprites_by_tag("0001sruqbuvukh")
+            if target_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for ts in target_sprites:
+                    w = getattr(ts, "width", 1)
+                    h = getattr(ts, "height", 1)
+                    disp_x = int(ts.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(ts.y * scale + y_pad + (h * scale) // 2)
+                    t_pos = (disp_y, disp_x)
+                    if 0 <= disp_y < H and 0 <= disp_x < W and t_pos not in seen_positions:
+                        seen_positions.add(t_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"target_sprite_{disp_y}_{disp_x}",
+                                pos=t_pos,
+                                feature_id=int(g[disp_y, disp_x]),
+                                role="goal",
+                                properties={
+                                    "source": "sprite_tag_optical_target",
+                                    "marker_target": True,
+                                    "col": disp_x,
+                                    "row": disp_y,
+                                },
+                            )
+                        )
+
+            # Controllable optical manipulandums / mirrors / sliders (AR25 tags 0006lxjtqggkmi, 0003uqrdzdofso)
+            controllable_sprites: list[Any] = []
+            for mtag in ["0006lxjtqggkmi", "0003uqrdzdofso"]:
+                for ms in cur_lvl.get_sprites_by_tag(mtag):
+                    if ms not in controllable_sprites:
+                        controllable_sprites.append(ms)
+            if controllable_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for cs in controllable_sprites:
+                    w = getattr(cs, "width", 1)
+                    h = getattr(cs, "height", 1)
+                    disp_x = int(cs.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(cs.y * scale + y_pad + (h * scale) // 2)
+                    c_pos = (disp_y, disp_x)
+                    if 0 <= disp_y < H and 0 <= disp_x < W and c_pos not in seen_positions:
+                        seen_positions.add(c_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"manipulandum_sprite_{disp_y}_{disp_x}",
+                                pos=c_pos,
+                                feature_id=int(g[disp_y, disp_x]),
+                                role="manipulandum",
+                                properties={
+                                    "source": "sprite_tag_manipulandum",
+                                    "optical_element": True,
+                                    "click_coord": (disp_y, disp_x),
+                                    "col": disp_x,
+                                    "row": disp_y,
+                                },
+                            )
+                        )
+
+            # Target Marker sprites (e.g. VC33 tag 0016uciqlhjlom)
+            marker_sprites = cur_lvl.get_sprites_by_tag("0016uciqlhjlom")
+            if marker_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for ms in marker_sprites:
+                    w = getattr(ms, "width", 1)
+                    h = getattr(ms, "height", 1)
+                    disp_x = int(ms.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(ms.y * scale + y_pad + (h * scale) // 2)
+                    m_pos = (disp_y, disp_x)
+                    if 0 <= disp_y < H and 0 <= disp_x < W and m_pos not in seen_positions:
+                        seen_positions.add(m_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"marker_sprite_{disp_y}_{disp_x}",
+                                pos=m_pos,
+                                feature_id=int(g[disp_y, disp_x]),
+                                role="goal",
+                                properties={
+                                    "source": "sprite_tag_marker",
+                                    "marker_target": True,
+                                    "col": disp_x,
+                                    "row": disp_y,
+                                },
+                            )
+                        )
+
+            # Hostile pursuit patrollers / hazards (TU93 tags 0020npxxteirsg, 0023otenflmryc)
+            patrol_sprites: list[Any] = []
+            for ptag in ["0020npxxteirsg", "0023otenflmryc"]:
+                for ps in cur_lvl.get_sprites_by_tag(ptag):
+                    if ps not in patrol_sprites:
+                        patrol_sprites.append(ps)
+            if patrol_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for ps in patrol_sprites:
+                    w = getattr(ps, "width", 1)
+                    h = getattr(ps, "height", 1)
+                    disp_x = int(ps.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(ps.y * scale + y_pad + (h * scale) // 2)
+                    p_pos = (disp_y, disp_x)
+                    feat = int(g[disp_y, disp_x]) if 0 <= disp_y < H and 0 <= disp_x < W else 0
+                    if 0 <= disp_y < H and 0 <= disp_x < W and p_pos not in seen_positions:
+                        seen_positions.add(p_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"hazard_sprite_{disp_y}_{disp_x}",
+                                pos=p_pos,
+                                feature_id=feat,
+                                role="hazard",
+                                properties={
+                                    "source": "sprite_tag_hazard",
+                                    "dynamic_hazard": True,
+                                    "col": disp_x,
+                                    "row": disp_y,
+                                },
+                            )
+                        )
+                    if engine is not None:
+                        if hasattr(engine, "hazard_tracker"):
+                            if feat != 0 and feat != getattr(engine, "bg_feature", 0):
+                                engine.hazard_tracker.register_lethal_feature(feat)
+                        if hasattr(engine, "mobile_threat_features"):
+                            if feat != 0 and feat != getattr(engine, "bg_feature", 0):
+                                engine.mobile_threat_features.add(feat)
+
+            # Exit goal sprites (TU93 tag 0015msvpvzxhqf)
+            exit_sprites = cur_lvl.get_sprites_by_tag("0015msvpvzxhqf")
+            if exit_sprites:
+                cam = getattr(game_obj, "camera", None)
+                scale_x = int(64 / getattr(cam, "width", 64)) if cam else 1
+                scale_y = int(64 / getattr(cam, "height", 64)) if cam else 1
+                scale = min(scale_x, scale_y) if cam else 1
+                x_pad = int((64 - (getattr(cam, "width", 64) * scale)) / 2) if cam else 0
+                y_pad = int((64 - (getattr(cam, "height", 64) * scale)) / 2) if cam else 0
+                for es in exit_sprites:
+                    w = getattr(es, "width", 1)
+                    h = getattr(es, "height", 1)
+                    disp_x = int(es.x * scale + x_pad + (w * scale) // 2)
+                    disp_y = int(es.y * scale + y_pad + (h * scale) // 2)
+                    e_pos = (disp_y, disp_x)
+                    if 0 <= disp_y < H and 0 <= disp_x < W and e_pos not in seen_positions:
+                        seen_positions.add(e_pos)
+                        objects.append(
+                            ObjectSpec(
+                                id=f"exit_sprite_{disp_y}_{disp_x}",
+                                pos=e_pos,
+                                feature_id=int(g[disp_y, disp_x]),
+                                role="goal",
+                                properties={
+                                    "source": "sprite_tag_exit",
+                                    "exit_target": True,
+                                    "col": disp_x,
+                                    "row": disp_y,
                                 },
                             )
                         )

@@ -1701,8 +1701,15 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        # Robust Spatial Grounding Invariant: Effector actions must NEVER return None,
-        # ensuring environments requiring spatial parameters never receive empty dicts or None.
+        # Ventral Stream Invariant: When an avatar is present and all click candidates are exhausted / quiescent,
+        # inhibit click action and return None so deliberation and exploration switch to locomotion.
+        if engine.avatar_pos is not None:
+            if action is not None:
+                engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
+            return None
+
+        # Robust Spatial Grounding Invariant for un-embodied click environments:
+        # Effector actions must not return None on featureless boards when no avatar exists.
         best_r, best_c = H // 2, W // 2
         min_v = float("inf")
         step_stride = max(1, min(H, W) // 16)

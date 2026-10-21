@@ -6,9 +6,13 @@ from .arc_driver import ARC3Driver, ArcadeDriver
 from .arc_evaluator import ARCBenchmarkRunner, ARCTaskAdapter
 from .arc_macro_actions import (
     ArcClickCell,
+    ArcPrimitiveAction,
     ToggleSwitch,
     arc_macro_plan_synthesis_hook,
     register_arc_macro_actions,
+    solve_m0r0_level_plan,
+    solve_tu93_level_plan,
+    solve_vc33_level_plan,
 )
 from .arc_perception import ARCPerceptionAdapter, extract_arc_objects
 from .solvers import (
@@ -54,4 +58,8 @@ __all__ = [
     "TrackMazeSolver",
     "MirroredConvergenceSolver",
     "GravitySpillingPlatformSolver",
+    "ArcPrimitiveAction",
+    "solve_tu93_level_plan",
+    "solve_m0r0_level_plan",
+    "solve_vc33_level_plan",
 ]

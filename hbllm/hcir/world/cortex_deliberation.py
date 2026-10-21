@@ -220,7 +220,14 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
             live_patrols: set[tuple[tuple[int, int], tuple[int, int]]] = {
                 (t.pos, t.facing)
                 for t in live_threats
-                if t.feature_id in engine.mobile_threat_features
+                if (
+                    t.feature_id in engine.mobile_threat_features
+                    or any(
+                        e.properties.get("dynamic_hazard") or e.role == "hazard"
+                        for e in entities
+                        if e.feature_id == t.feature_id
+                    )
+                )
             }
 
             if not live_patrols:
@@ -581,11 +588,19 @@ class PrefrontalDeliberationEngine:
             and not engine.working_memory.body_schema.has_manipulandum()
             and spatial_effector_actions
         ):
-            chosen_eff = spatial_effector_actions[0]
-            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
-            if eff_data is not None:
-                engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                return chosen_eff, eff_data
+            bg = engine.estimate_background(curr_grid)
+            entities = engine.extract_entities(curr_grid, bg)
+            has_interactive = bool(
+                entities
+                or getattr(engine, "learned_goal_positions", None)
+                or getattr(engine, "target_scorers", None)
+            )
+            if has_interactive:
+                chosen_eff = spatial_effector_actions[0]
+                eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+                if eff_data is not None:
+                    engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    return chosen_eff, eff_data
 
         if not spatial_effector_actions and discrete_transform_actions:
             has_displacement_actions = any(
@@ -801,19 +816,17 @@ class PrefrontalDeliberationEngine:
         engine._feedback_assimilated = False
 
         # Faculty: Executive Macro-Action Plan Execution & Synthesis
-        def _is_macro_step_safe(act: Any, data: dict[str, Any] | None) -> bool:
-            is_effector = engine.is_spatial_effector(act) or (
-                data is not None and any(k in data for k in ("x", "y", "col", "row"))
-            )
-            if not is_effector and engine.inhibited_actions.get(act, 0) > 0:
-                return False
-            if hasattr(engine, "working_memory") and hasattr(
-                engine.working_memory, "habenular_ior"
-            ):
-                if engine.working_memory.habenular_ior.is_action_inhibited(
-                    engine.avatar_pos, act, action_data=data
-                ):
-                    return False
+        def _is_macro_step_safe(plan: Any, act: Any, data: dict[str, Any] | None) -> bool:
+            # Executive prefrontal macro plans supersede subcortical motor refractory inhibition (inhibited_actions)
+            # and exploratory sensory foraging IOR (habenular_ior).
+            # If the macro plan is marked is_strict, trust executive dispatch completely (e.g. verified evasion/solution sequence).
+            if getattr(plan, "is_strict", False):
+                return True
+            cur_op = getattr(plan, "current", lambda: None)()
+            if cur_op is not None and getattr(cur_op, "is_strict", False):
+                return True
+
+            # Safety gating only aborts if the displacement moves directly into an active, lethal collision cone.
             if engine.avatar_pos is not None and act in engine.action_dynamics:
                 dyn = engine.action_dynamics[act]
                 if dyn.is_displacement_action():
@@ -833,7 +846,7 @@ class PrefrontalDeliberationEngine:
             if macro_step is not None:
                 m_act, m_data = macro_step
                 if m_act in available_actions:
-                    if _is_macro_step_safe(m_act, m_data):
+                    if _is_macro_step_safe(macro_plan, m_act, m_data):
                         return self._finalize_step(engine, curr_grid, m_act, m_data)
                     else:
                         macro_plan.clear()
@@ -856,7 +869,7 @@ class PrefrontalDeliberationEngine:
                 if macro_step is not None:
                     m_act, m_data = macro_step
                     if m_act in available_actions:
-                        if _is_macro_step_safe(m_act, m_data):
+                        if _is_macro_step_safe(synthesized, m_act, m_data):
                             return self._finalize_step(engine, curr_grid, m_act, m_data)
                         else:
                             engine.working_memory.macro_plan.clear()

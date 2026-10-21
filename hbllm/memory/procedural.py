@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -252,6 +253,107 @@ class ProceduralMemory(MemoryRepository):
             return None
 
         return self._row_to_dict(row)
+
+    def get_skill_sync(self, tenant_id: str, skill_name: str) -> dict[str, Any] | None:
+        """Synchronously retrieve a single skill by tenant and skill name."""
+        if not self.db_path.exists():
+            return None
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM skills WHERE tenant_id = ? AND skill_name = ?",
+                (tenant_id, skill_name),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self._row_to_dict(row)
+
+    def store_skill_sync(
+        self,
+        tenant_id: str,
+        skill_name: str,
+        trigger_pattern: str,
+        steps: list[dict[str, Any]],
+        source_node: str = "",
+    ) -> str:
+        """Synchronously store or update a procedural skill in SQLite."""
+        if not skill_name or not skill_name.strip():
+            raise ValueError("skill_name must not be empty")
+        if not steps:
+            raise ValueError("steps must not be empty")
+
+        now = datetime.now(timezone.utc).isoformat()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS skills (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    skill_name TEXT NOT NULL,
+                    trigger_pattern TEXT NOT NULL,
+                    steps_json TEXT NOT NULL,
+                    success_rate REAL DEFAULT 1.0,
+                    usage_count INTEGER DEFAULT 0,
+                    source_node TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            cursor.execute(
+                "SELECT id FROM skills WHERE tenant_id = ? AND skill_name = ?",
+                (tenant_id, skill_name),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    """UPDATE skills
+                       SET steps_json = ?, trigger_pattern = ?, source_node = ?, updated_at = ?
+                       WHERE id = ?""",
+                    (json.dumps(steps), trigger_pattern, source_node, now, existing[0]),
+                )
+                conn.commit()
+                logger.info("Updated skill '%s' for tenant '%s' (sync)", skill_name, tenant_id)
+                return str(existing[0])
+            else:
+                skill_id = uuid.uuid4().hex[:12]
+                cursor.execute(
+                    """INSERT INTO skills
+                       (id, tenant_id, skill_name, trigger_pattern, steps_json,
+                        source_node, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        skill_id,
+                        tenant_id,
+                        skill_name,
+                        trigger_pattern,
+                        json.dumps(steps),
+                        source_node,
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+                logger.info("Stored new skill '%s' for tenant '%s' (sync)", skill_name, tenant_id)
+                return skill_id
+
+    def find_skill_sync(self, tenant_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """Synchronously search skills matching a query."""
+        if not self.db_path.exists():
+            return []
+        with sqlite3.connect(str(self.db_path)) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM skills
+                   WHERE tenant_id = ?
+                     AND (skill_name LIKE ? OR trigger_pattern LIKE ?)
+                   ORDER BY usage_count DESC, success_rate DESC
+                   LIMIT ?""",
+                (tenant_id, f"%{query}%", f"%{query}%", top_k),
+            )
+            rows = cursor.fetchall()
+            return [self._row_to_dict(r) for r in rows]
 
     # ── MemoryRepository interface ───────────────────────────────────
     # Transitional adapters.

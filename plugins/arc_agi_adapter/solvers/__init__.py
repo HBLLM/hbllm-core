@@ -6,6 +6,7 @@ from plugins.arc_agi_adapter.solvers.archetypes import (
     install_arc3_solvers,
 )
 from plugins.arc_agi_adapter.solvers.game_solvers import (
+    FruitMergeAttractorSolver,
     GravitySpillingPlatformSolver,
     LightsOutSolver,
     MemoryCardMatchingSolver,
@@ -13,7 +14,9 @@ from plugins.arc_agi_adapter.solvers.game_solvers import (
     MirroredConvergenceSolver,
     PegSolitaireSolver,
     SentryCombatSolver,
+    SplineKinematicsSolver,
     TrackMazeSolver,
+    VisualProgramSynthesisSolver,
     VortexAttractorSolver,
 )
 
@@ -30,4 +33,7 @@ __all__ = [
     "TrackMazeSolver",
     "MirroredConvergenceSolver",
     "GravitySpillingPlatformSolver",
+    "SplineKinematicsSolver",
+    "FruitMergeAttractorSolver",
+    "VisualProgramSynthesisSolver",
 ]
