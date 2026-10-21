@@ -1,17 +1,22 @@
-"""
-Prediction Lifecycle State Machine — Tracks Prediction Evolution & Real-world Verification.
+"""Prediction Lifecycle State Machine — Tracks Prediction Evolution & Real-world Verification.
+
+State machine tracking prediction verification and learning lifecycles, lifted
+to declarative CausalPredicates and atomic TransactionOperations.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
 
-class PredictionState(str, Enum):
+class PredictionState(StrEnum):
     """Lifecycle states of a prediction."""
 
     CREATED = "created"
@@ -39,3 +44,22 @@ class PredictionLifecycle:
             new_state.value,
         )
         self.state = new_state
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export lifecycle state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"lifecycle:{self.prediction_id}",
+            operator="==",
+            value=self.state.value,
+            target_entity=self.prediction_id,
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction updating prediction lifecycle state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.MODIFY_NODE,
+                node_id=f"pred_{self.prediction_id}",
+                changes={"lifecycle_state": self.state.value},
+            )
+        ]

@@ -123,6 +123,9 @@ class ContradictionOperator:
         # Strategy 3: High-magnitude prediction errors
         contradictions.extend(self._detect_prediction_failures(view))
 
+        # Strategy 4: Physical deadlocks conflicting with goals
+        contradictions.extend(self._detect_physical_deadlocks(view))
+
         if not contradictions:
             return CognitiveResult(
                 status=ResultStatus.NO_RESULT,
@@ -296,6 +299,66 @@ class ContradictionOperator:
                             "strategy": "prediction_failure",
                             "node_a": node.prediction_id,
                             "node_b": node.id,
+                        }
+                    )
+
+        return results
+
+    @staticmethod
+    def _detect_physical_deadlocks(view: Any) -> list[dict[str, Any]]:
+        """Detect physical deadlocks (e.g. trapped movable entities) conflicting with goals."""
+        results: list[dict[str, Any]] = []
+        goals = [
+            node
+            for node in view.nodes_by_type(HCIRNodeType.GOAL)
+            if getattr(node, "resolved", False) is False
+        ]
+        if not goals:
+            return results
+
+        for node_id in view.all_node_ids():
+            node = view.get_node(node_id)
+            if not node:
+                continue
+
+            is_deadlocked = False
+            deadlock_desc = ""
+
+            if node.node_type == HCIRNodeType.PREDICTION:
+                props = getattr(node, "properties", {}) or {}
+                predicted_state = props.get("predicted_state") or {}
+                spatial_outcome = (
+                    predicted_state.get("spatial_outcome")
+                    if isinstance(predicted_state, dict)
+                    else {}
+                )
+                if spatial_outcome and spatial_outcome.get("deadlock"):
+                    is_deadlocked = True
+                    entities = spatial_outcome.get("deadlocked_entities", [])
+                    deadlock_desc = f"Prediction {node_id} results in fatal physical deadlock for entities {entities}"
+                elif "deadlock': True" in str(getattr(node, "predicted_outcome", "")):
+                    is_deadlocked = True
+                    deadlock_desc = (
+                        f"Prediction {node_id} predicted outcome contains fatal deadlock"
+                    )
+
+            elif node.node_type == HCIRNodeType.PHYSICAL_ENTITY:
+                props = getattr(node, "properties", {}) or {}
+                if getattr(node, "status", "") == "deadlocked" or props.get("deadlock") is True:
+                    is_deadlocked = True
+                    deadlock_desc = f"Physical entity {getattr(node, 'entity_name', node_id)} is trapped in corner deadlock"
+
+            if is_deadlocked:
+                for g in goals:
+                    results.append(
+                        {
+                            "description": (
+                                f"Physical deadlock contradiction: '{deadlock_desc}' violates goal '{getattr(g, 'description', g.id)}'"
+                            ),
+                            "severity": 1.0,
+                            "strategy": "physical_deadlock",
+                            "node_a": g.id,
+                            "node_b": node_id,
                         }
                     )
 

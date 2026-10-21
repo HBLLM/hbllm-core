@@ -1,5 +1,7 @@
-"""
-Predictor Disagreement Analyzer — Measures Predictor Variance & Triggers Attention Salience.
+"""Predictor Disagreement Analyzer — Measures Predictor Variance & Triggers Attention Salience.
+
+Analyzes variance across ensemble predictor outputs, ambiguity between competing hypotheses,
+and direct contradictions, lifted to declarative CausalPredicates and atomic TransactionOperations.
 """
 
 from __future__ import annotations
@@ -7,6 +9,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +23,29 @@ class DisagreementReport:
     disagreement_score: float
     high_disagreement: bool
     component_confidences: dict[str, float] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export disagreement report as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="predictor_disagreement",
+            operator="==",
+            value=self.disagreement_score,
+            relation="high" if self.high_disagreement else "nominal",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording disagreement metrics."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="predictor_disagreement_report",
+                node_data={
+                    "disagreement_score": self.disagreement_score,
+                    "high_disagreement": self.high_disagreement,
+                    "component_confidences": dict(self.component_confidences),
+                },
+            )
+        ]
 
 
 class PredictorDisagreementAnalyzer:
@@ -48,3 +76,37 @@ class PredictorDisagreementAnalyzer:
             high_disagreement=high_disagreement,
             component_confidences=confidences,
         )
+
+    @staticmethod
+    def detect_ambiguity(
+        hypotheses: list[dict[str, Any]],
+        confidence_delta_threshold: float = 0.05,
+    ) -> tuple[bool, float]:
+        """W126: Ambiguity detection when multiple competing hypotheses share near-identical confidence."""
+        if len(hypotheses) < 2:
+            return False, 0.0
+
+        confs = [float(h.get("confidence", 0.5)) for h in hypotheses]
+        confs.sort(reverse=True)
+        top1, top2 = confs[0], confs[1]
+        delta = abs(top1 - top2)
+        is_ambiguous = delta <= confidence_delta_threshold
+        ambiguity_level = max(0.0, 1.0 - delta)
+        return is_ambiguous, ambiguity_level
+
+    @staticmethod
+    def detect_contradiction(
+        pred_a: dict[str, Any],
+        pred_b: dict[str, Any],
+    ) -> list[str]:
+        """W128: Contradiction detection identifying direct conflicts on categorical variables."""
+        contradictions: list[str] = []
+        for k in set(pred_a.keys()) & set(pred_b.keys()):
+            va, vb = pred_a[k], pred_b[k]
+            if va != vb:
+                contradictions.append(f"Conflict on variable '{k}': {va} vs {vb}")
+        return contradictions
+
+    def export_causal_predicates(self, report: DisagreementReport) -> list[CausalPredicate]:
+        """Export disagreement report as declarative causal predicates."""
+        return [report.to_causal_predicate()]

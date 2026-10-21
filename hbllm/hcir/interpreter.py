@@ -110,12 +110,18 @@ async def sys_assert(
     edge_data = ins.params.get("edge_data")
 
     if node_data:
+        node_id = node_data.get("id")
+        op = (
+            TransactionOp.UPSERT_NODE
+            if (node_id and workspace.graph.has_node(node_id))
+            else TransactionOp.ADD_NODE
+        )
         tx = HCIRTransaction(
             author=ins.params.get("author", "interpreter"),
             operations=[
                 TransactionOperation(
-                    op=TransactionOp.ADD_NODE,
-                    node_id=node_data.get("id"),
+                    op=op,
+                    node_id=node_id,
                     node_data=node_data,
                 )
             ],

@@ -1,5 +1,7 @@
-"""
-Predictor Weight Manager — Domain-Keyed Predictor Weight Manager with Exploration Scoring.
+"""Predictor Weight Manager — Domain-Keyed Predictor Weight Manager with Exploration Scoring.
+
+Manages domain-scoped predictor weights with exploration scoring, lifted to
+declarative CausalPredicates and atomic TransactionOperations.
 """
 
 from __future__ import annotations
@@ -7,6 +9,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_context import WorldModelScope
 
 logger = logging.getLogger(__name__)
@@ -27,6 +31,31 @@ class PredictorWeightState:
         num = (alpha * self.accuracy_weight) + (beta * self.exploration_bonus)
         den = max(0.01, gamma * (1.0 + self.uncertainty))
         return num / den
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export predictor weight state as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"weight:{self.predictor_name}",
+            operator="==",
+            value=self.accuracy_weight,
+            relation="accuracy_weight",
+            target_entity=self.predictor_name,
+        )
+
+    def to_transaction_operation(self, scope_key: str = "global") -> TransactionOperation:
+        """Propose atomic HCIR transaction updating predictor weight in cognitive kernel."""
+        return TransactionOperation(
+            op=TransactionOp.UPSERT_NODE,
+            node_id=f"weight_{scope_key}_{self.predictor_name}",
+            node_data={
+                "predictor_name": self.predictor_name,
+                "scope_key": scope_key,
+                "accuracy_weight": self.accuracy_weight,
+                "exploration_bonus": self.exploration_bonus,
+                "uncertainty": self.uncertainty,
+                "total_evaluations": self.total_evaluations,
+            },
+        )
 
 
 class PredictorWeightManager:
@@ -70,3 +99,15 @@ class PredictorWeightManager:
             new_acc,
         )
         return state
+
+    def export_causal_predicates(self, scope: WorldModelScope) -> list[CausalPredicate]:
+        """Export all predictor weights for a scope as causal predicates."""
+        key = scope.to_key()
+        states = self._weights.get(key, {})
+        return [st.to_causal_predicate() for st in states.values()]
+
+    def to_transaction_operations(self, scope: WorldModelScope) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting weights for a domain scope."""
+        key = scope.to_key()
+        states = self._weights.get(key, {})
+        return [st.to_transaction_operation(key) for st in states.values()]

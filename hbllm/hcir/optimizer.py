@@ -19,6 +19,7 @@ Pipeline::
 from __future__ import annotations
 
 import logging
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -26,6 +27,17 @@ from typing import Any
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "CIRBlock",
+    "CognitiveIRProgram",
+    "CostPruningPass",
+    "DeadInstructionEliminationPass",
+    "HCIROptimizer",
+    "IOptimizerPass",
+    "QueryMergingPass",
+    "TransactionBatchingPass",
+]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -150,6 +162,58 @@ class QueryMergingPass(IOptimizerPass):
         )
 
 
+class TransactionBatchingPass(IOptimizerPass):
+    """Groups consecutive mutating instructions into atomic transaction batches.
+
+    Annotates contiguous sequences of mutating instructions (ASSERT, RETRACT)
+    with a shared ``batch_id`` in their parameter dictionary. This allows the
+    interpreter or transaction manager to commit them within a single transaction
+    block rather than incurring transaction overhead per instruction.
+    """
+
+    def __init__(self, max_batch_size: int = 50) -> None:
+        self._max_batch_size = max_batch_size
+
+    @property
+    def name(self) -> str:
+        return "TransactionBatching"
+
+    def run(self, stream: InstructionStream) -> InstructionStream:
+        optimized: list[Instruction] = []
+        batch_id: str | None = None
+        current_batch_count = 0
+        mutating_opcodes = {Opcode.ASSERT, Opcode.RETRACT}
+
+        for ins in stream.instructions:
+            if ins.opcode in mutating_opcodes:
+                if batch_id is None or current_batch_count >= self._max_batch_size:
+                    batch_id = f"batch_{uuid.uuid4().hex[:8]}"
+                    current_batch_count = 0
+
+                new_params = dict(ins.params)
+                new_params["batch_id"] = batch_id
+                current_batch_count += 1
+
+                optimized.append(
+                    Instruction(
+                        id=ins.id,
+                        opcode=ins.opcode,
+                        params=new_params,
+                        cost_estimate=ins.cost_estimate,
+                    )
+                )
+            else:
+                batch_id = None
+                current_batch_count = 0
+                optimized.append(ins)
+
+        return InstructionStream(
+            author=stream.author,
+            description=f"{stream.description} [opt:tx_batch]",
+            instructions=optimized,
+        )
+
+
 class CostPruningPass(IOptimizerPass):
     """Prunes instructions if total estimated cost exceeds a budget limit."""
 
@@ -205,6 +269,7 @@ class HCIROptimizer:
         self._passes = passes or [
             DeadInstructionEliminationPass(),
             QueryMergingPass(),
+            TransactionBatchingPass(),
         ]
 
     def optimize(self, stream: InstructionStream) -> InstructionStream:

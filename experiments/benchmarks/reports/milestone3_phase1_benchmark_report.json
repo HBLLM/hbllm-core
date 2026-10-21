@@ -1,0 +1,801 @@
+{
+  "benchmark": "Milestone 3 Phase 1: Inductive Global Invariant Discovery",
+  "timestamp_iso": "2026-10-10T16:42:17Z",
+  "execution_duration_seconds": 8.69,
+  "system_environment": {
+    "python_version": "3.12.15",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit",
+    "numpy_version": "2.3.5"
+  },
+  "comparative_baselines": {
+    "BASELINE_A_PRIMITIVE_ONLY": {
+      "exact_matches": "0/20",
+      "exact_match_pct": 0.0,
+      "wilson_95_ci": [
+        0.0,
+        0.1611
+      ]
+    },
+    "BASELINE_B_HEURISTIC_GREEDY": {
+      "exact_matches": "5/20",
+      "exact_match_pct": 25.0,
+      "wilson_95_ci": [
+        0.1119,
+        0.4687
+      ]
+    },
+    "BASELINE_C_TEMPLATE_MEMORIZATION": {
+      "exact_matches": "11/20",
+      "exact_match_pct": 55.0,
+      "wilson_95_ci": [
+        0.3421,
+        0.7418
+      ]
+    },
+    "BASELINE_D_FULL_INDUCTIVE_HCIR": {
+      "exact_matches": "8/20",
+      "exact_match_pct": 40.0,
+      "wilson_95_ci": [
+        0.2188,
+        0.6134
+      ]
+    }
+  },
+  "hcir_family_breakdown": {
+    "parity_color_inversion_shapes": {
+      "exact_matches": "1/5",
+      "exact_match_pct": 20.0,
+      "wilson_95_ci": [
+        0.0362,
+        0.6245
+      ]
+    },
+    "parity_foreground_recolor": {
+      "exact_matches": "4/5",
+      "exact_match_pct": 80.0,
+      "wilson_95_ci": [
+        0.3755,
+        0.9638
+      ]
+    },
+    "modular_ternary_cycle": {
+      "exact_matches": "2/5",
+      "exact_match_pct": 40.0,
+      "wilson_95_ci": [
+        0.1176,
+        0.7693
+      ]
+    },
+    "alternating_parity_reflection": {
+      "exact_matches": "1/5",
+      "exact_match_pct": 20.0,
+      "wilson_95_ci": [
+        0.0362,
+        0.6245
+      ]
+    }
+  },
+  "trials_log": [
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_01",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 50.09,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_01",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_01",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_01",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 906.01,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_02",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 185.26,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_02",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_02",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_02",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 310.4,
+      "synthesized_operator_name": "synthesis_failed"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_03",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 158.46,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_03",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_03",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.11,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_03",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 668.35,
+      "synthesized_operator_name": "synthesized_global_invariant_pixel_count_mod_3"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_04",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 188.17,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_04",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_04",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_04",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 591.12,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_05",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 19.89,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_05",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_05",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.1,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_color_inversion_shapes_05",
+      "family": "parity_color_inversion_shapes",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 377.97,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_01",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 85.35,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_01",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.05,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_01",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_01",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 488.32,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_02",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 112.29,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_02",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_02",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_02",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 485.03,
+      "synthesized_operator_name": "synthesized_global_invariant_pixel_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_03",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 177.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_03",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_03",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_03",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 354.67,
+      "synthesized_operator_name": "synthesized_global_invariant_pixel_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_04",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 90.08,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_04",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_04",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_04",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 619.65,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_05",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 39.96,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_05",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_05",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_parity_foreground_recolor_05",
+      "family": "parity_foreground_recolor",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 310.13,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_01",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.54,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_01",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_01",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.1,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_01",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 116.78,
+      "synthesized_operator_name": "synthesized_cellular_automaton_4_neighbor"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_02",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 40.14,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_02",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_02",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.23,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_02",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 126.87,
+      "synthesized_operator_name": "synthesized_cellular_automaton_4_neighbor"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_03",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 64.41,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_03",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_03",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.09,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_03",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 313.4,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_3"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_04",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 63.88,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_04",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.05,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_04",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.12,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_04",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 374.63,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_3"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_05",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.72,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_05",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_05",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.1,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_modular_ternary_cycle_05",
+      "family": "modular_ternary_cycle",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 82.64,
+      "synthesized_operator_name": "synthesized_cellular_automaton_4_neighbor"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_01",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 52.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_01",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_01",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_01",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 352.36,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_02",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 41.98,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_02",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_02",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.14,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_02",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 357.63,
+      "synthesized_operator_name": "synthesized_global_invariant_object_count_mod_2"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_03",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 90.84,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_03",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_03",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_03",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 72.48,
+      "synthesized_operator_name": "synthesis_failed"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_04",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 53.23,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_04",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_04",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.12,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_04",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 88.16,
+      "synthesized_operator_name": "synthesis_failed"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_05",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 47.51,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_05",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_05",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.13,
+      "synthesized_operator_name": "memorized_demo_0"
+    },
+    {
+      "task_id": "m3_p1_alternating_parity_reflection_05",
+      "family": "alternating_parity_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 80.86,
+      "synthesized_operator_name": "synthesis_failed"
+    }
+  ],
+  "integrity_sha256": "b513946ce0514e192ddc86a1c94e6d5959e3be8e48a6b24043fa31393aeca304"
+}

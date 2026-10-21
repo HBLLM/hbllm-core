@@ -1,7 +1,7 @@
-"""
-World State Interpreter — Telemetry to Cognitive Belief Inference Pipeline.
+"""World State Interpreter — Telemetry to Cognitive Belief Inference Pipeline.
 
-Translates empirical sensor telemetry from DigitalTwinRegistry into structured cognitive belief hypotheses.
+Translates empirical sensor telemetry from DigitalTwinRegistry into structured cognitive
+belief hypotheses, formal Pearl causal predicates, and HCIRSymbolicWorldTheory rules.
 """
 
 from __future__ import annotations
@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,16 @@ class InterpretedBeliefHypothesis:
     value: Any
     confidence: float
     evidence_source: str = "sensor_telemetry"
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export belief hypothesis as a formal declarative HCIR CausalPredicate."""
+        return CausalPredicate(
+            variable=f"{self.subject}_{self.predicate}",
+            operator="==",
+            value=self.value,
+            relation=self.evidence_source,
+            target_entity=self.subject,
+        )
 
 
 class WorldStateInterpreter:
@@ -82,3 +94,14 @@ class WorldStateInterpreter:
             len(hypotheses),
         )
         return hypotheses
+
+    def export_causal_predicates(self, snapshot: WorldStateSnapshot) -> list[CausalPredicate]:
+        """Export all interpreted telemetry hypotheses as declarative causal predicates."""
+        hypotheses = self.interpret_snapshot(snapshot)
+        return [h.to_causal_predicate() for h in hypotheses]
+
+    def to_world_theory(self, snapshot: WorldStateSnapshot) -> HCIRSymbolicWorldTheory:
+        """Synthesize an empirical HCIRSymbolicWorldTheory from snapshot telemetry."""
+        theory = HCIRSymbolicWorldTheory()
+        theory.goal_predicates.extend(self.export_causal_predicates(snapshot))
+        return theory

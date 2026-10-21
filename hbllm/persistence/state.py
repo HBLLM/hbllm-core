@@ -46,12 +46,10 @@ class BrainState:
     def __init__(self, path: str = "./brain_state.db"):
         self.path = os.path.expanduser(path)
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        # Enable 5-second busy timeout to wait for transient SQLite locks
-        self._conn = sqlite3.connect(self.path, timeout=5.0)
+        from hbllm.persistence.sqlite_profiles import open_connection
+
+        self._conn = open_connection(self.path, profile="default", timeout=5.0)
         self._conn.row_factory = sqlite3.Row
-        # Enable WAL (Write-Ahead Logging) and safe synchronous modes
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_tables()
 
     def _init_tables(self) -> None:

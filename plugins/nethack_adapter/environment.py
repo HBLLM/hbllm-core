@@ -1,21 +1,16 @@
 """
-NetHack Environment Wrapper.
+NetHack Native Environment Wrapper.
 
-Provides dual-mode execution:
-1. Native `minihack` / `nle` if installed.
-2. High-fidelity `StandaloneNetHackEnv` implementing procedural multi-room dungeons,
-   fog of war, doors, monsters, inventory, and staircase descent.
+Provides native integration with upstream minihack / nle packages for
+procedural multi-room dungeons, glyph grids, and tactical action execution.
 """
 
 from __future__ import annotations
 
 import logging
-import random
 from typing import Any
 
 from .types import (
-    ACTION_VECTORS,
-    GLYPH_CHARS,
     NetHackAction,
     NetHackGlyph,
     NetHackObservation,
@@ -25,294 +20,8 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 
-class StandaloneNetHackEnv:
-    """
-    High-fidelity, zero-dependency NetHack / MiniHack simulation engine.
-    Generates procedural multi-room dungeons with corridors, doors, fog of war,
-    tactical combat, and staircase progression.
-    """
-
-    def __init__(
-        self,
-        height: int = 21,
-        width: int = 79,
-        seed: int | None = None,
-        tier: int = 5,
-    ) -> None:
-        self.height = height
-        self.width = width
-        self.tier = tier
-        self.rng = random.Random(seed)
-
-        self.dungeon_level = 1
-        self.max_steps = 200
-        self.step_count = 0
-
-        self.full_grid: list[list[NetHackGlyph]] = []
-        self.visible_grid: list[list[NetHackGlyph]] = []
-        self.player_pos = (10, 10)
-        self.stairs_pos = (20, 10)
-        self.stats = NetHackStats()
-        self.inventory: list[str] = []
-        self.monsters: dict[tuple[int, int], int] = {}  # (x, y) -> hp
-        self.last_message = "Welcome to NetHack!"
-
-        self.reset(seed=seed)
-
-    def reset(self, seed: int | None = None) -> tuple[NetHackObservation, dict[str, Any]]:
-        if seed is not None:
-            self.rng = random.Random(seed)
-
-        self.step_count = 0
-        self.dungeon_level = 1
-        self.stats = NetHackStats(hp=15, max_hp=15, dungeon_level=1, gold=0)
-        self.inventory = []
-        self.monsters = {}
-        self.last_message = "Welcome to NetHack! You enter the dungeon."
-
-        self._generate_dungeon()
-        self._update_visibility()
-        return self._get_obs(), {}
-
-    def _generate_dungeon(self) -> None:
-        """Generate procedural dungeon according to benchmark tier."""
-        self.full_grid = [
-            [NetHackGlyph.WALL for _ in range(self.width)] for _ in range(self.height)
-        ]
-        self.visible_grid = [
-            [NetHackGlyph.UNEXPLORED for _ in range(self.width)] for _ in range(self.height)
-        ]
-
-        # Room 1: (5, 5) to (18, 14)
-        r1_x1, r1_y1, r1_x2, r1_y2 = 5, 5, 18, 14
-        for y in range(r1_y1, r1_y2 + 1):
-            for x in range(r1_x1, r1_x2 + 1):
-                self.full_grid[y][x] = NetHackGlyph.FLOOR
-
-        # Tier 1: Single Room Navigation
-        if self.tier == 1:
-            self.player_pos = (r1_x1 + 2, r1_y1 + 2)
-            self.stairs_pos = (r1_x2 - 2, r1_y2 - 2)
-            sx, sy = self.stairs_pos
-            self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
-            return
-
-        # Tier 4: Monster Combat (Single room with monster blocking stairs)
-        if self.tier == 4:
-            self.player_pos = (r1_x1 + 2, r1_y1 + 2)
-            mx, my = r1_x1 + 6, r1_y1 + 2
-            self.full_grid[my][mx] = NetHackGlyph.MONSTER
-            self.monsters[(mx, my)] = 6
-            self.stairs_pos = (r1_x2 - 2, r1_y1 + 2)
-            sx, sy = self.stairs_pos
-            self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
-            return
-
-        # Tiers 2, 3, 5: Two Rooms connected by corridor
-        r2_x1, r2_y1, r2_x2, r2_y2 = 35, 5, 50, 14
-        for y in range(r2_y1, r2_y2 + 1):
-            for x in range(r2_x1, r2_x2 + 1):
-                self.full_grid[y][x] = NetHackGlyph.FLOOR
-
-        # Corridor connecting Room 1 and Room 2 along y=10
-        cy = 10
-        for x in range(r1_x2 + 1, r2_x1):
-            self.full_grid[cy][x] = NetHackGlyph.CORRIDOR
-
-        # Player placed in Room 1
-        self.player_pos = (r1_x1 + 2, r1_y1 + 2)
-
-        # Stairs placed in Room 2
-        self.stairs_pos = (r2_x2 - 2, r2_y2 - 2)
-        sx, sy = self.stairs_pos
-        self.full_grid[sy][sx] = NetHackGlyph.STAIRS_DOWN
-
-        if self.tier == 2:
-            # Tier 2: Open Corridor Exploration (no door, no monster)
-            self.full_grid[cy][r1_x2] = NetHackGlyph.FLOOR
-            return
-
-        if self.tier == 3:
-            # Tier 3: Closed Door Navigation (closed door, no monster)
-            self.full_grid[cy][r1_x2] = NetHackGlyph.DOOR_CLOSED
-            return
-
-        # Tier 5: Full Dungeon Descent (closed door + monster)
-        self.full_grid[cy][r1_x2] = NetHackGlyph.DOOR_CLOSED
-        mx, my = r2_x1 + 4, cy
-        self.full_grid[my][mx] = NetHackGlyph.MONSTER
-        self.monsters[(mx, my)] = 6
-        self.full_grid[r1_y2 - 2][r1_x1 + 4] = NetHackGlyph.KEY
-
-    def _update_visibility(self) -> None:
-        """Reveal cells within line-of-sight radius (radius=5)."""
-        px, py = self.player_pos
-        radius = 5
-        for dy in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                x, y = px + dx, py + dy
-                if 0 <= x < self.width and 0 <= y < self.height:
-                    if dx * dx + dy * dy <= radius * radius + 1:
-                        self.visible_grid[y][x] = self.full_grid[y][x]
-
-    def step(
-        self, action: int | NetHackAction
-    ) -> tuple[NetHackObservation, float, bool, bool, dict[str, Any]]:
-        act = NetHackAction(action) if isinstance(action, int) else action
-        self.step_count += 1
-        reward = 0.0
-        terminated = False
-        self.last_message = ""
-
-        px, py = self.player_pos
-
-        # Movement / Attack
-        if act in ACTION_VECTORS:
-            dx, dy = ACTION_VECTORS[act]
-            nx, ny = px + dx, py + dy
-
-            if 0 <= nx < self.width and 0 <= ny < self.height:
-                target_glyph = self.full_grid[ny][nx]
-
-                # Combat if walking into monster
-                if (nx, ny) in self.monsters:
-                    hp = self.monsters[(nx, ny)] - 4
-                    if hp <= 0:
-                        del self.monsters[(nx, ny)]
-                        self.full_grid[ny][nx] = NetHackGlyph.FLOOR
-                        self.last_message = "You hit the monster and kill it!"
-                        self.stats.gold += 10
-                    else:
-                        self.monsters[(nx, ny)] = hp
-                        self.last_message = "You hit the monster! It counterattacks."
-                        self.stats.hp = max(0, self.stats.hp - 2)
-
-                # Closed door blocks movement
-                elif target_glyph == NetHackGlyph.DOOR_CLOSED:
-                    self.last_message = "This door is closed."
-
-                # Passable terrain
-                elif target_glyph in (
-                    NetHackGlyph.FLOOR,
-                    NetHackGlyph.CORRIDOR,
-                    NetHackGlyph.DOOR_OPEN,
-                    NetHackGlyph.STAIRS_DOWN,
-                    NetHackGlyph.STAIRS_UP,
-                    NetHackGlyph.KEY,
-                    NetHackGlyph.FOOD,
-                    NetHackGlyph.GOLD,
-                ):
-                    self.player_pos = (nx, ny)
-
-        # Open Door Action
-        elif act == NetHackAction.OPEN_DOOR:
-            # Check all 8 adjacent cells for closed door
-            opened = False
-            for dx, dy in (
-                (0, -1),
-                (1, 0),
-                (0, 1),
-                (-1, 0),
-                (1, -1),
-                (1, 1),
-                (-1, 1),
-                (-1, -1),
-            ):
-                nx, ny = px + dx, py + dy
-                if 0 <= nx < self.width and 0 <= ny < self.height:
-                    if self.full_grid[ny][nx] == NetHackGlyph.DOOR_CLOSED:
-                        self.full_grid[ny][nx] = NetHackGlyph.DOOR_OPEN
-                        self.last_message = "The door opens."
-                        opened = True
-                        break
-            if not opened:
-                self.last_message = "No closed door here."
-
-        # Kick Action (e.g. break locked doors or obstacles)
-        elif act == NetHackAction.KICK:
-            kicked = False
-            for dx, dy in (
-                (0, -1),
-                (1, 0),
-                (0, 1),
-                (-1, 0),
-                (1, -1),
-                (1, 1),
-                (-1, 1),
-                (-1, -1),
-            ):
-                nx, ny = px + dx, py + dy
-                if 0 <= nx < self.width and 0 <= ny < self.height:
-                    if self.full_grid[ny][nx] == NetHackGlyph.DOOR_CLOSED:
-                        self.full_grid[ny][nx] = NetHackGlyph.DOOR_OPEN
-                        self.last_message = "As you kick the door, it gives way and breaks open!"
-                        kicked = True
-                        break
-            if not kicked:
-                self.last_message = "You kick at empty space."
-
-        # Pickup Action
-        elif act == NetHackAction.PICKUP:
-            curr = self.full_grid[py][px]
-            if curr == NetHackGlyph.KEY:
-                self.inventory.append("skeleton_key")
-                self.full_grid[py][px] = NetHackGlyph.FLOOR
-                self.last_message = "You pick up a skeleton key."
-            elif curr == NetHackGlyph.GOLD:
-                self.stats.gold += 25
-                self.full_grid[py][px] = NetHackGlyph.FLOOR
-                self.last_message = "You pick up 25 gold pieces."
-
-        # Descend Stairs Action
-        elif act == NetHackAction.DESCEND_STAIRS:
-            if self.player_pos == self.stairs_pos:
-                self.dungeon_level += 1
-                self.stats.dungeon_level = self.dungeon_level
-                self.last_message = f"You descend to dungeon level {self.dungeon_level}!"
-                reward = 1.0
-                terminated = True
-            else:
-                self.last_message = "You can't go down here."
-
-        # Check death
-        if self.stats.hp <= 0:
-            self.last_message = "You die..."
-            terminated = True
-
-        self._update_visibility()
-        truncated = self.step_count >= self.max_steps
-        obs = self._get_obs()
-        return obs, reward, terminated, truncated, {"dungeon_level": self.dungeon_level}
-
-    def _get_obs(self) -> NetHackObservation:
-        # Build 2D chars
-        chars = [[GLYPH_CHARS[g] for g in row] for row in self.visible_grid]
-        px, py = self.player_pos
-        chars[py][px] = GLYPH_CHARS[NetHackGlyph.PLAYER]
-
-        return NetHackObservation(
-            glyphs=self.visible_grid,
-            chars=chars,
-            player_pos=self.player_pos,
-            stats=NetHackStats(**self.stats.__dict__),
-            inventory=list(self.inventory),
-            message=self.last_message,
-            step_count=self.step_count,
-        )
-
-
 class NativeNetHackWrapper:
-    """
-    Dual-mode wrapper wrapping authentic upstream minihack / nle package.
-
-    NOTE ON MINIHACK / NLE UPSTREAM COMPILATION:
-    The upstream 'minihack' / 'nle' packages compile against the NetHack C source distribution
-    requiring flex, bison, and specific C toolchain headers.
-    When installed in an environment supporting minihack/nle, this wrapper binds directly
-    to gym.make('MiniHack-...').
-    In standalone or CI environments, HBLLM provides the high-fidelity StandaloneNetHackEnv
-    simulating procedural NetHack dungeon generation, glyph grids, tactical combat, and descent.
-    """
+    """Wrapper around authentic upstream minihack / nle package."""
 
     is_native: bool = True
 
@@ -353,7 +62,7 @@ class NativeNetHackWrapper:
             except ImportError as err:
                 raise ImportError(
                     "minihack and gymnasium/gym are required for NativeNetHackWrapper. "
-                    "Install via 'pip install minihack' or use StandaloneNetHackEnv."
+                    "Install via 'pip install minihack'."
                 ) from err
 
         self._gym = gym
@@ -379,6 +88,35 @@ class NativeNetHackWrapper:
 
         self.reset(seed=seed)
 
+    def _env_reset(self, seed: int | None = None) -> tuple[Any, dict[str, Any]]:
+        if self._is_gymnasium:
+            res: Any = self.env.reset(seed=seed) if seed is not None else self.env.reset()
+        else:
+            if seed is not None and hasattr(self.env, "seed"):
+                getattr(self.env, "seed")(seed)
+            res = self.env.reset()
+
+        if isinstance(res, tuple) and len(res) == 2:
+            raw_obs, info = res
+            return raw_obs, dict(info) if isinstance(info, dict) else {}
+        return res, {}
+
+    def _env_step(self, action_idx: int) -> tuple[Any, float, bool, bool, dict[str, Any]]:
+        step_result: Any = self.env.step(action_idx)
+        if isinstance(step_result, tuple) and len(step_result) == 5:
+            obs, r, term, trunc, inf = step_result
+            return (
+                obs,
+                float(r),
+                bool(term),
+                bool(trunc),
+                dict(inf) if isinstance(inf, dict) else {},
+            )
+        elif isinstance(step_result, tuple) and len(step_result) == 4:
+            obs, r, done, inf = step_result
+            return obs, float(r), bool(done), False, dict(inf) if isinstance(inf, dict) else {}
+        return step_result, 0.0, False, False, {}
+
     def reset(self, seed: int | None = None) -> tuple[NetHackObservation, dict[str, Any]]:
         if seed is not None:
             self.seed = seed
@@ -386,11 +124,7 @@ class NativeNetHackWrapper:
         self.dungeon_level = 1
         self.known_glyphs = []
         self.known_chars = []
-        if self._is_gymnasium:
-            raw_obs, info = self.env.reset(seed=seed) if seed is not None else self.env.reset()
-        else:
-            raw_obs = self.env.reset()
-            info = {}
+        raw_obs, info = self._env_reset(seed=seed)
         obs = self._build_obs(raw_obs)
         return obs, info
 
@@ -416,60 +150,48 @@ class NativeNetHackWrapper:
             (-1, -1): "NW",
         }
 
-        # Handle door interactions (modal OPEN/KICK if supported, or step-into-door)
+        # Check if modal action (e.g. open door, kick, search)
         if act_enum in (NetHackAction.OPEN_DOOR, NetHackAction.KICK):
+            # Find closed door near player
             px, py = self.player_pos
             dir_name = "E"
+            door_coord = None
             for (dx, dy), name in dir_to_name.items():
                 nx, ny = px + dx, py + dy
                 if 0 <= ny < len(self.known_glyphs) and 0 <= nx < len(self.known_glyphs[0]):
                     if self.known_glyphs[ny][nx] == NetHackGlyph.DOOR_CLOSED:
                         dir_name = name
+                        door_coord = (nx, ny)
                         break
 
             if act_enum == NetHackAction.OPEN_DOOR and "OPEN" in self._action_name_to_idx:
                 open_idx = self._action_name_to_idx["OPEN"]
                 dir_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    _, r1, term1, trunc1, i1 = self.env.step(open_idx)
-                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = term1 or term2
-                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                    info = {**i1, **i2}
-                else:
-                    _, r1, d1, i1 = self.env.step(open_idx)
-                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = d1 or d2
-                    truncated = self.step_count >= self.max_steps
-                    info = {**i1, **i2}
+                _, r1, term1, trunc1, i1 = self._env_step(open_idx)
+                raw_obs, r2, term2, trunc2, i2 = self._env_step(dir_idx)
+                reward = r1 + r2
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
             elif act_enum == NetHackAction.KICK and "KICK" in self._action_name_to_idx:
                 kick_idx = self._action_name_to_idx["KICK"]
                 dir_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    _, r1, term1, trunc1, i1 = self.env.step(kick_idx)
-                    raw_obs, r2, term2, trunc2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = term1 or term2
-                    truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
-                    info = {**i1, **i2}
-                else:
-                    _, r1, d1, i1 = self.env.step(kick_idx)
-                    raw_obs, r2, d2, i2 = self.env.step(dir_idx)
-                    reward = float(r1 + r2)
-                    terminated = d1 or d2
-                    truncated = self.step_count >= self.max_steps
-                    info = {**i1, **i2}
+                _, r1, term1, trunc1, i1 = self._env_step(kick_idx)
+                raw_obs, r2, term2, trunc2, i2 = self._env_step(dir_idx)
+                reward = r1 + r2
+                terminated = term1 or term2
+                truncated = trunc1 or trunc2 or (self.step_count >= self.max_steps)
+                info = {**i1, **i2}
             else:
                 # In standard MiniHack environments, stepping into the closed door opens it!
                 act_idx = self._action_name_to_idx.get(dir_name, 0)
-                if self._is_gymnasium:
-                    raw_obs, reward, terminated, truncated, info = self.env.step(act_idx)
-                else:
-                    raw_obs, reward, terminated, info = self.env.step(act_idx)
-                reward = float(reward)
-                truncated = truncated or (self.step_count >= self.max_steps)
+                raw_obs, reward, terminated, trunc_env, info = self._env_step(act_idx)
+                truncated = trunc_env or (self.step_count >= self.max_steps)
+
+            if door_coord is not None:
+                dx_c, dy_c = door_coord
+                if 0 <= dy_c < len(self.known_glyphs) and 0 <= dx_c < len(self.known_glyphs[0]):
+                    self.known_glyphs[dy_c][dx_c] = int(NetHackGlyph.DOOR_OPEN)
 
         else:
             name_map = {
@@ -490,16 +212,8 @@ class NativeNetHackWrapper:
             if act_idx >= action_space_size:
                 act_idx = act_idx % action_space_size
 
-            if self._is_gymnasium:
-                raw_obs, reward_env, term_env, trunc_env, info = self.env.step(act_idx)
-                reward = float(reward_env)
-                terminated = term_env
-                truncated = trunc_env or (self.step_count >= self.max_steps)
-            else:
-                raw_obs, reward_env, done_env, info = self.env.step(act_idx)
-                reward = float(reward_env)
-                terminated = done_env
-                truncated = self.step_count >= self.max_steps
+            raw_obs, reward, terminated, trunc_env, info = self._env_step(act_idx)
+            truncated = trunc_env or (self.step_count >= self.max_steps)
 
         if reward >= 1.0:
             self.dungeon_level = 2
@@ -565,7 +279,13 @@ class NativeNetHackWrapper:
                             self.known_glyphs[r][c] = int(NetHackGlyph.MONSTER)
                             self.known_chars[r][c] = chr(ch)
                         elif ch in (ord("|"), ord("-")):
-                            self.known_glyphs[r][c] = int(NetHackGlyph.WALL)
+                            if self.known_glyphs[r][c] in (
+                                int(NetHackGlyph.DOOR_CLOSED),
+                                int(NetHackGlyph.DOOR_OPEN),
+                            ):
+                                self.known_glyphs[r][c] = int(NetHackGlyph.DOOR_OPEN)
+                            else:
+                                self.known_glyphs[r][c] = int(NetHackGlyph.WALL)
                             self.known_chars[r][c] = chr(ch)
 
             if "message" in raw_obs:
@@ -593,20 +313,13 @@ class NativeNetHackWrapper:
 def make_nethack_env(
     seed: int | None = None,
     tier: int = 5,
-    prefer_native: bool = True,
-    require_native: bool = False,
-) -> StandaloneNetHackEnv | NativeNetHackWrapper:
-    """Instantiate NetHack environment with dual-mode native/standalone selection."""
-    if prefer_native or require_native:
-        try:
-            return NativeNetHackWrapper(seed=seed, tier=tier)
-        except Exception as e:
-            if require_native:
-                raise RuntimeError(
-                    f"Native 'minihack' / 'nle' upstream package is required but failed: {e}"
-                ) from e
-            logger.warning(
-                "Native minihack unavailable (%s), falling back to StandaloneNetHackEnv",
-                e,
-            )
-    return StandaloneNetHackEnv(seed=seed, tier=tier)
+) -> NativeNetHackWrapper:
+    """Instantiate NetHack environment binding strictly to native minihack."""
+    try:
+        wrapper = NativeNetHackWrapper(seed=seed, tier=tier)
+        logger.info("Successfully bound to native minihack environment (tier=%d)", tier)
+        return wrapper
+    except Exception as e:
+        raise RuntimeError(
+            f"Native 'minihack' / 'nle' upstream package is required but failed: {e}"
+        ) from e

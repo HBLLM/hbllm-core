@@ -1,0 +1,39 @@
+{
+  "name": "arc-agi-adapter",
+  "version": "1.0.0",
+  "manifest_version": 2,
+  "description": "ARC-AGI and ARC-AGI-3 Interactive Reasoning Benchmark Adapter for HCIR",
+  "author": "hbllm-team",
+  "entry_point": "__init__.py",
+  "platform_version": ">=1.0.0",
+  "dependencies": [
+    "numpy>=1.24.0",
+    "arc-agi>=0.9.9",
+    "arcengine>=0.9.3"
+  ],
+  "tags": [
+    "eval",
+    "benchmark",
+    "arc-agi",
+    "arc-agi-3",
+    "interactive-reasoning",
+    "hcir"
+  ],
+  "benchmark_category": "upstream_external_benchmark",
+  "upstream_package": "arc-agi",
+  "supports_native_execution": true,
+  "supports_standalone_fallback": true,
+  "license": "GPL-3.0-only",
+  "capabilities": [
+    "arc1_solve_relational",
+    "arc1_extract_topology",
+    "arc3_observe",
+    "arc3_calibrate_motor",
+    "arc3_plan_hcir",
+    "arc3_step"
+  ],
+  "permissions": [
+    "environment_simulation",
+    "network_access"
+  ]
+}

@@ -308,3 +308,28 @@ class TestBudgetAwareScheduling:
         scheduler = KernelInstructionScheduler(budget=budget)
         assert scheduler.budget is budget
         assert scheduler.budget.total_tokens == 5000
+
+
+def test_infer_hypothetical_goals_symmetry() -> None:
+    """Verify CognitiveBlackbox._infer_hypothetical_goals detects incomplete mirror coordinates."""
+    import numpy as np
+
+    from hbllm.drivers.cognitive_blackbox import AgentState, CognitiveBlackbox
+    from hbllm.hcir.spatial_planner import EntityGraph
+
+    cb = CognitiveBlackbox()
+    state = AgentState()
+    eg = EntityGraph(grid_shape=(10, 10))
+
+    # Construct symmetric grid with one missing pixel on the right:
+    grid = np.zeros((10, 10), dtype=int)
+    grid[2, 2] = 3
+    grid[3, 3] = 3
+    grid[3, 6] = 3
+    grid[4, 1] = 3
+    grid[4, 8] = 3
+
+    hypo_goals = cb._infer_hypothetical_goals(eg=eg, state=state, perception_data={"grid": grid})
+    assert len(hypo_goals) > 0
+    assert any(g.grid_pos == (2, 7) for g in hypo_goals)
+    assert any(g.properties.get("hypothesis") == "symmetry_completion" for g in hypo_goals)
