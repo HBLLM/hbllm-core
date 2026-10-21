@@ -90,3 +90,13 @@ kaggle_submission/environment_files/
 /scratch/
 /kaggle_arc2_submission/
 /graphify-out
+
+# Benchmark scorecards and evaluation reports
+*scorecard*.json
+*scorecard*.md
+arc_agi_*_report.md
+arc_agi_*_results.json
+*results.json
+tu93_ar25_*.json
+test_*_scorecard.json
+

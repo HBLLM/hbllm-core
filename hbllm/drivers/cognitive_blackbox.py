@@ -2980,7 +2980,7 @@ class CognitiveBlackbox:
             and not state.learned_obstacle_features
             and state.avatar_feature is None
         ):
-            for fallback_id in ["arc_agi", "default"]:
+            for fallback_id in ["default"]:
                 if fallback_id in self._source_states and fallback_id != source_id:
                     fb_state = self._source_states[fallback_id]
                     if (
@@ -3239,17 +3239,6 @@ class CognitiveBlackbox:
                 m.delta_r = 0
                 m.delta_c = 0
                 m.confidence = 0.3
-
-        # Also sync to arc_agi source_id if active
-        if source_id != "arc_agi":
-            arc_state = self.get_state("arc_agi")
-            arc_state.avatar_feature = state.avatar_feature
-            arc_state.step_size = state.step_size
-            arc_state.learned_obstacle_features.update(state.learned_obstacle_features)
-            arc_state.learned_target_features.update(state.learned_target_features)
-            arc_state.learned_traversable_features.update(state.learned_traversable_features)
-            arc_state.action_models.update(state.action_models)
-            arc_state.learned_affordance_rules.update(state.learned_affordance_rules)
 
         # Sync state to workspace and spatial planner
         self.sync_state_to_workspace(source_id)
