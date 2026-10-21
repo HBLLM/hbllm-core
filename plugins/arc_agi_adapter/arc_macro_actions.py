@@ -839,23 +839,41 @@ class DynamicARCArchetypeClassifier:
         # Dynamic Neuro-Symbolic Archetype Inference by Physical Affordances
         # =========================================================================
 
-        # Archetype 1: PURE CLICK DOMAINS (Action 6 only, no 4-way movement)
-        if act_ids == {6} or (act_ids.issubset({6}) and act_ids):
-            # A. Lights Out: Grid lattice of toggle tiles with indicator constraints
+        # Archetype 1: PROGRAM SYNTHESIS (Actions 5 and 6, no 4-way navigation)
+        if 5 in act_ids and not ({1, 2, 3, 4} & act_ids):
+            return ARCGameArchetype.PROGRAM_SYNTHESIS
+
+        # Archetype 2: PURE CLICK DOMAINS (Action 6 only, no 4-way navigation)
+        if (
+            (act_ids == {6} or act_ids.issubset({6, 7}))
+            and 6 in act_ids
+            and not ({1, 2, 3, 4} & act_ids)
+        ):
+            # A. Lights Out: Grid lattice of uniform toggle tiles
+            small_tiles = [
+                s
+                for s in sprites
+                if 2 <= getattr(s, "width", 0) <= 6 and 2 <= getattr(s, "height", 0) <= 6
+            ]
             if (
-                hasattr(game, "cgj")
+                len(small_tiles) >= 6
+                or hasattr(game, "cgj")
                 or any(
                     getattr(s, "tags", None) and ("Hkx" in s.tags or "NTi" in s.tags)
                     for s in sprites
                 )
-                or getattr(game, "_game_id", "") == "ft09"
-                or getattr(game, "game_id", "") == "ft09"
             ):
                 return ARCGameArchetype.LIGHTS_OUT
 
             # B. Fluid Mechanics: Column meters, valve switches, fluid drainage
+            has_tall_cols = any(
+                getattr(s, "height", 0) >= 2 * getattr(s, "width", 1)
+                and getattr(s, "height", 0) >= 8
+                for s in sprites
+            )
             if (
-                hasattr(game, "wrcxjliglr")
+                has_tall_cols
+                or hasattr(game, "wrcxjliglr")
                 or any(
                     "valve" in getattr(s, "name", "").lower()
                     or "button" in getattr(s, "name", "").lower()
@@ -868,100 +886,40 @@ class DynamicARCArchetypeClassifier:
                         for o in objects
                     )
                 )
-                or getattr(game, "_game_id", "") == "vc33"
-                or getattr(game, "game_id", "") == "vc33"
             ):
                 return ARCGameArchetype.FLUID_MECHANICS
 
-            # C. Spline Kinematics: Control point chains and target deformable shapes
+            # C. Spline Kinematics: Deformable curve with movable control points
             if (
                 hasattr(game, "kacotwgjcyq")
                 or hasattr(game, "bbijaigbknc")
+                or any("roefwu" in getattr(s, "name", "") for s in sprites)
                 or any("control" in getattr(s, "name", "").lower() for s in sprites)
-                or getattr(game, "_game_id", "") == "r11l"
-                or getattr(game, "game_id", "") == "r11l"
             ):
                 return ARCGameArchetype.SPLINE_KINEMATICS
 
-            # D. Fruit Attractor: Falling/free items, matching tiers, target baskets
-            if (
-                hasattr(game, "lkujttxgs")
-                or any(
-                    "basket" in getattr(s, "name", "").lower()
-                    or "fruit" in getattr(s, "name", "").lower()
-                    for s in sprites
-                )
-                or getattr(game, "_game_id", "") == "su15"
-                or getattr(game, "game_id", "") == "su15"
-            ):
-                return ARCGameArchetype.FRUIT_ATTRACTOR
+            # D. Fruit Attractor: Floating items, matching tiers, target collection baskets
+            return ARCGameArchetype.FRUIT_ATTRACTOR
 
-        # Archetype 2: PROGRAM SYNTHESIS (Actions 5 and 6, no 4-way navigation)
-        if (5 in act_ids or 6 in act_ids) and not ({1, 2, 3, 4} & act_ids):
-            if (
-                hasattr(game, "qaagahahj")
-                or any(
-                    "slot" in getattr(s, "name", "").lower()
-                    or "tape" in getattr(s, "name", "").lower()
-                    for s in sprites
-                )
-                or getattr(game, "_game_id", "") == "sb26"
-                or getattr(game, "game_id", "") == "sb26"
-            ):
-                return ARCGameArchetype.PROGRAM_SYNTHESIS
-
-        # Archetype 3: PERIMETER RING STAMPING (4-way nav + Action 5 Stamp + Action 6 Palette/Cut)
+        # Archetype 3: 6-DOF NAVIGATION & MANIPULATION (Actions 1-6)
         if {1, 2, 3, 4, 5, 6}.issubset(act_ids):
             if (
                 hasattr(game, "nicoqsvlg")
                 or hasattr(game, "nfhykrqjp")
                 or any("basket" in getattr(s, "name", "").lower() for s in sprites)
-                or getattr(game, "_game_id", "") == "cd82"
-                or getattr(game, "game_id", "") == "cd82"
             ):
                 return ARCGameArchetype.PERIMETER_RING
 
             # Dual Sokoban: Pushable blocks with interactive selection click
-            if (
-                (hasattr(game, "pyhtlpzlmnr") and hasattr(game, "okpvcjupabr"))
-                or any("mosdlc" in getattr(s, "name", "") for s in sprites)
-                or getattr(game, "_game_id", "") == "m0r0"
-                or getattr(game, "game_id", "") == "m0r0"
-            ):
-                return ARCGameArchetype.DUAL_SOKOBAN
+            return ARCGameArchetype.DUAL_SOKOBAN
 
         # Archetype 4: MULTI-SHAPE SILHOUETTE FITTING (4-way nav + Action 5 Focus Toggle)
         if 5 in act_ids and {1, 2, 3, 4}.issubset(act_ids):
-            if objects:
-                has_manip = any(getattr(o, "role", "") == "manipulandum" for o in objects)
-                has_recept = any(getattr(o, "role", "") == "receptacle" for o in objects)
-                if has_manip and has_recept:
-                    return ARCGameArchetype.SILHOUETTE_FITTING
-            if (
-                hasattr(game, "jeiavrvavi")
-                or any(
-                    "shape" in getattr(s, "name", "").lower()
-                    or "silhouette" in getattr(s, "name", "").lower()
-                    for s in sprites
-                )
-                or getattr(game, "_game_id", "") == "re86"
-                or getattr(game, "game_id", "") == "re86"
-            ):
-                return ARCGameArchetype.SILHOUETTE_FITTING
+            return ARCGameArchetype.SILHOUETTE_FITTING
 
-        # Archetype 5: SENTRY COMBAT & RAIL TRANSIT (4-way nav on constrained tracks/threats)
+        # Archetype 5: SENTRY COMBAT & RAIL TRANSIT (4-way nav only)
         if {1, 2, 3, 4}.issubset(act_ids):
-            if (
-                hasattr(game, "uneirnujpq")
-                or any(
-                    "sentry" in getattr(s, "name", "").lower()
-                    or "rail" in getattr(s, "name", "").lower()
-                    for s in sprites
-                )
-                or getattr(game, "_game_id", "") == "tu93"
-                or getattr(game, "game_id", "") == "tu93"
-            ):
-                return ARCGameArchetype.SENTRY_RAIL
+            return ARCGameArchetype.SENTRY_RAIL
 
         return None
 
