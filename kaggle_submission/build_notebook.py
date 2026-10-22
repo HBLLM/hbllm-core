@@ -78,37 +78,6 @@ def build() -> dict:
     )
     install_cell = code_cell(install_cell_source)
 
-    # Collect pure-Python plugin adapter files to embed directly into the notebook
-    import os
-
-    plugin_files_dict: dict[str, str] = {}
-    plugins_dir = ROOT.parent / "plugins"
-    if plugins_dir.exists():
-        for root, _, files in os.walk(plugins_dir):
-            for f in files:
-                fp = Path(root) / f
-                if fp.suffix == ".py" and "__pycache__" not in fp.parts:
-                    rel = fp.relative_to(ROOT.parent)
-                    plugin_files_dict[f"/tmp/{rel}"] = fp.read_text(encoding="utf-8")
-
-    write_plugins_source = (
-        "# ==============================================================================\n"
-        "# 2A. EMBEDDED ARC-AGI COGNITIVE USB ADAPTER PLUGINS\n"
-        "# ==============================================================================\n"
-        "import json\n"
-        "import os\n"
-        "import sys\n\n"
-        f"_PLUGIN_FILES_DATA = {json.dumps(plugin_files_dict)}\n\n"
-        "for _dst_path, _code in _PLUGIN_FILES_DATA.items():\n"
-        "    os.makedirs(os.path.dirname(_dst_path), exist_ok=True)\n"
-        "    with open(_dst_path, 'w', encoding='utf-8') as _pf:\n"
-        "        _pf.write(_code)\n\n"
-        "if '/tmp' not in sys.path:\n"
-        "    sys.path.insert(0, '/tmp')\n\n"
-        f"print(f'✓ Deployed {{len(_PLUGIN_FILES_DATA)}} embedded ARC-AGI plugin files to /tmp/plugins.')\n"
-    )
-    write_plugins_cell = code_cell(write_plugins_source)
-
     # Cell 2 writes /tmp/my_agent.py (NOT in /kaggle/working/ so Kaggle doesn't confuse it with submission.parquet)
     write_agent_cell = code_cell("%%writefile /tmp/my_agent.py\n" + agent_body)
 
@@ -155,15 +124,10 @@ def build() -> dict:
             shutil.copytree(framework_src, working_framework)
             print(f"✓ Copied framework from {framework_src} to {working_framework}")
 
-            # 3. Install MyAgent and embedded plugins into the framework
+            # 3. Install MyAgent into the framework
             target_agent = os.path.join(working_framework, "agents", "templates", "my_agent.py")
             shutil.copy("/tmp/my_agent.py", target_agent)
             print(f"✓ Installed MyAgent into {target_agent}")
-
-            plugins_target = os.path.join(working_framework, "plugins")
-            if os.path.exists("/tmp/plugins"):
-                shutil.copytree("/tmp/plugins", plugins_target, dirs_exist_ok=True)
-                print(f"✓ Installed embedded plugins into {plugins_target}")
 
 
             # 4. Register MyAgent in the framework registry (slimming out unused heavy deps)
@@ -431,7 +395,6 @@ def build() -> dict:
                 "evaluates against hidden competition puzzles, and emits verified scorecard."
             ),
             install_cell,
-            write_plugins_cell,
             write_agent_cell,
             run_cell,
             dummy_submission_cell,
