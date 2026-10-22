@@ -17,12 +17,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from plugins.arc_agi_adapter.solvers.game_solvers import (
-    MemoryCardMatchingSolver,
-    MirroredConvergenceSolver,
-    VortexAttractorSolver,
-)
-
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
@@ -87,15 +81,10 @@ class ARC3ArchetypeScorer:
         last_feat = getattr(vm, "last_probed_feature", None)
         if last_probed is not None and last_feat is not None and last_feat != bg and last_feat != 0:
             pair_target = vm.find_matching_pair(last_probed, last_feat)
-            return MemoryCardMatchingSolver.score_matching_pairs(
-                last_probed=last_probed,
-                last_feat=last_feat,
-                matching_partner_pos=pair_target,
-                H=H,
-                W=W,
-                bg=bg,
-                quiescent_targets=engine.quiescent_click_targets,
-            )
+            if pair_target is not None:
+                pr, pc = pair_target
+                if (pr, pc) not in engine.quiescent_click_targets and 0 <= pr < H and 0 <= pc < W:
+                    candidates.append((pr, pc, 450.0))
         return candidates
 
     def _score_symmetry_discrepancies(
@@ -156,15 +145,34 @@ class ARC3ArchetypeScorer:
             barrier_features=engine.symbolic_theory.barrier_features,
             known_lethal_features=engine.hazard_tracker.known_lethal_features,
         )
-        return MirroredConvergenceSolver.extract_mirror_targets(
-            structural_goals=structural_goals,
-            curr_grid=curr_grid,
-            bg=bg,
-            H=H,
-            W=W,
-            quiescent_targets=engine.quiescent_click_targets,
-            visit_counts=engine.entity_visit_counts,
-        )
+        candidates: list[tuple[int, int, float]] = []
+        for og in structural_goals:
+            op = og.get("position")
+            g_type = og.get("type")
+            if (
+                op is not None
+                and op not in engine.quiescent_click_targets
+                and 0 <= op[0] < H
+                and 0 <= op[1] < W
+            ):
+                v_count = engine.entity_visit_counts.get(f"click_{op[0]}_{op[1]}", 0)
+                if v_count < 3:
+                    is_void = og.get("is_void", False) or (int(curr_grid[op[0], op[1]]) == bg)
+                    if g_type in (
+                        "relational_alignment",
+                        "optical_mirror_target",
+                        "reflection_target",
+                    ):
+                        base = 60.0 if is_void else 240.0
+                        conf = og.get("confidence", 0.5)
+                        score = base + (conf * 40.0) - float(v_count) * 20.0
+                        candidates.append((op[0], op[1], score))
+                    elif g_type == "symmetry_completion":
+                        base = 50.0 if is_void else 220.0
+                        conf = og.get("confidence", 0.8)
+                        score = base + (conf * 50.0) - float(v_count) * 20.0
+                        candidates.append((op[0], op[1], score))
+        return candidates
 
     def _score_affordance_panels(
         self,
@@ -250,16 +258,49 @@ class ARC3ArchetypeScorer:
             if engine.last_action_data and "x" in engine.last_action_data
             else None
         )
-        return VortexAttractorSolver.score_repulsion_wave_targets(
-            entities=entities,
-            curr_grid=curr_grid,
-            bg=bg,
-            H=H,
-            W=W,
-            quiescent_targets=engine.quiescent_click_targets,
-            visit_counts=engine.entity_visit_counts,
-            last_action_coord=last_action_coord,
-        )
+        candidates: list[tuple[int, int, float]] = []
+        target_zones = [
+            e.grid_pos
+            for e in entities
+            if getattr(e, "role", None) is not None and str(getattr(e, "role", "")) == "goal"
+        ]
+        movable_items = [
+            e
+            for e in entities
+            if e.feature_id != bg and e.area <= 12 and getattr(e, "role", None) != "goal"
+        ]
+
+        if not target_zones or not movable_items:
+            return candidates
+
+        for item in movable_items:
+            ir, ic = item.grid_pos
+            nearest_zone = min(target_zones, key=lambda z: abs(z[0] - ir) + abs(z[1] - ic))
+            zr, zc = nearest_zone
+            dr = 1 if zr > ir else (-1 if zr < ir else 0)
+            dc = 1 if zc > ic else (-1 if zc < ic else 0)
+
+            probe_points = []
+            if dr != 0:
+                probe_points.append((ir - dr * 2, ic))
+                probe_points.append((ir - dr * 3, ic))
+            if dc != 0:
+                probe_points.append((ir, ic - dc * 2))
+                probe_points.append((ir, ic - dc * 3))
+
+            for click_r, click_c in probe_points:
+                if (
+                    0 <= click_r < H
+                    and 0 <= click_c < W
+                    and (click_r, click_c) not in engine.quiescent_click_targets
+                ):
+                    v_count = engine.entity_visit_counts.get(f"click_{click_r}_{click_c}", 0)
+                    if v_count < 4:
+                        base_score = 350.0
+                        if (click_r, click_c) == last_action_coord:
+                            base_score += 40.0
+                        candidates.append((click_r, click_c, base_score - float(v_count) * 20.0))
+        return candidates
 
 
 class ARC3DeliberationPolicy:
@@ -446,15 +487,10 @@ class ARC3DeliberationPolicy:
 
 
 def install_arc3_solvers(engine: AutonomousEpistemicEngine) -> None:
-    """Wire ARC-AGI-3 game solvers and archetype policies into an epistemic engine instance."""
+    """Wire ARC-AGI-3 modular archetype policies and target scorers into an epistemic engine instance."""
     scorer = ARC3ArchetypeScorer()
     if hasattr(engine, "register_target_scorer"):
         engine.register_target_scorer(scorer)
     if hasattr(engine, "register_deliberation_policy"):
         engine.register_deliberation_policy(ARC3DeliberationPolicy())
-    from hbllm.hcir.world.macro_actions import MacroActionDriverManager
-
-    MacroActionDriverManager.register_synthesis_hook(
-        MirroredConvergenceSolver.synthesize_macro_plan
-    )
-    logger.info("Installed ARC-AGI-3 modular game solvers and archetype scorers.")
+    logger.info("Installed ARC-AGI-3 modular archetype scorers and deliberation policy.")

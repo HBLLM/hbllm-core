@@ -125,6 +125,32 @@ class HCIRSymbolicWorldTheory:
         """Record empirical causal failure where tool_feat failed to clear barrier_feat."""
         self.tool_barrier_incompatibilities.setdefault(tool_feat, set()).add(barrier_feat)
 
+    def has_tool_barrier_affinity(
+        self, tool_feat: int | None, barrier_feat: int | None = None
+    ) -> bool:
+        """Check if tool_feat has empirical resonance with barrier_feat (or any barrier if barrier_feat is None)."""
+        if tool_feat is None:
+            return False
+        affinities = self.tool_barrier_affinities.get(tool_feat)
+        if not affinities:
+            return False
+        if barrier_feat is None:
+            return len(affinities) > 0
+        return barrier_feat in affinities
+
+    def is_tool_barrier_incompatible(
+        self, tool_feat: int | None, barrier_feat: int | None = None
+    ) -> bool:
+        """Check if tool_feat has confirmed incompatibility with barrier_feat."""
+        if tool_feat is None:
+            return False
+        incompat = self.tool_barrier_incompatibilities.get(tool_feat)
+        if not incompat:
+            return False
+        if barrier_feat is None:
+            return len(incompat) > 0
+        return barrier_feat in incompat
+
     def record_distal_actuation(
         self,
         trigger_feature: int | tuple[int, int] | None = None,

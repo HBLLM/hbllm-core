@@ -189,6 +189,97 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         )
 
 
+def _attach_object_macro_tasks(
+    role: str,
+    pos: tuple[int, int],
+    feat: int = 0,
+    obj_id: str = "",
+    props: dict[str, Any] | None = None,
+) -> list[Any]:
+    """Break down the smallest atomic macro-tasks available for an object."""
+    from hbllm.hcir.world.macro_actions import (
+        DepositCargo,
+        ExploreObject,
+        InteractWith,
+        NavigateTo,
+        PickUpCargo,
+        PushObject,
+        SwitchFocus,
+        TranslateObject,
+        UseToolOnBarrier,
+    )
+
+    tasks: list[Any] = []
+    props = props or {}
+
+    if "cargo" in role or "box" in role or "key" in role or "crate" in role or "item" in role:
+        # Box / Cargo: PickUp is the primary atomic macro-task
+        tasks.append(
+            PickUpCargo(cargo_pos=pos, cargo_feature=feat, description=f"Pick up {role} at {pos}")
+        )
+        tasks.append(PushObject(target_pos=pos, description=f"Push {role} at {pos}"))
+    elif (
+        "switch" in role
+        or "button" in role
+        or "lever" in role
+        or "valve" in role
+        or "actuator" in role
+    ):
+        try:
+            from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell, ToggleSwitch
+
+            tasks.append(
+                ToggleSwitch(
+                    switch_pos=pos,
+                    switch_id=obj_id,
+                    switch_feature=feat,
+                    description=f"Toggle switch at {pos}",
+                )
+            )
+            tasks.append(ArcClickCell(cell_coord=pos, description=f"Click cell at {pos}"))
+        except Exception:
+            pass
+        tasks.append(InteractWith(target_coord=pos, description=f"Interact with {role} at {pos}"))
+    elif "goal" in role or "exit" in role:
+        tasks.append(NavigateTo(destination=pos, description=f"Navigate to goal at {pos}"))
+    elif "receptacle" in role or "door" in role or "silhouette" in role or "container" in role:
+        tasks.append(
+            DepositCargo(
+                receptacle_pos=pos,
+                cargo_feature=feat,
+                description=f"Deposit into receptacle at {pos}",
+            )
+        )
+        tasks.append(
+            UseToolOnBarrier(
+                barrier_pos=pos, tool_feature=feat, description=f"Unlock barrier at {pos}"
+            )
+        )
+    elif "manipulandum" in role or "shape" in role or "slider" in role:
+        tasks.append(TranslateObject(target_pos=pos, description=f"Translate {role} at {pos}"))
+        tasks.append(SwitchFocus(switch_action=5, description="Switch active manipulandum focus"))
+    elif "barrier" in role or "obstacle" in role:
+        tasks.append(
+            UseToolOnBarrier(
+                barrier_pos=pos, tool_feature=feat, description=f"Use tool on barrier at {pos}"
+            )
+        )
+    else:
+        tasks.append(
+            ExploreObject(
+                target_pos=pos, target_feature=feat, description=f"Explore entity at {pos}"
+            )
+        )
+        try:
+            from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
+
+            tasks.append(ArcClickCell(cell_coord=pos, description=f"Click cell at {pos}"))
+        except Exception:
+            pass
+
+    return tasks
+
+
 def extract_arc_objects(
     grid: Any,
     engine: Any = None,
@@ -459,42 +550,57 @@ def extract_arc_objects(
                 # 1. Interactive clickable switches & buttons & actuators
                 if role == "switch":
                     seen_positions.add(s_pos)
+                    s_id = f"switch_sprite_{disp_y}_{disp_x}"
+                    s_props = {
+                        "source": "sprite_actuator",
+                        "click_coord": s_pos,
+                        "click_data": {"x": disp_x, "y": disp_y},
+                        "sprite_name": s_name,
+                    }
                     objects.append(
                         ObjectSpec(
-                            id=f"switch_sprite_{disp_y}_{disp_x}",
+                            id=s_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="switch",
-                            properties={
-                                "source": "sprite_actuator",
-                                "click_coord": s_pos,
-                                "click_data": {"x": disp_x, "y": disp_y},
-                                "sprite_name": s_name,
-                            },
+                            properties=s_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, s_id, s_props
+                            ),
                         )
                     )
                 # 2. Exits, target markers, and goals
                 elif role == "goal":
                     seen_positions.add(s_pos)
+                    g_id = f"goal_sprite_{disp_y}_{disp_x}"
+                    g_props = {"source": "sprite_goal", "sprite_name": s_name}
                     objects.append(
                         ObjectSpec(
-                            id=f"goal_sprite_{disp_y}_{disp_x}",
+                            id=g_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="goal",
-                            properties={"source": "sprite_goal", "sprite_name": s_name},
+                            properties=g_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, g_id, g_props
+                            ),
                         )
                     )
                 # 3. Dynamic hazards, enemies, patrollers
                 elif role == "hazard":
                     seen_positions.add(s_pos)
+                    h_id = f"hazard_sprite_{disp_y}_{disp_x}"
+                    h_props = {"source": "sprite_hazard", "sprite_name": s_name}
                     objects.append(
                         ObjectSpec(
-                            id=f"hazard_sprite_{disp_y}_{disp_x}",
+                            id=h_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="hazard",
-                            properties={"source": "sprite_hazard", "sprite_name": s_name},
+                            properties=h_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, h_id, h_props
+                            ),
                         )
                     )
                     if engine is not None:
@@ -505,54 +611,95 @@ def extract_arc_objects(
                 # 4. Movable manipulandums, shapes, sliders
                 elif role == "manipulandum":
                     seen_positions.add(s_pos)
+                    m_id = f"shape_sprite_{disp_y}_{disp_x}"
+                    m_props = {
+                        "source": "sprite_manipulandum",
+                        "width": w,
+                        "height": h,
+                        "focus_switch_actions": {5},
+                    }
                     objects.append(
                         ObjectSpec(
-                            id=f"shape_sprite_{disp_y}_{disp_x}",
+                            id=m_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="manipulandum",
-                            properties={
-                                "source": "sprite_manipulandum",
-                                "width": w,
-                                "height": h,
-                                "focus_switch_actions": {5},
-                            },
+                            properties=m_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, m_id, m_props
+                            ),
                         )
                     )
                 # 5. Receptacles, silhouettes, fitting zones, baskets
                 elif role == "receptacle":
                     seen_positions.add(s_pos)
+                    r_id = f"silhouette_sprite_{disp_y}_{disp_x}"
+                    r_props = {"source": "sprite_receptacle", "sprite_name": s_name}
                     objects.append(
                         ObjectSpec(
-                            id=f"silhouette_sprite_{disp_y}_{disp_x}",
+                            id=r_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="receptacle",
-                            properties={"source": "sprite_receptacle", "sprite_name": s_name},
+                            properties=r_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, r_id, r_props
+                            ),
                         )
                     )
                 # 6. Cargo, crates, gems, keys, pickups
                 elif role == "cargo":
                     seen_positions.add(s_pos)
+                    c_id = f"cargo_sprite_{disp_y}_{disp_x}"
+                    c_props = {"source": "sprite_cargo", "sprite_name": s_name}
                     objects.append(
                         ObjectSpec(
-                            id=f"cargo_sprite_{disp_y}_{disp_x}",
+                            id=c_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="cargo",
-                            properties={"source": "sprite_cargo", "sprite_name": s_name},
+                            properties=c_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, c_id, c_props
+                            ),
                         )
                     )
                 # 7. Stations / tools
                 elif role == "tool":
                     seen_positions.add(s_pos)
+                    t_id = f"tool_station_{disp_y}_{disp_x}"
+                    t_props = {"source": "sprite_tool", "sprite_name": s_name}
                     objects.append(
                         ObjectSpec(
-                            id=f"tool_station_{disp_y}_{disp_x}",
+                            id=t_id,
                             pos=s_pos,
                             feature_id=s_feat,
                             role="tool",
-                            properties={"source": "sprite_tool", "sprite_name": s_name},
+                            properties=t_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                role, s_pos, s_feat, t_id, t_props
+                            ),
+                        )
+                    )
+                elif s_name != "background":
+                    seen_positions.add(s_pos)
+                    u_id = f"entity_sprite_{disp_y}_{disp_x}"
+                    u_props = {
+                        "source": "sprite_entity",
+                        "sprite_name": s_name,
+                        "click_coord": s_pos,
+                        "click_data": {"x": disp_x, "y": disp_y},
+                    }
+                    objects.append(
+                        ObjectSpec(
+                            id=u_id,
+                            pos=s_pos,
+                            feature_id=s_feat,
+                            role="entity",
+                            properties=u_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                "entity", s_pos, s_feat, u_id, u_props
+                            ),
                         )
                     )
         except Exception as exc:
@@ -605,17 +752,21 @@ def extract_arc_objects(
             else:
                 role = str(ent.role.value if hasattr(ent.role, "value") else ent.role).lower()
 
-            if role != "unknown":
-                seen_positions.add(pos)
-                objects.append(
-                    ObjectSpec(
-                        id=ent.id or f"{role}_{pos[0]}_{pos[1]}",
-                        pos=pos,
-                        feature_id=feat,
-                        role=role,
-                        properties=dict(ent.properties),
-                    )
+            if role == "unknown":
+                role = "entity"
+            seen_positions.add(pos)
+            ent_id = ent.id or f"{role}_{pos[0]}_{pos[1]}"
+            ent_props = dict(ent.properties)
+            objects.append(
+                ObjectSpec(
+                    id=ent_id,
+                    pos=pos,
+                    feature_id=feat,
+                    role=role,
+                    properties=ent_props,
+                    macro_tasks=_attach_object_macro_tasks(role, pos, feat, ent_id, ent_props),
                 )
+            )
 
     # 3. Ingest Candidate Goals / Exits from PerceptionFrame
     if frame is not None and frame.candidate_goals:
@@ -623,13 +774,19 @@ def extract_arc_objects(
             pos = (int(gp[0]), int(gp[1]))
             if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
                 seen_positions.add(pos)
+                cg_id = f"exit_goal_{pos[0]}_{pos[1]}"
+                cg_feat = int(g[pos[0], pos[1]])
+                cg_props = {"source": "candidate_goal"}
                 objects.append(
                     ObjectSpec(
-                        id=f"exit_goal_{pos[0]}_{pos[1]}",
+                        id=cg_id,
                         pos=pos,
-                        feature_id=int(g[pos[0], pos[1]]),
-                        role="candidate_goal",
-                        properties={"source": "candidate_goal"},
+                        feature_id=cg_feat,
+                        role="goal",
+                        properties=cg_props,
+                        macro_tasks=_attach_object_macro_tasks(
+                            "goal", pos, cg_feat, cg_id, cg_props
+                        ),
                     )
                 )
 
@@ -639,13 +796,19 @@ def extract_arc_objects(
             pos = (int(gp[0]), int(gp[1]))
             if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
                 seen_positions.add(pos)
+                lg_id = f"learned_goal_{pos[0]}_{pos[1]}"
+                lg_feat = int(g[pos[0], pos[1]])
+                lg_props = {"source": "learned_goal"}
                 objects.append(
                     ObjectSpec(
-                        id=f"learned_goal_{pos[0]}_{pos[1]}",
+                        id=lg_id,
                         pos=pos,
-                        feature_id=int(g[pos[0], pos[1]]),
+                        feature_id=lg_feat,
                         role="goal",
-                        properties={"source": "learned_goal"},
+                        properties=lg_props,
+                        macro_tasks=_attach_object_macro_tasks(
+                            "goal", pos, lg_feat, lg_id, lg_props
+                        ),
                     )
                 )
 
@@ -655,13 +818,19 @@ def extract_arc_objects(
             pos = (int(rp[0]), int(rp[1]))
             if 0 <= pos[0] < H and 0 <= pos[1] < W and pos not in seen_positions and pos != av_pos:
                 seen_positions.add(pos)
+                lr_id = f"learned_receptacle_{pos[0]}_{pos[1]}"
+                lr_feat = int(g[pos[0], pos[1]])
+                lr_props = {"source": "learned_receptacle"}
                 objects.append(
                     ObjectSpec(
-                        id=f"learned_receptacle_{pos[0]}_{pos[1]}",
+                        id=lr_id,
                         pos=pos,
-                        feature_id=int(g[pos[0], pos[1]]),
+                        feature_id=lr_feat,
                         role="receptacle",
-                        properties={"source": "learned_receptacle"},
+                        properties=lr_props,
+                        macro_tasks=_attach_object_macro_tasks(
+                            "receptacle", pos, lr_feat, lr_id, lr_props
+                        ),
                     )
                 )
 

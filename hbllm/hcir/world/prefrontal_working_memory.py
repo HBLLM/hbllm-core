@@ -276,6 +276,12 @@ class PrefrontalWorkingMemory:
         self.level_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
 
+        # Object Knowledge Base and Atomic Macro-Task Stores (Rule 1.8)
+        self.known_objects: dict[str, Any] = {}
+        self.object_macro_tasks: dict[str, list[Any]] = {}
+        self.object_trial_counts: dict[str, int] = {}
+        self.object_success_counts: dict[str, int] = {}
+
     def has_salience_shift(self, engine: Any) -> bool:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise
         warrant an executive phase shift back to forward mental simulation.
@@ -411,6 +417,10 @@ class PrefrontalWorkingMemory:
             self.focus_switch_actions.clear()
             self.last_non_displacement_action = None
             self.total_epistemic_probes = 0
+            self.known_objects.clear()
+            self.object_macro_tasks.clear()
+            self.object_trial_counts.clear()
+            self.object_success_counts.clear()
         else:
             self.habenular_ior.reset_episode(
                 retain_long_term=True,

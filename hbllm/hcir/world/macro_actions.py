@@ -49,8 +49,9 @@ class ObjectSpec:
     id: str
     pos: tuple[int, int]
     feature_id: int = 0
-    role: str = "unknown"  # "goal", "cargo", "key", "receptacle", "switch", "barrier", "hazard"
+    role: str = "unknown"  # "goal", "cargo", "key", "receptacle", "switch", "barrier", "hazard", "manipulandum"
     properties: dict[str, Any] = field(default_factory=dict)
+    macro_tasks: list[MacroAction] = field(default_factory=list)
 
 
 @dataclass
@@ -130,6 +131,9 @@ class NavigateTo(MacroAction):
         self.radius = max(0, radius)
         self.description = description or f"Navigate to {self.destination}"
         self.cached_path: list[tuple[Any, tuple[int, int]]] = []
+        self.max_steps: int = 40
+        self.consecutive_stuck: int = 0
+        self.last_av_pos: tuple[int, int] | None = None
 
     def is_satisfied(
         self,
@@ -161,12 +165,25 @@ class NavigateTo(MacroAction):
         available_actions: Sequence[Any],
     ) -> tuple[Any, dict[str, Any] | None] | None:
         self.consecutive_steps += 1
+        av_pos = engine.avatar_pos
+        if av_pos is not None:
+            if self.last_av_pos == av_pos:
+                self.consecutive_stuck += 1
+                if self.consecutive_stuck >= 3:
+                    self.status = MacroActionStatus.FAILED
+                    if engine.last_action is not None and engine.last_action in available_actions:
+                        engine.failed_transitions.add((av_pos, int(engine.last_action)))
+                    return None
+            else:
+                self.consecutive_stuck = 0
+                self.last_av_pos = av_pos
+
         if self.consecutive_steps > self.max_steps:
             self.status = MacroActionStatus.FAILED
             logger.warning(
                 "MacroAction %s timed out after %d steps", self.name, self.consecutive_steps
             )
-            return available_actions[0], None
+            return None
 
         from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
@@ -547,6 +564,167 @@ class UseToolOnBarrier(DepositCargo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 5B. PushObject Operator (Adjacent Stance + Directional Displacement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class PushObject(MacroAction):
+    """Adjacent stance navigation followed by directional displacement to push an object.
+
+    Used when an object cannot be docked into body schema (e.g., heavy box/crate/sokoban block),
+    requiring the agent to position itself on the opposite side and push into the object.
+    """
+
+    def __init__(
+        self,
+        target_pos: tuple[int, int],
+        direction: tuple[int, int] = (0, 1),
+        description: str = "",
+    ) -> None:
+        super().__init__(
+            name=f"PushObject({target_pos}, dir={direction})", intent=SpatialActionIntent.INTERACT
+        )
+        self.target_pos = (int(target_pos[0]), int(target_pos[1]))
+        self.direction = (int(direction[0]), int(direction[1]))
+        self.stance_pos = (
+            self.target_pos[0] - self.direction[0],
+            self.target_pos[1] - self.direction[1],
+        )
+        self.description = (
+            description or f"Push object at {self.target_pos} in direction {self.direction}"
+        )
+        self.nav_op = NavigateTo(destination=self.stance_pos, radius=0)
+        self.has_pushed: bool = False
+
+    def is_satisfied(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+    ) -> bool:
+        return self.has_pushed
+
+    def is_feasible(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> bool:
+        return self.nav_op.is_feasible(engine, curr_grid, available_actions)
+
+    def step(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> tuple[Any, dict[str, Any] | None] | None:
+        self.consecutive_steps += 1
+        if not self.nav_op.is_satisfied(engine, curr_grid):
+            return self.nav_op.step(engine, curr_grid, available_actions)
+
+        # In stance: push directly in direction
+        av_pos = engine.avatar_pos
+        if av_pos == self.stance_pos:
+            for a, dyn in engine.action_dynamics.items():
+                if a in available_actions and dyn.is_displacement_action():
+                    if dyn.get_displacement() == self.direction:
+                        self.has_pushed = True
+                        self.status = MacroActionStatus.SATISFIED
+                        return a, None
+
+        self.status = MacroActionStatus.FAILED
+        return available_actions[0], None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5C. ExploreObject Operator (Affordance Probing on Unknown Entities)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ExploreObject(MacroAction):
+    """Active epistemic probing of an unfamiliar or unprobed entity to test affordances."""
+
+    def __init__(
+        self,
+        target_pos: tuple[int, int],
+        target_feature: int | None = None,
+        description: str = "",
+    ) -> None:
+        super().__init__(name=f"ExploreObject({target_pos})", intent=SpatialActionIntent.NAVIGATE)
+        self.target_pos = (int(target_pos[0]), int(target_pos[1]))
+        self.target_feature = target_feature
+        self.description = description or f"Explore entity at {self.target_pos}"
+        self.nav_op = NavigateTo(destination=self.target_pos, radius=1)
+        self.probed: bool = False
+
+    def is_satisfied(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+    ) -> bool:
+        return self.probed or self.consecutive_steps >= 15
+
+    def is_feasible(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> bool:
+        return len(available_actions) > 0
+
+    def step(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> tuple[Any, dict[str, Any] | None] | None:
+        self.consecutive_steps += 1
+        # Allocentric click effector
+        if any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
+            eff_candidates = [
+                a for a in available_actions if engine.is_spatial_effector(a) or a == 6
+            ]
+            if eff_candidates:
+                self.probed = True
+                self.status = MacroActionStatus.SATISFIED
+                return eff_candidates[0], {
+                    "x": int(self.target_pos[1]),
+                    "y": int(self.target_pos[0]),
+                }
+
+        # Embodied: navigate adjacent to target
+        if engine.avatar_pos is not None:
+            if not self.nav_op.is_satisfied(engine, curr_grid):
+                res = self.nav_op.step(engine, curr_grid, available_actions)
+                if res is not None:
+                    return res
+
+        # Adjacent or non-embodied: try interact action or uninhibited probe actions
+        self.probed = True
+        self.status = MacroActionStatus.SATISFIED
+        interact_candidates = [
+            a
+            for a in available_actions
+            if not engine.is_displacement_action(a) and engine.inhibited_actions.get(a, 0) == 0
+        ]
+        if interact_candidates:
+            return interact_candidates[0], None
+
+        if engine.avatar_pos is not None:
+            dr = int(np.sign(self.target_pos[0] - engine.avatar_pos[0]))
+            dc = int(np.sign(self.target_pos[1] - engine.avatar_pos[1]))
+            for a, dyn in engine.action_dynamics.items():
+                if a in available_actions and dyn.is_displacement_action():
+                    if dyn.get_displacement() == (dr, dc):
+                        return a, None
+
+        for a in available_actions:
+            if engine.inhibited_actions.get(a, 0) == 0:
+                return a, None
+
+        return available_actions[0], None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6. ExploreFrontier Operator (Epistemic Curiosity)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -619,8 +797,8 @@ class MacroActionDriverManager:
             MacroActionPlan | None,
         ],
     ) -> None:
-        """Register a domain-specific plan synthesis hook."""
-        cls._synthesis_hooks.append(hook)
+        if hook not in cls._synthesis_hooks:
+            cls._synthesis_hooks.append(hook)
 
     @classmethod
     def get_registered_actions(cls) -> dict[str, type[MacroAction]]:
@@ -1032,7 +1210,7 @@ class MacroActionPlan:
                 break
 
         # Check and advance BA10 frontopolar subgoal stack
-        if engine.subgoal_stack.has_pending_goals:
+        if hasattr(engine, "subgoal_stack") and engine.subgoal_stack.has_pending_goals:
             top_sg = engine.subgoal_stack.current_subgoal
             if top_sg is not None:
                 held_feats = {t.feature_id for t in engine.working_memory.body_schema.held_tools}
@@ -1199,24 +1377,52 @@ class MacroPlanSynthesizer:
                 pos = None
                 feat = 0
                 props = {}
+                obj_id = ""
+                m_tasks = []
                 if isinstance(obj, ObjectSpec):
+                    obj_id = obj.id
                     role = obj.role.lower()
                     pos = obj.pos
                     feat = obj.feature_id
                     props = obj.properties
+                    m_tasks = getattr(obj, "macro_tasks", [])
                 elif hasattr(obj, "role") and hasattr(obj, "grid_pos"):
                     role = str(obj.role.value if hasattr(obj.role, "value") else obj.role).lower()
                     pos = obj.grid_pos
                     feat = getattr(obj, "feature_id", 0) or 0
                     props = getattr(obj, "properties", {})
+                    obj_id = getattr(obj, "id", f"{role}_{pos[0]}_{pos[1]}")
                 elif isinstance(obj, dict):
                     role = str(obj.get("role", "unknown")).lower()
                     pos = obj.get("pos", obj.get("position", obj.get("grid_pos")))
                     feat = obj.get("feature_id", obj.get("feature", 0)) or 0
                     props = obj.get("properties", {})
+                    obj_id = obj.get("id", f"{role}_{pos[0]}_{pos[1]}")
 
                 if pos is not None:
                     pos = (int(pos[0]), int(pos[1]))
+                    if not obj_id:
+                        obj_id = f"{role}_{pos[0]}_{pos[1]}"
+
+                    # Store in working memory knowledge base (Rule 1.8)
+                    if hasattr(engine, "working_memory"):
+                        spec = (
+                            obj
+                            if isinstance(obj, ObjectSpec)
+                            else ObjectSpec(
+                                id=obj_id,
+                                pos=pos,
+                                feature_id=feat,
+                                role=role,
+                                properties=props,
+                                macro_tasks=m_tasks,
+                            )
+                        )
+                        engine.working_memory.known_objects[obj_id] = spec
+                        if m_tasks:
+                            engine.working_memory.object_macro_tasks[obj_id] = list(m_tasks)
+                        engine.working_memory.object_trial_counts.setdefault(obj_id, 0)
+
                     if role == "goal" or "exit" in role:
                         if props.get("source") == "learned_goal" or props.get("confirmed", False):
                             engine.learned_goal_positions.add(pos)
@@ -1225,11 +1431,16 @@ class MacroPlanSynthesizer:
                         if feat:
                             engine.symbolic_theory.goal_features.add(feat)
                             engine.learned_goal_features.add(feat)
-                    elif "cargo" in role or "key" in role or "manipulable" in role:
+                    elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
                             engine.symbolic_theory.cargo_features.add(feat)
                             engine.learned_cargo_features.add(feat)
-                    elif "receptacle" in role or "door" in role or "container" in role:
+                    elif (
+                        "receptacle" in role
+                        or "door" in role
+                        or "container" in role
+                        or "silhouette" in role
+                    ):
                         engine.learned_receptacle_positions.add(pos)
                         if feat:
                             engine.symbolic_theory.receptacle_features.add(feat)
@@ -1255,11 +1466,11 @@ class MacroPlanSynthesizer:
         objects: Sequence[Any] | None = None,
         micro_actions: Sequence[Any] | None = None,
     ) -> MacroActionPlan | None:
-        """Query ObjectStateGraph, driver hooks, and SymbolicWorldTheory to synthesize a plan."""
+        """Synthesize high-level macro plans from object affordances and causal theory."""
         if objects or micro_actions:
             cls.ingest_knowledge(engine, objects=objects, micro_actions=micro_actions)
 
-        # 0. Query registered domain drivers & plugins (e.g. ARC-AGI, AI2-THOR, Crafter)
+        # 0. Query registered domain drivers & plugins
         driver_plan = MacroActionDriverManager.run_synthesis_hooks(
             engine, curr_grid, available_actions, objects=objects
         )
@@ -1331,14 +1542,23 @@ class MacroPlanSynthesizer:
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
+        known_objs = list(getattr(engine.working_memory, "known_objects", {}).values())
+        trial_counts = getattr(engine.working_memory, "object_trial_counts", {})
 
-        goals = [
-            e.grid_pos
-            for e in entities
-            if e.role == EntityRole.GOAL
-            or e.feature_id in engine.learned_goal_features
-            or e.grid_pos in engine.learned_goal_positions
-        ]
+        # Collect candidate goals
+        goals: list[tuple[int, int]] = []
+        for obj in known_objs:
+            if "goal" in obj.role or "exit" in obj.role:
+                if obj.pos not in goals:
+                    goals.append(obj.pos)
+        for e in entities:
+            if (
+                e.role == EntityRole.GOAL
+                or e.feature_id in engine.learned_goal_features
+                or e.grid_pos in engine.learned_goal_positions
+            ):
+                if e.grid_pos not in goals:
+                    goals.append(e.grid_pos)
         for g_pos in engine.learned_goal_positions:
             if g_pos not in goals:
                 goals.append(g_pos)
@@ -1359,65 +1579,288 @@ class MacroPlanSynthesizer:
             None,
         )
 
-        # 1. Multi-Stage Subgoals: Recursive BA10 Subgoal Decomposition
-        cargo_entities = [
-            e
-            for e in entities
-            if e.role == EntityRole.MANIPULABLE or e.feature_id in engine.learned_cargo_features
+        # Collect candidate cargo / boxes
+        cargo_objs: list[ObjectSpec] = [
+            obj
+            for obj in known_objs
+            if "cargo" in obj.role
+            or "box" in obj.role
+            or "key" in obj.role
+            or "crate" in obj.role
+            or "item" in obj.role
+            or obj.feature_id in engine.learned_cargo_features
         ]
-        receptacles = [
-            e.grid_pos
-            for e in entities
-            if e.role == EntityRole.RECEPTACLE or e.grid_pos in engine.learned_receptacle_positions
-        ]
+        for e in entities:
+            if (
+                e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                or e.feature_id in engine.learned_cargo_features
+            ):
+                if not any(c.pos == e.grid_pos for c in cargo_objs):
+                    cargo_objs.append(
+                        ObjectSpec(
+                            id=f"cargo_{e.grid_pos[0]}_{e.grid_pos[1]}",
+                            pos=e.grid_pos,
+                            feature_id=e.feature_id,
+                            role="cargo",
+                        )
+                    )
+
+        # Collect candidate receptacles / sockets / gates
+        receptacles: list[tuple[int, int]] = []
+        for obj in known_objs:
+            if (
+                "receptacle" in obj.role
+                or "door" in obj.role
+                or "silhouette" in obj.role
+                or "container" in obj.role
+            ):
+                if obj.pos not in receptacles:
+                    receptacles.append(obj.pos)
+        for e in entities:
+            if (
+                e.role in (EntityRole.RECEPTACLE, EntityRole.PORTAL)
+                or e.grid_pos in engine.learned_receptacle_positions
+            ):
+                if e.grid_pos not in receptacles:
+                    receptacles.append(e.grid_pos)
         for r_pos in engine.learned_receptacle_positions:
             if r_pos not in receptacles:
                 receptacles.append(r_pos)
 
-        if cargo_entities and receptacles and engine.avatar_pos is not None:
-            target_g = goals[0] if goals else receptacles[0]
-            decomposed = engine.subgoal_stack.decompose_target_goal(
-                target_goal=target_g,
-                grid=curr_grid,
-                avatar_pos=engine.avatar_pos,
-                static_barriers=engine.learned_barriers,
-                tools=cargo_entities,
-                receptacles_or_gates=receptacles,
-                held_features={t.feature_id for t in engine.working_memory.body_schema.held_tools},
-                theory=engine.symbolic_theory,
-            )
-            for sg in decomposed:
-                if sg.subgoal_type in (SubgoalType.ACQUIRE_TOOL, SubgoalType.COLLECT_ITEM):
-                    plan.append(
-                        PickUpCargo(
-                            cargo_pos=sg.target_entity_pos, cargo_feature=sg.required_feature
+        # Collect candidate switches / buttons / actuators
+        switch_objs: list[ObjectSpec] = [
+            obj
+            for obj in known_objs
+            if "switch" in obj.role
+            or "button" in obj.role
+            or "actuator" in obj.role
+            or "lever" in obj.role
+            or "valve" in obj.role
+            or obj.feature_id in engine.symbolic_theory.actuator_features
+        ]
+        for e in entities:
+            if (
+                e.role == EntityRole.ACTUATOR
+                or e.feature_id in engine.symbolic_theory.actuator_features
+            ):
+                if not any(s.pos == e.grid_pos for s in switch_objs):
+                    switch_objs.append(
+                        ObjectSpec(
+                            id=f"switch_{e.grid_pos[0]}_{e.grid_pos[1]}",
+                            pos=e.grid_pos,
+                            feature_id=e.feature_id,
+                            role="switch",
                         )
                     )
-                elif sg.subgoal_type in (
-                    SubgoalType.CLEAR_OBSTACLE,
-                    SubgoalType.UNLOCK_REMOTE_MECHANISM,
-                ):
-                    plan.append(
-                        UseToolOnBarrier(
-                            barrier_pos=sg.target_destination, tool_feature=sg.required_feature
-                        )
-                    )
-                elif sg.subgoal_type in (SubgoalType.DELIVER_TO_GOAL, SubgoalType.NAVIGATE_TO):
-                    plan.append(NavigateTo(destination=sg.target_destination))
-            if not plan.is_empty():
+
+        # ── Autonomous First-Principles Plan Synthesis ────────────────────────
+        # 1. HELD CARGO / EXTENDED BODY SCHEMA:
+        # "if box can pick, pick will be macro task for object called box.
+        #  also if it need to move it need to be picked and then travel. like that."
+        held_tools = engine.working_memory.body_schema.held_tools
+        has_held = bool(held_tools) or engine.working_memory.body_schema.has_manipulandum()
+        if has_held and engine.avatar_pos is not None:
+            held_feat = held_tools[-1].feature_id if held_tools else None
+            # If a known barrier blocks the goal:
+            barriers_to_clear = []
+            for b in engine.learned_barriers:
+                b_feat = (
+                    int(curr_grid[b[0], b[1]])
+                    if 0 <= b[0] < curr_grid.shape[0] and 0 <= b[1] < curr_grid.shape[1]
+                    else None
+                )
+                if hasattr(
+                    engine.symbolic_theory, "is_tool_barrier_incompatible"
+                ) and engine.symbolic_theory.is_tool_barrier_incompatible(held_feat, b_feat):
+                    continue
+                if (
+                    hasattr(engine.symbolic_theory, "has_tool_barrier_affinity")
+                    and engine.symbolic_theory.has_tool_barrier_affinity(held_feat, b_feat)
+                ) or held_feat is not None:
+                    barriers_to_clear.append(b)
+            if barriers_to_clear:
+                closest_barrier = min(
+                    barriers_to_clear,
+                    key=lambda b: (
+                        abs(b[0] - engine.avatar_pos[0]) + abs(b[1] - engine.avatar_pos[1])
+                    ),
+                )
+                plan.append(UseToolOnBarrier(barrier_pos=closest_barrier, tool_feature=held_feat))
+                if goals:
+                    plan.append(NavigateTo(destination=goals[0]))
                 return plan
 
-        # 2. Terminal Goal: Multi-agent coordination with focus handover
-        if goals and engine.avatar_pos is not None and has_multi_agent and focus_switch is not None:
+            if receptacles:
+                closest_rec = min(
+                    receptacles,
+                    key=lambda r: (
+                        abs(r[0] - engine.avatar_pos[0]) + abs(r[1] - engine.avatar_pos[1])
+                    ),
+                )
+                plan.append(DepositCargo(receptacle_pos=closest_rec, cargo_feature=held_feat))
+                if goals:
+                    plan.append(NavigateTo(destination=goals[0]))
+                return plan
+
+            if goals:
+                plan.append(DepositCargo(receptacle_pos=goals[0], cargo_feature=held_feat))
+                return plan
+
+        # 2. PREREQUISITE UNHELD CARGO / BOX ACQUISITION & MOVEMENT:
+        # If goals are blocked or receptacles are unsatisfied, acquire cargo first
+        if cargo_objs and engine.avatar_pos is not None:
+            av_pos = engine.avatar_pos
+            unpicked_cargo = [
+                c
+                for c in cargo_objs
+                if c.pos != av_pos
+                and not engine.working_memory.body_schema.is_holding(c.feature_id)
+            ]
+            if unpicked_cargo:
+                best_cargo = min(
+                    unpicked_cargo,
+                    key=lambda c: (
+                        trial_counts.get(c.id, 0),
+                        abs(c.pos[0] - av_pos[0]) + abs(c.pos[1] - av_pos[1]),
+                    ),
+                )
+                target_dest = None
+                if receptacles:
+                    target_dest = min(
+                        receptacles,
+                        key=lambda r: abs(r[0] - best_cargo.pos[0]) + abs(r[1] - best_cargo.pos[1]),
+                    )
+                elif goals:
+                    target_dest = goals[0]
+
+                plan.append(
+                    PickUpCargo(
+                        cargo_pos=best_cargo.pos,
+                        cargo_feature=best_cargo.feature_id,
+                        description=f"Pick up cargo {best_cargo.id} at {best_cargo.pos}",
+                    )
+                )
+                if target_dest is not None:
+                    plan.append(
+                        DepositCargo(
+                            receptacle_pos=target_dest,
+                            cargo_feature=best_cargo.feature_id,
+                            description=f"Travel with cargo to {target_dest}",
+                        )
+                    )
+                if goals:
+                    plan.append(
+                        NavigateTo(destination=goals[0], description="Navigate to exit goal")
+                    )
+
+                trial_counts[best_cargo.id] = trial_counts.get(best_cargo.id, 0) + 1
+                return plan
+
+        # 3. INTERACTIVE SWITCHES / BUTTONS (Distal Actuators):
+        if switch_objs:
+            av_pos = engine.avatar_pos or (0, 0)
+            sorted_switches = sorted(
+                switch_objs,
+                key=lambda s: (
+                    trial_counts.get(s.id, 0),
+                    abs(s.pos[0] - av_pos[0]) + abs(s.pos[1] - av_pos[1]),
+                ),
+            )
+            best_switch = sorted_switches[0]
+            has_click = any(engine.is_spatial_effector(a) or a == 6 for a in available_actions)
+            if has_click and (engine.avatar_pos is None or set(available_actions).issubset({6})):
+                try:
+                    from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
+
+                    plan.append(
+                        ArcClickCell(
+                            cell_coord=best_switch.pos,
+                            description=f"Click switch at {best_switch.pos}",
+                        )
+                    )
+                except Exception:
+                    plan.append(
+                        InteractWith(
+                            target_coord=best_switch.pos,
+                            description=f"Click switch at {best_switch.pos}",
+                        )
+                    )
+            else:
+                plan.append(
+                    InteractWith(
+                        target_coord=best_switch.pos,
+                        description=f"Interact with switch at {best_switch.pos}",
+                    )
+                )
+
+            if goals:
+                plan.append(
+                    NavigateTo(destination=goals[0], description="Reach goal unblocked by switch")
+                )
+
+            trial_counts[best_switch.id] = trial_counts.get(best_switch.id, 0) + 1
+            return plan
+
+        # 4. TERMINAL GOAL REACHABILITY:
+        if goals and engine.avatar_pos is not None:
             sorted_goals = sorted(
                 goals,
                 key=lambda g: abs(g[0] - engine.avatar_pos[0]) + abs(g[1] - engine.avatar_pos[1]),
             )
             target_goal = sorted_goals[0]
             plan.append(NavigateTo(destination=target_goal, description="Reach exit goal"))
-            plan.append(
-                SwitchFocus(switch_action=focus_switch, description="Handover after reaching goal")
-            )
+            if has_multi_agent and focus_switch is not None:
+                plan.append(
+                    SwitchFocus(
+                        switch_action=focus_switch, description="Handover after reaching goal"
+                    )
+                )
             return plan
+
+        # 5. GENERAL EPISTEMIC EXPLORATION: "trying everything on available objects"
+        if known_objs:
+            av_pos = engine.avatar_pos or (0, 0)
+            explorable = [
+                obj
+                for obj in known_objs
+                if "barrier" not in obj.role and "hazard" not in obj.role and obj.pos != av_pos
+            ]
+            if explorable:
+                best_obj = min(
+                    explorable,
+                    key=lambda o: (
+                        trial_counts.get(o.id, 0),
+                        abs(o.pos[0] - av_pos[0]) + abs(o.pos[1] - av_pos[1]),
+                    ),
+                )
+                trial_counts[best_obj.id] = trial_counts.get(best_obj.id, 0) + 1
+
+                if best_obj.macro_tasks:
+                    for task in best_obj.macro_tasks:
+                        plan.append(task)
+                    return plan
+
+                if any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
+                    try:
+                        from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
+
+                        plan.append(
+                            ArcClickCell(
+                                cell_coord=best_obj.pos,
+                                description=f"Try probing object {best_obj.id} at {best_obj.pos}",
+                            )
+                        )
+                    except Exception:
+                        plan.append(
+                            InteractWith(
+                                target_coord=best_obj.pos,
+                                description=f"Try probing object {best_obj.id} at {best_obj.pos}",
+                            )
+                        )
+                else:
+                    plan.append(
+                        ExploreObject(target_pos=best_obj.pos, target_feature=best_obj.feature_id)
+                    )
+                return plan
 
         return None

@@ -508,7 +508,7 @@ class MyAgent(Agent):
                     )
                 coords = {"x": max(0, min(W - 1, fallback_x)), "y": max(0, min(H - 1, fallback_y))}
             else:
-                coords = {"x": int(action_data["x"]), "y": int(action_data["y"])}
+                coords = {"x": max(0, int(action_data["x"])), "y": max(0, int(action_data["y"]))}
             if hasattr(act_enum, "set_data"):
                 act_enum.set_data(coords)
             act_enum.data = coords

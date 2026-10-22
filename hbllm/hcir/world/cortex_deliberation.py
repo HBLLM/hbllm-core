@@ -851,7 +851,12 @@ class PrefrontalDeliberationEngine:
                     else:
                         macro_plan.clear()
 
-        if macro_plan is None or macro_plan.is_empty():
+        if (
+            (objects or micro_actions)
+            and (macro_plan is None or macro_plan.is_empty())
+            and not engine.mental_plan
+            and (engine.is_motor_grounded() or set(available_actions).issubset({6, 7}))
+        ):
             from hbllm.hcir.world.macro_actions import MacroPlanSynthesizer
 
             synthesized = MacroPlanSynthesizer.synthesize_plan(
@@ -870,6 +875,11 @@ class PrefrontalDeliberationEngine:
                     m_act, m_data = macro_step
                     if m_act in available_actions:
                         if _is_macro_step_safe(synthesized, m_act, m_data):
+                            if (
+                                engine.phase == EpistemicPhase.MOTOR_GROUNDING
+                                and engine.is_motor_grounded()
+                            ):
+                                engine.phase = EpistemicPhase.EXPLOITATION
                             return self._finalize_step(engine, curr_grid, m_act, m_data)
                         else:
                             engine.working_memory.macro_plan.clear()
