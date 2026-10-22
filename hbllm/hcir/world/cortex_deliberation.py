@@ -851,14 +851,25 @@ class PrefrontalDeliberationEngine:
                     else:
                         macro_plan.clear()
 
+        from hbllm.hcir.world.macro_actions import (
+            MacroActionDriverManager,
+            MacroPlanSynthesizer,
+        )
+
+        can_synthesize = (
+            engine.is_motor_grounded()
+            or set(available_actions).issubset({6, 7})
+            or bool(getattr(engine, "current_game_id", None))
+            or hasattr(engine, "_arc_game")
+            or bool(MacroActionDriverManager._synthesis_hooks)
+        )
+
         if (
             (objects or micro_actions)
             and (macro_plan is None or macro_plan.is_empty())
             and not engine.mental_plan
-            and (engine.is_motor_grounded() or set(available_actions).issubset({6, 7}))
+            and can_synthesize
         ):
-            from hbllm.hcir.world.macro_actions import MacroPlanSynthesizer
-
             synthesized = MacroPlanSynthesizer.synthesize_plan(
                 engine,
                 curr_grid,

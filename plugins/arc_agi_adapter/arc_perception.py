@@ -23,6 +23,82 @@ from hbllm.hcir.world.percept import BasePerceptionAdapter, PerceptionFrame
 
 logger = logging.getLogger(__name__)
 
+TAG_SEMANTIC_ROLES: dict[str, str] = {
+    # Avatar / Agent
+    "wbmdvjhthc": "avatar",
+    "0007dtbisvazhv": "avatar",
+    "player": "avatar",
+    "avatar": "avatar",
+    "agent": "avatar",
+    # Cargo / Movable objects
+    "geezpjgiyd": "cargo",
+    "0031cppcuvqlbi": "manipulandum",
+    "crzsjq": "cargo",
+    "cargo": "cargo",
+    "crate": "cargo",
+    "box": "cargo",
+    "block": "cargo",
+    "gem": "cargo",
+    "coin": "cargo",
+    "key": "cargo",
+    # Receptacles / Silhouette sockets
+    "fsjjayjoeg": "receptacle",
+    "0054xnsuqceejm": "receptacle",
+    "0001sruqbuvukh": "receptacle",
+    "receptacle": "receptacle",
+    "silhouette": "receptacle",
+    "socket": "receptacle",
+    "slot": "receptacle",
+    "basket": "receptacle",
+    "bin": "receptacle",
+    # Goals / Exits
+    "0015msvpvzxhqf": "goal",
+    "0016uciqlhjlom": "goal",
+    "0001uqqokjrptk": "goal",
+    "tovemc": "goal",
+    "goknoi": "goal",
+    "goal": "goal",
+    "exit": "goal",
+    "target": "goal",
+    "portal": "goal",
+    "flag": "goal",
+    "finish": "goal",
+    # Manipulandum / Sliders
+    "0006lxjtqggkmi": "manipulandum",
+    "manipulandum": "manipulandum",
+    "slider": "manipulandum",
+    "shape": "manipulandum",
+    "piece": "manipulandum",
+    # Switches / Buttons / Dials / Clickable
+    "nxkictbbvzt": "switch",
+    "tjaqvwdgkxe": "switch",
+    "sys_click": "switch",
+    "button": "switch",
+    "switch": "switch",
+    "lever": "switch",
+    "valve": "switch",
+    "dial": "switch",
+    "actuator": "switch",
+    "hkx": "switch",
+    "nti": "switch",
+    # Dynamic Hazards / Enemies
+    "enemy": "hazard",
+    "hazard": "hazard",
+    "threat": "hazard",
+    "patrol": "hazard",
+    "collider": "hazard",
+    "0015qniapgwsvb": "hazard",
+    "0027jbgxilrocf": "hazard",
+    # Barriers / Walls
+    "0003uqrdzdofso": "barrier",
+    "0056icpryeujyf": "barrier",
+    "0054kgxrvfihgm": "barrier",
+    "border": "barrier",
+    "wall": "barrier",
+    "barrier": "barrier",
+    "obstacle": "barrier",
+}
+
 
 class ARCPerceptionAdapter(BasePerceptionAdapter):
     """Domain Sensory Adapter lifting ARC-AGI 2D grids into standardized PerceptionFrames."""
@@ -398,38 +474,7 @@ def extract_arc_objects(
                 and hasattr(cur_lvl, "get_sprites_by_tag")
                 and callable(cur_lvl.get_sprites_by_tag)
             ):
-                tag_role_hints = [
-                    ("sys_click", "switch"),
-                    ("button", "switch"),
-                    ("switch", "switch"),
-                    ("lever", "switch"),
-                    ("valve", "switch"),
-                    ("goal", "goal"),
-                    ("exit", "goal"),
-                    ("target", "goal"),
-                    ("hazard", "hazard"),
-                    ("enemy", "hazard"),
-                    ("threat", "hazard"),
-                    ("patrol", "hazard"),
-                    ("manipulandum", "manipulandum"),
-                    ("shape", "manipulandum"),
-                    ("slider", "manipulandum"),
-                    ("receptacle", "receptacle"),
-                    ("silhouette", "receptacle"),
-                    ("cargo", "cargo"),
-                    ("crate", "cargo"),
-                    ("block", "cargo"),
-                    ("tool", "tool"),
-                    # Legacy fallback tags for benchmark tests
-                    ("geezpjgiyd", "cargo"),
-                    ("fsjjayjoeg", "receptacle"),
-                    ("0031cppcuvqlbi", "manipulandum"),
-                    ("0054xnsuqceejm", "receptacle"),
-                    ("0015msvpvzxhqf", "goal"),
-                    ("0001sruqbuvukh", "goal"),
-                    ("0016uciqlhjlom", "goal"),
-                ]
-                for tag, role_hint in tag_role_hints:
+                for tag, role_hint in TAG_SEMANTIC_ROLES.items():
                     try:
                         tagged_spr = cur_lvl.get_sprites_by_tag(tag)
                         if isinstance(tagged_spr, (list, tuple, set)):
@@ -467,6 +512,46 @@ def extract_arc_objects(
 
                 # Infer role dynamically from semantic properties and role hints
                 role: str = role_hint or "unknown"
+                if role == "unknown":
+                    for t in s_tags:
+                        if t in TAG_SEMANTIC_ROLES:
+                            role = TAG_SEMANTIC_ROLES[t]
+                            break
+
+                if role == "avatar":
+                    is_active_avatar = True
+                    if hasattr(sp, "pixels") and sp.pixels is not None:
+                        try:
+                            parr = np.asarray(sp.pixels)
+                            if parr.ndim == 2 and parr.shape[0] >= 3 and parr.shape[1] >= 3:
+                                mid_r, mid_c = parr.shape[0] // 2, parr.shape[1] // 2
+                                if (
+                                    parr[mid_r, mid_c] == parr[0, 0]
+                                    and engine is not None
+                                    and engine.avatar_pos is not None
+                                ):
+                                    is_active_avatar = False
+                        except Exception:
+                            pass
+                    if is_active_avatar:
+                        if engine is not None:
+                            engine.avatar_pos = s_pos
+                            engine.avatar_feature = s_feat
+                            if hasattr(engine, "avatar_features"):
+                                engine.avatar_features.add(s_feat)
+                        av_pos = s_pos
+                        av_feat = s_feat
+                        av_feats.add(s_feat)
+                    seen_positions.add(s_pos)
+                    continue
+                elif role == "barrier":
+                    seen_positions.add(s_pos)
+                    if engine is not None:
+                        engine.learned_barriers.add(s_pos)
+                        if s_feat:
+                            engine.symbolic_theory.barrier_features.add(s_feat)
+                    continue
+
                 if role == "unknown":
                     if (
                         "sys_click" in s_tags
@@ -611,6 +696,11 @@ def extract_arc_objects(
                 # 4. Movable manipulandums, shapes, sliders
                 elif role == "manipulandum":
                     seen_positions.add(s_pos)
+                    if engine is not None and engine.avatar_pos is None:
+                        engine.avatar_pos = s_pos
+                        engine.avatar_feature = s_feat
+                        if hasattr(engine, "avatar_features"):
+                            engine.avatar_features.add(s_feat)
                     m_id = f"shape_sprite_{disp_y}_{disp_x}"
                     m_props = {
                         "source": "sprite_manipulandum",

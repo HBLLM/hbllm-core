@@ -129,6 +129,11 @@ def package_dataset(output_zip: Path | None = None) -> Path:
             rel = fp.relative_to(core_dir)
             included_files.append((fp, str(rel)))
 
+    # 4. procedural_memory.db (core procedural skill database)
+    proc_db = core_dir / "procedural_memory.db"
+    if proc_db.exists():
+        included_files.append((proc_db, "procedural_memory.db"))
+
     print(f"📦 Packaging {len(included_files)} files into {output_zip.name}...")
 
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:

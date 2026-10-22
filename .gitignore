@@ -29,6 +29,7 @@ env/
 /checkpoints/
 /memory/
 *.db
+!procedural_memory.db
 *.db-shm
 *.db-wal
 *.db-journal

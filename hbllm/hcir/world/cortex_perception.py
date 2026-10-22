@@ -471,7 +471,11 @@ class GestaltAffordanceDetector:
             if count >= len(edge_cells) * 0.6 and (
                 (barrier_features and dom_val in barrier_features) or dom_val != bg
             ):
-                gap_cells = [edge_cells[i] for i, v in enumerate(edge_vals) if v != dom_val]
+                gap_cells = [
+                    edge_cells[i]
+                    for i, v in enumerate(edge_vals)
+                    if v != dom_val and 0 < i < len(edge_cells) - 1
+                ]
                 if 1 <= len(gap_cells) <= 4:
                     goals.append(
                         {

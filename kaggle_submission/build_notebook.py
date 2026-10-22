@@ -190,6 +190,7 @@ def build() -> dict:
             print("🎮 Launching MyAgent tournament against gateway sidecar...")
             !cd /kaggle/working/ARC-AGI-3-Agents && \\
                 PYTHONPATH="{hbllm_dataset_root}:$PYTHONPATH" \\
+                HBLLM_PROCEDURAL_DB="{hbllm_dataset_root}/procedural_memory.db" \\
                 MPLBACKEND=agg \\
                 ONLY_RESET_LEVELS=true \\
                 python main.py --agent myagent

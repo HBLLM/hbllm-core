@@ -396,7 +396,9 @@ def arc_macro_plan_synthesis_hook(
             obj for obj in objects if isinstance(obj, ObjectSpec) and obj.role == "manipulandum"
         ]
         silhouettes = [
-            obj for obj in objects if isinstance(obj, ObjectSpec) and obj.role == "receptacle"
+            obj
+            for obj in objects
+            if isinstance(obj, ObjectSpec) and obj.role in ("receptacle", "goal")
         ]
         if shapes and silhouettes:
             active_shape = next(
@@ -413,11 +415,11 @@ def arc_macro_plan_synthesis_hook(
             dr = abs(active_shape.pos[0] - matching_sil.pos[0])
             dc = abs(active_shape.pos[1] - matching_sil.pos[1])
             plan = MacroActionPlan(plan_id="arc_shape_silhouette_plan")
-            if dr + dc > 2:
+            if dr + dc > 0:
                 plan.append(
                     NavigateTo(
                         destination=matching_sil.pos,
-                        radius=2,
+                        radius=0,
                         description=f"Fit shape {active_shape.id} to silhouette at {matching_sil.pos}",
                     )
                 )

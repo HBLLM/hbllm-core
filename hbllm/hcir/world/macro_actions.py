@@ -465,9 +465,24 @@ class PickUpCargo(MacroAction):
         if not self.nav_op.is_satisfied(engine, curr_grid):
             return self.nav_op.step(engine, curr_grid, available_actions)
 
-        # Avatar is adjacent to cargo! Step directly toward cargo to dock/bind
+        # Avatar is adjacent to cargo!
         av_pos = engine.avatar_pos
         if av_pos is not None:
+            interact_candidates = [
+                a
+                for a in available_actions
+                if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            ]
+            if interact_candidates:
+                chosen = 5 if 5 in interact_candidates else interact_candidates[0]
+                self.status = MacroActionStatus.SATISFIED
+                if self.cargo_feature is not None:
+                    engine.working_memory.body_schema.acquire_tool(
+                        feature_id=self.cargo_feature,
+                        step=engine.step_counter,
+                    )
+                return chosen, None
+
             dr = int(np.sign(self.cargo_pos[0] - av_pos[0]))
             dc = int(np.sign(self.cargo_pos[1] - av_pos[1]))
             for a, dyn in engine.action_dynamics.items():
@@ -508,6 +523,8 @@ class DepositCargo(MacroAction):
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
     ) -> bool:
+        if self.status == MacroActionStatus.SATISFIED:
+            return True
         # 1. If barrier at receptacle was cleared
         r, c = self.receptacle_pos
         if 0 <= r < curr_grid.shape[0] and 0 <= c < curr_grid.shape[1]:
@@ -538,7 +555,26 @@ class DepositCargo(MacroAction):
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
     ) -> tuple[Any, dict[str, Any] | None] | None:
-        return self.nav_op.step(engine, curr_grid, available_actions)
+        if not self.nav_op.is_satisfied(engine, curr_grid):
+            return self.nav_op.step(engine, curr_grid, available_actions)
+
+        # In stance at receptacle: trigger deposit action if interact available
+        interact_candidates = [
+            a
+            for a in available_actions
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+        if interact_candidates:
+            chosen = 5 if 5 in interact_candidates else interact_candidates[0]
+            self.status = MacroActionStatus.SATISFIED
+            if self.cargo_feature is not None:
+                engine.working_memory.body_schema.expend_tool(self.cargo_feature)
+            elif engine.working_memory.body_schema.held_tools:
+                engine.working_memory.body_schema.held_tools.pop()
+            return chosen, None
+
+        self.status = MacroActionStatus.SATISFIED
+        return available_actions[0], None
 
 
 class UseToolOnBarrier(DepositCargo):
