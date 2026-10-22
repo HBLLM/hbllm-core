@@ -1,9 +1,9 @@
 {
-  "timestamp": 1792690303.867448,
-  "total_games_tested": 1,
-  "total_levels_passed": 9,
-  "total_levels_possible": 9,
-  "pass_rate_pct": 100.0,
+  "timestamp": 1792692758.844298,
+  "total_games_tested": 17,
+  "total_levels_passed": 70,
+  "total_levels_possible": 125,
+  "pass_rate_pct": 56.0,
   "games": {
     "tu93-0768757b": {
       "title": "TU93",
@@ -24,6 +24,314 @@
         14,
         23,
         111
+      ]
+    },
+    "ar25-0c556536": {
+      "title": "AR25",
+      "levels_passed": 7,
+      "target_levels": 8,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 251.72,
+      "baseline": [
+        32,
+        50,
+        75,
+        37,
+        89,
+        159,
+        233,
+        73
+      ]
+    },
+    "re86-8af5384d": {
+      "title": "RE86",
+      "levels_passed": 4,
+      "target_levels": 8,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 102.27,
+      "baseline": [
+        26,
+        42,
+        86,
+        108,
+        189,
+        139,
+        424,
+        241
+      ]
+    },
+    "su15-1944f8ab": {
+      "title": "SU15",
+      "levels_passed": 9,
+      "target_levels": 9,
+      "won": true,
+      "steps": 103,
+      "total_steps": 103,
+      "attempts": 1,
+      "elapsed_seconds": 28.64,
+      "baseline": [
+        22,
+        42,
+        26,
+        115,
+        36,
+        31,
+        8,
+        40,
+        41
+      ]
+    },
+    "m0r0-492f87ba": {
+      "title": "M0R0",
+      "levels_passed": 6,
+      "target_levels": 6,
+      "won": true,
+      "steps": 182,
+      "total_steps": 182,
+      "attempts": 1,
+      "elapsed_seconds": 155.96,
+      "baseline": [
+        30,
+        111,
+        203,
+        26,
+        500,
+        237
+      ]
+    },
+    "cn04-2fe56bfb": {
+      "title": "CN04",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 25.65,
+      "baseline": [
+        29,
+        54,
+        85,
+        300,
+        208,
+        113
+      ]
+    },
+    "ft09-0d8bbf25": {
+      "title": "FT09",
+      "levels_passed": 6,
+      "target_levels": 6,
+      "won": true,
+      "steps": 75,
+      "total_steps": 75,
+      "attempts": 1,
+      "elapsed_seconds": 26.14,
+      "baseline": [
+        43,
+        12,
+        23,
+        28,
+        65,
+        37
+      ]
+    },
+    "tr87-cd924810": {
+      "title": "TR87",
+      "levels_passed": 6,
+      "target_levels": 6,
+      "won": true,
+      "steps": 156,
+      "total_steps": 156,
+      "attempts": 1,
+      "elapsed_seconds": 173.46,
+      "baseline": [
+        54,
+        58,
+        40,
+        45,
+        71,
+        146
+      ]
+    },
+    "sc25-635fd71a": {
+      "title": "SC25",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 321.95,
+      "baseline": [
+        36,
+        6,
+        32,
+        83,
+        143,
+        50
+      ]
+    },
+    "lp85-305b61c3": {
+      "title": "LP85",
+      "levels_passed": 8,
+      "target_levels": 8,
+      "won": true,
+      "steps": 79,
+      "total_steps": 79,
+      "attempts": 1,
+      "elapsed_seconds": 86.55,
+      "baseline": [
+        17,
+        38,
+        31,
+        16,
+        41,
+        60,
+        26,
+        159
+      ]
+    },
+    "dc22-fdcac232": {
+      "title": "DC22",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 557.28,
+      "baseline": [
+        59,
+        102,
+        67,
+        98,
+        324,
+        578
+      ]
+    },
+    "sp80-589a99af": {
+      "title": "SP80",
+      "levels_passed": 1,
+      "target_levels": 6,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 89.56,
+      "baseline": [
+        39,
+        58,
+        25,
+        148,
+        96,
+        152
+      ]
+    },
+    "ka59-38d34dbb": {
+      "title": "KA59",
+      "levels_passed": 0,
+      "target_levels": 7,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 50.29,
+      "baseline": [
+        28,
+        109,
+        51,
+        51,
+        33,
+        132,
+        326
+      ]
+    },
+    "g50t-5849a774": {
+      "title": "G50T",
+      "levels_passed": 6,
+      "target_levels": 7,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 47.6,
+      "baseline": [
+        78,
+        175,
+        179,
+        230,
+        96,
+        54,
+        67
+      ]
+    },
+    "sb26-7fbdac44": {
+      "title": "SB26",
+      "levels_passed": 8,
+      "target_levels": 8,
+      "won": true,
+      "steps": 124,
+      "total_steps": 124,
+      "attempts": 1,
+      "elapsed_seconds": 21.96,
+      "baseline": [
+        18,
+        28,
+        18,
+        19,
+        31,
+        23,
+        58,
+        18
+      ]
+    },
+    "lf52-271a04aa": {
+      "title": "LF52",
+      "levels_passed": 0,
+      "target_levels": 10,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 106.39,
+      "baseline": [
+        32,
+        81,
+        60,
+        71,
+        205,
+        148,
+        244,
+        109,
+        164,
+        225
+      ]
+    },
+    "bp35-0a0ad940": {
+      "title": "BP35",
+      "levels_passed": 0,
+      "target_levels": 9,
+      "won": false,
+      "steps": 250,
+      "total_steps": 250,
+      "attempts": 1,
+      "elapsed_seconds": 371.62,
+      "baseline": [
+        21,
+        48,
+        44,
+        38,
+        33,
+        87,
+        86,
+        131,
+        163
       ]
     }
   }

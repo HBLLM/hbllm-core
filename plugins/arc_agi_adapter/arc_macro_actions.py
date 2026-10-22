@@ -355,6 +355,20 @@ def arc_macro_plan_synthesis_hook(
     """
     game = getattr(engine, "_arc_game", None)
     if game is not None:
+        # 1. Dynamic Online Symmetry Reflection Solver (Zero-database visual/spatial inference)
+        try:
+            from plugins.arc_agi_adapter.solvers.symmetry_solver import (
+                OnlineSymmetryReflectionSolver,
+            )
+
+            if OnlineSymmetryReflectionSolver.can_solve(game):
+                plan = OnlineSymmetryReflectionSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineSymmetryReflectionSolver failed: %s", e)
+
+        # 2. Recalled Procedural Skills from Database
         raw_gid = (
             getattr(engine, "current_game_id", None)
             or getattr(game, "game_id", None)
