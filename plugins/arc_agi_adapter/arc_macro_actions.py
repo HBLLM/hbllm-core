@@ -368,7 +368,20 @@ def arc_macro_plan_synthesis_hook(
         except Exception as e:
             logger.debug("OnlineSymmetryReflectionSolver failed: %s", e)
 
-        # 2. Recalled Procedural Skills from Database
+        # 2. Dynamic Online Permutation Cycle Solver (Zero-database cyclic tile inference)
+        try:
+            from plugins.arc_agi_adapter.solvers.permutation_cycle_solver import (
+                OnlinePermutationCycleSolver,
+            )
+
+            if OnlinePermutationCycleSolver.can_solve(game):
+                plan = OnlinePermutationCycleSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlinePermutationCycleSolver failed: %s", e)
+
+        # 3. Recalled Procedural Skills from Database
         raw_gid = (
             getattr(engine, "current_game_id", None)
             or getattr(game, "game_id", None)

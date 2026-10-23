@@ -5,6 +5,9 @@ from plugins.arc_agi_adapter.solvers.archetypes import (
     ARC3DeliberationPolicy,
     install_arc3_solvers,
 )
+from plugins.arc_agi_adapter.solvers.permutation_cycle_solver import (
+    OnlinePermutationCycleSolver,
+)
 from plugins.arc_agi_adapter.solvers.symmetry_solver import (
     OnlineSymmetryReflectionSolver,
 )
@@ -12,6 +15,7 @@ from plugins.arc_agi_adapter.solvers.symmetry_solver import (
 __all__ = [
     "ARC3ArchetypeScorer",
     "ARC3DeliberationPolicy",
+    "OnlinePermutationCycleSolver",
     "OnlineSymmetryReflectionSolver",
     "install_arc3_solvers",
 ]
