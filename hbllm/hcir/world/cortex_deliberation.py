@@ -553,8 +553,15 @@ class PrefrontalDeliberationEngine:
             for a in available_actions
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
-        focus_switches = [a for a in discrete_transform_actions if engine.is_focus_switch_action(a)]
+        focus_switches = [
+            a
+            for a in discrete_transform_actions
+            if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
+        ]
         if focus_switches:
+            engine.inhibited_actions[focus_switches[0]] = max(
+                engine.inhibited_actions.get(focus_switches[0], 0), 8
+            )
             engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
             return focus_switches[0], None
 
@@ -891,7 +898,14 @@ class PrefrontalDeliberationEngine:
                                 and engine.is_motor_grounded()
                             ):
                                 engine.phase = EpistemicPhase.EXPLOITATION
-                            return self._finalize_step(engine, curr_grid, m_act, m_data)
+                            pred_pos = getattr(
+                                synthesized.current_action, "next_predicted_pos", None
+                            )
+                            if pred_pos is None and engine.mental_plan:
+                                pred_pos = engine.mental_plan[0].predicted_avatar_pos
+                            return self._finalize_step(
+                                engine, curr_grid, m_act, m_data, predicted_pos=pred_pos
+                            )
                         else:
                             engine.working_memory.macro_plan.clear()
 
@@ -1120,7 +1134,7 @@ class PrefrontalDeliberationEngine:
             affordance_choice := self.arbitrate_affordances(
                 engine, curr_grid, available_actions, known_av_feats
             )
-        ) is not None and affordance_choice[0] not in engine.inhibited_actions:
+        ) is not None and engine.inhibited_actions.get(affordance_choice[0], 0) == 0:
             chosen_action, chosen_data = affordance_choice
 
         # 2. Check active mental plan during EXPLOITATION phase

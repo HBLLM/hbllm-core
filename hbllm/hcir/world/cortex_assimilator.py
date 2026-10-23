@@ -259,6 +259,7 @@ class EpistemicFeedbackAssimilator:
             engine.entity_action_failed_positions.clear()
             engine.immobile_entity_actions.clear()
             if is_focus_switch:
+                engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 8)
                 engine.avatar_features.clear()
                 # Preserve prior avatar feature for re-grounding recovery
                 # in case the focus switch was actually an INTERACT action
@@ -1320,20 +1321,34 @@ class EpistemicFeedbackAssimilator:
             if diff.changed_pixel_count == 0 and not is_win and not is_lost:
                 engine.consecutive_stuck_steps += 1
                 if engine.last_action is not None:
-                    recent_acts = list(engine.recent_actions)[-3:]
-                    if len(recent_acts) >= 3 and all(a == engine.last_action for a in recent_acts):
+                    if not engine.is_displacement_action(engine.last_action):
                         engine.inhibited_actions[engine.last_action] = max(
-                            engine.inhibited_actions.get(engine.last_action, 0) + 4, 6
+                            engine.inhibited_actions.get(engine.last_action, 0) + 2, 4
+                        )
+                        recent_acts = list(engine.recent_actions)[-2:]
+                        if len(recent_acts) >= 2 and all(
+                            a == engine.last_action for a in recent_acts
+                        ):
+                            engine.inhibited_actions[engine.last_action] = max(
+                                engine.inhibited_actions.get(engine.last_action, 0) + 4, 8
+                            )
+                    elif prev_avatar_pos is not None:
+                        engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
+                        engine.working_memory.habenular_ior.failed_transitions.add(
+                            (prev_avatar_pos, engine.last_action)
                         )
             elif prev_avatar_pos is not None and engine.avatar_pos is not None:
                 if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
                     engine.consecutive_stuck_steps += 1
-                    if engine.last_action is not None and engine.is_displacement_action(
-                        engine.last_action
-                    ):
-                        engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
-                        prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
-                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
+                    if engine.last_action is not None:
+                        if engine.is_displacement_action(engine.last_action):
+                            engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
+                            engine.working_memory.habenular_ior.failed_transitions.add(
+                                (prev_avatar_pos, engine.last_action)
+                            )
+                        else:
+                            prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                            engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
                 else:
                     engine.consecutive_stuck_steps = 0
             else:

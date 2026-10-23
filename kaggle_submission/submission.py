@@ -898,7 +898,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
     def __init__(
         self,
         *args: Any,
-        disable_archetypes: bool = True,
+        disable_archetypes: bool = False,
         instructions: Any = None,
         **kwargs: Any,
     ) -> None:

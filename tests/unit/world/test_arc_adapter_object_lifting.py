@@ -10,7 +10,6 @@ Validates:
    to synthesize and execute neuro-symbolic macro plans without hardcoded rules in the core.
 """
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -117,30 +116,27 @@ def test_extract_arc_objects_with_sprite_tags() -> None:
     mock_lvl = MagicMock()
     mock_game.current_level = mock_lvl
 
-    # Cargo sprite (e.g. wa30 crate)
+    # Cargo sprite (e.g. movable crate)
     cargo_sprite = MagicMock()
+    cargo_sprite.name = "crate_1"
+    cargo_sprite.tags = ["cargo"]
     cargo_sprite.x = 5
     cargo_sprite.y = 5
     cargo_sprite.width = 1
     cargo_sprite.height = 1
     cargo_sprite.pixels = [[4]]
 
-    # Receptacle sprite (e.g. wa30 green goal area)
+    # Receptacle sprite (e.g. green goal area)
     rec_sprite = MagicMock()
+    rec_sprite.name = "socket_1"
+    rec_sprite.tags = ["receptacle"]
     rec_sprite.x = 12
     rec_sprite.y = 12
     rec_sprite.width = 2
     rec_sprite.height = 2
     rec_sprite.pixels = [[7, 7], [7, 7]]
 
-    def get_sprites_by_tag(tag: str) -> list[Any]:
-        if tag == "geezpjgiyd":
-            return [cargo_sprite]
-        elif tag == "fsjjayjoeg":
-            return [rec_sprite]
-        return []
-
-    mock_lvl.get_sprites_by_tag.side_effect = get_sprites_by_tag
+    mock_lvl.get_sprites.return_value = [cargo_sprite, rec_sprite]
 
     objects = extract_arc_objects(grid, game_obj=mock_game)
 
@@ -227,7 +223,7 @@ def test_extract_arc_objects_sys_click_and_shapes() -> None:
     # Mock shape sprite
     shape_sprite = MagicMock()
     shape_sprite.name = "shape_1"
-    shape_sprite.tags = ["0031cppcuvqlbi"]
+    shape_sprite.tags = ["manipulandum"]
     shape_sprite.x = 10
     shape_sprite.y = 16
     shape_sprite.width = 20
@@ -237,21 +233,12 @@ def test_extract_arc_objects_sys_click_and_shapes() -> None:
     # Mock silhouette sprite
     sil_sprite = MagicMock()
     sil_sprite.name = "sil_1"
-    sil_sprite.tags = ["0054xnsuqceejm"]
+    sil_sprite.tags = ["receptacle"]
     sil_pixels = np.full((64, 64), -1)
     sil_pixels[10:20, 15:25] = 11
     sil_sprite.pixels = sil_pixels
 
-    def get_sprites_by_tag(tag: str) -> list[Any]:
-        if tag == "sys_click":
-            return [btn_sprite]
-        elif tag == "0031cppcuvqlbi":
-            return [shape_sprite]
-        elif tag == "0054xnsuqceejm":
-            return [sil_sprite]
-        return []
-
-    cur_lvl.get_sprites_by_tag.side_effect = get_sprites_by_tag
+    cur_lvl.get_sprites.return_value = [btn_sprite, shape_sprite, sil_sprite]
 
     engine = AutonomousEpistemicEngine()
     objects = extract_arc_objects(grid, engine=engine, game_obj=game_obj)

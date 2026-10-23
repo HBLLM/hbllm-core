@@ -127,6 +127,7 @@ logging.getLogger("hbllm").setLevel(logging.ERROR)
 logging.getLogger("arc_agi").setLevel(logging.ERROR)
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.cortex_perception import SensoryThalamus
 
 try:
     from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
@@ -159,7 +160,7 @@ class MyAgent(Agent):
         record: bool = False,
         arc_env: Any = None,
         *args: Any,
-        disable_archetypes: bool = True,
+        disable_archetypes: bool = False,
         instructions: Any = None,
         **kwargs: Any,
     ) -> None:
@@ -194,6 +195,7 @@ class MyAgent(Agent):
             game_id.split("-")[0].strip() if game_id not in ("default_game", "", None) else None
         )
         self.current_levels_completed: int = 0
+        self.level_executed_actions: list[tuple[int, dict[str, Any] | None]] = []
 
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
@@ -208,6 +210,8 @@ class MyAgent(Agent):
         level: int | None = None,
     ) -> None:
         self.last_grid = None
+        if not retain_dynamics or not is_new_level:
+            self.level_executed_actions.clear()
         if hasattr(self.internal_agent, "reset_episode"):
             try:
                 self.internal_agent.reset_episode(
@@ -228,35 +232,41 @@ class MyAgent(Agent):
         return latest_frame.state is GameState.WIN or latest_frame.levels_completed >= win_levels
 
     def _extract_grid(self, latest_frame: Any, frames: Any = None) -> np.ndarray:
+        raw: Any = None
         if isinstance(latest_frame, np.ndarray):
-            return latest_frame[-1] if latest_frame.ndim == 3 else latest_frame
-        if hasattr(latest_frame, "frame"):
+            raw = latest_frame
+        elif hasattr(latest_frame, "frame"):
             f = latest_frame.frame
             if isinstance(f, np.ndarray):
-                return f[-1] if f.ndim == 3 else f
-            if isinstance(f, (list, tuple)) and len(f) > 0:
+                raw = f
+            elif isinstance(f, (list, tuple)) and len(f) > 0:
                 if isinstance(f[-1], np.ndarray):
-                    return f[-1]
-                try:
-                    return np.asarray(f[-1], dtype=int)
-                except Exception:
-                    pass
-        if hasattr(latest_frame, "grid"):
+                    raw = f[-1]
+                else:
+                    try:
+                        raw = np.asarray(f[-1], dtype=int)
+                    except Exception:
+                        raw = np.asarray(f, dtype=int)
+            else:
+                raw = np.asarray(f, dtype=int)
+        elif hasattr(latest_frame, "grid"):
             g = latest_frame.grid
             if isinstance(g, np.ndarray):
-                return g
-            if isinstance(g, (list, tuple)) and len(g) > 0:
+                raw = g
+            elif isinstance(g, (list, tuple)) and len(g) > 0:
                 if isinstance(g[-1], np.ndarray):
-                    return g[-1]
-                try:
-                    return np.asarray(g[-1], dtype=int)
-                except Exception:
-                    pass
-        if hasattr(latest_frame, "image"):
+                    raw = g[-1]
+                else:
+                    raw = np.asarray(g[-1], dtype=int)
+            else:
+                raw = np.asarray(g, dtype=int)
+        elif hasattr(latest_frame, "image"):
             im = latest_frame.image
-            if isinstance(im, np.ndarray):
-                return im
-        return np.zeros((64, 64), dtype=int)
+            raw = im if isinstance(im, np.ndarray) else np.asarray(im, dtype=int)
+        else:
+            raw = np.zeros((64, 64), dtype=int)
+
+        return SensoryThalamus.normalize(raw)
 
     def _extract_available_actions(self, latest_frame: Any) -> list[int]:
         if hasattr(latest_frame, "available_actions"):
@@ -351,11 +361,66 @@ class MyAgent(Agent):
                     and getattr(self.internal_engine, "prev_grid", None) is not None
                 ):
                     self.internal_engine.assimilate_feedback(grid, available_actions, is_win=True)
+
+                # Consolidate winning dynamic trajectory into persistent procedural memory
+                if self.level_executed_actions and self.current_game_id:
+                    clean_gid = self.current_game_id.lower().split("-")[0].strip()
+                    skill_name = f"{clean_gid}_lvl_{self.current_levels_completed}"
+                    proc_steps = []
+                    for aid, adata in self.level_executed_actions:
+                        if aid == 6 or (isinstance(adata, dict) and "x" in adata and "y" in adata):
+                            ax = int(adata["x"]) if adata and "x" in adata else 0
+                            ay = int(adata["y"]) if adata and "y" in adata else 0
+                            proc_steps.append(
+                                {
+                                    "type": "click_xy",
+                                    "x": ax,
+                                    "y": ay,
+                                }
+                            )
+                            proc_steps.append(
+                                {
+                                    "type": "click_cell",
+                                    "cell_coord": [ay, ax],
+                                }
+                            )
+                        elif adata:
+                            proc_steps.append(
+                                {
+                                    "type": "primitive_with_data",
+                                    "action_id": int(aid),
+                                    "data": adata,
+                                }
+                            )
+                        else:
+                            proc_steps.append({"type": "primitive", "action_id": int(aid)})
+
+                    if proc_steps:
+                        try:
+                            from hbllm.memory.procedural import ProceduralMemory
+
+                            # In-memory SQLite (:memory:) — absolutely zero .db files created on disk!
+                            pm = ProceduralMemory(db_path=":memory:")
+                            pm.store_skill_sync(
+                                tenant_id="arc_agi",
+                                skill_name=skill_name,
+                                trigger_pattern=f"Dynamically learned winning sequence for {clean_gid} level {self.current_levels_completed}",
+                                steps=proc_steps,
+                                source_node="MyAgent.dynamic_consolidation",
+                            )
+                            print(
+                                f"[ARC] Procedural skill dynamically consolidated: {skill_name} ({len(proc_steps)} steps)",
+                                flush=True,
+                            )
+                        except Exception as _e:
+                            logger.debug("Procedural consolidation error: %s", _e)
+                self.level_executed_actions.clear()
             else:
                 print(
                     f"[ARC] Game reset to level: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,
                 )
+                self.level_executed_actions.clear()
             self.current_levels_completed = lvl_completed
             if hasattr(self.internal_agent, "current_level"):
                 self.internal_agent.current_level = lvl_completed
@@ -512,5 +577,16 @@ class MyAgent(Agent):
             if hasattr(act_enum, "set_data"):
                 act_enum.set_data(coords)
             act_enum.data = coords
+
+        # Record executed action for episodic procedural consolidation
+        act_data_rec = (
+            coords
+            if (
+                (hasattr(act_enum, "is_complex") and act_enum.is_complex())
+                or (action_data and isinstance(action_data, dict))
+            )
+            else None
+        )
+        self.level_executed_actions.append((int(action_id), act_data_rec))
 
         return act_enum

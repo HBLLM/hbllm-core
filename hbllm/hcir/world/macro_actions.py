@@ -216,18 +216,55 @@ class NavigateTo(MacroAction):
                 avatar_pos=av_pos,
             )
 
+        H, W = curr_grid.shape
+        bg_val = engine.bg_feature or 0
+        wall_feats = set(engine.symbolic_theory.barrier_features)
+        grid_walls: set[tuple[int, int]] = set(engine.learned_barriers)
+        for rr in range(H):
+            for cc in range(W):
+                if int(curr_grid[rr, cc]) in wall_feats:
+                    grid_walls.add((rr, cc))
+
+        # Dead-end corridor reduction across dynamic action strides
+        max_stride = 1
+        for a in available_actions:
+            if a in engine.action_dynamics:
+                dyn = engine.action_dynamics[a]
+                max_stride = max(max_stride, abs(dyn.delta_r), abs(dyn.delta_c))
+
+        passable_grid = np.ones((H, W), dtype=bool)
+        for w in grid_walls:
+            if 0 <= w[0] < H and 0 <= w[1] < W:
+                passable_grid[w[0], w[1]] = False
+        pruned_topology = PerceptionEngine.prune_topological_dead_ends(
+            passable=passable_grid,
+            goals={self.destination},
+            avatar_pos=av_pos,
+            step_size=max_stride,
+        )
+        effective_walls = set(grid_walls)
+        for rr in range(H):
+            for cc in range(W):
+                if not pruned_topology[rr, cc]:
+                    effective_walls.add((rr, cc))
+
+        wall_feats = set(engine.symbolic_theory.barrier_features)
+        if not wall_feats and grid_walls:
+            for wr, wc in list(grid_walls)[:20]:
+                wall_feats.add(int(curr_grid[wr, wc]))
+
         # Plan next geodesic step
         plan = GeodesicManifoldRouter.route_geodesic(
             curr_grid=curr_grid,
             start_pos=av_pos,
             goals=[self.destination],
             static_barriers=engine.learned_barriers,
-            grid_walls=set(),
+            grid_walls=effective_walls,
             unknown_entity_cells=set(),
             oriented_threats=threats,
             movable_actions=movable_actions,
-            bg=engine.bg_feature or 0,
-            barrier_features=engine.symbolic_theory.barrier_features,
+            bg=bg_val,
+            barrier_features=wall_feats,
             avatar_features=av_feats,
             max_candidate_goals=1,
         )
@@ -236,6 +273,7 @@ class NavigateTo(MacroAction):
             next_act, next_pos = plan[0]
             if next_act in available_actions and (av_pos, next_act) not in failed_tx:
                 self.status = MacroActionStatus.RUNNING
+                self.next_predicted_pos = next_pos
                 from collections import deque
 
                 from hbllm.hcir.world.cortex_planner import MentalSimulationStep

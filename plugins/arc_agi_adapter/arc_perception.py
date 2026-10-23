@@ -12,6 +12,7 @@ in the plugin layer, keeping the cognitive core 100% domain-agnostic.
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -23,17 +24,14 @@ from hbllm.hcir.world.percept import BasePerceptionAdapter, PerceptionFrame
 
 logger = logging.getLogger(__name__)
 
-TAG_SEMANTIC_ROLES: dict[str, str] = {
-    # Avatar / Agent
-    "wbmdvjhthc": "avatar",
-    "0007dtbisvazhv": "avatar",
-    "player": "avatar",
+# Canonical Semantic Keyword Mapping (Domain-Agnostic Vocabulary)
+SEMANTIC_KEYWORD_ROLES: dict[str, str] = {
+    # Avatar / Controllable Agent
     "avatar": "avatar",
+    "player": "avatar",
     "agent": "avatar",
-    # Cargo / Movable objects
-    "geezpjgiyd": "cargo",
-    "0031cppcuvqlbi": "manipulandum",
-    "crzsjq": "cargo",
+    "hero": "avatar",
+    # Cargo / Movable Items
     "cargo": "cargo",
     "crate": "cargo",
     "box": "cargo",
@@ -41,10 +39,9 @@ TAG_SEMANTIC_ROLES: dict[str, str] = {
     "gem": "cargo",
     "coin": "cargo",
     "key": "cargo",
-    # Receptacles / Silhouette sockets
-    "fsjjayjoeg": "receptacle",
-    "0054xnsuqceejm": "receptacle",
-    "0001sruqbuvukh": "receptacle",
+    "item": "cargo",
+    "pickup": "cargo",
+    # Receptacles / Silhouette Sockets
     "receptacle": "receptacle",
     "silhouette": "receptacle",
     "socket": "receptacle",
@@ -52,11 +49,6 @@ TAG_SEMANTIC_ROLES: dict[str, str] = {
     "basket": "receptacle",
     "bin": "receptacle",
     # Goals / Exits
-    "0015msvpvzxhqf": "goal",
-    "0016uciqlhjlom": "goal",
-    "0001uqqokjrptk": "goal",
-    "tovemc": "goal",
-    "goknoi": "goal",
     "goal": "goal",
     "exit": "goal",
     "target": "goal",
@@ -64,40 +56,64 @@ TAG_SEMANTIC_ROLES: dict[str, str] = {
     "flag": "goal",
     "finish": "goal",
     # Manipulandum / Sliders
-    "0006lxjtqggkmi": "manipulandum",
     "manipulandum": "manipulandum",
     "slider": "manipulandum",
     "shape": "manipulandum",
     "piece": "manipulandum",
-    # Switches / Buttons / Dials / Clickable
-    "nxkictbbvzt": "switch",
-    "tjaqvwdgkxe": "switch",
-    "sys_click": "switch",
-    "button": "switch",
+    # Switches / Buttons / Actuators
     "switch": "switch",
+    "button": "switch",
     "lever": "switch",
     "valve": "switch",
     "dial": "switch",
     "actuator": "switch",
-    "hkx": "switch",
-    "nti": "switch",
+    "click": "switch",
+    "sys_click": "switch",
     # Dynamic Hazards / Enemies
-    "enemy": "hazard",
     "hazard": "hazard",
+    "enemy": "hazard",
     "threat": "hazard",
     "patrol": "hazard",
     "collider": "hazard",
-    "0015qniapgwsvb": "hazard",
-    "0027jbgxilrocf": "hazard",
-    # Barriers / Walls
-    "0003uqrdzdofso": "barrier",
-    "0056icpryeujyf": "barrier",
-    "0054kgxrvfihgm": "barrier",
-    "border": "barrier",
-    "wall": "barrier",
+    "spike": "hazard",
+    "lava": "hazard",
+    "danger": "hazard",
+    # Barriers / Impassable Structures
     "barrier": "barrier",
+    "wall": "barrier",
     "obstacle": "barrier",
+    "border": "barrier",
+    "blocker": "barrier",
 }
+
+
+def classify_tag_semantic_role(tags: Sequence[str] | None) -> str | None:
+    """Classify semantic role from string tags via canonical keyword & stem matching.
+
+    Decoupled from hardcoded environment hashes. Resolves any tag containing
+    domain-general stems ('portal_gate' -> 'goal', 'btn_actuator' -> 'switch').
+    """
+    if not tags:
+        return None
+    for raw_t in tags:
+        t = str(raw_t).strip().lower()
+        if not t:
+            continue
+        if t in SEMANTIC_KEYWORD_ROLES:
+            return SEMANTIC_KEYWORD_ROLES[t]
+        for kw, role in SEMANTIC_KEYWORD_ROLES.items():
+            if kw in t:
+                return role
+    return None
+
+
+def _is_truthy_flag(val: Any) -> bool:
+    """Check boolean flag safely without being fooled by unconfigured MagicMocks."""
+    if val is None or val is False:
+        return False
+    if hasattr(val, "_mock_name"):
+        return False
+    return bool(val)
 
 
 class ARCPerceptionAdapter(BasePerceptionAdapter):
@@ -176,19 +192,7 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         ):
             known_lethal_features.update(context.hazard_tracker.known_lethal_features)
 
-        # 3. Extract segmented spatial entities
-        entities = PerceptionEngine.extract_entities(
-            grid=grid,
-            bg=bg,
-            symbolic_theory=symbolic_theory,
-            avatar_features=av_feats,
-            state_mutations=getattr(context, "state_mutations", None),
-            learned_barriers=learned_barriers,
-            learned_goal_positions=learned_goals,
-            avatar_pos=av_pos,
-        )
-
-        # 4. Detect structural exit and candidate goals
+        # 3. Detect structural exit and candidate goals FIRST to seed goal spatial priors
         candidate_goals: set[tuple[int, int]] = set(learned_goals)
         structural_goals = PerceptionEngine.detect_structural_goals(
             grid=grid,
@@ -200,12 +204,45 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             avatar_pos=av_pos,
         )
         for sg in structural_goals:
+            pos = sg.get("position")
+            feat = sg.get("feature")
+            if pos is not None and av_pos is not None:
+                if pos == av_pos or (abs(pos[0] - av_pos[0]) <= 2 and abs(pos[1] - av_pos[1]) <= 2):
+                    continue
+            if feat is not None and feat in av_feats:
+                continue
             if sg.get("type") in ("exit_marker", "gateway_notch", "target_zone"):
                 for cp in sg.get("cells", []):
-                    candidate_goals.add(cp)
-                pos = sg.get("position")
-                if pos:
+                    if av_pos is None or (
+                        cp != av_pos and (abs(cp[0] - av_pos[0]) > 2 or abs(cp[1] - av_pos[1]) > 2)
+                    ):
+                        candidate_goals.add(cp)
+                if pos and (
+                    av_pos is None
+                    or (
+                        pos != av_pos
+                        and (abs(pos[0] - av_pos[0]) > 2 or abs(pos[1] - av_pos[1]) > 2)
+                    )
+                ):
                     candidate_goals.add(pos)
+        if (
+            context is not None
+            and hasattr(context, "learned_goal_positions")
+            and av_pos is not None
+        ):
+            context.learned_goal_positions.discard(av_pos)
+
+        # 4. Extract segmented spatial entities informed by candidate goals
+        entities = PerceptionEngine.extract_entities(
+            grid=grid,
+            bg=bg,
+            symbolic_theory=symbolic_theory,
+            avatar_features=av_feats,
+            state_mutations=getattr(context, "state_mutations", None),
+            learned_barriers=learned_barriers,
+            learned_goal_positions=candidate_goals,
+            avatar_pos=av_pos,
+        )
 
         # 5. Synthesize Passable Topology Map
         # 1 = traversable/walkable, 0 = impassable barrier/lethal
@@ -392,13 +429,6 @@ def extract_arc_objects(
         return []
 
     H, W = g.shape
-    adapter = adapter or ARCPerceptionAdapter()
-    try:
-        frame = adapter.lift_percept(g, context=engine)
-    except Exception as exc:
-        logger.debug("ARCPerceptionAdapter.lift_percept failed in extract_arc_objects: %s", exc)
-        frame = None
-
     seen_positions: set[tuple[int, int]] = set()
     objects: list[ObjectSpec] = []
 
@@ -408,11 +438,6 @@ def extract_arc_objects(
     av_feats = set(getattr(engine, "avatar_features", set()) or set())
     if av_feat is not None:
         av_feats.add(av_feat)
-    if frame is not None:
-        if frame.avatar_pos is not None:
-            av_pos = frame.avatar_pos
-        if frame.avatar_features:
-            av_feats.update(frame.avatar_features)
 
     # Ingest from symbolic theory if available
     symbolic_theory = getattr(engine, "symbolic_theory", None)
@@ -429,7 +454,8 @@ def extract_arc_objects(
         barrier_feats.update(getattr(symbolic_theory, "barrier_features", set()))
         actuator_feats.update(getattr(symbolic_theory, "actuator_features", set()))
 
-    # 1. Ingest arcade sprite tags if available in environment game_obj
+    # 1. Ingest arcade sprite tags if available in environment game_obj FIRST
+    # (Grounds avatar pos and key landmarks before general matrix lifting)
     cur_lvl = getattr(game_obj, "current_level", None) if game_obj is not None else None
     if cur_lvl is not None:
         try:
@@ -452,38 +478,20 @@ def extract_arc_objects(
                 x_pad = 0
                 y_pad = 0
 
-            # Gather sprites: support full sprite list, direct sprites collection, or tag queries
-            candidate_sprites: list[tuple[Any, str | None]] = []
+            # Ingest arcade sprites directly from level representation
+            candidate_sprites: list[Any] = []
             if hasattr(cur_lvl, "get_sprites") and callable(cur_lvl.get_sprites):
                 res = cur_lvl.get_sprites()
                 if isinstance(res, (list, tuple, set)):
-                    for s in res:
-                        candidate_sprites.append((s, None))
+                    candidate_sprites.extend(res)
             elif hasattr(cur_lvl, "sprites"):
                 spr = getattr(cur_lvl, "sprites", None)
                 if isinstance(spr, (list, tuple, set)):
-                    for s in spr:
-                        candidate_sprites.append((s, None))
+                    candidate_sprites.extend(spr)
                 elif isinstance(spr, dict):
-                    for s in spr.values():
-                        candidate_sprites.append((s, None))
+                    candidate_sprites.extend(spr.values())
 
-            # If empty or if get_sprites_by_tag is present (e.g. in test mocks or tag-only environments)
-            if (
-                not candidate_sprites
-                and hasattr(cur_lvl, "get_sprites_by_tag")
-                and callable(cur_lvl.get_sprites_by_tag)
-            ):
-                for tag, role_hint in TAG_SEMANTIC_ROLES.items():
-                    try:
-                        tagged_spr = cur_lvl.get_sprites_by_tag(tag)
-                        if isinstance(tagged_spr, (list, tuple, set)):
-                            for s in tagged_spr:
-                                candidate_sprites.append((s, role_hint))
-                    except Exception:
-                        pass
-
-            for sp, role_hint in candidate_sprites:
+            for sp in candidate_sprites:
                 s_name = getattr(sp, "name", "").lower()
                 s_tags = [str(t).lower() for t in getattr(sp, "tags", [])]
                 w = getattr(sp, "width", 1)
@@ -510,13 +518,86 @@ def extract_arc_objects(
                     except Exception:
                         pass
 
-                # Infer role dynamically from semantic properties and role hints
-                role: str = role_hint or "unknown"
+                # 1. Semantic Tag/Name Matching (Canonical English Vocabulary)
+                role: str = (
+                    classify_tag_semantic_role(s_tags)
+                    or classify_tag_semantic_role([s_name])
+                    or "unknown"
+                )
+
+                # 2. Visual Cortex & Topological Affordance Invariants (Tag-Agnostic Ground Truth)
                 if role == "unknown":
-                    for t in s_tags:
-                        if t in TAG_SEMANTIC_ROLES:
-                            role = TAG_SEMANTIC_ROLES[t]
-                            break
+                    # (a) Physical Avatar Invariant (layer >= 1, compact, non-background)
+                    if (
+                        engine is not None
+                        and getattr(sp, "layer", 0) >= 1
+                        and 1 <= w <= 12
+                        and 1 <= h <= 12
+                        and s_name != "background"
+                        and (
+                            engine.avatar_pos is None
+                            or s_feat in getattr(engine, "avatar_features", set())
+                            or s_feat == getattr(engine, "avatar_feature", None)
+                            or not getattr(engine, "avatar_features", set())
+                        )
+                    ):
+                        role = "avatar"
+                    elif (
+                        (
+                            engine is not None
+                            and s_pos in getattr(engine, "learned_goal_positions", set())
+                        )
+                        or _is_truthy_flag(getattr(sp, "is_goal", False))
+                        or _is_truthy_flag(getattr(sp, "is_target", False))
+                    ):
+                        role = "goal"
+                    elif getattr(sp, "layer", 0) <= 0 and (
+                        _is_truthy_flag(getattr(sp, "is_collidable", False))
+                        or _is_truthy_flag(getattr(sp, "blocking", False))
+                        or _is_truthy_flag(getattr(sp, "solid", False))
+                        or (
+                            engine is not None
+                            and s_pos in getattr(engine, "learned_barriers", set())
+                        )
+                    ):
+                        role = "barrier"
+                    elif (
+                        _is_truthy_flag(getattr(sp, "clickable", False))
+                        or _is_truthy_flag(getattr(sp, "interactive", False))
+                        or _is_truthy_flag(getattr(sp, "is_button", False))
+                    ):
+                        role = "switch"
+                    elif (
+                        _is_truthy_flag(getattr(sp, "lethal", False))
+                        or _is_truthy_flag(getattr(sp, "is_hazard", False))
+                        or (
+                            engine is not None
+                            and hasattr(engine, "hazard_tracker")
+                            and s_pos
+                            in getattr(engine.hazard_tracker, "static_lethal_positions", set())
+                        )
+                    ):
+                        role = "hazard"
+                    elif (
+                        _is_truthy_flag(getattr(sp, "movable", False))
+                        or _is_truthy_flag(getattr(sp, "draggable", False))
+                        or _is_truthy_flag(getattr(sp, "pushable", False))
+                        or _is_truthy_flag(getattr(sp, "collectible", False))
+                    ):
+                        role = "cargo"
+                    elif _is_truthy_flag(getattr(sp, "is_receptacle", False)):
+                        role = "receptacle"
+                    elif symbolic_theory is not None:
+                        if s_feat in getattr(symbolic_theory, "goal_features", set()):
+                            role = "goal"
+                        elif s_feat in getattr(symbolic_theory, "barrier_features", set()):
+                            role = "barrier"
+                        elif s_feat in getattr(symbolic_theory, "cargo_features", set()):
+                            role = "cargo"
+                        elif s_feat in getattr(symbolic_theory, "receptacle_features", set()):
+                            role = "receptacle"
+                        elif s_feat in getattr(symbolic_theory, "actuator_features", set()):
+                            role = "switch"
 
                 if role == "avatar":
                     is_active_avatar = True
@@ -529,6 +610,7 @@ def extract_arc_objects(
                                     parr[mid_r, mid_c] == parr[0, 0]
                                     and engine is not None
                                     and engine.avatar_pos is not None
+                                    and s_feat not in getattr(engine, "avatar_features", set())
                                 ):
                                     is_active_avatar = False
                         except Exception:
@@ -551,86 +633,6 @@ def extract_arc_objects(
                         if s_feat:
                             engine.symbolic_theory.barrier_features.add(s_feat)
                     continue
-
-                if role == "unknown":
-                    if (
-                        "sys_click" in s_tags
-                        or "button" in s_name
-                        or "switch" in s_name
-                        or "lever" in s_name
-                        or "valve" in s_name
-                        or "click" in s_name
-                        or "actuator" in s_name
-                        or any("click" in t or "button" in t or "switch" in t for t in s_tags)
-                        or getattr(sp, "clickable", False)
-                        or getattr(sp, "interactive", False)
-                    ):
-                        role = "switch"
-                    elif (
-                        "exit" in s_name
-                        or "goal" in s_name
-                        or "target" in s_name
-                        or "flag" in s_name
-                        or "finish" in s_name
-                        or "portal" in s_name
-                        or any("goal" in t or "exit" in t or "target" in t for t in s_tags)
-                        or getattr(sp, "is_goal", False)
-                    ):
-                        role = "goal"
-                    elif (
-                        "hazard" in s_name
-                        or "enemy" in s_name
-                        or "threat" in s_name
-                        or "patrol" in s_name
-                        or "danger" in s_name
-                        or "spike" in s_name
-                        or "lava" in s_name
-                        or any("hazard" in t or "enemy" in t or "threat" in t for t in s_tags)
-                        or getattr(sp, "lethal", False)
-                        or getattr(sp, "is_hazard", False)
-                    ):
-                        role = "hazard"
-                    elif (
-                        "manipulandum" in s_name
-                        or "shape" in s_name
-                        or "slider" in s_name
-                        or "piece" in s_name
-                        or any("manipulandum" in t or "shape" in t or "slider" in t for t in s_tags)
-                        or getattr(sp, "movable", False)
-                        or getattr(sp, "draggable", False)
-                    ):
-                        role = "manipulandum"
-                    elif (
-                        "receptacle" in s_name
-                        or "silhouette" in s_name
-                        or "sil" in s_name
-                        or "basket" in s_name
-                        or "bin" in s_name
-                        or "slot" in s_name
-                        or any(
-                            "receptacle" in t or "silhouette" in t or "slot" in t for t in s_tags
-                        )
-                        or getattr(sp, "is_receptacle", False)
-                    ):
-                        role = "receptacle"
-                    elif (
-                        "cargo" in s_name
-                        or "crate" in s_name
-                        or "block" in s_name
-                        or "box" in s_name
-                        or "gem" in s_name
-                        or "key" in s_name
-                        or "coin" in s_name
-                        or "pickup" in s_name
-                        or any("cargo" in t or "item" in t or "pickup" in t for t in s_tags)
-                        or getattr(sp, "pushable", False)
-                        or getattr(sp, "collectible", False)
-                    ):
-                        role = "cargo"
-                    elif (
-                        "tool" in s_name or "station" in s_name or any("tool" in t for t in s_tags)
-                    ):
-                        role = "tool"
 
                 # 1. Interactive clickable switches & buttons & actuators
                 if role == "switch":
@@ -771,29 +773,28 @@ def extract_arc_objects(
                             ),
                         )
                     )
-                elif s_name != "background":
-                    seen_positions.add(s_pos)
-                    u_id = f"entity_sprite_{disp_y}_{disp_x}"
-                    u_props = {
-                        "source": "sprite_entity",
-                        "sprite_name": s_name,
-                        "click_coord": s_pos,
-                        "click_data": {"x": disp_x, "y": disp_y},
-                    }
-                    objects.append(
-                        ObjectSpec(
-                            id=u_id,
-                            pos=s_pos,
-                            feature_id=s_feat,
-                            role="entity",
-                            properties=u_props,
-                            macro_tasks=_attach_object_macro_tasks(
-                                "entity", s_pos, s_feat, u_id, u_props
-                            ),
-                        )
-                    )
+                else:
+                    # Unclassified sprite in unseen game:
+                    # Do NOT flood seen_positions with a dummy "entity" object.
+                    # Leave locus unmasked so the Ventral Stream visual segmenter
+                    # (frame.entities) has primary jurisdiction over spatial representation.
+                    pass
         except Exception as exc:
             logger.debug("Failed extracting sprites from cur_lvl: %s", exc)
+
+    # 1B. Lift standardized PerceptionFrame with pre-grounded avatar context
+    adapter = adapter or ARCPerceptionAdapter()
+    try:
+        frame = adapter.lift_percept(g, context=engine)
+    except Exception as exc:
+        logger.debug("ARCPerceptionAdapter.lift_percept failed in extract_arc_objects: %s", exc)
+        frame = None
+
+    if frame is not None:
+        if frame.avatar_pos is not None and av_pos is None:
+            av_pos = frame.avatar_pos
+        if frame.avatar_features:
+            av_feats.update(frame.avatar_features)
 
     # 2. Convert segmented SpatialEntity instances into ObjectSpec
     if frame is not None and frame.entities:
@@ -802,7 +803,15 @@ def extract_arc_objects(
             if ent.role == EntityRole.AGENT:
                 continue
             pos = (int(ent.grid_pos[0]), int(ent.grid_pos[1]))
-            if pos == av_pos or pos in seen_positions:
+            if (
+                pos == av_pos
+                or (
+                    av_pos is not None
+                    and abs(pos[0] - av_pos[0]) <= 2
+                    and abs(pos[1] - av_pos[1]) <= 2
+                )
+                or pos in seen_positions
+            ):
                 continue
 
             feat = int(
@@ -843,7 +852,21 @@ def extract_arc_objects(
                 role = str(ent.role.value if hasattr(ent.role, "value") else ent.role).lower()
 
             if role == "unknown":
-                role = "entity"
+                if pos in getattr(engine, "learned_goal_positions", set()):
+                    role = "goal"
+                elif feat == getattr(frame, "bg", None) or (
+                    engine is not None
+                    and feat in getattr(engine.symbolic_theory, "walkable_features", set())
+                ):
+                    role = "floor"
+                elif (
+                    ent.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE) or feat in cargo_feats
+                ):
+                    role = "cargo"
+                elif ent.role == EntityRole.ACTUATOR or feat in actuator_feats:
+                    role = "switch"
+                else:
+                    role = "entity"
             seen_positions.add(pos)
             ent_id = ent.id or f"{role}_{pos[0]}_{pos[1]}"
             ent_props = dict(ent.properties)

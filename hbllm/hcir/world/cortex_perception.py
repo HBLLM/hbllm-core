@@ -234,6 +234,7 @@ class FigureGroundSegregator:
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
     ) -> int:
+        grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
         border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
         vals, counts = np.unique(border_pixels, return_counts=True)
@@ -298,7 +299,8 @@ class SpatialRoleClassifier:
         is_border = (
             (min_r <= 1 and max_r >= H - 2 and min_c <= 1 and max_c >= W - 2)
             or (max_r - min_r >= H - 2 and max_c - min_c >= W - 2)
-            or (area > H * W * 0.35)
+            or (area > H * W * 0.20)
+            or (area >= 60 and (max_r - min_r >= H // 3 or max_c - min_c >= W // 3) and area > 100)
         )
 
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
@@ -332,8 +334,20 @@ class SpatialRoleClassifier:
 
         if is_border or is_theory_barrier:
             return EntityRole.OBSTACLE
-        elif val in av_set:
+        elif val in av_set or (
+            avatar_pos is not None
+            and (grid_pos == avatar_pos or (cells is not None and avatar_pos in cells))
+        ):
             return EntityRole.AGENT
+        elif (
+            is_theory_goal
+            or (
+                (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
+                and (cells is None or any(p in goal_set for p in cells))
+            )
+            or grid_pos in receptacle_set
+        ):
+            return EntityRole.GOAL
         elif not is_theory_walkable and any(
             (
                 getattr(m, "trigger_feature", None) is not None
@@ -378,6 +392,7 @@ class GestaltAffordanceDetector:
         avatar_pos: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
         goals: list[dict[str, Any]] = []
         av_feats = set(avatar_features) if avatar_features else set()
@@ -411,6 +426,11 @@ class GestaltAffordanceDetector:
                     int(round(float(np.mean(pts[:, 0])))),
                     int(round(float(np.mean(pts[:, 1])))),
                 )
+                if avatar_pos is not None and (
+                    centroid == avatar_pos
+                    or (min_r <= avatar_pos[0] <= max_r and min_c <= avatar_pos[1] <= max_c)
+                ):
+                    continue
                 goals.append(
                     {
                         "type": "target_zone",
@@ -468,19 +488,28 @@ class GestaltAffordanceDetector:
             if not val_counts:
                 continue
             dom_val, count = val_counts.most_common(1)[0]
-            if count >= len(edge_cells) * 0.6 and (
-                (barrier_features and dom_val in barrier_features) or dom_val != bg
-            ):
+            is_valid_wall = dom_val in barrier_features if barrier_features else (dom_val != bg)
+            if count >= len(edge_cells) * 0.6 and is_valid_wall:
                 gap_cells = [
                     edge_cells[i]
                     for i, v in enumerate(edge_vals)
                     if v != dom_val and 0 < i < len(edge_cells) - 1
                 ]
                 if 1 <= len(gap_cells) <= 4:
+                    mid_r, mid_c = gap_cells[len(gap_cells) // 2]
+                    interior_r = 1 if mid_r == 0 else (H - 2 if mid_r == H - 1 else mid_r)
+                    interior_c = 1 if mid_c == 0 else (W - 2 if mid_c == W - 1 else mid_c)
+                    int_val = int(grid[interior_r, interior_c])
+                    if (
+                        (barrier_features and int_val in barrier_features)
+                        or (known_lethal_features and int_val in known_lethal_features)
+                        or (dom_val in (barrier_features or set()) and int_val == dom_val)
+                    ):
+                        continue
                     goals.append(
                         {
                             "type": "gateway_notch",
-                            "position": gap_cells[len(gap_cells) // 2],
+                            "position": (mid_r, mid_c),
                             "cells": gap_cells,
                             "feature": int(grid[gap_cells[0]]),
                             "confidence": 0.85,
@@ -728,6 +757,7 @@ class PerceptionEngine:
         avatar_pos: tuple[int, int] | None = None,
     ) -> list[SpatialEntity]:
         """Domain-agnostic connected-component entity segmentation using native substrate labeling."""
+        grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
         av_feats = avatar_features or set()
         mutations = state_mutations or []
@@ -983,6 +1013,47 @@ class PerceptionEngine:
             goals=goals,
             cargo_features=cargo_features,
         )
+
+    @classmethod
+    def prune_topological_dead_ends(
+        cls,
+        passable: np.ndarray,
+        goals: set[tuple[int, int]],
+        avatar_pos: tuple[int, int] | None = None,
+        step_size: int = 1,
+    ) -> np.ndarray:
+        """Iteratively prune non-goal dead-end branches (degree <= 1) from passable topology."""
+        if not goals:
+            return passable
+        H, W = passable.shape
+        pruned = passable.copy()
+        protected = set(goals)
+        if avatar_pos is not None:
+            protected.add(avatar_pos)
+
+        step = max(1, step_size)
+        changed = True
+        iterations = 0
+        max_iters = max(H, W) * 2
+
+        while changed and iterations < max_iters:
+            changed = False
+            iterations += 1
+            for r in range(0, H, step):
+                for c in range(0, W, step):
+                    if not pruned[r, c] or (r, c) in protected:
+                        continue
+                    deg = 0
+                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        nr, nc = r + dr * step, c + dc * step
+                        if 0 <= nr < H and 0 <= nc < W and pruned[nr, nc]:
+                            deg += 1
+                    if deg <= 1:
+                        for br in range(r, min(H, r + step)):
+                            for bc in range(c, min(W, c + step)):
+                                pruned[br, bc] = False
+                        changed = True
+        return pruned
 
     @classmethod
     def to_causal_predicate(cls) -> CausalPredicate:

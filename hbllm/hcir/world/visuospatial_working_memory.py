@@ -176,6 +176,24 @@ class VisuospatialWorkingMemory:
 
         return None
 
+    def find_any_unresolved_pair(
+        self,
+        bg: int | None = None,
+    ) -> tuple[tuple[int, int], tuple[int, int], int] | None:
+        """Find any two unresolved coordinates in memory that share the same non-zero feature."""
+        for feat, coords in self.feature_to_coords.items():
+            if feat <= 0 or (bg is not None and feat == bg):
+                continue
+            active = [p for p in coords if p not in self.resolved_coords]
+            if len(active) >= 2:
+                # Sort by step observed to match most recently discovered first
+                active.sort(
+                    key=lambda p: self.bound_slots[p].step_observed if p in self.bound_slots else 0,
+                    reverse=True,
+                )
+                return (active[0], active[1], feat)
+        return None
+
     def find_matching_pair_subgoal(
         self,
         current_pos: tuple[int, int],

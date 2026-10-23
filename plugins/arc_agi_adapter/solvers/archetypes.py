@@ -84,7 +84,16 @@ class ARC3ArchetypeScorer:
             if pair_target is not None:
                 pr, pc = pair_target
                 if (pr, pc) not in engine.quiescent_click_targets and 0 <= pr < H and 0 <= pc < W:
-                    candidates.append((pr, pc, 450.0))
+                    candidates.append((pr, pc, 500.0))
+
+        # Proactively check for any unresolved pairs stored in working memory
+        if hasattr(vm, "find_any_unresolved_pair"):
+            unresolved = vm.find_any_unresolved_pair(bg=bg)
+            if unresolved is not None:
+                p1, p2, _ = unresolved
+                for p in (p1, p2):
+                    if p not in engine.quiescent_click_targets and 0 <= p[0] < H and 0 <= p[1] < W:
+                        candidates.append((p[0], p[1], 480.0))
         return candidates
 
     def _score_symmetry_discrepancies(
@@ -462,10 +471,15 @@ class ARC3DeliberationPolicy:
                 and discrete_transform_actions
             ):
                 focus_switches = [
-                    a for a in discrete_transform_actions if engine.is_focus_switch_action(a)
+                    a
+                    for a in discrete_transform_actions
+                    if engine.is_focus_switch_action(a) and engine.inhibited_actions.get(a, 0) == 0
                 ]
                 if focus_switches:
                     chosen_action = focus_switches[0]
+                    engine.inhibited_actions[chosen_action] = max(
+                        engine.inhibited_actions.get(chosen_action, 0), 8
+                    )
                     engine.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
                     return chosen_action, None
                 if not spatial_effector_actions:

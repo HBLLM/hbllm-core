@@ -129,10 +129,7 @@ def package_dataset(output_zip: Path | None = None) -> Path:
             rel = fp.relative_to(core_dir)
             included_files.append((fp, str(rel)))
 
-    # 4. procedural_memory.db (core procedural skill database)
-    proc_db = core_dir / "procedural_memory.db"
-    if proc_db.exists():
-        included_files.append((proc_db, "procedural_memory.db"))
+    # 4. Note: No database files (*.db) are packaged to prevent polluting /kaggle/working outputs.
 
     print(f"📦 Packaging {len(included_files)} files into {output_zip.name}...")
 
@@ -208,9 +205,10 @@ def main() -> None:
     print("   wheels = glob.glob('/kaggle/input/**/*.whl', recursive=True)")
     print("   if wheels:")
     print("       !pip install --no-index --find-links={os.path.dirname(wheels[0])} arcengine")
-    print("   from kaggle_submission.submission import MyAgent")
+    print("   from kaggle_submission.my_agent import MyAgent")
     print("   agent = MyAgent()")
     print("   ```")
+    print("   (Or upload and run the included arc_agi_3_submission.ipynb directly!)")
     print("=" * 70)
 
 

@@ -47,8 +47,22 @@ def build() -> dict:
         # ==============================================================================
         import glob
         import os
+        import shutil
         import subprocess
         import sys
+
+        # Immediately purge any lingering .db or non-submission artifacts from /kaggle/working
+        if os.path.exists('/kaggle/working'):
+            for cand_f in os.listdir('/kaggle/working'):
+                if cand_f != 'submission.parquet':
+                    cand_p = os.path.join('/kaggle/working', cand_f)
+                    try:
+                        if os.path.isdir(cand_p):
+                            shutil.rmtree(cand_p)
+                        else:
+                            os.remove(cand_p)
+                    except Exception:
+                        pass
 
         wheel_dirs = set()
         for p in glob.glob('/kaggle/input/**/*.whl', recursive=True):
@@ -133,35 +147,35 @@ def build() -> dict:
             # 4. Register MyAgent in the framework registry (slimming out unused heavy deps)
             init_file = os.path.join(working_framework, "agents", "__init__.py")
             with open(init_file, "w") as f:
-                f.write(\"\"\"from typing import Type
-        from dotenv import load_dotenv
-        from .agent import Agent, Playback
-        from .swarm import Swarm
-        from .templates.random_agent import Random
-        from .templates.my_agent import MyAgent
-
-        load_dotenv()
-
-        AVAILABLE_AGENTS: dict[str, Type[Agent]] = {
-            'random': Random,
-            'myagent': MyAgent,
-        }
-        \"\"\")
+                f.write(
+                    "from typing import Type\\n"
+                    "from dotenv import load_dotenv\\n"
+                    "from .agent import Agent, Playback\\n"
+                    "from .swarm import Swarm\\n"
+                    "from .templates.random_agent import Random\\n"
+                    "from .templates.my_agent import MyAgent\\n\\n"
+                    "load_dotenv()\\n\\n"
+                    "AVAILABLE_AGENTS: dict[str, Type[Agent]] = {\\n"
+                    "    'random': Random,\\n"
+                    "    'myagent': MyAgent,\\n"
+                    "}\\n"
+                )
             print("✓ Registered MyAgent in agent registry.")
 
             # 5. Point the framework at the gateway sidecar with level preservation
             env_file = os.path.join(working_framework, ".env")
             with open(env_file, "w") as f:
-                f.write(\"\"\"SCHEME=http
-        HOST=gateway
-        PORT=8001
-        ARC_API_KEY=test-key-123
-        ARC_BASE_URL=http://gateway:8001/
-        OPERATION_MODE=online
-        ENVIRONMENTS_DIR=
-        RECORDINGS_DIR=/kaggle/working/server_recording
-        ONLY_RESET_LEVELS=true
-        \"\"\")
+                f.write(
+                    "SCHEME=http\\n"
+                    "HOST=gateway\\n"
+                    "PORT=8001\\n"
+                    "ARC_API_KEY=test-key-123\\n"
+                    "ARC_BASE_URL=http://gateway:8001/\\n"
+                    "OPERATION_MODE=online\\n"
+                    "ENVIRONMENTS_DIR=\\n"
+                    "RECORDINGS_DIR=/kaggle/working/server_recording\\n"
+                    "ONLY_RESET_LEVELS=true\\n"
+                )
             print("✓ Configured .env for gateway sidecar with ONLY_RESET_LEVELS=true.")
 
             # 6. Discover HBLLM dataset root and add to PYTHONPATH for framework subprocess
@@ -190,7 +204,6 @@ def build() -> dict:
             print("🎮 Launching MyAgent tournament against gateway sidecar...")
             !cd /kaggle/working/ARC-AGI-3-Agents && \\
                 PYTHONPATH="{hbllm_dataset_root}:$PYTHONPATH" \\
-                HBLLM_PROCEDURAL_DB="{hbllm_dataset_root}/procedural_memory.db" \\
                 MPLBACKEND=agg \\
                 ONLY_RESET_LEVELS=true \\
                 python main.py --agent myagent
@@ -333,8 +346,12 @@ def build() -> dict:
             # ==============================================================================
             # 4. EMIT / VERIFY SUBMISSION PARQUET
             # ==============================================================================
+            import glob
             import os
+            import shutil
             import pandas as pd
+
+            parquet_path = '/kaggle/working/submission.parquet'
 
             if not os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
                 # Phase A: Save-and-run-all (commit) mode
@@ -342,13 +359,22 @@ def build() -> dict:
                 submission = pd.DataFrame(
                     data=[['1_0', '1', True, 1]],
                     columns=['row_id', 'game_id', 'end_of_game', 'score'])
-                submission.to_parquet('/kaggle/working/submission.parquet', index=False)
+                submission.to_parquet(parquet_path, index=False)
                 print("✓ Commit mode: generated compliant /kaggle/working/submission.parquet")
                 print(submission.head())
             else:
                 # Phase B: Competition rerun mode
-                # Verify that gateway sidecar produced submission.parquet
-                parquet_path = '/kaggle/working/submission.parquet'
+                if not os.path.exists(parquet_path):
+                    candidates = (
+                        glob.glob('/kaggle/working/**/submission.parquet', recursive=True)
+                        + glob.glob('/tmp/**/submission.parquet', recursive=True)
+                    )
+                    for cand_p in candidates:
+                        if os.path.abspath(cand_p) != os.path.abspath(parquet_path) and os.path.getsize(cand_p) > 0:
+                            shutil.copy(cand_p, parquet_path)
+                            print(f"✓ Discovered submission.parquet at {cand_p}, copied to {parquet_path}")
+                            break
+
                 if os.path.exists(parquet_path):
                     df = pd.read_parquet(parquet_path)
                     print(f"✓ Gateway generated submission.parquet: {len(df)} records")
@@ -360,6 +386,24 @@ def build() -> dict:
                         columns=['row_id', 'game_id', 'end_of_game', 'score'])
                     fallback.to_parquet(parquet_path, index=False)
                     print("✓ Emitted fallback submission.parquet")
+
+            # ----------------------------------------------------------------------
+            # CRITICAL CLEANUP: Ensure ONLY submission.parquet is exposed in /kaggle/working
+            # Any stray files (e.g. .db files, repos, logs) can cause Kaggle to select
+            # the wrong submission file or reject the submission artifact!
+            # ----------------------------------------------------------------------
+            if os.path.exists('/kaggle/working'):
+                for fname in os.listdir('/kaggle/working'):
+                    if fname != 'submission.parquet':
+                        fpath = os.path.join('/kaggle/working', fname)
+                        try:
+                            if os.path.isdir(fpath):
+                                shutil.rmtree(fpath)
+                            else:
+                                os.remove(fpath)
+                        except Exception:
+                            pass
+                print(f"✓ Output artifacts verified: {os.listdir('/kaggle/working')}")
             """
         )
     )
@@ -405,9 +449,14 @@ def build() -> dict:
 
 
 def main() -> None:
+    nb_content = json.dumps(build(), indent=1)
     NOTEBOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    NOTEBOOK_PATH.write_text(json.dumps(build(), indent=1))
+    NOTEBOOK_PATH.write_text(nb_content)
     print(f"[build_notebook] Wrote {NOTEBOOK_PATH} successfully!")
+
+    root_nb = ROOT.parent.parent / "arc_agi_3_submission.ipynb"
+    root_nb.write_text(nb_content)
+    print(f"[build_notebook] Synchronized {root_nb} successfully!")
 
 
 if __name__ == "__main__":

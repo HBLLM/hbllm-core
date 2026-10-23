@@ -79,11 +79,33 @@ class OnlinePermutationCycleSolver:
             return None
 
         # 1. Perception: Identify target sockets and required tile contents
+        cur_lvl = getattr(game, "current_level", None)
+        all_sprites: list[Any] = []
+        if cur_lvl is not None:
+            if hasattr(cur_lvl, "get_sprites") and callable(cur_lvl.get_sprites):
+                res = cur_lvl.get_sprites()
+                if isinstance(res, (list, tuple, set)):
+                    all_sprites.extend(res)
+            elif hasattr(cur_lvl, "sprites"):
+                spr = getattr(cur_lvl, "sprites", None)
+                if isinstance(spr, dict):
+                    all_sprites.extend(spr.values())
+                elif isinstance(spr, (list, tuple, set)):
+                    all_sprites.extend(spr)
+
         target_matches: list[tuple[int, int, str]] = []
-        for s in game.current_level.get_sprites_by_tag("bghvgbtwcb"):
-            target_matches.append((s.x + 1, s.y + 1, "goal"))
-        for s in game.current_level.get_sprites_by_tag("fdgmtkfrxl"):
-            target_matches.append((s.x + 1, s.y + 1, "goal-o"))
+        for s in all_sprites:
+            s_tags = [str(t).lower() for t in getattr(s, "tags", [])]
+            s_name = getattr(s, "name", "").lower()
+            if any("goal-o" in t for t in s_tags) or "goal-o" in s_name:
+                target_matches.append((s.x + 1, s.y + 1, "goal-o"))
+            elif (
+                any("goal" in t for t in s_tags)
+                or "goal" in s_name
+                or getattr(s, "is_goal", False)
+                or getattr(s, "is_target", False)
+            ):
+                target_matches.append((s.x + 1, s.y + 1, "goal"))
 
         if not target_matches:
             return None
@@ -123,11 +145,20 @@ class OnlinePermutationCycleSolver:
         # 5. Extract unique physical click locations & composite motor transitions
         click_buttons: list[tuple[Any, tuple[int, int]]] = []
         seen_pos: set[tuple[int, int]] = set()
-        for s in game.current_level.get_sprites_by_tag("sys_click"):
-            center_g = (s.x + s.width // 2, s.y + s.height // 2)
-            if (s.x, s.y) not in seen_pos and center_g in grid_to_disp:
-                seen_pos.add((s.x, s.y))
-                click_buttons.append((s, center_g))
+        for s in all_sprites:
+            s_tags = [str(t).lower() for t in getattr(s, "tags", [])]
+            s_name = getattr(s, "name", "").lower()
+            if (
+                getattr(s, "clickable", False)
+                or getattr(s, "interactive", False)
+                or any("click" in t or "button" in t or "switch" in t for t in s_tags)
+                or "button" in s_name
+                or "switch" in s_name
+            ):
+                center_g = (s.x + s.width // 2, s.y + s.height // 2)
+                if (s.x, s.y) not in seen_pos and center_g in grid_to_disp:
+                    seen_pos.add((s.x, s.y))
+                    click_buttons.append((s, center_g))
 
         moves: list[tuple[tuple[int, int], dict[tuple[int, int], tuple[int, int]]]] = []
         for s, center_g in click_buttons:

@@ -590,11 +590,11 @@ class AutonomousEpistemicEngine:
     @property
     def current_simulated_goal(self) -> tuple[int, int] | None:
         """Active goal coordinate tracked in prefrontal working memory."""
-        return self.working_memory.focal_attention_point
+        return self.working_memory.simulated_goal
 
     @current_simulated_goal.setter
     def current_simulated_goal(self, val: tuple[int, int] | None) -> None:
-        self.working_memory.focal_attention_point = val
+        self.working_memory.simulated_goal = val
 
     @property
     def last_predicted_pos(self) -> tuple[int, int] | None:
@@ -2036,6 +2036,10 @@ class AutonomousEpistemicEngine:
 
     def record_learned_barrier(self, barrier_pos: tuple[int, int]) -> None:
         """Record learned barrier locally and propose atomic state transaction."""
+        if barrier_pos == (16, 16):
+            import traceback
+
+            logger.warning("GROUNDED (16, 16) AS BARRIER:\n%s", "".join(traceback.format_stack()))
         if barrier_pos not in self.learned_barriers:
             self.learned_barriers.add(barrier_pos)
             bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"

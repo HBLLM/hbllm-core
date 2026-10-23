@@ -197,6 +197,7 @@ class PrefrontalWorkingMemory:
         self.topological_subgoals: list[tuple[int, int]] = []
         self.active_macro_goal: str | None = None
         self.focal_attention_point: tuple[int, int] | None = None
+        self.simulated_goal: tuple[int, int] | None = None
         self.last_predicted_pos: tuple[int, int] | None = None
         self.feedback_assimilated: bool = False
         self.avatar_controllability_evidence: dict[int, list[tuple[int, tuple[int, int]]]] = {}
@@ -356,6 +357,7 @@ class PrefrontalWorkingMemory:
         self.topological_subgoals.clear()
         self.active_macro_goal = None
         self.focal_attention_point = None
+        self.simulated_goal = None
         self.last_predicted_pos = None
         self.feedback_assimilated = False
         self.mental_plan.clear()

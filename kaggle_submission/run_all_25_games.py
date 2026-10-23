@@ -350,7 +350,7 @@ DEFAULT_EXECUTIVE_DIRECTIVES = [
 # ── 3. Evaluation Harness for All 25 Games & All Levels ───────────────────────
 def run_all_25_games(
     selected_games: list[str] | None = None,
-    disable_archetypes: bool = True,
+    disable_archetypes: bool = False,
     scorecard_file: str = "all_25_games_scorecard.json",
     instructions: list[str] | str | None = None,
     max_steps_per_game: int = 1000,
@@ -735,11 +735,11 @@ if __name__ == "__main__":
             x.strip() for x in args.instructions.replace("\n", ";").split(";") if x.strip()
         ]
 
-    disable_archetypes = True
-    if args.enable_archetypes:
-        disable_archetypes = False
-    elif args.disable_archetypes:
+    disable_archetypes = False
+    if args.disable_archetypes:
         disable_archetypes = True
+    elif args.enable_archetypes:
+        disable_archetypes = False
 
     run_all_25_games(
         selected_games=selected,

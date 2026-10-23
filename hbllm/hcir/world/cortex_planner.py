@@ -308,7 +308,16 @@ class EpistemicGoalScheduler:
             goals = [
                 g
                 for g in engine.learned_goal_positions
-                if 0 <= g[0] < H and 0 <= g[1] < W and g not in panel_coords
+                if 0 <= g[0] < H
+                and 0 <= g[1] < W
+                and g not in panel_coords
+                and (
+                    avatar_pos is None
+                    or (
+                        g != avatar_pos
+                        and (abs(g[0] - avatar_pos[0]) > 1 or abs(g[1] - avatar_pos[1]) > 1)
+                    )
+                )
             ]
         if not goals:
             structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
@@ -414,6 +423,43 @@ class EpistemicGoalScheduler:
         # Exclude all known static lethal coordinates from candidate attractors
         all_lethals = engine.current_level_lethal_positions
         goals = [g for g in goals if g not in all_lethals]
+
+        # Reachability Gating: Discard goals physically disconnected from avatar
+        if avatar_pos is not None and goals:
+            from collections import deque
+
+            barrier_feats = engine.symbolic_theory.barrier_features
+            lethal_feats = engine.hazard_tracker.known_lethal_features
+            learned_b = engine.learned_barriers
+
+            reachable_cells: set[tuple[int, int]] = {avatar_pos}
+            q = deque([avatar_pos])
+            while q:
+                cr, cc = q.popleft()
+                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    nr, nc = cr + dr, cc + dc
+                    if (
+                        0 <= nr < H
+                        and 0 <= nc < W
+                        and (nr, nc) not in reachable_cells
+                        and (nr, nc) not in learned_b
+                        and int(curr_grid[nr, nc]) not in barrier_feats
+                        and int(curr_grid[nr, nc]) not in lethal_feats
+                    ):
+                        reachable_cells.add((nr, nc))
+                        q.append((nr, nc))
+
+            reachable_goals = [
+                g
+                for g in goals
+                if g in reachable_cells
+                or any(
+                    (g[0] + dr, g[1] + dc) in reachable_cells
+                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                )
+            ]
+            if reachable_goals:
+                goals = reachable_goals
 
         # Extended avatar projection
         goals = cls._project_extended_avatar_goals(curr_grid, engine, goals, H, W)
@@ -983,6 +1029,24 @@ class MentalSimulationPlanner:
                 ):
                     _grid_walls.add((rr, cc))
 
+        # Topological Dead-End Pruning: When navigating under step/energy constraints,
+        # prune dead-end branches from searchable space so search never enters dead ends.
+        if step_size >= 1 and goals:
+            passable_grid = np.ones((H, W), dtype=bool)
+            for w in _grid_walls:
+                if 0 <= w[0] < H and 0 <= w[1] < W:
+                    passable_grid[w[0], w[1]] = False
+            pruned_topology = PerceptionEngine.prune_topological_dead_ends(
+                passable=passable_grid,
+                goals=set(goals),
+                avatar_pos=engine.avatar_pos,
+                step_size=step_size,
+            )
+            for rr in range(H):
+                for cc in range(W):
+                    if not pruned_topology[rr, cc]:
+                        _grid_walls.add((rr, cc))
+
         def _corridor_blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
             probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
             dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
@@ -1145,13 +1209,7 @@ class MentalSimulationPlanner:
         # When temporal threats (patrols, chasers) exist, defer to Space-Time A*.
         # ─────────────────────────────────────────────────────────────────────
         if goals and not is_block_delivery and not has_temporal and start_pos is not None:
-            geodesic_movable_actions = [
-                (act, dr, dc)
-                for act, dr, dc in movable_actions
-                if (start_pos, act) not in engine.failed_transitions
-                and not engine.working_memory.habenular_ior.is_action_inhibited(start_pos, act)
-                and engine.inhibited_actions.get(act, 0) == 0
-            ]
+            geodesic_movable_actions = list(movable_actions)
             action_plan = (
                 GeodesicManifoldRouter.route_geodesic(
                     curr_grid=curr_grid,
@@ -1225,23 +1283,25 @@ class MentalSimulationPlanner:
                 grid_shape=(H, W),
                 traversable=traversable_cells,
             )
-        # Gather all physical cells of confirmed/candidate goal entities
+        # Gather all physical cells of confirmed goal entities
         all_goal_cells: set[tuple[int, int]] = set(goals)
-        goal_features = (
+        known_goal_features: set[int] = (
             engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
         )
-        for gf in goal_features:
-            if gf != bg and gf not in av_feats:
-                for gr_idx, gc_idx in np.argwhere(curr_grid == gf):
-                    all_goal_cells.add((int(gr_idx), int(gc_idx)))
         for e in entities:
             if (
-                engine.symbolic_theory.is_goal(e)
+                e.grid_pos in goals
+                or engine.symbolic_theory.is_goal(e)
                 or e.role == EntityRole.GOAL
-                or e.feature_id in goal_features
+                or e.feature_id in known_goal_features
             ):
                 for cr, cc in e.properties.get("cells", [e.grid_pos]):
                     all_goal_cells.add((int(cr), int(cc)))
+        if not all_goal_cells:
+            for gf in known_goal_features:
+                if gf != bg and gf not in av_feats:
+                    for gr_idx, gc_idx in np.argwhere(curr_grid == gf):
+                        all_goal_cells.add((int(gr_idx), int(gc_idx)))
 
         # Precompute Vectorized 2D Geodesic Distance Field Matrix for O(1) heuristic lookup
         grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
@@ -1535,7 +1595,7 @@ class MentalSimulationPlanner:
                             )
                             if engine.working_memory.body_schema.is_barrier_permeable(cell_feat):
                                 pass
-                            elif cell_feat in goal_features or (kr, kc) in all_goal_cells:
+                            elif cell_feat in known_goal_features or (kr, kc) in all_goal_cells:
                                 pass
                             else:
                                 ray_blocked = True

@@ -62,11 +62,11 @@ class OnlineSymmetryReflectionSolver:
         mirror_targets: dict[str, dict[str, int]] = {}
         for m in movable_mirrors:
             # Vertical mirror reflects horizontally
-            if "0054kgxrvfihgm" in m.tags or getattr(m, "width", 1) == 1:
+            if getattr(m, "width", 1) == 1 or "vertical" in getattr(m, "name", "").lower():
                 mid_x = int(round((min_tx + max_tx) / 2.0))
                 mirror_targets[m.name] = {"x": mid_x}
             # Horizontal mirror reflects vertically
-            if "0002nuguepuujf" in m.tags or getattr(m, "height", 1) == 1:
+            if getattr(m, "height", 1) == 1 or "horizontal" in getattr(m, "name", "").lower():
                 mid_y = int(round((min_ty + max_ty) / 2.0))
                 mirror_targets[m.name] = {"y": mid_y}
 
