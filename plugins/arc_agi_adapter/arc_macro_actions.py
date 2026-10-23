@@ -381,7 +381,46 @@ def arc_macro_plan_synthesis_hook(
         except Exception as e:
             logger.debug("OnlinePermutationCycleSolver failed: %s", e)
 
-        # 3. Recalled Procedural Skills from Database
+        # 3. Dynamic Online Grammar Translation Solver (Zero-database formal rewrite inference)
+        try:
+            from plugins.arc_agi_adapter.solvers.grammar_translation_solver import (
+                OnlineGrammarTranslationSolver,
+            )
+
+            if OnlineGrammarTranslationSolver.can_solve(game):
+                plan = OnlineGrammarTranslationSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineGrammarTranslationSolver failed: %s", e)
+
+        # 4. Dynamic Online Kinematic Pull Solver (Zero-database particle attractor inference)
+        try:
+            from plugins.arc_agi_adapter.solvers.kinematic_pull_solver import (
+                OnlineKinematicPullSolver,
+            )
+
+            if OnlineKinematicPullSolver.can_solve(game):
+                plan = OnlineKinematicPullSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineKinematicPullSolver failed: %s", e)
+
+        # 5. Dynamic Online Geometric Stamping Solver (Zero-database backward operator induction)
+        try:
+            from plugins.arc_agi_adapter.solvers.geometric_stamping_solver import (
+                OnlineGeometricStampingSolver,
+            )
+
+            if OnlineGeometricStampingSolver.can_solve(game):
+                plan = OnlineGeometricStampingSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineGeometricStampingSolver failed: %s", e)
+
+        # 6. Recalled Procedural Skills from Database
         raw_gid = (
             getattr(engine, "current_game_id", None)
             or getattr(game, "game_id", None)

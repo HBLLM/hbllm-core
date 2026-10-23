@@ -94,20 +94,20 @@ class OnlineSymmetryReflectionSolver:
 
         if len(pieces) == 1:
             p0 = pieces[0]
-            found = None
+            found_single: tuple[int, int] | None = None
             for p0x in range(21 - p0.width + 1):
                 for p0y in range(21 - p0.height + 1):
                     p0.set_position(p0x, p0y)
                     if is_solution():
-                        found = (p0x, p0y)
+                        found_single = (p0x, p0y)
                         break
-                if found:
+                if found_single:
                     break
-            if found:
-                piece_targets[p0.name] = {"x": found[0], "y": found[1]}
+            if found_single:
+                piece_targets[p0.name] = {"x": found_single[0], "y": found_single[1]}
         elif len(pieces) == 2:
             p0, p1 = pieces[0], pieces[1]
-            found = None
+            found_pair: tuple[tuple[int, int], tuple[int, int]] | None = None
 
             def get_candidates(p: Any) -> list[tuple[int, int]]:
                 cands: list[tuple[int, int]] = []
@@ -127,14 +127,14 @@ class OnlineSymmetryReflectionSolver:
                 for p1x, p1y in p1_cands:
                     p1.set_position(p1x, p1y)
                     if is_solution():
-                        found = ((p0x, p0y), (p1x, p1y))
+                        found_pair = ((p0x, p0y), (p1x, p1y))
                         break
-                if found:
+                if found_pair:
                     break
 
-            if found:
-                piece_targets[p0.name] = {"x": found[0][0], "y": found[0][1]}
-                piece_targets[p1.name] = {"x": found[1][0], "y": found[1][1]}
+            if found_pair:
+                piece_targets[p0.name] = {"x": found_pair[0][0], "y": found_pair[0][1]}
+                piece_targets[p1.name] = {"x": found_pair[1][0], "y": found_pair[1][1]}
 
         # Restore original positions
         for m, ox, oy in saved_mirror_pos:
@@ -163,13 +163,13 @@ class OnlineSymmetryReflectionSolver:
             actions.extend([5] * switches)
             curr_focus = target_idx
 
-            tg = all_targets.get(sprite.name)
-            if not tg:
+            target_coord = all_targets.get(sprite.name)
+            if target_coord is None:
                 continue
 
             cur_x, cur_y = sprite.x, sprite.y
-            tg_x = tg.get("x", cur_x)
-            tg_y = tg.get("y", cur_y)
+            tg_x = target_coord.get("x", cur_x)
+            tg_y = target_coord.get("y", cur_y)
 
             dx = tg_x - cur_x
             dy = tg_y - cur_y
