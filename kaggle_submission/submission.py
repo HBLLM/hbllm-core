@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -893,7 +894,20 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
     autonomous puzzle solving across all ARC-AGI-3 archetypes.
     """
 
-    MAX_ACTIONS: int = 1000
+    MAX_ACTIONS: int = 800
+    BASE_ACTIONS_PER_LEVEL: int = 100
+    EXTRA_ACTIONS_PER_LEVEL: int = 75
+    MAX_CONSECUTIVE_DEATHS: int = 5
+    PER_GAME_MAX_SECONDS: float = 480.0
+    TOURNAMENT_MAX_SECONDS: float = 27000.0
+
+    _TOURNAMENT_START_TIME: float | None = None
+
+    @classmethod
+    def is_tournament_budget_exceeded(cls) -> bool:
+        if cls._TOURNAMENT_START_TIME is None:
+            return False
+        return (time.time() - cls._TOURNAMENT_START_TIME) >= cls.TOURNAMENT_MAX_SECONDS
 
     def __init__(
         self,
@@ -924,20 +938,50 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self.current_game_id: str | None = None
         self.current_levels_completed: int = 0
 
-    def load_instructions(self, instructions: Any) -> None:
-        """Load executive cognitive directives into the agent's internal epistemic engine."""
-        self.instructions = instructions
-        if hasattr(self.internal_agent, "load_instructions"):
-            self.internal_agent.load_instructions(instructions)
+        # Time & Stagnation Tracking per Game Instance
+        self._game_start_time: float = time.time()
+        self.consecutive_deaths_this_level: int = 0
+        self._is_marked_done: bool = False
 
     def is_done(self, frames: Any, latest_frame: Any) -> bool:
-        """Stop once all levels are won."""
+        """Stop once all levels are won or budget guards trigger."""
+        if getattr(self, "_is_marked_done", False):
+            return True
+
         win_levels = getattr(latest_frame, "win_levels", 1) or 1
         state_str = getattr(
             getattr(latest_frame, "state", None), "name", str(getattr(latest_frame, "state", ""))
         )
         levels_completed = getattr(latest_frame, "levels_completed", 0)
-        return state_str == "WIN" or levels_completed >= win_levels
+        if state_str == "WIN" or levels_completed >= win_levels:
+            return True
+
+        # 1. Global Tournament Time Guard
+        if MyAgent.is_tournament_budget_exceeded():
+            self._is_marked_done = True
+            return True
+
+        # 2. Per-game Wall-Clock Time Guard
+        game_start = getattr(self, "_game_start_time", None)
+        if game_start is not None and (time.time() - game_start) > self.PER_GAME_MAX_SECONDS:
+            self._is_marked_done = True
+            return True
+
+        # 3. Dynamic Progress-Scaled Action Budget Guard
+        allowed_actions = self.BASE_ACTIONS_PER_LEVEL + (
+            self.current_levels_completed * self.EXTRA_ACTIONS_PER_LEVEL
+        )
+        act_cnt = getattr(self, "action_counter", getattr(self, "step_count", 0))
+        if act_cnt >= allowed_actions:
+            self._is_marked_done = True
+            return True
+
+        # 4. Consecutive Death Stagnation Guard
+        if getattr(self, "consecutive_deaths_this_level", 0) >= self.MAX_CONSECUTIVE_DEATHS:
+            self._is_marked_done = True
+            return True
+
+        return False
 
     def reset_episode(
         self,
@@ -1052,6 +1096,9 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 self.internal_agent.prev_grid = None
             return getattr(GameAction, "RESET", GameAction.ACTION1)
         if state_str in ("GAME_OVER", "GameState.GAME_OVER"):
+            self.consecutive_deaths_this_level += 1
+            if self.consecutive_deaths_this_level >= self.MAX_CONSECUTIVE_DEATHS:
+                self._is_marked_done = True
             grid = self._extract_grid(latest_frame, frames)
             avail = self._extract_available_actions(latest_frame)
             if (
@@ -1102,6 +1149,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         lvl_completed = getattr(latest_frame, "levels_completed", 0)
         if lvl_completed != self.current_levels_completed:
             if lvl_completed > self.current_levels_completed:
+                self.consecutive_deaths_this_level = 0
                 if (
                     hasattr(self.internal_agent, "assimilate_feedback")
                     and getattr(self.internal_agent, "prev_grid", None) is not None

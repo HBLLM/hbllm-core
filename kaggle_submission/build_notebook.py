@@ -51,11 +51,14 @@ def build() -> dict:
         import subprocess
         import sys
 
-        # Immediately purge any lingering .db or non-submission artifacts from /kaggle/working
-        if os.path.exists('/kaggle/working'):
-            for cand_f in os.listdir('/kaggle/working'):
-                if cand_f != 'submission.parquet':
-                    cand_p = os.path.join('/kaggle/working', cand_f)
+        # Immediately purge any lingering artifacts
+        # In competition rerun mode, purge any lingering placeholder or past submission artifact
+        # so that a real tournament execution is required and stale dummies don't mask failures!
+        if os.getenv("KAGGLE_IS_COMPETITION_RERUN"):
+            print("🧹 Cleaning working directory for competition rerun...")
+            if os.path.exists("/kaggle/working"):
+                for cand_f in os.listdir("/kaggle/working"):
+                    cand_p = os.path.join("/kaggle/working", cand_f)
                     try:
                         if os.path.isdir(cand_p):
                             shutil.rmtree(cand_p)
@@ -63,6 +66,18 @@ def build() -> dict:
                             os.remove(cand_p)
                     except Exception:
                         pass
+        else:
+            if os.path.exists("/kaggle/working"):
+                for cand_f in os.listdir("/kaggle/working"):
+                    if cand_f != "submission.parquet":
+                        cand_p = os.path.join("/kaggle/working", cand_f)
+                        try:
+                            if os.path.isdir(cand_p):
+                                shutil.rmtree(cand_p)
+                            else:
+                                os.remove(cand_p)
+                        except Exception:
+                            pass
 
         wheel_dirs = set()
         for p in glob.glob('/kaggle/input/**/*.whl', recursive=True):
@@ -79,6 +94,8 @@ def build() -> dict:
             for fallback in [
                 "/kaggle/input/competitions/arc-prize-2026-arc-agi-3/arc_agi_3_wheels",
                 "/kaggle/input/arc-prize-2026-arc-agi-3/arc_agi_3_wheels",
+                "/kaggle/input/competitions/arc-agi-3/arc_agi_3_wheels",
+                "/kaggle/input/arc-agi-3/arc_agi_3_wheels",
             ]:
                 if os.path.exists(fallback):
                     print(f"Installing wheels from fallback: {fallback}")
@@ -104,20 +121,37 @@ def build() -> dict:
         import shutil
         import subprocess
         import sys
+        import time
+        import urllib.request
 
         if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):
             print("🚀 Competition Rerun Mode Detected: Connecting to Gateway Sidecar...")
 
-            # 1. Wait for gateway sidecar to be healthy
-            !curl --fail --retry 999 --retry-all-errors --retry-delay 5 \\
-                  --retry-max-time 600 http://gateway:8001/api/games
-            print("✓ Gateway sidecar is online and ready.")
+            # 1. Wait for gateway sidecar to be healthy (pure Python retry loop)
+            gateway_url = "http://gateway:8001/api/games"
+            deadline = time.time() + 600
+            gateway_ok = False
+            print(f"Waiting for {gateway_url}...")
+            while time.time() < deadline:
+                try:
+                    with urllib.request.urlopen(gateway_url, timeout=5) as resp:
+                        if resp.status == 200:
+                            print("✓ Gateway sidecar is online and ready.")
+                            gateway_ok = True
+                            break
+                except Exception:
+                    time.sleep(5)
+
+            if not gateway_ok:
+                raise RuntimeError(f"Timed out waiting for gateway sidecar at {gateway_url}")
 
             # 2. Locate ARC-AGI-3-Agents framework in competition inputs
             framework_src = None
             for cand in [
                 "/kaggle/input/competitions/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents",
                 "/kaggle/input/arc-prize-2026-arc-agi-3/ARC-AGI-3-Agents",
+                "/kaggle/input/competitions/arc-agi-3/ARC-AGI-3-Agents",
+                "/kaggle/input/arc-agi-3/ARC-AGI-3-Agents",
             ]:
                 if os.path.exists(cand):
                     framework_src = cand
@@ -132,7 +166,9 @@ def build() -> dict:
             if framework_src is None:
                 raise RuntimeError("Could not locate ARC-AGI-3-Agents framework in /kaggle/input!")
 
-            working_framework = "/kaggle/working/ARC-AGI-3-Agents"
+            # Keep /kaggle/working clean for submission.parquet! Copy framework to tmp
+            tmp_root = "/kaggle/tmp" if os.path.isdir("/kaggle/tmp") else "/tmp"
+            working_framework = os.path.join(tmp_root, "ARC-AGI-3-Agents")
             if os.path.exists(working_framework):
                 shutil.rmtree(working_framework)
             shutil.copytree(framework_src, working_framework)
@@ -143,8 +179,7 @@ def build() -> dict:
             shutil.copy("/tmp/my_agent.py", target_agent)
             print(f"✓ Installed MyAgent into {target_agent}")
 
-
-            # 4. Register MyAgent in the framework registry (slimming out unused heavy deps)
+            # 4. Register MyAgent in the framework registry (supporting common aliases)
             init_file = os.path.join(working_framework, "agents", "__init__.py")
             with open(init_file, "w") as f:
                 f.write(
@@ -158,11 +193,15 @@ def build() -> dict:
                     "AVAILABLE_AGENTS: dict[str, Type[Agent]] = {\\n"
                     "    'random': Random,\\n"
                     "    'myagent': MyAgent,\\n"
+                    "    'my_agent': MyAgent,\\n"
+                    "    'MyAgent': MyAgent,\\n"
                     "}\\n"
                 )
             print("✓ Registered MyAgent in agent registry.")
 
             # 5. Point the framework at the gateway sidecar with level preservation
+            recordings_dir = os.path.join(tmp_root, "server_recording")
+            os.makedirs(recordings_dir, exist_ok=True)
             env_file = os.path.join(working_framework, ".env")
             with open(env_file, "w") as f:
                 f.write(
@@ -173,7 +212,7 @@ def build() -> dict:
                     "ARC_BASE_URL=http://gateway:8001/\\n"
                     "OPERATION_MODE=online\\n"
                     "ENVIRONMENTS_DIR=\\n"
-                    "RECORDINGS_DIR=/kaggle/working/server_recording\\n"
+                    f"RECORDINGS_DIR={recordings_dir}\\n"
                     "ONLY_RESET_LEVELS=true\\n"
                 )
             print("✓ Configured .env for gateway sidecar with ONLY_RESET_LEVELS=true.")
@@ -182,9 +221,11 @@ def build() -> dict:
             hbllm_dataset_root = None
             for cand in [
                 '/kaggle/input/hbllm-kaggle-dataset',
+                '/kaggle/input/hbllm_kaggle_dataset',
                 '/kaggle/input/hbllm-core',
                 '/kaggle/input/hbllm',
                 '/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset',
+                '/kaggle/input/datasets/dumithsalinda/hbllm-kaggle-dataset',
             ]:
                 if os.path.isdir(os.path.join(cand, 'hbllm')):
                     hbllm_dataset_root = cand
@@ -200,14 +241,70 @@ def build() -> dict:
                 print(f"⚠️ Could not find HBLLM dataset, defaulting to: {hbllm_dataset_root}")
             print(f"✓ HBLLM dataset root: {hbllm_dataset_root}")
 
-            # 7. Run the competition tournament! The gateway records actions and emits submission.parquet.
-            print("🎮 Launching MyAgent tournament against gateway sidecar...")
-            !cd /kaggle/working/ARC-AGI-3-Agents && \\
-                PYTHONPATH="{hbllm_dataset_root}:$PYTHONPATH" \\
-                MPLBACKEND=agg \\
-                ONLY_RESET_LEVELS=true \\
-                python main.py --agent myagent
-            print("✓ Tournament finished.")
+            # 7. Run the competition tournament with live log streaming & error detection!
+            sub_env = os.environ.copy()
+            sub_env["PYTHONPATH"] = (
+                f"{hbllm_dataset_root}:{working_framework}:"
+                + sub_env.get("PYTHONPATH", "")
+            )
+            sub_env["MPLBACKEND"] = "agg"
+            sub_env["ONLY_RESET_LEVELS"] = "true"
+
+            cmd = [sys.executable, "main.py", "--agent", "myagent"]
+            print(f"🎮 Launching tournament: {' '.join(cmd)} in {working_framework}...", flush=True)
+            proc = subprocess.Popen(
+                cmd,
+                cwd=working_framework,
+                env=sub_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # Active Watchdog: 7.5 hours (27,000s) default.
+            # Leaves 1.5h buffer before Kaggle's 9h container termination.
+            # On reaching deadline, sends SIGINT so main.py triggers its official
+            # cleanup handler, closes the scorecard, and flushes submission.parquet cleanly!
+            import select
+            import signal
+
+            tournament_timeout = int(os.getenv("ARC_TOURNAMENT_TIMEOUT", "27000"))
+            start_tournament = time.time()
+            sigint_sent = False
+
+            while True:
+                if proc.poll() is not None:
+                    # Process exited, drain any remaining stdout lines
+                    for rem_line in proc.stdout:
+                        print(rem_line, end="", flush=True)
+                    break
+
+                # Non-blocking read with 1.0s timeout so timeout checks occur continuously
+                rlist, _, _ = select.select([proc.stdout], [], [], 1.0)
+                if rlist:
+                    line = proc.stdout.readline()
+                    if line:
+                        print(line, end="", flush=True)
+
+                elapsed = time.time() - start_tournament
+                if not sigint_sent and elapsed > tournament_timeout:
+                    print()
+                    print(
+                        f"⏰ [WATCHDOG] Tournament runtime limit reached ({elapsed:.0f}s >= {tournament_timeout}s).",
+                        flush=True,
+                    )
+                    print(
+                        "Sending SIGINT to trigger clean scorecard closure and submission.parquet generation...",
+                        flush=True,
+                    )
+                    proc.send_signal(signal.SIGINT)
+                    sigint_sent = True
+
+            ret = proc.wait()
+            # With SIGINT, official main.py exits with 0 after scorecard closure
+            if ret != 0 and not sigint_sent:
+                raise RuntimeError(f"ARC-AGI-3 tournament process exited with non-zero exit code: {ret}")
+            print("✓ Tournament finished successfully.", flush=True)
         else:
             print("=" * 70)
             print("ℹ️ RUNTIME MODE: INTERACTIVE / COMMIT (PHASE A)")
@@ -349,6 +446,7 @@ def build() -> dict:
             import glob
             import os
             import shutil
+            import time
             import pandas as pd
 
             parquet_path = '/kaggle/working/submission.parquet'
@@ -364,10 +462,15 @@ def build() -> dict:
                 print(submission.head())
             else:
                 # Phase B: Competition rerun mode
+                # The Gateway sidecar automatically records all actions and generates submission.parquet!
+                print("🚀 Competition Rerun Mode: Verifying gateway-generated submission.parquet...")
+
+                # 1. Search candidate locations if not directly at target
                 if not os.path.exists(parquet_path):
+                    tmp_root = '/kaggle/tmp' if os.path.isdir('/kaggle/tmp') else '/tmp'
                     candidates = (
                         glob.glob('/kaggle/working/**/submission.parquet', recursive=True)
-                        + glob.glob('/tmp/**/submission.parquet', recursive=True)
+                        + glob.glob(f'{tmp_root}/**/submission.parquet', recursive=True)
                     )
                     for cand_p in candidates:
                         if os.path.abspath(cand_p) != os.path.abspath(parquet_path) and os.path.getsize(cand_p) > 0:
@@ -375,17 +478,25 @@ def build() -> dict:
                             print(f"✓ Discovered submission.parquet at {cand_p}, copied to {parquet_path}")
                             break
 
+                # 2. Wait up to 30s if gateway sidecar is still flushing file to disk
+                deadline = time.time() + 30
+                while not os.path.exists(parquet_path) and time.time() < deadline:
+                    time.sleep(2)
+
+                # 3. Strictly validate the output artifact
                 if os.path.exists(parquet_path):
                     df = pd.read_parquet(parquet_path)
                     print(f"✓ Gateway generated submission.parquet: {len(df)} records")
                     print(df.head(10))
+                    if len(df) == 0:
+                        raise RuntimeError("Gateway submission.parquet was generated but contains 0 records!")
                 else:
-                    print("⚠️ Fallback: Gateway submission.parquet not found, emitting valid output...")
-                    fallback = pd.DataFrame(
-                        data=[['1_0', '1', True, 1]],
-                        columns=['row_id', 'game_id', 'end_of_game', 'score'])
-                    fallback.to_parquet(parquet_path, index=False)
-                    print("✓ Emitted fallback submission.parquet")
+                    # DO NOT SILENTLY EMIT A 1-ROW DUMMY TABLE!
+                    # Emitting a 1-row table caused the 0.16/100 score and masked the failure.
+                    raise RuntimeError(
+                        "CRITICAL: Gateway submission.parquet was NOT found after tournament execution! "
+                        "Check tournament stdout/stderr logs above."
+                    )
 
             # ----------------------------------------------------------------------
             # CRITICAL CLEANUP: Ensure ONLY submission.parquet is exposed in /kaggle/working

@@ -822,6 +822,10 @@ class PrefrontalDeliberationEngine:
             )
         engine._feedback_assimilated = False
 
+        # Track recent avatar position on every decision step (before macro or micro action planning)
+        if engine.avatar_pos is not None:
+            engine.recent_positions.append(engine.avatar_pos)
+
         # Faculty: Executive Macro-Action Plan Execution & Synthesis
         def _is_macro_step_safe(plan: Any, act: Any, data: dict[str, Any] | None) -> bool:
             # Executive prefrontal macro plans supersede subcortical motor refractory inhibition (inhibited_actions)
@@ -833,7 +837,7 @@ class PrefrontalDeliberationEngine:
             if cur_op is not None and getattr(cur_op, "is_strict", False):
                 return True
 
-            # Safety gating only aborts if the displacement moves directly into an active, lethal collision cone.
+            # Safety gating aborts if displacement moves into collision cone or ping-pongs in limit cycle.
             if engine.avatar_pos is not None and act in engine.action_dynamics:
                 dyn = engine.action_dynamics[act]
                 if dyn.is_displacement_action():
@@ -843,6 +847,11 @@ class PrefrontalDeliberationEngine:
                         engine, "collision_cones"
                     ) and engine.collision_cones.is_collision_hazard(nr, nc, 1):
                         return False
+                    # Abort if stuck in a 2-position ping-pong oscillation
+                    rec = list(getattr(engine, "recent_positions", []))
+                    if len(rec) >= 4 and len(set(rec[-4:])) <= 2:
+                        if len(rec) >= 2 and (nr, nc) == rec[-2]:
+                            return False
             return True
 
         macro_plan = getattr(engine.working_memory, "macro_plan", None)
@@ -937,22 +946,22 @@ class PrefrontalDeliberationEngine:
         for act in to_uninhibited:
             engine.inhibited_actions.pop(act, None)
 
-        # Track recent avatar position on every decision step
-        if engine.avatar_pos is not None:
-            engine.recent_positions.append(engine.avatar_pos)
-
         # Anterior Mid-Cingulate & Lateral Habenula: Limit Cycle / Oscillation Detection
         osc_acts = engine.working_memory.habenular_ior.detect_cyclic_actions()
         if osc_acts:
-            has_progress = (
-                engine.phase == EpistemicPhase.EXPLOITATION
-                and bool(engine.mental_plan)
-                and any(
-                    s.predicted_avatar_pos is not None
-                    and s.predicted_avatar_pos != engine.avatar_pos
-                    for s in engine.mental_plan
+            cyclic_positions = set(list(engine.recent_positions)[-4:])
+            if len(cyclic_positions) <= 2 and len(engine.recent_positions) >= 4:
+                has_progress = False
+            else:
+                has_progress = (
+                    engine.phase == EpistemicPhase.EXPLOITATION
+                    and bool(engine.mental_plan)
+                    and any(
+                        s.predicted_avatar_pos is not None
+                        and s.predicted_avatar_pos != engine.avatar_pos
+                        for s in engine.mental_plan
+                    )
                 )
-            )
             if not has_progress:
                 for osc_act in osc_acts:
                     engine.inhibited_actions[osc_act] = max(
@@ -964,11 +973,14 @@ class PrefrontalDeliberationEngine:
         engine.acc_conflict_monitor.record_step(engine.last_action, engine.avatar_pos)
         is_osc, cyclic_acts = engine.acc_conflict_monitor.detect_oscillation()
         if is_osc:
-            # In cognitive architecture, an intentional temporal wait/dodge maneuver
-            # planned by the prefrontal cortex must not be aborted as an unintentional deadlock
-            # if the active mental plan progresses to novel coordinates beyond the cyclic positions.
-            if engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
-                cyclic_positions = set(list(engine.acc_conflict_monitor.position_history)[-4:])
+            cyclic_positions = set(list(engine.acc_conflict_monitor.position_history)[-4:])
+            if (
+                len(cyclic_positions) <= 2
+                and len(engine.acc_conflict_monitor.position_history) >= 4
+            ):
+                # Real physical deadlock: do NOT bypass with mental plan
+                pass
+            elif engine.phase == EpistemicPhase.EXPLOITATION and engine.mental_plan:
                 future_plan_positions = {
                     s.predicted_avatar_pos
                     for s in engine.mental_plan

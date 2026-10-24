@@ -1238,6 +1238,18 @@ class EpistemicFeedbackAssimilator:
         if not is_effector_action and not is_known_displacement and not avatar_moved:
             engine.last_non_displacement_action = action
 
+        if engine.avatar_pos is not None:
+            engine.learned_goal_positions.discard(engine.avatar_pos)
+            if prev_avatar_pos is not None:
+                engine.learned_goal_positions.discard(prev_avatar_pos)
+            engine.learned_goal_positions.difference_update(engine.recent_positions)
+            if engine.avatar_features:
+                engine.symbolic_theory.goal_features.difference_update(engine.avatar_features)
+                engine.symbolic_theory.barrier_features.difference_update(engine.avatar_features)
+            if engine.avatar_feature is not None:
+                engine.symbolic_theory.goal_features.discard(engine.avatar_feature)
+                engine.symbolic_theory.barrier_features.discard(engine.avatar_feature)
+
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_win:
@@ -1266,40 +1278,42 @@ class EpistemicFeedbackAssimilator:
                         }
                         engine.symbolic_theory.candidate_goal_features.update(cand_goal_feats)
 
-                        for k in range(1, dist + 1):
-                            kr = prev_avatar_pos[0] + step_r * k
-                            kc = prev_avatar_pos[1] + step_c * k
-                            if 0 <= kr < H and 0 <= kc < W:
-                                val = (
-                                    int(engine.prev_grid[kr, kc])
-                                    if engine.prev_grid is not None
-                                    else int(curr_grid[kr, kc])
-                                )
-                                # HCIR Attractor Invariant: Candidate goals are NEVER barriers
-                                # Proprioceptive obstacle grounding: any non-walkable feature blocking movement is an empirical barrier
-                                if (
-                                    val != bg
-                                    and val != engine.bg_feature
-                                    and val not in av_feats
-                                    and val not in engine.learned_goal_features
-                                    and val not in cand_goal_feats
-                                    and (kr, kc) not in cand_goal_positions
-                                    and not engine.symbolic_theory.is_walkable(val)
-                                ):
-                                    engine.record_learned_barrier((kr, kc))
-                                    if not engine.symbolic_theory.is_barrier(val):
-                                        engine.symbolic_theory.induce_barrier(val)
-                                        logger.info(
-                                            "AutonomousEpistemicEngine: Proprioceptive obstacle grounded along ray at (%d, %d) with feature %d",
-                                            kr,
-                                            kc,
-                                            val,
-                                        )
-                                        if engine.bg_feature == val:
-                                            engine.bg_feature = engine.estimate_background(
-                                                curr_grid
-                                            )
-                                    break
+                        av_rad_r = max(0, (getattr(engine, "avatar_h", 1) or 1) // 2)
+                        av_rad_c = max(0, (getattr(engine, "avatar_w", 1) or 1) // 2)
+
+                        # Proprioceptive obstacle grounding: only the immediate leading edge cell
+                        # can physically impede motor displacement. Distant features across void are NEVER obstacles.
+                        adj_r = prev_avatar_pos[0] + step_r * (av_rad_r + 1)
+                        adj_c = prev_avatar_pos[1] + step_c * (av_rad_c + 1)
+                        if 0 <= adj_r < H and 0 <= adj_c < W:
+                            val = (
+                                int(engine.prev_grid[adj_r, adj_c])
+                                if engine.prev_grid is not None
+                                else int(curr_grid[adj_r, adj_c])
+                            )
+                            if val == bg or val == engine.bg_feature:
+                                # Stopped by platform boundary / void
+                                engine.record_learned_barrier((adj_r, adj_c))
+                            elif (
+                                val not in av_feats
+                                and val not in engine.avatar_features
+                                and val != engine.avatar_feature
+                                and val not in engine.learned_goal_features
+                                and val not in cand_goal_feats
+                                and (adj_r, adj_c) not in cand_goal_positions
+                                and not engine.symbolic_theory.is_walkable(val)
+                            ):
+                                engine.record_learned_barrier((adj_r, adj_c))
+                                if not engine.symbolic_theory.is_barrier(val):
+                                    engine.symbolic_theory.induce_barrier(val)
+                                    logger.info(
+                                        "AutonomousEpistemicEngine: Proprioceptive obstacle grounded at leading edge (%d, %d) with feature %d",
+                                        adj_r,
+                                        adj_c,
+                                        val,
+                                    )
+                                    if engine.bg_feature == val:
+                                        engine.bg_feature = engine.estimate_background(curr_grid)
                         else:
                             end_r = prev_avatar_pos[0] + step_r * dist
                             end_c = prev_avatar_pos[1] + step_c * dist

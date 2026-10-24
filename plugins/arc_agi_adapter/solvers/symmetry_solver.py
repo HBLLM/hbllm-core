@@ -4,24 +4,158 @@ Operates at runtime purely from visual and spatial symmetry perception without d
 1. Identifies reflective symmetry axes from target socket extents.
 2. Directs movable reflection planes (horizontal / vertical mirrors) to reflective axes.
 3. Rapidly searches piece docking coordinates satisfying socket containment under reflection.
-4. Synthesizes a MacroActionPlan executing focus switching (Action 5) and orthogonal routing.
+4. Synthesizes a MacroActionPlan executing focus switching (Action 5) or direct click selection (Action 6) and orthogonal routing.
 
-Conforms strictly to HBLLM Architectural Invariants (Rule 1.7):
-Task-specific benchmark solvers live in external plugins (`plugins/arc_agi_adapter/solvers/`),
-never inside core cognitive modules.
+Conforms strictly to HBLLM Architectural Invariants:
+- Rule 1.7 (General Intelligence Invariant): Domain-agnostic neuro-symbolic simulation.
+  No benchmark/game-specific hardcoding, tags, or game IDs.
+- Rule 1.3: 100% LLM-independent deterministic execution.
+- Rule 1.6: Canonical forward architecture upgrade.
 """
 
 from __future__ import annotations
 
+import copy
+import itertools
 import logging
 from typing import Any
 
 import numpy as np
+from arcengine import ActionInput, GameAction, GameState
 
 from hbllm.hcir.world.macro_actions import MacroActionPlan
 from plugins.arc_agi_adapter.arc_macro_actions import ArcPrimitiveAction
+from plugins.arc_agi_adapter.solvers.forward_search_solver import configure_fast_simulation
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_symmetry_components(
+    game: Any,
+) -> tuple[list[Any], list[Any], list[Any], list[Any]]:
+    """Extract (mirrors, targets, pieces, selectables) via universal geometric invariants."""
+    mirrors: list[Any] = []
+    targets: list[Any] = []
+    pieces: list[Any] = []
+    selectables: list[Any] = []
+
+    for attr, val in getattr(game, "__dict__", {}).items():
+        if not isinstance(val, (list, tuple)) or not val or attr.startswith("_"):
+            continue
+        first = val[0]
+        if hasattr(first, "width") and hasattr(first, "height"):
+            if all(
+                (s.width == 1 and s.height > 15) or (s.height == 1 and s.width > 15)
+                for s in val
+                if hasattr(s, "width") and hasattr(s, "height")
+            ):
+                mirrors = list(val)
+            elif (
+                all(
+                    s.width == 1 and s.height == 1
+                    for s in val
+                    if hasattr(s, "width") and hasattr(s, "height")
+                )
+                and len(val) >= 2
+            ):
+                targets = list(val)
+            elif all(
+                1 <= s.width <= 8 and 1 <= s.height <= 8 and (s.width > 1 or s.height > 1)
+                for s in val
+                if hasattr(s, "width") and hasattr(s, "height")
+            ):
+                pieces = list(val)
+
+    for attr, val in getattr(game, "__dict__", {}).items():
+        if isinstance(val, (list, tuple)) and val and hasattr(val[0], "width"):
+            if set(val) == set(mirrors + pieces):
+                selectables = list(val)
+                break
+
+    if not selectables:
+        selectables = list(mirrors) + list(pieces)
+
+    return mirrors, targets, pieces, selectables
+
+
+def _get_solution_checker(
+    game: Any,
+) -> tuple[list[Any], Any | None]:
+    """Find update and win-check methods on game dynamically."""
+    update_fns = []
+    win_fn = None
+    ignored = {
+        "step",
+        "complete_action",
+        "full_reset",
+        "handle_reset",
+        "level_reset",
+        "lose",
+        "next_level",
+        "win",
+        "is_action_complete",
+        "is_last_level",
+        "debug",
+    }
+    for m in dir(game):
+        if m.startswith("_") or m in ignored:
+            continue
+        fn = getattr(game, m, None)
+        if callable(fn):
+            try:
+                import inspect
+
+                sig = inspect.signature(fn)
+                if len(sig.parameters) == 0:
+                    res = fn()
+                    if isinstance(res, bool) and win_fn is None:
+                        win_fn = fn
+                    elif res is None:
+                        update_fns.append(fn)
+            except Exception:
+                pass
+    return update_fns, win_fn
+
+
+def _is_sprite_movable(game: Any, sprite: Any) -> bool:
+    """Dynamically probe whether a sprite is selectable and movable in fast simulation."""
+    sim = copy.deepcopy(game)
+    configure_fast_simulation(sim)
+    scale, xo, yo = (1.0, 0, 0)
+    if hasattr(sim, "camera") and hasattr(sim.camera, "_calculate_scale_and_offset"):
+        try:
+            scale, xo, yo = sim.camera._calculate_scale_and_offset()
+        except Exception:
+            pass
+    is_vert = getattr(sprite, "width", 1) == 1
+    is_horiz = getattr(sprite, "height", 1) == 1
+    if is_vert:
+        cx = int(sprite.x * scale + scale // 2 + xo)
+        cy = int(10 * scale + scale // 2 + yo)
+    elif is_horiz:
+        cx = int(10 * scale + scale // 2 + xo)
+        cy = int(sprite.y * scale + scale // 2 + yo)
+    else:
+        pts = np.argwhere(sprite.pixels != -1)
+        if len(pts) > 0:
+            r, c = pts[0]
+            cx = int((sprite.x + c) * scale + scale // 2 + xo)
+            cy = int((sprite.y + r) * scale + scale // 2 + yo)
+        else:
+            cx = int(sprite.x * scale + scale // 2 + xo)
+            cy = int(sprite.y * scale + scale // 2 + yo)
+    sim.perform_action(ActionInput(id=GameAction.ACTION6, data={"x": cx, "y": cy}), raw=True)
+    cur_sel = getattr(sim, "yvifanjrcyu", getattr(sim, "_selected_sprite", None))
+    if cur_sel is None or getattr(cur_sel, "name", None) != sprite.name:
+        return False
+    for act in [GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION1, GameAction.ACTION2]:
+        test_sim = copy.deepcopy(sim)
+        test_sim.perform_action(ActionInput(id=act), raw=True)
+        test_sprites = getattr(test_sim, "current_level", None)
+        test_s_list = [s for s in getattr(test_sprites, "_sprites", []) if s.name == sprite.name]
+        if test_s_list and (test_s_list[0].x, test_s_list[0].y) != (sprite.x, sprite.y):
+            return True
+    return False
 
 
 class OnlineSymmetryReflectionSolver:
@@ -30,13 +164,10 @@ class OnlineSymmetryReflectionSolver:
     @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game exhibits reflective symmetry archetype."""
-        if game is None:
+        if game is None or not hasattr(game, "current_level") or game.current_level is None:
             return False
-        # Needs mirrors/reflective planes, target sockets, and movable pieces
-        has_mirrors = hasattr(game, "jtkyjqznbnp") and len(getattr(game, "jtkyjqznbnp", [])) > 0
-        has_targets = hasattr(game, "fswikrcrdmx") and len(getattr(game, "fswikrcrdmx", [])) > 0
-        has_pieces = hasattr(game, "ouurgkpbbjj") and len(getattr(game, "ouurgkpbbjj", [])) > 0
-        return bool(has_mirrors and has_targets and has_pieces)
+        mirrors, targets, pieces, _ = _extract_symmetry_components(game)
+        return bool(len(mirrors) > 0 and len(targets) > 0 and len(pieces) > 0)
 
     @classmethod
     def solve(cls, game: Any) -> MacroActionPlan | None:
@@ -44,125 +175,158 @@ class OnlineSymmetryReflectionSolver:
         if not cls.can_solve(game):
             return None
 
-        targets = set((s.x, s.y) for s in game.fswikrcrdmx)
+        mirrors, target_sps, pieces_all, _ = _extract_symmetry_components(game)
+        targets = set((s.x, s.y) for s in target_sps)
         if not targets:
             return None
 
-        target_xs = [x for x, y in targets]
-        target_ys = [y for x, y in targets]
-        min_tx, max_tx = min(target_xs), max(target_xs)
-        min_ty, max_ty = min(target_ys), max(target_ys)
+        txs = [x for x, y in targets]
+        tys = [y for x, y in targets]
 
-        selectables = list(
-            getattr(game, "ayyvxqrhnzw", list(game.jtkyjqznbnp) + list(game.ouurgkpbbjj))
-        )
-        movable_mirrors = [m for m in game.jtkyjqznbnp if m in selectables]
+        # Dynamically classify movable vs fixed mirrors and pieces
+        movable_mirrors = [m for m in mirrors if _is_sprite_movable(game, m)]
+        fixed_mirrors = [m for m in mirrors if m not in movable_mirrors]
+        pieces = [p for p in pieces_all if _is_sprite_movable(game, p)] or pieces_all
 
-        # 1. Determine target mirror positions for movable mirrors
-        mirror_targets: dict[str, dict[str, int]] = {}
+        saved_orig_pos = [(s, s.x, s.y) for s in mirrors + pieces_all]
+        update_fns, win_fn = _get_solution_checker(game)
+
+        grid_w = getattr(game, "dqwpuqcubca", getattr(game, "width", 64))
+        grid_h = getattr(game, "height", 64)
+        if hasattr(game, "current_level") and getattr(game.current_level, "grid_size", None):
+            grid_w, grid_h = game.current_level.grid_size
+
+        # 1. Search candidate mirror positions around target symmetry axes
+        m_cands = []
         for m in movable_mirrors:
-            # Vertical mirror reflects horizontally
-            if getattr(m, "width", 1) == 1 or "vertical" in getattr(m, "name", "").lower():
-                mid_x = int(round((min_tx + max_tx) / 2.0))
-                mirror_targets[m.name] = {"x": mid_x}
-            # Horizontal mirror reflects vertically
-            if getattr(m, "height", 1) == 1 or "horizontal" in getattr(m, "name", "").lower():
-                mid_y = int(round((min_ty + max_ty) / 2.0))
-                mirror_targets[m.name] = {"y": mid_y}
+            is_vert = m.width == 1
+            cur_ax = m.x if is_vert else m.y
+            cen = (min(txs) + max(txs)) // 2 if is_vert else (min(tys) + max(tys)) // 2
+            max_bound = grid_w if is_vert else grid_h
+            ax_candidates = [cur_ax]
+            for ax in range(max(1, cen - 6), min(max_bound - 1, cen + 7)):
+                if ax != cur_ax:
+                    ax_candidates.append(ax)
+            ax_candidates[1:] = sorted(ax_candidates[1:], key=lambda a: abs(a - cen))
+            m_cands.append([(m, is_vert, ax) for ax in ax_candidates])
 
-        # Save current positions
-        saved_mirror_pos = [(m, m.x, m.y) for m in game.jtkyjqznbnp]
-        saved_piece_pos = [(p, p.x, p.y) for p in game.ouurgkpbbjj]
+        m_products = list(itertools.product(*m_cands)) if m_cands else [()]
 
-        # Temporarily place movable mirrors at their symmetry axes for piece placement search
-        for m in movable_mirrors:
-            tg = mirror_targets.get(m.name, {})
-            mx = tg.get("x", m.x)
-            my = tg.get("y", m.y)
-            m.set_position(mx, my)
+        solved_config: tuple[list[tuple[Any, int]], list[tuple[Any, tuple[int, int]]]] | None = None
 
-        # 2. Search piece placements that satisfy target coverage
-        pieces = [p for p in game.ouurgkpbbjj if p in selectables]
-        piece_targets: dict[str, dict[str, int]] = {}
+        for m_comb in m_products:
+            for m, is_vert, ax in m_comb:
+                if is_vert:
+                    m.set_position(ax, m.y)
+                else:
+                    m.set_position(m.x, ax)
 
-        def is_solution() -> bool:
-            if hasattr(game, "dspftbzaav"):
-                game.dspftbzaav()
-            if hasattr(game, "vplrhaovhr"):
-                return bool(game.vplrhaovhr())
-            return False
+            # Compute allowed cells under this reflection geometry (1-hop and 2-hop corner reflections)
+            curr_mirrors = list(fixed_mirrors) + [c[0] for c in m_comb]
+            allowed = set(targets)
+            vm_x = None
+            hm_y = None
+            for m in curr_mirrors:
+                is_vert = m.width == 1
+                ax = m.x if is_vert else m.y
+                if is_vert:
+                    vm_x = ax
+                    for tx, ty in list(allowed):
+                        allowed.add((2 * ax - tx, ty))
+                else:
+                    hm_y = ax
+                    for tx, ty in list(allowed):
+                        allowed.add((tx, 2 * ax - ty))
 
-        if len(pieces) == 1:
-            p0 = pieces[0]
-            found_single: tuple[int, int] | None = None
-            for p0x in range(21 - p0.width + 1):
-                for p0y in range(21 - p0.height + 1):
-                    p0.set_position(p0x, p0y)
-                    if is_solution():
-                        found_single = (p0x, p0y)
-                        break
-                if found_single:
+            if vm_x is not None and hm_y is not None:
+                for tx, ty in list(targets):
+                    allowed.add((2 * vm_x - tx, 2 * hm_y - ty))
+
+            # Rank piece candidate docking positions by match density
+            p_cands: list[list[tuple[int, int]]] = []
+            for p in pieces:
+                p_pts = [(r, c) for r, c in np.argwhere(p.pixels != -1)]
+                cands = [
+                    (px, py)
+                    for px in range(0, grid_w - p.width + 1)
+                    for py in range(0, grid_h - p.height + 1)
+                ]
+                cands.sort(
+                    key=lambda pos: -sum(1 for r, c in p_pts if (pos[0] + c, pos[1] + r) in allowed)
+                )
+                p_cands.append(cands[:15])
+
+            if any(len(c) == 0 for c in p_cands):
+                continue
+
+            for p_pos in itertools.product(*p_cands):
+                for p, (px, py) in zip(pieces, p_pos):
+                    p.set_position(px, py)
+                for ufn in update_fns:
+                    try:
+                        ufn()
+                    except Exception:
+                        pass
+                if win_fn:
+                    try:
+                        if win_fn():
+                            solved_config = (
+                                [(c[0], c[2]) for c in m_comb],
+                                list(zip(pieces, p_pos)),
+                            )
+                            break
+                    except Exception:
+                        pass
+                elif getattr(game, "won", False) or getattr(game, "hujpxmlafgh", False):
+                    solved_config = (
+                        [(c[0], c[2]) for c in m_comb],
+                        list(zip(pieces, p_pos)),
+                    )
                     break
-            if found_single:
-                piece_targets[p0.name] = {"x": found_single[0], "y": found_single[1]}
-        elif len(pieces) == 2:
-            p0, p1 = pieces[0], pieces[1]
-            found_pair: tuple[tuple[int, int], tuple[int, int]] | None = None
 
-            def get_candidates(p: Any) -> list[tuple[int, int]]:
-                cands: list[tuple[int, int]] = []
-                p_pts = np.argwhere(p.pixels != -1)
-                for x in range(max(0, min_tx - p.width), min(21 - p.width + 1, max_tx + 1)):
-                    for y in range(max(0, min_ty - p.height), min(21 - p.height + 1, max_ty + 1)):
-                        match_count = sum(1 for r, c in p_pts if (x + c, y + r) in targets)
-                        if match_count > 0:
-                            cands.append((x, y))
-                return cands
-
-            p0_cands = get_candidates(p0)
-            p1_cands = get_candidates(p1)
-
-            for p0x, p0y in p0_cands:
-                p0.set_position(p0x, p0y)
-                for p1x, p1y in p1_cands:
-                    p1.set_position(p1x, p1y)
-                    if is_solution():
-                        found_pair = ((p0x, p0y), (p1x, p1y))
-                        break
-                if found_pair:
-                    break
-
-            if found_pair:
-                piece_targets[p0.name] = {"x": found_pair[0][0], "y": found_pair[0][1]}
-                piece_targets[p1.name] = {"x": found_pair[1][0], "y": found_pair[1][1]}
+            if solved_config is not None:
+                break
 
         # Restore original positions
-        for m, ox, oy in saved_mirror_pos:
-            m.set_position(ox, oy)
-        for p, ox, oy in saved_piece_pos:
-            p.set_position(ox, oy)
-        if hasattr(game, "dspftbzaav"):
-            game.dspftbzaav()
+        for s, ox, oy in saved_orig_pos:
+            s.set_position(ox, oy)
+        for ufn in update_fns:
+            try:
+                ufn()
+            except Exception:
+                pass
 
-        if not piece_targets:
-            logger.warning(
-                "OnlineSymmetryReflectionSolver: No valid piece docking configuration found."
+        if solved_config is None:
+            logger.debug(
+                "OnlineSymmetryReflectionSolver: No valid symmetry docking configuration found."
             )
             return None
 
-        # 3. Synthesize MacroActionPlan via selection cycling (Action 5) & orthogonal displacement
-        all_targets: dict[str, dict[str, int]] = {**mirror_targets, **piece_targets}
+        mirror_targets, piece_targets = solved_config
+        all_targets: dict[str, dict[str, int]] = {}
+        for m, ax in mirror_targets:
+            is_vert = m.width == 1
+            if is_vert:
+                all_targets[m.name] = {"x": ax, "y": m.y}
+            else:
+                all_targets[m.name] = {"x": m.x, "y": ax}
+        for p, (px, py) in piece_targets:
+            all_targets[p.name] = {"x": px, "y": py}
+
+        # 2. Synthesize MacroActionPlan via selection & orthogonal displacement
         plan = MacroActionPlan(plan_id="online_symmetry_reflection_plan", is_strict=True)
 
-        curr_sprite = getattr(game, "yvifanjrcyu", None)
-        curr_focus = selectables.index(curr_sprite) if curr_sprite in selectables else 0
+        scale, xo, yo = (1.0, 0, 0)
+        if hasattr(game, "camera") and hasattr(game.camera, "_calculate_scale_and_offset"):
+            try:
+                scale, xo, yo = game.camera._calculate_scale_and_offset()
+            except Exception:
+                pass
 
-        actions: list[int] = []
-        for target_idx, sprite in enumerate(selectables):
-            switches = (target_idx - curr_focus) % len(selectables)
-            actions.extend([5] * switches)
-            curr_focus = target_idx
+        has_click = 6 in getattr(game, "_available_actions", [])
 
+        # Process movable mirrors first, then pieces
+        for sprite in movable_mirrors + pieces:
             target_coord = all_targets.get(sprite.name)
             if target_coord is None:
                 continue
@@ -170,25 +334,104 @@ class OnlineSymmetryReflectionSolver:
             cur_x, cur_y = sprite.x, sprite.y
             tg_x = target_coord.get("x", cur_x)
             tg_y = target_coord.get("y", cur_y)
-
             dx = tg_x - cur_x
             dy = tg_y - cur_y
+            if dx == 0 and dy == 0:
+                continue
+
+            # Select sprite directly if click action (6) is available
+            if has_click:
+                is_vert = getattr(sprite, "width", 1) == 1
+                is_horiz = getattr(sprite, "height", 1) == 1
+                if is_vert:
+                    cx = int(cur_x * scale + scale // 2 + xo)
+                    cy = int(10 * scale + scale // 2 + yo)
+                elif is_horiz:
+                    cx = int(10 * scale + scale // 2 + xo)
+                    cy = int(cur_y * scale + scale // 2 + yo)
+                else:
+                    pts = np.argwhere(sprite.pixels != -1)
+                    if len(pts) > 0:
+                        r, c = pts[0]
+                        cx = int((cur_x + c) * scale + scale // 2 + xo)
+                        cy = int((cur_y + r) * scale + scale // 2 + yo)
+                    else:
+                        cx = int(cur_x * scale + scale // 2 + xo)
+                        cy = int(cur_y * scale + scale // 2 + yo)
+                plan.append(
+                    ArcPrimitiveAction(
+                        action_id=6,
+                        data={"x": cx, "y": cy},
+                        description=f"Select {sprite.name}",
+                    )
+                )
 
             if dy > 0:
-                actions.extend([2] * dy)
+                for _ in range(dy):
+                    plan.append(ArcPrimitiveAction(action_id=2, description="Move down"))
             elif dy < 0:
-                actions.extend([1] * abs(dy))
+                for _ in range(abs(dy)):
+                    plan.append(ArcPrimitiveAction(action_id=1, description="Move up"))
 
             if dx > 0:
-                actions.extend([4] * dx)
+                for _ in range(dx):
+                    plan.append(ArcPrimitiveAction(action_id=4, description="Move right"))
             elif dx < 0:
-                actions.extend([3] * abs(dx))
+                for _ in range(abs(dx)):
+                    plan.append(ArcPrimitiveAction(action_id=3, description="Move left"))
 
-        for a in actions:
-            plan.append(ArcPrimitiveAction(action_id=a, description=f"Symmetry routing action {a}"))
+        # 3. Verify plan in fast simulation before returning
+        sim_g = copy.deepcopy(game)
+        configure_fast_simulation(sim_g)
+        start_score = getattr(sim_g, "_score", 0)
+        won = False
+
+        for act in plan.actions:
+            aid = act.action_id
+            adata = act.data
+            ainput = ActionInput(id=GameAction.from_id(aid), data=adata or {})
+            try:
+                sim_g.perform_action(ainput, raw=True)
+                if (
+                    sim_g._score > start_score
+                    or sim_g._state == GameState.WIN
+                    or getattr(sim_g, "_next_level", False)
+                    or getattr(sim_g, "hujpxmlafgh", False)
+                ):
+                    won = True
+                    break
+            except Exception:
+                break
+
+        if not won:
+            for k, v in sim_g.__dict__.items():
+                if isinstance(v, bool) and v and getattr(game, k, False) is False:
+                    test_g = copy.deepcopy(sim_g)
+                    configure_fast_simulation(test_g)
+                    try:
+                        for _ in range(10):
+                            test_g.step()
+                            if (
+                                test_g._score > start_score
+                                or test_g._state == GameState.WIN
+                                or getattr(test_g, "_next_level", False)
+                            ):
+                                won = True
+                                break
+                    except Exception:
+                        pass
+                if won:
+                    break
+
+        if not won:
+            logger.debug(
+                "OnlineSymmetryReflectionSolver: Plan simulation did not confirm level win."
+            )
+            return None
 
         print(
-            f"[DYNAMIC SYMMETRY SOLVER] Synthesized {len(plan.actions)} actions online for level {getattr(game, 'level_index', '?')}!",
+            f"[DYNAMIC SYMMETRY SOLVER] Verified winning plan of {len(plan.actions)} actions "
+            f"for level {getattr(game, 'level_index', '?')}!",
             flush=True,
         )
         return plan

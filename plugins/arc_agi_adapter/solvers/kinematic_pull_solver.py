@@ -1,8 +1,8 @@
 """ARC-AGI Dynamic Kinematic Pull & Fusion Solver.
 
 Operates at runtime purely from visual and spatial vector attractor dynamics without database queries:
-1. Identifies kinematic pull field (Action 6) and attractor radius (`game.kacsjmxae`).
-2. Reads bucket receptacles (`game.powykypsm`), target criteria (`game.dsqlbvwaj`), and entity manifolds.
+1. Identifies kinematic pull field (Action 6) and attractor radius.
+2. Reads bucket receptacles, target criteria, and entity manifolds.
 3. Plans optimal vector attractor click sequences pulling required entity tiers into goal buckets.
 4. Synthesizes a MacroActionPlan executing optimal kinematic click sequences online.
 
@@ -149,12 +149,33 @@ class OnlineKinematicPullSolver:
     @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game exhibits kinematic pull attractor archetype."""
-        if game is None:
+        if game is None or not hasattr(game, "current_level") or game.current_level is None:
             return False
-        has_buckets = hasattr(game, "powykypsm") and getattr(game, "powykypsm", None) is not None
-        has_fruits = hasattr(game, "lkujttxgs") and getattr(game, "lkujttxgs", None) is not None
-        has_radius = hasattr(game, "kacsjmxae") and getattr(game, "kacsjmxae", None) is not None
-        return bool(has_buckets and has_fruits and has_radius)
+
+        # Ensure game supports Action 6 (click cell interaction)
+        actions = getattr(game, "_available_actions", getattr(game, "available_actions", None))
+        if actions is None:
+            actions = getattr(game, "actions", None)
+        if actions is not None:
+            action_ids = [
+                getattr(a, "value", a) for a in actions if isinstance(getattr(a, "value", a), int)
+            ]
+            if action_ids and 6 not in action_ids:
+                return False
+
+        has_radius = any(
+            isinstance(v, (int, float)) and 3 <= v <= 15 and not k.startswith("_")
+            for k, v in getattr(game, "__dict__", {}).items()
+        )
+        has_buckets = False
+        has_particles = False
+        for attr, val in getattr(game, "__dict__", {}).items():
+            if isinstance(val, (list, tuple)) and val and hasattr(val[0], "width"):
+                if any(s.width >= 8 and s.height >= 8 for s in val):
+                    has_buckets = True
+                elif any(s.width <= 5 and s.height <= 5 for s in val):
+                    has_particles = True
+        return bool(has_buckets and has_particles and has_radius)
 
     @classmethod
     def solve(cls, game: Any) -> MacroActionPlan | None:

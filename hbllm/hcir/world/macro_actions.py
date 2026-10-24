@@ -205,10 +205,10 @@ class NavigateTo(MacroAction):
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
         )
 
+        from hbllm.hcir.world.cortex_perception import PerceptionEngine
+
         threats = getattr(engine, "_prev_oriented_threats", [])
         if not threats:
-            from hbllm.hcir.world.cortex_perception import PerceptionEngine
-
             threats = PerceptionEngine.detect_oriented_threats(
                 curr_grid,
                 getattr(engine, "previous_entities", []),
@@ -219,10 +219,22 @@ class NavigateTo(MacroAction):
         H, W = curr_grid.shape
         bg_val = engine.bg_feature or 0
         wall_feats = set(engine.symbolic_theory.barrier_features)
+        walkable_and_safe = set(engine.symbolic_theory.walkable_features) | set(
+            getattr(engine, "verified_safe_features", set()) or set()
+        )
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg_val not in walkable_and_safe
+        if not bg_is_impassable_void:
+            bg_count = int(np.count_nonzero(curr_grid == bg_val))
+            if bg_count / max(1, H * W) >= 0.20:
+                bg_is_impassable_void = True
+
         grid_walls: set[tuple[int, int]] = set(engine.learned_barriers)
         for rr in range(H):
             for cc in range(W):
-                if int(curr_grid[rr, cc]) in wall_feats:
+                c_val = int(curr_grid[rr, cc])
+                if c_val in wall_feats or (
+                    bg_is_impassable_void and c_val == bg_val and (rr, cc) != self.destination
+                ):
                     grid_walls.add((rr, cc))
 
         # Dead-end corridor reduction across dynamic action strides
@@ -298,15 +310,21 @@ class NavigateTo(MacroAction):
             if engine.is_displacement_action(a) and (av_pos, a) not in failed_tx
         ]
         if valid_disp_acts:
-            best_a = min(
-                valid_disp_acts,
-                key=lambda a: (
-                    (av_pos[0] + engine.action_dynamics[a].delta_r - self.destination[0]) ** 2
-                    + (av_pos[1] + engine.action_dynamics[a].delta_c - self.destination[1]) ** 2
-                    if a in engine.action_dynamics
-                    else 9999
-                ),
-            )
+            recent_pos_list = list(getattr(engine, "recent_positions", []))
+            prev_pos = recent_pos_list[-2] if len(recent_pos_list) >= 2 else None
+
+            def _eval_act_cost(a: int) -> float:
+                if a not in engine.action_dynamics:
+                    return 9999.0
+                nr = av_pos[0] + engine.action_dynamics[a].delta_r
+                nc = av_pos[1] + engine.action_dynamics[a].delta_c
+                cost = (nr - self.destination[0]) ** 2 + (nc - self.destination[1]) ** 2
+                # Penalize immediate reversal into recently visited position
+                if prev_pos is not None and (nr, nc) == prev_pos:
+                    cost += 10000.0
+                return float(cost)
+
+            best_a = min(valid_disp_acts, key=_eval_act_cost)
             return best_a, None
 
         self.status = MacroActionStatus.BLOCKED
@@ -1498,13 +1516,19 @@ class MacroPlanSynthesizer:
                         engine.working_memory.object_trial_counts.setdefault(obj_id, 0)
 
                     if role == "goal" or "exit" in role:
-                        if props.get("source") == "learned_goal" or props.get("confirmed", False):
+                        rec_pos = getattr(engine, "recent_positions", set())
+                        av_f = getattr(engine, "avatar_features", set())
+                        if (
+                            pos != getattr(engine, "avatar_pos", None)
+                            and pos not in rec_pos
+                            and (not feat or feat not in av_f)
+                        ):
                             engine.learned_goal_positions.add(pos)
                             if hasattr(engine, "goals") and pos not in engine.goals:
                                 engine.goals.append(pos)
-                        if feat:
-                            engine.symbolic_theory.goal_features.add(feat)
-                            engine.learned_goal_features.add(feat)
+                            if feat:
+                                engine.symbolic_theory.goal_features.add(feat)
+                                engine.learned_goal_features.add(feat)
                     elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
                             engine.symbolic_theory.cargo_features.add(feat)
@@ -1620,10 +1644,21 @@ class MacroPlanSynthesizer:
         trial_counts = getattr(engine.working_memory, "object_trial_counts", {})
 
         # Collect candidate goals
+        av_pos = engine.avatar_pos
+        recent_pos = set(getattr(engine, "recent_positions", set()))
+        av_feats = set(engine.avatar_features or set())
+        if engine.avatar_feature is not None:
+            av_feats.add(engine.avatar_feature)
+
         goals: list[tuple[int, int]] = []
         for obj in known_objs:
             if "goal" in obj.role or "exit" in obj.role:
-                if obj.pos not in goals:
+                if (
+                    obj.pos not in goals
+                    and obj.pos != av_pos
+                    and obj.pos not in recent_pos
+                    and obj.feature_id not in av_feats
+                ):
                     goals.append(obj.pos)
         for e in entities:
             if (
@@ -1631,10 +1666,15 @@ class MacroPlanSynthesizer:
                 or e.feature_id in engine.learned_goal_features
                 or e.grid_pos in engine.learned_goal_positions
             ):
-                if e.grid_pos not in goals:
+                if (
+                    e.grid_pos not in goals
+                    and e.grid_pos != av_pos
+                    and e.grid_pos not in recent_pos
+                    and e.feature_id not in av_feats
+                ):
                     goals.append(e.grid_pos)
         for g_pos in engine.learned_goal_positions:
-            if g_pos not in goals:
+            if g_pos not in goals and g_pos != av_pos and g_pos not in recent_pos:
                 goals.append(g_pos)
 
         # Multi-Agent focus switch verification
@@ -1657,17 +1697,27 @@ class MacroPlanSynthesizer:
         cargo_objs: list[ObjectSpec] = [
             obj
             for obj in known_objs
-            if "cargo" in obj.role
-            or "box" in obj.role
-            or "key" in obj.role
-            or "crate" in obj.role
-            or "item" in obj.role
-            or obj.feature_id in engine.learned_cargo_features
+            if (
+                "cargo" in obj.role
+                or "box" in obj.role
+                or "key" in obj.role
+                or "crate" in obj.role
+                or "item" in obj.role
+                or obj.feature_id in engine.learned_cargo_features
+            )
+            and obj.pos != av_pos
+            and obj.pos not in recent_pos
+            and obj.feature_id not in av_feats
         ]
         for e in entities:
             if (
-                e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
-                or e.feature_id in engine.learned_cargo_features
+                (
+                    e.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                and e.grid_pos != av_pos
+                and e.grid_pos not in recent_pos
+                and e.feature_id not in av_feats
             ):
                 if not any(c.pos == e.grid_pos for c in cargo_objs):
                     cargo_objs.append(

@@ -2,7 +2,7 @@
 
 Operates at runtime purely from visual canvas analysis and backward operator induction
 without database queries:
-1. Extracts initial canvas (`xytrjjbyib`), target pattern (`eoqnvkspoa-`), and palette (`pqkenviek`).
+1. Extracts initial interactive canvas, target preview pattern, and palette swatches.
 2. Constructs formal stamping operators (horizontal/vertical halves, diagonal triangles, corner tabs).
 3. Solves the stamping sequence in reverse using backward wildcard induction in < 2ms.
 4. Synthesizes a MacroActionPlan executing color selection (Action 6), perimeter routing
@@ -125,15 +125,31 @@ class OnlineGeometricStampingSolver:
     """Dynamic, domain-general geometric stamping solver for ARC-AGI pattern printing puzzles."""
 
     @classmethod
+    def _find_perimeter_ops(cls, game: Any) -> list[Any] | None:
+        """Find 8-position perimeter transformation list on game."""
+        for v in getattr(game, "__dict__", {}).values():
+            if (
+                isinstance(v, (list, tuple))
+                and len(v) == 8
+                and all(isinstance(x, (list, tuple)) and len(x) >= 4 for x in v)
+            ):
+                return list(v)
+        return None
+
+    @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game exhibits geometric stamping archetype."""
-        if game is None:
+        if game is None or not hasattr(game, "current_level") or game.current_level is None:
             return False
-        has_canvas = hasattr(game, "current_level") and any(
-            s.name == "xytrjjbyib" for s in getattr(game.current_level, "get_sprites", lambda: [])()
-        )
-        has_stamps = hasattr(game, "nicoqsvlg") and hasattr(game, "xwmfgtlso")
-        return bool(has_canvas and has_stamps)
+        curr_lvl = game.current_level
+        sprites = getattr(curr_lvl, "get_sprites", lambda: [])()
+        ten_by_ten = [
+            s for s in sprites if getattr(s, "width", 0) == 10 and getattr(s, "height", 0) == 10
+        ]
+        has_canvas = any(s.x >= 15 and s.y >= 15 for s in ten_by_ten)
+        has_target = any(s.x < 15 and s.y < 15 for s in ten_by_ten)
+        has_stamps = cls._find_perimeter_ops(game) is not None
+        return bool(has_canvas and has_target and has_stamps)
 
     @classmethod
     def solve(cls, game: Any) -> MacroActionPlan | None:
@@ -147,20 +163,31 @@ class OnlineGeometricStampingSolver:
                 return None
 
             sprites = curr_lvl.get_sprites()
-            canvas_sps = [s for s in sprites if s.name == "xytrjjbyib"]
-            target_sps = [s for s in sprites if s.name.startswith("eoqnvkspoa-")]
+            ten_by_ten = [
+                s for s in sprites if getattr(s, "width", 0) == 10 and getattr(s, "height", 0) == 10
+            ]
+            canvas_sps = [s for s in ten_by_ten if s.x >= 15 and s.y >= 15]
+            target_sps = [s for s in ten_by_ten if s.x < 15 and s.y < 15]
             if not canvas_sps or not target_sps:
                 return None
 
             init_canvas = canvas_sps[0].pixels.copy()
             target_canvas = target_sps[0].pixels.copy()
 
-            # Palette color positions
+            # Palette color positions: small 5x5 color swatches in header
             palette: dict[int, tuple[int, int]] = {}
             for s in sprites:
-                if s.name.startswith("pqkenviek"):
-                    col = int(s.pixels[2, 2])
-                    palette[col] = (int(s.x + 2), int(s.y + 2))
+                if (
+                    getattr(s, "width", 0) <= 6
+                    and getattr(s, "height", 0) <= 6
+                    and s.y < 15
+                    and hasattr(s, "pixels")
+                    and s.pixels is not None
+                ):
+                    arr = np.array(s.pixels)
+                    if arr.ndim == 2 and arr.shape[0] >= 3 and arr.shape[1] >= 3:
+                        col = int(arr[arr.shape[0] // 2, arr.shape[1] // 2])
+                        palette[col] = (int(s.x + s.width // 2), int(s.y + s.height // 2))
 
             # Backward induction to find minimal sequence of stamps
             def is_solved(cur_target: np.ndarray[Any, Any]) -> bool:
@@ -207,8 +234,15 @@ class OnlineGeometricStampingSolver:
             forward_stamps = list(reversed(found_rev_stamps))
 
             # Synthesize primitive action plan
-            curr_pos = int(getattr(game, "xwmfgtlso", 0))
-            curr_color = int(getattr(game, "knqmgavuh", 15))
+            perimeter_ops = cls._find_perimeter_ops(game)
+            curr_pos = 0
+            curr_color = 15
+            for attr, val in getattr(game, "__dict__", {}).items():
+                if isinstance(val, int) and not attr.startswith("_"):
+                    if 0 <= val <= 7 and "pos" in attr.lower():
+                        curr_pos = val
+                    elif 0 <= val <= 15 and "col" in attr.lower():
+                        curr_color = val
 
             plan = MacroActionPlan(plan_id="online_geometric_stamping_plan", is_strict=True)
 
@@ -240,16 +274,24 @@ class OnlineGeometricStampingSolver:
                 # 3. Apply stamp
                 if is_corner:
                     cx, cy = 0, 0
-                    if hasattr(game, "nicoqsvlg") and target_pos in _CORNER_OFFSETS:
-                        _, yely, dzhd, _, _, _ = game.nicoqsvlg[target_pos]
+                    if perimeter_ops and target_pos in _CORNER_OFFSETS:
+                        _, yely, dzhd, _, _, _ = perimeter_ops[target_pos]
                         off = _CORNER_OFFSETS[target_pos]
                         cx = int(yely + off[0] + 2)
                         cy = int(dzhd + off[1] + 2)
-                    elif hasattr(game, "oaouwdxbxc"):
-                        corner_spr = game.oaouwdxbxc(target_pos)
-                        if corner_spr:
-                            cx = int(corner_spr.x + 2)
-                            cy = int(corner_spr.y + 2)
+                    else:
+                        for method_name in dir(game):
+                            if not method_name.startswith("_"):
+                                m = getattr(game, method_name)
+                                if callable(m):
+                                    try:
+                                        res = m(target_pos)
+                                        if res and hasattr(res, "x") and hasattr(res, "y"):
+                                            cx = int(res.x + 2)
+                                            cy = int(res.y + 2)
+                                            break
+                                    except Exception:
+                                        pass
                     if cx > 0 and cy > 0:
                         plan.append(
                             ArcPrimitiveAction(

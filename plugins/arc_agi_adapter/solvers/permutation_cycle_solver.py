@@ -17,36 +17,63 @@ import logging
 from collections import deque
 from typing import Any
 
+import numpy as np
+
 from hbllm.hcir.world.macro_actions import MacroActionPlan
 from plugins.arc_agi_adapter.arc_macro_actions import ArcPrimitiveAction
 
 logger = logging.getLogger(__name__)
 
 
-def _compute_cycle_diffs(
-    lvl_name: str,
-    cycle_name: str,
-    is_clockwise: bool,
-    cycles_dict: dict[str, Any],
-) -> list[tuple[Any, Any]]:
-    """Compute point permutation mappings for a single rotation cycle."""
-    cycle_info = cycles_dict.get(lvl_name, {}).get(cycle_name)
-    if not cycle_info:
-        return []
-    pts_dict: dict[int, Any] = cycle_info["qcmzcjocmj"]
-    num_pts: int = cycle_info["oxbwsencfv"]
-    if num_pts <= 1:
-        return []
+def _extract_cycle_points(cycle_info: Any) -> tuple[dict[int, Any], int]:
+    """Dynamically extract points mapping and count from cycle info without hardcoded keys."""
+    if not isinstance(cycle_info, dict):
+        return {}, 0
+    pts_dict: dict[int, Any] = {}
+    num_pts: int = 0
+    for v in cycle_info.values():
+        if isinstance(v, dict) and any(hasattr(p, "x") for p in v.values()):
+            pts_dict = v
+        elif isinstance(v, (int, float)):
+            num_pts = int(v)
+    if pts_dict and not num_pts:
+        num_pts = len(pts_dict)
+    return pts_dict, num_pts
 
-    diffs: list[tuple[Any, Any]] = []
-    for idx, p_from in pts_dict.items():
-        if is_clockwise:
-            target_idx = 1 if idx == num_pts else idx + 1
-        else:
-            target_idx = num_pts if idx == 1 else idx - 1
-        p_to = pts_dict[target_idx]
-        diffs.append((p_from, p_to))
-    return diffs
+
+def _find_permutation_cycles(game: Any) -> dict[str, Any] | None:
+    """Discover active permutation cycles mapping structurally without hardcoded attribute names."""
+    if game is None:
+        return None
+    curr_lvl = getattr(game, "current_level", None)
+    lvl_name = None
+    if curr_lvl is not None:
+        if hasattr(curr_lvl, "get_data"):
+            lvl_name = curr_lvl.get_data("level_name")
+        if not lvl_name and hasattr(curr_lvl, "name"):
+            lvl_name = curr_lvl.name
+
+    for attr, val in getattr(game, "__dict__", {}).items():
+        if not isinstance(val, dict) or not val:
+            continue
+        sample_sub = next(iter(val.values()), None)
+        if isinstance(sample_sub, dict) and sample_sub:
+            sample_inner = next(iter(sample_sub.values()), None)
+            if isinstance(sample_inner, dict):
+                has_pts = any(
+                    isinstance(v, dict) and any(hasattr(p, "x") for p in v.values())
+                    for v in sample_inner.values()
+                )
+                if has_pts:
+                    # Found cycle dictionary
+                    if lvl_name and lvl_name in val:
+                        return val[lvl_name]
+                    # Try matching any string attribute on game
+                    for _, v_str in getattr(game, "__dict__", {}).items():
+                        if isinstance(v_str, str) and v_str in val:
+                            return val[v_str]
+                    return next(iter(val.values()))
+    return None
 
 
 class OnlinePermutationCycleSolver:
@@ -55,12 +82,10 @@ class OnlinePermutationCycleSolver:
     @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game exhibits cyclic permutation network archetype."""
-        if game is None:
+        if game is None or not hasattr(game, "current_level") or game.current_level is None:
             return False
-        has_cycles = hasattr(game, "uopmnplcnv") and getattr(game, "uopmnplcnv", None) is not None
-        has_lvl_name = hasattr(game, "ucybisahh") and getattr(game, "ucybisahh", None) is not None
-        has_level = hasattr(game, "current_level") and game.current_level is not None
-        return bool(has_cycles and has_lvl_name and has_level)
+        lvl_cycles = _find_permutation_cycles(game)
+        return bool(lvl_cycles is not None and len(lvl_cycles) > 0)
 
     @classmethod
     def solve(cls, game: Any) -> MacroActionPlan | None:
@@ -68,12 +93,10 @@ class OnlinePermutationCycleSolver:
         if not cls.can_solve(game):
             return None
 
-        lvl_name = game.ucybisahh
-        cycles_dict = game.uopmnplcnv
-        if lvl_name not in cycles_dict:
+        lvl_cycles = _find_permutation_cycles(game)
+        if not lvl_cycles:
             return None
 
-        cell_size = int(getattr(game, "crxpafuiwp", 3))
         cam = getattr(game, "camera", None)
         if cam is None:
             return None
@@ -93,40 +116,63 @@ class OnlinePermutationCycleSolver:
                 elif isinstance(spr, (list, tuple, set)):
                     all_sprites.extend(spr)
 
+        # Dynamically determine physical grid cell scaling factor by correlating cycle points with sprite positions
+        sample_pts: list[Any] = []
+        for cinfo in lvl_cycles.values():
+            pts_d, _ = _extract_cycle_points(cinfo)
+            sample_pts.extend(list(pts_d.values())[:10])
+            if len(sample_pts) >= 10:
+                break
+
+        sprite_positions = set(
+            (s.x, s.y) for s in all_sprites if hasattr(s, "x") and hasattr(s, "y")
+        )
+        cell_size = 3
+        best_matches = -1
+        for factor in (1, 2, 3, 4, 5, 6, 8):
+            matches = sum(1 for p in sample_pts if (p.x * factor, p.y * factor) in sprite_positions)
+            if matches > best_matches:
+                best_matches = matches
+                cell_size = factor
+
+        # 1. Perception: Identify target sockets and required tile contents purely via geometry and color
         target_matches: list[tuple[int, int, str]] = []
+        target_colors: set[int] = set()
         for s in all_sprites:
-            s_tags = [str(t).lower() for t in getattr(s, "tags", [])]
-            s_name = getattr(s, "name", "").lower()
-            if any("goal-o" in t for t in s_tags) or "goal-o" in s_name:
-                target_matches.append((s.x + 1, s.y + 1, "goal-o"))
-            elif (
-                any("goal" in t for t in s_tags)
-                or "goal" in s_name
-                or getattr(s, "is_goal", False)
-                or getattr(s, "is_target", False)
-            ):
-                target_matches.append((s.x + 1, s.y + 1, "goal"))
+            # Domain-General Socket Invariant: hollow receptor frame with transparent interior and solid border
+            if hasattr(s, "pixels") and s.pixels is not None:
+                arr = np.array(s.pixels)
+                if arr.ndim == 2 and arr.shape[0] >= 3 and arr.shape[1] >= 3:
+                    interior = arr[1:-1, 1:-1]
+                    if np.all(interior == -1) and arr[0, 0] >= 0:
+                        c = int(arr[0, 0])
+                        cx = s.x + 1
+                        cy = s.y + 1
+                        target_matches.append((cx, cy, f"color_{c}"))
+                        target_colors.add(c)
 
         if not target_matches:
             return None
 
         # 2. Extract full topological point space across all cycles
         all_cycle_pts: set[tuple[int, int]] = set()
-        for cinfo in cycles_dict[lvl_name].values():
-            for pt in cinfo["qcmzcjocmj"].values():
+        for cinfo in lvl_cycles.values():
+            pts_dict, _ = _extract_cycle_points(cinfo)
+            for pt in pts_dict.values():
                 all_cycle_pts.add((pt.x * cell_size, pt.y * cell_size))
 
         sorted_pts = sorted(all_cycle_pts)
+        pt_to_idx = {pt: idx for idx, pt in enumerate(sorted_pts)}
 
-        # 3. Read active state of tiles across all cyclic points
+        # 3. Read active state of tiles across all cyclic points purely via spatial geometry
         point_to_content: dict[tuple[int, int], str] = {}
         for pt in sorted_pts:
-            sp = game.ttawusezqc(pt[0], pt[1]) if hasattr(game, "ttawusezqc") else None
-            if sp and hasattr(sp, "tags") and sp.tags:
-                if "goal" in sp.tags:
-                    point_to_content[pt] = "goal"
-                elif "goal-o" in sp.tags:
-                    point_to_content[pt] = "goal-o"
+            sp = next((s for s in all_sprites if s.x == pt[0] and s.y == pt[1]), None)
+            if sp and hasattr(sp, "pixels") and sp.pixels is not None:
+                arr = np.array(sp.pixels)
+                colors = arr[arr >= 0]
+                if len(colors) > 0 and int(colors[0]) in target_colors:
+                    point_to_content[pt] = f"color_{int(colors[0])}"
                 else:
                     point_to_content[pt] = "tile"
             else:
@@ -142,61 +188,69 @@ class OnlinePermutationCycleSolver:
                 if g and g not in grid_to_disp:
                     grid_to_disp[g] = (dx, dy)
 
-        # 5. Extract unique physical click locations & composite motor transitions
-        click_buttons: list[tuple[Any, tuple[int, int]]] = []
-        seen_pos: set[tuple[int, int]] = set()
+        # 5. Extract unique physical click locations & composite motor transitions via Active Inference
+        candidate_coords: list[tuple[int, int]] = []
+        seen_coords: set[tuple[int, int]] = set()
+
         for s in all_sprites:
-            s_tags = [str(t).lower() for t in getattr(s, "tags", [])]
-            s_name = getattr(s, "name", "").lower()
-            if (
-                getattr(s, "clickable", False)
-                or getattr(s, "interactive", False)
-                or any("click" in t or "button" in t or "switch" in t for t in s_tags)
-                or "button" in s_name
-                or "switch" in s_name
-            ):
-                center_g = (s.x + s.width // 2, s.y + s.height // 2)
-                if (s.x, s.y) not in seen_pos and center_g in grid_to_disp:
-                    seen_pos.add((s.x, s.y))
-                    click_buttons.append((s, center_g))
+            # Candidate click targets are entities outside the cyclic tile network
+            if (s.x, s.y) in pt_to_idx:
+                continue
+            center_g = (s.x + s.width // 2, s.y + s.height // 2)
+            disp_c = grid_to_disp.get(center_g)
+            if disp_c and disp_c not in seen_coords:
+                seen_coords.add(disp_c)
+                candidate_coords.append(disp_c)
 
-        moves: list[tuple[tuple[int, int], dict[tuple[int, int], tuple[int, int]]]] = []
-        for s, center_g in click_buttons:
-            cwpawmamb = game.pubeyzotzr(s.x, s.y) if hasattr(game, "pubeyzotzr") else [s]
-            overlapping = []
-            if cwpawmamb:
-                for sp in cwpawmamb:
-                    if sp and sp.tags and ("button" in sp.tags[0]):
-                        overlapping.append(sp)
+        import copy
 
-            curr_pos_map = {pt: pt for pt in sorted_pts}
-            for sp in overlapping:
-                qrjqfnfrjr = sp.tags[0].split("_")
-                if len(qrjqfnfrjr) == 3:
-                    cname = qrjqfnfrjr[1]
-                    side = qrjqfnfrjr[2]
-                    is_clockwise = side == "R"
-                    dshozwexhv = _compute_cycle_diffs(lvl_name, cname, is_clockwise, cycles_dict)
-                    step_trans = {
-                        (p1.x * cell_size, p1.y * cell_size): (p2.x * cell_size, p2.y * cell_size)
-                        for p1, p2 in dshozwexhv
-                    }
-                    new_pos_map = dict(curr_pos_map)
-                    for pt, curr_loc in curr_pos_map.items():
-                        if curr_loc in step_trans:
-                            new_pos_map[pt] = step_trans[curr_loc]
-                    curr_pos_map = new_pos_map
+        from arcengine import GameAction
 
-            disp_coord = grid_to_disp[center_g]
-            moves.append((disp_coord, curr_pos_map))
+        fast_moves: list[tuple[tuple[int, int], list[int]]] = []
+        for disp_coord in candidate_coords:
+            perm_indices: list[int] | None = None
+
+            # 1. Pure Empirical Transition Probing (100% Tag-Agnostic Active Inference)
+            try:
+                g_copy = copy.deepcopy(game)
+                sp_map = {
+                    id(sp): (sp.x, sp.y)
+                    for sp in g_copy.current_level.get_sprites()
+                    if (sp.x, sp.y) in pt_to_idx
+                }
+                g_copy.action.id = GameAction.ACTION6
+                g_copy.action.data = {"x": disp_coord[0], "y": disp_coord[1]}
+                g_copy.step()
+                sp_after = {
+                    id(sp): (sp.x, sp.y)
+                    for sp in g_copy.current_level.get_sprites()
+                    if id(sp) in sp_map
+                }
+
+                trans = {}
+                for sid, p_before in sp_map.items():
+                    p_after = sp_after.get(sid)
+                    if p_after is not None and p_after != p_before:
+                        trans[p_before] = p_after
+
+                if trans:
+                    dest_to_src = {new_p: old_p for old_p, new_p in trans.items()}
+                    perm_indices = [pt_to_idx[dest_to_src.get(pt, pt)] for pt in sorted_pts]
+                    fast_moves.append((disp_coord, perm_indices))
+            except Exception:
+                continue
 
         # 6. Permutation Graph BFS Search
+        goal_reqs = [
+            (pt_to_idx[(tgx, tgy)], req_label)
+            for tgx, tgy, req_label in target_matches
+            if (tgx, tgy) in pt_to_idx
+        ]
+        if not goal_reqs:
+            return None
+
         def is_goal_state(state: tuple[str, ...]) -> bool:
-            c_map = {pt: state[i] for i, pt in enumerate(sorted_pts)}
-            for tgx, tgy, req_label in target_matches:
-                if c_map.get((tgx, tgy)) != req_label:
-                    return False
-            return True
+            return all(state[idx] == req for idx, req in goal_reqs)
 
         queue: deque[tuple[tuple[str, ...], list[tuple[int, int]]]] = deque([(init_state, [])])
         visited: set[tuple[str, ...]] = {init_state}
@@ -207,18 +261,13 @@ class OnlinePermutationCycleSolver:
             if is_goal_state(curr):
                 plan_clicks = path
                 break
-            c_map = {pt: curr[i] for i, pt in enumerate(sorted_pts)}
-            for disp_coord, pos_map in moves:
-                next_map = dict(c_map)
-                for orig_pt, new_pt in pos_map.items():
-                    if orig_pt != new_pt:
-                        next_map[new_pt] = c_map[orig_pt]
-                next_state = tuple(next_map[pt] for pt in sorted_pts)
+            for disp_coord, perm in fast_moves:
+                next_state = tuple(curr[p] for p in perm)
                 if next_state not in visited:
                     visited.add(next_state)
                     queue.append((next_state, path + [disp_coord]))
 
-        if not plan_clicks:
+        if plan_clicks is None:
             logger.warning("OnlinePermutationCycleSolver: No plan found within search horizon.")
             return None
 

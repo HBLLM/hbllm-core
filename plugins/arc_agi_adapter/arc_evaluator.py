@@ -152,7 +152,11 @@ class InteractiveARCEvaluator:
             if hasattr(env, "is_won") and env.is_won():
                 solved = True
                 break
-            if hasattr(env, "vplrhaovhr") and env.vplrhaovhr():
+            if getattr(env, "won", False) or str(getattr(env, "state", "")).upper() in (
+                "WIN",
+                "WON",
+                "GAMESTATE.WIN",
+            ):
                 solved = True
                 break
 

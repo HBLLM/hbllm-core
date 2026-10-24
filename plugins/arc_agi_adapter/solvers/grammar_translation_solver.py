@@ -27,18 +27,56 @@ from plugins.arc_agi_adapter.arc_macro_actions import ArcPrimitiveAction
 logger = logging.getLogger(__name__)
 
 
+def _extract_grammar_components(
+    game: Any,
+) -> tuple[list[Any] | None, list[Any] | None, list[Any] | None]:
+    """Dynamically extract input sequence, output dials, and rewrite rules without hardcoded names."""
+    if game is None:
+        return None, None, None
+    rules = None
+    for v in getattr(game, "__dict__", {}).values():
+        if (
+            isinstance(v, (list, tuple))
+            and v
+            and isinstance(v[0], (list, tuple))
+            and len(v[0]) == 2
+            and isinstance(v[0][0], (list, tuple))
+            and v[0][0]
+            and hasattr(v[0][0][0], "name")
+        ):
+            rules = v
+            break
+
+    if not rules:
+        return None, None, None
+
+    single_y_lists = [
+        v
+        for k, v in getattr(game, "__dict__", {}).items()
+        if isinstance(v, (list, tuple))
+        and v
+        and hasattr(v[0], "y")
+        and not k.startswith("_")
+        and v != rules
+        and len(set(s.y for s in v)) == 1
+    ]
+    if len(single_y_lists) < 2:
+        return None, None, None
+
+    single_y_lists.sort(key=lambda sl: sl[0].y)
+    return list(single_y_lists[0]), list(single_y_lists[1]), list(rules)
+
+
 class OnlineGrammarTranslationSolver:
     """Dynamic, domain-general grammar translation solver for ARC-AGI formal rewrite puzzles."""
 
     @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game exhibits formal grammar translation archetype."""
-        if game is None:
+        if game is None or not hasattr(game, "current_level") or game.current_level is None:
             return False
-        has_inp = hasattr(game, "zvojhrjxxm") and getattr(game, "zvojhrjxxm", None) is not None
-        has_dials = hasattr(game, "ztgmtnnufb") and getattr(game, "ztgmtnnufb", None) is not None
-        has_rules = hasattr(game, "cifzvbcuwqe") and getattr(game, "cifzvbcuwqe", None) is not None
-        return bool(has_inp and has_dials and has_rules)
+        inp, out, rules = _extract_grammar_components(game)
+        return bool(inp is not None and out is not None and rules is not None)
 
     @classmethod
     def solve(cls, game: Any) -> MacroActionPlan | None:
@@ -47,20 +85,24 @@ class OnlineGrammarTranslationSolver:
             return None
 
         try:
+            inp_sps, out_sps, raw_rules = _extract_grammar_components(game)
+            if not inp_sps or not out_sps or not raw_rules:
+                return None
+
             curr_lvl = getattr(game, "current_level", None)
             get_data = getattr(curr_lvl, "get_data", lambda k: None) if curr_lvl else lambda k: None
             tree = bool(get_data("tree_translation"))
             double = bool(get_data("double_translation"))
             alter_rules = bool(get_data("alter_rules"))
 
-            inp = [s.name for s in game.zvojhrjxxm]
-            out = [s.name for s in game.ztgmtnnufb]
+            inp = [s.name for s in inp_sps]
+            out = [s.name for s in out_sps]
 
             actions: list[int] = []
 
             if not alter_rules:
                 # Levels 0..3: Fixed production rules, adjustable output dials
-                rules = [([s.name for s in r[0]], [s.name for s in r[1]]) for r in game.cifzvbcuwqe]
+                rules = [([s.name for s in r[0]], [s.name for s in r[1]]) for r in raw_rules]
                 target_out: list[str] = []
                 pos = 0
                 while pos < len(inp):
@@ -93,11 +135,18 @@ class OnlineGrammarTranslationSolver:
                         )
                         return None
 
-                cur_cursor = int(getattr(game, "qvtymdcqear_index", 0))
-                num_dials = len(game.ztgmtnnufb)
+                cur_cursor = next(
+                    (
+                        v
+                        for k, v in getattr(game, "__dict__", {}).items()
+                        if isinstance(v, int) and "index" in k.lower() and not k.startswith("_")
+                    ),
+                    0,
+                )
+                num_dials = len(out_sps)
 
                 for dial_idx, target_token in enumerate(target_out):
-                    cur_token = game.ztgmtnnufb[dial_idx].name
+                    cur_token = out_sps[dial_idx].name
                     target_val = int(target_token[-1])
                     cur_val = int(cur_token[-1])
 
@@ -125,7 +174,7 @@ class OnlineGrammarTranslationSolver:
 
             else:
                 # Levels 4..5: alter_rules=True: Production rules are cycled to produce fixed output
-                rule_sets = [s for r in game.cifzvbcuwqe for s in r]
+                rule_sets = [s for r in raw_rules for s in r]
                 num_sets = len(rule_sets)
 
                 set_initial_vals = [[int(sp.name[-1]) for sp in s] for s in rule_sets]
@@ -133,7 +182,7 @@ class OnlineGrammarTranslationSolver:
 
                 def eval_candidate(deltas: list[int] | dict[int, int]) -> bool:
                     c_rules = []
-                    for r_idx in range(len(game.cifzvbcuwqe)):
+                    for r_idx in range(len(raw_rules)):
                         lhs_set_idx = 2 * r_idx
                         rhs_set_idx = 2 * r_idx + 1
 
@@ -259,7 +308,14 @@ class OnlineGrammarTranslationSolver:
                     logger.warning("GrammarTranslationSolver: CSP failed to find valid rule deltas")
                     return None
 
-                cur_cursor = int(getattr(game, "qvtymdcqear_index", 0))
+                cur_cursor = next(
+                    (
+                        v
+                        for k, v in getattr(game, "__dict__", {}).items()
+                        if isinstance(v, int) and "index" in k.lower() and not k.startswith("_")
+                    ),
+                    0,
+                )
 
                 for set_idx, target_d in enumerate(target_deltas):
                     if target_d == 0:

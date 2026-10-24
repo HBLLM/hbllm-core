@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +25,11 @@ _hbllm_root = None
 # 1. Fast explicit path check (covers 99% of Kaggle cases)
 _KAGGLE_DATASET_CANDIDATES = [
     "/kaggle/input/hbllm-kaggle-dataset",
+    "/kaggle/input/hbllm_kaggle_dataset",
     "/kaggle/input/hbllm-core",
     "/kaggle/input/hbllm",
     "/kaggle/input/datasets/dumithrathnayaka/hbllm-kaggle-dataset",
+    "/kaggle/input/datasets/dumithsalinda/hbllm-kaggle-dataset",
 ]
 
 for _cand in _KAGGLE_DATASET_CANDIDATES:
@@ -37,10 +41,10 @@ for _cand in _KAGGLE_DATASET_CANDIDATES:
         print(f"[HBLLM] Resolved core from: {_cand}", flush=True)
         break
 
-# 2. Recursive fallback: walk /kaggle/input (limited depth to avoid slowness)
+# 2. Recursive fallback: walk /kaggle/input (allows nested Kaggle datasets)
 if not _hbllm_resolved:
     for _root, _dirs, _ in os.walk("/kaggle/input"):
-        if _root.count(os.sep) - "/kaggle/input".count(os.sep) > 2:
+        if _root.count(os.sep) - "/kaggle/input".count(os.sep) > 5:
             _dirs.clear()  # Don't descend too deep
             continue
         if "hbllm" in _dirs and "plugins" in _dirs:
@@ -84,6 +88,9 @@ except ImportError:
         """Fallback base Agent class when running standalone outside framework."""
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def main(self) -> None:
             pass
 
 
@@ -149,7 +156,33 @@ except ImportError:
 class MyAgent(Agent):
     """The competitive ARC-AGI-3 Agent for Kaggle powered by HBLLM Core Cognitive Architecture."""
 
-    MAX_ACTIONS = 1000
+    # ─────────────────────────────────────────────────────────────────────────
+    # Tournament Lifecycle & Adaptive Time / Action Guards
+    # Prevents 8-9h Kaggle container timeouts by strictly bounding compute:
+    # 1. Global Tournament Time Guard (7.5h max, leaves 1.5h margin for scorecard close)
+    # 2. Per-Game Time Guard (8 min max per game)
+    # 3. Dynamic Progress-Scaled Action Guard (100 base + 75 per completed level)
+    # 4. Consecutive Death Stagnation Guard (max 5 deaths on same level without progress)
+    # 5. Worker Concurrency Gating (max 4 concurrent games to eliminate GIL thrashing)
+    # ─────────────────────────────────────────────────────────────────────────
+    MAX_ACTIONS: int = 800
+    BASE_ACTIONS_PER_LEVEL: int = 100
+    EXTRA_ACTIONS_PER_LEVEL: int = 75
+    MAX_CONSECUTIVE_DEATHS: int = 5
+    PER_GAME_MAX_SECONDS: float = 480.0  # 8 minutes max per game
+    TOURNAMENT_MAX_SECONDS: float = (
+        27000.0  # 7.5 hours (leaves 1.5h margin before Kaggle's 9h kill)
+    )
+    CONCURRENCY_LIMIT: int = 4  # Prevent GIL contention & memory thrashing
+
+    _TOURNAMENT_START_TIME: float | None = None
+    _CONCURRENCY_SEMAPHORE: threading.Semaphore | None = None
+
+    @classmethod
+    def is_tournament_budget_exceeded(cls) -> bool:
+        if cls._TOURNAMENT_START_TIME is None:
+            return False
+        return (time.time() - cls._TOURNAMENT_START_TIME) >= cls.TOURNAMENT_MAX_SECONDS
 
     def __init__(
         self,
@@ -197,6 +230,41 @@ class MyAgent(Agent):
         self.current_levels_completed: int = 0
         self.level_executed_actions: list[tuple[int, dict[str, Any] | None]] = []
 
+        # Time & Stagnation Tracking per Game Instance
+        self._game_start_time: float = time.time()
+        self.consecutive_deaths_this_level: int = 0
+        self._is_marked_done: bool = False
+
+    def main(self) -> None:
+        """Execute agent with concurrency gating and tournament time tracking."""
+        if MyAgent._TOURNAMENT_START_TIME is None:
+            MyAgent._TOURNAMENT_START_TIME = time.time()
+
+        if MyAgent._CONCURRENCY_SEMAPHORE is None:
+            MyAgent._CONCURRENCY_SEMAPHORE = threading.Semaphore(self.CONCURRENCY_LIMIT)
+
+        # Do not start if tournament deadline is already reached
+        if MyAgent.is_tournament_budget_exceeded():
+            print(
+                f"[TIME GUARD] Skipping game {self.game_id}: global tournament deadline already reached.",
+                flush=True,
+            )
+            return
+
+        with MyAgent._CONCURRENCY_SEMAPHORE:
+            self._game_start_time = time.time()
+            try:
+                super().main()
+            except Exception as e:
+                import traceback
+
+                print(
+                    f"[HBLLM ERROR] Exception in game {self.game_id}: {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                traceback.print_exc(file=sys.stderr)
+
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
         self.instructions = instructions
@@ -228,8 +296,64 @@ class MyAgent(Agent):
             self.internal_agent.prev_grid = None
 
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
-        win_levels = getattr(latest_frame, "win_levels", 1) or 1
-        return latest_frame.state is GameState.WIN or latest_frame.levels_completed >= win_levels
+        if getattr(self, "_is_marked_done", False):
+            return True
+
+        state_obj = getattr(latest_frame, "state", None)
+        state_name = getattr(state_obj, "name", str(state_obj))
+        if state_name == "WIN" or state_obj is GameState.WIN or state_obj == GameState.WIN:
+            return True
+        win_levels = getattr(latest_frame, "win_levels", None)
+        levels_comp = getattr(latest_frame, "levels_completed", None)
+        if win_levels is not None and levels_comp is not None and win_levels > 0:
+            if levels_comp >= win_levels:
+                return True
+
+        # 1. Global Tournament Time Guard
+        if MyAgent.is_tournament_budget_exceeded():
+            print(
+                f"[TIME GUARD] Global tournament deadline reached. Ending {self.game_id} cleanly.",
+                flush=True,
+            )
+            self._is_marked_done = True
+            return True
+
+        # 2. Per-game Wall-Clock Time Guard
+        game_start = getattr(self, "_game_start_time", None)
+        if game_start is not None and (time.time() - game_start) > self.PER_GAME_MAX_SECONDS:
+            print(
+                f"[TIME GUARD] Per-game budget ({self.PER_GAME_MAX_SECONDS}s) exceeded for {self.game_id} "
+                f"at level {self.current_levels_completed}. Yielding game.",
+                flush=True,
+            )
+            self._is_marked_done = True
+            return True
+
+        # 3. Dynamic Progress-Scaled Action Budget Guard
+        allowed_actions = self.BASE_ACTIONS_PER_LEVEL + (
+            self.current_levels_completed * self.EXTRA_ACTIONS_PER_LEVEL
+        )
+        act_cnt = getattr(self, "action_counter", 0)
+        if act_cnt >= allowed_actions:
+            print(
+                f"[ACTION GUARD] Action budget reached ({act_cnt}/{allowed_actions}) for {self.game_id} "
+                f"at level {self.current_levels_completed}. Yielding game.",
+                flush=True,
+            )
+            self._is_marked_done = True
+            return True
+
+        # 4. Consecutive Death Stagnation Guard
+        if getattr(self, "consecutive_deaths_this_level", 0) >= self.MAX_CONSECUTIVE_DEATHS:
+            print(
+                f"[STAGNATION GUARD] Max consecutive deaths ({self.MAX_CONSECUTIVE_DEATHS}) reached on level "
+                f"{self.current_levels_completed} for {self.game_id}. Yielding game.",
+                flush=True,
+            )
+            self._is_marked_done = True
+            return True
+
+        return False
 
     def _extract_grid(self, latest_frame: Any, frames: Any = None) -> np.ndarray:
         raw: Any = None
@@ -295,6 +419,14 @@ class MyAgent(Agent):
             return GameAction.RESET
 
         if state_obj is GameState.GAME_OVER or state_name == "GAME_OVER":
+            self.consecutive_deaths_this_level += 1
+            if self.consecutive_deaths_this_level >= self.MAX_CONSECUTIVE_DEATHS:
+                self._is_marked_done = True
+                print(
+                    f"[STAGNATION GUARD] Game {self.current_game_id} reached {self.consecutive_deaths_this_level} consecutive "
+                    f"deaths on level {self.current_levels_completed}. Ending game to conserve tournament time budget.",
+                    flush=True,
+                )
             grid = self._extract_grid(latest_frame, frames)
             avail = self._extract_available_actions(latest_frame)
             if (
@@ -307,6 +439,9 @@ class MyAgent(Agent):
             self.reset_episode(
                 retain_dynamics=True, is_new_level=False, level=self.current_levels_completed
             )
+            return GameAction.RESET
+
+        if state_obj is GameState.WIN or state_name == "WIN":
             return GameAction.RESET
 
         # Check full_reset signal from ARC-AGI environment
@@ -352,6 +487,7 @@ class MyAgent(Agent):
         lvl_completed = getattr(latest_frame, "levels_completed", 0)
         if lvl_completed != self.current_levels_completed:
             if lvl_completed > self.current_levels_completed:
+                self.consecutive_deaths_this_level = 0
                 print(
                     f"[ARC] Level completed: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,

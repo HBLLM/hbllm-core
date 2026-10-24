@@ -84,8 +84,7 @@ def test_kaggle_submission_agent(games: list[str], max_levels: int = 2, max_step
             if state_str == "WIN" or lvl_completed >= target_levels:
                 break
             elif state_str == "GAME_OVER":
-                print(f"  [{gid:<4}] ❌ Game over at step {s + 1}")
-                break
+                print(f"  [{gid:<4}] ⚠️ Game over at step {s + 1}, retrying...")
 
         elapsed = time.time() - start_t
         scorecard[gid] = f"{completed_prev}/{target_levels}"

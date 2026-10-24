@@ -433,6 +433,32 @@ def arc_macro_plan_synthesis_hook(
             if plan is not None and len(plan.actions) > 0:
                 return plan
 
+        # 7a. Dynamic Online Program Synthesis Solver (Visual Programming / Frame Puzzles)
+        try:
+            from plugins.arc_agi_adapter.solvers.program_synthesis_solver import (
+                OnlineProgramSynthesisSolver,
+            )
+
+            if OnlineProgramSynthesisSolver.can_solve(game):
+                plan = OnlineProgramSynthesisSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineProgramSynthesisSolver failed: %s", e)
+
+        # 7b. Dynamic Online Counterfactual Forward Search Solver (Domain-General Simulation)
+        try:
+            from plugins.arc_agi_adapter.solvers.forward_search_solver import (
+                OnlineForwardSearchSolver,
+            )
+
+            if OnlineForwardSearchSolver.can_solve(game):
+                plan = OnlineForwardSearchSolver.solve(game)
+                if plan is not None and len(plan.actions) > 0:
+                    return plan
+        except Exception as e:
+            logger.debug("OnlineForwardSearchSolver failed: %s", e)
+
     # 1. Allocentric Click Games (Action 6) with Interactive Buttons / Switches
     if objects and any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
         is_click_only = set(available_actions).issubset({6})
