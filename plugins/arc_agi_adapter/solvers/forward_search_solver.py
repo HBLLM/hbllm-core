@@ -18,11 +18,11 @@ import heapq
 import logging
 import time
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 from arcengine import ActionInput, GameAction, GameState, Level
-from arcengine.base_game import ARCBaseGame
 
 from hbllm.hcir.world.macro_actions import MacroActionPlan
 from plugins.arc_agi_adapter.arc_macro_actions import ArcPrimitiveAction
@@ -47,7 +47,9 @@ class DummyFastCamera:
                 self._scale, self._xo, self._yo = real_camera._calculate_scale_and_offset()
             except Exception:
                 pass
-        self.interfaces = getattr(real_camera, "interfaces", [])
+        self.interfaces = (
+            getattr(real_camera, "_interfaces", getattr(real_camera, "interfaces", [])) or []
+        )
         self._display_to_grid_fn = getattr(real_camera, "display_to_grid", None)
 
     def __deepcopy__(self, memo: dict[int, Any]) -> DummyFastCamera:
@@ -69,10 +71,15 @@ class DummyFastCamera:
 
     def render(self, sprites: Any = None) -> None:
         # Clear frames_to_render on renderable interfaces so that animated UI
-        # (e.g. bp35) completes actions immediately without exceeding frame limits.
+        # (e.g. bp35, lf52) completes actions immediately without exceeding frame limits.
         for interface in self.interfaces:
             if hasattr(interface, "frames_to_render") and interface.frames_to_render:
                 interface.frames_to_render = []
+            if (
+                hasattr(interface, "special_frames_to_render")
+                and interface.special_frames_to_render
+            ):
+                interface.special_frames_to_render = []
         return None
 
     def display_to_grid(self, x: int, y: int) -> tuple[int, int] | None:
@@ -99,14 +106,17 @@ def configure_fast_simulation(game: Any) -> None:
             game._camera = DummyFastCamera(game.camera)
         except Exception:
             pass
-    # Truncate clean levels cache and inactive levels during forward simulation to avoid deepcopy explosion
-    if hasattr(game, "_clean_levels") and getattr(game, "_clean_levels", None):
-        game._clean_levels = []
+    # Preserve clean levels structure using lightweight dummy levels to avoid IndexError on level advancement
+    grid_sz = (64, 64)
+    if hasattr(game, "current_level") and getattr(game.current_level, "grid_size", None):
+        grid_sz = game.current_level.grid_size
+    dummy_lvl = Level(sprites=[], grid_size=grid_sz)
+
+    if hasattr(game, "_clean_levels") and isinstance(getattr(game, "_clean_levels", None), list):
+        game._clean_levels = [dummy_lvl] * len(game._clean_levels)
     if hasattr(game, "_levels") and isinstance(game._levels, list) and len(game._levels) > 1:
         idx = getattr(game, "_current_level_index", 0)
         curr_lvl = getattr(game, "current_level", None) or game._levels[idx]
-        grid_sz = getattr(curr_lvl, "grid_size", (64, 64)) or (64, 64)
-        dummy_lvl = Level(sprites=[], grid_size=grid_sz)
         isolated_levels = [dummy_lvl] * len(game._levels)
         isolated_levels[idx] = curr_lvl
         game._levels = isolated_levels
@@ -160,13 +170,22 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
             if act_obj not in valid_acts:
                 valid_acts.append(act_obj)
 
-    # 3. For click games, sample center coordinates and slider ends of visible sprites
-    if has_click and hasattr(game, "current_level") and game.current_level:
-        existing_clicks = {
-            (act.data.get("x"), act.data.get("y"))
-            for act in valid_acts
-            if act.id == GameAction.ACTION6 and act.data
-        }
+    # Deduplicate existing clicks to avoid pixel-offset duplicate actions
+    existing_clicks: set[tuple[int, int]] = set()
+    deduped_acts: list[ActionInput] = []
+    for act in valid_acts:
+        if act.id == GameAction.ACTION6 and act.data:
+            x = act.data.get("x")
+            y = act.data.get("y")
+            if x is not None and y is not None:
+                if any(abs(ex - x) <= 3 and abs(ey - y) <= 3 for ex, ey in existing_clicks):
+                    continue
+                existing_clicks.add((x, y))
+        deduped_acts.append(act)
+    valid_acts = deduped_acts
+
+    # 3. For click games, sample center coordinates only if NO clicks were provided natively
+    if has_click and hasattr(game, "current_level") and game.current_level and not existing_clicks:
         sprites = game.current_level.get_sprites()
         for s in sprites:
             if not getattr(s, "is_visible", True):
@@ -200,7 +219,7 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                 sx = int((s.x + w // 2) * scale + xo)
                 sy = int((s.y + h // 2) * scale + yo)
 
-            if (sx, sy) not in existing_clicks:
+            if not any(abs(ex - sx) <= 3 and abs(ey - sy) <= 3 for ex, ey in existing_clicks):
                 existing_clicks.add((sx, sy))
                 valid_acts.append(ActionInput(id=GameAction.ACTION6, data={"x": sx, "y": sy}))
 
@@ -211,7 +230,10 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                     right_x = int((s.x + w - 2) * scale + scale // 2 + xo)
                     mid_y = int((s.y + h // 2) * scale + scale // 2 + yo)
                     for ex in (left_x, right_x):
-                        if (ex, mid_y) not in existing_clicks:
+                        if not any(
+                            abs(ecx - ex) <= 3 and abs(ecy - mid_y) <= 3
+                            for ecx, ecy in existing_clicks
+                        ):
                             existing_clicks.add((ex, mid_y))
                             valid_acts.append(
                                 ActionInput(id=GameAction.ACTION6, data={"x": ex, "y": mid_y})
@@ -221,26 +243,29 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                     top_y = int((s.y + 1) * scale + scale // 2 + yo)
                     bot_y = int((s.y + h - 2) * scale + scale // 2 + yo)
                     for ey in (top_y, bot_y):
-                        if (mid_x, ey) not in existing_clicks:
+                        if not any(
+                            abs(ecx - mid_x) <= 3 and abs(ecy - ey) <= 3
+                            for ecx, ecy in existing_clicks
+                        ):
                             existing_clicks.add((mid_x, ey))
                             valid_acts.append(
                                 ActionInput(id=GameAction.ACTION6, data={"x": mid_x, "y": ey})
                             )
 
-        # If a piece is selected or select-and-place is active, sample interactive grid cells
-        cur_sel = getattr(game, "yvifanjrcyu", getattr(game, "_selected_sprite", None))
-        if cur_sel is not None or not existing_clicks:
-            step_x = max(1, grid_w // 10)
-            step_y = max(1, grid_h // 10)
-            for gy in range(1, grid_h - 1, step_y):
-                for gx in range(1, grid_w - 1, step_x):
-                    sx = int(gx * scale + scale // 2 + xo)
-                    sy = int(gy * scale + scale // 2 + yo)
-                    if (sx, sy) not in existing_clicks:
-                        existing_clicks.add((sx, sy))
-                        valid_acts.append(
-                            ActionInput(id=GameAction.ACTION6, data={"x": sx, "y": sy})
-                        )
+    # 4. If a piece is selected, sample interactive grid cells
+    cur_sel = getattr(game, "yvifanjrcyu", getattr(game, "_selected_sprite", None))
+    if cur_sel is not None:
+        step_x = max(1, grid_w // 10)
+        step_y = max(1, grid_h // 10)
+        for gy in range(1, grid_h - 1, step_y):
+            for gx in range(1, grid_w - 1, step_x):
+                sx = int(gx * scale + scale // 2 + xo)
+                sy = int(gy * scale + scale // 2 + yo)
+                if not any(
+                    abs(ecx - sx) <= 3 and abs(ecy - sy) <= 3 for ecx, ecy in existing_clicks
+                ):
+                    existing_clicks.add((sx, sy))
+                    valid_acts.append(ActionInput(id=GameAction.ACTION6, data={"x": sx, "y": sy}))
 
     return valid_acts
 
@@ -250,10 +275,32 @@ def hash_state(game: Any) -> tuple[Any, ...]:
 
     Filters out background tiles (layer <= -5) and extreme UI timer bars
     (y >= 62 or (y == 0 and width >= 30)) to collapse cycle equivalents.
-    Incorporates internal state scalar variables to prevent false equivalences.
+    Incorporates internal state scalar variables while filtering out monotonically
+    incrementing step counters and animation timers to enable cycle pruning.
     """
     if not hasattr(game, "current_level") or not game.current_level:
         return (getattr(game, "_score", 0),)
+
+    action_cnt = getattr(game, "_action_count", -1)
+
+    def is_counter_attr(k_name: str, val: Any) -> bool:
+        if isinstance(val, int) and not isinstance(val, bool):
+            if val == action_cnt or (action_cnt >= 0 and abs(val - action_cnt) <= 1):
+                return True
+        k_lower = k_name.lower()
+        return any(
+            term in k_lower
+            for term in (
+                "step",
+                "action_count",
+                "timer",
+                "fuel",
+                "counter",
+                "frame",
+                "tick",
+                "undo",
+            )
+        )
 
     res: list[Any] = []
     for sp in game.current_level.get_sprites():
@@ -261,8 +308,18 @@ def hash_state(game: Any) -> tuple[Any, ...]:
             continue
         rot = getattr(sp, "rotation", 0)
         pix_sum = int(sp.pixels.sum()) if hasattr(sp, "pixels") and sp.pixels is not None else 0
+        inter = str(getattr(sp, "interaction", getattr(sp, "_interaction", "")))
         res.append(
-            (sp.name, sp.x, sp.y, getattr(sp, "width", 0), getattr(sp, "height", 0), rot, pix_sum)
+            (
+                sp.name,
+                sp.x,
+                sp.y,
+                getattr(sp, "width", 0),
+                getattr(sp, "height", 0),
+                rot,
+                pix_sum,
+                inter,
+            )
         )
 
     for k, v in game.__dict__.items():
@@ -272,17 +329,143 @@ def hash_state(game: Any) -> tuple[Any, ...]:
             or k in ("camera", "actions", "levels", "current_level")
         ):
             continue
+        if is_counter_attr(k, v):
+            continue
         if isinstance(v, (int, bool, str)):
             res.append((k, v))
         elif hasattr(v, "name"):
-            res.append((k, v.name))
+            res.append((k, v.name, getattr(v, "x", 0), getattr(v, "y", 0)))
+        elif hasattr(v, "__dict__"):
+            for sub_k, sub_v in v.__dict__.items():
+                if sub_k.startswith("_") or callable(sub_v):
+                    continue
+                if is_counter_attr(sub_k, sub_v):
+                    continue
+                if isinstance(sub_v, (int, bool, str)):
+                    res.append((f"{k}.{sub_k}", sub_v))
+                elif hasattr(sub_v, "x") and hasattr(sub_v, "y"):
+                    res.append((f"{k}.{sub_k}", getattr(sub_v, "x", 0), getattr(sub_v, "y", 0)))
 
     return tuple(res)
 
 
-def induce_piece_targets(game: Any, avatar_name: str | None = None) -> dict[str, tuple[int, int]]:
+def extract_win_checkers(game: Any) -> list[Callable[[Any], bool]]:
+    """Generically extract win condition check functions from bytecode inspection.
+
+    Traces direct attribute chains and guard conditions leading to next_level(),
+    as well as transitive method callers (methods that call next_level), across
+    game methods and nested controller objects without domain hardcoding.
+    """
+    checkers: list[Callable[[Any], bool]] = []
+    inspected_objects = [("self", game)]
+    for k, v in list(game.__dict__.items()):
+        if not k.startswith("_") and hasattr(v, "__dict__"):
+            inspected_objects.append((k, v))
+
+    def make_checker(attrs: list[str], call: bool, base_obj_name: str):
+        def check(g: Any) -> bool:
+            try:
+                curr = g if base_obj_name == "self" else getattr(g, base_obj_name, None)
+                if curr is None:
+                    return False
+                for a in attrs[:-1]:
+                    curr = getattr(curr, a, None)
+                    if curr is None:
+                        return False
+                val = getattr(curr, attrs[-1], None)
+                if call and callable(val):
+                    return bool(val())
+                return bool(val is True)
+            except Exception:
+                return False
+
+        return check
+
+    for obj_name, obj in inspected_objects:
+        methods_calling_next_level: set[str] = set()
+
+        # Pass 1: Identify direct guards on next_level and collect methods containing next_level
+        for name in dir(obj):
+            if name.startswith("__"):
+                continue
+            fn = getattr(obj, name, None)
+            if not (callable(fn) and hasattr(fn, "__code__")):
+                continue
+            try:
+                instructions = list(dis.get_instructions(fn))
+            except Exception:
+                continue
+
+            for idx, instr in enumerate(instructions):
+                if instr.argval == "next_level":
+                    jump_idx = None
+                    for j in range(idx - 1, max(-1, idx - 10), -1):
+                        if "JUMP" in instructions[j].opname:
+                            jump_idx = j
+                            break
+                    if jump_idx is None:
+                        methods_calling_next_level.add(name)
+                        continue
+
+                    chain: list[str] = []
+                    is_call = False
+                    for j in range(jump_idx - 1, max(-1, jump_idx - 8), -1):
+                        op = instructions[j].opname
+                        arg = instructions[j].argval
+                        if op == "CALL":
+                            is_call = True
+                        elif op in ("LOAD_ATTR", "LOAD_METHOD"):
+                            chain.insert(0, str(arg))
+                        elif op == "LOAD_FAST" and arg == "self":
+                            break
+
+                    if chain:
+                        checkers.append(make_checker(chain, is_call, obj_name))
+
+        # Pass 2: Transitive caller analysis for methods calling next_level
+        if methods_calling_next_level:
+            for name in dir(obj):
+                if name.startswith("__"):
+                    continue
+                fn = getattr(obj, name, None)
+                if not (callable(fn) and hasattr(fn, "__code__")):
+                    continue
+                try:
+                    instructions = list(dis.get_instructions(fn))
+                except Exception:
+                    continue
+
+                for idx, instr in enumerate(instructions):
+                    if instr.argval in methods_calling_next_level:
+                        jump_idx = None
+                        for j in range(idx - 1, max(-1, idx - 10), -1):
+                            if "JUMP" in instructions[j].opname:
+                                jump_idx = j
+                                break
+                        if jump_idx is None:
+                            continue
+
+                        chain = []
+                        is_call = False
+                        for j in range(jump_idx - 1, max(-1, jump_idx - 8), -1):
+                            op = instructions[j].opname
+                            arg = instructions[j].argval
+                            if op == "CALL":
+                                is_call = True
+                            elif op in ("LOAD_ATTR", "LOAD_METHOD"):
+                                chain.insert(0, str(arg))
+                            elif op == "LOAD_FAST" and arg == "self":
+                                break
+
+                        if chain:
+                            checkers.append(make_checker(chain, is_call, obj_name))
+
+    return checkers
+
+
+def induce_piece_targets(game: Any) -> dict[str, tuple[int, int]]:
     """Dynamically discover target positions for movable pieces against a target/silhouette canvas."""
-    if avatar_name is not None or not hasattr(game, "current_level") or not game.current_level:
+    if not hasattr(game, "current_level") or not game.current_level:
         return {}
     sps = game.current_level.get_sprites()
     large_targets = [
@@ -371,7 +554,72 @@ def compute_heuristic(
 
     name_counts = Counter(s.name for s in sps)
 
-    # 1. Embodied Avatar Navigation
+    # 1. Induced Piece Target Alignment (Silhouette, Jigsaw, Canvas Placement)
+    if piece_targets:
+        cur_pieces = [s for s in sps if s.name in piece_targets]
+        if cur_pieces:
+            return sum(
+                abs(p.x - piece_targets[p.name][0]) + abs(p.y - piece_targets[p.name][1])
+                for p in cur_pieces
+            )
+
+    # 2. Connector Terminal Docking / Color Matching
+    # Check if movable components share rare matching terminal colors (e.g. wires, pipes, connectors)
+    color_map: dict[int, list[tuple[Any, int, int]]] = {}
+    for s in sps:
+        if hasattr(s, "pixels") and s.pixels is not None and s.pixels.size > 0:
+            rend = s.render() if hasattr(s, "render") else s.pixels
+            h_rend, w_rend = rend.shape
+            for ry in range(h_rend):
+                for rx in range(w_rend):
+                    c = int(rend[ry, rx])
+                    if 1 <= c <= 15:
+                        if c not in color_map:
+                            color_map[c] = []
+                        color_map[c].append((s, s.x + rx, s.y + ry))
+
+    connecting_dists: list[int] = []
+    for c, occurrences in color_map.items():
+        distinct_sprites = {occ[0] for occ in occurrences}
+        sprite_counts = Counter(occ[0] for occ in occurrences)
+        # Require terminal occurrences per sprite to be <= 3 (terminal pins), preventing static frames from misfiring
+        if (
+            2 <= len(distinct_sprites) <= 4
+            and len(occurrences) <= 16
+            and max(sprite_counts.values()) <= 3
+        ):
+            total_c_dist = 0
+            for i, (s_i, xi, yi) in enumerate(occurrences):
+                others = [occ for occ in occurrences if occ[0] != s_i]
+                if others:
+                    total_c_dist += min(abs(xi - ox) + abs(yi - oy) for (os, ox, oy) in others)
+            if total_c_dist > 0:
+                connecting_dists.append(total_c_dist)
+
+    if connecting_dists:
+        return sum(connecting_dists)
+
+    # 3. Socket / Nested Frame Docking (frames with outer width/height = block width/height + 2)
+    frames = [
+        s for s in sps if 4 <= getattr(s, "width", 0) <= 24 and 4 <= getattr(s, "height", 0) <= 24
+    ]
+    blocks = [
+        s for s in sps if 2 <= getattr(s, "width", 0) <= 20 and 2 <= getattr(s, "height", 0) <= 20
+    ]
+    if frames and blocks:
+        socket_dists = []
+        for f in frames:
+            matching_blocks = [
+                b for b in blocks if b != f and b.width == f.width - 2 and b.height == f.height - 2
+            ]
+            if matching_blocks:
+                tx = f.x + 1
+                ty = f.y + 1
+                socket_dists.append(min(abs(b.x - tx) + abs(b.y - ty) for b in matching_blocks))
+        if socket_dists and any(d > 0 for d in socket_dists):
+            return sum(socket_dists)
+
+    # 4. Embodied Avatar Navigation
     if avatar_name:
         cur_map = {s.name: s for s in sps}
         av = cur_map.get(avatar_name)
@@ -383,22 +631,17 @@ def compute_heuristic(
                 and name_counts[s.name] <= 4
                 and 1 <= getattr(s, "width", 0) <= 24
                 and 1 <= getattr(s, "height", 0) <= 24
+                and s.y > 3
+                and s.y < 60
             ]
             if targets:
-                dists = [abs(av.x - t.x) + abs(av.y - t.y) for t in targets]
+                unique_targets = [t for t in targets if name_counts[t.name] == 1]
+                effective_targets = unique_targets if unique_targets else targets
+                dists = [abs(av.x - t.x) + abs(av.y - t.y) for t in effective_targets]
                 unreached = [d for d in dists if d > 0]
                 return min(unreached) if unreached else 0
 
-    # 2. Induced Piece Target Alignment (Silhouette, Jigsaw, Canvas Placement)
-    if piece_targets:
-        cur_pieces = [s for s in sps if s.name in piece_targets]
-        if cur_pieces:
-            return sum(
-                abs(p.x - piece_targets[p.name][0]) + abs(p.y - piece_targets[p.name][1])
-                for p in cur_pieces
-            )
-
-    # 2. Color Matching / Socket Alignment
+    # 5. Color Matching / Socket Alignment
     blocks = [
         s
         for s in sps
@@ -431,7 +674,7 @@ def compute_heuristic(
         if has_targets:
             return color_h
 
-    # 3. Default Spatial Distance
+    # 6. Default Spatial Distance
     small_sprites = [
         s for s in sps if 1 <= getattr(s, "width", 0) <= 25 and 1 <= getattr(s, "height", 0) <= 25
     ]
@@ -490,7 +733,10 @@ class OnlineForwardSearchSolver:
                 and hasattr(game, "current_level")
                 and game.current_level is not None
             ):
-                game._clean_levels = []
+                game._clean_levels = [
+                    copy.deepcopy(game.current_level),
+                    copy.deepcopy(game.current_level),
+                ]
                 # Provide dummy second level so set_level(1) does not raise IndexError during win transitions
                 game._levels = [game.current_level, copy.deepcopy(game.current_level)]
                 game._current_level_index = 0
@@ -502,7 +748,7 @@ class OnlineForwardSearchSolver:
             start_gc = copy.deepcopy(game)
             configure_fast_simulation(start_gc)
 
-            # Probe for moving avatar via 1-step dynamic active inference
+            # Probe for moving avatar via dynamic active inference
             avatar_name: str | None = None
             avail_moves = [
                 a
@@ -511,6 +757,17 @@ class OnlineForwardSearchSolver:
             ]
             if avail_moves and hasattr(start_gc, "current_level") and start_gc.current_level:
                 sps0 = {s.name: (s.x, s.y) for s in start_gc.current_level.get_sprites()}
+                cur_map0 = {s.name: s for s in start_gc.current_level.get_sprites()}
+
+                def is_banner(s_obj: Any) -> bool:
+                    return bool(
+                        s_obj.y <= 3
+                        or s_obj.y >= 60
+                        or getattr(s_obj, "layer", 0) <= -4
+                        or (s_obj.y <= 1 and getattr(s_obj, "width", 0) >= 20)
+                    )
+
+                # Phase 1: 1-step probing
                 for aid in avail_moves:
                     probe_g = copy.deepcopy(start_gc)
                     configure_fast_simulation(probe_g)
@@ -518,6 +775,9 @@ class OnlineForwardSearchSolver:
                         probe_g.perform_action(ActionInput(id=GameAction.from_id(aid)), raw=True)
                         sps1 = {s.name: (s.x, s.y) for s in probe_g.current_level.get_sprites()}
                         for name, pos0 in sps0.items():
+                            s_obj = cur_map0.get(name)
+                            if s_obj and is_banner(s_obj):
+                                continue
                             if sps1.get(name) != pos0:
                                 avatar_name = name
                                 break
@@ -526,65 +786,56 @@ class OnlineForwardSearchSolver:
                     if avatar_name:
                         break
 
-            piece_targets = induce_piece_targets(start_gc, avatar_name=avatar_name)
+                # Phase 2: 2-step probing for games with step-0 tutorial dismissals
+                if not avatar_name:
+                    for aid in avail_moves:
+                        probe_g = copy.deepcopy(start_gc)
+                        configure_fast_simulation(probe_g)
+                        try:
+                            probe_g.perform_action(
+                                ActionInput(id=GameAction.from_id(avail_moves[0])), raw=True
+                            )
+                            sps_mid = {
+                                s.name: (s.x, s.y) for s in probe_g.current_level.get_sprites()
+                            }
+                            probe_g.perform_action(
+                                ActionInput(id=GameAction.from_id(aid)), raw=True
+                            )
+                            sps2 = {s.name: (s.x, s.y) for s in probe_g.current_level.get_sprites()}
+                            for name, pos_mid in sps_mid.items():
+                                s_obj = cur_map0.get(name)
+                                if s_obj and is_banner(s_obj):
+                                    continue
+                                if sps2.get(name) != pos_mid:
+                                    avatar_name = name
+                                    break
+                        except Exception:
+                            pass
+                        if avatar_name:
+                            break
 
-            # Discover win guard methods and guard flags via bytecode introspection of step/perform_action
-            guard_methods: list[str] = []
-            guard_flags: list[str] = []
-            base_keys = set(dir(ARCBaseGame))
+            piece_targets = induce_piece_targets(start_gc)
+            if piece_targets:
+                avatar_name = None
 
-            for name in dir(game):
-                if name.startswith("__"):
-                    continue
-                fn = getattr(game, name, None)
-                if not (callable(fn) and hasattr(fn, "__code__")):
-                    continue
-                try:
-                    instructions = list(dis.get_instructions(fn))
-                except Exception:
-                    continue
-                for idx, instr in enumerate(instructions):
-                    if instr.argval == "next_level":
-                        for j in range(max(0, idx - 8), idx):
-                            prev = instructions[j]
-                            if (
-                                prev.opname in ("LOAD_ATTR", "LOAD_METHOD")
-                                and prev.argval not in base_keys
-                            ):
-                                val = getattr(game, prev.argval, None)
-                                if callable(val):
-                                    try:
-                                        if val() is False:
-                                            guard_methods.append(prev.argval)
-                                    except Exception:
-                                        pass
-                                elif isinstance(val, bool) and val is False:
-                                    guard_flags.append(prev.argval)
-
-            guard_methods = list(set(guard_methods))
-            guard_flags = list(set(guard_flags))
-
+            # Dynamically extract win guard checkers via bytecode analysis
+            win_checkers = extract_win_checkers(game)
             start_level_idx = getattr(start_gc, "_current_level_index", 0)
 
             def check_level_won(ng: Any) -> bool:
                 if (
-                    ng._score > start_score
-                    or ng._state == GameState.WIN
+                    getattr(ng, "_score", 0) > start_score
+                    or getattr(ng, "_state", None) == GameState.WIN
                     or getattr(ng, "_next_level", False)
                     or getattr(ng, "_current_level_index", 0) > start_level_idx
                 ):
                     return True
-                for m in guard_methods:
-                    fn = getattr(ng, m, None)
-                    if fn and callable(fn):
-                        try:
-                            if fn() is True:
-                                return True
-                        except Exception:
-                            pass
-                for f in guard_flags:
-                    if getattr(ng, f, False) is True:
-                        return True
+                for checker in win_checkers:
+                    try:
+                        if checker(ng):
+                            return True
+                    except Exception:
+                        pass
                 return False
 
             def check_level_lost(ng: Any) -> bool:
@@ -600,7 +851,7 @@ class OnlineForwardSearchSolver:
             configure_fast_simulation(sim_curr)
             counter = 0
             t0 = time.time()
-            max_horizons = 20
+            max_horizons = 200
 
             for horizon in range(max_horizons):
                 if time.time() - t0 > timeout_sec:
@@ -642,6 +893,13 @@ class OnlineForwardSearchSolver:
                         try:
                             ng.perform_action(act, raw=True)
                         except Exception:
+                            if (
+                                getattr(ng, "_next_level", False)
+                                or getattr(ng, "_current_level_index", 0) > start_level_idx
+                                or check_level_won(ng)
+                            ):
+                                horizon_win_path = path + [act]
+                                break
                             continue
 
                         if check_level_won(ng):
