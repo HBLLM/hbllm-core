@@ -237,6 +237,23 @@ def build() -> dict:
                         hbllm_dataset_root = root
                         break
             if hbllm_dataset_root is None:
+                # Check for zipped dataset archive in /kaggle/input
+                import zipfile
+                for root, _, files in os.walk('/kaggle/input'):
+                    for f in files:
+                        if f.endswith('.zip') and ('hbllm' in f.lower() or 'dataset' in f.lower()):
+                            zip_p = os.path.join(root, f)
+                            target_ext = '/tmp/hbllm_unpacked'
+                            if not os.path.isdir(os.path.join(target_ext, 'hbllm')):
+                                print(f"Unpacking {zip_p} to {target_ext}...")
+                                with zipfile.ZipFile(zip_p, 'r') as zf:
+                                    zf.extractall(target_ext)
+                            if os.path.isdir(os.path.join(target_ext, 'hbllm')):
+                                hbllm_dataset_root = target_ext
+                                break
+                    if hbllm_dataset_root:
+                        break
+            if hbllm_dataset_root is None:
                 hbllm_dataset_root = '/kaggle/input/hbllm-kaggle-dataset'
                 print(f"⚠️ Could not find HBLLM dataset, defaulting to: {hbllm_dataset_root}")
             print(f"✓ HBLLM dataset root: {hbllm_dataset_root}")

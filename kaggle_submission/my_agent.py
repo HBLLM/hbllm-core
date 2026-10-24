@@ -55,6 +55,32 @@ if not _hbllm_resolved:
             print(f"[HBLLM] Resolved core from walk: {_root}", flush=True)
             break
 
+# 2b. Automatic zip extraction fallback (if dataset contains zipped archive)
+if not _hbllm_resolved:
+    import zipfile
+
+    for _root, _, _files in os.walk("/kaggle/input"):
+        for _f in _files:
+            if _f.endswith(".zip") and ("hbllm" in _f.lower() or "dataset" in _f.lower()):
+                _zip_path = os.path.join(_root, _f)
+                _target_extract = "/tmp/hbllm_unpacked"
+                if not os.path.isdir(os.path.join(_target_extract, "hbllm")):
+                    try:
+                        print(f"[HBLLM] Unpacking {_zip_path} to {_target_extract}...", flush=True)
+                        with zipfile.ZipFile(_zip_path, "r") as _zf:
+                            _zf.extractall(_target_extract)
+                    except Exception as _ze:
+                        print(f"[HBLLM] Failed to unpack {_zip_path}: {_ze}", flush=True)
+                if os.path.isdir(os.path.join(_target_extract, "hbllm")):
+                    if _target_extract not in sys.path:
+                        sys.path.insert(0, _target_extract)
+                    _hbllm_resolved = True
+                    _hbllm_root = Path(_target_extract)
+                    print(f"[HBLLM] Resolved core from unpacked zip: {_target_extract}", flush=True)
+                    break
+        if _hbllm_resolved:
+            break
+
 # 3. Local development fallback
 try:
     _here = Path(__file__).resolve().parent
