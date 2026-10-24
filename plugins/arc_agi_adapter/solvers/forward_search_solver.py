@@ -61,7 +61,7 @@ class DummyFastCamera:
         new_cam._yo = self._yo
         new_cam.width = self.width
         new_cam.height = self.height
-        new_cam.interfaces = self.interfaces
+        new_cam.interfaces = [memo.get(id(i), copy.deepcopy(i, memo)) for i in self.interfaces]
         new_cam._display_to_grid_fn = self._display_to_grid_fn
         return new_cam
 
@@ -178,13 +178,78 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
             x = act.data.get("x")
             y = act.data.get("y")
             if x is not None and y is not None:
-                if any(abs(ex - x) <= 3 and abs(ey - y) <= 3 for ex, ey in existing_clicks):
+                if any(abs(ex - x) <= 1 and abs(ey - y) <= 1 for ex, ey in existing_clicks):
                     continue
                 existing_clicks.add((x, y))
         deduped_acts.append(act)
     valid_acts = deduped_acts
 
-    # 3. For click games, sample center coordinates only if NO clicks were provided natively
+    # 3. For click games, sample center coordinates from nested grids and level sprites
+    if has_click:
+        # Check for nested grid engines (e.g. Peg Solitaire, Tile Puzzles)
+        grids: list[tuple[Any, Any]] = []
+        for k, v in game.__dict__.items():
+            if not k.startswith("_") and hasattr(v, "__dict__"):
+                for sub_k, sub_v in v.__dict__.items():
+                    if hasattr(sub_v, "grid_size") and (
+                        hasattr(sub_v, "xpnsbxlatu") or hasattr(sub_v, "ndtvadsrqf")
+                    ):
+                        grids.append((v, sub_v))
+
+        for parent_v, g_obj in grids:
+            tile_w, tile_h = getattr(g_obj, "tile_size", (6, 6))
+            off_x, off_y = getattr(g_obj, "cdpcbbnfdp", (0, 0))
+
+            cur_sel = None
+            for p_attr in ("wpwvsglgmb", "selection", "selector"):
+                if hasattr(parent_v, p_attr) and hasattr(getattr(parent_v, p_attr), "qoifrofmiu"):
+                    cur_sel = getattr(getattr(parent_v, p_attr), "qoifrofmiu")
+                    break
+            if cur_sel is None:
+                cur_sel = getattr(parent_v, "qoifrofmiu", getattr(g_obj, "qoifrofmiu", None))
+
+            if cur_sel is not None:
+                sel_gx = getattr(cur_sel, "grid_x", 0)
+                sel_gy = getattr(cur_sel, "grid_y", 0)
+                sel_px = int(sel_gx * tile_w + tile_w // 2 + off_x)
+                sel_py = int(sel_gy * tile_h + tile_h // 2 + off_y)
+                for m_attr in ("zpbguihjnf", "markers", "valid_moves"):
+                    markers = getattr(parent_v, m_attr, [])
+                    if isinstance(markers, list):
+                        for m in markers:
+                            m_pos = getattr(m, "cdpcbbnfdp", getattr(m, "offset", (0, 0)))
+                            if m_pos != (0, 0):
+                                mx = sel_px + m_pos[0]
+                                my = sel_py + m_pos[1]
+                                if not any(
+                                    abs(ecx - mx) <= 1 and abs(ecy - my) <= 1
+                                    for ecx, ecy in existing_clicks
+                                ):
+                                    existing_clicks.add((mx, my))
+                                    valid_acts.append(
+                                        ActionInput(id=GameAction.ACTION6, data={"x": mx, "y": my})
+                                    )
+            else:
+                entities = getattr(g_obj, "xpnsbxlatu", [])
+                if hasattr(g_obj, "ndtvadsrqf"):
+                    pegs = g_obj.ndtvadsrqf("fozwvlovdui")
+                    if pegs:
+                        entities = pegs
+                for e in entities:
+                    gx = getattr(e, "grid_x", None)
+                    gy = getattr(e, "grid_y", None)
+                    if gx is not None and gy is not None:
+                        px = int(gx * tile_w + tile_w // 2 + off_x)
+                        py = int(gy * tile_h + tile_h // 2 + off_y)
+                        if not any(
+                            abs(ecx - px) <= 1 and abs(ecy - py) <= 1
+                            for ecx, ecy in existing_clicks
+                        ):
+                            existing_clicks.add((px, py))
+                            valid_acts.append(
+                                ActionInput(id=GameAction.ACTION6, data={"x": px, "y": py})
+                            )
+
     if has_click and hasattr(game, "current_level") and game.current_level and not existing_clicks:
         sprites = game.current_level.get_sprites()
         for s in sprites:
@@ -219,7 +284,7 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                 sx = int((s.x + w // 2) * scale + xo)
                 sy = int((s.y + h // 2) * scale + yo)
 
-            if not any(abs(ex - sx) <= 3 and abs(ey - sy) <= 3 for ex, ey in existing_clicks):
+            if not any(abs(ex - sx) <= 1 and abs(ey - sy) <= 1 for ex, ey in existing_clicks):
                 existing_clicks.add((sx, sy))
                 valid_acts.append(ActionInput(id=GameAction.ACTION6, data={"x": sx, "y": sy}))
 
@@ -231,7 +296,7 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                     mid_y = int((s.y + h // 2) * scale + scale // 2 + yo)
                     for ex in (left_x, right_x):
                         if not any(
-                            abs(ecx - ex) <= 3 and abs(ecy - mid_y) <= 3
+                            abs(ecx - ex) <= 1 and abs(ecy - mid_y) <= 1
                             for ecx, ecy in existing_clicks
                         ):
                             existing_clicks.add((ex, mid_y))
@@ -244,7 +309,7 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                     bot_y = int((s.y + h - 2) * scale + scale // 2 + yo)
                     for ey in (top_y, bot_y):
                         if not any(
-                            abs(ecx - mid_x) <= 3 and abs(ecy - ey) <= 3
+                            abs(ecx - mid_x) <= 1 and abs(ecy - ey) <= 1
                             for ecx, ecy in existing_clicks
                         ):
                             existing_clicks.add((mid_x, ey))
@@ -262,7 +327,7 @@ def get_candidate_actions(game: Any) -> list[ActionInput]:
                 sx = int(gx * scale + scale // 2 + xo)
                 sy = int(gy * scale + scale // 2 + yo)
                 if not any(
-                    abs(ecx - sx) <= 3 and abs(ecy - sy) <= 3 for ecx, ecy in existing_clicks
+                    abs(ecx - sx) <= 1 and abs(ecy - sy) <= 1 for ecx, ecy in existing_clicks
                 ):
                     existing_clicks.add((sx, sy))
                     valid_acts.append(ActionInput(id=GameAction.ACTION6, data={"x": sx, "y": sy}))
@@ -331,6 +396,8 @@ def hash_state(game: Any) -> tuple[Any, ...]:
             continue
         if is_counter_attr(k, v):
             continue
+        if getattr(v, "y", 0) >= 62 or (getattr(v, "y", 0) <= 0 and getattr(v, "width", 0) >= 30):
+            continue
         if isinstance(v, (int, bool, str)):
             res.append((k, v))
         elif hasattr(v, "name"):
@@ -341,12 +408,74 @@ def hash_state(game: Any) -> tuple[Any, ...]:
                     continue
                 if is_counter_attr(sub_k, sub_v):
                     continue
+                if getattr(sub_v, "y", 0) >= 62 or (
+                    getattr(sub_v, "y", 0) <= 0 and getattr(sub_v, "width", 0) >= 30
+                ):
+                    continue
                 if isinstance(sub_v, (int, bool, str)):
                     res.append((f"{k}.{sub_k}", sub_v))
                 elif hasattr(sub_v, "x") and hasattr(sub_v, "y"):
                     res.append((f"{k}.{sub_k}", getattr(sub_v, "x", 0), getattr(sub_v, "y", 0)))
                 elif isinstance(sub_v, np.ndarray) and sub_v.ndim == 2:
                     res.append((f"{k}.{sub_k}#buf", int(sub_v.sum()), int(np.count_nonzero(sub_v))))
+                elif isinstance(sub_v, dict) and sub_v:
+                    items = []
+                    for dk, dv in sub_v.items():
+                        if isinstance(dv, list):
+                            items.append(
+                                tuple(dv)
+                                if dv and isinstance(dv[0], (int, str, tuple))
+                                else len(dv)
+                            )
+                        elif isinstance(dv, (int, str, bool)):
+                            items.append((str(dk), dv))
+                    if items:
+                        res.append((f"{k}.{sub_k}#dict", tuple(items)))
+                elif isinstance(sub_v, list) and sub_v:
+                    res.append((f"{k}.{sub_k}#len", len(sub_v)))
+
+                # Check for selection state (e.g. peg / piece selection)
+                for sel_attr in ("qoifrofmiu", "selected", "selection"):
+                    if hasattr(sub_v, sel_attr):
+                        sel = getattr(sub_v, sel_attr, None)
+                        if sel is not None:
+                            res.append(
+                                (
+                                    f"{k}.{sub_k}.{sel_attr}",
+                                    getattr(sel, "name", ""),
+                                    getattr(sel, "grid_x", getattr(sel, "x", 0)),
+                                    getattr(sel, "grid_y", getattr(sel, "y", 0)),
+                                )
+                            )
+                # Check for grid tokens / pegs positions
+                if hasattr(sub_v, "ndtvadsrqf"):
+                    pegs = sub_v.ndtvadsrqf("fozwvlovdui")
+                    if pegs:
+                        res.append(
+                            (
+                                f"{k}.{sub_k}.pegs",
+                                tuple(
+                                    sorted(
+                                        (getattr(p, "grid_x", 0), getattr(p, "grid_y", 0))
+                                        for p in pegs
+                                    )
+                                ),
+                            )
+                        )
+                elif hasattr(sub_v, "grid_size") and hasattr(sub_v, "xpnsbxlatu"):
+                    entities = getattr(sub_v, "xpnsbxlatu", [])
+                    if entities:
+                        res.append(
+                            (
+                                f"{k}.{sub_k}.grid_entities",
+                                tuple(
+                                    sorted(
+                                        (getattr(p, "grid_x", 0), getattr(p, "grid_y", 0))
+                                        for p in entities
+                                    )
+                                ),
+                            )
+                        )
 
     return tuple(res)
 
@@ -536,6 +665,7 @@ def compute_heuristic(
     game: Any,
     avatar_name: str | None = None,
     piece_targets: dict[str, tuple[int, int]] | None = None,
+    initial_entities: dict[str, tuple[int, int]] | None = None,
 ) -> int:
     """Compute domain-general admissible/informative heuristic.
 
@@ -544,6 +674,20 @@ def compute_heuristic(
     3. Color Matching / Socket Alignment: If colored movable blocks exist, compute distance to matching sockets.
     4. Spatial Distance: Min distance between small visible components.
     """
+    # 0. Check for discrete tokens / pegs reduction (e.g. Peg Solitaire, token elimination)
+    for k, v in game.__dict__.items():
+        if not k.startswith("_") and hasattr(v, "__dict__"):
+            for sub_k, sub_v in v.__dict__.items():
+                if hasattr(sub_v, "ndtvadsrqf"):
+                    pegs = sub_v.ndtvadsrqf("fozwvlovdui")
+                    if pegs:
+                        bonus = 0
+                        if hasattr(v, "wpwvsglgmb") and v.wpwvsglgmb.qoifrofmiu is not None:
+                            markers = getattr(v, "zpbguihjnf", [])
+                            if any(getattr(m, "cdpcbbnfdp", (0, 0)) != (0, 0) for m in markers):
+                                bonus = -5
+                        return (len(pegs) - 1) * 20 + bonus
+
     if not hasattr(game, "current_level") or not game.current_level:
         return 0
 
@@ -663,28 +807,32 @@ def compute_heuristic(
         return sum(connecting_dists) + pattern_penalty
 
     # 3. Socket / Nested Frame Docking (frames with outer width/height = block width/height + 2)
-    frames = [
-        s for s in sps if 4 <= getattr(s, "width", 0) <= 24 and 4 <= getattr(s, "height", 0) <= 24
-    ]
-    blocks = [
-        s
-        for s in sps
-        if 2 <= getattr(s, "width", 0) <= 20
-        and 2 <= getattr(s, "height", 0) <= 20
-        and (avatar_name is None or s.name == avatar_name)
-    ]
-    if frames and blocks:
-        socket_dists = []
-        for f in frames:
-            matching_blocks = [
-                b for b in blocks if b != f and b.width == f.width - 2 and b.height == f.height - 2
-            ]
-            if matching_blocks:
-                tx = f.x + 1
-                ty = f.y + 1
-                socket_dists.append(min(abs(b.x - tx) + abs(b.y - ty) for b in matching_blocks))
-        if socket_dists and any(d > 0 for d in socket_dists):
-            return sum(socket_dists) + pattern_penalty
+    # Only applied when NO active avatar is navigating, preventing false docking overrides
+    if not avatar_name:
+        frames = [
+            s
+            for s in sps
+            if 4 <= getattr(s, "width", 0) <= 24 and 4 <= getattr(s, "height", 0) <= 24
+        ]
+        blocks = [
+            s
+            for s in sps
+            if 2 <= getattr(s, "width", 0) <= 20 and 2 <= getattr(s, "height", 0) <= 20
+        ]
+        if frames and blocks:
+            socket_dists = []
+            for f in frames:
+                matching_blocks = [
+                    b
+                    for b in blocks
+                    if b != f and b.width == f.width - 2 and b.height == f.height - 2
+                ]
+                if matching_blocks:
+                    tx = f.x + 1
+                    ty = f.y + 1
+                    socket_dists.append(min(abs(b.x - tx) + abs(b.y - ty) for b in matching_blocks))
+            if socket_dists and any(d > 0 for d in socket_dists):
+                return sum(socket_dists) + pattern_penalty
 
     # 4. Embodied Avatar Navigation
     if avatar_name:
@@ -707,6 +855,17 @@ def compute_heuristic(
                 dists = [abs(av.x - t.x) + abs(av.y - t.y) for t in effective_targets]
                 unreached = [d for d in dists if d > 0]
                 base_h = min(unreached) if unreached else 0
+
+                # Causal environmental progress bonus: reward when non-avatar entities move (e.g. doors open)
+                if initial_entities:
+                    cur_ent = {s.name: (s.x, s.y) for s in sps if s.name in initial_entities}
+                    if any(
+                        cur_ent.get(k) != initial_entities[k]
+                        for k in initial_entities
+                        if k in cur_ent
+                    ):
+                        base_h -= 30
+
                 return base_h + pattern_penalty
 
     # 5. Color Matching / Socket Alignment
@@ -808,9 +967,10 @@ class OnlineForwardSearchSolver:
                 # Provide dummy second level so set_level(1) does not raise IndexError during win transitions
                 game._levels = [game.current_level, copy.deepcopy(game.current_level)]
                 game._current_level_index = 0
-            if hasattr(game, "camera"):
+            if hasattr(game, "camera") and not isinstance(
+                getattr(game, "_camera", None), DummyFastCamera
+            ):
                 game._camera = DummyFastCamera(game.camera)
-                game._camera.interfaces = []
 
             start_score = getattr(game, "_score", 0)
             start_gc = copy.deepcopy(game)
@@ -882,9 +1042,21 @@ class OnlineForwardSearchSolver:
                         if avatar_name:
                             break
 
-            piece_targets: dict[str, tuple[int, int]] = {}
-            if not avatar_name:
-                piece_targets = induce_piece_targets(start_gc)
+            piece_targets: dict[str, tuple[int, int]] = induce_piece_targets(start_gc)
+            if piece_targets:
+                avatar_name = None
+
+            initial_entities: dict[str, tuple[int, int]] = {}
+            if avatar_name and hasattr(start_gc, "current_level") and start_gc.current_level:
+                initial_entities = {
+                    s.name: (s.x, s.y)
+                    for s in start_gc.current_level.get_sprites()
+                    if s.name != avatar_name
+                    and getattr(s, "layer", 0) >= 0
+                    and 1 < s.y < 62
+                    and 1 <= getattr(s, "width", 0) < 20
+                    and 1 <= getattr(s, "height", 0) < 20
+                }
 
             # Dynamically extract win guard checkers via bytecode analysis
             win_checkers = extract_win_checkers(game)
@@ -927,7 +1099,10 @@ class OnlineForwardSearchSolver:
 
                 sh0 = hash_state(sim_curr)
                 h0 = compute_heuristic(
-                    sim_curr, avatar_name=avatar_name, piece_targets=piece_targets
+                    sim_curr,
+                    avatar_name=avatar_name,
+                    piece_targets=piece_targets,
+                    initial_entities=initial_entities,
                 )
                 pq: list[tuple[int, int, int, int, Any, list[ActionInput]]] = [
                     (h0, 0, 0, h0, sim_curr, [])
@@ -988,7 +1163,10 @@ class OnlineForwardSearchSolver:
                         visited[sh] = next_cost
 
                         h = compute_heuristic(
-                            ng, avatar_name=avatar_name, piece_targets=piece_targets
+                            ng,
+                            avatar_name=avatar_name,
+                            piece_targets=piece_targets,
+                            initial_entities=initial_entities,
                         )
                         heapq.heappush(
                             pq,
