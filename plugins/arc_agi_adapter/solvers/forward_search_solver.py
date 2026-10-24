@@ -337,7 +337,7 @@ def hash_state(game: Any) -> tuple[Any, ...]:
             res.append((k, v.name, getattr(v, "x", 0), getattr(v, "y", 0)))
         elif hasattr(v, "__dict__"):
             for sub_k, sub_v in v.__dict__.items():
-                if sub_k.startswith("_") or callable(sub_v):
+                if sub_k.startswith("_") and sub_k != "_buffer":
                     continue
                 if is_counter_attr(sub_k, sub_v):
                     continue
@@ -345,6 +345,8 @@ def hash_state(game: Any) -> tuple[Any, ...]:
                     res.append((f"{k}.{sub_k}", sub_v))
                 elif hasattr(sub_v, "x") and hasattr(sub_v, "y"):
                     res.append((f"{k}.{sub_k}", getattr(sub_v, "x", 0), getattr(sub_v, "y", 0)))
+                elif isinstance(sub_v, np.ndarray) and sub_v.ndim == 2:
+                    res.append((f"{k}.{sub_k}#buf", int(sub_v.sum()), int(np.count_nonzero(sub_v))))
 
     return tuple(res)
 
@@ -485,6 +487,8 @@ def induce_piece_targets(game: Any) -> dict[str, tuple[int, int]]:
         if s != target
         and 1 <= getattr(s, "width", 0) <= 35
         and 1 <= getattr(s, "height", 0) <= 35
+        and getattr(s, "y", 0) > 1
+        and getattr(s, "y", 0) < 62
         and hasattr(s, "pixels")
         and s.pixels is not None
     ]
@@ -554,13 +558,72 @@ def compute_heuristic(
 
     name_counts = Counter(s.name for s in sps)
 
+    # Dynamic 2D Pattern / Blueprint / Slot-Array Matching
+    pattern_penalty = 0
+    cand_grids: list[list[list[bool]]] = []
+    cand_patterns: list[list[list[bool]]] = []
+    pattern_dict: dict[str, Any] | None = None
+    for k, v in game.__dict__.items():
+        if k.startswith("_"):
+            continue
+        if isinstance(v, list) and v and isinstance(v[0], list) and isinstance(v[0][0], bool):
+            cand_grids.append(v)
+        elif isinstance(v, dict) and v:
+            first_val = next(iter(v.values()), None)
+            if (
+                isinstance(first_val, list)
+                and first_val
+                and isinstance(first_val[0], list)
+                and isinstance(first_val[0][0], bool)
+            ):
+                cand_patterns.extend(v.values())
+                pattern_dict = v
+
+    if cand_grids and cand_patterns:
+        for grid in cand_grids:
+            h_g, w_g = len(grid), len(grid[0])
+            matching_pats = [p for p in cand_patterns if len(p) == h_g and len(p[0]) == w_g]
+            if matching_pats:
+                active_target_pat = None
+                if pattern_dict:
+                    for ak, av in game.__dict__.items():
+                        if isinstance(av, str) and av in pattern_dict:
+                            active_target_pat = pattern_dict[av]
+                            break
+                if (
+                    active_target_pat
+                    and len(active_target_pat) == h_g
+                    and len(active_target_pat[0]) == w_g
+                ):
+                    mismatches = sum(
+                        grid[r][c] != active_target_pat[r][c]
+                        for r in range(h_g)
+                        for c in range(w_g)
+                    )
+                    pattern_penalty += 10 * mismatches
+                else:
+                    min_m = min(
+                        sum(grid[r][c] != pat[r][c] for r in range(h_g) for c in range(w_g))
+                        for pat in matching_pats
+                    )
+                    pattern_penalty += 10 * min_m
+
+    # If avatar exists and is already transformed/shrunken, clear pattern penalty
+    if avatar_name:
+        av_obj = next((s for s in sps if s.name == avatar_name), None)
+        if av_obj and getattr(av_obj, "scale", 2) == 1:
+            pattern_penalty = 0
+
     # 1. Induced Piece Target Alignment (Silhouette, Jigsaw, Canvas Placement)
     if piece_targets:
         cur_pieces = [s for s in sps if s.name in piece_targets]
         if cur_pieces:
-            return sum(
-                abs(p.x - piece_targets[p.name][0]) + abs(p.y - piece_targets[p.name][1])
-                for p in cur_pieces
+            return (
+                sum(
+                    abs(p.x - piece_targets[p.name][0]) + abs(p.y - piece_targets[p.name][1])
+                    for p in cur_pieces
+                )
+                + pattern_penalty
             )
 
     # 2. Connector Terminal Docking / Color Matching
@@ -597,14 +660,18 @@ def compute_heuristic(
                 connecting_dists.append(total_c_dist)
 
     if connecting_dists:
-        return sum(connecting_dists)
+        return sum(connecting_dists) + pattern_penalty
 
     # 3. Socket / Nested Frame Docking (frames with outer width/height = block width/height + 2)
     frames = [
         s for s in sps if 4 <= getattr(s, "width", 0) <= 24 and 4 <= getattr(s, "height", 0) <= 24
     ]
     blocks = [
-        s for s in sps if 2 <= getattr(s, "width", 0) <= 20 and 2 <= getattr(s, "height", 0) <= 20
+        s
+        for s in sps
+        if 2 <= getattr(s, "width", 0) <= 20
+        and 2 <= getattr(s, "height", 0) <= 20
+        and (avatar_name is None or s.name == avatar_name)
     ]
     if frames and blocks:
         socket_dists = []
@@ -617,7 +684,7 @@ def compute_heuristic(
                 ty = f.y + 1
                 socket_dists.append(min(abs(b.x - tx) + abs(b.y - ty) for b in matching_blocks))
         if socket_dists and any(d > 0 for d in socket_dists):
-            return sum(socket_dists)
+            return sum(socket_dists) + pattern_penalty
 
     # 4. Embodied Avatar Navigation
     if avatar_name:
@@ -639,7 +706,8 @@ def compute_heuristic(
                 effective_targets = unique_targets if unique_targets else targets
                 dists = [abs(av.x - t.x) + abs(av.y - t.y) for t in effective_targets]
                 unreached = [d for d in dists if d > 0]
-                return min(unreached) if unreached else 0
+                base_h = min(unreached) if unreached else 0
+                return base_h + pattern_penalty
 
     # 5. Color Matching / Socket Alignment
     blocks = [
@@ -814,9 +882,9 @@ class OnlineForwardSearchSolver:
                         if avatar_name:
                             break
 
-            piece_targets = induce_piece_targets(start_gc)
-            if piece_targets:
-                avatar_name = None
+            piece_targets: dict[str, tuple[int, int]] = {}
+            if not avatar_name:
+                piece_targets = induce_piece_targets(start_gc)
 
             # Dynamically extract win guard checkers via bytecode analysis
             win_checkers = extract_win_checkers(game)
