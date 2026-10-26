@@ -65,6 +65,7 @@ class ProceduralMacro:
     confidence: float = 1.0  # Starts at 1.0 (proven), decays on replay failure
     replay_successes: int = 0
     replay_failures: int = 0
+    waypoints: list[Any] = field(default_factory=list)  # RelationalWaypoint milestones
 
     def is_compatible(self, available_actions: set[int]) -> bool:
         """Check if this macro's actions are all available in the given action space."""
@@ -241,6 +242,7 @@ class HippocampalEpisodicCortex:
         # Key: (game_id, level) or auto-generated signature.
         # Value: ProceduralMacro containing proven action sequence + context.
         self.consolidated_macros: dict[str, ProceduralMacro] = {}
+        self.relational_macros: dict[str, Any] = {}
 
     def record_transition(
         self,
@@ -576,6 +578,7 @@ class HippocampalEpisodicCortex:
     def reset_consolidated_macros(self) -> None:
         """Clear consolidated procedural macros (for cross-game isolation)."""
         self.consolidated_macros.clear()
+        self.relational_macros.clear()
 
     def query_applicable_macros(
         self,
@@ -599,6 +602,25 @@ class HippocampalEpisodicCortex:
 
         candidates.sort(key=lambda x: x[0], reverse=True)
         return [macro for _, macro in candidates[:top_k]]
+
+    def query_applicable_relational_macros(
+        self,
+        grid: np.ndarray,
+        available_actions: set[int],
+        top_k: int = 2,
+    ) -> list[Any]:
+        """Query relational macros whose waypoint features exist in the current grid."""
+        candidates: list[tuple[float, Any]] = []
+        for macro in self.relational_macros.values():
+            if hasattr(macro, "action_space") and not macro.action_space.issubset(
+                available_actions
+            ):
+                continue
+            if hasattr(macro, "matches_grid_features") and not macro.matches_grid_features(grid):
+                continue
+            candidates.append((getattr(macro, "confidence", 1.0), macro))
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return [m for _, m in candidates[:top_k]]
 
     def consolidate_schema_and_reset(
         self,
@@ -657,6 +679,31 @@ class HippocampalEpisodicCortex:
                 current_level = getattr(engine, "current_level", level or 0)
                 macro_id = f"macro_{game_id}_lvl{current_level}_{len(action_seq)}steps"
 
+                # Extract relational waypoints for coordinate-invariant lifting
+                from hbllm.hcir.world.autonomous_learning import (
+                    RelationalSubgoalMacro,
+                    RelationalWaypoint,
+                )
+
+                extracted_waypoints: list[RelationalWaypoint] = []
+                seen_features: set[int] = set()
+                for idx, step_t in enumerate(winning_trajectory):
+                    if step_t.grid_snapshot is not None and step_t.avatar_pos is not None:
+                        ar, ac = step_t.avatar_pos
+                        H_s, W_s = step_t.grid_snapshot.shape[:2]
+                        if 0 <= ar < H_s and 0 <= ac < W_s:
+                            f_val = int(step_t.grid_snapshot[ar, ac])
+                            if f_val != 0 and f_val not in seen_features:
+                                seen_features.add(f_val)
+                                extracted_waypoints.append(
+                                    RelationalWaypoint(
+                                        role="goal" if step_t.is_win else "waypoint",
+                                        feature=f_val,
+                                        target_pos=(ar, ac),
+                                        relative_step=idx,
+                                    )
+                                )
+
                 macro = ProceduralMacro(
                     macro_id=macro_id,
                     action_sequence=action_seq,
@@ -667,12 +714,24 @@ class HippocampalEpisodicCortex:
                     level=current_level,
                     game_id=game_id,
                     num_steps=len(action_seq),
+                    waypoints=extracted_waypoints,
                 )
                 self.consolidated_macros[macro_id] = macro
+
+                if extracted_waypoints:
+                    rel_macro_id = f"rel_{macro_id}"
+                    self.relational_macros[rel_macro_id] = RelationalSubgoalMacro(
+                        macro_id=rel_macro_id,
+                        waypoints=extracted_waypoints,
+                        action_space=frozenset(avail_actions),
+                        source_level=current_level,
+                    )
+
                 logger.info(
-                    "Procedural Consolidation: Compiled macro '%s' (%d actions) from winning trajectory",
+                    "Procedural Consolidation: Compiled macro '%s' (%d actions, %d relational waypoints) from winning trajectory",
                     macro_id,
                     len(action_seq),
+                    len(extracted_waypoints),
                 )
 
                 # Also register in working memory procedural library if engine has it

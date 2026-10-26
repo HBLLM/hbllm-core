@@ -453,16 +453,20 @@ class AutonomousEpistemicEngine:
         self.transaction_manager: TransactionManager | None = None
         self.active_task_frame: TaskFrame | None = None
 
-        # ── Autonomous Learning Integration (Phases B, C, D) ────────────────
+        # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
         from hbllm.hcir.world.autonomous_learning import (
             CausalTheoryPlanner,
+            ClickAffordanceLearner,
             CrossGameKnowledgeTransfer,
+            DeliberationEntropyMonitor,
             MetaLearningGovernor,
         )
 
         self.causal_planner: CausalTheoryPlanner = CausalTheoryPlanner()
         self.knowledge_transfer: CrossGameKnowledgeTransfer = CrossGameKnowledgeTransfer()
         self.meta_governor: MetaLearningGovernor = MetaLearningGovernor()
+        self.click_learner: ClickAffordanceLearner = ClickAffordanceLearner()
+        self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)
@@ -1527,6 +1531,8 @@ class AutonomousEpistemicEngine:
             level=level,
         )
         self.step_counter = 0
+        if hasattr(self, "entropy_monitor") and self.entropy_monitor is not None:
+            self.entropy_monitor.reset_for_level()
         if is_new_level:
             self.environmental_step_limit = None
             self.budget_governor.reset(max_budget=self.exploration_budget)
@@ -1679,6 +1685,24 @@ class AutonomousEpistemicEngine:
             action=action,
             action_data=action_data,
         )
+
+        # Record spatial effector intervention feedback (domain-agnostic)
+        if (
+            action is not None
+            and action_data is not None
+            and self.prev_grid is not None
+            and hasattr(self, "click_learner")
+            and self.click_learner is not None
+        ):
+            coord = None
+            if "row" in action_data and "col" in action_data:
+                coord = (int(action_data["row"]), int(action_data["col"]))
+            elif "y" in action_data and "x" in action_data:
+                coord = (int(action_data["y"]), int(action_data["x"]))
+            elif self.is_spatial_effector(action) and "pos" in action_data:
+                coord = tuple(action_data["pos"])
+            if coord is not None:
+                self.click_learner.observe_click(coord, self.prev_grid, curr_grid)
 
         # Wire W041-W050 temporal buffer & state transition sequence modeling
         new_snap = WorldStateSnapshot(

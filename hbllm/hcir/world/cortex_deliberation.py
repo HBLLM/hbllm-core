@@ -415,9 +415,7 @@ class CausalUndoSafetyPredicate(PlanSafetyPredicate):
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
         undo_acts = getattr(engine, "undo_actions", set())
-        if next_step.action in undo_acts or (
-            next_step.action == 7 and 7 in available_actions and len(available_actions) > 1
-        ):
+        if next_step.action in undo_acts:
             return SafetyGateResult(
                 is_safe=False,
                 reason=f"Action {next_step.action} is an empirical state-reversion undo operator",
@@ -826,6 +824,17 @@ class PrefrontalDeliberationEngine:
         if engine.avatar_pos is not None:
             engine.recent_positions.append(engine.avatar_pos)
 
+        # Metacognitive Fail-Fast & Entropy Monitoring (Phase I)
+        if hasattr(engine, "entropy_monitor") and engine.entropy_monitor is not None:
+            cur_h = float("inf")
+            if engine.avatar_pos is not None and engine.learned_goal_positions:
+                cur_h = min(
+                    abs(engine.avatar_pos[0] - g[0]) + abs(engine.avatar_pos[1] - g[1])
+                    for g in engine.learned_goal_positions
+                )
+            if engine.entropy_monitor.update(engine.avatar_pos, cur_h):
+                engine.entropy_monitor.trigger_fail_fast(engine)
+
         # Faculty: Executive Macro-Action Plan Execution & Synthesis
         def _is_macro_step_safe(plan: Any, act: Any, data: dict[str, Any] | None) -> bool:
             # Executive prefrontal macro plans supersede subcortical motor refractory inhibition (inhibited_actions)
@@ -916,11 +925,61 @@ class PrefrontalDeliberationEngine:
                     if m_act in available_actions:
                         return self._finalize_step(engine, curr_grid, m_act, m_data)
 
+        # ── Relational Subgoal Macro Recall (Phase E) ──────────────────────
+        # When exact concrete macro does not match, query coordinate-invariant
+        # relational macros and plan dynamically through intermediate waypoints.
+        if (
+            (macro_plan is None or macro_plan.is_empty())
+            and not engine.mental_plan
+            and hasattr(engine, "episodic_cortex")
+            and getattr(engine.episodic_cortex, "relational_macros", None)
+            and engine.avatar_pos is not None
+            and engine.is_motor_grounded()
+        ):
+            applicable_rel = engine.episodic_cortex.query_applicable_relational_macros(
+                grid=curr_grid,
+                available_actions=set(available_actions),
+                top_k=1,
+            )
+            if applicable_rel:
+                rel_macro = applicable_rel[0]
+                from hbllm.hcir.world.autonomous_learning import CausalTheoryPlanner
+
+                ctx = CausalTheoryPlanner.extract_planning_context(engine, curr_grid)
+                rel_path = CausalTheoryPlanner.plan_relational_macro(
+                    engine.avatar_pos, curr_grid, ctx, rel_macro
+                )
+                if rel_path:
+                    from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+                    rel_plan: list[MentalSimulationStep] = []
+                    sim_pos = engine.avatar_pos
+                    for act_id in rel_path:
+                        dr, dc = ctx.action_displacements.get(act_id, (0, 0))
+                        next_pos = (sim_pos[0] + dr, sim_pos[1] + dc)
+                        rel_plan.append(
+                            MentalSimulationStep(
+                                action=act_id,
+                                predicted_avatar_pos=next_pos,
+                            )
+                        )
+                        sim_pos = next_pos
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(rel_plan)
+                    next_step = engine.mental_plan.popleft()
+                    logger.info(
+                        "Relational Macro Recall: Dynamically planned %d-step path for '%s'",
+                        len(rel_path),
+                        rel_macro.macro_id,
+                    )
+                    return self._finalize_step(
+                        engine, curr_grid, next_step.action, next_step.action_data
+                    )
+
         can_synthesize = (
             engine.is_motor_grounded()
-            or set(available_actions).issubset({6, 7})
-            or bool(getattr(engine, "current_game_id", None))
-            or hasattr(engine, "_arc_game")
+            or any(engine.is_spatial_effector(a) for a in available_actions)
+            or not any(engine.is_displacement_action(a) for a in available_actions)
             or bool(MacroActionDriverManager._synthesis_hooks)
         )
 
@@ -1343,6 +1402,22 @@ class PrefrontalDeliberationEngine:
                                 ctx,
                                 max_expansions=300,
                             )
+                            # Phase F: Multi-Stage Chained Prerequisite Backchaining
+                            if not causal_path:
+                                tool_affinities = getattr(
+                                    engine.working_memory, "tool_barrier_affinities", {}
+                                )
+                                if not tool_affinities and hasattr(engine, "symbolic_theory"):
+                                    tool_affinities = getattr(
+                                        engine.symbolic_theory, "tool_barrier_affinities", {}
+                                    )
+                                causal_path = CausalTheoryPlanner.plan_chained_path(
+                                    engine.avatar_pos,
+                                    curr_grid,
+                                    ctx,
+                                    tool_barrier_affinities=tool_affinities,
+                                    max_expansions=400,
+                                )
                             if causal_path:
                                 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
@@ -1427,6 +1502,29 @@ class PrefrontalDeliberationEngine:
                     ]
                     chosen_action = non_eff[0] if non_eff else available_actions[0]
                     chosen_data = None
+
+        # Fallback to exploratory spatial effector affordance if any spatial effector action is available
+        if (
+            (chosen_action is None or chosen_action not in available_actions)
+            and hasattr(engine, "click_learner")
+            and engine.click_learner is not None
+        ):
+            spatial_eff_acts = [a for a in available_actions if engine.is_spatial_effector(a)]
+            if spatial_eff_acts:
+                eff_act = spatial_eff_acts[0]
+                click_target = engine.click_learner.pick_exploratory_click(
+                    curr_grid, bg_feature=getattr(engine, "bg_feature", 0)
+                )
+                if click_target is not None:
+                    chosen_action = eff_act
+                    aff = engine.action_affordances.get(eff_act)
+                    req_keys = aff.target_param_keys if aff else ("row", "col")
+                    if "row" in req_keys and "col" in req_keys:
+                        chosen_data = {"row": click_target[0], "col": click_target[1]}
+                    elif "y" in req_keys and "x" in req_keys:
+                        chosen_data = {"y": click_target[0], "x": click_target[1]}
+                    else:
+                        chosen_data = engine.ground_effector_action(curr_grid, eff_act)
 
         return self._finalize_step(
             engine, curr_grid, chosen_action, chosen_data, predicted_pos=predicted_pos

@@ -1982,31 +1982,12 @@ class MacroPlanSynthesizer:
                 ),
             )
             best_switch = sorted_switches[0]
-            has_click = any(engine.is_spatial_effector(a) or a == 6 for a in available_actions)
-            if has_click and (engine.avatar_pos is None or set(available_actions).issubset({6})):
-                try:
-                    from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
-
-                    plan.append(
-                        ArcClickCell(
-                            cell_coord=best_switch.pos,
-                            description=f"Click switch at {best_switch.pos}",
-                        )
-                    )
-                except Exception:
-                    plan.append(
-                        InteractWith(
-                            target_coord=best_switch.pos,
-                            description=f"Click switch at {best_switch.pos}",
-                        )
-                    )
-            else:
-                plan.append(
-                    InteractWith(
-                        target_coord=best_switch.pos,
-                        description=f"Interact with switch at {best_switch.pos}",
-                    )
+            plan.append(
+                InteractWith(
+                    target_coord=best_switch.pos,
+                    description=f"Interact with switch at {best_switch.pos}",
                 )
+            )
 
             if goals:
                 plan.append(
@@ -2055,23 +2036,13 @@ class MacroPlanSynthesizer:
                         plan.append(task)
                     return plan
 
-                if any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
-                    try:
-                        from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
-
-                        plan.append(
-                            ArcClickCell(
-                                cell_coord=best_obj.pos,
-                                description=f"Try probing object {best_obj.id} at {best_obj.pos}",
-                            )
+                if any(engine.is_spatial_effector(a) for a in available_actions):
+                    plan.append(
+                        InteractWith(
+                            target_coord=best_obj.pos,
+                            description=f"Try probing object {best_obj.id} at {best_obj.pos}",
                         )
-                    except Exception:
-                        plan.append(
-                            InteractWith(
-                                target_coord=best_obj.pos,
-                                description=f"Try probing object {best_obj.id} at {best_obj.pos}",
-                            )
-                        )
+                    )
                 else:
                     plan.append(
                         ExploreObject(target_pos=best_obj.pos, target_feature=best_obj.feature_id)
