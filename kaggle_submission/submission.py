@@ -934,6 +934,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         if instructions and hasattr(self.internal_agent, "load_instructions"):
             self.internal_agent.load_instructions(instructions)
         self.step_count: int = 0
+        self.action_counter: int = 0  # Cumulative per-game action count (never reset on death)
         self.last_grid: np.ndarray | None = None
         self.current_game_id: str | None = None
         self.current_levels_completed: int = 0
@@ -942,6 +943,11 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self._game_start_time: float = time.time()
         self.consecutive_deaths_this_level: int = 0
         self._is_marked_done: bool = False
+
+        # Grid stagnation detection: bail out when agent makes no visible progress
+        self._stagnation_grid_hash: int | None = None
+        self._stagnation_steps: int = 0
+        self._MAX_STAGNATION_STEPS: int = 20
 
     def is_done(self, frames: Any, latest_frame: Any) -> bool:
         """Stop once all levels are won or budget guards trigger."""
@@ -978,6 +984,11 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
         # 4. Consecutive Death Stagnation Guard
         if getattr(self, "consecutive_deaths_this_level", 0) >= self.MAX_CONSECUTIVE_DEATHS:
+            self._is_marked_done = True
+            return True
+
+        # 5. Grid Stagnation Guard: no observable change for _MAX_STAGNATION_STEPS
+        if getattr(self, "_stagnation_steps", 0) >= getattr(self, "_MAX_STAGNATION_STEPS", 20):
             self._is_marked_done = True
             return True
 
@@ -1130,9 +1141,22 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
             if self.current_game_id != base_gid:
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
+                self.action_counter = 0
+                self._stagnation_grid_hash = None
+                self._stagnation_steps = 0
                 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
                 self.internal_agent = AutonomousEpistemicEngine(instructions=self.instructions)
+                # Clear solver caches so exhausted_levels from previous games don't persist
+                try:
+                    from plugins.arc_agi_adapter.solvers.forward_search_solver import (
+                        OnlineForwardSearchSolver,
+                    )
+
+                    OnlineForwardSearchSolver._exhausted_levels.clear()
+                    OnlineForwardSearchSolver._game_solver_time.clear()
+                except Exception:
+                    pass
                 if not self.disable_archetypes:
                     try:
                         from plugins.arc_agi_adapter import install_arc3_solvers
@@ -1174,6 +1198,15 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
         self.last_grid = grid.copy()
         self.step_count += 1
+        self.action_counter += 1
+
+        # Grid stagnation tracking: detect when the observable state is not changing
+        grid_hash = hash(grid.tobytes())
+        if grid_hash == self._stagnation_grid_hash:
+            self._stagnation_steps += 1
+        else:
+            self._stagnation_grid_hash = grid_hash
+            self._stagnation_steps = 0
 
         # Synchronize working level and frame state
         self.internal_agent.last_frame_state = state_str
@@ -1199,9 +1232,35 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
 
         try:
             _arc_schema = [dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS]
+
+            # CRITICAL: Attach game object to engine so specialized solvers can access it.
+            # Without this, arc_macro_plan_synthesis_hook sees _arc_game=None and skips ALL solvers.
+            g_ctx = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
+                getattr(self, "arc_env", None), "game", None
+            )
+            if g_ctx is not None:
+                self.internal_agent._arc_game = g_ctx
+
+            # Extract perceptual objects for macro plan synthesis
+            _objects = None
+            try:
+                from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+
+                _objects = extract_arc_objects(
+                    grid,
+                    engine=self.internal_agent,
+                    game_obj=g_ctx or latest_frame,
+                )
+            except Exception:
+                pass
+
             if hasattr(self.internal_agent, "decide"):
                 action_id, action_data = self.internal_agent.decide(
-                    grid, available_actions, action_schemas=_arc_schema
+                    grid,
+                    available_actions,
+                    action_schemas=_arc_schema,
+                    micro_actions=_arc_schema,
+                    objects=_objects,
                 )
             else:
                 action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)

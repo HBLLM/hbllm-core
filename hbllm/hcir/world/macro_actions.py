@@ -1045,6 +1045,97 @@ class CustomMacroAction(MacroAction):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 8b. ProceduralReplayAction (Replay Consolidated Macro)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class ProceduralReplayAction(MacroAction):
+    """Replay a learned action sequence from a consolidated ProceduralMacro.
+
+    This is the execution arm of the procedural consolidation pipeline (Phase A).
+    When the deliberation engine finds an applicable macro from episodic memory,
+    it wraps it in this macro action to replay the proven action sequence.
+
+    The replay tracks progress through the sequence and records outcome back
+    to the source macro for Bayesian confidence updating.
+    """
+
+    def __init__(
+        self,
+        macro: Any,  # ProceduralMacro (avoid circular import)
+        description: str = "",
+    ) -> None:
+        super().__init__(
+            name=f"ProceduralReplay({getattr(macro, 'macro_id', 'unknown')})",
+            intent=SpatialActionIntent.NAVIGATE,
+        )
+        self._macro = macro
+        self._action_seq: list[Any] = list(getattr(macro, "action_sequence", []))
+        self._data_seq: list[Any] = list(getattr(macro, "action_data_sequence", []))
+        self._cursor: int = 0
+        self.max_steps = len(self._action_seq) + 5  # Small buffer for timing
+        self.is_strict = True  # Trust the proven sequence
+        self.description = description or f"Replaying {len(self._action_seq)}-step macro"
+
+    def is_satisfied(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+    ) -> bool:
+        """Satisfied when we've dispatched all actions in the sequence."""
+        return self._cursor >= len(self._action_seq)
+
+    def is_feasible(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> bool:
+        """Feasible if the next action is in the available action set."""
+        if self._cursor >= len(self._action_seq):
+            return False
+        next_action = self._action_seq[self._cursor]
+        return next_action in available_actions
+
+    def step(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+    ) -> tuple[Any, dict[str, Any] | None] | None:
+        """Dispatch the next action from the learned sequence."""
+        if self._cursor >= len(self._action_seq):
+            return None
+        action = self._action_seq[self._cursor]
+        data = self._data_seq[self._cursor] if self._cursor < len(self._data_seq) else None
+        self._cursor += 1
+        self.consecutive_steps += 1
+
+        if action not in available_actions:
+            logger.warning(
+                "ProceduralReplay: action %s not available at step %d, aborting",
+                action,
+                self._cursor,
+            )
+            self.status = MacroActionStatus.FAILED
+            if hasattr(self._macro, "record_replay_outcome"):
+                self._macro.record_replay_outcome(False)
+            return None
+
+        return (action, data)
+
+    def record_success(self) -> None:
+        """Record successful replay completion back to the source macro."""
+        if hasattr(self._macro, "record_replay_outcome"):
+            self._macro.record_replay_outcome(True)
+
+    def record_failure(self) -> None:
+        """Record replay failure back to the source macro."""
+        if hasattr(self._macro, "record_replay_outcome"):
+            self._macro.record_replay_outcome(False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 9. MacroActionPlan Scheduler & Causal Attribution
 # ─────────────────────────────────────────────────────────────────────────────
 

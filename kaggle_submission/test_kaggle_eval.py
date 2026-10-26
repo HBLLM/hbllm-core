@@ -37,6 +37,7 @@ def test_kaggle_submission_agent(games: list[str], max_levels: int = 2, max_step
             continue
 
         frame = env.reset()
+        agent.arc_env = env  # Critical: gives agent access to game object for solver dispatch
         agent.reset_episode()
         history = []
 

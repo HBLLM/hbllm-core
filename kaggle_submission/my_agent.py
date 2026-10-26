@@ -249,6 +249,7 @@ class MyAgent(Agent):
             except Exception as e:
                 logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         self.internal_agent = self.internal_engine
+        self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None
         self.current_game_id: str | None = (
             game_id.split("-")[0].strip() if game_id not in ("default_game", "", None) else None
@@ -260,6 +261,12 @@ class MyAgent(Agent):
         self._game_start_time: float = time.time()
         self.consecutive_deaths_this_level: int = 0
         self._is_marked_done: bool = False
+        self.action_counter: int = 0
+
+        # Grid stagnation detection: bail out when agent makes no visible progress
+        self._stagnation_grid_hash: int | None = None
+        self._stagnation_steps: int = 0
+        self._MAX_STAGNATION_STEPS: int = 20  # 20 steps with identical grid → bail out
 
     def main(self) -> None:
         """Execute agent with concurrency gating and tournament time tracking."""
@@ -379,6 +386,16 @@ class MyAgent(Agent):
             self._is_marked_done = True
             return True
 
+        # 5. Grid Stagnation Guard: no observable change for _MAX_STAGNATION_STEPS
+        if getattr(self, "_stagnation_steps", 0) >= getattr(self, "_MAX_STAGNATION_STEPS", 20):
+            print(
+                f"[STAGNATION GUARD] Grid unchanged for {self._stagnation_steps} steps on level "
+                f"{self.current_levels_completed} for {self.game_id}. Yielding game.",
+                flush=True,
+            )
+            self._is_marked_done = True
+            return True
+
         return False
 
     def _extract_grid(self, latest_frame: Any, frames: Any = None) -> np.ndarray:
@@ -491,7 +508,20 @@ class MyAgent(Agent):
                 )
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
+                self.action_counter = 0
+                self._stagnation_grid_hash = None
+                self._stagnation_steps = 0
                 self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
+                # Clear solver caches so exhausted_levels from previous games don't persist
+                try:
+                    from plugins.arc_agi_adapter.solvers.forward_search_solver import (
+                        OnlineForwardSearchSolver,
+                    )
+
+                    OnlineForwardSearchSolver._exhausted_levels.clear()
+                    OnlineForwardSearchSolver._game_solver_time.clear()
+                except Exception:
+                    pass
                 try:
                     import plugins.arc_agi_adapter  # noqa: F401
                 except Exception as e:
@@ -589,6 +619,17 @@ class MyAgent(Agent):
             self.reset_episode(retain_dynamics=True, is_new_level=True, level=lvl_completed)
 
         self.last_grid = grid.copy()
+
+        # Increment action counter for budget guard
+        self.action_counter += 1
+
+        # Grid stagnation tracking: detect when the observable state is not changing
+        grid_hash = hash(grid.tobytes())
+        if grid_hash == self._stagnation_grid_hash:
+            self._stagnation_steps += 1
+        else:
+            self._stagnation_grid_hash = grid_hash
+            self._stagnation_steps = 0
 
         # Synchronize working level and frame state
         self.internal_agent.last_frame_state = state_name

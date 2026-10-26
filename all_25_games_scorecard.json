@@ -1,19 +1,19 @@
 {
-  "timestamp": 1792862201.302676,
+  "timestamp": 1792887521.5297751,
   "total_games_tested": 25,
-  "total_levels_passed": 53,
+  "total_levels_passed": 60,
   "total_levels_possible": 183,
-  "pass_rate_pct": 28.96,
+  "pass_rate_pct": 32.79,
   "games": {
     "tu93-0768757b": {
       "title": "TU93",
       "levels_passed": 9,
       "target_levels": 9,
       "won": true,
-      "steps": 189,
-      "total_steps": 189,
+      "steps": 201,
+      "total_steps": 201,
       "attempts": 1,
-      "elapsed_seconds": 40.56,
+      "elapsed_seconds": 44.71,
       "baseline": [
         19,
         16,
@@ -34,7 +34,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 57.55,
+      "elapsed_seconds": 74.67,
       "baseline": [
         32,
         50,
@@ -48,13 +48,13 @@
     },
     "re86-8af5384d": {
       "title": "RE86",
-      "levels_passed": 0,
+      "levels_passed": 2,
       "target_levels": 8,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 75.1,
+      "elapsed_seconds": 69.79,
       "baseline": [
         26,
         42,
@@ -74,7 +74,7 @@
       "steps": 103,
       "total_steps": 103,
       "attempts": 1,
-      "elapsed_seconds": 19.56,
+      "elapsed_seconds": 44.93,
       "baseline": [
         22,
         42,
@@ -89,13 +89,13 @@
     },
     "m0r0-492f87ba": {
       "title": "M0R0",
-      "levels_passed": 1,
+      "levels_passed": 2,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 188.18,
+      "elapsed_seconds": 90.73,
       "baseline": [
         30,
         111,
@@ -107,13 +107,13 @@
     },
     "cn04-2fe56bfb": {
       "title": "CN04",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 53.06,
+      "elapsed_seconds": 155.56,
       "baseline": [
         29,
         54,
@@ -125,13 +125,13 @@
     },
     "ft09-0d8bbf25": {
       "title": "FT09",
-      "levels_passed": 1,
+      "levels_passed": 0,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 114.64,
+      "elapsed_seconds": 109.78,
       "baseline": [
         43,
         12,
@@ -149,7 +149,7 @@
       "steps": 120,
       "total_steps": 120,
       "attempts": 1,
-      "elapsed_seconds": 103.72,
+      "elapsed_seconds": 18.75,
       "baseline": [
         54,
         58,
@@ -161,13 +161,13 @@
     },
     "sc25-635fd71a": {
       "title": "SC25",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 248.86,
+      "elapsed_seconds": 66.89,
       "baseline": [
         36,
         6,
@@ -185,7 +185,7 @@
       "steps": 79,
       "total_steps": 79,
       "attempts": 1,
-      "elapsed_seconds": 19.29,
+      "elapsed_seconds": 19.7,
       "baseline": [
         17,
         38,
@@ -199,13 +199,13 @@
     },
     "dc22-fdcac232": {
       "title": "DC22",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 96.74,
+      "elapsed_seconds": 167.64,
       "baseline": [
         59,
         102,
@@ -217,13 +217,13 @@
     },
     "sp80-589a99af": {
       "title": "SP80",
-      "levels_passed": 1,
+      "levels_passed": 0,
       "target_levels": 6,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 55.3,
+      "elapsed_seconds": 63.09,
       "baseline": [
         39,
         58,
@@ -235,13 +235,13 @@
     },
     "ka59-38d34dbb": {
       "title": "KA59",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 7,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 71.65,
+      "elapsed_seconds": 62.4,
       "baseline": [
         28,
         109,
@@ -260,7 +260,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 84.77,
+      "elapsed_seconds": 223.49,
       "baseline": [
         78,
         175,
@@ -279,7 +279,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 83.26,
+      "elapsed_seconds": 28.71,
       "baseline": [
         18,
         28,
@@ -293,13 +293,13 @@
     },
     "lf52-271a04aa": {
       "title": "LF52",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 10,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 91.08,
+      "elapsed_seconds": 146.42,
       "baseline": [
         32,
         81,
@@ -321,7 +321,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 590.42,
+      "elapsed_seconds": 188.77,
       "baseline": [
         21,
         48,
@@ -342,7 +342,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 136.18,
+      "elapsed_seconds": 130.15,
       "baseline": [
         20,
         89,
@@ -362,7 +362,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 62.64,
+      "elapsed_seconds": 137.95,
       "baseline": [
         22,
         33,
@@ -380,7 +380,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 78.1,
+      "elapsed_seconds": 159.06,
       "baseline": [
         61,
         177,
@@ -400,7 +400,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 61.8,
+      "elapsed_seconds": 160.43,
       "baseline": [
         71,
         119,
@@ -421,7 +421,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 50.14,
+      "elapsed_seconds": 93.53,
       "baseline": [
         7,
         18,
@@ -434,13 +434,13 @@
     },
     "ls20-9607627b": {
       "title": "LS20",
-      "levels_passed": 0,
+      "levels_passed": 1,
       "target_levels": 7,
       "won": false,
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 82.43,
+      "elapsed_seconds": 217.53,
       "baseline": [
         22,
         123,
@@ -459,7 +459,7 @@
       "steps": 81,
       "total_steps": 81,
       "attempts": 1,
-      "elapsed_seconds": 9.59,
+      "elapsed_seconds": 31.14,
       "baseline": [
         55,
         8,
@@ -477,7 +477,7 @@
       "steps": 250,
       "total_steps": 250,
       "attempts": 1,
-      "elapsed_seconds": 141.54,
+      "elapsed_seconds": 178.36,
       "baseline": [
         32,
         72,

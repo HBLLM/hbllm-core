@@ -870,7 +870,51 @@ class PrefrontalDeliberationEngine:
         from hbllm.hcir.world.macro_actions import (
             MacroActionDriverManager,
             MacroPlanSynthesizer,
+            ProceduralReplayAction,
         )
+
+        # ── Procedural Memory Recall ───────────────────────────────────────
+        # Before synthesizing a new plan from scratch, check if episodic memory
+        # has a consolidated procedural macro applicable to the current observation.
+        # This is the retrieval arm of the procedural consolidation loop (Phase A):
+        #   Episode win → consolidate macro → query on future levels → replay.
+        if (
+            (macro_plan is None or macro_plan.is_empty())
+            and not engine.mental_plan
+            and hasattr(engine, "episodic_cortex")
+            and engine.episodic_cortex.consolidated_macros
+        ):
+            applicable_macros = engine.episodic_cortex.query_applicable_macros(
+                grid=curr_grid,
+                available_actions=set(available_actions),
+                top_k=1,
+                min_confidence=0.5,
+            )
+            if applicable_macros:
+                best_macro = applicable_macros[0]
+                logger.info(
+                    "Procedural Recall: Replaying consolidated macro '%s' "
+                    "(%d actions, confidence=%.2f)",
+                    best_macro.macro_id,
+                    len(best_macro.action_sequence),
+                    best_macro.confidence,
+                )
+                replay_action = ProceduralReplayAction(macro=best_macro)
+                from hbllm.hcir.world.macro_actions import MacroActionPlan
+
+                replay_plan = MacroActionPlan(
+                    actions=deque([replay_action]),
+                    plan_id=f"procedural_replay_{best_macro.macro_id}",
+                    is_strict=True,
+                )
+                engine.working_memory.macro_plan = replay_plan
+                first_step = replay_plan.step(
+                    engine, curr_grid, available_actions, prev_grid=engine.prev_grid
+                )
+                if first_step is not None:
+                    m_act, m_data = first_step
+                    if m_act in available_actions:
+                        return self._finalize_step(engine, curr_grid, m_act, m_data)
 
         can_synthesize = (
             engine.is_motor_grounded()
@@ -1282,6 +1326,50 @@ class PrefrontalDeliberationEngine:
                         12, 2 ** min(engine.consecutive_simulation_failures, 4)
                     )
                     engine.working_memory.update_salience_baseline(engine)
+
+            # 3A-bis. Causal Theory Planning (Phase B):
+            # If mental simulation failed/cooled down, try constructing a plan
+            # from discovered causal predicates and action dynamics.
+            if chosen_action is None and engine.is_motor_grounded():
+                try:
+                    from hbllm.hcir.world.autonomous_learning import CausalTheoryPlanner
+
+                    if engine.avatar_pos is not None and engine.learned_goal_positions:
+                        ctx = CausalTheoryPlanner.extract_planning_context(engine, curr_grid)
+                        if ctx.goal_positions and ctx.action_displacements:
+                            causal_path = CausalTheoryPlanner.plan_path(
+                                engine.avatar_pos,
+                                curr_grid,
+                                ctx,
+                                max_expansions=300,
+                            )
+                            if causal_path:
+                                from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+                                causal_plan: list[MentalSimulationStep] = []
+                                sim_pos = engine.avatar_pos
+                                for act_id in causal_path:
+                                    dr, dc = ctx.action_displacements.get(act_id, (0, 0))
+                                    next_pos = (sim_pos[0] + dr, sim_pos[1] + dc)
+                                    causal_plan.append(
+                                        MentalSimulationStep(
+                                            action=act_id,
+                                            predicted_avatar_pos=next_pos,
+                                        )
+                                    )
+                                    sim_pos = next_pos
+                                engine.phase = EpistemicPhase.EXPLOITATION
+                                engine.mental_plan = deque(causal_plan)
+                                next_step = engine.mental_plan.popleft()
+                                chosen_action = next_step.action
+                                chosen_data = next_step.action_data
+                                predicted_pos = next_step.predicted_avatar_pos
+                                logger.info(
+                                    "Phase B: CausalTheoryPlanner produced %d-step path",
+                                    len(causal_path),
+                                )
+                except Exception:
+                    pass  # Graceful degradation if causal planner fails
 
             # 3B. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
             # If exit is not open/reachable or in search backoff, interact with intermediate objects

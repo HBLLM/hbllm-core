@@ -355,109 +355,135 @@ def arc_macro_plan_synthesis_hook(
     """
     game = getattr(engine, "_arc_game", None)
     if game is not None:
-        # 1. Dynamic Online Symmetry Reflection Solver (Zero-database visual/spatial inference)
-        try:
-            from plugins.arc_agi_adapter.solvers.symmetry_solver import (
-                OnlineSymmetryReflectionSolver,
-            )
+        import time as _time
 
-            if OnlineSymmetryReflectionSolver.can_solve(game):
-                plan = OnlineSymmetryReflectionSolver.solve(game)
+        game_id = str(getattr(game, "_game_id", getattr(game, "game_id", "")))
+
+        # Per-game cumulative solver time budget: prevents serial solver chain
+        # from burning 30+ minutes on unsolvable games
+        _SOLVER_CHAIN_TIME_LIMIT = 45.0  # Max 45s total for entire solver chain per game
+        _solver_time_key = f"_solver_chain_time_{game_id}"
+        cumulative_solver_time = getattr(engine, _solver_time_key, 0.0)
+        if cumulative_solver_time >= _SOLVER_CHAIN_TIME_LIMIT:
+            # Skip all solvers — this game has consumed too much solver budget
+            pass  # Fall through to non-solver paths below
+        else:
+            _chain_start = _time.time()
+
+            # 1. Dynamic Online Symmetry Reflection Solver (Zero-database visual/spatial inference)
+            try:
+                from plugins.arc_agi_adapter.solvers.symmetry_solver import (
+                    OnlineSymmetryReflectionSolver,
+                )
+
+                if OnlineSymmetryReflectionSolver.can_solve(game):
+                    plan = OnlineSymmetryReflectionSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlineSymmetryReflectionSolver failed: %s", e)
+
+            # 2. Dynamic Online Permutation Cycle Solver (Zero-database cyclic tile inference)
+            try:
+                from plugins.arc_agi_adapter.solvers.permutation_cycle_solver import (
+                    OnlinePermutationCycleSolver,
+                )
+
+                if OnlinePermutationCycleSolver.can_solve(game):
+                    plan = OnlinePermutationCycleSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlinePermutationCycleSolver failed: %s", e)
+
+            # 3. Dynamic Online Grammar Translation Solver (Zero-database formal rewrite inference)
+            try:
+                from plugins.arc_agi_adapter.solvers.grammar_translation_solver import (
+                    OnlineGrammarTranslationSolver,
+                )
+
+                if OnlineGrammarTranslationSolver.can_solve(game):
+                    plan = OnlineGrammarTranslationSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlineGrammarTranslationSolver failed: %s", e)
+
+            # 4. Dynamic Online Kinematic Pull Solver (Zero-database particle attractor inference)
+            try:
+                from plugins.arc_agi_adapter.solvers.kinematic_pull_solver import (
+                    OnlineKinematicPullSolver,
+                )
+
+                if OnlineKinematicPullSolver.can_solve(game):
+                    plan = OnlineKinematicPullSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlineKinematicPullSolver failed: %s", e)
+
+            # 5. Dynamic Online Geometric Stamping Solver (Zero-database backward operator induction)
+            try:
+                from plugins.arc_agi_adapter.solvers.geometric_stamping_solver import (
+                    OnlineGeometricStampingSolver,
+                )
+
+                if OnlineGeometricStampingSolver.can_solve(game):
+                    plan = OnlineGeometricStampingSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlineGeometricStampingSolver failed: %s", e)
+
+            # 6. Recalled Procedural Skills from Database
+            raw_gid = (
+                getattr(engine, "current_game_id", None)
+                or getattr(game, "game_id", None)
+                or getattr(game, "_game_id", "")
+            )
+            if raw_gid:
+                clean_gid = str(raw_gid).split("-")[0].strip().lower()
+                lvl_idx = int(
+                    getattr(game, "level_index", getattr(game, "_current_level_index", 0))
+                )
+                plan = _recall_procedural_skill_plan(clean_gid, lvl_idx, game=game, engine=engine)
                 if plan is not None and len(plan.actions) > 0:
                     return plan
-        except Exception as e:
-            logger.debug("OnlineSymmetryReflectionSolver failed: %s", e)
 
-        # 2. Dynamic Online Permutation Cycle Solver (Zero-database cyclic tile inference)
-        try:
-            from plugins.arc_agi_adapter.solvers.permutation_cycle_solver import (
-                OnlinePermutationCycleSolver,
-            )
+            # 7a. Dynamic Online Program Synthesis Solver (Visual Programming / Frame Puzzles)
+            try:
+                from plugins.arc_agi_adapter.solvers.program_synthesis_solver import (
+                    OnlineProgramSynthesisSolver,
+                )
 
-            if OnlinePermutationCycleSolver.can_solve(game):
-                plan = OnlinePermutationCycleSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlinePermutationCycleSolver failed: %s", e)
+                if OnlineProgramSynthesisSolver.can_solve(game):
+                    plan = OnlineProgramSynthesisSolver.solve(game)
+                    if plan is not None and len(plan.actions) > 0:
+                        return plan
+            except Exception as e:
+                logger.debug("OnlineProgramSynthesisSolver failed: %s", e)
 
-        # 3. Dynamic Online Grammar Translation Solver (Zero-database formal rewrite inference)
-        try:
-            from plugins.arc_agi_adapter.solvers.grammar_translation_solver import (
-                OnlineGrammarTranslationSolver,
-            )
+            # Check time budget before the most expensive solver (forward search)
+            _chain_elapsed = _time.time() - _chain_start
+            setattr(engine, _solver_time_key, cumulative_solver_time + _chain_elapsed)
 
-            if OnlineGrammarTranslationSolver.can_solve(game):
-                plan = OnlineGrammarTranslationSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlineGrammarTranslationSolver failed: %s", e)
+            if cumulative_solver_time + _chain_elapsed < _SOLVER_CHAIN_TIME_LIMIT:
+                # 7b. Dynamic Online Counterfactual Forward Search Solver (Domain-General Simulation)
+                try:
+                    from plugins.arc_agi_adapter.solvers.forward_search_solver import (
+                        OnlineForwardSearchSolver,
+                    )
 
-        # 4. Dynamic Online Kinematic Pull Solver (Zero-database particle attractor inference)
-        try:
-            from plugins.arc_agi_adapter.solvers.kinematic_pull_solver import (
-                OnlineKinematicPullSolver,
-            )
+                    if OnlineForwardSearchSolver.can_solve(game):
+                        plan = OnlineForwardSearchSolver.solve(game)
+                        if plan is not None and len(plan.actions) > 0:
+                            return plan
+                except Exception as e:
+                    logger.debug("OnlineForwardSearchSolver failed: %s", e)
 
-            if OnlineKinematicPullSolver.can_solve(game):
-                plan = OnlineKinematicPullSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlineKinematicPullSolver failed: %s", e)
-
-        # 5. Dynamic Online Geometric Stamping Solver (Zero-database backward operator induction)
-        try:
-            from plugins.arc_agi_adapter.solvers.geometric_stamping_solver import (
-                OnlineGeometricStampingSolver,
-            )
-
-            if OnlineGeometricStampingSolver.can_solve(game):
-                plan = OnlineGeometricStampingSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlineGeometricStampingSolver failed: %s", e)
-
-        # 6. Recalled Procedural Skills from Database
-        raw_gid = (
-            getattr(engine, "current_game_id", None)
-            or getattr(game, "game_id", None)
-            or getattr(game, "_game_id", "")
-        )
-        if raw_gid:
-            clean_gid = str(raw_gid).split("-")[0].strip().lower()
-            lvl_idx = int(getattr(game, "level_index", getattr(game, "_current_level_index", 0)))
-            plan = _recall_procedural_skill_plan(clean_gid, lvl_idx, game=game, engine=engine)
-            if plan is not None and len(plan.actions) > 0:
-                return plan
-
-        # 7a. Dynamic Online Program Synthesis Solver (Visual Programming / Frame Puzzles)
-        try:
-            from plugins.arc_agi_adapter.solvers.program_synthesis_solver import (
-                OnlineProgramSynthesisSolver,
-            )
-
-            if OnlineProgramSynthesisSolver.can_solve(game):
-                plan = OnlineProgramSynthesisSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlineProgramSynthesisSolver failed: %s", e)
-
-        # 7b. Dynamic Online Counterfactual Forward Search Solver (Domain-General Simulation)
-        try:
-            from plugins.arc_agi_adapter.solvers.forward_search_solver import (
-                OnlineForwardSearchSolver,
-            )
-
-            if OnlineForwardSearchSolver.can_solve(game):
-                plan = OnlineForwardSearchSolver.solve(game)
-                if plan is not None and len(plan.actions) > 0:
-                    return plan
-        except Exception as e:
-            logger.debug("OnlineForwardSearchSolver failed: %s", e)
+            # Update cumulative time after all solvers
+            _total_elapsed = _time.time() - _chain_start
+            setattr(engine, _solver_time_key, cumulative_solver_time + _total_elapsed)
 
     # 1. Allocentric Click Games (Action 6) with Interactive Buttons / Switches
     if objects and any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):

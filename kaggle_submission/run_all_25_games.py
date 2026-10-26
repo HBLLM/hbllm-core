@@ -459,6 +459,20 @@ def run_all_25_games(
         agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
         cognitive_engine = CognitiveAgentAdapter(agent)
 
+        # Phase C: Seed engine with cross-game prior knowledge
+        try:
+            epistemic_engine = getattr(agent, "internal_engine", getattr(agent, "engine", None))
+            if epistemic_engine is not None and hasattr(epistemic_engine, "knowledge_transfer"):
+                epistemic_engine.knowledge_transfer.on_game_start(
+                    epistemic_engine,
+                    set(range(8)),  # Standard 8-action ARC space
+                )
+                # Phase C: Clear per-game episodic macros for tenant isolation
+                if hasattr(epistemic_engine, "episodic_cortex"):
+                    epistemic_engine.episodic_cortex.reset_consolidated_macros()
+        except Exception as e:
+            logger.debug("Phase C on_game_start error: %s", e)
+
         for attempt in range(retries + 1):
             attempts_taken += 1
             if attempt > 0:
@@ -530,6 +544,16 @@ def run_all_25_games(
                 if state_str == "WIN" or lvl >= target_levels:
                     break
 
+                # Per-game time guard in benchmark: prevent expensive games from starving the rest
+                game_elapsed = time.time() - start_time
+                _PER_GAME_TIME_LIMIT = 600.0  # 10 minutes max per game in benchmark
+                if game_elapsed >= _PER_GAME_TIME_LIMIT:
+                    print(
+                        f"    ⏱️ Per-game time limit ({_PER_GAME_TIME_LIMIT:.0f}s) exceeded at step {step} "
+                        f"({completed_prev}/{target_levels} levels). Yielding game."
+                    )
+                    break
+
                 # Optional per-level step limit if explicitly configured by user
                 if max_level_steps is not None and current_level_steps >= max_level_steps:
                     print(
@@ -583,6 +607,42 @@ def run_all_25_games(
         total_steps_taken += total_game_steps_all
         total_levels_passed += best_completed
         total_levels_possible += best_target
+
+        # Phase C & D: Post-game autonomous learning hooks
+        try:
+            epistemic_engine = getattr(agent, "internal_engine", getattr(agent, "engine", None))
+            if epistemic_engine is not None:
+                # Phase C: Extract and promote learned invariants
+                if hasattr(epistemic_engine, "knowledge_transfer"):
+                    epistemic_engine.knowledge_transfer.on_game_complete(
+                        epistemic_engine,
+                        game_id=gid,
+                        levels_won=best_completed,
+                    )
+                # Phase D: Record strategy outcome for meta-learning governor
+                if hasattr(epistemic_engine, "meta_governor"):
+                    from hbllm.hcir.world.autonomous_learning import (
+                        GameFeatureSignature,
+                        StrategyOutcome,
+                    )
+
+                    features = GameFeatureSignature(
+                        action_space=frozenset(range(8)),
+                        grid_shape=(0, 0),
+                        has_movement_actions=True,
+                    )
+                    epistemic_engine.meta_governor.record_outcome(
+                        StrategyOutcome(
+                            game_id=gid,
+                            features=features,
+                            strategy_name="epistemic_brain",
+                            levels_won=best_completed,
+                            total_levels=best_target,
+                            time_seconds=best_elapsed,
+                        )
+                    )
+        except Exception as e:
+            logger.debug("Phase C/D on_game_complete error: %s", e)
 
         status_label = (
             "✅ WON ALL LEVELS"

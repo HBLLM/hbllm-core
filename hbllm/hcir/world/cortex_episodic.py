@@ -39,6 +39,73 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class ProceduralMacro:
+    """A consolidated, replayable action sequence learned from a winning episode.
+
+    Compiled from a successful trajectory's EpisodicTransition sequence.
+    Stored in the hippocampal consolidated_macros dict and queryable by
+    the deliberation engine for future levels with similar structure.
+
+    The macro captures:
+    - The exact action sequence that won the level
+    - The grid signature at episode start (for similarity matching)
+    - The available action space (for compatibility checking)
+    - Success metadata (steps taken, level, game context)
+    """
+
+    macro_id: str
+    action_sequence: list[Any]  # Ordered list of action_ids
+    action_data_sequence: list[dict[str, Any] | None]  # Corresponding action_data
+    initial_grid_hash: int = 0  # Hash of grid at episode start
+    initial_grid_shape: tuple[int, int] = (0, 0)
+    available_actions: set[int] = field(default_factory=set)
+    level: int = 0
+    game_id: str = ""
+    num_steps: int = 0
+    confidence: float = 1.0  # Starts at 1.0 (proven), decays on replay failure
+    replay_successes: int = 0
+    replay_failures: int = 0
+
+    def is_compatible(self, available_actions: set[int]) -> bool:
+        """Check if this macro's actions are all available in the given action space."""
+        used_actions = set(self.action_sequence)
+        return used_actions.issubset(available_actions)
+
+    def match_score(self, grid: np.ndarray, available_actions: set[int]) -> float:
+        """Compute similarity score for a candidate grid + action space.
+
+        Returns 0.0 if incompatible, up to 1.0 for strong matches.
+        """
+        if not self.is_compatible(available_actions):
+            return 0.0
+        score = 0.5  # Base compatibility score
+        if grid.shape == self.initial_grid_shape:
+            score += 0.2
+        if hash(grid.tobytes()) == self.initial_grid_hash:
+            score += 0.3  # Exact grid match
+        return score * self.confidence
+
+    def record_replay_outcome(self, success: bool) -> None:
+        """Update confidence based on replay outcome."""
+        if success:
+            self.replay_successes += 1
+            self.confidence = min(1.0, self.confidence + 0.1)
+        else:
+            self.replay_failures += 1
+            self.confidence = max(0.0, self.confidence - 0.3)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export procedural macro as a formal causal predicate."""
+        return CausalPredicate(
+            variable=f"procedural_macro:{self.macro_id}",
+            operator="==",
+            value=f"actions:{len(self.action_sequence)}:conf:{self.confidence:.2f}",
+            relation=f"level:{self.level}:game:{self.game_id}",
+            target_entity=self.macro_id,
+        )
+
+
+@dataclass
 class EpisodicTransition:
     """A rich episodic transition record stored in the Hippocampal buffer."""
 
@@ -168,6 +235,12 @@ class HippocampalEpisodicCortex:
 
         # Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+
+        # ── Procedural Consolidation Store ──────────────────────────────────
+        # Winning trajectories compiled into replayable action macros.
+        # Key: (game_id, level) or auto-generated signature.
+        # Value: ProceduralMacro containing proven action sequence + context.
+        self.consolidated_macros: dict[str, ProceduralMacro] = {}
 
     def record_transition(
         self,
@@ -496,6 +569,36 @@ class HippocampalEpisodicCortex:
         self.grounded_lethal_transitions.clear()
         self.discovered_lethal_features.clear()
         self.habenular_ior.reset()
+        # NOTE: consolidated_macros are intentionally NOT cleared here.
+        # Learned procedural knowledge persists across levels within a game.
+        # Call reset_consolidated_macros() explicitly for cross-game isolation.
+
+    def reset_consolidated_macros(self) -> None:
+        """Clear consolidated procedural macros (for cross-game isolation)."""
+        self.consolidated_macros.clear()
+
+    def query_applicable_macros(
+        self,
+        grid: np.ndarray,
+        available_actions: set[int],
+        top_k: int = 3,
+        min_confidence: float = 0.3,
+    ) -> list[ProceduralMacro]:
+        """Retrieve ranked procedural macros applicable to the current observation.
+
+        Returns up to top_k macros sorted by match_score, filtered by
+        action compatibility and minimum confidence threshold.
+        """
+        candidates: list[tuple[float, ProceduralMacro]] = []
+        for macro in self.consolidated_macros.values():
+            if macro.confidence < min_confidence:
+                continue
+            score = macro.match_score(grid, available_actions)
+            if score > 0.0:
+                candidates.append((score, macro))
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return [macro for _, macro in candidates[:top_k]]
 
     def consolidate_schema_and_reset(
         self,
@@ -525,7 +628,77 @@ class HippocampalEpisodicCortex:
 
         # 2. SWR Trajectory Consolidation: Archive winning or catastrophic sequences
         if self.current_episode and any(t.is_win for t in self.current_episode):
-            self.successful_trajectories.append(list(self.current_episode))
+            winning_trajectory = list(self.current_episode)
+            self.successful_trajectories.append(winning_trajectory)
+
+            # ── Procedural Macro Compilation ────────────────────────────────
+            # Extract the proven action sequence and compile into a replayable macro.
+            # This is the core of Phase A: experience → reusable procedural knowledge.
+            action_seq = [t.action_id for t in winning_trajectory if t.action_id is not None]
+            action_data_seq = [t.action_data for t in winning_trajectory if t.action_id is not None]
+            if action_seq:
+                # Derive grid signature from first transition with a grid snapshot
+                init_hash = 0
+                init_shape = (0, 0)
+                avail_actions: set[int] = set()
+                for t in winning_trajectory:
+                    if t.grid_snapshot is not None:
+                        init_hash = hash(t.grid_snapshot.tobytes())
+                        init_shape = t.grid_snapshot.shape[:2]
+                        break
+                for t in winning_trajectory:
+                    if t.action_id is not None:
+                        try:
+                            avail_actions.add(int(t.action_id))
+                        except (ValueError, TypeError):
+                            pass
+
+                game_id = getattr(engine, "current_game_id", "") or ""
+                current_level = getattr(engine, "current_level", level or 0)
+                macro_id = f"macro_{game_id}_lvl{current_level}_{len(action_seq)}steps"
+
+                macro = ProceduralMacro(
+                    macro_id=macro_id,
+                    action_sequence=action_seq,
+                    action_data_sequence=action_data_seq,
+                    initial_grid_hash=init_hash,
+                    initial_grid_shape=init_shape,
+                    available_actions=avail_actions,
+                    level=current_level,
+                    game_id=game_id,
+                    num_steps=len(action_seq),
+                )
+                self.consolidated_macros[macro_id] = macro
+                logger.info(
+                    "Procedural Consolidation: Compiled macro '%s' (%d actions) from winning trajectory",
+                    macro_id,
+                    len(action_seq),
+                )
+
+                # Also register in working memory procedural library if engine has it
+                if hasattr(engine, "working_memory") and engine.working_memory is not None:
+                    try:
+                        from hbllm.hcir.skills.declarative import (
+                            ActionAffordancePredicate,
+                            DeclarativeNeuroSymbolicSkill,
+                        )
+
+                        skill_cls = type(
+                            f"LearnedMacroSkill_{macro_id}",
+                            (DeclarativeNeuroSymbolicSkill,),
+                            {
+                                "skill_name": macro_id,
+                                "description": (
+                                    f"Auto-consolidated procedural skill from winning level {current_level} "
+                                    f"({len(action_seq)} steps)"
+                                ),
+                                "signature": ActionAffordancePredicate(required=avail_actions),
+                                "_procedural_macro": macro,
+                            },
+                        )()
+                        engine.working_memory.register_procedural_skill(macro_id, skill_cls)
+                    except Exception as e:
+                        logger.debug("Could not register macro as procedural skill: %s", e)
         elif self.current_episode and any(t.is_lost for t in self.current_episode):
             self.failed_trajectories.append(list(self.current_episode))
         self.current_episode.clear()

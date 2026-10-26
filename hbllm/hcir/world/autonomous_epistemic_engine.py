@@ -453,6 +453,17 @@ class AutonomousEpistemicEngine:
         self.transaction_manager: TransactionManager | None = None
         self.active_task_frame: TaskFrame | None = None
 
+        # ── Autonomous Learning Integration (Phases B, C, D) ────────────────
+        from hbllm.hcir.world.autonomous_learning import (
+            CausalTheoryPlanner,
+            CrossGameKnowledgeTransfer,
+            MetaLearningGovernor,
+        )
+
+        self.causal_planner: CausalTheoryPlanner = CausalTheoryPlanner()
+        self.knowledge_transfer: CrossGameKnowledgeTransfer = CrossGameKnowledgeTransfer()
+        self.meta_governor: MetaLearningGovernor = MetaLearningGovernor()
+
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)
     # ─────────────────────────────────────────────────────────────────────────

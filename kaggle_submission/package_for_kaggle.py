@@ -117,8 +117,10 @@ def package_dataset(output_zip: Path | None = None) -> Path:
     for f in [
         "my_agent.py",
         "submission.py",
+        "constants.py",
         "build_notebook.py",
         "package_for_kaggle.py",
+        "run_all_25_games.py",
         "test_synthetic_eval.py",
         "test_kaggle_eval.py",
         "README.md",

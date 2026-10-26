@@ -921,6 +921,10 @@ class OnlineForwardSearchSolver:
 
     _exhausted_levels: set[tuple[str, int]] = set()
 
+    # Per-game cumulative solver time tracking: prevents re-attempting expensive games
+    _game_solver_time: dict[str, float] = {}
+    _GAME_SOLVER_TIME_LIMIT: float = 60.0  # Max 60s total solver time per game
+
     @classmethod
     def can_solve(cls, game: Any) -> bool:
         """Check if game can be simulated via counterfactual forward search."""
@@ -936,7 +940,7 @@ class OnlineForwardSearchSolver:
         cls,
         game: Any,
         max_expansions: int = 15000,
-        timeout_sec: float = 35.0,
+        timeout_sec: float = 12.0,
     ) -> MacroActionPlan | None:
         """Search for a winning action sequence online and return a MacroActionPlan."""
         if not cls.can_solve(game):
@@ -946,6 +950,19 @@ class OnlineForwardSearchSolver:
         game_id = str(getattr(game, "_game_id", getattr(game, "game_id", "")))
         game_key = (game_id, lvl_idx)
         if game_key in cls._exhausted_levels:
+            return None
+
+        # Fail-fast: Skip if this game has already consumed too much solver time
+        cumulative_time = cls._game_solver_time.get(game_id, 0.0)
+        if cumulative_time >= cls._GAME_SOLVER_TIME_LIMIT:
+            logger.debug(
+                "ForwardSearchSolver: Skipping game %s level %d — cumulative solver time %.1fs exceeds limit %.1fs",
+                game_id,
+                lvl_idx,
+                cumulative_time,
+                cls._GAME_SOLVER_TIME_LIMIT,
+            )
+            cls._exhausted_levels.add(game_key)
             return None
 
         # Isolate simulation environment to current level to speed up deepcopies by 15x
@@ -973,7 +990,25 @@ class OnlineForwardSearchSolver:
                 game._camera = DummyFastCamera(game.camera)
 
             start_score = getattr(game, "_score", 0)
+
+            # Adaptive deepcopy timing probe: measure cost of first deepcopy
+            # to dynamically reduce budget for expensive game objects (e.g. FT09)
+            t_dc_start = time.time()
             start_gc = copy.deepcopy(game)
+            dc_cost = time.time() - t_dc_start
+            if dc_cost > 0.15:  # >150ms per deepcopy = expensive game
+                max_expansions = min(max_expansions, 500)
+                timeout_sec = min(timeout_sec, 5.0)
+                logger.info(
+                    "ForwardSearchSolver: Expensive deepcopy detected (%.3fs). "
+                    "Reducing budget to %d expansions / %.1fs timeout.",
+                    dc_cost,
+                    max_expansions,
+                    timeout_sec,
+                )
+            elif dc_cost > 0.05:  # >50ms per deepcopy = moderately expensive
+                max_expansions = min(max_expansions, 3000)
+                timeout_sec = min(timeout_sec, 8.0)
             configure_fast_simulation(start_gc)
 
             # Probe for moving avatar via dynamic active inference
@@ -1092,6 +1127,7 @@ class OnlineForwardSearchSolver:
             counter = 0
             t0 = time.time()
             max_horizons = 200
+            max_stall = min(2000, max_expansions // 3)  # Bail out if search stalls
 
             for horizon in range(max_horizons):
                 if time.time() - t0 > timeout_sec:
@@ -1113,6 +1149,7 @@ class OnlineForwardSearchSolver:
                 horizon_win_path: list[ActionInput] | None = None
                 horizon_expansions = min(max_expansions, 10000)
                 horizon_counter = 0
+                horizon_stall = 0  # Per-horizon stall detection
 
                 while pq and horizon_counter < horizon_expansions:
                     if time.time() - t0 > timeout_sec:
@@ -1123,6 +1160,11 @@ class OnlineForwardSearchSolver:
                     if cur_h < best_h:
                         best_h = cur_h
                         best_path = path
+                        horizon_stall = 0  # Reset stall on improvement
+                    else:
+                        horizon_stall += 1
+                        if horizon_stall > max_stall:
+                            break  # Search is stalling, bail out of this horizon
 
                     sh_cg = hash_state(cg)
                     valid_acts = get_candidate_actions(cg)
@@ -1193,12 +1235,19 @@ class OnlineForwardSearchSolver:
                 else:
                     break
 
+            solver_elapsed = time.time() - t0
+            cls._game_solver_time[game_id] = (
+                cls._game_solver_time.get(game_id, 0.0) + solver_elapsed
+            )
+
             if not winning_path:
                 cls._exhausted_levels.add(game_key)
                 logger.debug(
-                    "ForwardSearchSolver: No solution found within %d nodes (%.2fs)",
+                    "ForwardSearchSolver: No solution found within %d nodes (%.2fs, cumulative %.1fs for game %s)",
                     counter,
-                    time.time() - t0,
+                    solver_elapsed,
+                    cls._game_solver_time.get(game_id, 0.0),
+                    game_id,
                 )
                 return None
             else:
