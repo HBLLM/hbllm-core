@@ -241,13 +241,6 @@ class MyAgent(Agent):
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
         self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
-        if not self.disable_archetypes:
-            try:
-                from plugins.arc_agi_adapter import install_arc3_solvers
-
-                install_arc3_solvers(self.internal_engine)
-            except Exception as e:
-                logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None
@@ -512,27 +505,6 @@ class MyAgent(Agent):
                 self._stagnation_grid_hash = None
                 self._stagnation_steps = 0
                 self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
-                # Clear solver caches so exhausted_levels from previous games don't persist
-                try:
-                    from plugins.arc_agi_adapter.solvers.forward_search_solver import (
-                        OnlineForwardSearchSolver,
-                    )
-
-                    OnlineForwardSearchSolver._exhausted_levels.clear()
-                    OnlineForwardSearchSolver._game_solver_time.clear()
-                except Exception:
-                    pass
-                try:
-                    import plugins.arc_agi_adapter  # noqa: F401
-                except Exception as e:
-                    logger.debug("Could not load plugins.arc_agi_adapter: %s", e)
-                if not self.disable_archetypes:
-                    try:
-                        from plugins.arc_agi_adapter import install_arc3_solvers
-
-                        install_arc3_solvers(self.internal_engine)
-                    except Exception as e:
-                        logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 

@@ -265,11 +265,11 @@ def test_hierarchical_subgoal_decomposition_multi_stage_switches() -> None:
     assert all(s.action == 4 for s in plan)
 
 
-def test_inductive_hcir_agent_disable_archetypes_wiring() -> None:
-    """Verify MyAgent with disable_archetypes=True routes via AutonomousEpistemicEngine."""
+def test_inductive_hcir_agent_autonomous_wiring() -> None:
+    """Verify MyAgent routes cleanly via AutonomousEpistemicEngine."""
     from kaggle_submission.my_agent import FrameData, GameAction, MyAgent
 
-    agent = MyAgent(disable_archetypes=True)
+    agent = MyAgent()
     assert hasattr(agent, "internal_engine")
     assert agent.internal_engine is not None
 

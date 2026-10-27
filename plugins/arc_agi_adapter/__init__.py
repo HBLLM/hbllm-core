@@ -12,11 +12,6 @@ from .arc_macro_actions import (
     register_arc_macro_actions,
 )
 from .arc_perception import ARCPerceptionAdapter, extract_arc_objects
-from .solvers import (
-    ARC3ArchetypeScorer,
-    ARC3DeliberationPolicy,
-    install_arc3_solvers,
-)
 
 # Register plugin adapter into core registry
 PerceptionRegistry.register("arc_agi", ARCPerceptionAdapter(), set_default=True)
@@ -31,9 +26,6 @@ __all__ = [
     "ARCPerceptionAdapter",
     "ARCTaskAdapter",
     "ARCBenchmarkRunner",
-    "ARC3ArchetypeScorer",
-    "ARC3DeliberationPolicy",
-    "install_arc3_solvers",
     "ArcPrimitiveAction",
     "ArcClickCell",
     "ToggleSwitch",

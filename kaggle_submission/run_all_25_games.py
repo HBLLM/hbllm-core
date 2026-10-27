@@ -350,7 +350,7 @@ DEFAULT_EXECUTIVE_DIRECTIVES = [
 # ── 3. Evaluation Harness for All 25 Games & All Levels ───────────────────────
 def run_all_25_games(
     selected_games: list[str] | None = None,
-    disable_archetypes: bool = False,
+    disable_archetypes: bool = True,
     scorecard_file: str = "all_25_games_scorecard.json",
     instructions: list[str] | str | None = None,
     max_steps_per_game: int = 1000,
@@ -387,9 +387,7 @@ def run_all_25_games(
     print(f"\n{'=' * 75}")
     print(f"🚀 HBLLM ARC-AGI 3 BENCHMARK: {len(environments)} GAMES x ALL LEVELS")
     print("   Architecture: Cognitive USB Driver + Autonomic Epistemic Brain")
-    print(
-        f"   Mode: {'Pure AutonomousEpistemicEngine (No Archetypes)' if disable_archetypes else 'Hybrid Competitive (Inductive HCIR + Epistemic Brain)'}"
-    )
+    print("   Mode: Pure AutonomousEpistemicEngine (Domain-General Neuro-Symbolic Core)")
     limit_desc = (
         f"No Per-Level Limit (Full Runway: {max_steps_per_game} steps/game)"
         if max_level_steps is None
@@ -456,7 +454,7 @@ def run_all_25_games(
         total_game_steps_all = 0
 
         # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-        agent = MyAgent(disable_archetypes=disable_archetypes, instructions=instructions)
+        agent = MyAgent(instructions=instructions)
         cognitive_engine = CognitiveAgentAdapter(agent)
 
         # Phase C: Seed engine with cross-game prior knowledge
@@ -730,14 +728,10 @@ if __name__ == "__main__":
         help="Path for saving benchmark results JSON scorecard.",
     )
     parser.add_argument(
-        "--enable-archetypes",
-        action="store_true",
-        help="Enable visual gestalt archetypes and ARC-AGI-3 target scorers (default: disabled, pure cognitive kernel).",
-    )
-    parser.add_argument(
         "--disable-archetypes",
         action="store_true",
-        help="Explicitly disable visual gestalt archetypes and target scorers (default: disabled).",
+        default=True,
+        help="No-op flag for backward compatibility (archetypes removed).",
     )
     parser.add_argument(
         "--instructions",
@@ -782,7 +776,11 @@ if __name__ == "__main__":
         arcade = Arcade()
         envs = arcade.get_environments()
         seen = set()
-        deduped_envs = [e for e in envs if not (e.game_id in seen or seen.add(e.game_id))]
+        deduped_envs = []
+        for e in envs:
+            if e.game_id not in seen:
+                seen.add(e.game_id)
+                deduped_envs.append(e)
         print(f"Available ARC-AGI-3 games ({len(deduped_envs)} total):")
         for i, e in enumerate(deduped_envs, 1):
             print(f"  {i:2d}. {e.game_id:<12} | Title: {getattr(e, 'title', e.game_id)}")
@@ -795,15 +793,8 @@ if __name__ == "__main__":
             x.strip() for x in args.instructions.replace("\n", ";").split(";") if x.strip()
         ]
 
-    disable_archetypes = False
-    if args.disable_archetypes:
-        disable_archetypes = True
-    elif args.enable_archetypes:
-        disable_archetypes = False
-
     run_all_25_games(
         selected_games=selected,
-        disable_archetypes=disable_archetypes,
         scorecard_file=args.output,
         instructions=custom_inst,
         max_steps_per_game=args.max_steps,

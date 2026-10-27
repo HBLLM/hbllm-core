@@ -924,13 +924,6 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self.internal_agent: AutonomousEpistemicEngine = AutonomousEpistemicEngine(
             instructions=instructions
         )
-        if not self.disable_archetypes:
-            try:
-                from plugins.arc_agi_adapter import install_arc3_solvers
-
-                install_arc3_solvers(self.internal_agent)
-            except Exception as e:
-                logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
         if instructions and hasattr(self.internal_agent, "load_instructions"):
             self.internal_agent.load_instructions(instructions)
         self.step_count: int = 0
@@ -1147,23 +1140,6 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
                 self.internal_agent = AutonomousEpistemicEngine(instructions=self.instructions)
-                # Clear solver caches so exhausted_levels from previous games don't persist
-                try:
-                    from plugins.arc_agi_adapter.solvers.forward_search_solver import (
-                        OnlineForwardSearchSolver,
-                    )
-
-                    OnlineForwardSearchSolver._exhausted_levels.clear()
-                    OnlineForwardSearchSolver._game_solver_time.clear()
-                except Exception:
-                    pass
-                if not self.disable_archetypes:
-                    try:
-                        from plugins.arc_agi_adapter import install_arc3_solvers
-
-                        install_arc3_solvers(self.internal_agent)
-                    except Exception as e:
-                        logger.debug("Could not install ARC-AGI-3 plugin solvers: %s", e)
                 self.last_grid = None
 
         grid = self._extract_grid(latest_frame, frames)

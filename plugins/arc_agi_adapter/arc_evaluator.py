@@ -114,10 +114,7 @@ class InteractiveARCEvaluator:
         """Evaluate an interactive environment end-to-end using dynamic neuro-symbolic faculties."""
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.macro_actions import MacroActionDriverManager
-        from plugins.arc_agi_adapter.arc_macro_actions import (
-            DynamicARCArchetypeClassifier,
-            register_arc_macro_actions,
-        )
+        from plugins.arc_agi_adapter.arc_macro_actions import register_arc_macro_actions
         from plugins.arc_agi_adapter.arc_perception import ARCPerceptionAdapter, extract_arc_objects
 
         register_arc_macro_actions()
@@ -136,13 +133,6 @@ class InteractiveARCEvaluator:
 
         available_actions = list(getattr(env, "available_actions", [1, 2, 3, 4, 5, 6]))
         objects = extract_arc_objects(curr_grid, engine, env)
-
-        archetype = DynamicARCArchetypeClassifier.classify(
-            game=env,
-            curr_grid=curr_grid,
-            available_actions=available_actions,
-            objects=objects,
-        )
 
         steps = 0
         total_reward = 0.0
@@ -205,7 +195,6 @@ class InteractiveARCEvaluator:
             "solved": solved or (hasattr(env, "is_won") and env.is_won()),
             "steps": steps,
             "reward": total_reward,
-            "archetype": archetype.value if archetype else None,
         }
 
     @classmethod
