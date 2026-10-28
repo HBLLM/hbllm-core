@@ -1,5 +1,6 @@
 #![allow(non_local_definitions)]
-use numpy::{PyArray1, PyReadonlyArray2};
+use numpy::ndarray::Array2;
+use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 
 #[cfg(target_arch = "aarch64")]
@@ -820,11 +821,228 @@ impl UniversalEngine {
             i += 1;
         }
     }
+
+    /// High-performance Vectorized Leaky Integrate-and-Fire (LIF) neural membrane update.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snn_step_lif_simd<'py>(
+        &self,
+        py: Python<'py>,
+        membrane: PyReadonlyArray2<'py, f32>,
+        refractory: PyReadonlyArray2<'py, i32>,
+        current_input: PyReadonlyArray2<'py, f32>,
+        v_thresh: f32,
+        v_reset: f32,
+        decay: f32,
+        refractory_steps: i32,
+    ) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
+        snn_step_lif_simd(
+            py,
+            membrane,
+            refractory,
+            current_input,
+            v_thresh,
+            v_reset,
+            decay,
+            refractory_steps,
+        )
+    }
+
+    /// High-performance kinematic limit-cycle hazard density projection with border reflection.
+    pub fn forecast_hazard_density_simd<'py>(
+        &self,
+        py: Python<'py>,
+        height: usize,
+        width: usize,
+        tracks: Vec<(i32, i32, i32, i32)>,
+        horizon_steps: usize,
+    ) -> PyResult<&'py PyArray2<f32>> {
+        forecast_hazard_density_simd(py, height, width, tracks, horizon_steps)
+    }
+
+    /// Compute probability of necessity (PN) and sufficiency (PS) for causal counterfactuals.
+    pub fn causal_attribution_simd(
+        &self,
+        factual_vals: Vec<f32>,
+        cf_vals: Vec<f32>,
+        weights: Vec<f32>,
+    ) -> PyResult<(f32, f32)> {
+        causal_attribution_simd(factual_vals, cf_vals, weights)
+    }
+}
+
+/// Standalone Vectorized Leaky Integrate-and-Fire (LIF) neural membrane update.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+pub fn snn_step_lif_simd<'py>(
+    py: Python<'py>,
+    membrane: PyReadonlyArray2<'py, f32>,
+    refractory: PyReadonlyArray2<'py, i32>,
+    current_input: PyReadonlyArray2<'py, f32>,
+    v_thresh: f32,
+    v_reset: f32,
+    decay: f32,
+    refractory_steps: i32,
+) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
+    let mem = membrane.as_array();
+    let ref_arr = refractory.as_array();
+    let inp = current_input.as_array();
+
+    let shape = mem.shape();
+    let h = shape[0];
+    let w = shape[1];
+    let total = h * w;
+
+    let (spikes, new_mem, new_ref) = py.allow_threads(|| {
+        let mut spikes = vec![0i32; total];
+        let mut new_mem = vec![0.0f32; total];
+        let mut new_ref = vec![0i32; total];
+
+        for (i, ((&m_in, &r_in), &cur_in)) in
+            mem.iter().zip(ref_arr.iter()).zip(inp.iter()).enumerate()
+        {
+            let mut m = m_in;
+            let mut r = r_in;
+            let mut spk = 0i32;
+
+            if r <= 0 {
+                m = m * decay + cur_in;
+                if m >= v_thresh {
+                    spk = 1;
+                    m = v_reset;
+                    r = refractory_steps;
+                }
+            }
+            if r > 0 {
+                r -= 1;
+            }
+
+            spikes[i] = spk;
+            new_mem[i] = m;
+            new_ref[i] = r;
+        }
+
+        (spikes, new_mem, new_ref)
+    });
+
+    let spikes_arr = Array2::from_shape_vec((h, w), spikes)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Shape error: {}", e)))?;
+    let mem_arr = Array2::from_shape_vec((h, w), new_mem)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Shape error: {}", e)))?;
+    let ref_arr_out = Array2::from_shape_vec((h, w), new_ref)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Shape error: {}", e)))?;
+
+    Ok((
+        PyArray2::from_owned_array(py, spikes_arr),
+        PyArray2::from_owned_array(py, mem_arr),
+        PyArray2::from_owned_array(py, ref_arr_out),
+    ))
+}
+
+/// Standalone kinematic limit-cycle hazard density projection with border reflection.
+#[pyfunction]
+pub fn forecast_hazard_density_simd<'py>(
+    py: Python<'py>,
+    height: usize,
+    width: usize,
+    tracks: Vec<(i32, i32, i32, i32)>,
+    horizon_steps: usize,
+) -> PyResult<&'py PyArray2<f32>> {
+    let total = height * width;
+    let density = py.allow_threads(|| {
+        let mut density = vec![0.0f32; total];
+
+        for (cur_r, cur_c, mut vr, mut vc) in tracks {
+            if vr == 0 && vc == 0 {
+                continue;
+            }
+            let mut r = cur_r;
+            let mut c = cur_c;
+
+            for step in 1..=horizon_steps {
+                r += vr;
+                c += vc;
+
+                if r < 0 || r >= height as i32 {
+                    vr = -vr;
+                    r = r.clamp(0, height as i32 - 1);
+                }
+                if c < 0 || c >= width as i32 {
+                    vc = -vc;
+                    c = c.clamp(0, width as i32 - 1);
+                }
+
+                let weight = 1.0f32 / (1.0f32 + 0.1f32 * (step as f32));
+                let idx = (r as usize) * width + (c as usize);
+                density[idx] += weight;
+            }
+        }
+
+        let max_d = density.iter().copied().fold(0.0f32, f32::max);
+        if max_d > 0.0 {
+            for val in &mut density {
+                *val /= max_d;
+            }
+        }
+
+        density
+    });
+
+    let arr = Array2::from_shape_vec((height, width), density)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("Shape error: {}", e)))?;
+
+    Ok(PyArray2::from_owned_array(py, arr))
+}
+
+/// Standalone probability of necessity (PN) and sufficiency (PS) calculation.
+#[pyfunction]
+pub fn causal_attribution_simd(
+    factual_vals: Vec<f32>,
+    cf_vals: Vec<f32>,
+    weights: Vec<f32>,
+) -> PyResult<(f32, f32)> {
+    let n = factual_vals.len();
+    if n == 0 || cf_vals.len() != n || weights.len() != n {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "Vectors must have non-zero identical lengths",
+        ));
+    }
+
+    let mut diff_sum = 0.0f32;
+    let mut total_weight = 0.0f32;
+
+    for i in 0..n {
+        let diff = (factual_vals[i] - cf_vals[i]).abs();
+        let w = weights[i];
+        diff_sum += diff * w;
+        total_weight += w;
+    }
+
+    let norm_diff = if total_weight > 0.0 {
+        diff_sum / total_weight
+    } else {
+        0.0
+    };
+
+    let pn = if norm_diff >= 1.0 {
+        1.0
+    } else {
+        norm_diff.clamp(0.0, 1.0)
+    };
+    let ps = if norm_diff >= 1.0 {
+        1.0
+    } else {
+        norm_diff.clamp(0.0, 1.0)
+    };
+
+    Ok((pn, ps))
 }
 
 #[pymodule]
 fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<UniversalEngine>()?;
+    m.add_function(wrap_pyfunction!(snn_step_lif_simd, m)?)?;
+    m.add_function(wrap_pyfunction!(forecast_hazard_density_simd, m)?)?;
+    m.add_function(wrap_pyfunction!(causal_attribution_simd, m)?)?;
     Ok(())
 }
 

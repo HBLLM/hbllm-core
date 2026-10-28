@@ -20,6 +20,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
@@ -281,6 +283,137 @@ class HabenularEpisodicIOR:
         wildcard_key = (None, act_token)
         score += self.repulsion_table.get(wildcard_key, 0.0) * 0.5
         return score
+
+    def preemptively_inhibit_action(
+        self,
+        pos: tuple[int, int] | None,
+        action: Any,
+        penalty: float,
+        duration_steps: int = 16,
+        action_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Pre-emptively install negative valence and motor inhibition before execution.
+
+        Args:
+            pos: Spatial avatar position to anchor inhibition (or None for global).
+            action: Action identifier or token.
+            penalty: Repulsion penalty magnitude.
+            duration_steps: Number of planning/deliberation steps this inhibition persists.
+            action_data: Optional parameter payload (e.g. click coordinates).
+        """
+        act_token = self._make_action_token(action, action_data)
+        key = (pos, act_token)
+        self.repulsion_table[key] += penalty
+        self.active_inhibitions[key] = max(self.active_inhibitions.get(key, 0), duration_steps)
+        if act_token != action:
+            raw_key = (pos, action)
+            self.repulsion_table[raw_key] += penalty * 0.8
+            self.active_inhibitions[raw_key] = max(
+                self.active_inhibitions.get(raw_key, 0), duration_steps
+            )
+        logger.debug(
+            "HabenularEpisodicIOR: Pre-emptively inhibited action %s at pos %s (penalty=%.1f, duration=%d)",
+            action,
+            pos,
+            penalty,
+            duration_steps,
+        )
+
+    def preemptively_inhibit_from_counterfactuals(
+        self,
+        scm_invariants: list[CausalPredicate],
+        current_pos: tuple[int, int] | None = None,
+        duration_steps: int = 24,
+    ) -> int:
+        """Install pre-emptive motor inhibitions derived from Pearl's SCM counterfactual safety invariants.
+
+        Args:
+            scm_invariants: Causal predicates synthesized by SCM counterfactual analysis.
+            current_pos: Spatial position to anchor inhibition.
+            duration_steps: Lifetime of the negative inhibition.
+
+        Returns:
+            int: Count of newly inhibited actions.
+        """
+        inhibited_count = 0
+        for pred in scm_invariants:
+            is_safety_invariant = (
+                pred.variable.startswith("invariant:safe:")
+                or pred.relation == "counterfactual_safety_invariant"
+                or (pred.operator == "!=" and "invariant" in pred.variable)
+            )
+            if not is_safety_invariant:
+                continue
+
+            # Extract prohibited action token
+            raw_act = pred.value
+            try:
+                action_id: Any = int(raw_act)
+            except (ValueError, TypeError):
+                action_id = raw_act
+
+            self.preemptively_inhibit_action(
+                pos=current_pos,
+                action=action_id,
+                penalty=self.base_penalty,
+                duration_steps=duration_steps,
+            )
+            inhibited_count += 1
+
+        if inhibited_count > 0:
+            logger.info(
+                "HabenularEpisodicIOR: Pre-emptively inhibited %d actions from SCM counterfactuals at pos %s",
+                inhibited_count,
+                current_pos,
+            )
+        return inhibited_count
+
+    def preemptively_inhibit_from_snn(
+        self,
+        hazard_density: np.ndarray,
+        current_pos: tuple[int, int],
+        action_deltas: dict[Any, tuple[int, int]],
+        threshold: float = 0.4,
+        duration_steps: int = 16,
+    ) -> list[Any]:
+        """Install pre-emptive motor inhibitions against actions projecting into forecasted SNN hazard cones.
+
+        Args:
+            hazard_density: 2D spatio-temporal hazard density array in [0.0, 1.0].
+            current_pos: Current (r, c) avatar position.
+            action_deltas: Mapping of action -> (dr, dc) motion displacement.
+            threshold: Minimum hazard density threshold to trigger habenular repulsion.
+            duration_steps: Lifetime of the inhibition.
+
+        Returns:
+            list[Any]: Actions actively inhibited by SNN hazard projection.
+        """
+        H, W = hazard_density.shape
+        cr, cc = current_pos
+        inhibited_actions: list[Any] = []
+
+        for act, (dr, dc) in action_deltas.items():
+            nr, nc = cr + dr, cc + dc
+            if 0 <= nr < H and 0 <= nc < W:
+                density_val = float(hazard_density[nr, nc])
+                if density_val >= threshold:
+                    penalty = self.base_penalty * density_val
+                    self.preemptively_inhibit_action(
+                        pos=current_pos,
+                        action=act,
+                        penalty=penalty,
+                        duration_steps=duration_steps,
+                    )
+                    inhibited_actions.append(act)
+
+        if inhibited_actions:
+            logger.info(
+                "HabenularEpisodicIOR: SNN hazard density inhibited %d actions %s at pos %s",
+                len(inhibited_actions),
+                inhibited_actions,
+                current_pos,
+            )
+        return inhibited_actions
 
     def detect_action_oscillation(self) -> Any | None:
         """Detect rapid periodic action oscillation (e.g. [A, B, A, B, A, B]) and return action to suppress."""

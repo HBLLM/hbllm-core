@@ -40,6 +40,7 @@ from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
     BilateralState,
@@ -289,6 +290,7 @@ class AutonomousEpistemicEngine:
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
         self.optical_projector: OpticalRayProjector = self.working_memory.optical_projector
         self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
+        self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
 
         # Motor calibration & dynamics
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
@@ -2001,19 +2003,31 @@ class AutonomousEpistemicEngine:
             )
         )
 
-        if disagreement.high_disagreement and self.event_bus is not None:
-            self.event_bus.publish(
-                KernelEvent(
-                    event_type="epistemic.ensemble_disagreement",
-                    source="AutonomousEpistemicEngine",
-                    data={
-                        "action_intent": action_intent,
-                        "disagreement_index": disagreement.disagreement_index,
-                        "conflicting_predictors": disagreement.conflicting_predictors,
-                        "world_id": self.world_id,
-                    },
-                )
+        if disagreement.high_disagreement:
+            actor_pos = (
+                (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
+                if self.avatar_pos is not None
+                else None
             )
+            self.acc_conflict.register_predictive_conflict(
+                disagreement_score=disagreement.disagreement_index,
+                conflicting_predictors=disagreement.conflicting_predictors,
+                actor_pos=actor_pos,
+                step=self.step_counter,
+            )
+            if self.event_bus is not None:
+                self.event_bus.publish(
+                    KernelEvent(
+                        event_type="epistemic.ensemble_disagreement",
+                        source="AutonomousEpistemicEngine",
+                        data={
+                            "action_intent": action_intent,
+                            "disagreement_index": disagreement.disagreement_index,
+                            "conflicting_predictors": disagreement.conflicting_predictors,
+                            "world_id": self.world_id,
+                        },
+                    )
+                )
 
         return pred, disagreement.high_disagreement
 
@@ -2028,6 +2042,25 @@ class AutonomousEpistemicEngine:
         snn = None
         if self.world_kernel and hasattr(self.world_kernel, "predictive_reality"):
             snn = getattr(self.world_kernel.predictive_reality, "snn", None)
+
+        if snn is not None and grid is not None and isinstance(grid, np.ndarray):
+            # Compute hazard density and pre-emptively inhibit dangerous actions via Habenula
+            density = snn.predict_hazard_density(grid, horizon_steps=3)
+            action_deltas: dict[Any, tuple[int, int]] = {}
+            for act, dyn in self.action_dynamics.items():
+                dr, dc = dyn.get_displacement()
+                if dyn.confidence >= 0.5 and (dr != 0 or dc != 0):
+                    action_deltas[act] = (dr, dc)
+            if not action_deltas:
+                action_deltas = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+
+            self.habenular_ior.preemptively_inhibit_from_snn(
+                hazard_density=density,
+                current_pos=agent_pos,
+                action_deltas=action_deltas,
+                threshold=0.45,
+            )
+
         return self.cerebellar_clock.evaluate_crossing_safety(
             agent_pos=agent_pos,
             target_pos=target_pos,

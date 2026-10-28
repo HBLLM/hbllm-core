@@ -21,6 +21,14 @@ from typing import Any
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
+try:
+    import hbllm_compute  # type: ignore[import-not-found]
+
+    _HAS_RUST_COMPUTE = True
+except ImportError:
+    hbllm_compute = None
+    _HAS_RUST_COMPUTE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -186,6 +194,9 @@ class StructuralCausalModel:
         external_context = {
             k: v for k, v in factual_evidence.items() if k not in intervened_model.variables
         }
+        external_context.update(
+            {k: v for k, v in interventions.items() if k not in intervened_model.variables}
+        )
         cf_values = intervened_model.evaluate(
             exogenous_values=inferred_u,
             context_values=external_context,
@@ -194,19 +205,49 @@ class StructuralCausalModel:
         # Compute causal effect on target variables
         targets = target_variables or list(interventions.keys())
         causal_diff = 0.0
-        for t in targets:
-            fact_val = factual_evidence.get(t)
-            cf_val = cf_values.get(t)
-            if isinstance(fact_val, (int, float)) and isinstance(cf_val, (int, float)):
-                causal_diff += abs(cf_val - fact_val)
-            elif fact_val != cf_val:
-                causal_diff += 1.0
 
-        # Compute Probability of Necessity (PN) and Sufficiency (PS)
-        # PN: Given factual success, would target fail if intervened?
-        # PS: Given factual baseline, was intervention alone sufficient to change target?
-        pn = 1.0 if causal_diff > 0.0 else 0.0
-        ps = 1.0 if causal_diff > 0.0 else 0.0
+        if (
+            _HAS_RUST_COMPUTE
+            and hbllm_compute is not None
+            and hasattr(hbllm_compute, "causal_attribution_simd")
+            and targets
+        ):
+            fact_floats: list[float] = []
+            cf_floats: list[float] = []
+            weights: list[float] = []
+            for t in targets:
+                fact_v = factual_evidence.get(t)
+                cf_v = cf_values.get(t)
+                fact_num = (
+                    float(fact_v)
+                    if isinstance(fact_v, (int, float, bool))
+                    else (1.0 if fact_v else 0.0)
+                )
+                cf_num = (
+                    float(cf_v) if isinstance(cf_v, (int, float, bool)) else (1.0 if cf_v else 0.0)
+                )
+                fact_floats.append(fact_num)
+                cf_floats.append(cf_num)
+                weights.append(1.0)
+                causal_diff += abs(cf_num - fact_num)
+
+            try:
+                pn, ps = hbllm_compute.causal_attribution_simd(fact_floats, cf_floats, weights)
+            except Exception:
+                pn = 1.0 if causal_diff > 0.0 else 0.0
+                ps = 1.0 if causal_diff > 0.0 else 0.0
+        else:
+            for t in targets:
+                fact_val = factual_evidence.get(t)
+                cf_val = cf_values.get(t)
+                if isinstance(fact_val, (int, float)) and isinstance(cf_val, (int, float)):
+                    causal_diff += abs(cf_val - fact_val)
+                elif fact_val != cf_val:
+                    causal_diff += 1.0
+
+            # Compute Probability of Necessity (PN) and Sufficiency (PS)
+            pn = 1.0 if causal_diff > 0.0 else 0.0
+            ps = 1.0 if causal_diff > 0.0 else 0.0
 
         outcome = CounterfactualOutcome(
             factual_evidence=factual_evidence,

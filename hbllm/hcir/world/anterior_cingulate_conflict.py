@@ -204,6 +204,65 @@ class AnteriorCingulateConflictMonitor:
         self.active_conflict = self.frustration >= self.frustration_threshold
         return self.frustration
 
+    def register_predictive_conflict(
+        self,
+        disagreement_score: float,
+        conflicting_predictors: list[str],
+        actor_pos: tuple[float, float] | None = None,
+        step: int = 0,
+    ) -> float:
+        """Register conflict and cognitive dissonance from acute predictive ensemble disagreement.
+
+        Args:
+            disagreement_score: Disagreement index in [0.0, 1.0] from ensemble predictors.
+            conflicting_predictors: List of predictor names that diverged.
+            actor_pos: Current position where predictive disagreement spiked.
+            step: Current simulation step counter.
+
+        Returns:
+            float: Updated frustration level F in [0.0, 1.0].
+        """
+        if disagreement_score < 0.3:
+            return self.frustration
+
+        # Epistemic friction elevates frustration
+        delta = 0.7 * disagreement_score
+        self.frustration = min(1.0, self.frustration + delta)
+        self.active_conflict = (
+            self.frustration >= self.frustration_threshold or disagreement_score >= 0.70
+        )
+
+        if actor_pos is not None and disagreement_score >= 0.55:
+            # Register spatial epistemic dissonance cluster
+            ar, ac = actor_pos
+            matched = False
+            for cl in self.clusters:
+                dist = math.hypot(cl.center_r - ar, cl.center_c - ac)
+                if dist <= self.cluster_radius:
+                    cl.count += 1
+                    cl.recent_steps.append(step)
+                    matched = True
+                    break
+            if not matched:
+                self.clusters.append(
+                    FailureCluster(
+                        center_r=ar,
+                        center_c=ac,
+                        count=2,  # Treat high predictive divergence as immediate conflict warning
+                        recent_steps=[step],
+                    )
+                )
+
+        if self.active_conflict:
+            logger.warning(
+                "ACC Conflict Monitor: High predictive ensemble disagreement (score=%.2f, models=%s) "
+                "elevated frustration to F=%.2f! Active conflict engaged.",
+                disagreement_score,
+                conflicting_predictors,
+                self.frustration,
+            )
+        return self.frustration
+
     def is_frustrated(self) -> bool:
         """Check if frustration level exceeds threshold or active conflict is triggered."""
         return self.active_conflict or self.frustration >= self.frustration_threshold

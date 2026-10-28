@@ -21,6 +21,14 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
+try:
+    import hbllm_compute  # type: ignore[import-not-found]
+
+    _HAS_RUST_COMPUTE = True
+except ImportError:
+    hbllm_compute = None
+    _HAS_RUST_COMPUTE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,19 +114,40 @@ class SNNTemporalPredictor:
 
         assert self.refractory_clock is not None
 
-        # 1. Decay membrane potential toward resting potential for non-refractory neurons
-        decay = np.exp(-dt / self.tau_m)
+        decay = float(np.exp(-dt / self.tau_m))
+
+        # 1. Fast Rust SIMD acceleration path
+        if (
+            _HAS_RUST_COMPUTE
+            and hbllm_compute is not None
+            and hasattr(hbllm_compute, "snn_step_lif_simd")
+        ):
+            try:
+                spikes, new_mem, new_ref = hbllm_compute.snn_step_lif_simd(
+                    self.membrane_potential,
+                    self.refractory_clock,
+                    current_input.astype(np.float32),
+                    float(self.v_thresh),
+                    float(self.v_reset),
+                    decay,
+                    int(self.refractory_steps),
+                )
+                self.membrane_potential = new_mem
+                self.refractory_clock = new_ref
+                return spikes, self.membrane_potential.copy()
+            except Exception as e:
+                logger.debug("Rust snn_step_lif_simd fallback to numpy: %s", e)
+
+        # 2. Pure NumPy fallback path
         non_refractory = self.refractory_clock <= 0
         self.membrane_potential[non_refractory] = (
             self.membrane_potential[non_refractory] * decay + current_input[non_refractory]
         )
 
-        # 2. Thresholding and spike generation
         spikes = (self.membrane_potential >= self.v_thresh) & non_refractory
         self.membrane_potential[spikes] = self.v_reset
         self.refractory_clock[spikes] = self.refractory_steps
 
-        # 3. Decrement refractory clocks
         self.refractory_clock = np.maximum(0, self.refractory_clock - 1)
 
         return spikes.astype(np.int32), self.membrane_potential.copy()
@@ -168,6 +197,37 @@ class SNNTemporalPredictor:
     ) -> np.ndarray:
         """Compute spatio-temporal hazard density map forecasted horizon_steps into the future."""
         H, W = grid.shape
+
+        # 1. Fast Rust SIMD kinematic projection path
+        if (
+            _HAS_RUST_COMPUTE
+            and hbllm_compute is not None
+            and hasattr(hbllm_compute, "forecast_hazard_density_simd")
+        ):
+            tracks_data = [
+                (
+                    int(t.positions[-1][0]),
+                    int(t.positions[-1][1]),
+                    int(t.velocity[0]),
+                    int(t.velocity[1]),
+                )
+                for t in self.entity_tracks.values()
+                if t.positions and t.velocity != (0, 0)
+            ]
+            if tracks_data:
+                try:
+                    rust_density = hbllm_compute.forecast_hazard_density_simd(
+                        H, W, tracks_data, horizon_steps
+                    )
+                    rust_density[grid != 0] += 0.1
+                    max_d = float(np.max(rust_density))
+                    if max_d > 0.0:
+                        rust_density = rust_density / max_d
+                    return rust_density
+                except Exception as e:
+                    logger.debug("Rust forecast_hazard_density_simd fallback to numpy: %s", e)
+
+        # 2. Pure NumPy fallback path
         density = np.zeros((H, W), dtype=np.float32)
 
         # Base density from stationary hazards
