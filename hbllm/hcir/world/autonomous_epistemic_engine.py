@@ -233,6 +233,22 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
+from hbllm.hcir.world.global_neuronal_workspace import (
+    GlobalNeuronalWorkspace,
+    IgnitionEvent,
+)
+from hbllm.hcir.world.neuromodulatory_system import (
+    NeuromodulatorLevels,
+    NeuromodulatorySystem,
+)
+from hbllm.hcir.world.superposition_planner import (
+    SuperpositionEvaluationResult,
+    SuperpositionPlanner,
+)
+from hbllm.hcir.world.thalamocortical_binding import (
+    BoundFeatureBundle,
+    ThalamocorticalBindingEngine,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Master Autonomous Epistemic Engine Orchestrator
@@ -408,6 +424,18 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+
+        # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
+        self.gnw: GlobalNeuronalWorkspace = GlobalNeuronalWorkspace()
+
+        # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
+        self.neuromodulatory_system: NeuromodulatorySystem = NeuromodulatorySystem()
+
+        # Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Attentional Gating
+        self.thalamocortical_binding: ThalamocorticalBindingEngine = ThalamocorticalBindingEngine()
+
+        # Track 4: Superposition Counterfactual Tree Search Planner
+        self.superposition_planner: SuperpositionPlanner = SuperpositionPlanner()
 
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
         self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
@@ -1194,6 +1222,70 @@ class AutonomousEpistemicEngine:
         # Clear transient pending buffer
         self.pending_transactions.clear()
         return committed_tx
+
+    def submit_to_workspace(
+        self,
+        source_cortex: str,
+        salience: float,
+        content: dict[str, Any],
+        epistemic_uncertainty: float = 0.0,
+    ) -> IgnitionEvent | None:
+        """Submit a candidate representation to the Global Neuronal Workspace.
+
+        Triggers non-linear ignition if salience exceeds the dynamic threshold.
+        """
+        self.gnw.submit_candidate(
+            source_cortex=source_cortex,
+            salience=salience,
+            content=content,
+            epistemic_uncertainty=epistemic_uncertainty,
+        )
+        return self.gnw.compete_and_ignite()
+
+    def modulate_cognition(
+        self,
+        reward_prediction_error: float = 0.0,
+        unexpected_surprise: float = 0.0,
+        prediction_accuracy: float = 1.0,
+        risk_level: float = 0.0,
+    ) -> NeuromodulatorLevels:
+        """Step the neuromodulatory systems (DA, NE, ACh, 5-HT) and adapt active inference parameters."""
+        if reward_prediction_error != 0.0:
+            self.neuromodulatory_system.update_reward_prediction_error(reward_prediction_error)
+        if unexpected_surprise != 0.0:
+            self.neuromodulatory_system.update_unexpected_uncertainty(unexpected_surprise)
+        if prediction_accuracy != 1.0:
+            self.neuromodulatory_system.update_expected_uncertainty(prediction_accuracy)
+        if risk_level != 0.0:
+            self.neuromodulatory_system.update_temporal_stress(risk_level)
+        self.neuromodulatory_system.step_homeostatic_decay()
+        params = self.neuromodulatory_system.get_effective_hyperparameters()
+        self.hierarchical_active_inference.sensory_precision = params["sensory_precision"]
+        return self.neuromodulatory_system.current
+
+    def synchronize_and_bind_entities(
+        self,
+        feature_entities: list[dict[str, Any]],
+        target_features: dict[str, Any] | None = None,
+    ) -> list[BoundFeatureBundle]:
+        """Apply Kuramoto phase synchronization and TRN gating to bind perceptual features."""
+        bundles = self.thalamocortical_binding.bind_features_oscillatory(feature_entities)
+        if target_features:
+            bundles = self.thalamocortical_binding.apply_trn_attentional_gating(
+                bundles, target_features
+            )
+        return bundles
+
+    def evaluate_superposition_actions(
+        self,
+        candidate_actions: list[Any],
+        simulator_fn: Any,
+    ) -> list[SuperpositionEvaluationResult]:
+        """Evaluate actions across multiple counterfactual world hypotheses in superposition."""
+        return self.superposition_planner.evaluate_superposition_actions(
+            candidate_actions=candidate_actions,
+            simulator_fn=simulator_fn,
+        )
 
     def evaluate_truth_value(
         self,

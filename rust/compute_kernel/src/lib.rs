@@ -2,6 +2,8 @@
 use numpy::ndarray::Array2;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 #[cfg(target_arch = "aarch64")]
 use core::arch::aarch64::*;
@@ -193,6 +195,85 @@ impl UniversalEngine {
         });
 
         Ok(PyArray1::from_vec(py, out))
+    }
+
+    /// High-performance Vectorized Leaky Integrate-and-Fire (LIF) neural membrane update.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snn_step_lif_simd<'py>(
+        &self,
+        py: Python<'py>,
+        membrane: PyReadonlyArray2<'py, f32>,
+        refractory: PyReadonlyArray2<'py, i32>,
+        current_input: PyReadonlyArray2<'py, f32>,
+        v_thresh: f32,
+        v_reset: f32,
+        decay: f32,
+        refractory_steps: i32,
+    ) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
+        snn_step_lif_simd(
+            py,
+            membrane,
+            refractory,
+            current_input,
+            v_thresh,
+            v_reset,
+            decay,
+            refractory_steps,
+        )
+    }
+
+    /// High-performance kinematic limit-cycle hazard density projection with border reflection.
+    pub fn forecast_hazard_density_simd<'py>(
+        &self,
+        py: Python<'py>,
+        height: usize,
+        width: usize,
+        tracks: Vec<(i32, i32, i32, i32)>,
+        horizon_steps: usize,
+    ) -> PyResult<&'py PyArray2<f32>> {
+        forecast_hazard_density_simd(py, height, width, tracks, horizon_steps)
+    }
+
+    /// Compute probability of necessity (PN) and sufficiency (PS) for causal counterfactuals.
+    pub fn causal_attribution_simd(
+        &self,
+        factual_vals: Vec<f32>,
+        cf_vals: Vec<f32>,
+        weights: Vec<f32>,
+    ) -> PyResult<(f32, f32)> {
+        causal_attribution_simd(factual_vals, cf_vals, weights)
+    }
+
+    /// Fast native A* grid search.
+    pub fn fast_astar_search(
+        &self,
+        height: usize,
+        width: usize,
+        start: (usize, usize),
+        goal: (usize, usize),
+        barriers: Vec<(usize, usize)>,
+    ) -> PyResult<Option<Vec<(usize, usize)>>> {
+        Ok(fast_astar_search(height, width, start, goal, barriers))
+    }
+
+    /// High-performance spatial rollout simulation for MCTS.
+    pub fn bitboard_simulate_rollout(
+        &self,
+        height: usize,
+        width: usize,
+        start: (usize, usize),
+        goal: (usize, usize),
+        barriers: Vec<(usize, usize)>,
+        action_deltas: Vec<(isize, isize)>,
+    ) -> PyResult<(bool, usize, (usize, usize))> {
+        Ok(bitboard_simulate_rollout(
+            height,
+            width,
+            start,
+            goal,
+            barriers,
+            action_deltas,
+        ))
     }
 }
 
@@ -821,53 +902,6 @@ impl UniversalEngine {
             i += 1;
         }
     }
-
-    /// High-performance Vectorized Leaky Integrate-and-Fire (LIF) neural membrane update.
-    #[allow(clippy::too_many_arguments)]
-    pub fn snn_step_lif_simd<'py>(
-        &self,
-        py: Python<'py>,
-        membrane: PyReadonlyArray2<'py, f32>,
-        refractory: PyReadonlyArray2<'py, i32>,
-        current_input: PyReadonlyArray2<'py, f32>,
-        v_thresh: f32,
-        v_reset: f32,
-        decay: f32,
-        refractory_steps: i32,
-    ) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
-        snn_step_lif_simd(
-            py,
-            membrane,
-            refractory,
-            current_input,
-            v_thresh,
-            v_reset,
-            decay,
-            refractory_steps,
-        )
-    }
-
-    /// High-performance kinematic limit-cycle hazard density projection with border reflection.
-    pub fn forecast_hazard_density_simd<'py>(
-        &self,
-        py: Python<'py>,
-        height: usize,
-        width: usize,
-        tracks: Vec<(i32, i32, i32, i32)>,
-        horizon_steps: usize,
-    ) -> PyResult<&'py PyArray2<f32>> {
-        forecast_hazard_density_simd(py, height, width, tracks, horizon_steps)
-    }
-
-    /// Compute probability of necessity (PN) and sufficiency (PS) for causal counterfactuals.
-    pub fn causal_attribution_simd(
-        &self,
-        factual_vals: Vec<f32>,
-        cf_vals: Vec<f32>,
-        weights: Vec<f32>,
-    ) -> PyResult<(f32, f32)> {
-        causal_attribution_simd(factual_vals, cf_vals, weights)
-    }
 }
 
 /// Standalone Vectorized Leaky Integrate-and-Fire (LIF) neural membrane update.
@@ -1037,12 +1071,172 @@ pub fn causal_attribution_simd(
     Ok((pn, ps))
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+struct AStarState {
+    cost: usize,
+    pos: usize,
+}
+
+impl Ord for AStarState {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cost.cmp(&self.cost)
+    }
+}
+
+impl PartialOrd for AStarState {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Fast native A* grid search.
+#[pyfunction]
+pub fn fast_astar_search(
+    height: usize,
+    width: usize,
+    start: (usize, usize),
+    goal: (usize, usize),
+    barriers: Vec<(usize, usize)>,
+) -> Option<Vec<(usize, usize)>> {
+    if height == 0 || width == 0 {
+        return None;
+    }
+    if start.0 >= height || start.1 >= width || goal.0 >= height || goal.1 >= width {
+        return None;
+    }
+    let total = height * width;
+    let mut barrier_grid = vec![false; total];
+    for (r, c) in barriers {
+        if r < height && c < width {
+            barrier_grid[r * width + c] = true;
+        }
+    }
+    if barrier_grid[start.0 * width + start.1] || barrier_grid[goal.0 * width + goal.1] {
+        return None;
+    }
+    if start == goal {
+        return Some(vec![start]);
+    }
+
+    let start_idx = start.0 * width + start.1;
+    let goal_idx = goal.0 * width + goal.1;
+
+    let mut dist = vec![usize::MAX; total];
+    let mut parent = vec![usize::MAX; total];
+    let mut heap = BinaryHeap::new();
+
+    dist[start_idx] = 0;
+    let h0 = start.0.abs_diff(goal.0) + start.1.abs_diff(goal.1);
+    heap.push(AStarState {
+        cost: h0,
+        pos: start_idx,
+    });
+
+    let dr: [isize; 4] = [-1, 1, 0, 0];
+    let dc: [isize; 4] = [0, 0, -1, 1];
+
+    while let Some(AStarState { cost: _, pos }) = heap.pop() {
+        if pos == goal_idx {
+            let mut path = Vec::new();
+            let mut curr = goal_idx;
+            while curr != usize::MAX {
+                let r = curr / width;
+                let c = curr % width;
+                path.push((r, c));
+                curr = parent[curr];
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        let r = (pos / width) as isize;
+        let c = (pos % width) as isize;
+        let d = dist[pos];
+
+        for i in 0..4 {
+            let nr = r + dr[i];
+            let nc = c + dc[i];
+            if nr >= 0 && nr < height as isize && nc >= 0 && nc < width as isize {
+                let n_idx = (nr as usize) * width + (nc as usize);
+                if !barrier_grid[n_idx] {
+                    let next_d = d + 1;
+                    if next_d < dist[n_idx] {
+                        dist[n_idx] = next_d;
+                        parent[n_idx] = pos;
+                        let h = (nr as usize).abs_diff(goal.0) + (nc as usize).abs_diff(goal.1);
+                        heap.push(AStarState {
+                            cost: next_d + h,
+                            pos: n_idx,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// High-performance spatial rollout simulation for MCTS.
+#[pyfunction]
+pub fn bitboard_simulate_rollout(
+    height: usize,
+    width: usize,
+    start: (usize, usize),
+    goal: (usize, usize),
+    barriers: Vec<(usize, usize)>,
+    action_deltas: Vec<(isize, isize)>,
+) -> (bool, usize, (usize, usize)) {
+    if height == 0 || width == 0 {
+        return (false, 0, start);
+    }
+    let total = height * width;
+    let mut barrier_grid = vec![false; total];
+    for (r, c) in barriers {
+        if r < height && c < width {
+            barrier_grid[r * width + c] = true;
+        }
+    }
+
+    let mut curr_r = start.0 as isize;
+    let mut curr_c = start.1 as isize;
+
+    if (curr_r as usize, curr_c as usize) == goal {
+        return (true, 0, goal);
+    }
+
+    for (step, &(dr, dc)) in action_deltas.iter().enumerate() {
+        let nr = curr_r + dr;
+        let nc = curr_c + dc;
+
+        if nr >= 0 && nr < height as isize && nc >= 0 && nc < width as isize {
+            let n_idx = (nr as usize) * width + (nc as usize);
+            if !barrier_grid[n_idx] {
+                curr_r = nr;
+                curr_c = nc;
+            }
+        }
+
+        if (curr_r as usize, curr_c as usize) == goal {
+            return (true, step + 1, goal);
+        }
+    }
+
+    (
+        false,
+        action_deltas.len(),
+        (curr_r as usize, curr_c as usize),
+    )
+}
+
 #[pymodule]
 fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<UniversalEngine>()?;
     m.add_function(wrap_pyfunction!(snn_step_lif_simd, m)?)?;
     m.add_function(wrap_pyfunction!(forecast_hazard_density_simd, m)?)?;
     m.add_function(wrap_pyfunction!(causal_attribution_simd, m)?)?;
+    m.add_function(wrap_pyfunction!(fast_astar_search, m)?)?;
+    m.add_function(wrap_pyfunction!(bitboard_simulate_rollout, m)?)?;
     Ok(())
 }
 
@@ -1203,5 +1397,38 @@ mod tests {
             scalar_sum,
             vec_sum
         );
+    }
+
+    #[test]
+    fn test_fast_astar_search_path() {
+        let barriers = vec![(1, 0), (1, 1), (1, 2)];
+        let path = fast_astar_search(4, 4, (0, 0), (2, 0), barriers);
+        assert!(path.is_some());
+        let p = path.unwrap();
+        assert_eq!(p.first().copied(), Some((0, 0)));
+        assert_eq!(p.last().copied(), Some((2, 0)));
+        // Avoids row 1 columns 0, 1, 2
+        for &(r, c) in &p {
+            assert!(!(r == 1 && c <= 2), "Path hit barrier at ({}, {})", r, c);
+        }
+    }
+
+    #[test]
+    fn test_fast_astar_blocked() {
+        let barriers = vec![(1, 0), (1, 1), (1, 2), (1, 3)];
+        let path = fast_astar_search(4, 4, (0, 0), (2, 0), barriers);
+        assert!(path.is_none());
+    }
+
+    #[test]
+    fn test_bitboard_simulate_rollout() {
+        let barriers = vec![(0, 2)];
+        // Actions: Right, Right, Down
+        let actions = vec![(0, 1), (0, 1), (1, 0)];
+        let (reached, steps, final_pos) =
+            bitboard_simulate_rollout(3, 3, (0, 0), (1, 1), barriers, actions);
+        assert!(reached);
+        assert_eq!(steps, 3);
+        assert_eq!(final_pos, (1, 1));
     }
 }
