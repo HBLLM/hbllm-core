@@ -264,6 +264,53 @@ class CerebellarPhaseClock:
 
         return decision
 
+    def evaluate_crossing_safety(
+        self,
+        agent_pos: tuple[int, int],
+        target_pos: tuple[int, int],
+        snn_predictor: Any,
+        grid: np.ndarray | None = None,
+        current_step: int = 0,
+        horizon_steps: int = 16,
+    ) -> PhaseGateDecision:
+        """Evaluate crossing safety combining cerebellar timing with SNN limit cycle forecasting."""
+        travel_steps = abs(agent_pos[0] - target_pos[0]) + abs(agent_pos[1] - target_pos[1])
+        arrival_step = current_step + travel_steps
+
+        # 1. If grid is available, forecast hazard density at arrival
+        if grid is not None and hasattr(snn_predictor, "predict_hazard_density"):
+            density_at_arrival = snn_predictor.predict_hazard_density(
+                grid, horizon_steps=max(1, travel_steps)
+            )
+            H, W = grid.shape
+            tr, tc = target_pos
+            if 0 <= tr < H and 0 <= tc < W:
+                hazard_prob = float(density_at_arrival[tr, tc])
+                if hazard_prob > 0.4:
+                    # Target will be occupied at arrival; find safe delay
+                    for delay in range(1, min(horizon_steps, 8)):
+                        future_density = snn_predictor.predict_hazard_density(
+                            grid, horizon_steps=travel_steps + delay
+                        )
+                        if float(future_density[tr, tc]) <= 0.2:
+                            return PhaseGateDecision(
+                                should_wait=True,
+                                wait_steps_recommended=delay,
+                                safe_phase_offset=delay,
+                                current_phase=arrival_step % (self.detected_macro_period or 4),
+                                environmental_period=self.detected_macro_period or 4,
+                                reason=f"SNN forecasted hazard at target (p={hazard_prob:.2f}), safe after {delay} steps",
+                            )
+
+        return PhaseGateDecision(
+            should_wait=False,
+            wait_steps_recommended=0,
+            safe_phase_offset=0,
+            current_phase=arrival_step % (self.detected_macro_period or 1),
+            environmental_period=self.detected_macro_period or 1,
+            reason="Corridor and target safe across planned transit window",
+        )
+
     def to_causal_predicate(self) -> CausalPredicate:
         """Export macro periodicity state as a declarative causal predicate."""
         return CausalPredicate(

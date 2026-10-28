@@ -13,6 +13,11 @@ from hbllm.hcir.world.causal_discovery import (
     CausalHypothesis,
     CausalPredicate,
 )
+from hbllm.hcir.world.causal_scm import (
+    CausalVariable,
+    CounterfactualOutcome,
+    StructuralCausalModel,
+)
 from hbllm.hcir.world.cortex_assimilator import (
     EpistemicFeedbackAssimilator,
     EpistemicPhase,
@@ -82,6 +87,8 @@ __all__ = [
     "BranchMode",
     "CausalHypothesis",
     "CausalPredicate",
+    "CausalVariable",
+    "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
     "EnsemblePrediction",
@@ -106,6 +113,7 @@ __all__ = [
     "SalientObject",
     "SpatialEntity",
     "StateDifferenceComputer",
+    "StructuralCausalModel",
     "SurpriseEngine",
     "SurpriseEvaluation",
     "TemporalStateBuffer",

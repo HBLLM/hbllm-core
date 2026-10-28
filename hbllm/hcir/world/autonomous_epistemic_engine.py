@@ -52,6 +52,7 @@ from hbllm.hcir.world.causal_discovery import (
 )
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
+    PhaseGateDecision,
 )
 from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
@@ -2015,6 +2016,25 @@ class AutonomousEpistemicEngine:
             )
 
         return pred, disagreement.high_disagreement
+
+    def evaluate_transit_safety_cerebellar_snn(
+        self,
+        target_pos: tuple[int, int],
+        curr_grid: np.ndarray | None = None,
+    ) -> PhaseGateDecision:
+        """Evaluate transit safety to target_pos combining Cerebellar timing and SNN limit cycle forecasting."""
+        agent_pos = self.avatar_pos or (0, 0)
+        grid = curr_grid if curr_grid is not None else getattr(self, "last_observed_grid", None)
+        snn = None
+        if self.world_kernel and hasattr(self.world_kernel, "predictive_reality"):
+            snn = getattr(self.world_kernel.predictive_reality, "snn", None)
+        return self.cerebellar_clock.evaluate_crossing_safety(
+            agent_pos=agent_pos,
+            target_pos=target_pos,
+            snn_predictor=snn,
+            grid=grid,
+            current_step=self.step_counter,
+        )
 
     def plan_epistemic_probe(
         self,

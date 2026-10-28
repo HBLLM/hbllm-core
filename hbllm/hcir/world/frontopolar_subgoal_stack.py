@@ -54,7 +54,15 @@ class FrontopolarSubgoal:
     is_terminal: bool = False
     prerequisite_subgoal_ids: list[str] = field(default_factory=list)
     prerequisite_features: set[int] = field(default_factory=set)
+    bound_skill_name: str | None = None
+    bound_skill: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def bind_skill(self, skill: Any) -> None:
+        """Bind a declarative neuro-symbolic skill directly to this executive subgoal."""
+        self.bound_skill = skill
+        self.bound_skill_name = getattr(skill, "skill_name", str(skill))
+        self.metadata["bound_skill"] = self.bound_skill_name
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export frontopolar subgoal as a declarative causal predicate."""
@@ -189,6 +197,65 @@ class FrontopolarSubgoalStack:
     def pop_active_subgoal(self) -> FrontopolarSubgoal | None:
         """Alias for pop_subgoal to complete and pop the active subgoal."""
         return self.pop_subgoal()
+
+    def decompose_subgoal_with_skill(
+        self,
+        subgoal_id: str,
+        skill: Any,
+    ) -> list[FrontopolarSubgoal]:
+        """Decompose a high-level frontopolar subgoal into primitive subgoals derived from skill program."""
+        target_sg = None
+        target_idx = -1
+        for i, sg in enumerate(self.stack):
+            if sg.subgoal_id == subgoal_id:
+                target_sg = sg
+                target_idx = i
+                break
+
+        if target_sg is None or not hasattr(skill, "program") or not skill.program:
+            return []
+
+        decomposed: list[FrontopolarSubgoal] = []
+        for idx, sub_item in enumerate(skill.program.subgoals):
+            t_query = sub_item.target_query or {}
+            role = t_query.get("role", "waypoint")
+            sub_id = f"{subgoal_id}_decomp_{idx}"
+
+            sg_type = SubgoalType.NAVIGATE_TO
+            if role == "goal":
+                sg_type = SubgoalType.DELIVER_TO_GOAL
+            elif role in ("barrier", "obstacle"):
+                sg_type = SubgoalType.CLEAR_OBSTACLE
+            elif role in ("key", "tool"):
+                sg_type = SubgoalType.ACQUIRE_TOOL
+            elif role in ("switch", "mechanism"):
+                sg_type = SubgoalType.UNLOCK_REMOTE_MECHANISM
+
+            pos = t_query.get("pos") or target_sg.target_entity_pos
+            dest = t_query.get("pos") or target_sg.target_destination
+
+            child_sg = FrontopolarSubgoal(
+                subgoal_id=sub_id,
+                subgoal_type=sg_type,
+                target_entity_pos=pos,
+                target_destination=dest,
+                priority=target_sg.priority + 0.1 * (len(skill.program.subgoals) - idx),
+                prerequisite_subgoal_ids=[decomposed[-1].subgoal_id]
+                if decomposed
+                else list(target_sg.prerequisite_subgoal_ids),
+                metadata={
+                    "parent_subgoal_id": subgoal_id,
+                    "skill_name": getattr(skill, "skill_name", ""),
+                },
+            )
+            decomposed.append(child_sg)
+
+        if decomposed:
+            self.stack.pop(target_idx)
+            for child in reversed(decomposed):
+                self.stack.insert(target_idx, child)
+
+        return decomposed
 
     def is_subgoal_satisfied(
         self,

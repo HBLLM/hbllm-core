@@ -25,6 +25,11 @@ from hbllm.hcir.skills.common_subskills import (
     RemoteActuator,
     TemporalSyncPlanner,
 )
+from hbllm.hcir.skills.curriculum import (
+    CurricularSkillGraph,
+    CurricularSkillNode,
+    SkillTier,
+)
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
@@ -61,6 +66,8 @@ __all__ = [
     "BlockPushPlanner",
     "ColorCluster",
     "ColorDistributionPredicate",
+    "CurricularSkillGraph",
+    "CurricularSkillNode",
     "CutSetPredicate",
     "DeclarativeNeuroSymbolicSkill",
     "DiscreteVectorTranslator",
@@ -81,6 +88,7 @@ __all__ = [
     "RemoteActuator",
     "SkillEvaluationContext",
     "SkillInductionEngine",
+    "SkillTier",
     "SubgoalSequence",
     "SymbolicPredicate",
     "SymbolicSubgoal",
