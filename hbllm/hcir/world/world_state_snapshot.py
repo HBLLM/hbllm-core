@@ -296,12 +296,19 @@ class StateDifferenceComputer:
             ):
                 diff_mask = g_pre != g_post
                 coords = np.argwhere(diff_mask)
-                changed_cells = [(int(r), int(c)) for r, c in coords]
-                if changed_cells:
-                    r_min = int(coords[:, 0].min())
-                    r_max = int(coords[:, 0].max())
-                    c_min = int(coords[:, 1].min())
-                    c_max = int(coords[:, 1].max())
+                if coords.ndim == 2 and coords.shape[0] > 0:
+                    if coords.shape[1] == 2:
+                        changed_cells = [(int(r), int(c)) for r, c in coords]
+                        r_min = int(coords[:, 0].min())
+                        r_max = int(coords[:, 0].max())
+                        c_min = int(coords[:, 1].min())
+                        c_max = int(coords[:, 1].max())
+                    else:
+                        changed_cells = [(int(pt[-2]), int(pt[-1])) for pt in coords]
+                        r_min = int(coords[:, -2].min())
+                        r_max = int(coords[:, -2].max())
+                        c_min = int(coords[:, -1].min())
+                        c_max = int(coords[:, -1].max())
                     bbox = (r_min, c_min, r_max, c_max)
 
         return StateDifferenceResult(

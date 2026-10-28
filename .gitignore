@@ -70,6 +70,7 @@ test_workspace/
 
 # Memory persistence artifacts
 knowledge_graph.json
+knowledge_store/
 semantic/
 
 # MkDocs build output
@@ -90,3 +91,4 @@ kaggle_submission/environment_files/
 /scratch/
 /kaggle_arc2_submission/
 /graphify-out
+*_backup_*.json

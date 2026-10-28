@@ -49,6 +49,9 @@ from hbllm.hcir.skills.declarative import (
     TileFramePredicate,
     TileGridPredicate,
 )
+from hbllm.hcir.skills.induction import (
+    SkillInductionEngine,
+)
 
 __all__ = [
     "ActionAffordancePredicate",
@@ -77,6 +80,7 @@ __all__ = [
     "Raycaster2D",
     "RemoteActuator",
     "SkillEvaluationContext",
+    "SkillInductionEngine",
     "SubgoalSequence",
     "SymbolicPredicate",
     "SymbolicSubgoal",

@@ -137,6 +137,9 @@ class CapabilityEvidence:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"cap_{self.capability_id}",
                 node_data={
+                    "id": f"cap_{self.capability_id}",
+                    "node_type": "capability_evidence",
+                    "category": "meta",
                     "capability_id": self.capability_id,
                     "name": self.name,
                     "domain": self.domain,
@@ -209,7 +212,12 @@ class CapabilityLedger:
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
                 node_id="capability_ledger_summary",
-                node_data=self.summary(),
+                node_data={
+                    "id": "capability_ledger_summary",
+                    "node_type": "capability_summary",
+                    "category": "meta",
+                    **self.summary(),
+                },
             )
         ]
         for entry in self._entries.values():

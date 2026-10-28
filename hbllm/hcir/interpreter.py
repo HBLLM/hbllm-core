@@ -234,14 +234,26 @@ async def sys_execute(
 async def sys_wait(
     ins: Instruction, workspace: HCIRWorkspaceState, services: KernelServices
 ) -> dict[str, Any]:
-    """WAIT: block execution until a condition resolves.
+    """WAIT: block execution until a condition resolves or event fires.
 
     Params:
         condition (str): A query-like condition to wait for.
+        event_type (str): Optional event type to await on KernelEventBus.
         timeout_ms (int): Maximum wait time in milliseconds.
     """
-    # In the current synchronous model, WAIT returns immediately
-    # with the condition evaluation result.
+    event_type = ins.params.get("event_type") or ins.params.get("event")
+    timeout_ms = ins.params.get("timeout_ms", 1000)
+
+    if event_type and hasattr(services, "event_bus") and services.event_bus is not None:
+        try:
+            evt = await services.event_bus.wait_for(event_type=event_type, timeout_ms=timeout_ms)
+            evt_dict = evt.to_dict() if hasattr(evt, "to_dict") else str(evt)
+            return {"waited": True, "event": evt_dict, "resolved": True}
+        except TimeoutError:
+            return {"waited": True, "event_type": event_type, "resolved": False, "timeout": True}
+        except Exception as exc:
+            return {"waited": True, "event_type": event_type, "resolved": False, "error": str(exc)}
+
     condition = ins.params.get("condition", "")
     return {"waited": True, "condition": condition, "resolved": True}
 

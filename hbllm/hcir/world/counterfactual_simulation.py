@@ -49,6 +49,9 @@ class DeadlockEvaluation(NamedTuple):
                 op=TransactionOp.ADD_NODE,
                 node_id=f"deadlock_{self.deadlock_type}",
                 node_data={
+                    "id": f"deadlock_{self.deadlock_type}",
+                    "node_type": "hypothesis",
+                    "category": "epistemology",
                     "is_deadlock": self.is_deadlock,
                     "deadlock_type": self.deadlock_type,
                     "description": self.description,

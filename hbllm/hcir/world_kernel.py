@@ -94,6 +94,20 @@ class WorldKernel:
 
         return summary
 
+    def sync_digital_twin(
+        self,
+        twin_id: str | None = None,
+        updates: dict[str, Any] | None = None,
+        variable_name: str | None = None,
+        value: Any | None = None,
+    ) -> None:
+        """Sync sensor telemetry or updates directly into DigitalTwinRegistry."""
+        if updates:
+            for k, v in updates.items():
+                self.digital_twin.sync_sensor_telemetry(k, v)
+        if variable_name is not None:
+            self.digital_twin.sync_sensor_telemetry(variable_name, value)
+
     def sync_from_workspace(self) -> None:
         """Sync variables, physical entities, and beliefs from workspace graph into digital twin and belief graph."""
         for node in self._workspace.graph.nodes_by_type(HCIRNodeType.WORLD_VARIABLE):

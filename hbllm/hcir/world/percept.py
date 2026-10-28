@@ -51,6 +51,11 @@ class PerceptionFrame:
     diff: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def bg(self) -> int:
+        """Background feature ID from metadata."""
+        return int(self.metadata.get("bg", 0))
+
     def is_passable(self, r: int, c: int) -> bool:
         """Check whether a given grid coordinate is walkable and safe."""
         if self.passable_topology is not None:
@@ -206,12 +211,21 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                 pass
 
         if candidate_goals:
+            has_known_goal_features = (
+                context is not None
+                and hasattr(context, "symbolic_theory")
+                and bool(getattr(context.symbolic_theory, "goal_features", None))
+            )
             for e in entities:
                 if e.grid_pos in candidate_goals and e.role not in (
                     EntityRole.AGENT,
                     EntityRole.DYNAMIC_HAZARD,
                 ):
-                    e.role = EntityRole.GOAL
+                    if not has_known_goal_features or (
+                        e.feature_id is not None
+                        and e.feature_id in context.symbolic_theory.goal_features
+                    ):
+                        e.role = EntityRole.GOAL
 
         passable = np.ones((H, W), dtype=bool)
         for r, c in barriers | lethal_cells:

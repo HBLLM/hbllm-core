@@ -105,6 +105,55 @@ class ProceduralMacro:
             target_entity=self.macro_id,
         )
 
+    def to_declarative_skill(self) -> Any:
+        """Export procedural macro as a formal DeclarativeNeuroSymbolicSkill."""
+        from hbllm.hcir.skills.declarative import (
+            ActionAffordancePredicate,
+            DeclarativeNeuroSymbolicSkill,
+            SubgoalSequence,
+            SymbolicSubgoal,
+        )
+        from hbllm.hcir.spatial_planner import SpatialActionIntent
+
+        req_actions = self.available_actions or {
+            a for a in self.action_sequence if isinstance(a, int)
+        }
+        signature = ActionAffordancePredicate(required=req_actions)
+        subgoals: list[SymbolicSubgoal] = []
+        if self.waypoints:
+            for wp in self.waypoints:
+                role = getattr(wp, "role", "waypoint")
+                feat = getattr(wp, "feature", None)
+                target_pos = getattr(wp, "target_pos", None)
+                intent = (
+                    SpatialActionIntent.ACTUATE if role == "goal" else SpatialActionIntent.NAVIGATE
+                )
+                subgoals.append(
+                    SymbolicSubgoal(
+                        intent=intent,
+                        target_query={"role": role, "feature": feat, "pos": target_pos},
+                    )
+                )
+        else:
+            for act in self.action_sequence:
+                subgoals.append(
+                    SymbolicSubgoal(
+                        intent=SpatialActionIntent.NAVIGATE,
+                        target_query={"action": act},
+                    )
+                )
+
+        skill = DeclarativeNeuroSymbolicSkill()
+        skill.skill_name = self.macro_id
+        skill.description = (
+            f"Auto-consolidated procedural skill '{self.macro_id}' from level {self.level} "
+            f"({len(self.action_sequence)} actions, conf={self.confidence:.2f})"
+        )
+        skill.signature = signature
+        skill.program = SubgoalSequence(*subgoals) if subgoals else None
+        setattr(skill, "_procedural_macro", self)
+        return skill
+
 
 @dataclass
 class EpisodicTransition:
@@ -737,25 +786,8 @@ class HippocampalEpisodicCortex:
                 # Also register in working memory procedural library if engine has it
                 if hasattr(engine, "working_memory") and engine.working_memory is not None:
                     try:
-                        from hbllm.hcir.skills.declarative import (
-                            ActionAffordancePredicate,
-                            DeclarativeNeuroSymbolicSkill,
-                        )
-
-                        skill_cls = type(
-                            f"LearnedMacroSkill_{macro_id}",
-                            (DeclarativeNeuroSymbolicSkill,),
-                            {
-                                "skill_name": macro_id,
-                                "description": (
-                                    f"Auto-consolidated procedural skill from winning level {current_level} "
-                                    f"({len(action_seq)} steps)"
-                                ),
-                                "signature": ActionAffordancePredicate(required=avail_actions),
-                                "_procedural_macro": macro,
-                            },
-                        )()
-                        engine.working_memory.register_procedural_skill(macro_id, skill_cls)
+                        skill = macro.to_declarative_skill()
+                        engine.working_memory.register_procedural_skill(macro_id, skill)
                     except Exception as e:
                         logger.debug("Could not register macro as procedural skill: %s", e)
         elif self.current_episode and any(t.is_lost for t in self.current_episode):
@@ -824,7 +856,8 @@ class HippocampalEpisodicCortex:
         engine.working_memory.reset_salience_baseline()
         engine.current_simulated_goal = None
         engine._feedback_assimilated = False
-        engine.symbolic_theory.candidate_goal_features.clear()
+        if is_new_level or not retain_dynamics:
+            engine.symbolic_theory.candidate_goal_features.clear()
 
         if not retain_dynamics:
             engine.level_failed_transitions.clear()

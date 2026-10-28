@@ -126,8 +126,9 @@ class HCIRCompiler:
         stream = compiler.compile(ast, author="user_session")
     """
 
-    def __init__(self, tenant_id: str = "default") -> None:
+    def __init__(self, tenant_id: str = "default", optimizer: Any | None = None) -> None:
         self._tenant_id = tenant_id
+        self._optimizer = optimizer
         # Intent → compilation strategy mapping
         self._strategies: dict[IntentType, Any] = {
             IntentType.INVESTIGATE: self._compile_investigate,
@@ -141,22 +142,41 @@ class HCIRCompiler:
             IntentType.MONITOR: self._compile_monitor,
         }
 
-    def compile(self, ast: SemanticAST, author: str = "compiler") -> InstructionStream:
-        """Compile a SemanticAST into bytecode."""
+    def compile(
+        self,
+        ast: SemanticAST,
+        author: str = "compiler",
+        optimize: bool = False,
+    ) -> InstructionStream:
+        """Compile a SemanticAST into bytecode, with optional optimization pass."""
         strategy = self._strategies.get(ast.intent)
         if strategy is None:
             logger.warning("No compilation strategy for intent: %s", ast.intent)
             return InstructionStream(author=author, description=f"Unknown intent: {ast.intent}")
 
         stream = strategy(ast, author)
+        if optimize:
+            opt = self._optimizer
+            if opt is None:
+                from hbllm.hcir.optimizer import HCIROptimizer
+
+                opt = HCIROptimizer()
+            stream = opt.optimize(stream)
+
         logger.debug(
-            "Compiled '%s' intent → %d instructions",
+            "Compiled '%s' intent → %d instructions (optimized=%s)",
             ast.intent,
             stream.length,
+            optimize,
         )
         return stream
 
-    def compile_text(self, text: str, author: str = "user") -> InstructionStream:
+    def compile_text(
+        self,
+        text: str,
+        author: str = "user",
+        optimize: bool = False,
+    ) -> InstructionStream:
         """Parse natural language prompt into a SemanticAST and compile to InstructionStream."""
         text_lower = text.lower().strip()
 
@@ -184,7 +204,7 @@ class HCIRCompiler:
             action="evaluate_prompt",
             raw_text=text,
         )
-        return self.compile(ast, author=author)
+        return self.compile(ast, author=author, optimize=optimize)
 
     # ── Compilation Strategies ───────────────────────────────────────
 

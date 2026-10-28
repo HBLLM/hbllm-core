@@ -26,7 +26,7 @@ def test_world_context_and_scope():
 
     pred_ctx = ctx.to_causal_predicate()
     assert pred_ctx.variable == "world_context"
-    assert pred_ctx.value == "reality"
+    assert pred_ctx.value in ("reality", "live")
 
     tx_ctx = ctx.to_transaction_operations()
     assert len(tx_ctx) == 1

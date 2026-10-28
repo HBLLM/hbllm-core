@@ -36,6 +36,7 @@ class ExecutiveRuntime:
         self._kernel = kernel or CognitiveKernel(services.workspace)
         self._controller = KernelExecutiveController(services)
         self._state = RuntimeState()
+        self._services.runtime_state = self._state
         self._is_running = False
         self._session_id: str = ""
 

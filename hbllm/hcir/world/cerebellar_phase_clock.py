@@ -55,6 +55,9 @@ class PhaseGateDecision:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="phase_gate_decision",
                 node_data={
+                    "id": "phase_gate_decision",
+                    "node_type": "event",
+                    "category": "execution",
                     "should_wait": self.should_wait,
                     "wait_steps_recommended": self.wait_steps_recommended,
                     "safe_phase_offset": self.safe_phase_offset,
@@ -281,6 +284,9 @@ class CerebellarPhaseClock:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="cerebellar_phase_clock",
                 node_data={
+                    "id": "cerebellar_phase_clock",
+                    "node_type": "event",
+                    "category": "execution",
                     "detected_macro_period": self.detected_macro_period,
                     "period_confidence": self.period_confidence,
                     "last_reset_step": self.last_reset_step,

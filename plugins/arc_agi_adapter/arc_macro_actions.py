@@ -246,7 +246,7 @@ def arc_macro_plan_synthesis_hook(
     autonomously plans from first principles.
     """
     # 1. Allocentric Click Games with Interactive Buttons / Switches
-    if objects and any(engine.is_spatial_effector(a) for a in available_actions):
+    if objects and any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
         is_click_only = not any(engine.is_displacement_action(a) for a in available_actions)
         if is_click_only:
             btn_coords: list[tuple[int, int]] = []

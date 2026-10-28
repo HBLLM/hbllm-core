@@ -76,11 +76,15 @@ class EpistemicObservationDiff:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction recording observation difference."""
+        node_id = f"diff_{self.diff_type.value}_{self.changed_pixel_count}"
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
-                node_id=f"diff_{self.diff_type.value}_{self.changed_pixel_count}",
+                node_id=node_id,
                 node_data={
+                    "id": node_id,
+                    "node_type": "observation",
+                    "category": "perception",
                     "diff_type": self.diff_type.value,
                     "changed_pixel_count": self.changed_pixel_count,
                     "translation_delta": self.translation_delta,
@@ -114,11 +118,15 @@ class OrientedThreat:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction recording oriented threat."""
+        node_id = f"threat_{self.feature_id}_{self.pos[0]}_{self.pos[1]}"
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
-                node_id=f"threat_{self.feature_id}_{self.pos[0]}_{self.pos[1]}",
+                node_id=node_id,
                 node_data={
+                    "id": node_id,
+                    "node_type": "physical_entity",
+                    "category": "perception",
                     "feature_id": self.feature_id,
                     "pos": self.pos,
                     "facing": self.facing,
@@ -320,34 +328,32 @@ class SpatialRoleClassifier:
             else False
         )
         is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
-        is_theory_goal = (
-            (
-                val != 0
-                and (
-                    val in symbolic_theory.goal_features
-                    or val in symbolic_theory.receptacle_features
-                )
+        is_candidate_goal = (
+            val != 0
+            and symbolic_theory is not None
+            and (
+                val in symbolic_theory.goal_features
+                or val in symbolic_theory.candidate_goal_features
+                or val in symbolic_theory.receptacle_features
             )
-            if symbolic_theory
-            else False
         )
+        is_spatial_goal = (
+            (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
+            and (cells is None or any(p in goal_set for p in cells))
+        ) or grid_pos in receptacle_set
 
-        if is_border or is_theory_barrier:
-            return EntityRole.OBSTACLE
-        elif val in av_set or (
+        has_known_goals = bool(symbolic_theory and symbolic_theory.goal_features)
+        if val in av_set or (
             avatar_pos is not None
             and (grid_pos == avatar_pos or (cells is not None and avatar_pos in cells))
         ):
             return EntityRole.AGENT
-        elif (
-            is_theory_goal
-            or (
-                (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
-                and (cells is None or any(p in goal_set for p in cells))
-            )
-            or grid_pos in receptacle_set
+        elif is_candidate_goal or (
+            is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features)
         ):
             return EntityRole.GOAL
+        elif is_border or is_theory_barrier:
+            return EntityRole.OBSTACLE
         elif not is_theory_walkable and any(
             (
                 getattr(m, "trigger_feature", None) is not None
@@ -363,15 +369,6 @@ class SpatialRoleClassifier:
             return EntityRole.ACTUATOR
         elif is_theory_cargo and not is_theory_walkable:
             return EntityRole.MANIPULABLE
-        elif (
-            is_theory_goal
-            or (
-                (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
-                and (cells is None or any(p in goal_set for p in cells))
-            )
-            or grid_pos in receptacle_set
-        ):
-            return EntityRole.GOAL
         elif area <= 16:
             return EntityRole.UNKNOWN
         else:
@@ -399,19 +396,18 @@ class GestaltAffordanceDetector:
         if avatar_feature is not None:
             av_feats.add(avatar_feature)
 
-        # 1. Detect target zones (medium-sized non-border rectangular entities)
+        # 1. Detect target zones and salient interior constellations
         for feat in np.unique(grid):
             feat_int = int(feat)
             if (
                 feat_int == bg
-                or feat_int == 0
                 or feat_int in av_feats
                 or (barrier_features and feat_int in barrier_features)
                 or (known_lethal_features and feat_int in known_lethal_features)
             ):
                 continue
             pts = np.argwhere(grid == feat_int)
-            if len(pts) < 4 or len(pts) > H * W * 0.3:
+            if len(pts) < 1 or len(pts) > H * W * 0.3:
                 continue
 
             min_r, min_c = pts.min(axis=0)
@@ -421,23 +417,29 @@ class GestaltAffordanceDetector:
             rect_area = (max_r - min_r + 1) * (max_c - min_c + 1)
             fill_ratio = len(pts) / max(1, rect_area)
 
-            if is_interior and fill_ratio > 0.7 and 4 <= len(pts) <= H * W * 0.15:
+            is_target_zone = fill_ratio > 0.7 and 4 <= len(pts) <= H * W * 0.15
+            is_constellation = (
+                1 <= len(pts) <= 12 and (max_r - min_r < H // 3) and (max_c - min_c < W // 3)
+            )
+
+            if is_interior and (is_target_zone or is_constellation):
                 centroid = (
                     int(round(float(np.mean(pts[:, 0])))),
                     int(round(float(np.mean(pts[:, 1])))),
                 )
-                if avatar_pos is not None and (
-                    centroid == avatar_pos
-                    or (min_r <= avatar_pos[0] <= max_r and min_c <= avatar_pos[1] <= max_c)
-                ):
+                target_cells = [(int(r), int(c)) for r, c in pts]
+                if avatar_pos is not None:
+                    target_cells = [c for c in target_cells if c != avatar_pos]
+                if not target_cells:
                     continue
                 goals.append(
                     {
-                        "type": "target_zone",
+                        "type": "target_zone" if is_target_zone else "constellation_target",
                         "position": centroid,
+                        "cells": target_cells,
                         "feature": feat_int,
-                        "size": len(pts),
-                        "confidence": 0.8,
+                        "size": len(target_cells),
+                        "confidence": 0.85 if is_constellation else 0.8,
                     }
                 )
 
@@ -446,23 +448,47 @@ class GestaltAffordanceDetector:
             feat_int = int(feat)
             if (
                 feat_int == bg
-                or feat_int == 0
                 or feat_int in av_feats
                 or (barrier_features and feat_int in barrier_features)
                 or (known_lethal_features and feat_int in known_lethal_features)
             ):
                 continue
-            pts = np.argwhere(grid == feat_int)
-            if len(pts) < 1 or len(pts) > 4:
-                continue
 
-            touches_edge = any(r == 0 or r == H - 1 or c == 0 or c == W - 1 for r, c in pts)
-            cells = [(int(r), int(c)) for r, c in pts]
-            centroid = (
-                int(round(float(np.mean(pts[:, 0])))),
-                int(round(float(np.mean(pts[:, 1])))),
-            )
-            if touches_edge:
+            feat_mask = grid == feat_int
+            labeled_feat, num_comp = label(feat_mask)
+            for c_id in range(1, num_comp + 1):
+                pts = np.argwhere(labeled_feat == c_id)
+                max_strip_len = max(16, max(H, W) * 2)
+                if len(pts) < 1 or len(pts) > max_strip_len:
+                    continue
+
+                touches_edge = any(r == 0 or r == H - 1 or c == 0 or c == W - 1 for r, c in pts)
+                if not touches_edge:
+                    continue
+
+                # Filter out complete perimeter walls and full-edge boundary borders
+                r_coords = pts[:, 0]
+                c_coords = pts[:, 1]
+                covers_all_4 = (
+                    np.any(r_coords == 0)
+                    and np.any(r_coords == H - 1)
+                    and np.any(c_coords == 0)
+                    and np.any(c_coords == W - 1)
+                    and len(pts) >= 2 * (H + W) - 8
+                )
+                spans_full_edge = (
+                    (int(np.max(r_coords)) - int(np.min(r_coords)) >= H - 2)
+                    or (int(np.max(c_coords)) - int(np.min(c_coords)) >= W - 2)
+                    or len(pts) >= min(H, W) - 2
+                )
+                if covers_all_4 or spans_full_edge:
+                    continue
+
+                cells = [(int(r), int(c)) for r, c in pts]
+                centroid = (
+                    int(round(float(np.mean(pts[:, 0])))),
+                    int(round(float(np.mean(pts[:, 1])))),
+                )
                 goals.append(
                     {
                         "type": "exit_marker",
@@ -1074,6 +1100,9 @@ class PerceptionEngine:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="perception_engine",
                 node_data={
+                    "id": "perception_engine",
+                    "node_type": "capability",
+                    "category": "perception",
                     "faculty": "cortex_perception",
                     "status": "ACTIVE",
                 },

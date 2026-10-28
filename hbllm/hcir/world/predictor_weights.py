@@ -48,6 +48,9 @@ class PredictorWeightState:
             op=TransactionOp.UPSERT_NODE,
             node_id=f"weight_{scope_key}_{self.predictor_name}",
             node_data={
+                "id": f"weight_{scope_key}_{self.predictor_name}",
+                "node_type": "predictor_weight",
+                "category": "meta",
                 "predictor_name": self.predictor_name,
                 "scope_key": scope_key,
                 "accuracy_weight": self.accuracy_weight,
@@ -56,6 +59,16 @@ class PredictorWeightState:
                 "total_evaluations": self.total_evaluations,
             },
         )
+
+
+DEFAULT_PREDICTOR_PRIORS: dict[str, dict[str, float]] = {
+    "physics": {"accuracy_weight": 0.80, "exploration_bonus": 0.15, "uncertainty": 0.05},
+    "snn": {"accuracy_weight": 0.70, "exploration_bonus": 0.20, "uncertainty": 0.10},
+    "statistical": {"accuracy_weight": 0.55, "exploration_bonus": 0.25, "uncertainty": 0.15},
+    "neural": {"accuracy_weight": 0.45, "exploration_bonus": 0.30, "uncertainty": 0.20},
+    "whole_grid": {"accuracy_weight": 0.50, "exploration_bonus": 0.25, "uncertainty": 0.15},
+    "llm": {"accuracy_weight": 0.40, "exploration_bonus": 0.40, "uncertainty": 0.25},
+}
 
 
 class PredictorWeightManager:
@@ -76,6 +89,20 @@ class PredictorWeightManager:
             self._weights[key][predictor_name] = PredictorWeightState(predictor_name=predictor_name)
 
         return self._weights[key][predictor_name]
+
+    def seed_priors(self, scope: WorldModelScope) -> None:
+        """Seed domain-specific prior weights for standard predictor faculties."""
+        key = scope.to_key()
+        if key not in self._weights:
+            self._weights[key] = {}
+        for name, priors in DEFAULT_PREDICTOR_PRIORS.items():
+            if name not in self._weights[key]:
+                self._weights[key][name] = PredictorWeightState(
+                    predictor_name=name,
+                    accuracy_weight=priors.get("accuracy_weight", 0.50),
+                    exploration_bonus=priors.get("exploration_bonus", 0.20),
+                    uncertainty=priors.get("uncertainty", 0.10),
+                )
 
     def update_weight(
         self,

@@ -54,6 +54,9 @@ class WorldModelDescriptor:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"model_{self.model_id}",
                 node_data={
+                    "id": f"model_{self.model_id}",
+                    "node_type": "model",
+                    "category": "meta",
                     "model_id": self.model_id,
                     "model_version": self.model_version,
                     "domain": self.domain,

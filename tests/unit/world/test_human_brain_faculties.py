@@ -3603,3 +3603,31 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         assert "x" in coords and "y" in coords
         assert 0 <= coords["x"] < 15
         assert 0 <= coords["y"] < 15
+
+    def test_active_manipulandum_none_safety(self) -> None:
+        """Verify that deliberation and planning safely handle has_manipulandum() returning True when active_manipulandum is None."""
+        from unittest.mock import MagicMock
+
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+        from hbllm.hcir.world.cortex_planner import MentalSimulationPlanner
+
+        engine = AutonomousEpistemicEngine(enable_logging=False)
+        engine.avatar_pos = None
+
+        # Simulate body_schema with has_manipulandum returning True but active_manipulandum is None
+        engine.working_memory.body_schema = MagicMock()
+        engine.working_memory.body_schema.has_manipulandum.return_value = True
+        engine.working_memory.body_schema.active_manipulandum = None
+
+        grid = np.zeros((10, 10), dtype=np.int32)
+        delib = PrefrontalDeliberationEngine()
+        # Must not raise AttributeError: 'NoneType' object has no attribute 'pos'
+        act, act_data = delib.decide(engine, grid, available_actions=[1, 2, 3, 4])
+        assert act in [1, 2, 3, 4]
+
+        # Test planner safety as well
+        plan = MentalSimulationPlanner.simulate_in_mind(
+            engine, grid, available_actions=[1, 2, 3, 4]
+        )
+        assert plan is None or isinstance(plan, list)

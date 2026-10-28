@@ -55,6 +55,9 @@ class PhysicalEntity:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"phys_{self.entity_id}",
                 node_data={
+                    "id": f"phys_{self.entity_id}",
+                    "node_type": "physical_entity",
+                    "category": "perception",
                     "entity_id": self.entity_id,
                     "entity_name": self.entity_name,
                     "status": self.status,

@@ -49,6 +49,10 @@ class PromotedSkillReceipt:
                 op=TransactionOp.ADD_NODE,
                 node_id=f"promoted_skill_{self.promotion_id}",
                 node_data={
+                    "id": f"promoted_skill_{self.promotion_id}",
+                    "node_type": "skill",
+                    "category": "execution",
+                    "name": self.action_intent,
                     "promotion_id": self.promotion_id,
                     "prediction_id": self.prediction_id,
                     "action_intent": self.action_intent,

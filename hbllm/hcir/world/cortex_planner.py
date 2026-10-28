@@ -61,11 +61,17 @@ class MentalSimulationStep:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction recording simulation step."""
+        node_id = (
+            f"sim_step_{self.action}_{self.predicted_avatar_pos[0]}_{self.predicted_avatar_pos[1]}"
+        )
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
-                node_id=f"sim_step_{self.action}_{self.predicted_avatar_pos[0]}_{self.predicted_avatar_pos[1]}",
+                node_id=node_id,
                 node_data={
+                    "id": node_id,
+                    "node_type": "action",
+                    "category": "execution",
                     "action": self.action,
                     "predicted_pos": self.predicted_avatar_pos,
                     "expected_mutation": self.expected_mutation,
@@ -331,6 +337,7 @@ class EpistemicGoalScheduler:
                     "reflection_target",
                     "relational_alignment",
                     "optical_mirror_target",
+                    "constellation_target",
                 )
             ]
             cand_sgs = primary_sgs if primary_sgs else structural_goals
@@ -339,9 +346,15 @@ class EpistemicGoalScheduler:
                 if feat is not None and (
                     (feat in av_feats and not sg.get("is_midpoint"))
                     or feat in engine.hazard_tracker.known_lethal_features
-                    or engine.symbolic_theory.is_barrier(feat)
+                    or (
+                        engine.symbolic_theory.is_barrier(feat)
+                        and feat not in engine.symbolic_theory.goal_features
+                        and feat not in engine.symbolic_theory.candidate_goal_features
+                    )
                 ):
                     continue
+                if feat is not None and feat != bg and feat not in av_feats:
+                    new_candidate_feats.add(feat)
                 cells = sg.get("cells")
                 if cells:
                     for cp in cells:
@@ -400,6 +413,7 @@ class EpistemicGoalScheduler:
                 for e in entities:
                     if (
                         e.grid_pos in goals
+                        and e.feature_id != bg
                         and e.feature_id not in av_feats
                         and e.grid_pos not in panel_coords
                         and e.feature_id not in engine.mobile_threat_features
@@ -645,6 +659,8 @@ class MentalSimulationPlanner:
                 feat_int == bg
                 or feat_int in av_feats
                 or feat_int in engine.symbolic_theory.walkable_features
+                or feat_int in engine.symbolic_theory.goal_features
+                or feat_int in engine.symbolic_theory.candidate_goal_features
             ):
                 continue
             if engine.avatar_pos is not None:
@@ -661,7 +677,9 @@ class MentalSimulationPlanner:
                     h_span <= 3 and w_span >= 20 and len(pts) >= w_span * 0.7
                 ):
                     for pr, pc in pts:
-                        static_barriers.add((int(pr), int(pc)))
+                        p_coord = (int(pr), int(pc))
+                        if p_coord not in goals:
+                            static_barriers.add(p_coord)
 
         # Explicitly ground all static lethal positions from hazard tracker and level memory
         for r, c in engine.current_level_lethal_positions:
@@ -841,7 +859,9 @@ class MentalSimulationPlanner:
             engine._update_avatar_position_from_grid(curr_grid, known_av)
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            engine.avatar_pos = engine.working_memory.body_schema.active_manipulandum.pos
+            manip = getattr(engine.working_memory.body_schema, "active_manipulandum", None)
+            if manip is not None and getattr(manip, "pos", None) is not None:
+                engine.avatar_pos = manip.pos
 
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
             return None
@@ -1023,10 +1043,10 @@ class MentalSimulationPlanner:
         _grid_walls: set[tuple[int, int]] = set(static_barriers)
         for rr in range(H):
             for cc in range(W):
+                if (rr, cc) in goals:
+                    continue
                 cell_val = int(curr_grid[rr, cc])
-                if cell_val in _barrier_feats or (
-                    bg_is_impassable_void and cell_val == bg and (rr, cc) not in goals
-                ):
+                if cell_val in _barrier_feats or (bg_is_impassable_void and cell_val == bg):
                     _grid_walls.add((rr, cc))
 
         # Topological Dead-End Pruning: When navigating under step/energy constraints,

@@ -39,6 +39,35 @@ class WorldKernelTransaction:
             target_entity=self.world_context.world_id,
         )
 
+    def to_kernel_envelope(self):
+        """Convert world transaction to canonical KernelTransactionEnvelope."""
+        from hbllm.hcir.kernel.transaction_envelope import (
+            CognitiveAuthorityChain,
+            KernelTransactionEnvelope,
+        )
+
+        chain = CognitiveAuthorityChain(
+            requestor=self.world_context.tenant_id,
+            tenant=self.world_context.tenant_id,
+            executive="AutonomousEpistemicEngine",
+            kernel="CognitiveKernel",
+            capability="world.epistemic_transaction",
+            actuator=self.world_context.device_id or "internal_world",
+        )
+        return KernelTransactionEnvelope(
+            execution_context=self.execution_context,
+            authority_chain=chain,
+            capability_name="world.epistemic_transaction",
+            branch_mode=BranchMode(self.branch_mode.value),
+            metadata={
+                "transaction_id": self.transaction_id,
+                "world_id": self.world_context.world_id,
+                "snapshot_hash": self.snapshot_hash,
+                "prediction_id": self.prediction_id,
+                "model_scope": self.model_scope.to_key(),
+            },
+        )
+
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction committing transaction envelope to audit log."""
         return [
@@ -46,6 +75,10 @@ class WorldKernelTransaction:
                 op=TransactionOp.ADD_NODE,
                 node_id=self.transaction_id,
                 node_data={
+                    "id": self.transaction_id,
+                    "node_type": "event",
+                    "category": "meta",
+                    "event_kind": "world_kernel_transaction",
                     "transaction_id": self.transaction_id,
                     "world_id": self.world_context.world_id,
                     "tenant_id": self.world_context.tenant_id,

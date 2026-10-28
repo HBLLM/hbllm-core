@@ -852,10 +852,14 @@ class ObjectStateGraphPlanner:
                     # 2. Greedy displacement step towards target stance
                     best_step_act = None
                     min_dist = abs(dr_target) + abs(dc_target)
+                    rec = list(getattr(engine, "recent_positions", []))
+                    ior = getattr(getattr(engine, "working_memory", None), "habenular_ior", None)
                     for act, dr, dc in movable_actions:
                         if failed_transitions and (av_pos, act) in failed_transitions:
                             continue
                         if engine.inhibited_actions.get(act, 0) > 0:
+                            continue
+                        if ior is not None and ior.is_action_inhibited(av_pos, act):
                             continue
                         nr, nc = av_pos[0] + dr, av_pos[1] + dc
                         if not (0 <= nr < H and 0 <= nc < W):
@@ -864,6 +868,13 @@ class ObjectStateGraphPlanner:
                             continue
                         if patroller_cells and (nr, nc) in patroller_cells:
                             continue
+                        if rec:
+                            if len(rec) >= 2 and (nr, nc) == rec[-2]:
+                                continue
+                            if len(rec) >= 4 and (nr, nc) in rec[-4:]:
+                                continue
+                            if len(rec) >= 6 and rec[-6:].count((nr, nc)) >= 2:
+                                continue
                         cand_dist = abs(target_stance[0] - nr) + abs(target_stance[1] - nc)
                         if cand_dist < min_dist:
                             min_dist = cand_dist
@@ -884,6 +895,8 @@ class ObjectStateGraphPlanner:
         # 2B. Spatial Effector (Click) Object Interaction
         if spatial_effector_actions:
             eff_act = spatial_effector_actions[0]
+            if movable_actions and engine.inhibited_actions.get(eff_act, 0) > 0:
+                return None
             from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
             quiescent_coords = getattr(engine, "quiescent_click_targets", set())
@@ -1050,6 +1063,10 @@ class ObjectStateGraphPlanner:
                     chosen_score,
                     chosen_act_data,
                 )
+                if movable_actions:
+                    engine.inhibited_actions[eff_act] = max(
+                        engine.inhibited_actions.get(eff_act, 0), 4
+                    )
                 return [
                     MentalSimulationStep(
                         action=eff_act,
@@ -1080,6 +1097,10 @@ class ObjectStateGraphPlanner:
                         best_vx,
                         best_vt,
                     )
+                    if movable_actions:
+                        engine.inhibited_actions[eff_act] = max(
+                            engine.inhibited_actions.get(eff_act, 0), 4
+                        )
                     return [
                         MentalSimulationStep(
                             action=eff_act,

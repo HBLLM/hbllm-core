@@ -209,9 +209,25 @@ class ConstitutionalVerifier:
                 if op.node_id:
                     existing = workspace.get_node(op.node_id)
                     if existing is not None:
-                        # Check that the transaction's provenance scope
-                        # matches the existing node's scope
-                        tx_tenant = transaction.provenance.session_id or ""
+                        # Check that the transaction's tenant scope matches the existing node's scope
+                        tx_metadata = getattr(transaction, "metadata", None)
+                        tx_tenant = (
+                            tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
+                        )
+                        if (
+                            not tx_tenant
+                            and hasattr(transaction, "provenance")
+                            and transaction.provenance
+                        ):
+                            tx_tenant = (
+                                getattr(
+                                    getattr(transaction.provenance, "scope", None),
+                                    "tenant_id",
+                                    None,
+                                )
+                                or transaction.provenance.session_id
+                                or ""
+                            )
                         node_tenant = existing.scope.tenant_id
 
                         # Allow system-level transactions to modify any scope
@@ -220,7 +236,7 @@ class ConstitutionalVerifier:
                                 TransactionAnnotation(
                                     author="ConstitutionalVerifier",
                                     assertion=(
-                                        f"Scope isolation violation: tx session={tx_tenant} "
+                                        f"Scope isolation violation: tx tenant={tx_tenant} "
                                         f"vs node tenant={node_tenant}"
                                     ),
                                     severity="error",

@@ -129,7 +129,7 @@ class CounterfactualPlanner:
     ) -> None:
         self._workspace = workspace
         self._services = services
-        self._world_kernel = WorldKernel(workspace)
+        self._world_kernel = getattr(services, "world_kernel", None) or WorldKernel(workspace)
         self._interpreter = HCIRInterpreter(workspace, services)
 
     @classmethod

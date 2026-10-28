@@ -45,3 +45,35 @@ def test_world_kernel_integration():
     pred_node = kernel.predict(action)
     assert pred_node.id.startswith("pred_")
     assert "optimize_cooling" in pred_node.claim
+
+
+async def test_world_kernel_governed_capability_execution():
+    from hbllm.hcir.capabilities.world_capabilities import (
+        WorldKernelCapabilityExecutor,
+        execute_world_capability,
+    )
+
+    ws = HCIRWorkspaceState()
+    kernel = WorldKernel(ws)
+
+    call_pred = CapabilityCall(
+        capability_name="world.predict", arguments={"action_intent": "reduce_speed"}
+    )
+    res = execute_world_capability(call_pred, kernel=kernel)
+    assert res.status == "SUCCESS"
+    assert "reduce_speed" in res.output["predicted_outcome"]
+    assert res.output["confidence"] > 0.0
+
+    call_twin = CapabilityCall(
+        capability_name="world.sync_twin",
+        arguments={"variable_name": "temp", "value": 72.5},
+    )
+    res_twin = execute_world_capability(call_twin, kernel=kernel)
+    assert res_twin.status == "SUCCESS"
+    assert res_twin.output["synced"] is True
+
+    executor = WorldKernelCapabilityExecutor(kernel)
+    assert executor.is_available is True
+    out = await executor.execute({"action_intent": "throttle_down"})
+    assert out["status"] == "simulated"
+    assert "throttle_down" in out["claim"]

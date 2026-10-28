@@ -45,6 +45,9 @@ class CounterfactualBranchNode:
                 op=TransactionOp.ADD_NODE,
                 node_id=f"cf_branch_{self.branch_id}",
                 node_data={
+                    "id": f"cf_branch_{self.branch_id}",
+                    "node_type": "counterfactual_branch",
+                    "category": "simulation",
                     "branch_id": self.branch_id,
                     "parent_branch_id": self.parent_branch_id,
                     "action_intent": self.action_intent,

@@ -22,16 +22,15 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.cognitive_state import UnifiedCognitiveState
-from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
 from hbllm.hcir.graph import ActionNode, GoalNode, HCIRNodeType
-from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.attention_graph import AttentionManager
 from hbllm.hcir.kernel.services import KernelServices
-from hbllm.hcir.learning_loop import LearningLoopEngine
-from hbllm.hcir.world_kernel import WorldKernel
+
+if TYPE_CHECKING:
+    from hbllm.hcir.cognitive_state import UnifiedCognitiveState
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +58,15 @@ class KernelExecutiveController:
     """
 
     def __init__(self, services: KernelServices) -> None:
+        from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
+        from hbllm.hcir.interpreter import HCIRInterpreter
+        from hbllm.hcir.learning_loop import LearningLoopEngine
+        from hbllm.hcir.world_kernel import WorldKernel
+
         self._services = services
         self._workspace = services.workspace
         self._attention_mgr = AttentionManager(self._workspace)
-        self._world_kernel = WorldKernel(self._workspace)
+        self._world_kernel = getattr(services, "world_kernel", None) or WorldKernel(self._workspace)
         self._cf_planner = CounterfactualPlanner(self._workspace, services)
         self._interpreter = HCIRInterpreter(self._workspace, services)
         self._learning_engine = LearningLoopEngine(self._workspace, services.transaction_manager)
@@ -96,17 +100,32 @@ class KernelExecutiveController:
         )
 
         selected_action_id = None
+        selected_action = None
         if candidate_actions:
             decision = await self._cf_planner.evaluate_and_select(primary_goal, candidate_actions)
+            selected_action = decision.action
             selected_action_id = decision.action.id
 
         # Phase 6: EXECUTE — Compile & run instruction stream via VM Interpreter
-        stream = InstructionStream(
-            instructions=[
-                Instruction(opcode=Opcode.QUERY, params={"node_type": "goal"}),
-                Instruction(opcode=Opcode.ASSERT, params={"condition": "system_healthy"}),
-            ]
-        )
+        instructions = [
+            Instruction(opcode=Opcode.QUERY, params={"node_type": "goal"}),
+        ]
+        if selected_action is not None and (selected_action.intent or selected_action.action_type):
+            instructions.append(
+                Instruction(
+                    opcode=Opcode.EXECUTE,
+                    params={
+                        "capability": selected_action.intent or selected_action.action_type,
+                        "params": selected_action.parameters,
+                    },
+                )
+            )
+        else:
+            instructions.append(
+                Instruction(opcode=Opcode.ASSERT, params={"condition": "system_healthy"})
+            )
+
+        stream = InstructionStream(instructions=instructions)
         exec_res, receipt = await self._interpreter.execute_with_receipt(
             stream, process_id=process_id, thread_id=f"thr_cycle_{self._cycle_count}"
         )
@@ -122,6 +141,8 @@ class KernelExecutiveController:
         skills_induced = max(0, skills_after - skills_before)
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        from hbllm.hcir.cognitive_state import UnifiedCognitiveState
+
         snapshot = UnifiedCognitiveState.from_workspace(self._workspace, attn_graph)
 
         logger.info(

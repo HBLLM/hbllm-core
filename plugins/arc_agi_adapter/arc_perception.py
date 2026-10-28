@@ -213,44 +213,19 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         for sg in structural_goals:
             pos = sg.get("position")
             feat = sg.get("feature")
-            if pos is not None and (
-                pos in recent_pos
-                or (
-                    av_pos is not None
-                    and (
-                        pos == av_pos
-                        or (abs(pos[0] - av_pos[0]) <= 2 and abs(pos[1] - av_pos[1]) <= 2)
-                    )
-                )
-            ):
-                continue
             if feat is not None and (
                 feat in av_feats
                 or (context is not None and feat in getattr(context, "avatar_features", set()))
+                or (goal_features and feat not in goal_features)
             ):
                 continue
-            if sg.get("type") in ("exit_marker", "gateway_notch", "target_zone"):
-                for cp in sg.get("cells", []):
-                    if cp not in recent_pos and (
-                        av_pos is None
-                        or (
-                            cp != av_pos
-                            and (abs(cp[0] - av_pos[0]) > 2 or abs(cp[1] - av_pos[1]) > 2)
-                        )
-                    ):
+            cells = sg.get("cells", [])
+            if cells:
+                for cp in cells:
+                    if cp not in recent_pos and (av_pos is None or cp != av_pos):
                         candidate_goals.add(cp)
-                if (
-                    pos
-                    and pos not in recent_pos
-                    and (
-                        av_pos is None
-                        or (
-                            pos != av_pos
-                            and (abs(pos[0] - av_pos[0]) > 2 or abs(pos[1] - av_pos[1]) > 2)
-                        )
-                    )
-                ):
-                    candidate_goals.add(pos)
+            elif pos is not None and pos not in recent_pos and (av_pos is None or pos != av_pos):
+                candidate_goals.add(pos)
         if context is not None and hasattr(context, "learned_goal_positions"):
             context.learned_goal_positions.difference_update(recent_pos)
             if av_pos is not None:
@@ -401,18 +376,29 @@ def _attach_object_macro_tasks(
                 barrier_pos=pos, tool_feature=feat, description=f"Use tool on barrier at {pos}"
             )
         )
+    elif (
+        "avatar" in role
+        or "agent" in role
+        or "floor" in role
+        or "background" in role
+        or "passable" in role
+        or "void" in role
+        or "empty" in role
+    ):
+        return []
     else:
         tasks.append(
             ExploreObject(
                 target_pos=pos, target_feature=feat, description=f"Explore entity at {pos}"
             )
         )
-        try:
-            from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
+        if "clickable" in role or props.get("is_clickable") or "clickable" in props.get("tags", []):
+            try:
+                from plugins.arc_agi_adapter.arc_macro_actions import ArcClickCell
 
-            tasks.append(ArcClickCell(cell_coord=pos, description=f"Click cell at {pos}"))
-        except Exception:
-            pass
+                tasks.append(ArcClickCell(cell_coord=pos, description=f"Click cell at {pos}"))
+            except Exception:
+                pass
 
     return tasks
 
@@ -466,6 +452,7 @@ def extract_arc_objects(
     # Ingest from symbolic theory if available
     symbolic_theory = getattr(engine, "symbolic_theory", None)
     goal_feats: set[int] = set()
+    candidate_goal_feats: set[int] = set()
     cargo_feats: set[int] = set()
     rec_feats: set[int] = set()
     barrier_feats: set[int] = set()
@@ -473,6 +460,7 @@ def extract_arc_objects(
 
     if symbolic_theory is not None:
         goal_feats.update(getattr(symbolic_theory, "goal_features", set()))
+        candidate_goal_feats.update(getattr(symbolic_theory, "candidate_goal_features", set()))
         cargo_feats.update(getattr(symbolic_theory, "cargo_features", set()))
         rec_feats.update(getattr(symbolic_theory, "receptacle_features", set()))
         barrier_feats.update(getattr(symbolic_theory, "barrier_features", set()))
@@ -544,19 +532,26 @@ def extract_arc_objects(
                     except Exception:
                         pass
 
-                # 1. Semantic Tag/Name Matching (Canonical English Vocabulary)
-                role: str = (
-                    classify_tag_semantic_role(s_tags)
-                    or classify_tag_semantic_role([s_name])
-                    or "unknown"
-                )
+                active_controlled = getattr(game_obj, "yvifanjrcyu", None)
+                all_controllable = getattr(game_obj, "ayyvxqrhnzw", [])
+                if active_controlled is not None and sp == active_controlled:
+                    role = "avatar"
+                elif all_controllable and sp in all_controllable:
+                    role = "manipulandum"
+                else:
+                    # 1. Semantic Tag/Name Matching (Canonical English Vocabulary)
+                    role = (
+                        classify_tag_semantic_role(s_tags)
+                        or classify_tag_semantic_role([s_name])
+                        or "unknown"
+                    )
 
                 # 2. Visual Cortex & Topological Affordance Invariants (Tag-Agnostic Ground Truth)
                 if role == "unknown":
-                    # (a) Physical Avatar Invariant (layer >= 1, compact, non-background)
+                    # (a) Physical Avatar Invariant (compact, non-background movable)
                     if (
                         engine is not None
-                        and getattr(sp, "layer", 0) >= 1
+                        and getattr(sp, "layer", 0) >= -1
                         and 1 <= w <= 12
                         and 1 <= h <= 12
                         and s_name != "background"
@@ -602,24 +597,22 @@ def extract_arc_objects(
                         or _is_truthy_flag(getattr(sp, "is_target", False))
                     ):
                         role = "goal"
-                    # (d) Empirical Barrier Invariant (large scale, layer < 0, or learned impassable)
+                    elif symbolic_theory is not None and s_feat in getattr(
+                        symbolic_theory, "candidate_goal_features", set()
+                    ):
+                        role = "candidate_goal"
+                    # (d) Empirical Barrier Invariant (learned impassable or explicitly marked wall/barrier)
                     elif (
-                        (
-                            (w > 12 or h > 12 or getattr(sp, "layer", 0) < 0)
-                            and (
-                                _is_truthy_flag(getattr(sp, "is_collidable", False))
-                                or _is_truthy_flag(getattr(sp, "blocking", False))
-                                or _is_truthy_flag(getattr(sp, "solid", False))
-                            )
-                        )
-                        or (
-                            engine is not None
-                            and s_pos in getattr(engine, "learned_barriers", set())
-                        )
+                        (engine is not None and s_pos in getattr(engine, "learned_barriers", set()))
                         or (
                             symbolic_theory is not None
                             and s_feat in getattr(symbolic_theory, "barrier_features", set())
                         )
+                        or _is_truthy_flag(getattr(sp, "blocking", False))
+                        or _is_truthy_flag(getattr(sp, "solid", False))
+                        or _is_truthy_flag(getattr(sp, "impassable", False))
+                        or "wall" in s_name.lower()
+                        or "barrier" in s_name.lower()
                     ):
                         role = "barrier"
                     # (e) Interactive Actuators / Switches
@@ -628,8 +621,20 @@ def extract_arc_objects(
                         or _is_truthy_flag(getattr(sp, "interactive", False))
                         or _is_truthy_flag(getattr(sp, "is_button", False))
                         or (
+                            "sys_click" in getattr(sp, "tags", [])
+                            and (not all_controllable or sp not in all_controllable)
+                        )
+                        or "switch" in s_name.lower()
+                        or "button" in s_name.lower()
+                        or (
                             symbolic_theory is not None
                             and s_feat in getattr(symbolic_theory, "actuator_features", set())
+                        )
+                    ) and (
+                        engine is None
+                        or (
+                            s_feat not in getattr(engine, "avatar_features", set())
+                            and s_pos != getattr(engine, "avatar_pos", None)
                         )
                     ):
                         role = "switch"
@@ -763,6 +768,26 @@ def extract_arc_objects(
                             ),
                         )
                     )
+                elif role == "candidate_goal":
+                    seen_positions.add(s_pos)
+                    cg_id = f"cand_goal_{disp_y}_{disp_x}"
+                    cg_props = {
+                        "source": "candidate_goal",
+                        "sprite_name": s_name,
+                        "confirmed": False,
+                    }
+                    objects.append(
+                        ObjectSpec(
+                            id=cg_id,
+                            pos=s_pos,
+                            feature_id=s_feat,
+                            role="candidate_goal",
+                            properties=cg_props,
+                            macro_tasks=_attach_object_macro_tasks(
+                                "goal", s_pos, s_feat, cg_id, cg_props
+                            ),
+                        )
+                    )
                 # 3. Dynamic hazards, enemies, patrollers
                 elif role == "hazard":
                     seen_positions.add(s_pos)
@@ -893,15 +918,7 @@ def extract_arc_objects(
             if ent.role == EntityRole.AGENT:
                 continue
             pos = (int(ent.grid_pos[0]), int(ent.grid_pos[1]))
-            if (
-                pos == av_pos
-                or (
-                    av_pos is not None
-                    and abs(pos[0] - av_pos[0]) <= 2
-                    and abs(pos[1] - av_pos[1]) <= 2
-                )
-                or pos in seen_positions
-            ):
+            if pos == av_pos or pos in seen_positions:
                 continue
 
             feat = int(
@@ -922,6 +939,12 @@ def extract_arc_objects(
                 role = "receptacle"
             elif feat in actuator_feats:
                 role = "switch"
+            elif feat in candidate_goal_feats or (
+                frame is not None
+                and pos in frame.candidate_goals
+                and (not goal_feats or feat in goal_feats)
+            ):
+                role = "goal"
             elif pos in frame.static_barriers or feat in barrier_feats:
                 role = "barrier"
             elif pos in frame.lethal_cells:
@@ -944,9 +967,10 @@ def extract_arc_objects(
             if role == "unknown":
                 if pos in getattr(engine, "learned_goal_positions", set()):
                     role = "goal"
-                elif feat == getattr(frame, "bg", None) or (
+                elif (frame is not None and feat == getattr(frame, "bg", None)) or (
                     engine is not None
                     and feat in getattr(engine.symbolic_theory, "walkable_features", set())
+                    and feat in getattr(engine, "verified_safe_features", set())
                 ):
                     role = "floor"
                 elif (
@@ -987,17 +1011,22 @@ def extract_arc_objects(
                 and pos not in recent_positions
             ):
                 cg_feat = int(g[pos[0], pos[1]])
-                if cg_feat in av_feats:
+                if (
+                    cg_feat in av_feats
+                    or cg_feat in cargo_feats
+                    or cg_feat in actuator_feats
+                    or cg_feat in barrier_feats
+                ):
                     continue
                 seen_positions.add(pos)
                 cg_id = f"exit_goal_{pos[0]}_{pos[1]}"
-                cg_props = {"source": "candidate_goal"}
+                cg_props = {"source": "candidate_goal", "confirmed": False}
                 objects.append(
                     ObjectSpec(
                         id=cg_id,
                         pos=pos,
                         feature_id=cg_feat,
-                        role="goal",
+                        role="candidate_goal",
                         properties=cg_props,
                         macro_tasks=_attach_object_macro_tasks(
                             "goal", pos, cg_feat, cg_id, cg_props

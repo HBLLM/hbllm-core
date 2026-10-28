@@ -160,6 +160,38 @@ class SensorCapabilityAdapter:
                 reading.value,
                 reading.unit,
             )
+            # Publish KernelEvent if event_bus is present
+            if hasattr(self._services, "event_bus") and self._services.event_bus is not None:
+                from hbllm.hcir.kernel.event_bus import KernelEvent
+
+                self._services.event_bus.publish(
+                    KernelEvent(
+                        event_type="sensor.reading_ingested",
+                        source="SensorCapabilityAdapter",
+                        data={
+                            "sensor_id": reading.sensor_id,
+                            "sensor_type": reading.sensor_type,
+                            "variable_name": reading.variable_name,
+                            "value": reading.value,
+                            "unit": reading.unit,
+                            "confidence": reading.confidence,
+                            "observation_id": obs_node.id,
+                            "world_variable_id": wv_node.id,
+                        },
+                    )
+                )
+
+            # Sync digital twin in WorldKernel if present
+            world_k = getattr(self._services, "world_kernel", None)
+            if world_k is not None:
+                try:
+                    world_k.sync_digital_twin(
+                        twin_id=reading.sensor_id,
+                        updates={reading.variable_name: reading.value},
+                    )
+                except Exception as e:
+                    logger.debug("Digital twin sync notice: %s", e)
+
             return tx
 
         logger.warning("Sensor reading ingestion rejected for sensor '%s'", reading.sensor_id)

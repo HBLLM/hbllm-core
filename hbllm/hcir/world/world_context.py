@@ -12,16 +12,29 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.types import BranchMode as CanonicalBranchMode
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 
 class BranchMode(StrEnum):
     """Execution branch mode for reality vs simulation isolation."""
 
-    REALITY = "reality"
-    SIMULATION = "simulation"
-    COUNTERFACTUAL = "counterfactual"
-    REPLAY = "replay"
+    LIVE = CanonicalBranchMode.LIVE.value
+    REALITY = CanonicalBranchMode.LIVE.value  # Canonical alias
+    SIMULATION = CanonicalBranchMode.SIMULATION.value
+    COUNTERFACTUAL = CanonicalBranchMode.SIMULATION.value  # Sub-mode alias
+    REPLAY = CanonicalBranchMode.REPLAY.value
+    TRAINING = CanonicalBranchMode.TRAINING.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> BranchMode | None:
+        if isinstance(value, str):
+            val_lower = value.lower()
+            if val_lower in ("reality", "live"):
+                return cls.LIVE
+            if val_lower in ("counterfactual", "simulation"):
+                return cls.SIMULATION
+        return None
 
 
 @dataclass(frozen=True)
@@ -57,16 +70,16 @@ class WorldContext:
     tenant_id: str = "default_tenant"
     device_id: str | None = None
     entity_ids: Sequence[str] = field(default_factory=tuple)
-    branch_mode: BranchMode = BranchMode.REALITY
+    branch_mode: BranchMode = BranchMode.LIVE
     timestamp: float = field(default_factory=time.time)
 
     def is_reality(self) -> bool:
         """Return True if execution mode is live physical reality."""
-        return self.branch_mode == BranchMode.REALITY
+        return self.branch_mode in (BranchMode.LIVE, BranchMode.REALITY)
 
     def allows_reality_mutation(self) -> bool:
         """Enforce strict branch isolation invariant: only REALITY branch may mutate live state."""
-        return self.branch_mode == BranchMode.REALITY
+        return self.branch_mode in (BranchMode.LIVE, BranchMode.REALITY)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export world execution context as a declarative causal predicate."""
@@ -85,6 +98,9 @@ class WorldContext:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"context_{self.world_id}",
                 node_data={
+                    "id": f"context_{self.world_id}",
+                    "node_type": "context",
+                    "category": "meta",
                     "world_id": self.world_id,
                     "tenant_id": self.tenant_id,
                     "device_id": self.device_id,

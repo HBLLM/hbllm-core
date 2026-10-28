@@ -25,6 +25,7 @@ import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent
 from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
+from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -225,7 +226,21 @@ class NavigateTo(MacroAction):
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg_val not in walkable_and_safe
         if not bg_is_impassable_void:
             bg_count = int(np.count_nonzero(curr_grid == bg_val))
-            if bg_count / max(1, H * W) >= 0.20:
+            ar, ac = (
+                (av_pos[0], av_pos[1])
+                if (av_pos and 0 <= av_pos[0] < H and 0 <= av_pos[1] < W)
+                else (-1, -1)
+            )
+            avatar_on_bg = ar >= 0 and (
+                int(curr_grid[ar, ac]) == bg_val
+                or any(
+                    0 <= ar + dr_a < H
+                    and 0 <= ac + dc_a < W
+                    and int(curr_grid[ar + dr_a, ac + dc_a]) == bg_val
+                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                )
+            )
+            if bg_count / max(1, H * W) >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
 
         grid_walls: set[tuple[int, int]] = set(engine.learned_barriers)
@@ -303,30 +318,6 @@ class NavigateTo(MacroAction):
                 )
                 return next_act, None
 
-        # Fallback: exploratory probe toward destination using unfailed displacement actions
-        valid_disp_acts = [
-            a
-            for a in available_actions
-            if engine.is_displacement_action(a) and (av_pos, a) not in failed_tx
-        ]
-        if valid_disp_acts:
-            recent_pos_list = list(getattr(engine, "recent_positions", []))
-            prev_pos = recent_pos_list[-2] if len(recent_pos_list) >= 2 else None
-
-            def _eval_act_cost(a: int) -> float:
-                if a not in engine.action_dynamics:
-                    return 9999.0
-                nr = av_pos[0] + engine.action_dynamics[a].delta_r
-                nc = av_pos[1] + engine.action_dynamics[a].delta_c
-                cost = (nr - self.destination[0]) ** 2 + (nc - self.destination[1]) ** 2
-                # Penalize immediate reversal into recently visited position
-                if prev_pos is not None and (nr, nc) == prev_pos:
-                    cost += 10000.0
-                return float(cost)
-
-            best_a = min(valid_disp_acts, key=_eval_act_cost)
-            return best_a, None
-
         self.status = MacroActionStatus.BLOCKED
         return None
 
@@ -344,12 +335,15 @@ class InteractWith(MacroAction):
         target_coord: tuple[int, int],
         effector_action: Any | None = None,
         description: str = "",
+        contact_radius: int = 1,
     ) -> None:
         super().__init__(name=f"InteractWith({target_coord})", intent=SpatialActionIntent.INTERACT)
         self.target_coord = (int(target_coord[0]), int(target_coord[1]))
         self.effector_action = effector_action
         self.description = description or f"Interact with coordinate {self.target_coord}"
         self.has_executed: bool = False
+        self.contact_radius = contact_radius
+        self.nav_op: NavigateTo | None = None
 
     def is_satisfied(
         self,
@@ -365,22 +359,59 @@ class InteractWith(MacroAction):
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
     ) -> bool:
-        if self.effector_action is not None:
-            return self.effector_action in available_actions
-        return any(engine.is_spatial_effector(a) for a in available_actions)
+        if self.effector_action is not None and self.effector_action in available_actions:
+            return True
+        if any(engine.is_spatial_effector(a) for a in available_actions):
+            return True
+        # Fallback to discrete interact / transform affordances
+        return any(
+            not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            for a in available_actions
+        )
 
     def step(
         self,
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
-    ) -> tuple[Any, dict[str, Any] | None]:
+    ) -> tuple[Any, dict[str, Any] | None] | None:
+        # Embodied Contact Prior:
+        # If displacement actions exist and an avatar is localized, physical interaction
+        # requires approaching the contact manifold unless already proven to act distally at range.
+        has_disp = engine.has_displacement_capabilities(available_actions)
+        if has_disp and engine.avatar_pos is not None:
+            dist = abs(engine.avatar_pos[0] - self.target_coord[0]) + abs(
+                engine.avatar_pos[1] - self.target_coord[1]
+            )
+            is_proven_remote = self.target_coord in engine.effective_click_targets
+            if dist > self.contact_radius and not is_proven_remote:
+                if self.nav_op is None:
+                    self.nav_op = NavigateTo(
+                        destination=self.target_coord,
+                        radius=self.contact_radius,
+                        description=f"Approach {self.target_coord} for interaction",
+                    )
+                if not self.nav_op.is_satisfied(engine, curr_grid):
+                    nav_step = self.nav_op.step(engine, curr_grid, available_actions)
+                    if nav_step is not None:
+                        return nav_step
+
         eff = self.effector_action
         if eff is None or eff not in available_actions:
             eff_candidates = [a for a in available_actions if engine.is_spatial_effector(a)]
             if eff_candidates:
                 eff = eff_candidates[0]
             else:
+                discrete_interacts = [
+                    a
+                    for a in available_actions
+                    if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                ]
+                if discrete_interacts:
+                    eff = discrete_interacts[0]
+                    self.has_executed = True
+                    self.status = MacroActionStatus.SATISFIED
+                    return eff, None
                 self.status = MacroActionStatus.FAILED
                 return available_actions[0], None
 
@@ -770,8 +801,10 @@ class ExploreObject(MacroAction):
         available_actions: Sequence[Any],
     ) -> tuple[Any, dict[str, Any] | None] | None:
         self.consecutive_steps += 1
-        # Allocentric click effector
-        if any(engine.is_spatial_effector(a) or a == 6 for a in available_actions):
+        # Allocentric click effector only if agent lacks displacement capabilities
+        if not engine.has_displacement_capabilities(available_actions) and any(
+            engine.is_spatial_effector(a) or a == 6 for a in available_actions
+        ):
             eff_candidates = [
                 a for a in available_actions if engine.is_spatial_effector(a) or a == 6
             ]
@@ -799,7 +832,13 @@ class ExploreObject(MacroAction):
             if not engine.is_displacement_action(a) and engine.inhibited_actions.get(a, 0) == 0
         ]
         if interact_candidates:
-            return interact_candidates[0], None
+            chosen = interact_candidates[0]
+            if engine.is_spatial_effector(chosen) or chosen == 6:
+                return chosen, {
+                    "x": int(self.target_pos[1]),
+                    "y": int(self.target_pos[0]),
+                }
+            return chosen, None
 
         if engine.avatar_pos is not None:
             dr = int(np.sign(self.target_pos[0] - engine.avatar_pos[0]))
@@ -1605,6 +1644,11 @@ class MacroPlanSynthesizer:
                         if m_tasks:
                             engine.working_memory.object_macro_tasks[obj_id] = list(m_tasks)
                         engine.working_memory.object_trial_counts.setdefault(obj_id, 0)
+                        sw_acts = props.get("focus_switch_actions")
+                        if sw_acts:
+                            for sw_a in sw_acts:
+                                engine.focus_switch_actions.add(sw_a)
+                                engine.working_memory.focus_switch_actions.add(sw_a)
 
                     if role == "goal" or "exit" in role:
                         rec_pos = getattr(engine, "recent_positions", set())
@@ -1614,12 +1658,24 @@ class MacroPlanSynthesizer:
                             and pos not in rec_pos
                             and (not feat or feat not in av_f)
                         ):
-                            engine.learned_goal_positions.add(pos)
-                            if hasattr(engine, "goals") and pos not in engine.goals:
-                                engine.goals.append(pos)
-                            if feat:
-                                engine.symbolic_theory.goal_features.add(feat)
-                                engine.learned_goal_features.add(feat)
+                            is_confirmed = (
+                                props.get("confirmed", False)
+                                or props.get("source") == "sprite_goal"
+                            )
+                            if is_confirmed:
+                                engine.learned_goal_positions.add(pos)
+                                if hasattr(engine, "goals") and pos not in engine.goals:
+                                    engine.goals.append(pos)
+                                if feat:
+                                    engine.symbolic_theory.goal_features.add(feat)
+                                    engine.learned_goal_features.add(feat)
+                                    engine.symbolic_theory.barrier_features.discard(feat)
+                                engine.learned_barriers.discard(pos)
+                            else:
+                                if feat:
+                                    engine.symbolic_theory.candidate_goal_features.add(feat)
+                                    engine.symbolic_theory.barrier_features.discard(feat)
+                                engine.learned_barriers.discard(pos)
                     elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
                             engine.symbolic_theory.cargo_features.add(feat)
@@ -1639,9 +1695,14 @@ class MacroPlanSynthesizer:
                         or "obstacle" in role
                         or props.get("is_solid")
                     ):
-                        engine.learned_barriers.add(pos)
-                        if feat:
-                            engine.symbolic_theory.barrier_features.add(feat)
+                        if (
+                            feat not in engine.symbolic_theory.goal_features
+                            and feat not in engine.symbolic_theory.candidate_goal_features
+                            and pos not in engine.learned_goal_positions
+                        ):
+                            engine.learned_barriers.add(pos)
+                            if feat:
+                                engine.symbolic_theory.barrier_features.add(feat)
                     elif "switch" in role or "actuator" in role or "button" in role:
                         if feat:
                             engine.symbolic_theory.actuator_features.add(feat)
@@ -1675,6 +1736,13 @@ class MacroPlanSynthesizer:
                 skill_plan = MacroActionPlan.from_skill(skill, engine, curr_grid, available_actions)
                 if skill_plan is not None and not skill_plan.is_empty():
                     return skill_plan
+
+        # Embodied Grounding Invariant:
+        # If the domain possesses physical displacement capabilities, an embodied agent
+        # cannot plan macroscopic bodily actions (navigating to switches, moving cargo, reaching goals)
+        # before discovering and localizing its avatar body via motor calibration.
+        if engine.has_displacement_capabilities(available_actions) and engine.avatar_pos is None:
+            return None
 
         plan = MacroActionPlan()
 
@@ -1842,21 +1910,69 @@ class MacroPlanSynthesizer:
             if r_pos not in receptacles:
                 receptacles.append(r_pos)
 
+        movable_actions = [
+            (a, engine.action_dynamics[a].delta_r, engine.action_dynamics[a].delta_c)
+            for a in available_actions
+            if engine.is_displacement_action(a) and a in engine.action_dynamics
+        ]
+
+        def _can_navigate_to(dest: tuple[int, int]) -> bool:
+            if av_pos is None:
+                return False
+            if dest == av_pos:
+                return True
+            dr = abs(dest[0] - av_pos[0])
+            dc = abs(dest[1] - av_pos[1])
+            if dr <= 1 and dc <= 1:
+                return True
+            if not movable_actions:
+                return False
+            H, W = curr_grid.shape
+            wall_f = set(engine.symbolic_theory.barrier_features)
+            grid_w = set(engine.learned_barriers)
+            for rr in range(H):
+                for cc in range(W):
+                    if int(curr_grid[rr, cc]) in wall_f:
+                        grid_w.add((rr, cc))
+            p = GeodesicManifoldRouter.route_geodesic(
+                curr_grid=curr_grid,
+                start_pos=av_pos,
+                goals=[dest],
+                static_barriers=engine.learned_barriers,
+                grid_walls=grid_w,
+                unknown_entity_cells=set(),
+                oriented_threats=[],
+                movable_actions=movable_actions,
+                bg=bg,
+                barrier_features=wall_f,
+                avatar_features=av_feats,
+                max_candidate_goals=1,
+            )
+            return p is not None and len(p) > 0
+
         # Collect candidate switches / buttons / actuators
         switch_objs: list[ObjectSpec] = [
             obj
             for obj in known_objs
-            if "switch" in obj.role
-            or "button" in obj.role
-            or "actuator" in obj.role
-            or "lever" in obj.role
-            or "valve" in obj.role
-            or obj.feature_id in engine.symbolic_theory.actuator_features
+            if (
+                "switch" in obj.role
+                or "button" in obj.role
+                or "actuator" in obj.role
+                or "lever" in obj.role
+                or "valve" in obj.role
+                or obj.feature_id in engine.symbolic_theory.actuator_features
+            )
+            and obj.pos != av_pos
+            and obj.feature_id not in av_feats
         ]
         for e in entities:
             if (
-                e.role == EntityRole.ACTUATOR
-                or e.feature_id in engine.symbolic_theory.actuator_features
+                (
+                    e.role == EntityRole.ACTUATOR
+                    or e.feature_id in engine.symbolic_theory.actuator_features
+                )
+                and e.grid_pos != av_pos
+                and e.feature_id not in av_feats
             ):
                 if not any(s.pos == e.grid_pos for s in switch_objs):
                     switch_objs.append(
@@ -1981,21 +2097,53 @@ class MacroPlanSynthesizer:
                     abs(s.pos[0] - av_pos[0]) + abs(s.pos[1] - av_pos[1]),
                 ),
             )
-            best_switch = sorted_switches[0]
-            plan.append(
-                InteractWith(
-                    target_coord=best_switch.pos,
-                    description=f"Interact with switch at {best_switch.pos}",
-                )
-            )
-
-            if goals:
+            reachable_switches = [s for s in sorted_switches if _can_navigate_to(s.pos)]
+            if (
+                not reachable_switches
+                and sorted_switches
+                and has_multi_agent
+                and focus_switch is not None
+            ):
                 plan.append(
-                    NavigateTo(destination=goals[0], description="Reach goal unblocked by switch")
+                    SwitchFocus(
+                        switch_action=focus_switch,
+                        description="Switch to partner agent to reach switch",
+                    )
+                )
+                return plan
+            if reachable_switches:
+                best_switch = reachable_switches[0]
+                if (
+                    engine.has_displacement_capabilities(available_actions)
+                    and engine.avatar_pos is not None
+                ):
+                    is_bar = (
+                        best_switch.pos in engine.learned_barriers
+                    ) or engine.symbolic_theory.is_barrier(best_switch.feature_id)
+                    switch_rad = 1 if is_bar else 0
+                    plan.append(
+                        NavigateTo(
+                            destination=best_switch.pos,
+                            radius=switch_rad,
+                            description=f"Navigate to switch at {best_switch.pos}",
+                        )
+                    )
+                plan.append(
+                    InteractWith(
+                        target_coord=best_switch.pos,
+                        description=f"Interact with switch at {best_switch.pos}",
+                    )
                 )
 
-            trial_counts[best_switch.id] = trial_counts.get(best_switch.id, 0) + 1
-            return plan
+                if goals:
+                    plan.append(
+                        NavigateTo(
+                            destination=goals[0], description="Reach goal unblocked by switch"
+                        )
+                    )
+
+                trial_counts[best_switch.id] = trial_counts.get(best_switch.id, 0) + 1
+                return plan
 
         # 4. TERMINAL GOAL REACHABILITY:
         if goals and engine.avatar_pos is not None:
@@ -2003,15 +2151,30 @@ class MacroPlanSynthesizer:
                 goals,
                 key=lambda g: abs(g[0] - engine.avatar_pos[0]) + abs(g[1] - engine.avatar_pos[1]),
             )
-            target_goal = sorted_goals[0]
-            plan.append(NavigateTo(destination=target_goal, description="Reach exit goal"))
-            if has_multi_agent and focus_switch is not None:
+            reachable_goals = [g for g in sorted_goals if _can_navigate_to(g)]
+            if (
+                not reachable_goals
+                and sorted_goals
+                and has_multi_agent
+                and focus_switch is not None
+            ):
                 plan.append(
                     SwitchFocus(
-                        switch_action=focus_switch, description="Handover after reaching goal"
+                        switch_action=focus_switch,
+                        description="Switch to partner agent to reach goal",
                     )
                 )
-            return plan
+                return plan
+            if reachable_goals:
+                target_goal = reachable_goals[0]
+                plan.append(NavigateTo(destination=target_goal, description="Reach exit goal"))
+                if has_multi_agent and focus_switch is not None:
+                    plan.append(
+                        SwitchFocus(
+                            switch_action=focus_switch, description="Handover after reaching goal"
+                        )
+                    )
+                return plan
 
         # 5. GENERAL EPISTEMIC EXPLORATION: "trying everything on available objects"
         if known_objs:
@@ -2019,7 +2182,15 @@ class MacroPlanSynthesizer:
             explorable = [
                 obj
                 for obj in known_objs
-                if "barrier" not in obj.role and "hazard" not in obj.role and obj.pos != av_pos
+                if "barrier" not in obj.role
+                and "hazard" not in obj.role
+                and "floor" not in obj.role
+                and "background" not in obj.role
+                and "passable" not in obj.role
+                and "void" not in obj.role
+                and "empty" not in obj.role
+                and "avatar" not in obj.role
+                and obj.pos != av_pos
             ]
             if explorable:
                 best_obj = min(
@@ -2037,6 +2208,21 @@ class MacroPlanSynthesizer:
                     return plan
 
                 if any(engine.is_spatial_effector(a) for a in available_actions):
+                    if (
+                        engine.has_displacement_capabilities(available_actions)
+                        and engine.avatar_pos is not None
+                    ):
+                        is_bar = (
+                            best_obj.pos in engine.learned_barriers
+                        ) or engine.symbolic_theory.is_barrier(best_obj.feature_id)
+                        obj_rad = 1 if is_bar else 0
+                        plan.append(
+                            NavigateTo(
+                                destination=best_obj.pos,
+                                radius=obj_rad,
+                                description=f"Navigate to object {best_obj.id} at {best_obj.pos}",
+                            )
+                        )
                     plan.append(
                         InteractWith(
                             target_coord=best_obj.pos,

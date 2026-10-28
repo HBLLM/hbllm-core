@@ -57,6 +57,9 @@ class RemoteCausalAffordance:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"remote_aff_{self.trigger_pos[0]}_{self.trigger_pos[1]}_{self.remote_pos[0]}_{self.remote_pos[1]}",
                 node_data={
+                    "id": f"remote_aff_{self.trigger_pos[0]}_{self.trigger_pos[1]}_{self.remote_pos[0]}_{self.remote_pos[1]}",
+                    "node_type": "belief",
+                    "category": "epistemology",
                     "trigger_pos": self.trigger_pos,
                     "trigger_feature": self.trigger_feature,
                     "remote_pos": self.remote_pos,
@@ -275,6 +278,9 @@ class RemoteCausalAttributor:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="remote_causal_attributor_summary",
                 node_data={
+                    "id": "remote_causal_attributor_summary",
+                    "node_type": "event",
+                    "category": "epistemology",
                     "evidence_count": len(self.co_occurrence_evidence),
                     "actuator_count": len(self.remote_actuators),
                     "trigger_count": len(self.trigger_registry),

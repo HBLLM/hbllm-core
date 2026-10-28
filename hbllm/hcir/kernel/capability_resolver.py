@@ -51,6 +51,35 @@ class ICapabilityExecutor(Protocol):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Capability Metadata & Performance Profiles
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class ResourceRequirements:
+    """Hardware/software requirements for a capability provider."""
+
+    gpu: bool = False
+    gpu_memory_gb: float = 0.0
+    cpu_cores: int = 0
+    memory_gb: float = 0.0
+    network: bool = False
+    battery_ok: bool = True
+
+
+@dataclass
+class PerformanceProfile:
+    """Performance characteristics of a capability provider."""
+
+    cost_per_call: float = 0.0
+    avg_latency_ms: int = 0
+    max_latency_ms: int = 0
+    accuracy: float = 0.0
+    reliability: float = 1.0
+    throughput_rps: float = 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Capability Implementation Registration
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -60,7 +89,7 @@ class CapabilityImplementation:
     """A concrete implementation that satisfies a capability.
 
     Multiple implementations can serve the same capability.
-    The resolver selects based on priority and availability.
+    The resolver selects based on priority, availability, and resource constraints.
     """
 
     capability_name: str
@@ -70,8 +99,11 @@ class CapabilityImplementation:
     estimated_cost: int = 0  # Tokens
     estimated_latency_ms: int = 0  # Expected latency
     description: str = ""
+    version: str = "1.0.0"
     tags: list[str] = field(default_factory=list)
     required_permissions: set[str] = field(default_factory=set)
+    requirements: ResourceRequirements = field(default_factory=ResourceRequirements)
+    performance: PerformanceProfile = field(default_factory=PerformanceProfile)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -96,11 +128,16 @@ class CapabilityResolver:
         result = await executor.execute({"code": "print('hello')"})
     """
 
-    def __init__(self, sandbox_manager: CapabilitySandboxManager | None = None) -> None:
+    def __init__(
+        self,
+        sandbox_manager: CapabilitySandboxManager | None = None,
+        health_registry: Any | None = None,
+    ) -> None:
         # capability_name → list of implementations (sorted by priority desc)
         self._registry: dict[str, list[CapabilityImplementation]] = {}
         self._total_cost: int = 0
         self.sandbox_manager = sandbox_manager
+        self.health_registry = health_registry
 
     def register(self, impl: CapabilityImplementation) -> None:
         """Register a capability implementation."""
@@ -126,11 +163,74 @@ class CapabilityResolver:
 
     def resolve_implementation(self, capability_name: str) -> CapabilityImplementation | None:
         """Resolve a capability to its best available implementation object."""
+        if self.health_registry is not None:
+            health = self.health_registry.get_health(capability_name)
+            if health is not None and getattr(health, "status", "") == "UNAVAILABLE":
+                logger.warning(
+                    "Capability '%s' marked UNAVAILABLE by health registry", capability_name
+                )
+                return None
+
         impls = self._registry.get(capability_name, [])
         for impl in impls:
             if impl.executor.is_available:
                 return impl
         return None
+
+    def find_best(
+        self,
+        capability_name: str,
+        strategy: str = "priority",
+        max_cost: float | None = None,
+        max_latency_ms: int | None = None,
+        min_accuracy: float | None = None,
+        require_gpu: bool | None = None,
+    ) -> CapabilityImplementation | None:
+        """Find the best provider matching constraints.
+
+        Strategies:
+            "priority"  — highest priority (default)
+            "cheapest"  — lowest cost_per_call / estimated_cost
+            "fastest"   — lowest avg_latency_ms / estimated_latency_ms
+            "accurate"  — highest accuracy
+        """
+        if self.health_registry is not None:
+            health = self.health_registry.get_health(capability_name)
+            if health is not None and getattr(health, "status", "") == "UNAVAILABLE":
+                return None
+
+        specs = self._registry.get(capability_name, [])
+        candidates: list[CapabilityImplementation] = []
+        for spec in specs:
+            if not spec.executor.is_available:
+                continue
+            cost = spec.performance.cost_per_call or float(spec.estimated_cost)
+            if max_cost is not None and cost > max_cost:
+                continue
+            lat = spec.performance.avg_latency_ms or spec.estimated_latency_ms
+            if max_latency_ms is not None and lat > max_latency_ms:
+                continue
+            if min_accuracy is not None and spec.performance.accuracy < min_accuracy:
+                continue
+            if require_gpu is not None and spec.requirements.gpu != require_gpu:
+                continue
+            candidates.append(spec)
+
+        if not candidates:
+            return None
+
+        if strategy == "cheapest":
+            return min(
+                candidates, key=lambda s: s.performance.cost_per_call or float(s.estimated_cost)
+            )
+        elif strategy == "fastest":
+            return min(
+                candidates, key=lambda s: s.performance.avg_latency_ms or s.estimated_latency_ms
+            )
+        elif strategy == "accurate":
+            return max(candidates, key=lambda s: s.performance.accuracy)
+        else:
+            return candidates[0]
 
     async def resolve(self, capability_name: str) -> ICapabilityExecutor | None:
         """Resolve a capability to its best available executor.

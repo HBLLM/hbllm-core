@@ -46,6 +46,9 @@ class LocalCardinalityConstraint:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"cardinality_constraint_{self.center[0]}_{self.center[1]}",
                 node_data={
+                    "id": f"cardinality_constraint_{self.center[0]}_{self.center[1]}",
+                    "node_type": "constraint",
+                    "category": "directives",
                     "center": self.center,
                     "radius": self.radius,
                     "required_count": self.required_count,
@@ -184,6 +187,9 @@ class SymbolicConstraintSolver:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="symbolic_constraint_solver_state",
                 node_data={
+                    "id": "symbolic_constraint_solver_state",
+                    "node_type": "event",
+                    "category": "directives",
                     "constraint_count": len(self.constraints),
                     "known_safe_cells": sorted(list(self.known_safe_cells)),
                     "known_hazard_cells": sorted(list(self.known_hazard_cells)),

@@ -77,6 +77,10 @@ class WorldBeliefNode:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=self.belief_id,
                 node_data={
+                    "id": self.belief_id,
+                    "node_type": "belief",
+                    "category": "belief",
+                    "claim": f"{self.subject} {self.predicate} {self.value}",
                     "belief_id": self.belief_id,
                     "subject": self.subject,
                     "predicate": self.predicate,

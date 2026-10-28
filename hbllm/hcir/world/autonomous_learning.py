@@ -117,6 +117,37 @@ class CausalTheoryPlanner:
                 if feat in theory.barrier_features:
                     barrier_positions.add((r, c))
 
+        # Fallback to candidate goal features if no concrete goal cells located
+        if not goal_positions and theory.candidate_goal_features:
+            for r in range(curr_grid.shape[0]):
+                for c in range(curr_grid.shape[1]):
+                    feat = int(curr_grid[r, c])
+                    if feat in theory.candidate_goal_features:
+                        goal_positions.add((r, c))
+
+        # Fallback to structural perception goals if still empty
+        if not goal_positions and hasattr(engine, "detect_structural_goals"):
+            try:
+                struct_goals = engine.detect_structural_goals(curr_grid)
+                for sg in struct_goals:
+                    if sg.get("cells"):
+                        for cp in sg["cells"]:
+                            if cp != engine.avatar_pos:
+                                goal_positions.add(cp)
+                    elif sg.get("position") and sg["position"] != engine.avatar_pos:
+                        goal_positions.add(sg["position"])
+                    if sg.get("feature") is not None:
+                        theory.candidate_goal_features.add(int(sg["feature"]))
+            except Exception:
+                pass
+
+        # Discard avatar position and exhausted goals
+        if engine.avatar_pos is not None:
+            goal_positions.discard(engine.avatar_pos)
+        exhausted = getattr(engine.working_memory, "exhausted_candidate_goals", set())
+        if exhausted and len(goal_positions - exhausted) > 0:
+            goal_positions.difference_update(exhausted)
+
         # Extract action displacements from empirical action dynamics
         action_displacements: dict[int, tuple[int, int]] = {}
         for act_id, dyn in engine.action_dynamics.items():
@@ -151,7 +182,7 @@ class CausalTheoryPlanner:
         min_dist = min(abs(pos[0] - g[0]) + abs(pos[1] - g[1]) for g in context.goal_positions)
         # Penalty if position is adjacent to lethal/barrier cells
         penalty = 0.0
-        if pos in context.barrier_positions:
+        if pos in context.barrier_positions and pos not in context.goal_positions:
             penalty += 100.0
         return float(min_dist) + penalty
 
@@ -168,10 +199,11 @@ class CausalTheoryPlanner:
         feat = int(grid[r, c])
         if feat in context.lethal_features:
             return False
-        if pos in context.barrier_positions:
-            return False
-        if feat in context.barrier_features:
-            return False
+        if pos not in context.goal_positions:
+            if pos in context.barrier_positions:
+                return False
+            if feat in context.barrier_features:
+                return False
         return True
 
     @staticmethod

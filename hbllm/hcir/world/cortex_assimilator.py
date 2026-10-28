@@ -311,10 +311,6 @@ class EpistemicFeedbackAssimilator:
                         cells=[(tr_t, tc_t)],
                         step=engine.step_counter,
                     )
-                    if engine.avatar_pos is None:
-                        engine.avatar_pos = (tr_t, tc_t)
-                        engine.avatar_features = {clicked_feat}
-                        engine.avatar_feature = clicked_feat
 
         # Empirical State-Reversion / Undo Action Discovery:
         # If executing this action restored the grid to the previous-previous state,
@@ -381,6 +377,16 @@ class EpistemicFeedbackAssimilator:
                 if prev_avatar_pos is not None:
                     engine.failed_transitions.add((prev_avatar_pos, action))
 
+            if is_effector_action and target_coord is not None:
+                engine.quiescent_click_targets.add(target_coord)
+                if hasattr(engine, "working_memory") and hasattr(
+                    engine.working_memory, "habenular_ior"
+                ):
+                    tok = (action, target_coord[0], target_coord[1])
+                    engine.working_memory.habenular_ior.active_inhibitions[
+                        (engine.avatar_pos, tok)
+                    ] = 20
+
             if is_effector_action and not is_win and not is_lost:
                 return
         else:
@@ -426,7 +432,8 @@ class EpistemicFeedbackAssimilator:
                     )
 
                 if is_effector_action and diff.changed_pixel_count > 0:
-                    engine.avatar_pos = target_coord
+                    if not engine.has_displacement_capabilities():
+                        engine.avatar_pos = target_coord
 
                     # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
                     if diff.changed_mask is not None and engine.prev_grid is not None:
@@ -446,34 +453,35 @@ class EpistemicFeedbackAssimilator:
                             elif dot < -0.5:
                                 engine.effector_kinetics_mode = -1
 
-                    clicked_feats = {
-                        int(f)
-                        for f in np.unique(
-                            curr_grid[
-                                max(0, tr - 2) : min(H, tr + 3), max(0, tc - 2) : min(W, tc + 3)
-                            ]
-                        )
-                        if int(f) != engine.bg_feature
-                    }
-                    if clicked_feats:
-                        engine.avatar_features = clicked_feats
-                        engine.avatar_feature = next(iter(clicked_feats))
-                        from scipy.ndimage import label
-
-                        mask_c = np.isin(curr_grid, list(clicked_feats))
-                        lab_c, _ = label(mask_c)
-                        if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
-                            comp_c = np.argwhere(lab_c == lab_c[tr, tc])
-                            engine.avatar_size = len(comp_c)
-                            engine.avatar_pos = (
-                                int(round(float(np.mean(comp_c[:, 0])))),
-                                int(round(float(np.mean(comp_c[:, 1])))),
+                    if not engine.has_displacement_capabilities():
+                        clicked_feats = {
+                            int(f)
+                            for f in np.unique(
+                                curr_grid[
+                                    max(0, tr - 2) : min(H, tr + 3), max(0, tc - 2) : min(W, tc + 3)
+                                ]
                             )
-                    engine.mental_plan.clear()
-                    engine.transition_to_phase(
-                        EpistemicPhase.MENTAL_SIMULATION,
-                        reason="avatar_relocation_assimilated",
-                    )
+                            if int(f) != engine.bg_feature
+                        }
+                        if clicked_feats:
+                            engine.avatar_features = clicked_feats
+                            engine.avatar_feature = next(iter(clicked_feats))
+                            from scipy.ndimage import label
+
+                            mask_c = np.isin(curr_grid, list(clicked_feats))
+                            lab_c, _ = label(mask_c)
+                            if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
+                                comp_c = np.argwhere(lab_c == lab_c[tr, tc])
+                                engine.avatar_size = len(comp_c)
+                                engine.avatar_pos = (
+                                    int(round(float(np.mean(comp_c[:, 0])))),
+                                    int(round(float(np.mean(comp_c[:, 1])))),
+                                )
+                        engine.mental_plan.clear()
+                        engine.transition_to_phase(
+                            EpistemicPhase.MENTAL_SIMULATION,
+                            reason="avatar_relocation_assimilated",
+                        )
 
                 # Numerical / neighborhood cardinality constraint discovery:
                 tr, tc = target_coord
@@ -1335,18 +1343,11 @@ class EpistemicFeedbackAssimilator:
             if diff.changed_pixel_count == 0 and not is_win and not is_lost:
                 engine.consecutive_stuck_steps += 1
                 if engine.last_action is not None:
-                    if not engine.is_displacement_action(engine.last_action):
-                        engine.inhibited_actions[engine.last_action] = max(
-                            engine.inhibited_actions.get(engine.last_action, 0) + 2, 4
-                        )
-                        recent_acts = list(engine.recent_actions)[-2:]
-                        if len(recent_acts) >= 2 and all(
-                            a == engine.last_action for a in recent_acts
-                        ):
-                            engine.inhibited_actions[engine.last_action] = max(
-                                engine.inhibited_actions.get(engine.last_action, 0) + 4, 8
-                            )
-                    elif prev_avatar_pos is not None:
+                    prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                    engine.inhibited_actions[engine.last_action] = max(prev_inh + 3, 5)
+                    if engine.consecutive_stuck_steps >= 2:
+                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 6, 8)
+                    if prev_avatar_pos is not None:
                         engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
                         engine.working_memory.habenular_ior.failed_transitions.add(
                             (prev_avatar_pos, engine.last_action)
@@ -1355,14 +1356,13 @@ class EpistemicFeedbackAssimilator:
                 if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
                     engine.consecutive_stuck_steps += 1
                     if engine.last_action is not None:
+                        prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
+                        engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 4)
                         if engine.is_displacement_action(engine.last_action):
                             engine.failed_transitions.add((prev_avatar_pos, engine.last_action))
                             engine.working_memory.habenular_ior.failed_transitions.add(
                                 (prev_avatar_pos, engine.last_action)
                             )
-                        else:
-                            prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
-                            engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
                 else:
                     engine.consecutive_stuck_steps = 0
             else:
@@ -1639,14 +1639,24 @@ class EpistemicFeedbackAssimilator:
         )
 
         # Faculty: Telic Depletion Goal Induction
-        # When an interventional action clears pixels of a non-background, non-avatar feature,
+        # When an interventional non-locomotion action clears pixels of a non-background, non-avatar feature,
         # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
-        if diff.mutated_pixels and not is_lost:
+        is_locomotion = False
+        if (
+            action in engine.action_dynamics
+            and engine.action_dynamics[action].is_displacement_action()
+        ):
+            is_locomotion = True
+        elif engine.is_displacement_action(action):
+            is_locomotion = True
+
+        if diff.mutated_pixels and not is_lost and not is_locomotion and engine.is_motor_grounded():
             for r, c, old_v, new_v in diff.mutated_pixels:
                 if (
                     new_v == bg
                     and old_v != bg
                     and old_v not in av_feats
+                    and old_v != engine.avatar_feature
                     and not engine.symbolic_theory.is_barrier(old_v)
                 ):
                     engine.symbolic_theory.induce_depletion_goal(old_v)

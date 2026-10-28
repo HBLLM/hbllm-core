@@ -49,6 +49,17 @@ class KernelExecutionReceipt:
     timestamp: float = field(default_factory=time.time)
     governance_decision: GovernanceDecision | None = None
 
+    def to_capability_result(self) -> Any:
+        from hbllm.hcir.kernel.cognitive_abi import CapabilityResult
+
+        return CapabilityResult(
+            capability_name=self.capability_name,
+            status=self.status,
+            output=self.result,
+            receipt_id=self.receipt_id,
+            timestamp=self.timestamp,
+        )
+
 
 class CognitiveKernel(CognitiveKernelProtocol):
     """Lightweight execution facade for the HCIR Cognitive OS Kernel."""
@@ -77,6 +88,43 @@ class CognitiveKernel(CognitiveKernelProtocol):
     def governance(self) -> GovernanceEngine:
         return self._governance
 
+    async def execute_async(
+        self,
+        capability_name: str,
+        arguments: dict[str, Any],
+        context: Any = None,
+    ) -> KernelExecutionReceipt:
+        """Asynchronously execute a capability call through the kernel pipeline."""
+        start_time = time.monotonic()
+        self._execution_count += 1
+        receipt_id = f"rcpt_k_{self._execution_count}"
+
+        gov_dec = self._governance.evaluate_execution(capability_name, arguments, context)
+        if not gov_dec.allowed:
+            raise PermissionError(
+                f"Kernel governance blocked capability '{capability_name}': {gov_dec.reason}"
+            )
+
+        result_data: dict[str, Any]
+        if self._services and self._services.capability_resolver:
+            resolver = self._services.capability_resolver
+            if resolver.has_capability(capability_name):
+                result_data = await resolver.resolve_and_execute(capability_name, arguments)
+            else:
+                result_data = {"executed": True, "capability": capability_name, "args": arguments}
+        else:
+            result_data = {"executed": True, "capability": capability_name, "args": arguments}
+
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
+        return KernelExecutionReceipt(
+            receipt_id=receipt_id,
+            capability_name=capability_name,
+            status="SUCCESS" if "error" not in result_data else "FAILED",
+            result=result_data,
+            elapsed_ms=elapsed_ms,
+            governance_decision=gov_dec,
+        )
+
     def execute(
         self,
         capability_name: str,
@@ -95,18 +143,53 @@ class CognitiveKernel(CognitiveKernelProtocol):
                 f"Kernel governance blocked capability '{capability_name}': {gov_dec.reason}"
             )
 
-        # Stage 4 & 5: Capability resolution and execution placeholder
-        result_data: dict[str, Any] = {
-            "executed": True,
-            "capability": capability_name,
-            "args": arguments,
-        }
+        # Stage 4 & 5: Capability resolution and execution
+        result_data: dict[str, Any]
+        if self._services and self._services.capability_resolver:
+            resolver = self._services.capability_resolver
+            if resolver.has_capability(capability_name):
+                import asyncio
+                import concurrent.futures
+
+                try:
+                    # Execute safely across sync/async boundaries
+                    try:
+                        asyncio.get_running_loop()
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            fut = pool.submit(
+                                lambda: asyncio.run(
+                                    resolver.resolve_and_execute(capability_name, arguments)
+                                )
+                            )
+                            result_data = fut.result()
+                    except RuntimeError:
+                        result_data = asyncio.run(
+                            resolver.resolve_and_execute(capability_name, arguments)
+                        )
+                except Exception as exc:
+                    result_data = {
+                        "executed": False,
+                        "error": str(exc),
+                        "capability": capability_name,
+                    }
+            else:
+                result_data = {
+                    "executed": True,
+                    "capability": capability_name,
+                    "args": arguments,
+                }
+        else:
+            result_data = {
+                "executed": True,
+                "capability": capability_name,
+                "args": arguments,
+            }
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         receipt = KernelExecutionReceipt(
             receipt_id=receipt_id,
             capability_name=capability_name,
-            status="SUCCESS",
+            status="SUCCESS" if "error" not in result_data else "FAILED",
             result=result_data,
             elapsed_ms=elapsed_ms,
             governance_decision=gov_dec,

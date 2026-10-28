@@ -160,6 +160,21 @@ class SurpriseEngine:
             is_persistent=is_persistent,
         )
 
+    def evaluate(
+        self,
+        expected: dict,
+        actual: dict,
+        confidence: float = 0.90,
+        prediction_id: str = "pred_eval",
+    ) -> SurpriseEvaluation:
+        """Alias for evaluate_surprise with shorthand arguments."""
+        return self.evaluate_surprise(
+            prediction_id=prediction_id,
+            expected_state=expected,
+            actual_state=actual,
+            confidence=confidence,
+        )
+
     def to_causal_predicate(self) -> CausalPredicate:
         """Export surprise engine configuration as a declarative causal predicate."""
         return CausalPredicate(

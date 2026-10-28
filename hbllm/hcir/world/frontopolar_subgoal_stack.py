@@ -73,6 +73,9 @@ class FrontopolarSubgoal:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"subgoal_{self.subgoal_id}",
                 node_data={
+                    "id": f"subgoal_{self.subgoal_id}",
+                    "node_type": "goal",
+                    "category": "directives",
                     "subgoal_id": self.subgoal_id,
                     "subgoal_type": self.subgoal_type.value,
                     "target_entity_pos": self.target_entity_pos,
@@ -382,6 +385,9 @@ class FrontopolarSubgoalStack:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="frontopolar_stack_summary",
                 node_data={
+                    "id": "frontopolar_stack_summary",
+                    "node_type": "event",
+                    "category": "directives",
                     "depth": self.depth,
                     "max_depth": self.max_depth,
                     "completed_count": len(self.completed_subgoals),

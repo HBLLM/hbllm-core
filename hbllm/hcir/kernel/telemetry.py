@@ -46,6 +46,9 @@ class MetricWindow:
         return sorted_samples[min(idx, len(sorted_samples) - 1)]
 
 
+KernelMetric = MetricWindow
+
+
 class KernelTelemetry:
     """
     Centralized telemetry collector owned by KernelServices.

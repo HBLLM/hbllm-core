@@ -357,6 +357,9 @@ class ModelProvenanceTracker:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=f"provenance_{ver.version_id}",
                 node_data={
+                    "id": f"provenance_{ver.version_id}",
+                    "node_type": "model_version",
+                    "category": "provenance",
                     "version_id": ver.version_id,
                     "parent_version_id": ver.parent_version_id,
                     "author_faculty": ver.author_faculty,

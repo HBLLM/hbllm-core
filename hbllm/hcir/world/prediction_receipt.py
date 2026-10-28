@@ -46,6 +46,9 @@ class WorldPredictionReceipt:
                 op=TransactionOp.ADD_NODE,
                 node_id=f"receipt_{self.receipt_id}",
                 node_data={
+                    "id": f"receipt_{self.receipt_id}",
+                    "node_type": "prediction_receipt",
+                    "category": "meta",
                     "receipt_id": self.receipt_id,
                     "prediction_id": self.prediction_id,
                     "model_version": self.model_version,

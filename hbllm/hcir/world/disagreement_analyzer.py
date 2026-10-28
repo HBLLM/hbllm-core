@@ -24,6 +24,16 @@ class DisagreementReport:
     high_disagreement: bool
     component_confidences: dict[str, float] = field(default_factory=dict)
 
+    @property
+    def disagreement_index(self) -> float:
+        """Alias for disagreement_score."""
+        return self.disagreement_score
+
+    @property
+    def conflicting_predictors(self) -> list[str]:
+        """Predictors involved in disagreement evaluation."""
+        return list(self.component_confidences.keys())
+
     def to_causal_predicate(self) -> CausalPredicate:
         """Export disagreement report as a declarative causal predicate."""
         return CausalPredicate(
@@ -40,6 +50,9 @@ class DisagreementReport:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="predictor_disagreement_report",
                 node_data={
+                    "id": "predictor_disagreement_report",
+                    "node_type": "disagreement_report",
+                    "category": "reasoning",
                     "disagreement_score": self.disagreement_score,
                     "high_disagreement": self.high_disagreement,
                     "component_confidences": dict(self.component_confidences),
@@ -106,6 +119,37 @@ class PredictorDisagreementAnalyzer:
             if va != vb:
                 contradictions.append(f"Conflict on variable '{k}': {va} vs {vb}")
         return contradictions
+
+    def to_contradiction_operations(
+        self,
+        contradictions: list[str],
+        world_id: str = "default_world",
+        source_a: str = "predictor_a",
+        source_b: str = "predictor_b",
+    ) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions for detected contradictions so EpistemicSafetyGate can gate execution."""
+        import uuid
+
+        ops: list[TransactionOperation] = []
+        for contradiction in contradictions:
+            cid = f"contradiction_{uuid.uuid4().hex[:8]}"
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node_id=cid,
+                    node_data={
+                        "id": cid,
+                        "node_type": "contradiction",
+                        "category": "reasoning",
+                        "claim_a_id": source_a,
+                        "claim_b_id": source_b,
+                        "description": contradiction,
+                        "world_id": world_id,
+                        "status": "open",
+                    },
+                )
+            )
+        return ops
 
     def export_causal_predicates(self, report: DisagreementReport) -> list[CausalPredicate]:
         """Export disagreement report as declarative causal predicates."""

@@ -19,13 +19,14 @@ from typing import Any
 def check_rust_crates() -> dict[str, bool]:
     """Check compilation status of native Rust crates."""
     crates = [
+        "hbllm_hcir_graph",
+        "hbllm_confidence",
         "hbllm_perception_rs",
         "hbllm_semantic_search",
-        "hbllm_compute_kernel_rs",
+        "hbllm_compute",
         "hbllm_tokenizer_rs",
-        "hbllm_knowledge_graph_rs",
-        "hbllm_confidence_rs",
-        "hbllm_concept_extract_rs",
+        "hbllm_knowledge_graph",
+        "hbllm_concept_extract",
     ]
     status = {}
     for crate in crates:

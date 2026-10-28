@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from heapq import heappop, heappush
 
+from hbllm.hcir.kernel.scheduler_policy import CognitiveScoreCalculator
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,6 +92,9 @@ class SchedulerEntry:
     process_id: str = field(compare=False)
     thread_id: str = field(compare=False)
     enqueued_at: float = field(compare=False, default_factory=time.time)
+
+
+ScheduledTask = SchedulerEntry
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -180,14 +185,24 @@ class KernelInstructionScheduler:
         thread_id: str,
         salience: float = 0.5,
         activation: float = 0.5,
+        expected_value: float = 1.0,
+        resource_cost: float = 1.0,
+        interruption_cost: float = 1.0,
     ) -> None:
-        """Enqueue a thread for dispatch.
+        """Enqueue a thread for dispatch using multi-criteria cognitive scoring.
 
-        Priority is derived from attention parameters:
-        higher salience × activation = dispatched sooner.
+        Priority is derived from the Cognitive OS formula:
+            execution_score = (expected_value * urgency * confidence) / (resource_cost * interruption_cost)
+        Higher score = dispatched sooner (negated for min-heap).
         """
-        # Negate for min-heap (highest priority first)
-        sort_key = -(salience * activation)
+        score = CognitiveScoreCalculator.score_task(
+            expected_value=expected_value,
+            urgency=salience,
+            confidence=activation,
+            resource_cost=resource_cost,
+            interruption_cost=interruption_cost,
+        )
+        sort_key = -score
         entry = SchedulerEntry(
             sort_key=sort_key,
             process_id=process_id,
@@ -265,6 +280,9 @@ class KernelInstructionScheduler:
         salience: float = 0.5,
         activation: float = 0.5,
         estimated_cost: int = 0,
+        expected_value: float = 1.0,
+        resource_cost: float = 1.0,
+        interruption_cost: float = 1.0,
     ) -> bool:
         """Enqueue a thread with budget checking.
 
@@ -281,5 +299,16 @@ class KernelInstructionScheduler:
                 return False
             self._budget.consume(estimated_cost)
 
-        self.enqueue(process_id, thread_id, salience, activation)
+        effective_resource_cost = resource_cost * (
+            1.0 + (estimated_cost / 1000.0) if estimated_cost > 0 else 1.0
+        )
+        self.enqueue(
+            process_id,
+            thread_id,
+            salience=salience,
+            activation=activation,
+            expected_value=expected_value,
+            resource_cost=effective_resource_cost,
+            interruption_cost=interruption_cost,
+        )
         return True

@@ -53,17 +53,22 @@ class CausalEdge:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction adding causal edge to semantic graph."""
+        edge_id = f"edge_{self.source_id}_{self.target_id}"
+        edge_payload = {
+            "id": edge_id,
+            "sources": [self.source_id],
+            "targets": [self.target_id],
+            "edge_type": self.relationship.value,
+            "weight": self.weight,
+            "factors": list(self.factors),
+        }
         return [
             TransactionOperation(
                 op=TransactionOp.ADD_EDGE,
-                node_id=f"edge_{self.source_id}_{self.target_id}",
-                node_data={
-                    "source_id": self.source_id,
-                    "target_id": self.target_id,
-                    "relationship": self.relationship.value,
-                    "weight": self.weight,
-                    "factors": list(self.factors),
-                },
+                edge_id=edge_id,
+                edge_data=edge_payload,
+                node_id=edge_id,
+                node_data=edge_payload,
             )
         ]
 

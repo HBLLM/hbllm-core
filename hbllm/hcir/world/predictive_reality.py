@@ -15,11 +15,13 @@ from hbllm.hcir.transactions import TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
 from hbllm.hcir.world.prediction_types import EnsemblePrediction, PredictionProvenance
+from hbllm.hcir.world.predictor_weights import PredictorWeightManager
 from hbllm.hcir.world.predictors.neural import NeuralWorldModel
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
 from hbllm.hcir.world.predictors.statistical import StatisticalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
+from hbllm.hcir.world.world_context import WorldModelScope
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,12 @@ logger = logging.getLogger(__name__)
 class PredictiveRealityModel:
     """Multi-horizon ensemble predictive reality model."""
 
-    def __init__(self, enable_llm: bool = False, enable_whole_grid: bool = False) -> None:
+    def __init__(
+        self,
+        enable_llm: bool = False,
+        enable_whole_grid: bool = False,
+        weight_manager: PredictorWeightManager | None = None,
+    ) -> None:
         self.physics = PhysicsPredictor()
         self.statistical = StatisticalPredictor()
         self.snn = SNNTemporalPredictor()
@@ -38,6 +45,7 @@ class PredictiveRealityModel:
         self.enable_whole_grid = enable_whole_grid
         self._llm: Any | None = None
         self.disagreement_analyzer = PredictorDisagreementAnalyzer()
+        self.weight_manager = weight_manager or PredictorWeightManager()
 
     @property
     def llm(self) -> Any:
@@ -53,6 +61,7 @@ class PredictiveRealityModel:
         action_intent: str,
         horizon_ms: int = 60000,
         provenance: PredictionProvenance | None = None,
+        scope: WorldModelScope | None = None,
     ) -> EnsemblePrediction:
         """Evaluate ensemble predictors and return unified EnsemblePrediction."""
         comp_results: dict[str, tuple[dict[str, Any], float]] = {}
@@ -81,38 +90,28 @@ class PredictiveRealityModel:
         if self.enable_llm:
             llm_state, llm_conf = self.llm.predict_state(snapshot, action_intent, horizon_ms)
             comp_results["llm"] = (llm_state, llm_conf)
-            if has_grid:
-                avg_confidence = (
-                    p_conf * 0.35
-                    + snn_conf * 0.25
-                    + st_conf * 0.15
-                    + neu_conf * 0.10
-                    + wg_conf * 0.10
-                    + llm_conf * 0.05
-                )
-                predictors_used = ["physics", "statistical", "snn", "neural", "whole_grid", "llm"]
-            else:
-                avg_confidence = (
-                    p_conf * 0.4
-                    + snn_conf * 0.3
-                    + st_conf * 0.15
-                    + neu_conf * 0.1
-                    + llm_conf * 0.05
-                )
-                predictors_used = ["physics", "statistical", "snn", "neural", "llm"]
-        else:
-            if has_grid:
-                avg_confidence = (
-                    p_conf * 0.38
-                    + snn_conf * 0.28
-                    + st_conf * 0.14
-                    + neu_conf * 0.10
-                    + wg_conf * 0.10
-                )
-                predictors_used = ["physics", "statistical", "snn", "neural", "whole_grid"]
-            else:
-                avg_confidence = p_conf * 0.42 + snn_conf * 0.32 + st_conf * 0.16 + neu_conf * 0.10
-                predictors_used = ["physics", "statistical", "snn", "neural"]
+
+        predictors_used = ["physics", "statistical", "snn", "neural"]
+        if has_grid:
+            predictors_used.append("whole_grid")
+        if self.enable_llm:
+            predictors_used.append("llm")
+
+        model_scope = scope or WorldModelScope(world_id=snapshot.world_id)
+        raw_scores = {
+            name: max(
+                0.001,
+                self.weight_manager.get_predictor_weight(model_scope, name).compute_score(),
+            )
+            for name in predictors_used
+        }
+        total_score = sum(raw_scores.values()) or 1.0
+        norm_weights = {name: score / total_score for name, score in raw_scores.items()}
+        avg_confidence = sum(
+            comp_results[name][1] * norm_weights[name]
+            for name in predictors_used
+            if name in comp_results
+        )
 
         disagreement = self.disagreement_analyzer.analyze_disagreement(comp_results)
 
@@ -151,6 +150,7 @@ class PredictiveRealityModel:
         action_intent: str,
         horizon_ms: int = 60000,
         provenance: PredictionProvenance | None = None,
+        scope: WorldModelScope | None = None,
     ) -> tuple[EnsemblePrediction, list[TransactionOperation]]:
         """Compute ensemble prediction and generate corresponding HCIR transaction proposals."""
         pred = self.predict(
@@ -158,6 +158,7 @@ class PredictiveRealityModel:
             action_intent=action_intent,
             horizon_ms=horizon_ms,
             provenance=provenance,
+            scope=scope,
         )
         return pred, pred.to_transaction_operations()
 

@@ -32,7 +32,6 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.topological_cut_set import CutSetResult, TopologicalCutSetAnalyzer
 from hbllm.hcir.types import Provenance, Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
-from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
 logger = logging.getLogger(__name__)
 
@@ -1460,6 +1459,8 @@ class HCIRSpatialEntityPlanner:
         effective_barriers = set(barrier_cells)
         if self._learned_barriers:
             effective_barriers.update(self._learned_barriers - {goal, start})
+        from hbllm.hcir.world.predictors.physics import PhysicsPredictor
+
         return PhysicsPredictor.compute_geodesic_path(
             start=start,
             goal=goal,

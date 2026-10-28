@@ -29,38 +29,11 @@ from hbllm.hcir.kernel.capability_resolver import (
     CapabilityImplementation,
     CapabilityResolver,
     ICapabilityExecutor,
+    PerformanceProfile,
+    ResourceRequirements,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Capability Metadata
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class ResourceRequirements:
-    """Hardware/software requirements for a capability provider."""
-
-    gpu: bool = False
-    gpu_memory_gb: float = 0.0
-    cpu_cores: int = 0
-    memory_gb: float = 0.0
-    network: bool = False
-    battery_ok: bool = True  # False = requires wall power
-
-
-@dataclass
-class PerformanceProfile:
-    """Performance characteristics of a capability provider."""
-
-    cost_per_call: float = 0.0  # USD or token cost
-    avg_latency_ms: int = 0
-    max_latency_ms: int = 0
-    accuracy: float = 0.0  # 0.0 – 1.0
-    reliability: float = 1.0  # Uptime / success rate
-    throughput_rps: float = 0.0  # Requests per second
 
 
 @dataclass
@@ -234,3 +207,7 @@ class KernelCapabilityRegistry:
             "total_providers": sum(len(s) for s in self._specs.values()),
             "capabilities": {name: len(specs) for name, specs in self._specs.items()},
         }
+
+
+# Canonical alias
+CapabilityRegistry = KernelCapabilityRegistry

@@ -135,3 +135,38 @@ def test_world_model_registry():
 
     reg_txs = registry.to_transaction_operations()
     assert len(reg_txs) == 1
+
+
+def test_autonomous_epistemic_engine_kernel_services_wiring():
+    from hbllm.hcir.kernel import KernelServices
+    from hbllm.hcir.workspace import HCIRWorkspaceState
+    from hbllm.hcir.workspace_tiers import TieredWorkspace
+    from hbllm.hcir.world import AutonomousEpistemicEngine, EpistemicPhase
+
+    ws = HCIRWorkspaceState()
+    services = KernelServices.create_default(workspace=ws)
+    tiered = TieredWorkspace()
+    services.tiered_workspace = tiered
+
+    engine = AutonomousEpistemicEngine(services=services)
+    assert engine.services is services
+    assert engine.event_bus is services.event_bus
+    assert engine.capability_resolver is services.capability_resolver
+    assert engine.tiered_workspace is tiered
+    assert engine.transaction_manager is not None
+
+    events_received = []
+    services.event_bus.subscribe(
+        "epistemic.phase_transition",
+        lambda evt: events_received.append(evt),
+    )
+
+    engine.transition_to_phase(EpistemicPhase.MENTAL_SIMULATION, reason="test_reason")
+    assert len(events_received) == 1
+    assert events_received[0].data["new_phase"] == "mental_simulation"
+
+    # Test re-attaching kernel services
+    new_services = KernelServices.create_default(workspace=HCIRWorkspaceState())
+    engine.attach_kernel_services(new_services, goal_id="sub_goal")
+    assert engine.services is new_services
+    assert engine.event_bus is new_services.event_bus

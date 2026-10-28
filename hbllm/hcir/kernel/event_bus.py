@@ -27,6 +27,8 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 import time
 from collections import defaultdict
@@ -93,9 +95,16 @@ class KernelEvent:
     """An ephemeral kernel event for internal observability."""
 
     event_type: str
-    source: str  # Which kernel component emitted this
+    source: str = "kernel"  # Which kernel component emitted this
     timestamp: float = field(default_factory=time.time)
     data: dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if self.payload is not None and not self.data:
+            object.__setattr__(self, "data", self.payload)
+        elif self.data and self.payload is None:
+            object.__setattr__(self, "payload", self.data)
 
     @property
     def is_error(self) -> bool:
@@ -110,7 +119,7 @@ class KernelEvent:
 # Event Handler type
 # ═══════════════════════════════════════════════════════════════════════════
 
-KernelEventHandler = Callable[[KernelEvent], None]
+KernelEventHandler = Callable[[KernelEvent], Any]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -207,15 +216,54 @@ class KernelEventBus:
 
     @staticmethod
     def _safe_call(handler: KernelEventHandler, event: KernelEvent) -> None:
-        """Call a handler, catching and logging any exceptions."""
+        """Call a handler, catching exceptions and safely scheduling async coroutines."""
         try:
-            handler(event)
+            res = handler(event)
+            if inspect.iscoroutine(res):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(res)
+                except RuntimeError:
+                    asyncio.run(res)
         except Exception as exc:
             logger.error(
                 "Kernel event handler error for %s: %s",
                 event.event_type,
                 exc,
             )
+
+    async def wait_for(
+        self,
+        event_type: str,
+        timeout_ms: int = 1000,
+        predicate: Callable[[KernelEvent], bool] | None = None,
+    ) -> KernelEvent:
+        """Asynchronously wait for a specific kernel event.
+
+        Args:
+            event_type: Exact event type, prefix ("transaction.*"), or wildcard "*".
+            timeout_ms: Timeout in milliseconds.
+            predicate: Optional filter callable returning True for matching events.
+
+        Returns:
+            The matched KernelEvent.
+
+        Raises:
+            TimeoutError: If no matching event is observed within timeout_ms.
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[KernelEvent] = loop.create_future()
+
+        def listener(ev: KernelEvent) -> None:
+            if not future.done():
+                if predicate is None or predicate(ev):
+                    future.set_result(ev)
+
+        self.subscribe(event_type, listener)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout_ms / 1000.0)
+        finally:
+            self.unsubscribe(event_type, listener)
 
     def get_history(
         self,

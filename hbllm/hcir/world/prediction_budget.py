@@ -95,6 +95,9 @@ class PredictionBudget:
                 op=TransactionOp.UPSERT_NODE,
                 node_id="prediction_budget_governor",
                 node_data={
+                    "id": "prediction_budget_governor",
+                    "node_type": "budget_governor",
+                    "category": "governance",
                     "max_latency_ms": self.max_latency_ms,
                     "max_cost_units": self.max_cost_units,
                     "max_depth": self.counterfactual_budget.max_depth,

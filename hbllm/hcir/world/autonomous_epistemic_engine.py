@@ -18,15 +18,22 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world_kernel import WorldKernel
 
 import numpy as np
 
 from hbllm.hcir.graph import (
     ConstraintNode,
+    EventNode,
     GoalNode,
     ObservationNode,
 )
+from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
+from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
+from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
@@ -240,6 +247,7 @@ class AutonomousEpistemicEngine:
         exploration_budget: int = 150,
         enable_logging: bool = True,
         instructions: Sequence[str] | str | None = None,
+        services: KernelServices | None = None,
     ) -> None:
         self.exploration_budget = exploration_budget
         self.enable_logging = enable_logging
@@ -448,10 +456,26 @@ class AutonomousEpistemicEngine:
         self.target_scorers: list[Any] = []
         self.deliberation_policies: list[Any] = []
 
-        # Tiered Cognitive Workspace & Transaction Manager live mirroring
-        self.tiered_workspace: TieredWorkspace | None = None
-        self.transaction_manager: TransactionManager | None = None
+        # Tiered Cognitive Workspace & Transaction Manager / Kernel Services live mirroring
+        self.services: KernelServices | None = services
+        self.event_bus: KernelEventBus | None = (
+            getattr(services, "event_bus", None) if services is not None else None
+        )
+        self.capability_resolver: CapabilityResolver | None = (
+            getattr(services, "capability_resolver", None) if services is not None else None
+        )
+        self.tiered_workspace: TieredWorkspace | None = (
+            getattr(services, "tiered_workspace", None) if services is not None else None
+        )
+        self.transaction_manager: TransactionManager | None = (
+            getattr(services, "transaction_manager", None) if services is not None else None
+        )
+        self.world_kernel: WorldKernel | None = (
+            getattr(services, "world_kernel", None) if services is not None else None
+        )
         self.active_task_frame: TaskFrame | None = None
+        if services is not None and self.tiered_workspace is not None:
+            self.attach_tiered_workspace(self.tiered_workspace)
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
         from hbllm.hcir.world.autonomous_learning import (
@@ -959,6 +983,26 @@ class AutonomousEpistemicEngine:
         if policy in self.deliberation_policies:
             self.deliberation_policies.remove(policy)
 
+    def attach_kernel_services(
+        self,
+        services: KernelServices,
+        goal_id: str = "main_goal",
+        hydrate_persistent: bool = True,
+    ) -> None:
+        """Connect the epistemic engine to a KernelServices container."""
+        self.services = services
+        self.event_bus = getattr(services, "event_bus", None)
+        self.capability_resolver = getattr(services, "capability_resolver", None)
+        self.world_kernel = getattr(services, "world_kernel", None)
+        if getattr(services, "transaction_manager", None) is not None:
+            self.transaction_manager = services.transaction_manager
+        if getattr(services, "tiered_workspace", None) is not None:
+            self.attach_tiered_workspace(
+                services.tiered_workspace,
+                goal_id=goal_id,
+                hydrate_persistent=hydrate_persistent,
+            )
+
     def attach_tiered_workspace(
         self,
         tiered: TieredWorkspace,
@@ -974,7 +1018,8 @@ class AutonomousEpistemicEngine:
         self.tiered_workspace = tiered
         frame = tiered.create_task_frame(goal_id=goal_id)
         self.active_task_frame = frame
-        self.transaction_manager = TransactionManager(workspace=frame.workspace)
+        if self.transaction_manager is None:
+            self.transaction_manager = TransactionManager(workspace=frame.workspace)
         logger.info(
             "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",
             frame.frame_id,
@@ -1117,6 +1162,19 @@ class AutonomousEpistemicEngine:
         if self.tiered_workspace is not None:
             self.tiered_workspace.notify_commit()
 
+        if self.event_bus is not None:
+            self.event_bus.publish(
+                KernelEvent(
+                    event_type="epistemic.transaction_committed",
+                    source="AutonomousEpistemicEngine",
+                    data={
+                        "tx_id": committed_tx.tx_id,
+                        "op_count": len(ops),
+                        "world_id": self.world_id,
+                    },
+                )
+            )
+
         # Clear transient pending buffer
         self.pending_transactions.clear()
         return committed_tx
@@ -1175,6 +1233,45 @@ class AutonomousEpistemicEngine:
             )
             self.phase_history.append((old, new_phase, reason))
             self._phase = new_phase
+            if self.event_bus is not None:
+                self.event_bus.publish(
+                    KernelEvent(
+                        event_type="epistemic.phase_transition",
+                        source="AutonomousEpistemicEngine",
+                        data={
+                            "old_phase": str(old),
+                            "new_phase": str(new_phase),
+                            "reason": reason,
+                            "world_id": self.world_id,
+                        },
+                    )
+                )
+            if self.transaction_manager is not None:
+                try:
+                    phase_node = EventNode(
+                        id=f"phase_{self.world_id}",
+                        event_kind="epistemic.phase_transition",
+                        event_data={
+                            "phase": str(new_phase),
+                            "previous_phase": str(old),
+                            "reason": reason,
+                            "timestep": self.step_counter,
+                        },
+                    )
+                    self.transaction_manager.commit(
+                        HCIRTransaction(
+                            author="AutonomousEpistemicEngine",
+                            operations=[
+                                TransactionOperation(
+                                    op=TransactionOp.UPSERT_NODE,
+                                    node_id=phase_node.id,
+                                    node_data=phase_node.model_dump(),
+                                )
+                            ],
+                        )
+                    )
+                except Exception as e:
+                    logger.debug("Phase transition transaction notice: %s", e)
 
     def shift_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Alias for transition_to_phase."""
@@ -1272,6 +1369,15 @@ class AutonomousEpistemicEngine:
             return True
         return action in self.action_deltas
 
+    def has_displacement_capabilities(self, available_actions: Sequence[Any] | None = None) -> bool:
+        """Returns True if the environment/agent possesses physical displacement actions."""
+        actions = (
+            available_actions
+            if available_actions is not None
+            else list(self.action_affordances.keys())
+        )
+        return any(self.is_displacement_action(a) for a in actions)
+
     @property
     def action_deltas(self) -> dict[Any, tuple[int, int]]:
         """Canonical mapping of action_id -> (delta_r, delta_c) displacement vector.
@@ -1346,7 +1452,13 @@ class AutonomousEpistemicEngine:
 
     def is_action_calibrated(self, action: Any) -> bool:
         """Returns True if empirical dynamics for this action have been observed."""
-        return action in self.action_dynamics
+        if self.is_spatial_effector(action):
+            aff = self.action_affordances.get(action)
+            return aff is not None and aff.requires_spatial_target
+        dyn = self.action_dynamics.get(action)
+        if dyn is None:
+            return False
+        return dyn.probes_tested > 0 or dyn.confidence >= 0.9
 
     def is_focus_switch_action(self, action: Any) -> bool:
         """Returns True if this action switches active control/focus between entities."""
@@ -1617,12 +1729,30 @@ class AutonomousEpistemicEngine:
         return PerceptionFrame(shape=(H, W))
 
     def estimate_background(self, grid: np.ndarray) -> int:
-        return PerceptionEngine.estimate_background(
+        bg = PerceptionEngine.estimate_background(
             grid,
             barrier_features=self.symbolic_theory.barrier_features,
             avatar_features=self.avatar_features,
             bg_feature=self.bg_feature,
         )
+        if self.bg_feature is None or self.bg_feature != bg:
+            old_bg = self.bg_feature
+            self.bg_feature = bg
+            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
+                if (
+                    old_bg is None
+                    and bg != 0
+                    and 0 not in getattr(self, "verified_safe_features", set())
+                ):
+                    self.symbolic_theory.walkable_features.discard(0)
+                elif (
+                    old_bg is not None
+                    and old_bg != bg
+                    and old_bg not in getattr(self, "verified_safe_features", set())
+                ):
+                    self.symbolic_theory.walkable_features.discard(old_bg)
+                self.symbolic_theory.induce_walkable(bg)
+        return bg
 
     def extract_entities(self, grid: np.ndarray, bg: int) -> list[SpatialEntity]:
         return PerceptionEngine.extract_entities(
@@ -1666,6 +1796,7 @@ class AutonomousEpistemicEngine:
         action: int | None = None,
         action_data: dict[str, Any] | None = None,
     ) -> None:
+        curr_grid = self.normalize_sensory_input(curr_grid)
         if action is None:
             action = self.last_action
         if action_data is None:
@@ -1812,6 +1943,78 @@ class AutonomousEpistemicEngine:
             target_role=target_role,
             blocked_cells=blocked_cells,
         )
+
+    def evaluate_candidate_action_ensemble(
+        self,
+        action: Any,
+        curr_grid: np.ndarray | None = None,
+        horizon_ms: int = 60000,
+    ) -> tuple[Any, bool]:
+        """Evaluate candidate action through WorldKernel PredictiveRealityModel ensemble.
+
+        Returns:
+            tuple[EnsemblePrediction | None, bool]: The ensemble prediction (or None if
+            predictive reality is unavailable) and a boolean indicating whether high
+            inter-predictor disagreement was detected.
+
+        If high disagreement is detected among physics, SNN, statistical, and neural
+        predictors, the anterior cingulate / deliberation cortex is notified via KernelEvent.
+        """
+        if self.world_kernel is None or not hasattr(self.world_kernel, "predictive_reality"):
+            return None, False
+
+        from hbllm.hcir.world.world_context import WorldModelScope
+        from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
+
+        variables: dict[str, Any] = {}
+        if curr_grid is not None:
+            variables["grid"] = curr_grid
+        elif hasattr(self, "last_observed_grid") and self.last_observed_grid is not None:
+            variables["grid"] = self.last_observed_grid
+
+        if hasattr(self.world_kernel, "digital_twin") and hasattr(
+            self.world_kernel.digital_twin, "get_variables"
+        ):
+            variables.update(self.world_kernel.digital_twin.get_variables())
+
+        snapshot = WorldStateSnapshot(
+            world_id=self.world_id,
+            timestamp=float(self.step_counter),
+            variables=variables,
+            entity_states={},
+        )
+
+        action_intent = str(action.name if hasattr(action, "name") else action)
+        scope = WorldModelScope(world_id=self.world_id)
+
+        pred = self.world_kernel.predictive_reality.predict(
+            snapshot=snapshot,
+            action_intent=action_intent,
+            horizon_ms=horizon_ms,
+            scope=scope,
+        )
+
+        disagreement = (
+            self.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement(
+                pred.component_predictions
+            )
+        )
+
+        if disagreement.high_disagreement and self.event_bus is not None:
+            self.event_bus.publish(
+                KernelEvent(
+                    event_type="epistemic.ensemble_disagreement",
+                    source="AutonomousEpistemicEngine",
+                    data={
+                        "action_intent": action_intent,
+                        "disagreement_index": disagreement.disagreement_index,
+                        "conflicting_predictors": disagreement.conflicting_predictors,
+                        "world_id": self.world_id,
+                    },
+                )
+            )
+
+        return pred, disagreement.high_disagreement
 
     def plan_epistemic_probe(
         self,
