@@ -275,6 +275,42 @@ impl UniversalEngine {
             action_deltas,
         ))
     }
+
+    /// High-performance Kuramoto phase synchronization loop.
+    pub fn kuramoto_phase_step_simd(
+        &self,
+        phases: Vec<f32>,
+        omegas: Vec<f32>,
+        proximity_matrix: Vec<Vec<f32>>,
+        coupling_k: f32,
+        dt: f32,
+    ) -> PyResult<Vec<f32>> {
+        Ok(kuramoto_phase_step_simd(
+            phases,
+            omegas,
+            proximity_matrix,
+            coupling_k,
+            dt,
+        ))
+    }
+
+    /// Continuous attractor multi-scale grid cell path integration step.
+    pub fn grid_cell_path_integrate_simd(
+        &self,
+        phases_x: Vec<f32>,
+        phases_y: Vec<f32>,
+        wavelengths: Vec<f32>,
+        delta_r: f32,
+        delta_c: f32,
+    ) -> PyResult<(Vec<f32>, Vec<f32>)> {
+        Ok(grid_cell_path_integrate_simd(
+            phases_x,
+            phases_y,
+            wavelengths,
+            delta_r,
+            delta_c,
+        ))
+    }
 }
 
 // ─── SIMD Implementations ────────────────────────────────────────────────────
@@ -1229,6 +1265,69 @@ pub fn bitboard_simulate_rollout(
     )
 }
 
+/// High-performance Kuramoto phase synchronization loop.
+#[pyfunction]
+pub fn kuramoto_phase_step_simd(
+    phases: Vec<f32>,
+    omegas: Vec<f32>,
+    proximity_matrix: Vec<Vec<f32>>,
+    coupling_k: f32,
+    dt: f32,
+) -> Vec<f32> {
+    let n = phases.len();
+    if n <= 1 {
+        return phases;
+    }
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let denom = (n - 1) as f32;
+    let k_scaled = coupling_k / denom.max(1.0);
+
+    let mut new_phases = vec![0.0f32; n];
+    for (i, &phi_i) in phases.iter().enumerate().take(n) {
+        let mut coupling_sum = 0.0f32;
+        let row_prox = proximity_matrix.get(i);
+
+        for (j, &phi_j) in phases.iter().enumerate().take(n) {
+            if i != j {
+                let weight = row_prox.and_then(|r| r.get(j)).copied().unwrap_or(1.0);
+                coupling_sum += weight * (phi_j - phi_i).sin();
+            }
+        }
+        let omega_i = omegas.get(i).copied().unwrap_or(0.0);
+        let d_phi = omega_i + k_scaled * coupling_sum;
+        let p = (phi_i + d_phi * dt) % two_pi;
+        new_phases[i] = if p < 0.0 { p + two_pi } else { p };
+    }
+    new_phases
+}
+
+/// Continuous attractor multi-scale grid cell path integration step.
+#[pyfunction]
+pub fn grid_cell_path_integrate_simd(
+    phases_x: Vec<f32>,
+    phases_y: Vec<f32>,
+    wavelengths: Vec<f32>,
+    delta_r: f32,
+    delta_c: f32,
+) -> (Vec<f32>, Vec<f32>) {
+    let n = phases_x.len();
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let mut out_x = vec![0.0f32; n];
+    let mut out_y = vec![0.0f32; n];
+
+    for i in 0..n {
+        let wl = wavelengths.get(i).copied().unwrap_or(3.0).max(0.01);
+        let k = two_pi / wl;
+
+        let px = (phases_x[i] + k * delta_c) % two_pi;
+        out_x[i] = if px < 0.0 { px + two_pi } else { px };
+
+        let py = (phases_y[i] + k * delta_r) % two_pi;
+        out_y[i] = if py < 0.0 { py + two_pi } else { py };
+    }
+    (out_x, out_y)
+}
+
 #[pymodule]
 fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<UniversalEngine>()?;
@@ -1237,6 +1336,8 @@ fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(causal_attribution_simd, m)?)?;
     m.add_function(wrap_pyfunction!(fast_astar_search, m)?)?;
     m.add_function(wrap_pyfunction!(bitboard_simulate_rollout, m)?)?;
+    m.add_function(wrap_pyfunction!(kuramoto_phase_step_simd, m)?)?;
+    m.add_function(wrap_pyfunction!(grid_cell_path_integrate_simd, m)?)?;
     Ok(())
 }
 
@@ -1430,5 +1531,26 @@ mod tests {
         assert!(reached);
         assert_eq!(steps, 3);
         assert_eq!(final_pos, (1, 1));
+    }
+
+    #[test]
+    fn test_kuramoto_phase_step_simd() {
+        let phases = vec![0.0f32, 0.5f32];
+        let omegas = vec![1.0f32, 1.0f32];
+        let prox = vec![vec![1.0f32, 1.0f32], vec![1.0f32, 1.0f32]];
+        let updated = kuramoto_phase_step_simd(phases, omegas, prox, 1.0, 0.1);
+        assert_eq!(updated.len(), 2);
+        assert!(updated[0] >= 0.0 && updated[0] < 2.0 * std::f32::consts::PI);
+    }
+
+    #[test]
+    fn test_grid_cell_path_integrate_simd() {
+        let px = vec![0.0f32];
+        let py = vec![0.0f32];
+        let wl = vec![4.0f32];
+        // Move delta_c = 1.0 -> phase shift 2*pi/4 = pi/2 = ~1.5707963
+        let (out_x, out_y) = grid_cell_path_integrate_simd(px, py, wl, 0.0, 1.0);
+        assert!((out_x[0] - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+        assert!((out_y[0] - 0.0).abs() < 1e-4);
     }
 }

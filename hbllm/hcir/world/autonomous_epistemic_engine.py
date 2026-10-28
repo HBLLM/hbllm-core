@@ -233,13 +233,27 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
+from hbllm.hcir.world.entorhinal_grid_cortex import (
+    EntorhinalGridCortex,
+)
 from hbllm.hcir.world.global_neuronal_workspace import (
     GlobalNeuronalWorkspace,
     IgnitionEvent,
 )
+from hbllm.hcir.world.metacognitive_agency_cortex import (
+    MetacognitiveAgencyCortex,
+    MetacognitiveAssessment,
+)
 from hbllm.hcir.world.neuromodulatory_system import (
     NeuromodulatorLevels,
     NeuromodulatorySystem,
+)
+from hbllm.hcir.world.predictive_coding_cortex import (
+    HierarchicalPredictiveCodingCortex,
+    PredictiveCodingSnapshot,
+)
+from hbllm.hcir.world.skill_program_synthesizer import (
+    SkillProgramSynthesizer,
 )
 from hbllm.hcir.world.superposition_planner import (
     SuperpositionEvaluationResult,
@@ -436,6 +450,20 @@ class AutonomousEpistemicEngine:
 
         # Track 4: Superposition Counterfactual Tree Search Planner
         self.superposition_planner: SuperpositionPlanner = SuperpositionPlanner()
+
+        # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
+        self.predictive_coding_cortex: HierarchicalPredictiveCodingCortex = (
+            HierarchicalPredictiveCodingCortex()
+        )
+
+        # Faculty: Entorhinal Grid Cells & Hippocampal Path Integration (Moser & O'Keefe)
+        self.entorhinal_grid_cortex: EntorhinalGridCortex = EntorhinalGridCortex()
+
+        # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
+        self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
+
+        # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
+        self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer()
 
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
         self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
@@ -1286,6 +1314,55 @@ class AutonomousEpistemicEngine:
             candidate_actions=candidate_actions,
             simulator_fn=simulator_fn,
         )
+
+    def step_predictive_coding(
+        self,
+        sensory_inputs: dict[str, float] | None = None,
+        abstract_priors: dict[str, float] | None = None,
+    ) -> PredictiveCodingSnapshot:
+        """Execute a bidirectional predictive coding cycle across cortical column layers."""
+        return self.predictive_coding_cortex.step_hierarchical_cycle(
+            sensory_inputs=sensory_inputs,
+            abstract_priors=abstract_priors,
+        )
+
+    def path_integrate_odometry(
+        self,
+        delta_r: float,
+        delta_c: float,
+    ) -> tuple[int, int]:
+        """Perform continuous attractor odometric path integration across multi-scale grid cells."""
+        return self.entorhinal_grid_cortex.path_integrate_step(delta_r, delta_c)
+
+    def assess_metacognitive_agency(
+        self,
+        action_id: Any,
+        raw_confidence: float,
+        predicted_avatar_pos: tuple[int, int] | None,
+        observed_avatar_pos: tuple[int, int] | None,
+        observed_other_changes_count: int = 0,
+        empirical_success: bool | None = None,
+    ) -> MetacognitiveAssessment:
+        """Evaluate sense of agency and calibrate confidence to govern simulation depth."""
+        agency = self.metacognitive_agency_cortex.compute_agency_attribution(
+            predicted_avatar_pos=predicted_avatar_pos,
+            observed_avatar_pos=observed_avatar_pos,
+            observed_other_changes_count=observed_other_changes_count,
+        )
+        return self.metacognitive_agency_cortex.calibrate_confidence_and_govern_compute(
+            action_id=action_id,
+            raw_confidence=raw_confidence,
+            agency_score=agency,
+            empirical_success=empirical_success,
+        )
+
+    def synthesize_procedural_skills_from_traces(
+        self,
+        min_support: int = 2,
+    ) -> list[Any]:
+        """Induce reusable declarative skills from recurring winning episode traces."""
+        self.skill_synthesizer.min_support_traces = min_support
+        return self.skill_synthesizer.induce_all_recurrent_skills()
 
     def evaluate_truth_value(
         self,

@@ -56,6 +56,7 @@ class SpatialActionIntent(StrEnum):
     """Semantic action intents for spatial planning subgoals."""
 
     NAVIGATE = "NAVIGATE"
+    NAVIGATE_TO = "NAVIGATE"
     INTERACT = "INTERACT"
     ACTUATE = "ACTIVATE"
     PICKUP = "PICKUP"
