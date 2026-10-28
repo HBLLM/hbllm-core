@@ -361,3 +361,87 @@ class HCIRDelta(BaseModel):
                 )
             )
         return ops
+
+
+def generate_compensating_operations(
+    operations: list[TransactionOperation],
+    workspace_before_image: Any | None = None,
+) -> list[TransactionOperation]:
+    """Generate exact inverse compensating operations to undo a transaction.
+
+    Used by the Constitutional 2-phase commit pipeline to guarantee atomic rollback
+    upon downstream verification failure or execution exceptions.
+    """
+    inverse: list[TransactionOperation] = []
+    for op in reversed(operations):
+        if op.op in (TransactionOp.ADD_NODE, TransactionOp.INSERT_NODE):
+            if op.node_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.REMOVE_NODE,
+                        node_id=op.node_id,
+                    )
+                )
+        elif op.op == TransactionOp.REMOVE_NODE:
+            if op.node_data and op.node_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_NODE,
+                        node_id=op.node_id,
+                        node_data=op.node_data,
+                    )
+                )
+        elif op.op == TransactionOp.MODIFY_NODE:
+            if op.node_id and op.node_data:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=op.node_id,
+                        node_data=op.node_data,
+                    )
+                )
+        elif op.op == TransactionOp.UPSERT_NODE:
+            if op.node_id:
+                if workspace_before_image and hasattr(workspace_before_image, "get_node"):
+                    prev = workspace_before_image.get_node(op.node_id)
+                    if prev:
+                        prev_dict = prev.model_dump() if hasattr(prev, "model_dump") else dict(prev)
+                        inverse.append(
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_NODE,
+                                node_id=op.node_id,
+                                node_data=prev_dict,
+                            )
+                        )
+                    else:
+                        inverse.append(
+                            TransactionOperation(
+                                op=TransactionOp.REMOVE_NODE,
+                                node_id=op.node_id,
+                            )
+                        )
+                else:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.REMOVE_NODE,
+                            node_id=op.node_id,
+                        )
+                    )
+        elif op.op == TransactionOp.ADD_EDGE:
+            if op.edge_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.REMOVE_EDGE,
+                        edge_id=op.edge_id,
+                    )
+                )
+        elif op.op == TransactionOp.REMOVE_EDGE:
+            if op.edge_data and op.edge_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE,
+                        edge_id=op.edge_id,
+                        edge_data=op.edge_data,
+                    )
+                )
+    return inverse

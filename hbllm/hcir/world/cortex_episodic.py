@@ -292,6 +292,28 @@ class HippocampalEpisodicCortex:
         # Value: ProceduralMacro containing proven action sequence + context.
         self.consolidated_macros: dict[str, ProceduralMacro] = {}
         self.relational_macros: dict[str, Any] = {}
+        self.replay_consolidator: HippocampalReplayConsolidator = HippocampalReplayConsolidator(
+            gamma=self.discount_factor
+        )
+
+    def consolidate_sleep_replay(self, terminal_reward: float = 1.0) -> dict[str, Any]:
+        """Perform Hippocampal Sharp-Wave Ripple (SWR) replay and cross-episode schema distillation."""
+        curr_traj = list(self.current_episode)
+        replay_res = self.replay_consolidator.replay_forward_and_reverse(
+            curr_traj, terminal_reward=terminal_reward
+        )
+        sources = list(self.successful_trajectories)
+        if terminal_reward > 0 and curr_traj:
+            sources.append(curr_traj)
+        distilled = self.replay_consolidator.distill_semantic_schemas(sources)
+        tx_ops = self.replay_consolidator.propose_consolidation_transactions(distilled)
+        return {
+            "replay": replay_res,
+            "distilled_schemas": len(distilled),
+            "transaction_operations": len(tx_ops),
+            "schemas": distilled,
+            "operations": tx_ops,
+        }
 
     def record_transition(
         self,
@@ -1360,4 +1382,232 @@ class DualStoreConsolidationEngine:
         ]
         for item in self.consolidated_store.values():
             ops.extend(item.to_transaction_operations())
+        return ops
+
+
+@dataclass
+class DistilledSchema:
+    """A formal declarative schema distilled across episodic replay traces.
+
+    Represents an invariant procedural or relational action motif verified across
+    multiple successful trajectories or high-confidence counterfactual rollouts.
+    """
+
+    schema_id: str
+    action_motif: list[Any]
+    causal_predicate: CausalPredicate
+    declarative_skill: Any = None
+    confidence: float = 1.0
+    support_count: int = 1
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export distilled schema as a formal causal predicate."""
+        return self.causal_predicate
+
+    def to_transaction_operations(self, tenant_id: str = "default") -> list[TransactionOperation]:
+        """Convert distilled schema into transactional HCIR graph state mutations targeting semantic tier."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"distilled_schema_{self.schema_id}",
+                node_data={
+                    "schema_id": self.schema_id,
+                    "action_motif": [
+                        int(a) if isinstance(a, (int, np.integer)) else str(a)
+                        for a in self.action_motif
+                    ],
+                    "confidence": float(self.confidence),
+                    "support_count": int(self.support_count),
+                    "tenant_id": tenant_id,
+                    "predicate": {
+                        "variable": self.causal_predicate.variable,
+                        "operator": self.causal_predicate.operator,
+                        "value": str(self.causal_predicate.value),
+                        "relation": str(self.causal_predicate.relation),
+                    },
+                    "metadata": self.metadata,
+                },
+            )
+        ]
+
+
+class HippocampalReplayConsolidator:
+    """Hippocampal Sharp-Wave Ripple (SWR) Consolidation & Sleep Replay Engine.
+
+    Biologically modeled on mammalian sleep consolidation and sharp-wave ripple
+    (SWR) reactivation between the hippocampus (CA3/CA1) and neocortex:
+    1. Forward Replay: Reactivates winning trajectory sequences to reinforce
+       affordance causal chains and state transition paths.
+    2. Reverse SWR Replay: Replays negative/catastrophic or high-reward trajectories
+       in reverse (T -> 0) with temporal credit assignment:
+         Delta Q(s_t, a_t) = R_terminal * gamma^(T - t) * kappa
+       to assign credit or blame to earlier pivotal actions.
+    3. Cross-Episode Schema Distillation:
+       Extracts common high-support action motifs and invariant state changes across
+       episodes into formal CausalPredicates and DeclarativeNeuroSymbolicSkills.
+    4. Transactional Promotion:
+       Compiles distilled schemas into atomic TransactionOperations targeting
+       WorkspaceTier.BRAIN / semantic memory tier via the TransactionManager.
+    """
+
+    def __init__(
+        self,
+        gamma: float = 0.95,
+        kappa: float = 0.5,
+        min_motif_support: int = 1,
+    ) -> None:
+        self.gamma = gamma
+        self.kappa = kappa
+        self.min_motif_support = min_motif_support
+        self.distilled_schemas: dict[str, DistilledSchema] = {}
+        self.replay_history: list[dict[str, Any]] = []
+
+    def replay_forward_and_reverse(
+        self,
+        trajectory: list[EpisodicTransition],
+        terminal_reward: float,
+    ) -> dict[str, Any]:
+        """Perform bidirectional replay with temporal credit assignment.
+
+        Forward replay reinforces positive causal trajectories.
+        Reverse SWR replay assigns credit/blame from terminal outcome backwards:
+            Delta Q(s_t, a_t) = terminal_reward * (gamma ** (T - 1 - t)) * kappa
+        """
+        if not trajectory:
+            return {
+                "forward_steps": 0,
+                "reverse_steps": 0,
+                "max_delta_q": 0.0,
+                "credit_assignments": [],
+            }
+
+        T = len(trajectory)
+        credit_assignments: list[float] = []
+
+        # 1. Reverse SWR replay: T - 1 down to 0
+        for step_idx in reversed(range(T)):
+            t = step_idx
+            trans = trajectory[t]
+            delta_q = float(terminal_reward * (self.gamma ** (T - 1 - t)) * self.kappa)
+            if hasattr(trans, "value_estimate"):
+                trans.value_estimate += delta_q
+            else:
+                setattr(trans, "value_estimate", delta_q)
+            credit_assignments.append(delta_q)
+
+        # 2. Forward replay: 0 up to T - 1
+        forward_steps = 0
+        for t in range(T):
+            trans = trajectory[t]
+            if hasattr(trans, "replay_count"):
+                trans.replay_count += 1
+            else:
+                setattr(trans, "replay_count", 1)
+            forward_steps += 1
+
+        record = {
+            "trajectory_length": T,
+            "terminal_reward": float(terminal_reward),
+            "forward_steps": forward_steps,
+            "reverse_steps": len(credit_assignments),
+            "max_delta_q": float(max(abs(q) for q in credit_assignments))
+            if credit_assignments
+            else 0.0,
+            "credit_assignments": credit_assignments,
+        }
+        self.replay_history.append(record)
+        return record
+
+    def distill_semantic_schemas(
+        self,
+        trajectories: list[list[EpisodicTransition]],
+    ) -> list[DistilledSchema]:
+        """Distill common action motifs across multiple trajectories into formal declarative schemas."""
+        from hbllm.hcir.skills.declarative import (
+            ActionAffordancePredicate,
+            DeclarativeNeuroSymbolicSkill,
+            SubgoalSequence,
+            SymbolicSubgoal,
+        )
+        from hbllm.hcir.spatial_planner import SpatialActionIntent
+
+        if not trajectories:
+            return []
+
+        # Extract action sequences from each trajectory
+        action_seqs: list[list[Any]] = []
+        for traj in trajectories:
+            seq = [t.action_id for t in traj if t.action_id is not None]
+            if seq:
+                action_seqs.append(seq)
+
+        if not action_seqs:
+            return []
+
+        # Find motifs of length 2 to 5 appearing across trajectories
+        motif_support: dict[tuple[Any, ...], int] = {}
+        for seq in action_seqs:
+            seen_in_seq: set[tuple[Any, ...]] = set()
+            max_len = min(5, len(seq))
+            for length in range(2, max_len + 1):
+                for i in range(len(seq) - length + 1):
+                    motif = tuple(seq[i : i + length])
+                    seen_in_seq.add(motif)
+            for m in seen_in_seq:
+                motif_support[m] = motif_support.get(m, 0) + 1
+
+        # If no multi-step motifs met threshold, consider full single sequence if available
+        new_schemas: list[DistilledSchema] = []
+        for motif, support in motif_support.items():
+            if support >= self.min_motif_support:
+                motif_id = f"motif_{abs(hash(motif)) % 1000000:06d}"
+                req_actions = {a for a in motif if isinstance(a, int)}
+                subgoals = [
+                    SymbolicSubgoal(
+                        intent=SpatialActionIntent.NAVIGATE,
+                        target_query={"action": act},
+                    )
+                    for act in motif
+                ]
+                skill = DeclarativeNeuroSymbolicSkill()
+                skill.skill_name = f"distilled_skill_{motif_id}"
+                skill.description = (
+                    f"Distilled neuro-symbolic skill {motif_id} "
+                    f"({len(motif)} actions, support={support})"
+                )
+                skill.signature = ActionAffordancePredicate(required=req_actions)
+                skill.program = SubgoalSequence(*subgoals)
+
+                pred = CausalPredicate(
+                    variable=f"distilled_schema:{motif_id}",
+                    operator="==",
+                    value=f"actions:{len(motif)}:support:{support}",
+                    relation="swr_sleep_replay",
+                    target_entity=motif_id,
+                )
+
+                schema = DistilledSchema(
+                    schema_id=motif_id,
+                    action_motif=list(motif),
+                    causal_predicate=pred,
+                    declarative_skill=skill,
+                    confidence=min(1.0, 0.5 + 0.1 * support),
+                    support_count=support,
+                    metadata={"motif_len": len(motif)},
+                )
+                self.distilled_schemas[motif_id] = schema
+                new_schemas.append(schema)
+
+        return new_schemas
+
+    def propose_consolidation_transactions(
+        self,
+        schemas: list[DistilledSchema],
+        tenant_id: str = "default",
+    ) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions committing distilled schemas to semantic memory."""
+        ops: list[TransactionOperation] = []
+        for schema in schemas:
+            ops.extend(schema.to_transaction_operations(tenant_id=tenant_id))
         return ops

@@ -181,6 +181,25 @@ class FrontopolarSubgoalStack:
             len(self.stack),
         )
 
+    def schedule_bottleneck_relief_subgoal(
+        self,
+        bottleneck_cell: tuple[int, int],
+        approach_cell: tuple[int, int],
+        priority: float = 1.5,
+    ) -> FrontopolarSubgoal:
+        """Schedule high-priority corridor bottleneck navigation subgoal (BA10 cognitive branching)."""
+        sg_id = f"bottleneck_relief_{bottleneck_cell[0]}_{bottleneck_cell[1]}"
+        subgoal = FrontopolarSubgoal(
+            subgoal_id=sg_id,
+            subgoal_type=SubgoalType.TRANSIT_CORRIDOR,
+            target_entity_pos=approach_cell,
+            target_destination=bottleneck_cell,
+            priority=priority,
+            metadata={"bottleneck_cell": bottleneck_cell, "approach_cell": approach_cell},
+        )
+        self.push_subgoal(subgoal)
+        return subgoal
+
     def pop_subgoal(self) -> FrontopolarSubgoal | None:
         """Pop and complete the current active subgoal, resuming the underlying suspended plan."""
         if not self.stack:

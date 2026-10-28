@@ -230,8 +230,90 @@ impl PyNativeGraph {
     }
 }
 
+/// Canonical BLAKE3 hashing of arbitrary byte buffers (grids, AST chunks, state diffs).
+#[pyfunction]
+pub fn blake3_hash(data: &[u8]) -> String {
+    let hash = blake3::hash(data);
+    hash.to_hex().to_string()
+}
+
+/// Fast BFS connected components labeling for 2D spatial lattices.
+#[pyfunction]
+pub fn topological_connected_components(
+    height: usize,
+    width: usize,
+    barriers: Vec<(usize, usize)>,
+) -> Vec<Vec<(usize, usize)>> {
+    if height == 0 || width == 0 {
+        return Vec::new();
+    }
+
+    let mut is_barrier = vec![false; height * width];
+    for (r, c) in barriers {
+        if r < height && c < width {
+            is_barrier[r * width + c] = true;
+        }
+    }
+
+    let mut visited = vec![false; height * width];
+    let mut components = Vec::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    for r in 0..height {
+        for c in 0..width {
+            let idx = r * width + c;
+            if is_barrier[idx] || visited[idx] {
+                continue;
+            }
+
+            let mut comp = Vec::new();
+            visited[idx] = true;
+            queue.push_back((r, c));
+
+            while let Some((curr_r, curr_c)) = queue.pop_front() {
+                comp.push((curr_r, curr_c));
+
+                if curr_r > 0 {
+                    let nidx = (curr_r - 1) * width + curr_c;
+                    if !is_barrier[nidx] && !visited[nidx] {
+                        visited[nidx] = true;
+                        queue.push_back((curr_r - 1, curr_c));
+                    }
+                }
+                if curr_r + 1 < height {
+                    let nidx = (curr_r + 1) * width + curr_c;
+                    if !is_barrier[nidx] && !visited[nidx] {
+                        visited[nidx] = true;
+                        queue.push_back((curr_r + 1, curr_c));
+                    }
+                }
+                if curr_c > 0 {
+                    let nidx = curr_r * width + (curr_c - 1);
+                    if !is_barrier[nidx] && !visited[nidx] {
+                        visited[nidx] = true;
+                        queue.push_back((curr_r, curr_c - 1));
+                    }
+                }
+                if curr_c + 1 < width {
+                    let nidx = curr_r * width + (curr_c + 1);
+                    if !is_barrier[nidx] && !visited[nidx] {
+                        visited[nidx] = true;
+                        queue.push_back((curr_r, curr_c + 1));
+                    }
+                }
+            }
+
+            components.push(comp);
+        }
+    }
+
+    components
+}
+
 #[pymodule]
 fn hbllm_hcir_graph(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyNativeGraph>()?;
+    m.add_function(wrap_pyfunction!(blake3_hash, m)?)?;
+    m.add_function(wrap_pyfunction!(topological_connected_components, m)?)?;
     Ok(())
 }

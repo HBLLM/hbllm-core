@@ -39,7 +39,10 @@ from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
-from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+from hbllm.hcir.world.active_inference import (
+    ActiveInferenceEngine,
+    HierarchicalActiveInferenceEngine,
+)
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
@@ -250,6 +253,7 @@ class AutonomousEpistemicEngine:
         enable_logging: bool = True,
         instructions: Sequence[str] | str | None = None,
         services: KernelServices | None = None,
+        world_id: str = "default",
     ) -> None:
         self.exploration_budget = exploration_budget
         self.enable_logging = enable_logging
@@ -257,7 +261,7 @@ class AutonomousEpistemicEngine:
         # Cognitive state
         self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
         self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
-        self.world_id: str = "default"
+        self.world_id: str = world_id
         self.step_counter: int = 0
         self.environmental_step_limit: int | None = None
 
@@ -372,6 +376,15 @@ class AutonomousEpistemicEngine:
             w_future_val=0.15,
             w_risk=0.10,
             w_cost=0.10,
+        )
+        self.hierarchical_active_inference: HierarchicalActiveInferenceEngine = (
+            HierarchicalActiveInferenceEngine(
+                sensory_precision=1.0,
+                dynamic_precision=1.0,
+                lambda_epistemic=0.4,
+                lambda_extrinsic=0.6,
+                lambda_risk=0.5,
+            )
         )
         self.prediction_budget: PredictionBudget = PredictionBudget()
         self.pending_transactions: list[TransactionOperation] = []
@@ -1659,6 +1672,33 @@ class AutonomousEpistemicEngine:
                 else self.exploration_budget
             )
             self.budget_governor.reset(max_budget=eff_budget)
+
+    def consolidate_episodic_memory(self, terminal_reward: float = 1.0) -> dict[str, Any]:
+        """Consolidate accumulated experiences via Hippocampal SWR replay & schema distillation.
+
+        Biologically invokes sharp-wave ripple forward and reverse replay over the
+        active episodic buffer, distills invariant schemas into declarative skills,
+        registers resulting causal predicates in symbolic world theory, and commits
+        mutations through TransactionManager if available.
+        """
+        res = self.episodic_cortex.consolidate_sleep_replay(terminal_reward=terminal_reward)
+        schemas = res.get("schemas", [])
+        for schema in schemas:
+            self.symbolic_theory.register_predicate(schema.causal_predicate)
+            if hasattr(self, "procedural_macros"):
+                self.procedural_macros[schema.schema_id] = schema.action_motif
+
+        # Propose state mutations through TransactionManager if present
+        if self.transaction_manager is not None and res.get("operations"):
+            from hbllm.hcir.transactions import HCIRTransaction
+
+            tx = HCIRTransaction(
+                author="HippocampalReplayConsolidator",
+                operations=res["operations"],
+            )
+            self.transaction_manager.commit(tx)
+
+        return res
 
     def set_environmental_step_limit(self, limit: int) -> None:
         """Set strict environmental step countdown or step limit."""

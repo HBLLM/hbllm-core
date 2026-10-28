@@ -270,3 +270,7 @@ class ConstitutionalVerifier:
                         )
                         return False
         return True
+
+
+# Backward and architectural compatibility alias
+ConstitutionalTransactionVerifier = ConstitutionalVerifier

@@ -26,7 +26,10 @@ from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
 from hbllm.hcir.kernel.executive_controller import CognitiveCycleResult, KernelExecutiveController
 from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
 from hbllm.hcir.kernel.executor import KernelExecutor
-from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+from hbllm.hcir.kernel.governance.constitutional_verifier import (
+    ConstitutionalTransactionVerifier,
+    ConstitutionalVerifier,
+)
 from hbllm.hcir.kernel.identity_bridge import IdentityBridge
 from hbllm.hcir.kernel.runtime_state import RuntimeState
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler, ScheduledTask
@@ -68,6 +71,7 @@ __all__ = [
     "CognitiveCycleResult",
     "CognitiveKernel",
     "CognitiveScoreCalculator",
+    "ConstitutionalTransactionVerifier",
     "ConstitutionalVerifier",
     "ExecutiveRuntime",
     "ICapabilityExecutor",

@@ -295,6 +295,61 @@ class TransactionManager:
         )
         return transaction
 
+    def commit_with_verification(
+        self,
+        transaction: HCIRTransaction,
+        verifiers: list[IVerificationStage] | None = None,
+        context: Any = None,
+    ) -> tuple[bool, HCIRTransaction, HCIRTransaction | None]:
+        """Two-phase constitutional commit with automated compensating rollback on failure.
+
+        Phase 1 (Prepare & Verify):
+            Evaluates transaction against all verification stages (constitutional,
+            multi-tenant scope, safety invariants, and budget). If any check fails,
+            the transaction is marked REJECTED and no state is mutated.
+
+        Phase 2 (Atomic Commit & Compensating Rollback):
+            Attempts atomic state mutation. If an exception occurs, automatically
+            rolls back any partial effects using inverse operations and commits a
+            compensating transaction to preserve graph consistency.
+
+        Returns:
+            (is_successful, committed_or_rejected_tx, compensating_tx_if_any)
+        """
+        all_stages = list(self._verification_stages)
+        if verifiers:
+            all_stages.extend(verifiers)
+
+        # Phase 1: Prepare & Verify
+        for stage in all_stages:
+            if not stage.verify(transaction, self._workspace):
+                transaction.status = TransactionStatus.REJECTED
+                self._rejected_log.append(transaction)
+                self._workspace.snapshot_manager.record_kernel_event(
+                    EventType.TRANSACTION_REJECTED,
+                    {"tx_id": transaction.id, "author": transaction.author},
+                )
+                logger.info(
+                    "Transaction %s rejected by %s in 2PC", transaction.id, type(stage).__name__
+                )
+                return False, transaction, None
+
+        # Phase 2: Atomic Commit with automated compensation on failure
+        try:
+            res = self.commit(transaction, context=context)
+            if res.is_committed:
+                return True, res, None
+            else:
+                return False, res, None
+        except Exception as exc:
+            logger.error(
+                "Phase 2 commit failed for tx %s: %s; initiating compensating rollback",
+                transaction.id,
+                exc,
+            )
+            comp_tx = self.compensate(transaction.id, reason=f"phase_2_failure: {exc}")
+            return False, transaction, comp_tx
+
     def commit_delta(self, delta: HCIRDelta, author: str) -> HCIRTransaction:
         """Wrap an HCIRDelta in a transaction and commit it.
 

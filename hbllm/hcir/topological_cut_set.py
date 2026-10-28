@@ -14,6 +14,11 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 
+try:
+    import hbllm_hcir_graph as _rust_graph  # type: ignore[import-not-found]
+except ImportError:
+    _rust_graph = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +37,42 @@ class CutSetResult:
     all_gates: list[tuple[tuple[int, int], tuple[int, int]]] = field(default_factory=list)
 
 
+@dataclass
+class BettiInvariants:
+    """Persistent homology invariants for 2D spatial manifolds."""
+
+    betti_0: int  # Number of connected components
+    betti_1: int  # 1D cycle rank (number of independent loops/tunnels)
+    euler_characteristic: int  # V - E
+    cavities: list[set[tuple[int, int]]] = field(
+        default_factory=list
+    )  # Dead-end cavities/cul-de-sacs
+    bottlenecks: set[tuple[int, int]] = field(
+        default_factory=set
+    )  # Articulation points / narrow corridors
+
+
+@dataclass
+class MinCutMaxFlowResult:
+    """Result of max-flow min-cut network analysis on spatial partition."""
+
+    max_flow: float
+    min_cut_capacity: float
+    cut_edges: list[tuple[tuple[int, int], tuple[int, int]]]
+    source_partition: set[tuple[int, int]]
+    sink_partition: set[tuple[int, int]]
+    critical_cut_cells: set[tuple[int, int]]
+
+
+@dataclass
+class ManifoldTopologyResult:
+    """Integrated spatial topology and homology analysis."""
+
+    cut_set_result: CutSetResult
+    betti_invariants: BettiInvariants
+    min_cut_result: MinCutMaxFlowResult | None
+
+
 class TopologicalCutSetAnalyzer:
     """Performs graph cut-set analysis on spatial grids to find partition bottlenecks."""
 
@@ -47,6 +88,19 @@ class TopologicalCutSetAnalyzer:
         sr, sc = int(round(start[0])), int(round(start[1]))
         if (sr, sc) in barrier_cells or not (0 <= sr < H and 0 <= sc < W):
             return set()
+
+        if step_size == 1 and _rust_graph is not None:
+            try:
+                rust_comps = _rust_graph.topological_connected_components(
+                    H, W, [(int(r), int(c)) for r, c in barrier_cells if 0 <= r < H and 0 <= c < W]
+                )
+                for comp in rust_comps:
+                    comp_set = {(int(r), int(c)) for r, c in comp}
+                    if (sr, sc) in comp_set:
+                        return comp_set
+                return set()
+            except Exception:
+                pass
 
         visited = {(sr, sc)}
         queue: deque[tuple[int, int]] = deque([(sr, sc)])
@@ -192,4 +246,266 @@ class TopologicalCutSetAnalyzer:
             best_gate_cell=best_gate,
             approach_cell=approach,
             all_gates=all_gates,
+        )
+
+    @staticmethod
+    def compute_betti_invariants(
+        grid_shape: tuple[int, int],
+        traversable_cells: set[tuple[int, int]],
+    ) -> BettiInvariants:
+        """Compute 0-th and 1-st Betti numbers and detect cavities/bottlenecks in traversable space."""
+        V = len(traversable_cells)
+        if V == 0:
+            return BettiInvariants(
+                betti_0=0,
+                betti_1=0,
+                euler_characteristic=0,
+                cavities=[],
+                bottlenecks=set(),
+            )
+
+        # Build adjacency graph
+        adj: dict[tuple[int, int], list[tuple[int, int]]] = {cell: [] for cell in traversable_cells}
+        edge_count = 0
+        deltas = [(0, 1), (1, 0)]  # Count each undirected edge once
+        for r, c in traversable_cells:
+            for dr, dc in deltas:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in traversable_cells:
+                    adj[(r, c)].append((nr, nc))
+                    adj[(nr, nc)].append((r, c))
+                    edge_count += 1
+
+        # 1. Connected components (b_0)
+        visited: set[tuple[int, int]] = set()
+        components: list[set[tuple[int, int]]] = []
+        for cell in traversable_cells:
+            if cell not in visited:
+                comp: set[tuple[int, int]] = set()
+                queue: deque[tuple[int, int]] = deque([cell])
+                visited.add(cell)
+                while queue:
+                    curr = queue.popleft()
+                    comp.add(curr)
+                    for nbr in adj[curr]:
+                        if nbr not in visited:
+                            visited.add(nbr)
+                            queue.append(nbr)
+                components.append(comp)
+
+        b_0 = len(components)
+        chi = V - edge_count
+        b_1 = max(0, edge_count - V + b_0)
+
+        # 2. Articulation points / Bottlenecks (cells whose removal increases b_0)
+        bottlenecks: set[tuple[int, int]] = set()
+        tin: dict[tuple[int, int], int] = {}
+        low: dict[tuple[int, int], int] = {}
+        timer = 0
+
+        def dfs_articulation(u: tuple[int, int], p: tuple[int, int] | None = None) -> None:
+            nonlocal timer
+            timer += 1
+            tin[u] = low[u] = timer
+            children = 0
+            for v in adj[u]:
+                if v == p:
+                    continue
+                if v in tin:
+                    low[u] = min(low[u], tin[v])
+                else:
+                    dfs_articulation(v, u)
+                    low[u] = min(low[u], low[v])
+                    if low[v] >= tin[u] and p is not None:
+                        bottlenecks.add(u)
+                    children += 1
+            if p is None and children > 1:
+                bottlenecks.add(u)
+
+        for comp in components:
+            if comp:
+                root = next(iter(comp))
+                dfs_articulation(root)
+
+        # 3. Cavities (dead-end pockets / cul-de-sacs with degree <= 1)
+        cavities: list[set[tuple[int, int]]] = []
+        dead_ends = [cell for cell, nbrs in adj.items() if len(nbrs) <= 1]
+        for de in dead_ends:
+            cavity: set[tuple[int, int]] = set()
+            curr = de
+            prev: tuple[int, int] | None = None
+            while curr not in bottlenecks and len(adj[curr]) <= 2:
+                cavity.add(curr)
+                next_cells = [n for n in adj[curr] if n != prev]
+                if not next_cells:
+                    break
+                prev = curr
+                curr = next_cells[0]
+            if cavity and cavity not in cavities:
+                cavities.append(cavity)
+
+        return BettiInvariants(
+            betti_0=b_0,
+            betti_1=b_1,
+            euler_characteristic=chi,
+            cavities=cavities,
+            bottlenecks=bottlenecks,
+        )
+
+    @staticmethod
+    def compute_min_cut_max_flow(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]],
+        traversable_cells: set[tuple[int, int]] | None = None,
+    ) -> MinCutMaxFlowResult:
+        """Compute the s-t min-cut and bottleneck barrier partition via Edmonds-Karp."""
+        H, W = grid_shape
+        trav = (
+            traversable_cells
+            if traversable_cells is not None
+            else {(r, c) for r in range(H) for c in range(W) if (r, c) not in barrier_cells}
+        )
+
+        all_nodes: set[tuple[int, int]] = set(trav) | set(barrier_cells)
+        if start not in all_nodes or goal not in all_nodes:
+            return MinCutMaxFlowResult(
+                max_flow=0.0,
+                min_cut_capacity=0.0,
+                cut_edges=[],
+                source_partition={start},
+                sink_partition=all_nodes - {start},
+                critical_cut_cells=set(),
+            )
+
+        # Build capacity graph
+        INF_CAP = 1000.0
+        capacities: dict[tuple[int, int], dict[tuple[int, int], float]] = {u: {} for u in all_nodes}
+        deltas = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+        for r, c in all_nodes:
+            is_barrier_u = (r, c) in barrier_cells
+            for dr, dc in deltas:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in all_nodes:
+                    is_barrier_v = (nr, nc) in barrier_cells
+                    cap = 1.0 if (is_barrier_u or is_barrier_v) else INF_CAP
+                    capacities[(r, c)][(nr, nc)] = cap
+
+        # Residual network copy
+        residual: dict[tuple[int, int], dict[tuple[int, int], float]] = {
+            u: dict(nbrs) for u, nbrs in capacities.items()
+        }
+        for u in all_nodes:
+            for v in capacities[u]:
+                if u not in residual[v]:
+                    residual[v][u] = 0.0
+
+        # Edmonds-Karp BFS augmenting path
+        max_flow = 0.0
+        while True:
+            parent: dict[tuple[int, int], tuple[int, int]] = {}
+            queue: deque[tuple[int, int]] = deque([start])
+            while queue and goal not in parent:
+                curr = queue.popleft()
+                for nxt, res_cap in residual[curr].items():
+                    if res_cap > 1e-6 and nxt not in parent and nxt != start:
+                        parent[nxt] = curr
+                        queue.append(nxt)
+
+            if goal not in parent:
+                break
+
+            # Find bottleneck along path
+            path_flow = float("inf")
+            curr = goal
+            while curr != start:
+                p = parent[curr]
+                path_flow = min(path_flow, residual[p][curr])
+                curr = p
+
+            # Augment flow
+            curr = goal
+            while curr != start:
+                p = parent[curr]
+                residual[p][curr] -= path_flow
+                residual[curr][p] += path_flow
+                curr = p
+
+            max_flow += path_flow
+            if max_flow > 10000.0:  # Direct path without barriers
+                break
+
+        # Compute S (reachable from start in residual) and T (sink partition)
+        source_partition: set[tuple[int, int]] = set()
+        queue_reach = deque([start])
+        source_partition.add(start)
+        while queue_reach:
+            curr = queue_reach.popleft()
+            for nxt, res_cap in residual[curr].items():
+                if res_cap > 1e-6 and nxt not in source_partition:
+                    source_partition.add(nxt)
+                    queue_reach.append(nxt)
+
+        sink_partition = all_nodes - source_partition
+        cut_edges: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        min_cut_capacity = 0.0
+        critical_cut_cells: set[tuple[int, int]] = set()
+
+        for u in source_partition:
+            for v, orig_cap in capacities[u].items():
+                if v in sink_partition and orig_cap > 0:
+                    cut_edges.append((u, v))
+                    min_cut_capacity += orig_cap
+                    if u in barrier_cells:
+                        critical_cut_cells.add(u)
+                    if v in barrier_cells:
+                        critical_cut_cells.add(v)
+
+        return MinCutMaxFlowResult(
+            max_flow=max_flow,
+            min_cut_capacity=min_cut_capacity,
+            cut_edges=cut_edges,
+            source_partition=source_partition,
+            sink_partition=sink_partition,
+            critical_cut_cells=critical_cut_cells,
+        )
+
+    @staticmethod
+    def analyze_manifold_topology(
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        barrier_cells: set[tuple[int, int]],
+        grid_shape: tuple[int, int],
+        step_size: int = 1,
+        movable_barriers: set[tuple[int, int]] | None = None,
+        occupied_cells: set[tuple[int, int]] | None = None,
+    ) -> ManifoldTopologyResult:
+        """Perform comprehensive persistent homology and min-cut manifold analysis."""
+        cut_res = TopologicalCutSetAnalyzer.analyze_cut_set(
+            start=start,
+            goal=goal,
+            barrier_cells=barrier_cells,
+            grid_shape=grid_shape,
+            step_size=step_size,
+            movable_barriers=movable_barriers,
+            occupied_cells=occupied_cells,
+        )
+        H, W = grid_shape
+        trav = {(r, c) for r in range(H) for c in range(W) if (r, c) not in barrier_cells}
+        betti = TopologicalCutSetAnalyzer.compute_betti_invariants(grid_shape, trav)
+        min_cut = None
+        if cut_res.is_partitioned:
+            min_cut = TopologicalCutSetAnalyzer.compute_min_cut_max_flow(
+                start=start,
+                goal=goal,
+                grid_shape=grid_shape,
+                barrier_cells=barrier_cells,
+                traversable_cells=trav,
+            )
+        return ManifoldTopologyResult(
+            cut_set_result=cut_res,
+            betti_invariants=betti,
+            min_cut_result=min_cut,
         )

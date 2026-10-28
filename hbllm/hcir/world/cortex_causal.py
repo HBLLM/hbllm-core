@@ -376,6 +376,18 @@ class HCIRSymbolicWorldTheory:
         if predicate not in self.domain_predicates:
             self.domain_predicates.append(predicate)
 
+    def export_causal_predicates(self) -> list[CausalPredicate]:
+        """Export all registered, domain, goal, barrier, and walkable causal predicates."""
+        all_preds = list(self.domain_predicates)
+        all_preds.extend(self.goal_predicates)
+        all_preds.extend(self.barrier_predicates)
+        all_preds.extend(self.walkable_predicates)
+        all_preds.extend(self.cargo_predicates)
+        all_preds.extend(self.receptacle_predicates)
+        all_preds.extend(self.actuator_predicates)
+        all_preds.extend(self.spelke_axioms.values())
+        return all_preds
+
     def seed_core_knowledge(self, bg_feature: int = 0) -> None:
         """Seed domain-general Spelke core cognitive knowledge (Physics & Free Space axioms).
 
