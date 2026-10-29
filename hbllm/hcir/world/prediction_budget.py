@@ -63,16 +63,27 @@ class PredictionBudget:
         consecutive_failures: int = 0,
         is_under_strict_budget: bool = False,
         remaining_steps: int | None = None,
+        metacognitive_depth: int | None = None,
+        exploration_mode: str | None = None,
     ) -> int:
-        """Compute anytime A* / MCTS state expansion budget based on temporal hazard complexity
-        and acute cognitive step limits.
+        """Compute anytime A* / MCTS state expansion budget based on temporal hazard complexity,
+        metacognitive compute governance, and acute cognitive step limits.
         """
+        # If metacognitive governor recommends reflex mode, prioritize minimal compute
+        if exploration_mode == "reflex":
+            return 300
+
         # Under acute step urgency (<= 25 steps remaining), cap search expansions to 600
         # to ensure rapid anytime action emission without latency stalls.
         if is_under_strict_budget or (remaining_steps is not None and remaining_steps <= 25):
             return 600
 
         base = 1500
+        if exploration_mode == "deep_simulation":
+            base = int(base * 2.0)
+        elif metacognitive_depth is not None and metacognitive_depth > 10:
+            base = int(base * 1.5)
+
         if consecutive_failures > 0 and not has_temporal:
             return int(base * 0.8)
         if has_temporal or has_threats:

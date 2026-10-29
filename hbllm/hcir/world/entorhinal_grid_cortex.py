@@ -114,6 +114,8 @@ class EntorhinalGridCortex:
             k = 2.0 * math.pi / max(0.1, mod.wavelength)
             mod.phase_x = (k * true_coord[1]) % (2.0 * math.pi)
             mod.phase_y = (k * true_coord[0]) % (2.0 * math.pi)
+        self.place_field_history.clear()
+        self.generate_place_field_readout()
 
     def path_integrate_step(
         self,
@@ -177,6 +179,31 @@ class EntorhinalGridCortex:
         )
         self.place_field_history.append(place)
         return place
+
+    def get_current_place_field(self) -> PlaceFieldRepresentation:
+        """Return the most recent place field readout, or generate one if none exists."""
+        if self.place_field_history:
+            return self.place_field_history[-1]
+        return self.generate_place_field_readout()
+
+    def detect_loop_closure(
+        self, min_step_separation: int = 4, similarity_threshold: float = 0.95
+    ) -> bool:
+        """Detect whether current place cell population vector matches a prior visited state."""
+        if len(self.place_field_history) <= min_step_separation:
+            return False
+        current = self.place_field_history[-1].population_vector
+        # Compare against historical states excluding immediately preceding steps
+        candidates = self.place_field_history[:-min_step_separation]
+        for past in candidates:
+            dot = sum(a * b for a, b in zip(current, past.population_vector))
+            norm_a = math.sqrt(sum(a * a for a in current))
+            norm_b = math.sqrt(sum(b * b for b in past.population_vector))
+            if norm_a > 0 and norm_b > 0:
+                sim = dot / (norm_a * norm_b)
+                if sim >= similarity_threshold:
+                    return True
+        return False
 
     def to_causal_predicates(self) -> list[CausalPredicate]:
         """Export grid cell path integration state as declarative causal predicates."""

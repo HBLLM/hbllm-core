@@ -216,6 +216,9 @@ class PrefrontalWorkingMemory:
         self.exploration_cooldown: int = 0
         self.consecutive_stuck_steps: int = 0
 
+        self.last_metacognitive_assessment: Any | None = None
+        self.last_scene_graph: Any | None = None
+
         self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
         self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
         self.subgoal_stack: FrontopolarSubgoalStack = FrontopolarSubgoalStack()

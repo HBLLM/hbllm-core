@@ -1389,12 +1389,24 @@ class MentalSimulationPlanner:
             or has_periodic
             or bool(engine.collision_cones.projected_trajectories)
         )
+        meta_depth = getattr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
+        meta_mode = (
+            getattr(
+                engine.working_memory.last_metacognitive_assessment,
+                "recommended_exploration_mode",
+                None,
+            )
+            if getattr(engine.working_memory, "last_metacognitive_assessment", None)
+            else None
+        )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
             has_temporal=has_temporal,
             has_threats=bool(init_threats),
             consecutive_failures=engine.consecutive_simulation_failures,
             is_under_strict_budget=engine.is_under_strict_step_budget(),
             remaining_steps=engine.get_remaining_step_budget(),
+            metacognitive_depth=meta_depth,
+            exploration_mode=meta_mode,
         )
 
         non_disp_wait_action: Any | None = None

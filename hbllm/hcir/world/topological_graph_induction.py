@@ -315,6 +315,18 @@ class GeodesicManifoldRouter:
 
         passable_mask[start_pos[0], start_pos[1]] = True
 
+        # Homological cul-de-sac cavity pruning via Betti invariants (Area 7 / VIP)
+        traversable_cells = {(r, c) for r in range(H) for c in range(W) if passable_mask[r, c]}
+        if len(traversable_cells) > 4:
+            from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
+
+            betti = TopologicalCutSetAnalyzer.compute_betti_invariants((H, W), traversable_cells)
+            goal_set = set(goals)
+            for cavity in betti.cavities:
+                if start_pos not in cavity and not (cavity & goal_set):
+                    for cr, cc in cavity:
+                        passable_mask[cr, cc] = False
+
         sorted_goals = sorted(
             goals,
             key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
@@ -368,6 +380,18 @@ class GeodesicManifoldRouter:
             relation="action_transition_routing",
             target_entity="manifold_router",
         )
+
+    @staticmethod
+    def compute_manifold_homology(
+        grid_shape: tuple[int, int],
+        passable_mask: np.ndarray,
+    ) -> Any:
+        """Compute persistent Betti invariants over a traversable manifold mask."""
+        from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
+
+        H, W = grid_shape
+        traversable_cells = {(r, c) for r in range(H) for c in range(W) if passable_mask[r, c]}
+        return TopologicalCutSetAnalyzer.compute_betti_invariants((H, W), traversable_cells)
 
     @classmethod
     def to_transaction_operations(cls) -> list[TransactionOperation]:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -350,3 +351,68 @@ class RelationalGraphMatcher:
             )
 
         return correspondences
+
+    @classmethod
+    def detect_object_mutations(
+        cls,
+        graph_prev: ObjectGraph,
+        graph_curr: ObjectGraph,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Detect dynamic object transformations (displacement, appearance, disappearance, recoloring)."""
+        correspondences = cls.match_graphs(
+            graph_prev, graph_curr, ignore_color=True, ignore_scale=True
+        )
+        matched_prev_ids = {c.src_object_id for c in correspondences if c.match_score >= 0.5}
+        matched_curr_ids = {c.dst_object_id for c in correspondences if c.match_score >= 0.5}
+
+        moved: list[dict[str, Any]] = []
+        recolored: list[dict[str, Any]] = []
+
+        for c in correspondences:
+            if c.match_score < 0.5:
+                continue
+            prev_token = graph_prev.nodes.get(c.src_object_id)
+            curr_token = graph_curr.nodes.get(c.dst_object_id)
+            if prev_token is None or curr_token is None:
+                continue
+
+            dr = curr_token.centroid[0] - prev_token.centroid[0]
+            dc = curr_token.centroid[1] - prev_token.centroid[1]
+            if abs(dr) >= 0.5 or abs(dc) >= 0.5:
+                moved.append(
+                    {
+                        "object_id": c.src_object_id,
+                        "delta": (float(dr), float(dc)),
+                        "from_pos": prev_token.centroid,
+                        "to_pos": curr_token.centroid,
+                        "match_score": c.match_score,
+                    }
+                )
+
+            if prev_token.feature_id != curr_token.feature_id:
+                recolored.append(
+                    {
+                        "object_id": c.src_object_id,
+                        "old_feature": prev_token.feature_id,
+                        "new_feature": curr_token.feature_id,
+                        "match_score": c.match_score,
+                    }
+                )
+
+        disappeared = [
+            {"object_id": obj_id, "token": token}
+            for obj_id, token in graph_prev.nodes.items()
+            if obj_id not in matched_prev_ids
+        ]
+        appeared = [
+            {"object_id": obj_id, "token": token}
+            for obj_id, token in graph_curr.nodes.items()
+            if obj_id not in matched_curr_ids
+        ]
+
+        return {
+            "moved": moved,
+            "recolored": recolored,
+            "disappeared": disappeared,
+            "appeared": appeared,
+        }

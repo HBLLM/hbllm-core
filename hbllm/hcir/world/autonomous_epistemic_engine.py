@@ -255,12 +255,22 @@ from hbllm.hcir.world.predictive_coding_cortex import (
     HierarchicalPredictiveCodingCortex,
     PredictiveCodingSnapshot,
 )
+from hbllm.hcir.world.relational_graph_matcher import (
+    ObjectCorrespondence,
+)
+from hbllm.hcir.world.relational_graph_matcher import (
+    RelationalGraphMatcher as VentralRelationalGraphMatcher,
+)
 from hbllm.hcir.world.skill_program_synthesizer import (
     SkillProgramSynthesizer,
 )
 from hbllm.hcir.world.superposition_planner import (
     SuperpositionEvaluationResult,
     SuperpositionPlanner,
+)
+from hbllm.hcir.world.temporal_dependency_tracker import (
+    DelayedEffectModeler,
+    LongHorizonDependencyGraph,
 )
 from hbllm.hcir.world.thalamocortical_binding import (
     BoundFeatureBundle,
@@ -473,6 +483,11 @@ class AutonomousEpistemicEngine:
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
+        # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
+        self.ventral_relational_matcher: VentralRelationalGraphMatcher = (
+            VentralRelationalGraphMatcher()
+        )
+
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
 
@@ -524,6 +539,7 @@ class AutonomousEpistemicEngine:
 
         # Module 3: Temporal Dynamics, Dual-Store Memory & Objective Efficiency (W167, W172, W173, W176-W180, W189, W190)
         self.delayed_effects: DelayedEffectModeler = DelayedEffectModeler()
+        self.delayed_effect_modeler: DelayedEffectModeler = self.delayed_effects
         self.dependency_graph: LongHorizonDependencyGraph = LongHorizonDependencyGraph()
         self.dual_memory: DualStoreMemoryManager = DualStoreMemoryManager()
         self.change_detector: EnvironmentChangeDetector = EnvironmentChangeDetector()
@@ -2153,17 +2169,6 @@ class AutonomousEpistemicEngine:
             sensory_inputs=sensory_evidence, abstract_priors=abstract_priors
         )
 
-        # Biological Faculty: BA10 Metacognitive Agency Attribution & Simulation Calibration
-        if action is not None:
-            self.assess_metacognitive_agency(
-                action_id=action,
-                raw_confidence=0.85,
-                predicted_avatar_pos=self.last_predicted_pos,
-                observed_avatar_pos=self.avatar_pos,
-                observed_other_changes_count=max(0, int(diff_count) - 2),
-                empirical_success=(not is_lost),
-            )
-
         # Biological Faculty: Spiking Neural Network Kinematic Tracking & Limit Cycles
         if curr_grid.ndim == 2:
             self.snn_predictor.update_tracks_from_grid(curr_grid)
@@ -2187,6 +2192,63 @@ class AutonomousEpistemicEngine:
             prediction_accuracy=1.0 / (1.0 + pred_fe),
             risk_level=risk_level,
         )
+
+        # Biological Faculty: BA10 Metacognitive Agency Attribution & Simulation Calibration
+        if action is not None:
+            raw_confidence = max(0.1, min(0.95, (1.0 - min(1.0, surprise_val)) / (1.0 + pred_fe)))
+            meta_assess = self.assess_metacognitive_agency(
+                action_id=action,
+                raw_confidence=raw_confidence,
+                predicted_avatar_pos=self.last_predicted_pos,
+                observed_avatar_pos=self.avatar_pos,
+                observed_other_changes_count=max(0, int(diff_count) - 2),
+                empirical_success=(not is_lost),
+            )
+            self.working_memory.last_metacognitive_assessment = meta_assess
+            self.prediction_budget.counterfactual_budget.max_depth = (
+                meta_assess.recommended_simulation_depth
+            )
+
+        # Biological Faculty: Striatal & Prefrontal Delayed Contingency Modeling (W172, W173)
+        if action is not None and curr_grid.ndim == 2:
+            mutations_dict: dict[str, Any] = {}
+            if diff_count > 0:
+                mutations_dict["diff_count"] = diff_count
+            if self.avatar_pos != prev_av_pos:
+                mutations_dict["avatar_moved"] = True
+            if is_win:
+                mutations_dict["terminal_win"] = True
+            delayed_records = self.delayed_effect_modeler.record_step(
+                step=self.step_counter,
+                action_id=action,
+                state_features={"pos": self.avatar_pos},
+                observed_mutations=mutations_dict,
+            )
+            for d_rec in delayed_records:
+                if d_rec.observed_lag_steps > 0:
+                    self.symbolic_theory.record_causal_predicate(d_rec.to_causal_predicate())
+
+        # Biological Faculty: Ventral Stream Relational Scene Graph & Object Mutations (W038)
+        if curr_grid.ndim == 2:
+            current_scene_graph = self.ventral_relational_matcher.build_scene_graph(
+                curr_grid, bg_color=self.estimate_background(curr_grid)
+            )
+            if self.working_memory.last_scene_graph is not None:
+                mutations = self.ventral_relational_matcher.detect_object_mutations(
+                    self.working_memory.last_scene_graph, current_scene_graph
+                )
+                if mutations["moved"]:
+                    for m in mutations["moved"]:
+                        self.symbolic_theory.record_causal_predicate(
+                            CausalPredicate(
+                                variable=f"object_displacement:{m['object_id']}",
+                                operator="==",
+                                value=f"{m['delta'][0]:.1f}_{m['delta'][1]:.1f}",
+                                relation="relational_motion",
+                                target_entity=str(m["object_id"]),
+                            )
+                        )
+            self.working_memory.last_scene_graph = current_scene_graph
 
         # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
         if is_lost:
@@ -2491,6 +2553,21 @@ class AutonomousEpistemicEngine:
             is_terminal=True,
         )
         return self.subgoal_stack.decompose_causal_chain(master_sg, causal_prerequisites)
+
+    def transfer_structural_analogies(
+        self,
+        prototype_grid: np.ndarray,
+    ) -> list[ObjectCorrespondence]:
+        """Compute structural correspondences between a prototype scene and current grid."""
+        if self.prev_grid is None or prototype_grid.ndim != 2:
+            return []
+        proto_graph = self.ventral_relational_matcher.build_scene_graph(
+            prototype_grid, bg_color=self.estimate_background(prototype_grid)
+        )
+        curr_graph = self.ventral_relational_matcher.build_scene_graph(
+            self.prev_grid, bg_color=self.estimate_background(self.prev_grid)
+        )
+        return self.ventral_relational_matcher.match_graphs(proto_graph, curr_graph)
 
     def plan_epistemic_probe(
         self,
