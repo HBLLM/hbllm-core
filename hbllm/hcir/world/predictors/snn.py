@@ -55,16 +55,24 @@ class SNNTemporalPredictor:
         v_reset: float = 0.0,
         tau_m: float = 10.0,
         refractory_steps: int = 2,
+        tau_adaptation: float = 20.0,
+        adaptation_increment: float = 0.3,
+        homeostatic_rate: float = 0.05,
     ) -> None:
         self.v_rest = v_rest
         self.v_thresh = v_thresh
         self.v_reset = v_reset
         self.tau_m = tau_m
         self.refractory_steps = refractory_steps
+        self.tau_adaptation = tau_adaptation
+        self.adaptation_increment = adaptation_increment
+        self.homeostatic_rate = homeostatic_rate
 
         # Internal neuronal state
         self.membrane_potential: np.ndarray | None = None
         self.refractory_clock: np.ndarray | None = None
+        self.adaptation_threshold: np.ndarray | None = None
+        self.sensitivity_scale: float = 1.0
         self.entity_tracks: dict[int, DynamicEntityTrack] = {}
         self.last_grid_shape: tuple[int, int] = (0, 0)
         self.step_counter: int = 0
@@ -98,11 +106,13 @@ class SNNTemporalPredictor:
         """Reset neuronal membrane potentials and tracking state."""
         self.membrane_potential = None
         self.refractory_clock = None
+        self.adaptation_threshold = None
+        self.sensitivity_scale = 1.0
         self.entity_tracks.clear()
         self.step_counter = 0
 
     def step_lif(self, current_input: np.ndarray, dt: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
-        """Execute one integration step of Leaky Integrate-and-Fire (LIF) dynamics.
+        """Execute one integration step of Leaky Integrate-and-Fire (LIF) dynamics with Spike-Frequency Adaptation.
 
         Returns:
             tuple[np.ndarray, np.ndarray]: (binary_spike_map, membrane_potential_map)
@@ -111,16 +121,26 @@ class SNNTemporalPredictor:
         if self.membrane_potential is None or self.membrane_potential.shape != shape:
             self.membrane_potential = np.full(shape, self.v_rest, dtype=np.float32)
             self.refractory_clock = np.zeros(shape, dtype=np.int32)
+            self.adaptation_threshold = np.zeros(shape, dtype=np.float32)
 
         assert self.refractory_clock is not None
+        if self.adaptation_threshold is None or self.adaptation_threshold.shape != shape:
+            self.adaptation_threshold = np.zeros(shape, dtype=np.float32)
 
         decay = float(np.exp(-dt / self.tau_m))
+        decay_theta = float(np.exp(-dt / self.tau_adaptation))
 
-        # 1. Fast Rust SIMD acceleration path
+        # Biological SFA: Exponential decay of adaptation threshold
+        self.adaptation_threshold *= decay_theta
+        effective_thresh = self.v_thresh + self.adaptation_threshold
+
+        # 1. Fast Rust SIMD acceleration path (when available, no SFA increment, and baseline sensitivity)
         if (
             _HAS_RUST_COMPUTE
             and hbllm_compute is not None
             and hasattr(hbllm_compute, "snn_step_lif_simd")
+            and self.adaptation_increment == 0.0
+            and abs(self.sensitivity_scale - 1.0) < 1e-3
         ):
             try:
                 spikes, new_mem, new_ref = hbllm_compute.snn_step_lif_simd(
@@ -138,17 +158,31 @@ class SNNTemporalPredictor:
             except Exception as e:
                 logger.debug("Rust snn_step_lif_simd fallback to numpy: %s", e)
 
-        # 2. Pure NumPy fallback path
+        # 2. Pure NumPy path with biological SFA & homeostatic sensitivity scaling
         non_refractory = self.refractory_clock <= 0
+        scaled_input = current_input.astype(np.float32) * self.sensitivity_scale
+
         self.membrane_potential[non_refractory] = (
-            self.membrane_potential[non_refractory] * decay + current_input[non_refractory]
+            self.membrane_potential[non_refractory] * decay + scaled_input[non_refractory]
         )
 
-        spikes = (self.membrane_potential >= self.v_thresh) & non_refractory
+        spikes = (self.membrane_potential >= effective_thresh) & non_refractory
         self.membrane_potential[spikes] = self.v_reset
         self.refractory_clock[spikes] = self.refractory_steps
 
+        # SFA: Increase dynamic threshold upon spike
+        self.adaptation_threshold[spikes] += self.adaptation_increment
         self.refractory_clock = np.maximum(0, self.refractory_clock - 1)
+
+        # Homeostatic plasticity: adjust input sensitivity toward target firing rate
+        mean_spike_rate = float(np.mean(spikes))
+        self.sensitivity_scale = float(
+            np.clip(
+                self.sensitivity_scale + 0.01 * (self.homeostatic_rate - mean_spike_rate),
+                0.2,
+                3.0,
+            )
+        )
 
         return spikes.astype(np.int32), self.membrane_potential.copy()
 

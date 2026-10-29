@@ -64,6 +64,7 @@ from hbllm.hcir.world.causal_discovery import (
 )
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
+    CerebellarSmithPredictor,
     PhaseGateDecision,
 )
 from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
@@ -379,6 +380,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
         self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
+        self.smith_predictor: CerebellarSmithPredictor = CerebellarSmithPredictor()
         self.pending_phase_wait_steps: int = 0
         self.consecutive_pacing_steps: int = 0
 
@@ -1545,6 +1547,37 @@ class AutonomousEpistemicEngine:
         self.evidence_provenance_log.append(record)
         return record
 
+    def record_motor_efference_copy(
+        self, action: Any, expected_delta: tuple[int, int]
+    ) -> tuple[int, int]:
+        """Buffer efference copy into the Cerebellar Smith Predictor ahead of sensory afferents."""
+        cur = self.avatar_pos or (0, 0)
+        return self.smith_predictor.record_efference_copy(
+            step=self.step_counter,
+            action_id=action,
+            expected_delta=expected_delta,
+            current_pos=cur,
+        )
+
+    def get_forward_compensated_position(self) -> tuple[int, int] | None:
+        """Return zero-latency forward compensated position if efference copy is unconfirmed."""
+        if self.avatar_pos is None:
+            return None
+        return self.smith_predictor.get_forward_compensated_position(self.avatar_pos)
+
+    def recall_episodic_attractor_plan(
+        self, sensory_cue: np.ndarray, match_threshold: float = 0.35
+    ) -> tuple[list[Any] | None, float]:
+        """Recall winning procedural macro plan using Hippocampal DG separation and CA3 auto-association."""
+        return self.episodic_cortex.recall_attractor_plan(
+            sensory_cue, match_threshold=match_threshold
+        )
+
+    @property
+    def episodic_memory(self) -> HippocampalEpisodicCortex:
+        """Hippocampal episodic cortex managing experiences and attractor networks (alias)."""
+        return self.episodic_cortex
+
     @property
     def phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase."""
@@ -2257,6 +2290,13 @@ class AutonomousEpistemicEngine:
             delta_c = float(self.avatar_pos[1] - prev_av_pos[1])
             if delta_r != 0.0 or delta_c != 0.0:
                 self.path_integrate_odometry(delta_r, delta_c)
+
+        # Biological Faculty: Cerebellar Smith Predictor Sensory Afferent Assimilation
+        if self.avatar_pos is not None:
+            self.smith_predictor.assimilate_sensory_feedback(
+                step=self.step_counter,
+                observed_pos=self.avatar_pos,
+            )
 
         # Biological Faculty: Hierarchical Predictive Coding Error Minimization
         diff_count = (

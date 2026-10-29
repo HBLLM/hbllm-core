@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections import deque
 from collections.abc import Iterator
 from enum import StrEnum
 from typing import Any
@@ -1813,6 +1814,117 @@ class CognitiveGraph:
                     result.update(edge.sources)
         result.discard(node_id)
         return sorted(result)
+
+    def find_path(self, start_id: str, target_id: str, max_depth: int = 10) -> list[str]:
+        """Find the shortest directed path of node IDs from start_id to target_id."""
+        if self._native_adapter is not None:
+            res = self._native_adapter.find_path(start_id, target_id, max_depth)
+            if res:
+                return res
+        if start_id == target_id:
+            return [start_id] if start_id in self._nodes else []
+        if start_id not in self._nodes or target_id not in self._nodes:
+            return []
+
+        visited: set[str] = {start_id}
+        queue: deque[tuple[str, list[str]]] = deque([(start_id, [start_id])])
+
+        while queue:
+            curr, path = queue.popleft()
+            if len(path) > max_depth:
+                break
+            for edge in self.edges_from(curr):
+                for tgt in edge.targets:
+                    if tgt == target_id:
+                        return path + [tgt]
+                    if tgt not in visited and tgt in self._nodes:
+                        visited.add(tgt)
+                        queue.append((tgt, path + [tgt]))
+        return []
+
+    def reachable_nodes(self, start_id: str, max_depth: int = 10) -> set[str]:
+        """Compute the set of forward reachable node IDs from start_id within max_depth."""
+        if self._native_adapter is not None:
+            return self._native_adapter.reachable_nodes(start_id, max_depth)
+        if start_id not in self._nodes:
+            return set()
+
+        visited: set[str] = {start_id}
+        queue: deque[tuple[str, int]] = deque([(start_id, 0)])
+
+        while queue:
+            curr, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for edge in self.edges_from(curr):
+                for tgt in edge.targets:
+                    if tgt not in visited and tgt in self._nodes:
+                        visited.add(tgt)
+                        queue.append((tgt, depth + 1))
+        return visited
+
+    def connected_components(self) -> list[set[str]]:
+        """Decompose active graph into disjoint undirected connected components."""
+        if self._native_adapter is not None:
+            return self._native_adapter.connected_components()
+        all_ids = set(self._nodes.keys())
+        visited: set[str] = set()
+        components: list[set[str]] = []
+
+        for nid in all_ids:
+            if nid in visited:
+                continue
+            comp: set[str] = set()
+            q: deque[str] = deque([nid])
+            visited.add(nid)
+
+            while q:
+                curr = q.popleft()
+                comp.add(curr)
+                for edge in self.edges_from(curr):
+                    for tgt in edge.targets:
+                        if tgt in all_ids and tgt not in visited:
+                            visited.add(tgt)
+                            q.append(tgt)
+                for edge in self.edges_to(curr):
+                    for src in edge.sources:
+                        if src in all_ids and src not in visited:
+                            visited.add(src)
+                            q.append(src)
+            components.append(comp)
+
+        return components
+
+    def topological_sort(self) -> list[str]:
+        """Compute topological ordering of DAG nodes using Kahn's algorithm."""
+        if self._native_adapter is not None:
+            return self._native_adapter.topological_sort()
+        all_ids = set(self._nodes.keys())
+        if not all_ids:
+            return []
+
+        in_degree: dict[str, int] = {nid: 0 for nid in all_ids}
+        adj: dict[str, list[str]] = {nid: [] for nid in all_ids}
+
+        for nid in all_ids:
+            for edge in self.edges_from(nid):
+                for tgt in edge.targets:
+                    if tgt in all_ids:
+                        adj[nid].append(tgt)
+                        in_degree[tgt] += 1
+
+        queue: deque[str] = deque([nid for nid, deg in in_degree.items() if deg == 0])
+        order: list[str] = []
+
+        while queue:
+            curr = queue.popleft()
+            order.append(curr)
+            for neighbor in adj[curr]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        return order
 
     # ── Indexed Queries ──────────────────────────────────────────────
 

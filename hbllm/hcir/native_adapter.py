@@ -38,6 +38,8 @@ class NativeGraphAdapter:
     def __init__(self, native_instance: Any = None, py_state: dict[str, Any] | None = None) -> None:
         self._removed_nodes: set[str] = set()
         self._removed_edges: set[str] = set()
+        self._node_ids: set[str] = set()
+        self._edge_ids: set[str] = set()
         if native_instance is not None:
             self._native = native_instance
             self._py_nodes: dict[str, dict[str, Any]] = {}
@@ -60,6 +62,8 @@ class NativeGraphAdapter:
                 self._py_outgoing = copy.deepcopy(py_state.get("outgoing", {}))
                 self._py_incoming = copy.deepcopy(py_state.get("incoming", {}))
                 self._py_type_index = copy.deepcopy(py_state.get("type_index", {}))
+                self._node_ids = set(self._py_nodes.keys())
+                self._edge_ids = set(self._py_edges.keys())
             else:
                 self._py_nodes = {}
                 self._py_edges = {}
@@ -81,6 +85,7 @@ class NativeGraphAdapter:
         created_at: float = 0.0,
     ) -> None:
         self._removed_nodes.discard(node_id)
+        self._node_ids.add(node_id)
         type_str = node_type.value if hasattr(node_type, "value") else str(node_type)
         props = {k: str(v) for k, v in (properties or {}).items()}
         if self._native is not None:
@@ -109,6 +114,7 @@ class NativeGraphAdapter:
         created_at: float = 0.0,
     ) -> None:
         self._removed_edges.discard(edge_id)
+        self._edge_ids.add(edge_id)
         type_str = edge_type.value if hasattr(edge_type, "value") else str(edge_type)
         props = {k: str(v) for k, v in (properties or {}).items()}
         if self._native is not None:
@@ -143,6 +149,7 @@ class NativeGraphAdapter:
     def remove_node(self, node_id: str) -> None:
         """Remove a node and clean up connected index entries."""
         self._removed_nodes.add(node_id)
+        self._node_ids.discard(node_id)
         if self._native is not None and hasattr(self._native, "remove_node"):
             self._native.remove_node(node_id)
         if node_id in self._py_nodes:
@@ -158,6 +165,7 @@ class NativeGraphAdapter:
     def remove_edge(self, edge_id: str) -> None:
         """Remove an edge by ID."""
         self._removed_edges.add(edge_id)
+        self._edge_ids.discard(edge_id)
         if self._native is not None and hasattr(self._native, "remove_edge"):
             self._native.remove_edge(edge_id)
         if edge_id in self._py_edges:
@@ -253,6 +261,91 @@ class NativeGraphAdapter:
         """Find shortest directed path (alias for bfs_path)."""
         return self.bfs_path(start, end, max_depth)
 
+    def reachable_nodes(self, start_id: str, max_depth: int = 10) -> set[str]:
+        """Compute the forward reachability cone of node IDs from start_id within max_depth."""
+        if not self.has_node(start_id):
+            return set()
+        visited: set[str] = {start_id}
+        queue: deque[tuple[str, int]] = deque([(start_id, 0)])
+
+        while queue:
+            curr, depth = queue.popleft()
+            if depth >= max_depth:
+                continue
+            for edge in self.edges_from(curr):
+                for target in edge.get("targets", []):
+                    if target not in visited and self.has_node(target):
+                        visited.add(target)
+                        queue.append((target, depth + 1))
+        return visited
+
+    def connected_components(self) -> list[set[str]]:
+        """Decompose active graph into disjoint undirected connected components."""
+        all_node_ids = {
+            nid
+            for nid in (self._node_ids if self._native is not None else self._py_nodes)
+            if nid not in self._removed_nodes
+        }
+        visited: set[str] = set()
+        components: list[set[str]] = []
+
+        for node_id in all_node_ids:
+            if node_id in visited:
+                continue
+            comp: set[str] = set()
+            q: deque[str] = deque([node_id])
+            visited.add(node_id)
+
+            while q:
+                curr = q.popleft()
+                comp.add(curr)
+                for edge in self.edges_from(curr):
+                    for tgt in edge.get("targets", []):
+                        if tgt in all_node_ids and tgt not in visited:
+                            visited.add(tgt)
+                            q.append(tgt)
+                for edge in self.edges_to(curr):
+                    for src in edge.get("sources", []):
+                        if src in all_node_ids and src not in visited:
+                            visited.add(src)
+                            q.append(src)
+            components.append(comp)
+
+        return components
+
+    def topological_sort(self) -> list[str]:
+        """Compute topological ordering of DAG nodes using Kahn's algorithm."""
+        all_node_ids = {
+            nid
+            for nid in (self._node_ids if self._native is not None else self._py_nodes)
+            if nid not in self._removed_nodes
+        }
+        if not all_node_ids:
+            return []
+
+        in_degree: dict[str, int] = {nid: 0 for nid in all_node_ids}
+        adj: dict[str, list[str]] = {nid: [] for nid in all_node_ids}
+
+        for nid in all_node_ids:
+            for edge in self.edges_from(nid):
+                for tgt in edge.get("targets", []):
+                    if tgt in all_node_ids:
+                        adj[nid].append(tgt)
+                        in_degree[tgt] += 1
+
+        queue: deque[str] = deque([nid for nid, deg in in_degree.items() if deg == 0])
+        order: list[str] = []
+
+        while queue:
+            curr = queue.popleft()
+            order.append(curr)
+            for neighbor in adj[curr]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        return order
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -313,6 +406,8 @@ class NativeGraphAdapter:
             snap = NativeGraphAdapter(native_instance=self._native.snapshot())
             snap._removed_nodes = self._removed_nodes.copy()
             snap._removed_edges = self._removed_edges.copy()
+            snap._node_ids = self._node_ids.copy()
+            snap._edge_ids = self._edge_ids.copy()
             return snap
         snap = NativeGraphAdapter(
             py_state={
@@ -325,6 +420,8 @@ class NativeGraphAdapter:
         )
         snap._removed_nodes = self._removed_nodes.copy()
         snap._removed_edges = self._removed_edges.copy()
+        snap._node_ids = self._node_ids.copy()
+        snap._edge_ids = self._edge_ids.copy()
         return snap
 
     def canonical_hash(self) -> str:

@@ -15,8 +15,10 @@ from __future__ import annotations
 import collections
 import hashlib
 import logging
+import math
+import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -396,6 +398,118 @@ class CerebellarPhaseClock:
                     "period_confidence": self.period_confidence,
                     "last_reset_step": self.last_reset_step,
                     "reset_intervals": list(self.reset_intervals),
+                },
+            )
+        ]
+
+
+@dataclass
+class EfferenceCopyRecord:
+    """Dispatched motor action efference copy buffered in the cerebellar forward model."""
+
+    step: int
+    action_id: Any
+    expected_delta: tuple[int, int]
+    prior_pos: tuple[int, int]
+    predicted_pos: tuple[int, int]
+    timestamp: float = field(default_factory=time.time)
+
+
+class CerebellarSmithPredictor:
+    """Internal forward model (Smith Predictor) compensating sensory feedback latency."""
+
+    def __init__(self, latency_steps: int = 1) -> None:
+        self.latency_steps = latency_steps
+        self.efference_queue: deque[EfferenceCopyRecord] = deque(maxlen=32)
+        self.last_predicted_pos: tuple[int, int] | None = None
+        self.prediction_errors: deque[float] = deque(maxlen=64)
+
+    def reset_episode(self) -> None:
+        """Clear forward prediction buffer and error history."""
+        self.efference_queue.clear()
+        self.last_predicted_pos = None
+        self.prediction_errors.clear()
+
+    def record_efference_copy(
+        self,
+        step: int,
+        action_id: Any,
+        expected_delta: tuple[int, int],
+        current_pos: tuple[int, int],
+    ) -> tuple[int, int]:
+        """Buffer efference copy and predict immediate forward position ahead of sensory afferents."""
+        pred_pos = (
+            int(current_pos[0] + expected_delta[0]),
+            int(current_pos[1] + expected_delta[1]),
+        )
+        record = EfferenceCopyRecord(
+            step=step,
+            action_id=action_id,
+            expected_delta=expected_delta,
+            prior_pos=current_pos,
+            predicted_pos=pred_pos,
+        )
+        self.efference_queue.append(record)
+        self.last_predicted_pos = pred_pos
+        return pred_pos
+
+    def assimilate_sensory_feedback(
+        self,
+        step: int,
+        observed_pos: tuple[int, int],
+    ) -> float:
+        """Compare observed afferent position against buffered prediction to compute sensory prediction error."""
+        matched: EfferenceCopyRecord | None = None
+        for rec in reversed(self.efference_queue):
+            if rec.step == step or rec.step == step - 1:
+                matched = rec
+                break
+
+        if matched is not None:
+            err = math.hypot(
+                observed_pos[0] - matched.predicted_pos[0],
+                observed_pos[1] - matched.predicted_pos[1],
+            )
+        elif self.last_predicted_pos is not None:
+            err = math.hypot(
+                observed_pos[0] - self.last_predicted_pos[0],
+                observed_pos[1] - self.last_predicted_pos[1],
+            )
+        else:
+            err = 0.0
+
+        self.prediction_errors.append(err)
+        return float(err)
+
+    def get_forward_compensated_position(self, observed_pos: tuple[int, int]) -> tuple[int, int]:
+        """Return zero-latency forward compensated position if efference copy is unconfirmed."""
+        if self.last_predicted_pos is not None and len(self.efference_queue) > 0:
+            return self.last_predicted_pos
+        return observed_pos
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export forward model status as a declarative causal predicate."""
+        mean_err = float(np.mean(list(self.prediction_errors))) if self.prediction_errors else 0.0
+        return CausalPredicate(
+            variable="cerebellar_smith_predictor",
+            operator="==",
+            value=f"mean_err:{mean_err:.2f}",
+            relation=f"buffered:{len(self.efference_queue)}",
+            target_entity="cerebellum_forward_model",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transactions persisting forward model state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="cerebellar_smith_predictor",
+                node_data={
+                    "id": "cerebellar_smith_predictor",
+                    "node_type": "event",
+                    "category": "execution",
+                    "buffered_count": len(self.efference_queue),
+                    "last_predicted_pos": self.last_predicted_pos,
                 },
             )
         ]
