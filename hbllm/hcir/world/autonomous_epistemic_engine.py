@@ -98,6 +98,11 @@ from hbllm.hcir.world.habenula_striatum_opponency import (
     OpponencyValueState,
 )
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.hippocampal_replay import (
+    HippocampalPrioritizedReplayBuffer,
+    ReplayBatch,
+    ReplayTransition,
+)
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
 )
@@ -125,6 +130,10 @@ from hbllm.hcir.world.interactive_goal_evaluator import (
 from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
+)
+from hbllm.hcir.world.lateral_prefrontal_switcher import (
+    LateralPrefrontalTaskSwitcher,
+    TaskArbitrationResult,
 )
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
@@ -169,6 +178,10 @@ from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
 from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
+from hbllm.hcir.world.retrosplenial_landmark_anchor import (
+    LandmarkRecalibrationResult,
+    RetrosplenialLandmarkAnchorEngine,
+)
 from hbllm.hcir.world.rule_induction import (
     RuleInductionEngine,
 )
@@ -593,6 +606,19 @@ class AutonomousEpistemicEngine:
 
         # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
         self.blame_attributor: PrefrontalBlameAttributor = PrefrontalBlameAttributor()
+
+        # Round 10 Faculty: Hippocampal-Entorhinal Prioritized Experience Replay (Foster & Wilson / Schaul)
+        self.hippocampal_replay: HippocampalPrioritizedReplayBuffer = (
+            HippocampalPrioritizedReplayBuffer()
+        )
+
+        # Round 10 Faculty: Lateral Prefrontal Cortex (LPFC) Dual Task Switcher (Monsell / Koechlin)
+        self.task_switcher: LateralPrefrontalTaskSwitcher = LateralPrefrontalTaskSwitcher()
+
+        # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
+        self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine = (
+            RetrosplenialLandmarkAnchorEngine()
+        )
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2025,6 +2051,113 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.minimum_spanning_tree()
+
+    def record_replay_transition(
+        self,
+        state: dict[str, Any],
+        action: Any,
+        reward: float,
+        next_state: dict[str, Any],
+        done: bool,
+        td_error: float = 0.0,
+        surprise: float = 0.0,
+        metadata: dict[str, Any] | None = None,
+    ) -> ReplayTransition:
+        """Record an episodic transition into hippocampal prioritized replay memory."""
+        trans = self.hippocampal_replay.add(
+            state=state,
+            action=action,
+            reward=reward,
+            next_state=next_state,
+            done=done,
+            td_error=td_error,
+            surprise=surprise,
+            timestamp=float(self.step_counter),
+            metadata=metadata,
+        )
+        return trans
+
+    def sample_prioritized_replay(
+        self, batch_size: int = 16, beta: float | None = None
+    ) -> ReplayBatch:
+        """Sample prioritized transitions with importance-sampling bias weights."""
+        return self.hippocampal_replay.sample(batch_size=batch_size, beta=beta)
+
+    def arbitrate_cognitive_task_set(
+        self,
+        hazard_distance: float | None = None,
+        goal_distance: float | None = None,
+        manipulable_adjacent: bool = False,
+        collectible_adjacent: bool = False,
+        epistemic_uncertainty: float = 0.0,
+        cognitive_load: float = 0.0,
+    ) -> TaskArbitrationResult:
+        """Arbitrate active LPFC task set (NAVIGATE, INTERACT, AVOID, COLLECT, EXPLORE)."""
+        affinities = self.task_switcher.evaluate_affinities(
+            working_memory=self.working_memory,
+            hazard_distance=hazard_distance,
+            goal_distance=goal_distance,
+            manipulable_adjacent=manipulable_adjacent,
+            collectible_adjacent=collectible_adjacent,
+            epistemic_uncertainty=epistemic_uncertainty,
+        )
+        result = self.task_switcher.arbitrate(
+            affinities=affinities,
+            cognitive_load=cognitive_load,
+            timestamp=float(self.step_counter),
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(
+                CausalPredicate(
+                    variable="active_task_set",
+                    operator="==",
+                    value=result.active_task.value,
+                    relation="lpfc_task_arbitration",
+                    target_entity="avatar",
+                )
+            )
+        return result
+
+    def recalibrate_spatial_drift_with_landmarks(
+        self,
+        odometry_pos: tuple[int, int],
+        landmark_observations: list[tuple[str, tuple[int, int]]],
+    ) -> LandmarkRecalibrationResult:
+        """Recalibrate dead-reckoning position and entorhinal coordinates using visual landmarks."""
+        result = self.retrosplenial_anchor.recalibrate(
+            odometry_pos=odometry_pos,
+            landmark_observations=landmark_observations,
+        )
+        if result.has_drift_correction:
+            if self.avatar_pos == odometry_pos:
+                self.avatar_pos = result.corrected_position
+            if self.symbolic_theory is not None:
+                self.symbolic_theory.record_causal_predicate(
+                    CausalPredicate(
+                        variable="landmark_recalibration",
+                        operator="==",
+                        value=f"drift:({result.drift_vector[0]:.2f},{result.drift_vector[1]:.2f})",
+                        relation="rsc_landmark_anchor",
+                        target_entity="avatar",
+                    )
+                )
+        return result
+
+    def compute_all_pairs_geodesics(
+        self,
+        graph: CognitiveGraph | None = None,
+        weight_attribute: str = "weight",
+    ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], list[str]]]:
+        """Compute all-pairs shortest paths and distance matrix across cognitive graph."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.all_pairs_shortest_paths(weight_attribute=weight_attribute)
 
     @property
     def phase(self) -> EpistemicPhase:

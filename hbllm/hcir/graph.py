@@ -2043,6 +2043,105 @@ class CognitiveGraph:
 
         return mst_graph, total_weight
 
+    def all_pairs_shortest_paths(
+        self, weight_attribute: str = "weight"
+    ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], list[str]]]:
+        """Compute all-pairs shortest paths using Floyd-Warshall with path reconstruction.
+
+        Returns:
+            Tuple of (distances, paths), where distances maps (u, v) -> float (or inf),
+            and paths maps (u, v) -> list of node IDs along the shortest path.
+        """
+        all_node_ids = sorted(list(self._nodes.keys()))
+        dist: dict[tuple[str, str], float] = {}
+        next_hop: dict[tuple[str, str], str | None] = {}
+
+        for u in all_node_ids:
+            for v in all_node_ids:
+                if u == v:
+                    dist[(u, v)] = 0.0
+                    next_hop[(u, v)] = u
+                else:
+                    dist[(u, v)] = float("inf")
+                    next_hop[(u, v)] = None
+
+        for edge in self._edges.values():
+            w = max(0.0, float(getattr(edge, weight_attribute, getattr(edge, "weight", 1.0))))
+            sources = [s for s in edge.sources if s in all_node_ids]
+            targets = [t for t in edge.targets if t in all_node_ids]
+            for s in sources:
+                for t in targets:
+                    if w < dist[(s, t)]:
+                        dist[(s, t)] = w
+                        next_hop[(s, t)] = t
+
+        for k in all_node_ids:
+            for i in all_node_ids:
+                d_ik = dist[(i, k)]
+                if d_ik == float("inf"):
+                    continue
+                for j in all_node_ids:
+                    d_kj = dist[(k, j)]
+                    if d_kj == float("inf"):
+                        continue
+                    if d_ik + d_kj < dist[(i, j)]:
+                        dist[(i, j)] = d_ik + d_kj
+                        next_hop[(i, j)] = next_hop[(i, k)]
+
+        paths: dict[tuple[str, str], list[str]] = {}
+        for u in all_node_ids:
+            for v in all_node_ids:
+                if dist[(u, v)] == float("inf"):
+                    paths[(u, v)] = []
+                elif u == v:
+                    paths[(u, v)] = [u]
+                else:
+                    curr = u
+                    p = [curr]
+                    visited = {curr}
+                    valid = True
+                    while curr != v:
+                        nxt = next_hop.get((curr, v))
+                        if nxt is None or nxt in visited:
+                            valid = False
+                            break
+                        visited.add(nxt)
+                        p.append(nxt)
+                        curr = nxt
+                    paths[(u, v)] = p if valid else []
+
+        return dist, paths
+
+    def graph_diameter(self, weight_attribute: str = "weight") -> float:
+        """Compute the maximum finite shortest path distance between any two nodes."""
+        dist, _ = self.all_pairs_shortest_paths(weight_attribute=weight_attribute)
+        finite_dists = [d for (u, v), d in dist.items() if u != v and d < float("inf")]
+        return max(finite_dists) if finite_dists else 0.0
+
+    def closeness_centrality(self, node_id: str, weight_attribute: str = "weight") -> float:
+        """Compute normalized closeness centrality for a node."""
+        all_node_ids = list(self._nodes.keys())
+        n = len(all_node_ids)
+        if n <= 1 or node_id not in all_node_ids:
+            return 0.0
+
+        dist, _ = self.all_pairs_shortest_paths(weight_attribute=weight_attribute)
+        reachable_dists = [
+            dist[(node_id, v)]
+            for v in all_node_ids
+            if v != node_id and dist.get((node_id, v), float("inf")) < float("inf")
+        ]
+        k = len(reachable_dists)
+        if k == 0:
+            return 0.0
+        sum_dist = sum(reachable_dists)
+        if sum_dist <= 0.0:
+            return 1.0
+
+        raw_closeness = k / sum_dist
+        wasserman_faust_norm = (k / (n - 1)) * raw_closeness
+        return float(wasserman_faust_norm)
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:

@@ -42,6 +42,11 @@ from hbllm.hcir.world.habenula_striatum_opponency import (
     OpponencyRegime,
     OpponencyValueState,
 )
+from hbllm.hcir.world.hippocampal_replay import (
+    HippocampalPrioritizedReplayBuffer,
+    ReplayBatch,
+    ReplayTransition,
+)
 from hbllm.hcir.world.inferotemporal_shape_hasher import (
     InferotemporalShapeHasher,
     ShapeArchetypeSignature,
@@ -50,6 +55,12 @@ from hbllm.hcir.world.insula_allostasis import (
     AllostaticRegime,
     InteroceptiveAllostasisCortex,
     InteroceptiveState,
+)
+from hbllm.hcir.world.lateral_prefrontal_switcher import (
+    CognitiveTaskSet,
+    LateralPrefrontalTaskSwitcher,
+    TaskArbitrationResult,
+    TaskSwitchEvent,
 )
 from hbllm.hcir.world.object_state_graph import (
     ObjectCategory,
@@ -94,6 +105,11 @@ from hbllm.hcir.world.prefrontal_working_memory import (
     PrefrontalWorkingMemory,
     WorkingMemorySalienceState,
 )
+from hbllm.hcir.world.retrosplenial_landmark_anchor import (
+    AllocentricLandmark,
+    LandmarkRecalibrationResult,
+    RetrosplenialLandmarkAnchorEngine,
+)
 from hbllm.hcir.world.spatial_distance_transform import (
     EuclideanDistanceTransformResult,
     SpatialDistanceTransformEngine,
@@ -126,6 +142,7 @@ from hbllm.hcir.world.world_transaction import (
 )
 
 __all__ = [
+    "AllocentricLandmark",
     "AllostaticRegime",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
@@ -136,6 +153,7 @@ __all__ = [
     "CausalPredicate",
     "CausalVariable",
     "ClaustrumSalienceConductor",
+    "CognitiveTaskSet",
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
@@ -151,9 +169,12 @@ __all__ = [
     "FoveatedSaliencyMap",
     "FoveationResolution",
     "HCIRSymbolicWorldTheory",
+    "HippocampalPrioritizedReplayBuffer",
     "InferotemporalShapeHasher",
     "InteroceptiveAllostasisCortex",
     "InteroceptiveState",
+    "LandmarkRecalibrationResult",
+    "LateralPrefrontalTaskSwitcher",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
@@ -173,6 +194,9 @@ __all__ = [
     "PrefrontalWorkingMemory",
     "RecursiveSubgoalTree",
     "RelationalGraphMatcher",
+    "ReplayBatch",
+    "ReplayTransition",
+    "RetrosplenialLandmarkAnchorEngine",
     "ReversibilityEngine",
     "SalientObject",
     "ShapeArchetypeSignature",
@@ -187,6 +211,8 @@ __all__ = [
     "SubthalamicDriftDiffusionEngine",
     "SurpriseEngine",
     "SurpriseEvaluation",
+    "TaskArbitrationResult",
+    "TaskSwitchEvent",
     "TemporalStateBuffer",
     "UnifiedPerceptualGestalt",
     "VisuospatialWorkingMemory",
