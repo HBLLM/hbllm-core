@@ -10,7 +10,7 @@ import copy
 import hashlib
 import logging
 import struct
-from collections import deque
+from collections import defaultdict, deque
 from typing import Any
 
 from hbllm.hcir.graph import HCIREdgeType, HCIRNodeType
@@ -708,6 +708,109 @@ class NativeGraphAdapter:
 
         articulation_points, bridges = self.find_articulation_points_and_bridges()
         return len(articulation_points) == 0 and len(bridges) == 0
+
+    def max_flow_min_cut(
+        self,
+        source: str,
+        sink: str,
+        capacity_attribute: str = "capacity",
+    ) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
+        """Compute directed maximum flow and minimum s-t cut using Edmonds-Karp algorithm.
+
+        Returns:
+            Tuple of (max_flow_value, cut_edges, source_set, sink_set).
+        """
+        all_nodes = set(self.all_node_ids())
+        if source not in all_nodes or sink not in all_nodes or source == sink:
+            return 0.0, [], set(), set()
+
+        initial_capacities: dict[tuple[str, str], float] = defaultdict(float)
+        adj: dict[str, set[str]] = defaultdict(set)
+
+        collected_edges: list[dict[str, Any]] = []
+        seen_edge_ids: set[str] = set()
+        for nid in all_nodes:
+            for edge in self.edges_from(nid):
+                eid = edge.get("id", "")
+                if eid not in seen_edge_ids:
+                    seen_edge_ids.add(eid)
+                    collected_edges.append(edge)
+
+        for edge in collected_edges:
+            cap = max(0.0, float(edge.get(capacity_attribute, edge.get("weight", 1.0))))
+            sources = [s for s in edge.get("sources", []) if s in all_nodes]
+            targets = [t for t in edge.get("targets", []) if t in all_nodes]
+            for s in sources:
+                for t in targets:
+                    if s != t:
+                        initial_capacities[(s, t)] += cap
+                        adj[s].add(t)
+                        adj[t].add(s)
+
+        residual: dict[tuple[str, str], float] = defaultdict(float)
+        for (u, v), cap in initial_capacities.items():
+            residual[(u, v)] = cap
+
+        max_flow = 0.0
+
+        while True:
+            parent: dict[str, str | None] = {nid: None for nid in all_nodes}
+            visited: set[str] = {source}
+            queue: deque[str] = deque([source])
+
+            while queue:
+                curr = queue.popleft()
+                if curr == sink:
+                    break
+                for neighbor in sorted(list(adj[curr])):
+                    if neighbor not in visited and residual.get((curr, neighbor), 0.0) > 1e-9:
+                        visited.add(neighbor)
+                        parent[neighbor] = curr
+                        queue.append(neighbor)
+
+            if sink not in visited:
+                break
+
+            path: list[tuple[str, str]] = []
+            curr = sink
+            bottleneck = float("inf")
+            while curr != source:
+                p = parent[curr]
+                if p is None:
+                    break
+                path.append((p, curr))
+                bottleneck = min(bottleneck, residual.get((p, curr), 0.0))
+                curr = p
+
+            if bottleneck <= 0.0 or bottleneck == float("inf"):
+                break
+
+            for u, v in path:
+                residual[(u, v)] -= bottleneck
+                residual[(v, u)] += bottleneck
+
+            max_flow += bottleneck
+
+        reachable: set[str] = set()
+        queue = deque([source])
+        reachable.add(source)
+        while queue:
+            curr = queue.popleft()
+            for neighbor in sorted(list(adj[curr])):
+                if neighbor not in reachable and residual.get((curr, neighbor), 0.0) > 1e-9:
+                    reachable.add(neighbor)
+                    queue.append(neighbor)
+
+        source_set = reachable
+        sink_set = all_nodes - source_set
+
+        cut_edges: list[tuple[str, str]] = [
+            (u, v)
+            for (u, v), cap in initial_capacities.items()
+            if u in source_set and v in sink_set and cap > 0.0
+        ]
+
+        return float(max_flow), cut_edges, source_set, sink_set
 
     def extract_subgraph(
         self, seed: str, max_depth: int = 2

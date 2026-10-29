@@ -57,6 +57,10 @@ from hbllm.hcir.world.active_inference_efe import (
     ExpectedFreeEnergyScore,
 )
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
+from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
+    AnteriorCingulateEffortAllocator,
+    EffortAllocationDecision,
+)
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
     BilateralState,
@@ -66,6 +70,10 @@ from hbllm.hcir.world.causal_discovery import (
     BeliefTransitionEvent,
     CausalHypothesis,
     CausalPredicate,
+)
+from hbllm.hcir.world.cerebellar_microzone_adaptor import (
+    CerebellarMicrozoneAdaptor,
+    ClimbingFiberFeedback,
 )
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
@@ -216,6 +224,10 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     EnvironmentChangeDetector,
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
+)
+from hbllm.hcir.world.ventral_premotor_resonator import (
+    AffordanceResonancePattern,
+    VentralPremotorAffordanceResonator,
 )
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.world_state_snapshot import (
@@ -644,6 +656,17 @@ class AutonomousEpistemicEngine:
         self.superior_colliculus: SuperiorColliculusTargetArbiter = (
             SuperiorColliculusTargetArbiter()
         )
+
+        # Round 12 Faculty: Cerebellar Microzone Granule-Purkinje Forward Adaptation (Marr-Albus-Ito)
+        self.cerebellar_microzone: CerebellarMicrozoneAdaptor = CerebellarMicrozoneAdaptor()
+
+        # Round 12 Faculty: Ventral Premotor (F5 / Mirror Neuron) Affordance Resonator (Rizzolatti)
+        self.premotor_resonator: VentralPremotorAffordanceResonator = (
+            VentralPremotorAffordanceResonator()
+        )
+
+        # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
+        self.effort_allocator: AnteriorCingulateEffortAllocator = AnteriorCingulateEffortAllocator()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2259,6 +2282,90 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.is_biconnected()
+
+    def adapt_cerebellar_motor_outcome(
+        self,
+        action_id: Any,
+        state: dict[str, Any],
+        actual_displacement: tuple[float, float],
+        actual_latency_ms: float = 10.0,
+    ) -> ClimbingFiberFeedback:
+        """Adapt cerebellar microzone forward model Purkinje weights using climbing fiber feedback."""
+        feedback = self.cerebellar_microzone.adapt_from_feedback(
+            action_id=action_id,
+            current_state=state,
+            actual_displacement=actual_displacement,
+            actual_latency_ms=actual_latency_ms,
+            timestamp=float(self.step_counter),
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(feedback.to_causal_predicate())
+        return feedback
+
+    def observe_external_affordance_interaction(
+        self,
+        entity_id: str,
+        entity_role: str,
+        initial_pos: tuple[int, int],
+        final_pos: tuple[int, int],
+        target_id: str,
+        target_role: str,
+        state_mutation: dict[str, Any],
+    ) -> AffordanceResonancePattern | None:
+        """Process observed external interaction and deduce vicarious causal mechanics."""
+        pattern = self.premotor_resonator.observe_interaction(
+            entity_id=entity_id,
+            entity_role=entity_role,
+            initial_pos=initial_pos,
+            final_pos=final_pos,
+            target_entity_id=target_id,
+            target_role=target_role,
+            state_mutation=state_mutation,
+        )
+        if pattern is not None and self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(pattern.to_causal_predicate())
+        return pattern
+
+    def allocate_cognitive_deliberation_effort(
+        self,
+        action_values: dict[Any, float],
+        hazard_distance: float | None = None,
+        state_familiarity: float = 1.0,
+        energy_reserve: float = 100.0,
+    ) -> EffortAllocationDecision:
+        """Dynamically regulate forward search depth and simulation budgets using ACC EVC theory."""
+        profile = self.effort_allocator.compute_conflict_profile(
+            action_values=action_values,
+            hazard_distance=hazard_distance,
+            state_familiarity=state_familiarity,
+        )
+        decision = self.effort_allocator.allocate_effort(
+            profile=profile,
+            energy_reserve=energy_reserve,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        return decision
+
+    def compute_network_max_flow_min_cut(
+        self,
+        source: str,
+        sink: str,
+        graph: CognitiveGraph | None = None,
+        capacity_attribute: str = "capacity",
+    ) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
+        """Compute directed maximum flow and minimum cutset bottleneck between source and sink."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.max_flow_min_cut(
+            source=source, sink=sink, capacity_attribute=capacity_attribute
+        )
 
     @property
     def phase(self) -> EpistemicPhase:

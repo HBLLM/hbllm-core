@@ -28,7 +28,7 @@ import copy
 import logging
 import time
 import uuid
-from collections import deque
+from collections import defaultdict, deque
 from collections.abc import Iterator
 from enum import StrEnum
 from typing import Any
@@ -2213,6 +2213,100 @@ class CognitiveGraph:
 
         articulation_points, bridges = self.find_articulation_points_and_bridges()
         return len(articulation_points) == 0 and len(bridges) == 0
+
+    def max_flow_min_cut(
+        self,
+        source: str,
+        sink: str,
+        capacity_attribute: str = "capacity",
+    ) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
+        """Compute directed maximum flow and minimum s-t cut using Edmonds-Karp algorithm.
+
+        Returns:
+            Tuple of (max_flow_value, cut_edges, source_set, sink_set).
+        """
+        all_nodes = set(self._nodes.keys())
+        if source not in all_nodes or sink not in all_nodes or source == sink:
+            return 0.0, [], set(), set()
+
+        initial_capacities: dict[tuple[str, str], float] = defaultdict(float)
+        adj: dict[str, set[str]] = defaultdict(set)
+
+        for edge in self._edges.values():
+            cap = max(0.0, float(getattr(edge, capacity_attribute, getattr(edge, "weight", 1.0))))
+            sources = [s for s in edge.sources if s in all_nodes]
+            targets = [t for t in edge.targets if t in all_nodes]
+            for s in sources:
+                for t in targets:
+                    if s != t:
+                        initial_capacities[(s, t)] += cap
+                        adj[s].add(t)
+                        adj[t].add(s)
+
+        residual: dict[tuple[str, str], float] = defaultdict(float)
+        for (u, v), cap in initial_capacities.items():
+            residual[(u, v)] = cap
+
+        max_flow = 0.0
+
+        while True:
+            parent: dict[str, str | None] = {nid: None for nid in all_nodes}
+            visited: set[str] = {source}
+            queue: deque[str] = deque([source])
+
+            while queue:
+                curr = queue.popleft()
+                if curr == sink:
+                    break
+                for neighbor in sorted(list(adj[curr])):
+                    if neighbor not in visited and residual.get((curr, neighbor), 0.0) > 1e-9:
+                        visited.add(neighbor)
+                        parent[neighbor] = curr
+                        queue.append(neighbor)
+
+            if sink not in visited:
+                break
+
+            path: list[tuple[str, str]] = []
+            curr = sink
+            bottleneck = float("inf")
+            while curr != source:
+                p = parent[curr]
+                if p is None:
+                    break
+                path.append((p, curr))
+                bottleneck = min(bottleneck, residual.get((p, curr), 0.0))
+                curr = p
+
+            if bottleneck <= 0.0 or bottleneck == float("inf"):
+                break
+
+            for u, v in path:
+                residual[(u, v)] -= bottleneck
+                residual[(v, u)] += bottleneck
+
+            max_flow += bottleneck
+
+        reachable: set[str] = set()
+        queue = deque([source])
+        reachable.add(source)
+        while queue:
+            curr = queue.popleft()
+            for neighbor in sorted(list(adj[curr])):
+                if neighbor not in reachable and residual.get((curr, neighbor), 0.0) > 1e-9:
+                    reachable.add(neighbor)
+                    queue.append(neighbor)
+
+        source_set = reachable
+        sink_set = all_nodes - source_set
+
+        cut_edges: list[tuple[str, str]] = [
+            (u, v)
+            for (u, v), cap in initial_capacities.items()
+            if u in source_set and v in sink_set and cap > 0.0
+        ]
+
+        return float(max_flow), cut_edges, source_set, sink_set
 
     # ── Indexed Queries ──────────────────────────────────────────────
 

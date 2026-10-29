@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
+    AnteriorCingulateEffortAllocator,
+    ConflictProfile,
+    EffortAllocationDecision,
+)
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
@@ -17,6 +22,11 @@ from hbllm.hcir.world.causal_scm import (
     CausalVariable,
     CounterfactualOutcome,
     StructuralCausalModel,
+)
+from hbllm.hcir.world.cerebellar_microzone_adaptor import (
+    CerebellarMicrozoneAdaptor,
+    ClimbingFiberFeedback,
+    MotorPrediction,
 )
 from hbllm.hcir.world.claustrum_salience_conductor import (
     ClaustrumSalienceConductor,
@@ -137,6 +147,11 @@ from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
     SurpriseEvaluation,
 )
+from hbllm.hcir.world.ventral_premotor_resonator import (
+    AffordanceResonancePattern,
+    VentralPremotorAffordanceResonator,
+    VicariousCausalInference,
+)
 from hbllm.hcir.world.visuospatial_working_memory import (
     VisuospatialWorkingMemory,
     WorkingMemorySlot,
@@ -157,8 +172,10 @@ from hbllm.hcir.world.world_transaction import (
 )
 
 __all__ = [
+    "AffordanceResonancePattern",
     "AllocentricLandmark",
     "AllostaticRegime",
+    "AnteriorCingulateEffortAllocator",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
@@ -168,14 +185,18 @@ __all__ = [
     "CausalHypothesis",
     "CausalPredicate",
     "CausalVariable",
+    "CerebellarMicrozoneAdaptor",
     "ClaustrumSalienceConductor",
+    "ClimbingFiberFeedback",
     "CognitiveTaskSet",
+    "ConflictProfile",
     "CounterfactualBranch",
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
     "DriftDiffusionDecision",
     "DualValueOpponencyCortex",
+    "EffortAllocationDecision",
     "EnsemblePrediction",
     "EntityRole",
     "EpistemicFeedbackAssimilator",
@@ -194,6 +215,7 @@ __all__ = [
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
     "LateralPrefrontalTaskSwitcher",
+    "MotorPrediction",
     "MultisensoryPriorityMap",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
@@ -239,6 +261,8 @@ __all__ = [
     "TemporalStateBuffer",
     "ThetaPhase",
     "UnifiedPerceptualGestalt",
+    "VentralPremotorAffordanceResonator",
+    "VicariousCausalInference",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",
     "WorkingMemorySlot",
