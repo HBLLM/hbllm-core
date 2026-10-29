@@ -57,6 +57,11 @@ from hbllm.hcir.world.object_state_graph import (
     RelationalGraphMatcher,
     SalientObject,
 )
+from hbllm.hcir.world.parietal_foveated_attention import (
+    FoveatedSaliencyMap,
+    FoveationResolution,
+    ParietalFoveatedAttentionEngine,
+)
 from hbllm.hcir.world.parietal_potential_field import (
     ParietalPotentialFieldNavigator,
     PotentialFieldVector,
@@ -80,6 +85,11 @@ from hbllm.hcir.world.predictor_weights import (
     PredictorWeightManager,
     PredictorWeightState,
 )
+from hbllm.hcir.world.prefrontal_blame_attribution import (
+    PlanAttributionReport,
+    PrefrontalBlameAttributor,
+    SubgoalBlameScore,
+)
 from hbllm.hcir.world.prefrontal_working_memory import (
     PrefrontalWorkingMemory,
     WorkingMemorySalienceState,
@@ -87,6 +97,10 @@ from hbllm.hcir.world.prefrontal_working_memory import (
 from hbllm.hcir.world.spatial_distance_transform import (
     EuclideanDistanceTransformResult,
     SpatialDistanceTransformEngine,
+)
+from hbllm.hcir.world.subthalamic_drift_diffusion import (
+    DriftDiffusionDecision,
+    SubthalamicDriftDiffusionEngine,
 )
 from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
@@ -125,6 +139,7 @@ __all__ = [
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
+    "DriftDiffusionDecision",
     "DualValueOpponencyCortex",
     "EnsemblePrediction",
     "EntityRole",
@@ -133,6 +148,8 @@ __all__ = [
     "EpistemicPhase",
     "EpistemicTruthValue",
     "EuclideanDistanceTransformResult",
+    "FoveatedSaliencyMap",
+    "FoveationResolution",
     "HCIRSymbolicWorldTheory",
     "InferotemporalShapeHasher",
     "InteroceptiveAllostasisCortex",
@@ -141,15 +158,18 @@ __all__ = [
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
     "OpponencyValueState",
+    "ParietalFoveatedAttentionEngine",
     "ParietalPotentialFieldNavigator",
     "PerceptionFrame",
     "PerceptionRegistry",
+    "PlanAttributionReport",
     "PotentialFieldVector",
     "PredictiveRealityModel",
     "PredictorDisagreementAnalyzer",
     "PredictorWeightManager",
     "PredictorWeightState",
     "PredictionProvenance",
+    "PrefrontalBlameAttributor",
     "PrefrontalWorkingMemory",
     "RecursiveSubgoalTree",
     "RelationalGraphMatcher",
@@ -160,9 +180,11 @@ __all__ = [
     "SpatialEntity",
     "StateDifferenceComputer",
     "StructuralCausalModel",
+    "SubgoalBlameScore",
     "SubgoalNodeType",
     "SubgoalTreeNode",
     "SubgoalTreeStatus",
+    "SubthalamicDriftDiffusionEngine",
     "SurpriseEngine",
     "SurpriseEvaluation",
     "TemporalStateBuffer",

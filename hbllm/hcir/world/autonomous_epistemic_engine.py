@@ -144,6 +144,10 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     ParietalCoordinateTransformer,
     RetrosplenialCoordinateTransformer,
 )
+from hbllm.hcir.world.parietal_foveated_attention import (
+    FoveatedSaliencyMap,
+    ParietalFoveatedAttentionEngine,
+)
 from hbllm.hcir.world.parietal_potential_field import (
     ParietalPotentialFieldNavigator,
     PotentialFieldVector,
@@ -156,6 +160,10 @@ from hbllm.hcir.world.percept import (
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
+from hbllm.hcir.world.prefrontal_blame_attribution import (
+    PlanAttributionReport,
+    PrefrontalBlameAttributor,
+)
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
@@ -171,6 +179,10 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
     LifecycleTrackingResult,
     MorphologicalDeformationTracker,
     SpatiotemporalHazardTracker,
+)
+from hbllm.hcir.world.subthalamic_drift_diffusion import (
+    DriftDiffusionDecision,
+    SubthalamicDriftDiffusionEngine,
 )
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
 from hbllm.hcir.world.temporal_dependency_tracker import (
@@ -572,6 +584,15 @@ class AutonomousEpistemicEngine:
 
         # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
         self.shape_hasher: InferotemporalShapeHasher = InferotemporalShapeHasher()
+
+        # Round 9 Faculty: Subthalamic Nucleus (STN) Drift-Diffusion Threshold Modulation (Ratcliff / Frank)
+        self.drift_diffusion: SubthalamicDriftDiffusionEngine = SubthalamicDriftDiffusionEngine()
+
+        # Round 9 Faculty: Parietal Egocentric Multi-Scale Foveation (Itti & Koch / Schwartz)
+        self.foveated_attention: ParietalFoveatedAttentionEngine = ParietalFoveatedAttentionEngine()
+
+        # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
+        self.blame_attributor: PrefrontalBlameAttributor = PrefrontalBlameAttributor()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -1936,6 +1957,74 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.transitive_reduction()
+
+    def step_drift_diffusion(
+        self,
+        evidence_rates: dict[Any, float],
+        conflict_level: float = 0.0,
+    ) -> DriftDiffusionDecision:
+        """Accumulate drift-diffusion evidence modulated by STN hyperdirect conflict boundary."""
+        decision = self.drift_diffusion.step_accumulation(
+            evidence_rates=evidence_rates,
+            conflict_level=conflict_level,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        return decision
+
+    def foveate_sensory_lattice(
+        self,
+        grid: np.ndarray | None = None,
+        gaze_center: tuple[int, int] | None = None,
+    ) -> FoveatedSaliencyMap:
+        """Apply parietal multi-scale foveation (fovea, parafovea, periphery) to sensory grid."""
+        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
+        if curr_g is None:
+            curr_g = np.zeros((10, 10), dtype=int)
+        center = gaze_center or self.avatar_pos or (curr_g.shape[0] // 2, curr_g.shape[1] // 2)
+        goals = list(self.learned_goal_positions) if hasattr(self, "learned_goal_positions") else []
+        foveated = self.foveated_attention.foveate_grid(
+            grid=curr_g,
+            gaze_center=center,
+            secondary_anchors=goals,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(foveated.to_causal_predicate())
+        return foveated
+
+    def attribute_plan_failure(
+        self,
+        subgoal_trace: list[dict[str, Any]],
+        failure_condition: str = "dead_end",
+    ) -> PlanAttributionReport:
+        """Perform Pearl-Halpern counterfactual blame attribution across executed subgoals."""
+        hazards = set()
+        if hasattr(self, "level_lethal_positions") and self.current_level is not None:
+            hazards = self.level_lethal_positions.get(self.current_level, set())
+        barriers = set(self.learned_barriers) if hasattr(self, "learned_barriers") else set()
+        report = self.blame_attributor.attribute_plan_failure(
+            subgoal_trace=subgoal_trace,
+            failure_condition=failure_condition,
+            lethal_hazards=hazards,
+            blocked_targets=barriers,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(report.to_causal_predicate())
+        return report
+
+    def extract_geodesic_spine(
+        self, graph: CognitiveGraph | None = None
+    ) -> tuple[CognitiveGraph, float]:
+        """Extract the minimal-cost connectivity spine across graph vertices using Kruskal's MST."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.minimum_spanning_tree()
 
     @property
     def phase(self) -> EpistemicPhase:

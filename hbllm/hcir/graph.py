@@ -1986,6 +1986,63 @@ class CognitiveGraph:
 
         return reduced_graph
 
+    def minimum_spanning_tree(self) -> tuple[CognitiveGraph, float]:
+        """Compute the Minimum Spanning Tree (MST) across cognitive graph vertices using Kruskal's algorithm.
+
+        Returns (mst_graph, total_weight) preserving all nodes and retaining the
+        minimal-weight acyclic connectivity spine.
+        """
+        mst_graph = CognitiveGraph(enable_native_substrate=False)
+        for node in self.all_nodes():
+            mst_graph.add_node(copy.deepcopy(node))
+
+        all_ids = set(self._nodes.keys())
+        all_edges = list(self.all_edges())
+        all_edges.sort(key=lambda e: float(getattr(e, "weight", 1.0)))
+
+        parent: dict[str, str] = {nid: nid for nid in all_ids}
+        rank: dict[str, int] = {nid: 0 for nid in all_ids}
+
+        def find(i: str) -> str:
+            if parent[i] == i:
+                return i
+            parent[i] = find(parent[i])
+            return parent[i]
+
+        def union(i: str, j: str) -> bool:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                if rank[root_i] < rank[root_j]:
+                    parent[root_i] = root_j
+                elif rank[root_i] > rank[root_j]:
+                    parent[root_j] = root_i
+                else:
+                    parent[root_j] = root_i
+                    rank[root_i] += 1
+                return True
+            return False
+
+        total_weight = 0.0
+        for edge in all_edges:
+            sources = [s for s in edge.sources if s in all_ids]
+            targets = [t for t in edge.targets if t in all_ids]
+            if not sources or not targets:
+                continue
+
+            merged_any = False
+            for s in sources:
+                for t in targets:
+                    if union(s, t):
+                        merged_any = True
+
+            if merged_any:
+                w = float(getattr(edge, "weight", 1.0))
+                total_weight += w
+                mst_graph.add_edge(copy.deepcopy(edge))
+
+        return mst_graph, total_weight
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:

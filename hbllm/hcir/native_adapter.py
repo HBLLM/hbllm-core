@@ -423,6 +423,93 @@ class NativeGraphAdapter:
 
         return reduced
 
+    def minimum_spanning_tree(self) -> tuple[NativeGraphAdapter, float]:
+        """Compute the Minimum Spanning Tree (MST) across connected vertices using Kruskal's algorithm.
+
+        Returns (mst_adapter, total_weight) preserving all nodes and retaining
+        the minimal-weight acyclic connectivity spine.
+        """
+        all_node_ids = {
+            nid
+            for nid in (self._node_ids if self._native is not None else self._py_nodes)
+            if nid not in self._removed_nodes
+        }
+        mst = NativeGraphAdapter()
+        for nid in all_node_ids:
+            node_data = self.get_node(nid)
+            if node_data:
+                mst.add_node(
+                    node_id=nid,
+                    node_type=node_data.get("node_type", "concept"),
+                    lifecycle=node_data.get("lifecycle", "ACTIVE"),
+                    properties=node_data.get("properties"),
+                )
+
+        # Collect unique edges with weight
+        collected_edges: list[dict[str, Any]] = []
+        seen_edge_ids: set[str] = set()
+
+        for nid in all_node_ids:
+            for edge in self.edges_from(nid):
+                eid = edge.get("id", "")
+                if eid not in seen_edge_ids:
+                    seen_edge_ids.add(eid)
+                    collected_edges.append(edge)
+
+        # Sort edges by weight
+        collected_edges.sort(key=lambda e: float(e.get("weight", 1.0)))
+
+        # Disjoint Set Union (DSU) with path compression
+        parent: dict[str, str] = {nid: nid for nid in all_node_ids}
+        rank: dict[str, int] = {nid: 0 for nid in all_node_ids}
+
+        def find(i: str) -> str:
+            if parent[i] == i:
+                return i
+            parent[i] = find(parent[i])
+            return parent[i]
+
+        def union(i: str, j: str) -> bool:
+            root_i = find(i)
+            root_j = find(j)
+            if root_i != root_j:
+                if rank[root_i] < rank[root_j]:
+                    parent[root_i] = root_j
+                elif rank[root_i] > rank[root_j]:
+                    parent[root_j] = root_i
+                else:
+                    parent[root_j] = root_i
+                    rank[root_i] += 1
+                return True
+            return False
+
+        total_weight = 0.0
+        for edge in collected_edges:
+            sources = [s for s in edge.get("sources", []) if s in all_node_ids]
+            targets = [t for t in edge.get("targets", []) if t in all_node_ids]
+            if not sources or not targets:
+                continue
+
+            merged_any = False
+            for s in sources:
+                for t in targets:
+                    if union(s, t):
+                        merged_any = True
+
+            if merged_any:
+                w = float(edge.get("weight", 1.0))
+                total_weight += w
+                mst.add_edge(
+                    edge_id=edge.get("id", ""),
+                    edge_type=edge.get("edge_type", "causes"),
+                    sources=sources,
+                    targets=targets,
+                    weight=w,
+                    properties=edge.get("properties"),
+                )
+
+        return mst, total_weight
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
