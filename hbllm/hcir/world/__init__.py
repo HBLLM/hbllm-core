@@ -31,6 +31,11 @@ from hbllm.hcir.world.disagreement_analyzer import (
     DisagreementReport,
     PredictorDisagreementAnalyzer,
 )
+from hbllm.hcir.world.frontopolar_exploration_horizon import (
+    BranchSwitchDecision,
+    CounterfactualBranch,
+    FrontopolarExplorationHorizonEngine,
+)
 from hbllm.hcir.world.frontopolar_subgoal_tree import (
     RecursiveSubgoalTree,
     SubgoalNodeType,
@@ -41,6 +46,11 @@ from hbllm.hcir.world.habenula_striatum_opponency import (
     DualValueOpponencyCortex,
     OpponencyRegime,
     OpponencyValueState,
+)
+from hbllm.hcir.world.hippocampal_phase_precession import (
+    HippocampalPhasePrecessionEngine,
+    PhasePrecessionBurst,
+    ThetaPhase,
 )
 from hbllm.hcir.world.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
@@ -118,6 +128,11 @@ from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
     SubthalamicDriftDiffusionEngine,
 )
+from hbllm.hcir.world.superior_colliculus_arbiter import (
+    MultisensoryPriorityMap,
+    SaccadeTarget,
+    SuperiorColliculusTargetArbiter,
+)
 from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
     SurpriseEvaluation,
@@ -149,11 +164,13 @@ __all__ = [
     "BasePerceptionAdapter",
     "BeliefTransitionEvent",
     "BranchMode",
+    "BranchSwitchDecision",
     "CausalHypothesis",
     "CausalPredicate",
     "CausalVariable",
     "ClaustrumSalienceConductor",
     "CognitiveTaskSet",
+    "CounterfactualBranch",
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
@@ -168,13 +185,16 @@ __all__ = [
     "EuclideanDistanceTransformResult",
     "FoveatedSaliencyMap",
     "FoveationResolution",
+    "FrontopolarExplorationHorizonEngine",
     "HCIRSymbolicWorldTheory",
+    "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
     "InferotemporalShapeHasher",
     "InteroceptiveAllostasisCortex",
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
     "LateralPrefrontalTaskSwitcher",
+    "MultisensoryPriorityMap",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
@@ -183,6 +203,7 @@ __all__ = [
     "ParietalPotentialFieldNavigator",
     "PerceptionFrame",
     "PerceptionRegistry",
+    "PhasePrecessionBurst",
     "PlanAttributionReport",
     "PotentialFieldVector",
     "PredictiveRealityModel",
@@ -198,6 +219,7 @@ __all__ = [
     "ReplayTransition",
     "RetrosplenialLandmarkAnchorEngine",
     "ReversibilityEngine",
+    "SaccadeTarget",
     "SalientObject",
     "ShapeArchetypeSignature",
     "SpatialDistanceTransformEngine",
@@ -209,11 +231,13 @@ __all__ = [
     "SubgoalTreeNode",
     "SubgoalTreeStatus",
     "SubthalamicDriftDiffusionEngine",
+    "SuperiorColliculusTargetArbiter",
     "SurpriseEngine",
     "SurpriseEvaluation",
     "TaskArbitrationResult",
     "TaskSwitchEvent",
     "TemporalStateBuffer",
+    "ThetaPhase",
     "UnifiedPerceptualGestalt",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",

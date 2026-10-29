@@ -85,6 +85,10 @@ from hbllm.hcir.world.counterfactual_simulation import (
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
 )
+from hbllm.hcir.world.frontopolar_exploration_horizon import (
+    BranchSwitchDecision,
+    FrontopolarExplorationHorizonEngine,
+)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
@@ -98,6 +102,10 @@ from hbllm.hcir.world.habenula_striatum_opponency import (
     OpponencyValueState,
 )
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.hippocampal_phase_precession import (
+    HippocampalPhasePrecessionEngine,
+    PhasePrecessionBurst,
+)
 from hbllm.hcir.world.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
@@ -196,6 +204,10 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
 from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
     SubthalamicDriftDiffusionEngine,
+)
+from hbllm.hcir.world.superior_colliculus_arbiter import (
+    SaccadeTarget,
+    SuperiorColliculusTargetArbiter,
 )
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
 from hbllm.hcir.world.temporal_dependency_tracker import (
@@ -618,6 +630,19 @@ class AutonomousEpistemicEngine:
         # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
         self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine = (
             RetrosplenialLandmarkAnchorEngine()
+        )
+
+        # Round 11 Faculty: Hippocampal Theta-Gamma Phase Precession & Macro Chunking (O'Keefe / Lisman)
+        self.phase_precession: HippocampalPhasePrecessionEngine = HippocampalPhasePrecessionEngine()
+
+        # Round 11 Faculty: Frontopolar BA10 Counterfactual Exploration Horizon Engine (Koechlin / Rushworth)
+        self.exploration_horizon: FrontopolarExplorationHorizonEngine = (
+            FrontopolarExplorationHorizonEngine()
+        )
+
+        # Round 11 Faculty: Superior Colliculus Multisensory Alignment & Saccadic Arbiter (Stein & Meredith)
+        self.superior_colliculus: SuperiorColliculusTargetArbiter = (
+            SuperiorColliculusTargetArbiter()
         )
 
         # Connect GNW conscious broadcast listener for executive arbitration
@@ -2158,6 +2183,82 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.all_pairs_shortest_paths(weight_attribute=weight_attribute)
+
+    def compress_trajectory_phase_precession(
+        self,
+        positions: list[tuple[int, int]],
+        actions: list[Any],
+        duration_s: float = 2.0,
+    ) -> PhasePrecessionBurst:
+        """Compress spatial trajectory and actions into a theta-gamma oscillatory burst."""
+        burst = self.phase_precession.encode_trajectory_burst(
+            positions=positions,
+            actions=actions,
+            behavioral_duration_s=duration_s,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(burst.to_causal_predicate())
+        return burst
+
+    def evaluate_counterfactual_branch_switch(self) -> BranchSwitchDecision:
+        """Evaluate BA10 counterfactual branches and execute switch if advantageous."""
+        decision = self.exploration_horizon.evaluate_branch_switch()
+        if decision.should_switch:
+            self.exploration_horizon.execute_branch_switch(decision)
+            if self.symbolic_theory is not None:
+                self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        return decision
+
+    def arbitrate_saccadic_target(
+        self,
+        visual_saliency: np.ndarray | None = None,
+        goal_positions: list[tuple[int, int]] | None = None,
+        obstacle_clearance: np.ndarray | None = None,
+    ) -> SaccadeTarget | None:
+        """Generate SC multisensory topographic priority map and select primary saccade target."""
+        if visual_saliency is None:
+            visual_saliency = np.zeros((10, 10), dtype=np.float64)
+        goals = (
+            goal_positions
+            if goal_positions is not None
+            else list(getattr(self, "learned_goal_positions", []))
+        )
+        priority_map = self.superior_colliculus.build_priority_map(
+            visual_saliency=visual_saliency,
+            goal_positions=goals,
+            obstacle_clearance=obstacle_clearance,
+            avatar_pos=self.avatar_pos,
+        )
+        target = self.superior_colliculus.select_primary_saccade_target(priority_map)
+        if target is not None and self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(target.to_causal_predicate())
+        return target
+
+    def find_graph_bottlenecks_and_bridges(
+        self, graph: CognitiveGraph | None = None
+    ) -> tuple[set[str], list[tuple[str, str]]]:
+        """Identify critical articulation points and single-point-of-failure bridge edges."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.find_articulation_points_and_bridges()
+
+    def is_graph_fault_tolerant_biconnected(self, graph: CognitiveGraph | None = None) -> bool:
+        """Check if cognitive graph has redundant alternate paths between all vertices."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.is_biconnected()
 
     @property
     def phase(self) -> EpistemicPhase:

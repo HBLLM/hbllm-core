@@ -2142,6 +2142,78 @@ class CognitiveGraph:
         wasserman_faust_norm = (k / (n - 1)) * raw_closeness
         return float(wasserman_faust_norm)
 
+    def find_articulation_points_and_bridges(
+        self,
+    ) -> tuple[set[str], list[tuple[str, str]]]:
+        """Compute articulation points (cut vertices) and bridges (cut edges) using Tarjan's DFS.
+
+        Returns:
+            Tuple of (articulation_points, bridges), identifying single points of failure.
+        """
+        all_nodes = sorted(list(self._nodes.keys()))
+        adj: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+
+        for edge in self._edges.values():
+            sources = [s for s in edge.sources if s in adj]
+            targets = [t for t in edge.targets if t in adj]
+            for s in sources:
+                for t in targets:
+                    if s != t:
+                        adj[s].add(t)
+                        adj[t].add(s)
+
+        timer = 0
+        disc: dict[str, int] = {}
+        low: dict[str, int] = {}
+        parent: dict[str, str | None] = {}
+        articulation_points: set[str] = set()
+        bridges: list[tuple[str, str]] = []
+
+        def dfs(u: str) -> None:
+            nonlocal timer
+            disc[u] = low[u] = timer
+            timer += 1
+            children = 0
+
+            for v in sorted(list(adj[u])):
+                if v == parent.get(u):
+                    continue
+                if v in disc:
+                    low[u] = min(low[u], disc[v])
+                else:
+                    parent[v] = u
+                    children += 1
+                    dfs(v)
+                    low[u] = min(low[u], low[v])
+
+                    if parent.get(u) is None and children > 1:
+                        articulation_points.add(u)
+                    elif parent.get(u) is not None and low[v] >= disc[u]:
+                        articulation_points.add(u)
+
+                    if low[v] > disc[u]:
+                        bridges.append((u, v))
+
+        for nid in all_nodes:
+            if nid not in disc:
+                parent[nid] = None
+                dfs(nid)
+
+        return articulation_points, bridges
+
+    def is_biconnected(self) -> bool:
+        """Return True if the graph is connected with >= 2 nodes, 0 articulation points, and 0 bridges."""
+        all_nodes = list(self._nodes.keys())
+        if len(all_nodes) < 2:
+            return False
+
+        components = self.connected_components()
+        if len(components) != 1 or len(components[0]) != len(all_nodes):
+            return False
+
+        articulation_points, bridges = self.find_articulation_points_and_bridges()
+        return len(articulation_points) == 0 and len(bridges) == 0
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
