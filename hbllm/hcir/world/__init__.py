@@ -18,6 +18,10 @@ from hbllm.hcir.world.causal_scm import (
     CounterfactualOutcome,
     StructuralCausalModel,
 )
+from hbllm.hcir.world.claustrum_salience_conductor import (
+    ClaustrumSalienceConductor,
+    UnifiedPerceptualGestalt,
+)
 from hbllm.hcir.world.cortex_assimilator import (
     EpistemicFeedbackAssimilator,
     EpistemicPhase,
@@ -26,6 +30,17 @@ from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 from hbllm.hcir.world.disagreement_analyzer import (
     DisagreementReport,
     PredictorDisagreementAnalyzer,
+)
+from hbllm.hcir.world.frontopolar_subgoal_tree import (
+    RecursiveSubgoalTree,
+    SubgoalNodeType,
+    SubgoalTreeNode,
+    SubgoalTreeStatus,
+)
+from hbllm.hcir.world.insula_allostasis import (
+    AllostaticRegime,
+    InteroceptiveAllostasisCortex,
+    InteroceptiveState,
 )
 from hbllm.hcir.world.object_state_graph import (
     ObjectCategory,
@@ -56,6 +71,10 @@ from hbllm.hcir.world.prefrontal_working_memory import (
     PrefrontalWorkingMemory,
     WorkingMemorySalienceState,
 )
+from hbllm.hcir.world.spatial_distance_transform import (
+    EuclideanDistanceTransformResult,
+    SpatialDistanceTransformEngine,
+)
 from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
     SurpriseEvaluation,
@@ -80,6 +99,7 @@ from hbllm.hcir.world.world_transaction import (
 )
 
 __all__ = [
+    "AllostaticRegime",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
@@ -88,6 +108,7 @@ __all__ = [
     "CausalHypothesis",
     "CausalPredicate",
     "CausalVariable",
+    "ClaustrumSalienceConductor",
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
@@ -97,7 +118,10 @@ __all__ = [
     "EpistemicObservation",
     "EpistemicPhase",
     "EpistemicTruthValue",
+    "EuclideanDistanceTransformResult",
     "HCIRSymbolicWorldTheory",
+    "InteroceptiveAllostasisCortex",
+    "InteroceptiveState",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
     "PerceptionFrame",
@@ -108,15 +132,21 @@ __all__ = [
     "PredictorWeightState",
     "PredictionProvenance",
     "PrefrontalWorkingMemory",
+    "RecursiveSubgoalTree",
     "RelationalGraphMatcher",
     "ReversibilityEngine",
     "SalientObject",
+    "SpatialDistanceTransformEngine",
     "SpatialEntity",
     "StateDifferenceComputer",
     "StructuralCausalModel",
+    "SubgoalNodeType",
+    "SubgoalTreeNode",
+    "SubgoalTreeStatus",
     "SurpriseEngine",
     "SurpriseEvaluation",
     "TemporalStateBuffer",
+    "UnifiedPerceptualGestalt",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",
     "WorkingMemorySlot",

@@ -71,6 +71,10 @@ from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarSmithPredictor,
     PhaseGateDecision,
 )
+from hbllm.hcir.world.claustrum_salience_conductor import (
+    ClaustrumSalienceConductor,
+    UnifiedPerceptualGestalt,
+)
 from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualComparison,
@@ -85,9 +89,16 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoalStack,
     SubgoalType,
 )
+from hbllm.hcir.world.frontopolar_subgoal_tree import (
+    RecursiveSubgoalTree,
+)
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
+)
+from hbllm.hcir.world.insula_allostasis import (
+    InteroceptiveAllostasisCortex,
+    InteroceptiveState,
 )
 from hbllm.hcir.world.interactive_action_discovery import (
     ActionBudgetGovernor,
@@ -288,6 +299,10 @@ from hbllm.hcir.world.relational_graph_matcher import (
 )
 from hbllm.hcir.world.skill_program_synthesizer import (
     SkillProgramSynthesizer,
+)
+from hbllm.hcir.world.spatial_distance_transform import (
+    EuclideanDistanceTransformResult,
+    SpatialDistanceTransformEngine,
 )
 from hbllm.hcir.world.superposition_planner import (
     SuperpositionEvaluationResult,
@@ -518,6 +533,20 @@ class AutonomousEpistemicEngine:
         # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
         self.ventral_relational_matcher: VentralRelationalGraphMatcher = (
             VentralRelationalGraphMatcher()
+        )
+
+        # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
+        self.allostasis_cortex: InteroceptiveAllostasisCortex = InteroceptiveAllostasisCortex()
+
+        # Round 7 Faculty: Claustrum Multimodal Salience Conductor & Perceptual Binding (Crick & Koch / Smith)
+        self.claustrum_conductor: ClaustrumSalienceConductor = ClaustrumSalienceConductor()
+
+        # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
+        self.subgoal_tree: RecursiveSubgoalTree = RecursiveSubgoalTree()
+
+        # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
+        self.distance_transform_engine: SpatialDistanceTransformEngine = (
+            SpatialDistanceTransformEngine()
         )
 
         # Connect GNW conscious broadcast listener for executive arbitration
@@ -1761,6 +1790,68 @@ class AutonomousEpistemicEngine:
         """Extract exterior boundaries and interior cavity loops for all entities."""
         bg = bg_color if bg_color is not None else self.estimate_background(grid)
         return self.affordance_extractor.extract_topological_contours(grid=grid, bg_color=bg)
+
+    def should_permit_deliberation(self, estimated_cost: float = 5.0) -> tuple[bool, str]:
+        """Check whether interoceptive allostasis permits expensive forward mental simulation."""
+        return self.allostasis_cortex.should_permit_deliberation(estimated_cost=estimated_cost)
+
+    def consume_allostatic_energy(
+        self, activity_type: str, scale: float = 1.0
+    ) -> InteroceptiveState:
+        """Deduct metabolic energy and update interoceptive allostasis state."""
+        state = self.allostasis_cortex.consume_energy(activity_type=activity_type, scale=scale)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def bind_multimodal_percept(
+        self,
+        grid_shape: tuple[int, int] | None = None,
+        visual_entities: list[SpatialEntity] | None = None,
+        hazard_map: dict[tuple[int, int], float] | None = None,
+        goal_coords: list[tuple[int, int]] | None = None,
+        affordance_fields: dict[str, Any] | None = None,
+    ) -> UnifiedPerceptualGestalt:
+        """Bind visual, hazard, and goal streams via claustrum conductor into a unified gestalt."""
+        last_g = getattr(self, "last_observed_grid", None)
+        shape = (
+            grid_shape
+            if grid_shape is not None
+            else ((int(last_g.shape[0]), int(last_g.shape[1])) if last_g is not None else (10, 10))
+        )
+        goals = goal_coords if goal_coords is not None else list(self.learned_goal_positions)
+        gestalt = self.claustrum_conductor.bind_modalities(
+            grid_shape=(int(shape[0]), int(shape[1])),
+            visual_entities=visual_entities,
+            hazard_map=hazard_map,
+            goal_coords=goals,
+            affordance_fields=affordance_fields,
+            agent_coord=self.avatar_pos,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(gestalt.to_causal_predicate())
+        return gestalt
+
+    def compute_spatial_distance_field(
+        self,
+        obstacles: set[tuple[int, int]] | None = None,
+        grid_shape: tuple[int, int] | None = None,
+    ) -> EuclideanDistanceTransformResult:
+        """Compute exact 2D Euclidean Distance Transform clearance and repulsive gradient fields."""
+        last_g = getattr(self, "last_observed_grid", None)
+        shape = (
+            grid_shape
+            if grid_shape is not None
+            else ((int(last_g.shape[0]), int(last_g.shape[1])) if last_g is not None else (10, 10))
+        )
+        obs = obstacles if obstacles is not None else set(self.learned_barriers)
+        result = self.distance_transform_engine.compute_edt(
+            grid_shape=(int(shape[0]), int(shape[1])),
+            obstacles=obs,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(result.to_causal_predicate())
+        return result
 
     @property
     def phase(self) -> EpistemicPhase:
