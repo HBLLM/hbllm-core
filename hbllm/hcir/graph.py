@@ -2308,6 +2308,91 @@ class CognitiveGraph:
 
         return float(max_flow), cut_edges, source_set, sink_set
 
+    def feedback_arc_set(
+        self,
+    ) -> tuple[list[tuple[str, str]], list[str]]:
+        """Compute the minimal Feedback Arc Set (FAS) to render the graph acyclic using Eades heuristic.
+
+        Returns:
+            Tuple of (feedback_edges, topological_ordering), where removing feedback_edges
+            yields a Directed Acyclic Graph (DAG).
+        """
+        all_nodes = sorted(list(self._nodes.keys()))
+        if not all_nodes:
+            return [], []
+
+        adj_out: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+        adj_in: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+
+        all_directed_edges: list[tuple[str, str]] = []
+        for edge in self._edges.values():
+            sources = [s for s in edge.sources if s in adj_out]
+            targets = [t for t in edge.targets if t in adj_out]
+            for s in sources:
+                for t in targets:
+                    if s != t:
+                        adj_out[s].add(t)
+                        adj_in[t].add(s)
+                        all_directed_edges.append((s, t))
+
+        in_deg = {nid: len(adj_in[nid]) for nid in all_nodes}
+        out_deg = {nid: len(adj_out[nid]) for nid in all_nodes}
+        remaining = set(all_nodes)
+
+        s1: list[str] = []
+        s2: list[str] = []
+
+        while remaining:
+            sinks = [u for u in remaining if out_deg[u] == 0]
+            if sinks:
+                for u in sorted(sinks):
+                    if u in remaining:
+                        remaining.remove(u)
+                        s2.insert(0, u)
+                        for p in adj_in[u]:
+                            if p in remaining:
+                                out_deg[p] -= 1
+                continue
+
+            sources = [u for u in remaining if in_deg[u] == 0]
+            if sources:
+                for u in sorted(sources):
+                    if u in remaining:
+                        remaining.remove(u)
+                        s1.append(u)
+                        for s in adj_out[u]:
+                            if s in remaining:
+                                in_deg[s] -= 1
+                continue
+
+            best_u = max(
+                sorted(list(remaining)),
+                key=lambda u: (out_deg[u] - in_deg[u], -ord(u[0]) if u else 0),
+            )
+            remaining.remove(best_u)
+            s1.append(best_u)
+            for s in adj_out[best_u]:
+                if s in remaining:
+                    in_deg[s] -= 1
+            for p in adj_in[best_u]:
+                if p in remaining:
+                    out_deg[p] -= 1
+
+        topological_order = s1 + s2
+        rank = {nid: i for i, nid in enumerate(topological_order)}
+
+        feedback_edges: list[tuple[str, str]] = []
+        seen_feedback: set[tuple[str, str]] = set()
+
+        for u, v in all_directed_edges:
+            if rank[u] > rank[v]:
+                pair = (u, v)
+                if pair not in seen_feedback:
+                    seen_feedback.add(pair)
+                    feedback_edges.append(pair)
+
+        return feedback_edges, topological_order
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:

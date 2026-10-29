@@ -125,6 +125,11 @@ from hbllm.hcir.world.prefrontal_working_memory import (
     PrefrontalWorkingMemory,
     WorkingMemorySalienceState,
 )
+from hbllm.hcir.world.pulvinar_attention_router import (
+    PulvinarAttentionRouter,
+    PulvinarRoutingState,
+    TransthalamicRoute,
+)
 from hbllm.hcir.world.retrosplenial_landmark_anchor import (
     AllocentricLandmark,
     LandmarkRecalibrationResult,
@@ -133,6 +138,11 @@ from hbllm.hcir.world.retrosplenial_landmark_anchor import (
 from hbllm.hcir.world.spatial_distance_transform import (
     EuclideanDistanceTransformResult,
     SpatialDistanceTransformEngine,
+)
+from hbllm.hcir.world.subicular_boundary_vector import (
+    BoundaryVectorCell,
+    BoundaryVectorMap,
+    SubicularBoundaryVectorEngine,
 )
 from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
@@ -151,6 +161,11 @@ from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
     VentralPremotorAffordanceResonator,
     VicariousCausalInference,
+)
+from hbllm.hcir.world.ventromedial_somatic_marker import (
+    SomaticAffectiveBias,
+    SomaticMarker,
+    VentromedialSomaticMarkerEngine,
 )
 from hbllm.hcir.world.visuospatial_working_memory import (
     VisuospatialWorkingMemory,
@@ -180,6 +195,8 @@ __all__ = [
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
     "BeliefTransitionEvent",
+    "BoundaryVectorCell",
+    "BoundaryVectorMap",
     "BranchMode",
     "BranchSwitchDecision",
     "CausalHypothesis",
@@ -235,6 +252,8 @@ __all__ = [
     "PredictionProvenance",
     "PrefrontalBlameAttributor",
     "PrefrontalWorkingMemory",
+    "PulvinarAttentionRouter",
+    "PulvinarRoutingState",
     "RecursiveSubgoalTree",
     "RelationalGraphMatcher",
     "ReplayBatch",
@@ -244,6 +263,8 @@ __all__ = [
     "SaccadeTarget",
     "SalientObject",
     "ShapeArchetypeSignature",
+    "SomaticAffectiveBias",
+    "SomaticMarker",
     "SpatialDistanceTransformEngine",
     "SpatialEntity",
     "StateDifferenceComputer",
@@ -252,6 +273,7 @@ __all__ = [
     "SubgoalNodeType",
     "SubgoalTreeNode",
     "SubgoalTreeStatus",
+    "SubicularBoundaryVectorEngine",
     "SubthalamicDriftDiffusionEngine",
     "SuperiorColliculusTargetArbiter",
     "SurpriseEngine",
@@ -260,8 +282,10 @@ __all__ = [
     "TaskSwitchEvent",
     "TemporalStateBuffer",
     "ThetaPhase",
+    "TransthalamicRoute",
     "UnifiedPerceptualGestalt",
     "VentralPremotorAffordanceResonator",
+    "VentromedialSomaticMarkerEngine",
     "VicariousCausalInference",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",

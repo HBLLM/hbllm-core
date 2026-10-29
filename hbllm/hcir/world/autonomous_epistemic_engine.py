@@ -190,6 +190,10 @@ from hbllm.hcir.world.prefrontal_blame_attribution import (
     PrefrontalBlameAttributor,
 )
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
+from hbllm.hcir.world.pulvinar_attention_router import (
+    PulvinarAttentionRouter,
+    PulvinarRoutingState,
+)
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
@@ -208,6 +212,10 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
     LifecycleTrackingResult,
     MorphologicalDeformationTracker,
     SpatiotemporalHazardTracker,
+)
+from hbllm.hcir.world.subicular_boundary_vector import (
+    BoundaryVectorMap,
+    SubicularBoundaryVectorEngine,
 )
 from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
@@ -228,6 +236,10 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
 from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
     VentralPremotorAffordanceResonator,
+)
+from hbllm.hcir.world.ventromedial_somatic_marker import (
+    SomaticAffectiveBias,
+    VentromedialSomaticMarkerEngine,
 )
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.world_state_snapshot import (
@@ -667,6 +679,15 @@ class AutonomousEpistemicEngine:
 
         # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
         self.effort_allocator: AnteriorCingulateEffortAllocator = AnteriorCingulateEffortAllocator()
+
+        # Round 13 Faculty: Subicular Egocentric-to-Allocentric Boundary Vector Cell (BVC) Map (Hartley-Burgess)
+        self.subicular_bvc: SubicularBoundaryVectorEngine = SubicularBoundaryVectorEngine()
+
+        # Round 13 Faculty: Ventromedial Prefrontal Cortex (vmPFC) Somatic Marker Engine (Damasio-Bechara)
+        self.somatic_marker: VentromedialSomaticMarkerEngine = VentromedialSomaticMarkerEngine()
+
+        # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
+        self.pulvinar_router: PulvinarAttentionRouter = PulvinarAttentionRouter()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2366,6 +2387,63 @@ class AutonomousEpistemicEngine:
         return target_graph.max_flow_min_cut(
             source=source, sink=sink, capacity_attribute=capacity_attribute
         )
+
+    def compute_subicular_boundary_map(
+        self,
+        boundary_grid: np.ndarray,
+        avatar_pos: tuple[int, int] = (0, 0),
+    ) -> BoundaryVectorMap:
+        """Compute egocentric-to-allocentric boundary vector map around avatar (Hartley-Burgess)."""
+        bvc_map = self.subicular_bvc.compute_bvc_activations(
+            avatar_pos=avatar_pos,
+            boundary_grid=boundary_grid,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(bvc_map.to_causal_predicate())
+        return bvc_map
+
+    def evaluate_somatic_marker_bias(
+        self,
+        candidate_actions: list[Any],
+        projected_state_hashes: dict[Any, int],
+    ) -> SomaticAffectiveBias:
+        """Evaluate pre-deliberative somatic gut-feeling biases and visceral alarms (Damasio-Bechara)."""
+        bias = self.somatic_marker.evaluate_somatic_bias(
+            candidate_actions=candidate_actions,
+            projected_state_hashes=projected_state_hashes,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(bias.to_causal_predicate())
+        return bias
+
+    def update_pulvinar_routing(
+        self,
+        cognitive_load: float,
+        threat_urgency: float = 0.0,
+    ) -> PulvinarRoutingState:
+        """Regulate cortico-cortical transthalamic information transfer bandwidth (Saalmann-Kastner)."""
+        routing_state = self.pulvinar_router.update_routing(
+            cognitive_load=cognitive_load,
+            threat_urgency=threat_urgency,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(routing_state.to_causal_predicate())
+        return routing_state
+
+    def extract_minimal_feedback_arc_set(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> tuple[list[tuple[str, str]], list[str]]:
+        """Extract minimal Feedback Arc Set (FAS) to sever causal graph cycles into a DAG."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.feedback_arc_set()
 
     @property
     def phase(self) -> EpistemicPhase:
