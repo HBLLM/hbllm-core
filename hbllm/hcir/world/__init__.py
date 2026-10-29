@@ -82,11 +82,21 @@ from hbllm.hcir.world.lateral_prefrontal_switcher import (
     TaskArbitrationResult,
     TaskSwitchEvent,
 )
+from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
+    ExplorationRegime,
+    LocusCoeruleusNoradrenalineEngine,
+    NoradrenergicState,
+)
 from hbllm.hcir.world.object_state_graph import (
     ObjectCategory,
     ObjectStateGraphPlanner,
     RelationalGraphMatcher,
     SalientObject,
+)
+from hbllm.hcir.world.parahippocampal_context import (
+    ContextTransitionEvent,
+    ParahippocampalContextEngine,
+    SpatialContextSchema,
 )
 from hbllm.hcir.world.parietal_foveated_attention import (
     FoveatedSaliencyMap,
@@ -134,6 +144,11 @@ from hbllm.hcir.world.retrosplenial_landmark_anchor import (
     AllocentricLandmark,
     LandmarkRecalibrationResult,
     RetrosplenialLandmarkAnchorEngine,
+)
+from hbllm.hcir.world.somatosensory_haptic import (
+    HapticAffordanceFeedback,
+    SomatosensoryHapticEngine,
+    SurfaceFrictionProfile,
 )
 from hbllm.hcir.world.spatial_distance_transform import (
     EuclideanDistanceTransformResult,
@@ -207,6 +222,7 @@ __all__ = [
     "ClimbingFiberFeedback",
     "CognitiveTaskSet",
     "ConflictProfile",
+    "ContextTransitionEvent",
     "CounterfactualBranch",
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
@@ -220,10 +236,12 @@ __all__ = [
     "EpistemicObservation",
     "EpistemicPhase",
     "EpistemicTruthValue",
+    "ExplorationRegime",
     "EuclideanDistanceTransformResult",
     "FoveatedSaliencyMap",
     "FoveationResolution",
     "FrontopolarExplorationHorizonEngine",
+    "HapticAffordanceFeedback",
     "HCIRSymbolicWorldTheory",
     "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
@@ -232,12 +250,15 @@ __all__ = [
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
     "LateralPrefrontalTaskSwitcher",
+    "LocusCoeruleusNoradrenalineEngine",
     "MotorPrediction",
     "MultisensoryPriorityMap",
+    "NoradrenergicState",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
     "OpponencyValueState",
+    "ParahippocampalContextEngine",
     "ParietalFoveatedAttentionEngine",
     "ParietalPotentialFieldNavigator",
     "PerceptionFrame",
@@ -265,6 +286,8 @@ __all__ = [
     "ShapeArchetypeSignature",
     "SomaticAffectiveBias",
     "SomaticMarker",
+    "SomatosensoryHapticEngine",
+    "SpatialContextSchema",
     "SpatialDistanceTransformEngine",
     "SpatialEntity",
     "StateDifferenceComputer",
@@ -276,6 +299,7 @@ __all__ = [
     "SubicularBoundaryVectorEngine",
     "SubthalamicDriftDiffusionEngine",
     "SuperiorColliculusTargetArbiter",
+    "SurfaceFrictionProfile",
     "SurpriseEngine",
     "SurpriseEvaluation",
     "TaskArbitrationResult",

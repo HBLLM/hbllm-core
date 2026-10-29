@@ -151,6 +151,10 @@ from hbllm.hcir.world.lateral_prefrontal_switcher import (
     LateralPrefrontalTaskSwitcher,
     TaskArbitrationResult,
 )
+from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
+    LocusCoeruleusNoradrenalineEngine,
+    NoradrenergicState,
+)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -161,6 +165,10 @@ from hbllm.hcir.world.object_state_graph import (
 )
 from hbllm.hcir.world.optical_ray_projection import (
     OpticalRayProjector,
+)
+from hbllm.hcir.world.parahippocampal_context import (
+    ParahippocampalContextEngine,
+    SpatialContextSchema,
 )
 from hbllm.hcir.world.parietal_coordinate_transform import (
     EgocentricCoordinate,
@@ -204,6 +212,10 @@ from hbllm.hcir.world.retrosplenial_landmark_anchor import (
 )
 from hbllm.hcir.world.rule_induction import (
     RuleInductionEngine,
+)
+from hbllm.hcir.world.somatosensory_haptic import (
+    HapticAffordanceFeedback,
+    SomatosensoryHapticEngine,
 )
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
@@ -688,6 +700,17 @@ class AutonomousEpistemicEngine:
 
         # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
         self.pulvinar_router: PulvinarAttentionRouter = PulvinarAttentionRouter()
+
+        # Round 14 Faculty: Parahippocampal Scene Schemas & Topological Recognition (Epstein / Bar)
+        self.parahippocampal_context: ParahippocampalContextEngine = ParahippocampalContextEngine()
+
+        # Round 14 Faculty: Locus Coeruleus Noradrenergic Exploration-Exploitation Switch (Aston-Jones / Cohen)
+        self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine = (
+            LocusCoeruleusNoradrenalineEngine()
+        )
+
+        # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
+        self.somatosensory_haptic: SomatosensoryHapticEngine = SomatosensoryHapticEngine()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2444,6 +2467,63 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.feedback_arc_set()
+
+    def classify_spatial_context(
+        self,
+        boundary_grid: np.ndarray,
+    ) -> SpatialContextSchema:
+        """Classify environmental envelope into an archetypal spatial schema (Epstein-Bar)."""
+        schema = self.parahippocampal_context.analyze_environmental_envelope(boundary_grid)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(schema.to_causal_predicate())
+        return schema
+
+    def update_noradrenergic_gain(
+        self,
+        immediate_utility: float,
+        progress_made: bool,
+    ) -> NoradrenergicState:
+        """Calibrate LC exploration-exploitation regime and softmax temperature (Aston-Jones-Cohen)."""
+        state = self.locus_coeruleus.update_gain_state(
+            immediate_utility=immediate_utility,
+            progress_made=progress_made,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def process_haptic_surface_feedback(
+        self,
+        position: tuple[int, int],
+        expected_displacement: tuple[float, float],
+        actual_displacement: tuple[float, float],
+    ) -> HapticAffordanceFeedback:
+        """Infer surface friction, drag, and traction efficiency from kinesthetic error (Craig-Kaas)."""
+        feedback = self.somatosensory_haptic.process_kinesthetic_feedback(
+            position=position,
+            expected_displacement=expected_displacement,
+            actual_displacement=actual_displacement,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(
+                feedback.inferred_profile.to_causal_predicate()
+            )
+        return feedback
+
+    def condense_graph_scc_metagraph(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> tuple[dict[int, set[str]], list[tuple[int, int]]]:
+        """Condense directed graph strongly connected components (SCCs) into a DAG metagraph."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.condense_scc_metagraph()
 
     @property
     def phase(self) -> EpistemicPhase:

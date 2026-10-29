@@ -2393,6 +2393,108 @@ class CognitiveGraph:
 
         return feedback_edges, topological_order
 
+    def strongly_connected_components(
+        self,
+    ) -> list[set[str]]:
+        """Compute Strongly Connected Components (SCC) of the directed graph using Tarjan's algorithm.
+
+        Returns:
+            List of sets of node IDs, where each set represents a maximal strongly connected component.
+        """
+        all_nodes = sorted(list(self._nodes.keys()))
+        if not all_nodes:
+            return []
+
+        adj: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+        for edge in self._edges.values():
+            sources = [s for s in edge.sources if s in adj]
+            targets = [t for t in edge.targets if t in adj]
+            for s in sources:
+                for t in targets:
+                    if s != t:
+                        adj[s].add(t)
+
+        index = 0
+        indices: dict[str, int] = {}
+        lowlinks: dict[str, int] = {}
+        on_stack: set[str] = set()
+        stack: list[str] = []
+        sccs: list[set[str]] = []
+
+        for node in all_nodes:
+            if node not in indices:
+                call_stack: list[tuple[str, int, list[str]]] = [(node, 0, sorted(list(adj[node])))]
+                indices[node] = index
+                lowlinks[node] = index
+                index += 1
+                stack.append(node)
+                on_stack.add(node)
+
+                while call_stack:
+                    curr, neighbor_idx, neighbors = call_stack[-1]
+                    if neighbor_idx < len(neighbors):
+                        nxt = neighbors[neighbor_idx]
+                        call_stack[-1] = (curr, neighbor_idx + 1, neighbors)
+                        if nxt not in indices:
+                            indices[nxt] = index
+                            lowlinks[nxt] = index
+                            index += 1
+                            stack.append(nxt)
+                            on_stack.add(nxt)
+                            call_stack.append((nxt, 0, sorted(list(adj[nxt]))))
+                        elif nxt in on_stack:
+                            lowlinks[curr] = min(lowlinks[curr], indices[nxt])
+                    else:
+                        call_stack.pop()
+                        if call_stack:
+                            parent = call_stack[-1][0]
+                            lowlinks[parent] = min(lowlinks[parent], lowlinks[curr])
+
+                        if lowlinks[curr] == indices[curr]:
+                            component: set[str] = set()
+                            while True:
+                                w = stack.pop()
+                                on_stack.remove(w)
+                                component.add(w)
+                                if w == curr:
+                                    break
+                            sccs.append(component)
+
+        return sorted(sccs, key=lambda comp: min(comp) if comp else "")
+
+    def condense_scc_metagraph(
+        self,
+    ) -> tuple[dict[int, set[str]], list[tuple[int, int]]]:
+        """Condense directed graph SCCs into an acyclic metagraph (DAG).
+
+        Returns:
+            Tuple of (scc_map, metagraph_edges), where:
+              scc_map: mapping scc_id -> set of original node IDs.
+              metagraph_edges: list of directed edges (scc_u, scc_v) with scc_u != scc_v forming a DAG.
+        """
+        sccs = self.strongly_connected_components()
+        node_to_scc: dict[str, int] = {}
+        scc_map: dict[int, set[str]] = {}
+
+        for scc_id, comp in enumerate(sccs):
+            scc_map[scc_id] = comp
+            for nid in comp:
+                node_to_scc[nid] = scc_id
+
+        metagraph_edges_set: set[tuple[int, int]] = set()
+
+        for edge in self._edges.values():
+            for s in edge.sources:
+                src_scc = node_to_scc.get(s)
+                if src_scc is None:
+                    continue
+                for t in edge.targets:
+                    tgt_scc = node_to_scc.get(t)
+                    if tgt_scc is not None and src_scc != tgt_scc:
+                        metagraph_edges_set.add((src_scc, tgt_scc))
+
+        return scc_map, sorted(list(metagraph_edges_set))
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
