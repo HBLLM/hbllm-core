@@ -188,6 +188,17 @@ class AnteriorCingulateConflictMonitor:
             )
         return self.frustration
 
+    def record_conflict(self, reason: str = "execution_conflict", severity: float = 0.5) -> None:
+        """Record a cognitive conflict / execution failure, elevating frustration and activating conflict."""
+        self.frustration = min(1.0, self.frustration + severity)
+        self.active_conflict = self.frustration >= self.frustration_threshold
+        logger.info(
+            "ACC Conflict Monitor: Conflict recorded [%s, severity=%.2f], current frustration=%.2f",
+            reason,
+            severity,
+            self.frustration,
+        )
+
     def evaluate_snn_hazard_conflict(
         self,
         target_pos: tuple[int, int],

@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
@@ -113,6 +114,58 @@ class FrontopolarSubgoal:
             if any(feat not in held_features for feat in self.prerequisite_features):
                 return False
         return True
+
+    def compile_to_instructions(self, author: str = "apfc_ba10") -> list[Instruction]:
+        """Compile frontopolar executive subgoal into primitive HCIR bytecode instructions."""
+        instructions: list[Instruction] = []
+        for pre in self.causal_preconditions:
+            instructions.append(
+                Instruction(
+                    opcode=Opcode.ASSERT,
+                    params={
+                        "type": "precondition",
+                        "variable": pre.variable,
+                        "operator": pre.operator,
+                        "value": str(pre.value),
+                        "subgoal_id": self.subgoal_id,
+                        "author": author,
+                    },
+                    cost_estimate=2,
+                )
+            )
+
+        instructions.append(
+            Instruction(
+                opcode=Opcode.ASSERT,
+                params={
+                    "type": "subgoal_target",
+                    "subgoal_id": self.subgoal_id,
+                    "subgoal_type": self.subgoal_type.value,
+                    "target_pos": list(self.target_entity_pos),
+                    "destination": list(self.target_destination),
+                    "priority": self.priority,
+                    "author": author,
+                },
+                cost_estimate=5,
+            )
+        )
+
+        capability_name = f"navigation.{self.subgoal_type.value.lower()}"
+        instructions.append(
+            Instruction(
+                opcode=Opcode.EXECUTE,
+                params={
+                    "capability": capability_name,
+                    "params": {
+                        "subgoal_id": self.subgoal_id,
+                        "target_pos": list(self.target_entity_pos),
+                        "destination": list(self.target_destination),
+                    },
+                },
+                cost_estimate=10,
+            )
+        )
+        return instructions
 
 
 class FrontopolarSubgoalStack:
@@ -568,6 +621,17 @@ class FrontopolarSubgoalStack:
         for sg in self.stack:
             ops.extend(sg.to_transaction_operations())
         return ops
+
+    def compile_to_instruction_stream(self, author: str = "apfc_ba10") -> InstructionStream:
+        """Compile active frontopolar subgoals into an executable HCIR InstructionStream."""
+        stream = InstructionStream(
+            author=author,
+            description=f"Frontopolar Subgoal Execution Plan (depth={self.depth})",
+        )
+        for sg in self.stack:
+            for ins in sg.compile_to_instructions(author=author):
+                stream.append(ins)
+        return stream
 
 
 @dataclass

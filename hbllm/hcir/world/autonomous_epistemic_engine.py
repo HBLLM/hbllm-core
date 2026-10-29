@@ -23,8 +23,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from hbllm.hcir.world_kernel import WorldKernel
 
+import uuid
+
 import numpy as np
 
+from hbllm.hcir.bytecode import InstructionStream
 from hbllm.hcir.graph import (
     ConstraintNode,
     EventNode,
@@ -32,13 +35,17 @@ from hbllm.hcir.graph import (
     ObservationNode,
     SkillNode,
 )
+from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
+from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
+from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
 from hbllm.hcir.world.active_inference import (
     ActiveInferenceEngine,
@@ -1402,6 +1409,109 @@ class AutonomousEpistemicEngine:
         self.skill_synthesizer.min_support_traces = min_support
         return self.skill_synthesizer.induce_all_recurrent_skills()
 
+    def update_ballistic_particles(
+        self,
+        particles: list[dict[str, Any]],
+        grid: np.ndarray,
+        barrier_features: set[int] | None = None,
+        absorbing_features: set[int] | None = None,
+        deflection_mode: str = "specular_normal",
+        horizon: int | None = None,
+    ) -> None:
+        """Project ballistic particle kinematic trajectories into spatiotemporal collision cones."""
+        barriers = (
+            barrier_features
+            if barrier_features is not None
+            else self.symbolic_theory.barrier_features
+        )
+        self.collision_cones.update_ballistic_particle_trajectories(
+            particles=particles,
+            grid=grid,
+            barrier_features=barriers,
+            absorbing_features=absorbing_features,
+            deflection_mode=deflection_mode,
+            horizon=horizon,
+        )
+
+    async def execute_subgoal_program_with_checkpoint(
+        self,
+        stream: InstructionStream,
+        workspace: HCIRWorkspaceState,
+        services: KernelServices | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Execute frontopolar subgoal instruction stream with transactional checkpoint and rollback VM."""
+        sim_branch = f"subgoal_sim_{uuid.uuid4().hex[:8]}"
+        workspace.fork(sim_branch)
+        target_version = workspace.snapshot_manager.current_version
+        sim_ws = workspace.get_branch(sim_branch) or workspace
+
+        if services is None:
+            tx_mgr = TransactionManager(sim_ws)
+            resolver = CapabilityResolver()
+            scheduler = KernelInstructionScheduler()
+            services = KernelServices(
+                workspace=sim_ws,
+                transaction_manager=tx_mgr,
+                capability_resolver=resolver,
+                scheduler=scheduler,
+            )
+
+        interpreter = HCIRInterpreter(sim_ws, services)
+        exec_result = await interpreter.execute(stream)
+        has_errors = (
+            any(a.severity == "error" for a in exec_result.annotations) or not exec_result.success
+        )
+
+        if not has_errors:
+            if sim_ws is not workspace:
+                for node in sim_ws.graph.all_nodes():
+                    existing = workspace.get_node(node.id)
+                    if existing is None or node.model_dump() != existing.model_dump():
+                        workspace.upsert_node(node.model_copy(deep=True), author="subgoal_exec")
+                workspace.drop_branch(sim_branch)
+            return ({"status": "success", "result": exec_result, "branch": sim_branch}, True)
+        else:
+            if sim_ws is not workspace:
+                workspace.drop_branch(sim_branch)
+            workspace.snapshot_manager.record_kernel_event(
+                EventType.ROLLBACK,
+                {"branch": sim_branch, "target_version": target_version},
+            )
+            err_msg = exec_result.error or (
+                exec_result.annotations[0].assertion
+                if exec_result.annotations
+                else "execution_error"
+            )
+            self.acc_conflict_monitor.record_conflict(f"subgoal_failed_{err_msg}", severity=0.6)
+            self.transition_to_phase(EpistemicPhase.REPLANNING)
+            return ({"status": "failed", "error": err_msg}, False)
+
+    def run_subgoal_program_sync(
+        self,
+        stream: InstructionStream,
+        workspace: HCIRWorkspaceState,
+        services: KernelServices | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Synchronously execute subgoal instruction stream with transactional checkpoint and rollback VM."""
+        import asyncio
+        import concurrent.futures
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(
+                    asyncio.run,
+                    self.execute_subgoal_program_with_checkpoint(stream, workspace, services),
+                ).result()
+        else:
+            return asyncio.run(
+                self.execute_subgoal_program_with_checkpoint(stream, workspace, services)
+            )
+
     def evaluate_truth_value(
         self,
         variable_name: str,
@@ -1443,6 +1553,11 @@ class AutonomousEpistemicEngine:
     @phase.setter
     def phase(self, value: EpistemicPhase) -> None:
         self.transition_to_phase(value, reason="state_assignment")
+
+    @property
+    def current_phase(self) -> EpistemicPhase:
+        """Active cognitive lifecycle phase (alias)."""
+        return self._phase
 
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
@@ -2132,6 +2247,10 @@ class AutonomousEpistemicEngine:
             action_data=action_data,
         )
 
+        # Biological Faculty: Popperian Inductive Hypothesis Consolidation & Retraction (Track 2)
+        self.working_memory.hypothesis_engine.export_to_world_theory(self.symbolic_theory)
+        self.working_memory.hypothesis_engine.retract_refuted_rules(self.symbolic_theory)
+
         # Biological Faculty: Entorhinal Grid Cell Continuous Attractor Path Integration
         if prev_av_pos is not None and self.avatar_pos is not None:
             delta_r = float(self.avatar_pos[0] - prev_av_pos[0])
@@ -2249,6 +2368,48 @@ class AutonomousEpistemicEngine:
                             )
                         )
             self.working_memory.last_scene_graph = current_scene_graph
+
+        # Biological Faculty: Thalamocortical Gamma-Band Phase Synchronization & TRN Gating (Track 1)
+        if curr_grid.ndim == 2:
+            ventral_tokens = self.it_segmenter.segment_objects(
+                curr_grid,
+                background_feature=self.bg_feature,
+                avatar_features=self.avatar_features,
+            )
+            feature_entities = [
+                {
+                    "pos": t.centroid,
+                    "feature": t.feature_id,
+                    "area": t.area,
+                    "role": (
+                        "goal"
+                        if t.feature_id in self.symbolic_theory.goal_features
+                        else (
+                            "barrier"
+                            if t.feature_id in self.symbolic_theory.barrier_features
+                            else "unknown"
+                        )
+                    ),
+                }
+                for t in ventral_tokens
+            ]
+            if self.avatar_pos is not None:
+                feature_entities.append(
+                    {
+                        "pos": self.avatar_pos,
+                        "feature": self.avatar_feature or 999,
+                        "area": 1,
+                        "role": "avatar",
+                    }
+                )
+            target_feat = {"role": "goal"} if self.symbolic_theory.goal_features else None
+            bound_bundles = self.synchronize_and_bind_entities(
+                feature_entities, target_features=target_feat
+            )
+            self.working_memory.active_bound_bundles = bound_bundles
+            for bundle in bound_bundles:
+                if bundle.is_bound:
+                    self.symbolic_theory.record_causal_predicate(bundle.to_causal_predicate())
 
         # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
         if is_lost:

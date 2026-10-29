@@ -1592,7 +1592,7 @@ class CognitiveGraph:
 
     # ── Node Operations ──────────────────────────────────────────────
 
-    def add_node(self, node: HCIRNode) -> None:
+    def add_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add a node to the graph.  Raises ValueError on duplicate ID."""
         if node.id in self._nodes:
             raise ValueError(f"Duplicate node ID: {node.id}")
@@ -1621,7 +1621,7 @@ class CognitiveGraph:
             except Exception as e:
                 logger.debug("CognitiveGraph: native add_node error: %s", e)
 
-    def upsert_node(self, node: HCIRNode) -> None:
+    def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add or replace a node in the graph."""
         old = self._nodes.get(node.id)
         if old is not None:

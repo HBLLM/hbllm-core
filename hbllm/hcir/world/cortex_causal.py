@@ -117,6 +117,11 @@ class HCIRSymbolicWorldTheory:
     tool_barrier_incompatibilities: dict[int, set[int]] = field(default_factory=dict)
     distal_actuations: list[dict[str, Any]] = field(default_factory=list)
 
+    @property
+    def causal_predicates(self) -> list[CausalPredicate]:
+        """Declarative causal predicates recorded in the symbolic world theory."""
+        return self.domain_predicates
+
     def record_causal_predicate(self, predicate: CausalPredicate) -> None:
         """Record an empirical causal predicate into the symbolic world theory."""
         self.domain_predicates.append(predicate)

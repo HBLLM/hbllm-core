@@ -22,8 +22,14 @@ from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.cortex_causal import CausalPredicate
+from hbllm.hcir.world.elastic_particle_induction import (
+    DeflectionMode,
+    ParticleKinematicsSimulator,
+)
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from hbllm.hcir.world.kinetic_stream import KineticEntity
 
 logger = logging.getLogger(__name__)
@@ -286,6 +292,65 @@ class SpatiotemporalCollisionCones:
                 )
                 self.persistent_velocities[t_feat] = (vr, vc)
                 projected_feats.add(t_feat)
+
+    def update_ballistic_particle_trajectories(
+        self,
+        particles: list[dict[str, Any]],
+        grid: np.ndarray,
+        barrier_features: set[int],
+        absorbing_features: set[int] | None = None,
+        deflection_mode: DeflectionMode | str = DeflectionMode.SPECULAR_NORMAL,
+        horizon: int | None = None,
+    ) -> None:
+        """Extrapolate forward space-time collision trajectories for ballistic particles.
+
+        Leverages ParticleKinematicsSimulator to accurately model:
+        1. Specular normal ray reflections off angled and static barrier surfaces.
+        2. Boundary rebounds and multi-rebound reflections across forward time horizons.
+        3. Absorbing barrier cell terminations.
+        """
+        T = horizon or self.default_horizon
+        H, W = grid.shape
+        for t in range(1, T + 1):
+            if t not in self.step_occupied_cells:
+                self.step_occupied_cells[t] = set()
+
+        for idx, p in enumerate(particles):
+            pos = p.get("pos", (0, 0))
+            vel = p.get("velocity", (0, 0))
+            feat_id = p.get("feature_id", 0)
+            entity_id = p.get("entity_id", f"ballistic_{idx}")
+
+            if vel == (0, 0):
+                continue
+
+            traj = ParticleKinematicsSimulator.simulate_trajectory(
+                grid=grid,
+                start_coord=pos,
+                initial_velocity=vel,
+                barrier_colors=barrier_features,
+                deflection_mode=deflection_mode,
+                absorbing_colors=absorbing_features,
+                max_steps=T,
+            )
+
+            sim_pos = traj[:T]
+            for step_idx, step_coord in enumerate(sim_pos, start=1):
+                if 0 <= step_coord[0] < H and 0 <= step_coord[1] < W:
+                    self.step_occupied_cells[step_idx].add(step_coord)
+                    self.step_occupied_by_feat.setdefault(feat_id, {}).setdefault(
+                        step_idx, set()
+                    ).add(step_coord)
+
+            proj = ProjectedTrajectory(
+                entity_id=entity_id,
+                feature_id=feat_id,
+                initial_pos=pos,
+                velocity=vel,
+                positions=sim_pos,
+            )
+            self.projected_trajectories.append(proj)
+            self.persistent_velocities[feat_id] = vel
 
     def is_collision_hazard(
         self,

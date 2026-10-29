@@ -22,6 +22,7 @@ Popperian counterexample refutation, and causal rule abstraction:
 
 import logging
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -144,34 +145,43 @@ class RelationalRuleHypothesis:
         """Compile this hypothesis into a formal first-order CausalPredicate."""
         if self.rule_type == HypothesisType.REMOTE_MECHANISM:
             return CausalPredicate(
-                variable="contact_feature",
+                variable=f"inductive_rule:{self.rule_id}",
                 operator="==",
                 value=self.premise_feature,
                 relation="clears_barrier",
-                target_entity=str(self.target_feature) if self.target_feature is not None else "",
+                target_entity=str(self.target_feature)
+                if self.target_feature is not None
+                else self.rule_id,
             )
         elif self.rule_type == HypothesisType.HAZARD_CONTACT:
             return CausalPredicate(
-                variable="feature_id",
+                variable=f"inductive_rule:{self.rule_id}",
                 operator="==",
                 value=self.premise_feature,
                 relation="lethal_hazard",
+                target_entity=str(self.premise_feature)
+                if self.premise_feature is not None
+                else self.rule_id,
             )
         elif self.rule_type == HypothesisType.ACTION_MUTATION:
             return CausalPredicate(
-                variable="action_id",
+                variable=f"inductive_rule:{self.rule_id}",
                 operator="==",
                 value=self.action_id,
                 relation="transforms_to",
-                target_entity=str(self.result_feature) if self.result_feature is not None else "",
+                target_entity=str(self.result_feature)
+                if self.result_feature is not None
+                else self.rule_id,
             )
         else:
             return CausalPredicate(
-                variable="feature_id",
+                variable=f"inductive_rule:{self.rule_id}",
                 operator="==",
                 value=self.premise_feature,
                 relation="contact_transform",
-                target_entity=str(self.result_feature) if self.result_feature is not None else "",
+                target_entity=str(self.result_feature)
+                if self.result_feature is not None
+                else self.rule_id,
             )
 
 
@@ -422,6 +432,29 @@ class InductiveHypothesisEngine:
         )
         self.falsifier: PopperianFalsifier = PopperianFalsifier()
 
+    def propose_hypothesis(
+        self,
+        rule_type: HypothesisType,
+        premise_feature: int | None = None,
+        target_feature: int | None = None,
+        result_feature: int | None = None,
+        action_id: Any = None,
+        consequence: str = "",
+    ) -> RelationalRuleHypothesis:
+        """Explicitly propose an inductive relational rule hypothesis."""
+        rule_id = f"hyp_{rule_type.value}_{premise_feature}_{target_feature}_{uuid.uuid4().hex[:6]}"
+        hyp = RelationalRuleHypothesis(
+            rule_id=rule_id,
+            rule_type=rule_type,
+            premise_feature=premise_feature,
+            target_feature=target_feature,
+            result_feature=result_feature,
+            action_id=action_id,
+            description=consequence,
+        )
+        self.hypotheses[rule_id] = hyp
+        return hyp
+
     def observe_transition(
         self,
         prev_grid: np.ndarray,
@@ -509,6 +542,7 @@ class InductiveHypothesisEngine:
         """Ground confirmed inductive rules into first-order HCIR CausalPredicates."""
         for hyp in self.get_confirmed_rules():
             pred = hyp.to_causal_predicate()
+            theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                 if hyp.target_feature is not None:
                     theory.barrier_features.add(hyp.target_feature)
@@ -521,8 +555,49 @@ class InductiveHypothesisEngine:
                             target_entity=str(hyp.premise_feature),
                         )
                     )
+                if hyp.premise_feature is not None:
+                    theory.actuator_features.add(hyp.premise_feature)
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                 theory.barrier_predicates.append(pred)
+                if hyp.premise_feature is not None:
+                    theory.barrier_features.add(hyp.premise_feature)
+            elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
+                if hyp.premise_feature is not None:
+                    theory.actuator_features.add(hyp.premise_feature)
+
+    def retract_refuted_rules(self, theory: HCIRSymbolicWorldTheory) -> list[str]:
+        """Remove refuted hypotheses from active symbolic world theory predicates."""
+        retracted_ids = []
+        for hyp in self.hypotheses.values():
+            if hyp.status == HypothesisStatus.REFUTED:
+                retracted_ids.append(hyp.rule_id)
+                if hyp.rule_type == HypothesisType.HAZARD_CONTACT:
+                    if hyp.premise_feature is not None:
+                        theory.barrier_features.discard(hyp.premise_feature)
+                elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
+                    if hyp.target_feature is not None:
+                        theory.barrier_features.discard(hyp.target_feature)
+                    if hyp.premise_feature is not None:
+                        theory.actuator_features.discard(hyp.premise_feature)
+                elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
+                    if hyp.premise_feature is not None:
+                        theory.actuator_features.discard(hyp.premise_feature)
+                else:
+                    if hyp.target_feature is not None:
+                        theory.barrier_features.discard(hyp.target_feature)
+                    if hyp.premise_feature is not None:
+                        theory.actuator_features.discard(hyp.premise_feature)
+                theory.domain_predicates = [
+                    p
+                    for p in theory.domain_predicates
+                    if hyp.rule_id not in p.variable and p.target_entity != hyp.rule_id
+                ]
+                theory.barrier_predicates = [
+                    p
+                    for p in theory.barrier_predicates
+                    if p.target_entity != str(hyp.premise_feature) and hyp.rule_id not in p.variable
+                ]
+        return retracted_ids
 
     def reset_episode(self, retain_confirmed: bool = True) -> None:
         """Reset episodic hypotheses between levels or attempts."""

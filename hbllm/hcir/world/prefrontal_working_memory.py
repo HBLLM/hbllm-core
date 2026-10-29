@@ -218,6 +218,7 @@ class PrefrontalWorkingMemory:
 
         self.last_metacognitive_assessment: Any | None = None
         self.last_scene_graph: Any | None = None
+        self.active_bound_bundles: list[Any] = []
 
         self.visuospatial: VisuospatialWorkingMemory = VisuospatialWorkingMemory()
         self.body_schema: ExtendedBodySchema = ExtendedBodySchema()
@@ -374,6 +375,7 @@ class PrefrontalWorkingMemory:
         self.visuospatial.reset_episode(retain_long_term=retain_long_term)
         self.body_schema.reset_episode(retain_dynamics=retain_long_term)
         self.subgoal_stack.reset_episode()
+        self.active_bound_bundles.clear()
         self.macro_plan.clear()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
