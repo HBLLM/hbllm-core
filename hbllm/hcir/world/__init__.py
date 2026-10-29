@@ -37,6 +37,15 @@ from hbllm.hcir.world.frontopolar_subgoal_tree import (
     SubgoalTreeNode,
     SubgoalTreeStatus,
 )
+from hbllm.hcir.world.habenula_striatum_opponency import (
+    DualValueOpponencyCortex,
+    OpponencyRegime,
+    OpponencyValueState,
+)
+from hbllm.hcir.world.inferotemporal_shape_hasher import (
+    InferotemporalShapeHasher,
+    ShapeArchetypeSignature,
+)
 from hbllm.hcir.world.insula_allostasis import (
     AllostaticRegime,
     InteroceptiveAllostasisCortex,
@@ -47,6 +56,10 @@ from hbllm.hcir.world.object_state_graph import (
     ObjectStateGraphPlanner,
     RelationalGraphMatcher,
     SalientObject,
+)
+from hbllm.hcir.world.parietal_potential_field import (
+    ParietalPotentialFieldNavigator,
+    PotentialFieldVector,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -112,6 +125,7 @@ __all__ = [
     "CounterfactualOutcome",
     "DefaultPerceptionAdapter",
     "DisagreementReport",
+    "DualValueOpponencyCortex",
     "EnsemblePrediction",
     "EntityRole",
     "EpistemicFeedbackAssimilator",
@@ -120,12 +134,17 @@ __all__ = [
     "EpistemicTruthValue",
     "EuclideanDistanceTransformResult",
     "HCIRSymbolicWorldTheory",
+    "InferotemporalShapeHasher",
     "InteroceptiveAllostasisCortex",
     "InteroceptiveState",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
+    "OpponencyRegime",
+    "OpponencyValueState",
+    "ParietalPotentialFieldNavigator",
     "PerceptionFrame",
     "PerceptionRegistry",
+    "PotentialFieldVector",
     "PredictiveRealityModel",
     "PredictorDisagreementAnalyzer",
     "PredictorWeightManager",
@@ -136,6 +155,7 @@ __all__ = [
     "RelationalGraphMatcher",
     "ReversibilityEngine",
     "SalientObject",
+    "ShapeArchetypeSignature",
     "SpatialDistanceTransformEngine",
     "SpatialEntity",
     "StateDifferenceComputer",

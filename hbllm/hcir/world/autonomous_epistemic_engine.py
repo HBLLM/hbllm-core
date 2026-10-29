@@ -29,6 +29,7 @@ import numpy as np
 
 from hbllm.hcir.bytecode import InstructionStream
 from hbllm.hcir.graph import (
+    CognitiveGraph,
     ConstraintNode,
     EventNode,
     GoalNode,
@@ -92,9 +93,17 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.frontopolar_subgoal_tree import (
     RecursiveSubgoalTree,
 )
+from hbllm.hcir.world.habenula_striatum_opponency import (
+    DualValueOpponencyCortex,
+    OpponencyValueState,
+)
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
+)
+from hbllm.hcir.world.inferotemporal_shape_hasher import (
+    InferotemporalShapeHasher,
+    ShapeArchetypeSignature,
 )
 from hbllm.hcir.world.insula_allostasis import (
     InteroceptiveAllostasisCortex,
@@ -134,6 +143,10 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     HeadingOrientation,
     ParietalCoordinateTransformer,
     RetrosplenialCoordinateTransformer,
+)
+from hbllm.hcir.world.parietal_potential_field import (
+    ParietalPotentialFieldNavigator,
+    PotentialFieldVector,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -548,6 +561,17 @@ class AutonomousEpistemicEngine:
         self.distance_transform_engine: SpatialDistanceTransformEngine = (
             SpatialDistanceTransformEngine()
         )
+
+        # Round 8 Faculty: Ventral Striatum & Lateral Habenula Dual Value Opponency (Matsumoto & Hikosaka / Cools)
+        self.value_opponency: DualValueOpponencyCortex = DualValueOpponencyCortex()
+
+        # Round 8 Faculty: Posterior Parietal Cortex (PPC) Potential Field Navigation (Andersen & Buneo / Khatib)
+        self.potential_field_navigator: ParietalPotentialFieldNavigator = (
+            ParietalPotentialFieldNavigator()
+        )
+
+        # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
+        self.shape_hasher: InferotemporalShapeHasher = InferotemporalShapeHasher()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -1852,6 +1876,66 @@ class AutonomousEpistemicEngine:
         if self.symbolic_theory is not None:
             self.symbolic_theory.record_causal_predicate(result.to_causal_predicate())
         return result
+
+    def update_value_opponency(
+        self,
+        state_key: tuple[int, int] | str,
+        reward_plus: float,
+        punishment_minus: float,
+        next_state_key: tuple[int, int] | str | None = None,
+    ) -> OpponencyValueState:
+        """Update dual appetitive and aversive values and register opponency predicate."""
+        state = self.value_opponency.update_transition(
+            state_key=state_key,
+            reward_plus=reward_plus,
+            punishment_minus=punishment_minus,
+            next_state_key=next_state_key,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def compute_navigational_force(
+        self,
+        goal_pos: tuple[int, int],
+        agent_pos: tuple[int, int] | None = None,
+        obstacles: set[tuple[int, int]] | None = None,
+        grid_shape: tuple[int, int] | None = None,
+    ) -> PotentialFieldVector:
+        """Synthesize attractive and repulsive potential forces into a single navigation vector."""
+        pos = agent_pos or self.avatar_pos or (0, 0)
+        edt_result = self.compute_spatial_distance_field(obstacles=obstacles, grid_shape=grid_shape)
+        vec = self.potential_field_navigator.compute_navigation_vector(
+            agent_pos=pos,
+            goal_pos=goal_pos,
+            edt_result=edt_result,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        return vec
+
+    def hash_entity_shape(
+        self, coordinates: set[tuple[int, int]] | list[tuple[int, int]]
+    ) -> ShapeArchetypeSignature:
+        """Compute translation- and scale-invariant Hu moments and canonical archetype hash."""
+        sig = self.shape_hasher.compute_signature(coordinates)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(sig.to_causal_predicate())
+        return sig
+
+    def extract_minimal_causal_skeleton(
+        self, graph: CognitiveGraph | None = None
+    ) -> CognitiveGraph:
+        """Extract the minimal transitive reduction DAG of the causal or workspace graph."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.transitive_reduction()
 
     @property
     def phase(self) -> EpistemicPhase:

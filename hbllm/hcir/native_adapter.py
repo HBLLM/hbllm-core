@@ -366,6 +366,63 @@ class NativeGraphAdapter:
 
         return order
 
+    def transitive_reduction(self) -> NativeGraphAdapter:
+        """Compute the transitive reduction of the directed graph (DAG).
+
+        Returns a new NativeGraphAdapter with identical nodes and the minimal edge set
+        preserving the reachability relation (Aho, Garey, & Ullman 1972).
+        For every directed edge u -> v, if an alternative path of length >= 2 exists,
+        the edge u -> v is redundant and pruned.
+        """
+        reduced = self.snapshot()
+        all_node_ids = {
+            nid
+            for nid in (self._node_ids if self._native is not None else self._py_nodes)
+            if nid not in self._removed_nodes
+        }
+
+        # Build adjacency mapping: u -> list of (edge_id, target_v)
+        adj: dict[str, list[tuple[str, str]]] = {nid: [] for nid in all_node_ids}
+        for nid in all_node_ids:
+            for edge in self.edges_from(nid):
+                eid = edge.get("id", "")
+                for tgt in edge.get("targets", []):
+                    if tgt in all_node_ids:
+                        adj[nid].append((eid, tgt))
+
+        # Check reachability avoiding the direct edge
+        redundant_edge_ids: set[str] = set()
+
+        for u in all_node_ids:
+            for direct_eid, v in adj[u]:
+                visited: set[str] = {u}
+                queue: deque[str] = deque()
+                found_alternate_path = False
+
+                for other_eid, w in adj[u]:
+                    if (other_eid, w) != (direct_eid, v) and w not in visited:
+                        visited.add(w)
+                        queue.append(w)
+
+                while queue:
+                    curr = queue.popleft()
+                    if curr == v:
+                        found_alternate_path = True
+                        break
+                    for _, next_node in adj.get(curr, []):
+                        if next_node not in visited:
+                            visited.add(next_node)
+                            queue.append(next_node)
+
+                if found_alternate_path:
+                    redundant_edge_ids.add(direct_eid)
+
+        # Remove redundant edges from the reduced adapter
+        for reid in redundant_edge_ids:
+            reduced.remove_edge(reid)
+
+        return reduced
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

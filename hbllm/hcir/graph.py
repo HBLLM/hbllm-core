@@ -24,6 +24,7 @@ Design invariants:
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 import uuid
@@ -1933,6 +1934,57 @@ class CognitiveGraph:
                     queue.append(neighbor)
 
         return order
+
+    def transitive_reduction(self) -> CognitiveGraph:
+        """Compute the transitive reduction of the cognitive graph DAG.
+
+        Returns a new CognitiveGraph with identical nodes and a minimal edge set
+        preserving the reachability relation (Aho, Garey, & Ullman 1972).
+        For every directed edge u -> v, if an alternative path of length >= 2 exists,
+        the edge u -> v is redundant and pruned.
+        """
+        reduced_graph = CognitiveGraph(enable_native_substrate=False)
+        for node in self.all_nodes():
+            reduced_graph.add_node(copy.deepcopy(node))
+
+        all_ids = set(self._nodes.keys())
+        adj: dict[str, list[tuple[str, str]]] = {nid: [] for nid in all_ids}
+        for nid in all_ids:
+            for edge in self.edges_from(nid):
+                for tgt in edge.targets:
+                    if tgt in all_ids:
+                        adj[nid].append((edge.id, tgt))
+
+        redundant_edge_ids: set[str] = set()
+        for u in all_ids:
+            for direct_eid, v in adj[u]:
+                visited: set[str] = {u}
+                queue: deque[str] = deque()
+                found_alt = False
+
+                for other_eid, w in adj[u]:
+                    if (other_eid, w) != (direct_eid, v) and w not in visited:
+                        visited.add(w)
+                        queue.append(w)
+
+                while queue:
+                    curr = queue.popleft()
+                    if curr == v:
+                        found_alt = True
+                        break
+                    for _, next_node in adj.get(curr, []):
+                        if next_node not in visited:
+                            visited.add(next_node)
+                            queue.append(next_node)
+
+                if found_alt:
+                    redundant_edge_ids.add(direct_eid)
+
+        for edge in self.all_edges():
+            if edge.id not in redundant_edge_ids:
+                reduced_graph.add_edge(copy.deepcopy(edge))
+
+        return reduced_graph
 
     # ── Indexed Queries ──────────────────────────────────────────────
 
