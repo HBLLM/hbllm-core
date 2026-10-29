@@ -1108,3 +1108,174 @@ class PerceptionEngine:
                 },
             )
         ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Gibsonian Ecological Affordance Extractor & Topological Contours
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class AffordanceRole(StrEnum):
+    """Gibsonian invariant ecological affordances for 2D spatial lattices."""
+
+    TRAVERSABLE = "traversable"
+    STATIC_BARRIER = "static_barrier"
+    MOVABLE_CARGO = "movable_cargo"
+    ACTUATABLE_SWITCH = "actuatable_switch"
+    LETHAL_HAZARD = "lethal_hazard"
+    COLLECTIBLE_GOAL = "collectible_goal"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class TopologicalContour:
+    """A closed exterior or interior topological boundary contour."""
+
+    feature_id: int
+    exterior_boundary: list[tuple[int, int]]
+    cavity_loops: list[list[tuple[int, int]]]
+    perimeter_length: int
+    is_enclosed: bool
+    area: int
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export contour as a declarative causal predicate."""
+        return CausalPredicate(
+            variable=f"contour:feature_{self.feature_id}",
+            operator="==",
+            value=f"perimeter:{self.perimeter_length}:area:{self.area}",
+            relation=f"cavities:{len(self.cavity_loops)}:enclosed:{self.is_enclosed}",
+            target_entity=f"feature_{self.feature_id}",
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording topological contour."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"contour_feat_{self.feature_id}",
+                node_data={
+                    "feature_id": self.feature_id,
+                    "perimeter_length": self.perimeter_length,
+                    "area": self.area,
+                    "is_enclosed": self.is_enclosed,
+                    "cavity_count": len(self.cavity_loops),
+                },
+            )
+        ]
+
+
+class GibsonianAffordanceExtractor:
+    """Extracts dense ecological affordance fields and closed topological contours from 2D spatial lattices."""
+
+    def __init__(self) -> None:
+        pass
+
+    def extract_affordance_map(
+        self,
+        grid: np.ndarray,
+        bg_color: int = 0,
+        goal_features: set[int] | None = None,
+        barrier_features: set[int] | None = None,
+        lethal_features: set[int] | None = None,
+        cargo_features: set[int] | None = None,
+        switch_features: set[int] | None = None,
+    ) -> np.ndarray:
+        """Generate a dense affordance matrix mapping each coordinate to an AffordanceRole string.
+
+        Returns:
+            np.ndarray: String array of shape (H, W) containing AffordanceRole values.
+        """
+        H, W = grid.shape
+        affordances = np.full((H, W), AffordanceRole.TRAVERSABLE.value, dtype=object)
+
+        goals = goal_features or set()
+        barriers = barrier_features or set()
+        lethals = lethal_features or set()
+        cargos = cargo_features or set()
+        switches = switch_features or set()
+
+        for r in range(H):
+            for c in range(W):
+                val = int(grid[r, c])
+                if val == bg_color:
+                    affordances[r, c] = AffordanceRole.TRAVERSABLE.value
+                elif val in lethals:
+                    affordances[r, c] = AffordanceRole.LETHAL_HAZARD.value
+                elif val in goals:
+                    affordances[r, c] = AffordanceRole.COLLECTIBLE_GOAL.value
+                elif val in switches:
+                    affordances[r, c] = AffordanceRole.ACTUATABLE_SWITCH.value
+                elif val in cargos:
+                    affordances[r, c] = AffordanceRole.MOVABLE_CARGO.value
+                elif val in barriers:
+                    affordances[r, c] = AffordanceRole.STATIC_BARRIER.value
+                else:
+                    affordances[r, c] = AffordanceRole.STATIC_BARRIER.value
+
+        return affordances
+
+    def extract_topological_contours(
+        self,
+        grid: np.ndarray,
+        bg_color: int = 0,
+    ) -> list[TopologicalContour]:
+        """Extract exterior perimeter coordinates and internal cavity holes for all non-background entities."""
+        H, W = grid.shape
+        unique_feats = [int(f) for f in np.unique(grid) if int(f) != bg_color]
+        contours: list[TopologicalContour] = []
+
+        for feat in unique_feats:
+            mask = grid == feat
+            pts = [(int(r), int(c)) for r, c in np.argwhere(mask)]
+            if not pts:
+                continue
+
+            pt_set = set(pts)
+            exterior: list[tuple[int, int]] = []
+
+            for r, c in pts:
+                is_boundary = False
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < H and 0 <= nc < W) or (nr, nc) not in pt_set:
+                        is_boundary = True
+                        break
+                if is_boundary:
+                    exterior.append((r, c))
+
+            min_r = min(r for r, _ in pts)
+            max_r = max(r for r, _ in pts)
+            min_c = min(c for _, c in pts)
+            max_c = max(c for _, c in pts)
+
+            cavities: list[list[tuple[int, int]]] = []
+            is_enclosed = False
+
+            if max_r - min_r >= 2 and max_c - min_c >= 2:
+                sub_grid = ~(mask[min_r : max_r + 1, min_c : max_c + 1])
+                labeled_sub, num_sub = label(sub_grid)
+
+                for comp_idx in range(1, num_sub + 1):
+                    comp_pts = np.argwhere(labeled_sub == comp_idx)
+                    touches_box_edge = any(
+                        cr == 0 or cr == (max_r - min_r) or cc == 0 or cc == (max_c - min_c)
+                        for cr, cc in comp_pts
+                    )
+                    if not touches_box_edge and len(comp_pts) > 0:
+                        cavity = [(int(cr + min_r), int(cc + min_c)) for cr, cc in comp_pts]
+                        cavities.append(cavity)
+                        is_enclosed = True
+
+            contours.append(
+                TopologicalContour(
+                    feature_id=feat,
+                    exterior_boundary=exterior,
+                    cavity_loops=cavities,
+                    perimeter_length=len(exterior),
+                    is_enclosed=is_enclosed,
+                    area=len(pts),
+                )
+            )
+
+        return contours

@@ -51,6 +51,10 @@ from hbllm.hcir.world.active_inference import (
     ActiveInferenceEngine,
     HierarchicalActiveInferenceEngine,
 )
+from hbllm.hcir.world.active_inference_efe import (
+    ExpectedFreeEnergyEvaluator,
+    ExpectedFreeEnergyScore,
+)
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
@@ -225,7 +229,11 @@ from hbllm.hcir.world.cortex_causal import (
     CausalInductionCortex,
     HCIRSymbolicWorldTheory,
 )
-from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
+from hbllm.hcir.world.cortex_deliberation import (
+    BasalGangliaDecision,
+    BasalGangliaGatingCircuit,
+    PrefrontalDeliberationEngine,
+)
 from hbllm.hcir.world.cortex_episodic import (
     FalsifiableAnalogyEngine,
     HippocampalEpisodicCortex,
@@ -237,8 +245,10 @@ from hbllm.hcir.world.cortex_motor import (
 )
 from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
+    GibsonianAffordanceExtractor,
     OrientedThreat,
     PerceptionEngine,
+    TopologicalContour,
 )
 from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
@@ -445,6 +455,8 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
+        self.efe_evaluator: ExpectedFreeEnergyEvaluator = ExpectedFreeEnergyEvaluator()
+        self.affordance_extractor: GibsonianAffordanceExtractor = GibsonianAffordanceExtractor()
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
         self.deformation_tracker: MorphologicalDeformationTracker = (
@@ -1577,6 +1589,89 @@ class AutonomousEpistemicEngine:
     def episodic_memory(self) -> HippocampalEpisodicCortex:
         """Hippocampal episodic cortex managing experiences and attractor networks (alias)."""
         return self.episodic_cortex
+
+    @property
+    def basal_ganglia(self) -> BasalGangliaGatingCircuit:
+        """Basal Ganglia tri-pathway action arbitration circuit."""
+        return self.deliberation_engine.basal_ganglia
+
+    def arbitrate_basal_ganglia_action(
+        self,
+        candidate_utilities: dict[Any, float],
+        acc_conflict: float = 0.0,
+        threat_looming: float = 0.0,
+        surprise_entropy: float = 0.0,
+        risk_penalties: dict[Any, float] | None = None,
+    ) -> tuple[BasalGangliaDecision | None, list[BasalGangliaDecision]]:
+        """Arbitrate candidate actions through the Basal Ganglia tri-pathway circuit."""
+        return self.deliberation_engine.arbitrate_basal_ganglia_action(
+            self,
+            candidate_utilities=candidate_utilities,
+            acc_conflict=acc_conflict,
+            threat_looming=threat_looming,
+            surprise_entropy=surprise_entropy,
+            risk_penalties=risk_penalties,
+        )
+
+    def evaluate_policy_expected_free_energy(
+        self,
+        candidate_transitions: dict[Any, tuple[int, int]],
+        grid: np.ndarray | None = None,
+        goal_confidence: float = 0.0,
+    ) -> list[ExpectedFreeEnergyScore]:
+        """Rank candidate actions using Karl Friston's Expected Free Energy decomposition."""
+        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
+        if curr_g is None:
+            curr_g = np.zeros((10, 10), dtype=int)
+
+        uncertainty = 0.5
+        unconfirmed = 0
+        if self.symbolic_theory is not None:
+            unconfirmed = len(getattr(self.symbolic_theory, "unconfirmed_hypotheses", []))
+            uncertainty = min(1.0, max(0.1, unconfirmed / 5.0))
+
+        return self.efe_evaluator.rank_candidate_actions(
+            candidate_transitions=candidate_transitions,
+            current_pos=self.avatar_pos,
+            grid=curr_g,
+            goal_positions=self.learned_goal_positions,
+            position_visit_counts=self.working_memory.position_visit_counts,
+            unconfirmed_hypotheses_count=unconfirmed,
+            goal_confidence=goal_confidence,
+            world_theory_uncertainty=uncertainty,
+        )
+
+    def extract_affordance_field(
+        self,
+        grid: np.ndarray,
+        bg_color: int | None = None,
+    ) -> np.ndarray:
+        """Extract dense 2D Gibsonian affordance matrix across the sensory lattice."""
+        bg = bg_color if bg_color is not None else self.estimate_background(grid)
+        goals = self.learned_goal_positions
+        goal_feats = {
+            int(grid[r, c]) for r, c in goals if 0 <= r < grid.shape[0] and 0 <= c < grid.shape[1]
+        }
+        barrier_feats: set[int] = set()
+        if self.symbolic_theory is not None:
+            for p in self.symbolic_theory.barrier_predicates:
+                if isinstance(p.value, int):
+                    barrier_feats.add(p.value)
+        return self.affordance_extractor.extract_affordance_map(
+            grid=grid,
+            bg_color=bg,
+            goal_features=goal_feats,
+            barrier_features=barrier_feats,
+        )
+
+    def extract_topological_contours(
+        self,
+        grid: np.ndarray,
+        bg_color: int | None = None,
+    ) -> list[TopologicalContour]:
+        """Extract exterior boundaries and interior cavity loops for all entities."""
+        bg = bg_color if bg_color is not None else self.estimate_background(grid)
+        return self.affordance_extractor.extract_topological_contours(grid=grid, bg_color=bg)
 
     @property
     def phase(self) -> EpistemicPhase:
