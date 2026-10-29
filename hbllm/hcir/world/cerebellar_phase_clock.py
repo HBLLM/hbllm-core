@@ -83,6 +83,64 @@ class CerebellarPhaseClock:
         # Reset cycle tracking
         self.reset_intervals: list[int] = []
         self.last_reset_step: int = 0
+        self.entity_cycles: dict[int, tuple[int, int]] = {}  # feature_id -> (period, phase)
+
+    def register_entity_cycle(self, feature_id: int, period: int, phase: int = 0) -> None:
+        """Register a dynamic entity limit cycle discovered by SNN temporal tracking."""
+        if period > 1:
+            self.entity_cycles[feature_id] = (period, phase)
+            logger.debug(
+                "CerebellarPhaseClock: Registered entity cycle feat=%d, period=%d, phase=%d",
+                feature_id,
+                period,
+                phase,
+            )
+
+    def evaluate_track_crossing_gate(
+        self,
+        current_step: int,
+        travel_steps_to_hazard: int,
+        entity_feature: int,
+        collision_phases: set[int],
+    ) -> PhaseGateDecision:
+        """Evaluate motor gating for crossing a track occupied by a periodic dynamic entity."""
+        cycle = self.entity_cycles.get(entity_feature)
+        if cycle is None or cycle[0] <= 1 or not collision_phases:
+            return PhaseGateDecision(should_wait=False)
+
+        period, base_phase = cycle
+        arrival_step = current_step + travel_steps_to_hazard
+        arrival_phase = (arrival_step + base_phase) % period
+
+        if arrival_phase not in collision_phases:
+            return PhaseGateDecision(
+                should_wait=False,
+                current_phase=arrival_phase,
+                environmental_period=period,
+                reason="arrival_in_safe_phase",
+            )
+
+        # Collision imminent on immediate arrival — find minimal wait_k
+        for wait_k in range(1, period):
+            delayed_phase = (arrival_step + wait_k + base_phase) % period
+            if delayed_phase not in collision_phases:
+                return PhaseGateDecision(
+                    should_wait=True,
+                    wait_steps_recommended=wait_k,
+                    safe_phase_offset=delayed_phase,
+                    current_phase=arrival_phase,
+                    environmental_period=period,
+                    reason=f"delayed_by_{wait_k}_to_avoid_entity_{entity_feature}",
+                )
+
+        return PhaseGateDecision(
+            should_wait=True,
+            wait_steps_recommended=1,
+            safe_phase_offset=0,
+            current_phase=arrival_phase,
+            environmental_period=period,
+            reason="fallback_wait_step",
+        )
 
     def record_step(self, step: int, grid: np.ndarray, is_reset: bool = False) -> None:
         """Record visual frame and update macro periodicity models.

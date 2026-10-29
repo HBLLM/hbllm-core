@@ -264,6 +264,121 @@ class SNNTemporalPredictor:
 
         return density
 
+    def extract_limit_cycles(self) -> list[tuple[int, int, int]]:
+        """Extract detected periodic limit cycles (feature_id, period, phase) across entity tracks."""
+        cycles: list[tuple[int, int, int]] = []
+        for feat_id, track in self.entity_tracks.items():
+            if track.period > 1 and track.positions:
+                phase = self.step_counter % track.period
+                cycles.append((feat_id, track.period, phase))
+        return cycles
+
+    def forecast_entity_position(
+        self,
+        feature_id: int,
+        steps_ahead: int,
+        grid_shape: tuple[int, int],
+    ) -> tuple[int, int] | None:
+        """Forecast the coordinate of a dynamic entity steps_ahead into the future with boundary reflection."""
+        track = self.entity_tracks.get(feature_id)
+        if track is None or not track.positions or track.velocity == (0, 0):
+            return None
+
+        H, W = grid_shape
+        r, c = track.positions[-1]
+        vr, vc = track.velocity
+
+        for _ in range(steps_ahead):
+            r += vr
+            c += vc
+            if r < 0 or r >= H:
+                vr = -vr
+                r = max(0, min(H - 1, r))
+            if c < 0 or c >= W:
+                vc = -vc
+                c = max(0, min(W - 1, c))
+
+        return (r, c)
+
+    def evaluate_hazard_at_trajectory(
+        self,
+        planned_positions: list[tuple[int, int]],
+        grid_shape: tuple[int, int],
+    ) -> float:
+        """Compute cumulative hazard exposure along a planned trajectory across future horizons."""
+        if not planned_positions or not self.entity_tracks:
+            return 0.0
+
+        total_hazard: float = 0.0
+        for step_idx, pos in enumerate(planned_positions, start=1):
+            for feat_id, track in self.entity_tracks.items():
+                if not track.positions or track.velocity == (0, 0):
+                    continue
+                future_pos = self.forecast_entity_position(feat_id, step_idx, grid_shape)
+                if future_pos == pos:
+                    total_hazard += 1.0
+                elif future_pos is not None:
+                    # Proximity penalty
+                    dist = abs(future_pos[0] - pos[0]) + abs(future_pos[1] - pos[1])
+                    if dist == 1:
+                        total_hazard += 0.5
+                    elif dist == 2:
+                        total_hazard += 0.2
+
+        return min(1.0, total_hazard)
+
+    def evaluate_phase_gate_for_track(
+        self,
+        feature_id: int,
+        current_step: int,
+        target_pos: tuple[int, int],
+        grid_shape: tuple[int, int],
+        travel_steps: int = 1,
+        max_wait: int = 8,
+    ) -> dict[str, Any]:
+        """Evaluate if motor hesitation/wait steps are required to safely traverse target_pos.
+
+        Returns dict with keys: should_wait, wait_steps_recommended, reason, period.
+        """
+        track = self.entity_tracks.get(feature_id)
+        if track is None or track.period <= 1:
+            return {
+                "should_wait": False,
+                "wait_steps_recommended": 0,
+                "reason": "no_cycle",
+                "period": 1,
+            }
+
+        # Check immediate arrival
+        imm_pos = self.forecast_entity_position(feature_id, travel_steps, grid_shape)
+        if imm_pos != target_pos:
+            return {
+                "should_wait": False,
+                "wait_steps_recommended": 0,
+                "reason": "immediate_arrival_safe",
+                "period": track.period,
+            }
+
+        # Immediate arrival causes collision — find minimal wait_k in [1, min(max_wait, period)]
+        for wait_k in range(1, min(max_wait, track.period) + 1):
+            delayed_pos = self.forecast_entity_position(
+                feature_id, travel_steps + wait_k, grid_shape
+            )
+            if delayed_pos != target_pos:
+                return {
+                    "should_wait": True,
+                    "wait_steps_recommended": wait_k,
+                    "reason": f"collision_avoided_with_entity_{feature_id}",
+                    "period": track.period,
+                }
+
+        return {
+            "should_wait": True,
+            "wait_steps_recommended": 1,
+            "reason": "fallback_single_step_wait",
+            "period": track.period,
+        }
+
     def predict_state(
         self,
         snapshot: WorldStateSnapshot,

@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -90,6 +93,34 @@ class AnteriorCingulateConflictMonitor:
         self.failure_history: list[tuple[float, float, int]] = []  # (r, c, step)
         self.detour_target: tuple[int, int] | None = None
 
+        from hbllm.hcir.world.cortex_motor import ACCConflictMonitor as MotorACC
+
+        self._motor_oscillation_monitor = MotorACC()
+
+    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+        """Record step in the motor oscillation detector."""
+        self._motor_oscillation_monitor.record_step(action, avatar_pos)
+
+    def detect_oscillation(self) -> tuple[bool, list[Any]]:
+        """Detect action/position limit cycle oscillations."""
+        return self._motor_oscillation_monitor.detect_oscillation()
+
+    def reset(self) -> None:
+        """Reset conflict histories."""
+        self.reset_episode(retain_long_term=True)
+        self._motor_oscillation_monitor.reset()
+
+    @staticmethod
+    def get_orthogonal_actions(
+        available_actions: Sequence[Any],
+        cyclic_actions: Sequence[Any],
+        action_dynamics: dict[Any, Any],
+    ) -> list[Any]:
+        """Compute actions orthogonal to an oscillating action axis."""
+        from hbllm.hcir.world.cortex_motor import ACCConflictMonitor as MotorACC
+
+        return MotorACC.get_orthogonal_actions(available_actions, cyclic_actions, action_dynamics)
+
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient conflict state, optionally preserving long-term failure clusters."""
         self.active_conflict = False
@@ -156,6 +187,25 @@ class AnteriorCingulateConflictMonitor:
                 max_recurrence,
             )
         return self.frustration
+
+    def evaluate_snn_hazard_conflict(
+        self,
+        target_pos: tuple[int, int],
+        snn_hazard_density: np.ndarray,
+        threshold: float = 0.35,
+    ) -> float:
+        """Evaluate conflict score for moving into target_pos based on SNN hazard density.
+
+        Returns conflict level in [0.0, 1.0].
+        """
+        tr, tc = target_pos
+        H, W = snn_hazard_density.shape
+        if 0 <= tr < H and 0 <= tc < W:
+            density = float(snn_hazard_density[tr, tc])
+            if density >= threshold:
+                conflict = min(1.0, (density - threshold) / (1.0 - threshold) * 0.8 + 0.2)
+                return conflict
+        return 0.0
 
     def register_threat_conflict(
         self,

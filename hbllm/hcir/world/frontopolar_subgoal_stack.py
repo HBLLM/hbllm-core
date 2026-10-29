@@ -54,6 +54,7 @@ class FrontopolarSubgoal:
     is_terminal: bool = False
     prerequisite_subgoal_ids: list[str] = field(default_factory=list)
     prerequisite_features: set[int] = field(default_factory=set)
+    causal_preconditions: list[CausalPredicate] = field(default_factory=list)
     bound_skill_name: str | None = None
     bound_skill: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -63,6 +64,11 @@ class FrontopolarSubgoal:
         self.bound_skill = skill
         self.bound_skill_name = getattr(skill, "skill_name", str(skill))
         self.metadata["bound_skill"] = self.bound_skill_name
+
+    def bind_causal_precondition(self, predicate: CausalPredicate) -> None:
+        """Bind a verified causal prerequisite predicate that must be satisfied."""
+        self.causal_preconditions.append(predicate)
+        self.metadata.setdefault("causal_preconditions", []).append(str(predicate))
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export frontopolar subgoal as a declarative causal predicate."""
@@ -275,6 +281,85 @@ class FrontopolarSubgoalStack:
                 self.stack.insert(target_idx, child)
 
         return decomposed
+
+    def decompose_causal_chain(
+        self,
+        target_subgoal: FrontopolarSubgoal,
+        causal_prerequisites: list[tuple[str, tuple[int, int], SubgoalType, int | None]],
+    ) -> list[FrontopolarSubgoal]:
+        """Decompose a high-level target goal into a causal prerequisite chain.
+
+        Args:
+            target_subgoal: The primary objective subgoal (e.g. deliver to terminal goal).
+            causal_prerequisites: List of tuples (prereq_id, prereq_coord, prereq_type, required_feat)
+                                  ordered from root dependency to immediate prerequisite.
+
+        Returns:
+            list[FrontopolarSubgoal]: The ordered sequence of subgoals pushed to the stack.
+        """
+        chain: list[FrontopolarSubgoal] = []
+        prior_id: str | None = None
+
+        for idx, (p_id, p_coord, p_type, req_feat) in enumerate(causal_prerequisites):
+            prereq_ids = [prior_id] if prior_id else []
+            sg = FrontopolarSubgoal(
+                subgoal_id=p_id,
+                subgoal_type=p_type,
+                target_entity_pos=p_coord,
+                target_destination=p_coord,
+                required_feature=req_feat,
+                priority=target_subgoal.priority + 0.2 * (len(causal_prerequisites) - idx),
+                prerequisite_subgoal_ids=prereq_ids,
+                metadata={"causal_chain_target": target_subgoal.subgoal_id, "chain_index": idx},
+            )
+            chain.append(sg)
+            prior_id = p_id
+
+        # Target subgoal now depends on the final prerequisite in the chain
+        if prior_id:
+            target_subgoal.prerequisite_subgoal_ids.append(prior_id)
+
+        # Push target subgoal first (bottom of stack), followed by prerequisites in reverse order (LIFO top)
+        self.push_subgoal(target_subgoal)
+        for sg in reversed(chain):
+            self.push_subgoal(sg)
+
+        return chain
+
+    def decompose_and_push_prerequisite(
+        self,
+        target_subgoal_id: str,
+        prerequisite_subgoal: FrontopolarSubgoal,
+    ) -> bool:
+        """Temporarily suspend an active subgoal and push a prerequisite to top of stack."""
+        for sg in self.stack:
+            if sg.subgoal_id == target_subgoal_id:
+                if prerequisite_subgoal.subgoal_id not in sg.prerequisite_subgoal_ids:
+                    sg.prerequisite_subgoal_ids.append(prerequisite_subgoal.subgoal_id)
+                self.push_subgoal(prerequisite_subgoal)
+                return True
+        # If target not found in stack, push prerequisite anyway
+        self.push_subgoal(prerequisite_subgoal)
+        return False
+
+    def synthesize_declarative_program(
+        self,
+        completed_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Export executed subgoals as a structured declarative program with causal preconditions."""
+        steps: list[dict[str, Any]] = []
+        source_subgoals = (
+            self.completed_subgoals if completed_only else [sg.subgoal_id for sg in self.stack]
+        )
+
+        for sg_id in source_subgoals:
+            steps.append(
+                {
+                    "subgoal_id": sg_id,
+                    "completed": True,
+                }
+            )
+        return steps
 
     def is_subgoal_satisfied(
         self,

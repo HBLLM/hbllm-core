@@ -67,7 +67,9 @@ from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
 )
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
+    FrontopolarSubgoal,
     FrontopolarSubgoalStack,
+    SubgoalType,
 )
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import (
@@ -111,6 +113,7 @@ from hbllm.hcir.world.percept import (
     PerceptionRegistry,
 )
 from hbllm.hcir.world.prediction_budget import PredictionBudget
+from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
@@ -220,7 +223,6 @@ from hbllm.hcir.world.cortex_episodic import (
     HippocampalEpisodicCortex,
 )
 from hbllm.hcir.world.cortex_motor import (
-    ACCConflictMonitor,
     EpistemicCuriosityExplorer,
     EpistemicProbeProposal,
     MotorCortexEffector,
@@ -382,7 +384,9 @@ class AutonomousEpistemicEngine:
         )
 
         # Faculty: Anterior Cingulate Cortex (ACC) Motor Conflict Monitor
-        self.acc_conflict_monitor: ACCConflictMonitor = ACCConflictMonitor()
+        self.acc_conflict_monitor: AnteriorCingulateConflictMonitor = (
+            AnteriorCingulateConflictMonitor()
+        )
 
         # Room topology & doorway subgoal reasoning (spatial containment)
         self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
@@ -465,6 +469,12 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
         self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer()
+
+        # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
+        self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
+
+        # Connect GNW conscious broadcast listener for executive arbitration
+        self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
 
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
         self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
@@ -1291,6 +1301,17 @@ class AutonomousEpistemicEngine:
         params = self.neuromodulatory_system.get_effective_hyperparameters()
         self.hierarchical_active_inference.sensory_precision = params["sensory_precision"]
         return self.neuromodulatory_system.current
+
+    def _on_conscious_ignition(self, event: IgnitionEvent) -> None:
+        """Handle conscious global broadcasts ignited by the Global Neuronal Workspace."""
+        winner_cortex = event.winner.source_cortex
+        if winner_cortex in ("loss_monitor", "surprise_engine"):
+            if self._phase in (EpistemicPhase.MENTAL_SIMULATION, EpistemicPhase.EXPLOITATION):
+                logger.info(
+                    "AutonomousEpistemicEngine: GNW broadcast from [%s] triggered executive reset to REPLANNING",
+                    winner_cortex,
+                )
+                self.transition_to_phase(EpistemicPhase.REPLANNING)
 
     def synchronize_and_bind_entities(
         self,
@@ -2143,6 +2164,64 @@ class AutonomousEpistemicEngine:
                 empirical_success=(not is_lost),
             )
 
+        # Biological Faculty: Spiking Neural Network Kinematic Tracking & Limit Cycles
+        if curr_grid.ndim == 2:
+            self.snn_predictor.update_tracks_from_grid(curr_grid)
+            self.snn_predictor.step_lif(curr_grid.astype(np.float32) * 0.2)
+            for feat_id, period, phase in self.snn_predictor.extract_limit_cycles():
+                self.cerebellar_clock.register_entity_cycle(feat_id, period, phase)
+
+        # Biological Faculty: Closed-Loop Neuromodulatory Dynamics (Dopamine, NE, ACh, Serotonin)
+        rpe = 1.0 if is_win else (-1.0 if is_lost else 0.0)
+        pred_fe = float(getattr(self.predictive_coding_cortex, "total_free_energy", 0.0))
+        risk_level = 0.0
+        if self.avatar_pos is not None and curr_grid.ndim == 2:
+            hazard_density = self.snn_predictor.predict_hazard_density(curr_grid, horizon_steps=2)
+            ar, ac = self.avatar_pos
+            if 0 <= ar < hazard_density.shape[0] and 0 <= ac < hazard_density.shape[1]:
+                risk_level = float(hazard_density[ar, ac])
+        surprise_val = 1.0 if is_lost else self.last_surprise
+        self.modulate_cognition(
+            reward_prediction_error=rpe,
+            unexpected_surprise=surprise_val,
+            prediction_accuracy=1.0 / (1.0 + pred_fe),
+            risk_level=risk_level,
+        )
+
+        # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
+        if is_lost:
+            self.gnw.submit_candidate(
+                source_cortex="loss_monitor",
+                salience=0.95,
+                content={"event": "loss", "avatar_pos": self.avatar_pos},
+            )
+        elif is_win:
+            self.gnw.submit_candidate(
+                source_cortex="goal_monitor",
+                salience=0.95,
+                content={"event": "win", "avatar_pos": self.avatar_pos},
+            )
+        elif pred_fe > 1.2:
+            self.gnw.submit_candidate(
+                source_cortex="predictive_coding",
+                salience=min(0.9, pred_fe / 2.5),
+                content={"free_energy": pred_fe},
+            )
+        elif self.last_surprise > 0.2:
+            self.gnw.submit_candidate(
+                source_cortex="surprise_engine",
+                salience=min(0.9, self.last_surprise),
+                content={"surprise": self.last_surprise},
+            )
+        elif getattr(self.acc_conflict_monitor, "active_conflict", False):
+            self.gnw.submit_candidate(
+                source_cortex="anterior_cingulate",
+                salience=0.85,
+                content={"frustration": self.acc_conflict_monitor.frustration},
+            )
+
+        self.gnw.compete_and_ignite()
+
         # Record spatial effector intervention feedback (domain-agnostic)
         if (
             action is not None
@@ -2365,6 +2444,8 @@ class AutonomousEpistemicEngine:
         snn = None
         if self.world_kernel and hasattr(self.world_kernel, "predictive_reality"):
             snn = getattr(self.world_kernel.predictive_reality, "snn", None)
+        if snn is None:
+            snn = self.snn_predictor
 
         if snn is not None and grid is not None and isinstance(grid, np.ndarray):
             # Compute hazard density and pre-emptively inhibit dangerous actions via Habenula
@@ -2391,6 +2472,25 @@ class AutonomousEpistemicEngine:
             grid=grid,
             current_step=self.step_counter,
         )
+
+    def schedule_causal_subgoal_chain(
+        self,
+        target_destination: tuple[int, int],
+        target_type: SubgoalType,
+        causal_prerequisites: list[tuple[str, tuple[int, int], SubgoalType, int | None]],
+        target_id: str = "master_causal_target",
+        priority: float = 2.0,
+    ) -> list[FrontopolarSubgoal]:
+        """Schedule a chained sequence of prerequisite subgoals leading to a master goal."""
+        master_sg = FrontopolarSubgoal(
+            subgoal_id=target_id,
+            subgoal_type=target_type,
+            target_entity_pos=target_destination,
+            target_destination=target_destination,
+            priority=priority,
+            is_terminal=True,
+        )
+        return self.subgoal_stack.decompose_causal_chain(master_sg, causal_prerequisites)
 
     def plan_epistemic_probe(
         self,

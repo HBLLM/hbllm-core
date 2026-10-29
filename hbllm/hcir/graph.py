@@ -24,6 +24,7 @@ Design invariants:
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -31,6 +32,8 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 from hbllm.hcir.proposition import (
     Proposition,
@@ -1557,7 +1560,7 @@ class CognitiveGraph:
     capability for efficient querying.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, enable_native_substrate: bool = True) -> None:
         # ── Primary storage ──
         self._nodes: dict[str, HCIRNode] = {}
         self._edges: dict[str, HCIREdge] = {}
@@ -1575,6 +1578,18 @@ class CognitiveGraph:
         self._edges_by_source: dict[str, set[str]] = {}  # node_id → edge IDs
         self._edges_by_target: dict[str, set[str]] = {}  # node_id → edge IDs
 
+        # ── Native Substrate Sync ──
+        self._enable_native_substrate = enable_native_substrate
+        self._native_adapter: Any | None = None
+        if enable_native_substrate:
+            try:
+                from hbllm.hcir.native_adapter import NativeGraphAdapter
+
+                self._native_adapter = NativeGraphAdapter()
+            except Exception as e:
+                logger.debug("CognitiveGraph: native adapter initialization skipped: %s", e)
+                self._native_adapter = None
+
     # ── Node Operations ──────────────────────────────────────────────
 
     def add_node(self, node: HCIRNode) -> None:
@@ -1583,6 +1598,28 @@ class CognitiveGraph:
             raise ValueError(f"Duplicate node ID: {node.id}")
         self._nodes[node.id] = node
         self._index_node(node)
+        if self._native_adapter is not None:
+            try:
+                ntype = (
+                    node.node_type.value
+                    if hasattr(node.node_type, "value")
+                    else str(node.node_type)
+                )
+                lifecycle = (
+                    node.lifecycle.value
+                    if hasattr(node.lifecycle, "value")
+                    else str(node.lifecycle)
+                )
+                cat = node.category.value if hasattr(node.category, "value") else str(node.category)
+                self._native_adapter.add_node(
+                    node_id=node.id,
+                    node_type=ntype,
+                    lifecycle=lifecycle,
+                    properties={"category": cat},
+                    created_at=getattr(node, "created_at", 0.0),
+                )
+            except Exception as e:
+                logger.debug("CognitiveGraph: native add_node error: %s", e)
 
     def upsert_node(self, node: HCIRNode) -> None:
         """Add or replace a node in the graph."""
@@ -1591,6 +1628,30 @@ class CognitiveGraph:
             self._deindex_node(old)
         self._nodes[node.id] = node
         self._index_node(node)
+        if self._native_adapter is not None:
+            try:
+                if self._native_adapter.has_node(node.id):
+                    self._native_adapter.remove_node(node.id)
+                ntype = (
+                    node.node_type.value
+                    if hasattr(node.node_type, "value")
+                    else str(node.node_type)
+                )
+                lifecycle = (
+                    node.lifecycle.value
+                    if hasattr(node.lifecycle, "value")
+                    else str(node.lifecycle)
+                )
+                cat = node.category.value if hasattr(node.category, "value") else str(node.category)
+                self._native_adapter.add_node(
+                    node_id=node.id,
+                    node_type=ntype,
+                    lifecycle=lifecycle,
+                    properties={"category": cat},
+                    created_at=getattr(node, "created_at", 0.0),
+                )
+            except Exception as e:
+                logger.debug("CognitiveGraph: native upsert_node error: %s", e)
 
     def remove_node(self, node_id: str) -> HCIRNode | None:
         """Remove a node and all its connected edges.  Returns the removed node."""
@@ -1598,6 +1659,11 @@ class CognitiveGraph:
         if node is None:
             return None
         self._deindex_node(node)
+        if self._native_adapter is not None:
+            try:
+                self._native_adapter.remove_node(node_id)
+            except Exception as e:
+                logger.debug("CognitiveGraph: native remove_node error: %s", e)
         # Remove edges connected to this node
         connected_edge_ids = set()
         connected_edge_ids.update(self._edges_by_source.pop(node_id, set()))
@@ -1605,6 +1671,11 @@ class CognitiveGraph:
         for eid in connected_edge_ids:
             edge = self._edges.pop(eid, None)
             if edge:
+                if self._native_adapter is not None:
+                    try:
+                        self._native_adapter.remove_edge(eid)
+                    except Exception:
+                        pass
                 # Clean up reverse indexes for other endpoints
                 for src in edge.sources:
                     if src != node_id:
@@ -1643,12 +1714,35 @@ class CognitiveGraph:
             self._edges_by_source.setdefault(src, set()).add(edge.id)
         for tgt in edge.targets:
             self._edges_by_target.setdefault(tgt, set()).add(edge.id)
+        if self._native_adapter is not None:
+            try:
+                etype = (
+                    edge.edge_type.value
+                    if hasattr(edge.edge_type, "value")
+                    else str(edge.edge_type)
+                )
+                self._native_adapter.add_edge(
+                    edge_id=edge.id,
+                    edge_type=etype,
+                    sources=edge.sources,
+                    targets=edge.targets,
+                    weight=edge.weight,
+                    properties={},
+                    created_at=getattr(edge, "created_at", 0.0),
+                )
+            except Exception as e:
+                logger.debug("CognitiveGraph: native add_edge error: %s", e)
 
     def remove_edge(self, edge_id: str) -> HCIREdge | None:
         """Remove an edge by ID."""
         edge = self._edges.pop(edge_id, None)
         if edge is None:
             return None
+        if self._native_adapter is not None:
+            try:
+                self._native_adapter.remove_edge(edge_id)
+            except Exception as e:
+                logger.debug("CognitiveGraph: native remove_edge error: %s", e)
         for src in edge.sources:
             self._edges_by_source.get(src, set()).discard(edge_id)
         for tgt in edge.targets:
@@ -1858,6 +1952,99 @@ class CognitiveGraph:
         self._idx_by_tag.clear()
         self._edges_by_source.clear()
         self._edges_by_target.clear()
+        if self._native_adapter is not None:
+            try:
+                from hbllm.hcir.native_adapter import NativeGraphAdapter
+
+                self._native_adapter = NativeGraphAdapter()
+            except Exception:
+                self._native_adapter = None
+
+    def find_shortest_path(self, source_id: str, target_id: str) -> list[str] | None:
+        """Find the shortest directed path between two nodes using the native BFS substrate."""
+        if self._native_adapter is not None:
+            p = self._native_adapter.find_path(source_id, target_id)
+            return p if p else None
+        if source_id not in self._nodes or target_id not in self._nodes:
+            return None
+        if source_id == target_id:
+            return [source_id]
+        from collections import deque
+
+        visited = {source_id}
+        queue: deque[list[str]] = deque([[source_id]])
+        while queue:
+            path = queue.popleft()
+            curr = path[-1]
+            for edge_id in self._edges_by_source.get(curr, set()):
+                edge = self._edges.get(edge_id)
+                if not edge:
+                    continue
+                for tgt in edge.targets:
+                    if tgt == target_id:
+                        return path + [tgt]
+                    if tgt not in visited:
+                        visited.add(tgt)
+                        queue.append(path + [tgt])
+        return None
+
+    def extract_subgraph_by_depth(self, seed_id: str, max_depth: int = 2) -> CognitiveGraph:
+        """Extract a depth-limited ego subgraph centered on seed_id using the native substrate."""
+        if self._native_adapter is not None:
+            res = self._native_adapter.extract_subgraph(seed_id, max_depth)
+            if isinstance(res, tuple):
+                nodes, _ = res
+                node_ids = {n["id"] for n in nodes}
+            elif isinstance(res, dict):
+                node_ids = {n["id"] for n in res.get("nodes", [])}
+            else:
+                node_ids = set()
+            return self.subgraph(node_ids)
+        node_ids = {seed_id}
+        curr_layer = {seed_id}
+        for _ in range(max_depth):
+            next_layer: set[str] = set()
+            for nid in curr_layer:
+                for eid in self._edges_by_source.get(nid, set()):
+                    e = self._edges.get(eid)
+                    if e:
+                        next_layer.update(e.targets)
+            next_layer.difference_update(node_ids)
+            if not next_layer:
+                break
+            node_ids.update(next_layer)
+            curr_layer = next_layer
+        return self.subgraph(node_ids)
+
+    def canonical_state_hash(self) -> str:
+        """Deterministic canonical structural state hash."""
+        if self._native_adapter is not None:
+            return self._native_adapter.canonical_hash()
+        import hashlib
+
+        h = hashlib.sha256()
+        for nid in sorted(self._nodes.keys()):
+            h.update(nid.encode("utf-8"))
+        for eid in sorted(self._edges.keys()):
+            h.update(eid.encode("utf-8"))
+        return h.hexdigest()[:16]
+
+    def native_snapshot(self) -> Any:
+        """Create O(1) chunked native snapshot via structural sharing."""
+        if self._native_adapter is not None:
+            return self._native_adapter.snapshot()
+        return None
+
+    def get_native_adapter(self) -> Any:
+        """Return the underlying NativeGraphAdapter instance."""
+        return self._native_adapter
+
+    @property
+    def is_native_substrate_active(self) -> bool:
+        """Whether native Rust graph acceleration is compiled and active."""
+        return self._native_adapter is not None and getattr(
+            self._native_adapter, "is_native", False
+        )
 
     def subgraph(self, node_ids: set[str] | list[str] | Iterator[str]) -> CognitiveGraph:
         """Extract an induced subgraph containing only specified nodes and edges between them."""
