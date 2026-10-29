@@ -30,6 +30,7 @@ from hbllm.hcir.graph import (
     EventNode,
     GoalNode,
     ObservationNode,
+    SkillNode,
 )
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
@@ -1847,23 +1848,88 @@ class AutonomousEpistemicEngine:
 
         Biologically invokes sharp-wave ripple forward and reverse replay over the
         active episodic buffer, distills invariant schemas into declarative skills,
-        registers resulting causal predicates in symbolic world theory, and commits
-        mutations through TransactionManager if available.
+        induces program DSL routines, registers resulting causal predicates in symbolic
+        world theory, and commits mutations through TransactionManager if available.
         """
         res = self.episodic_cortex.consolidate_sleep_replay(terminal_reward=terminal_reward)
         schemas = res.get("schemas", [])
         for schema in schemas:
             self.symbolic_theory.register_predicate(schema.causal_predicate)
+            self.episodic_cortex.consolidated_macros[schema.schema_id] = schema.action_motif
             if hasattr(self, "procedural_macros"):
                 self.procedural_macros[schema.schema_id] = schema.action_motif
 
+        # DreamCoder-style program induction from winning episodic traces
+        from hbllm.hcir.spatial_planner import SpatialActionIntent
+        from hbllm.hcir.world.skill_program_synthesizer import ActionTraceStep
+
+        if terminal_reward > 0 and self.episodic_cortex.current_episode:
+            steps: list[ActionTraceStep] = []
+            for tr in self.episodic_cortex.current_episode:
+                intent = (
+                    SpatialActionIntent.NAVIGATE_TO
+                    if self.is_displacement_action(tr.action_id)
+                    else (
+                        SpatialActionIntent.INTERACT
+                        if self.is_spatial_effector(tr.action_id)
+                        else SpatialActionIntent.ACTUATE
+                    )
+                )
+                steps.append(
+                    ActionTraceStep(
+                        intent=intent,
+                        target_query={"pos": tr.avatar_pos} if tr.avatar_pos else {},
+                        parameters={"action_id": tr.action_id, "reward": tr.reward},
+                    )
+                )
+            if steps:
+                req_acts = {
+                    tr.action_id
+                    for tr in self.episodic_cortex.current_episode
+                    if isinstance(tr.action_id, int)
+                }
+                self.skill_synthesizer.record_winning_trace(
+                    steps=steps,
+                    required_actions=req_acts,
+                    terminal_reward=terminal_reward,
+                )
+
+        newly_induced = self.skill_synthesizer.induce_all_recurrent_skills()
+        res["induced_skills"] = newly_induced
+
+        # Promote newly induced skills to TieredWorkspace.persistent if attached
+        if self.tiered_workspace is not None:
+            for skill in newly_induced:
+                skill_name = getattr(skill, "name", "skill")
+                subgoals = getattr(skill, "program", [])
+                subgoal_count = (
+                    len(getattr(subgoals, "subgoals", []))
+                    if hasattr(subgoals, "subgoals")
+                    else len(subgoals)
+                )
+                skill_node = SkillNode(
+                    id=f"synthesized_skill_{skill_name}",
+                    name=skill_name,
+                    skill_name=skill_name,
+                    description=f"Synthesized neuro-symbolic DSL skill with {subgoal_count} subgoals",
+                    preconditions=[str(getattr(skill, "signature", ""))],
+                    success_rate=0.9,
+                )
+                self.tiered_workspace.persistent.upsert_node(
+                    skill_node, author="SkillProgramSynthesizer"
+                )
+
         # Propose state mutations through TransactionManager if present
-        if self.transaction_manager is not None and res.get("operations"):
+        all_ops = list(res.get("operations", []))
+        for meta in self.skill_synthesizer.synthesized_metadata.values():
+            all_ops.extend(meta.to_transaction_operations(tenant_id=self.world_id))
+
+        if self.transaction_manager is not None and all_ops:
             from hbllm.hcir.transactions import HCIRTransaction
 
             tx = HCIRTransaction(
                 author="HippocampalReplayConsolidator",
-                operations=res["operations"],
+                operations=all_ops,
             )
             self.transaction_manager.commit(tx)
 
@@ -2028,6 +2094,54 @@ class AutonomousEpistemicEngine:
             action=action,
             action_data=action_data,
         )
+
+        # Biological Faculty: Entorhinal Grid Cell Continuous Attractor Path Integration
+        if prev_av_pos is not None and self.avatar_pos is not None:
+            delta_r = float(self.avatar_pos[0] - prev_av_pos[0])
+            delta_c = float(self.avatar_pos[1] - prev_av_pos[1])
+            if delta_r != 0.0 or delta_c != 0.0:
+                self.path_integrate_odometry(delta_r, delta_c)
+
+        # Biological Faculty: Hierarchical Predictive Coding Error Minimization
+        diff_count = (
+            float(np.sum(self.prev_grid != curr_grid))
+            if self.prev_grid is not None and self.prev_grid.shape == curr_grid.shape
+            else 0.0
+        )
+        sensory_evidence: dict[str, float] = {
+            "avatar_r": float(self.avatar_pos[0]) if self.avatar_pos else 0.0,
+            "avatar_c": float(self.avatar_pos[1]) if self.avatar_pos else 0.0,
+            "diff_count": diff_count,
+        }
+        pred_r = (
+            float(self.last_predicted_pos[0])
+            if self.last_predicted_pos
+            else (float(prev_av_pos[0]) if prev_av_pos else 0.0)
+        )
+        pred_c = (
+            float(self.last_predicted_pos[1])
+            if self.last_predicted_pos
+            else (float(prev_av_pos[1]) if prev_av_pos else 0.0)
+        )
+        abstract_priors: dict[str, float] = {
+            "avatar_r": pred_r,
+            "avatar_c": pred_c,
+            "diff_count": 0.0,
+        }
+        self.step_predictive_coding(
+            sensory_inputs=sensory_evidence, abstract_priors=abstract_priors
+        )
+
+        # Biological Faculty: BA10 Metacognitive Agency Attribution & Simulation Calibration
+        if action is not None:
+            self.assess_metacognitive_agency(
+                action_id=action,
+                raw_confidence=0.85,
+                predicted_avatar_pos=self.last_predicted_pos,
+                observed_avatar_pos=self.avatar_pos,
+                observed_other_changes_count=max(0, int(diff_count) - 2),
+                empirical_success=(not is_lost),
+            )
 
         # Record spatial effector intervention feedback (domain-agnostic)
         if (

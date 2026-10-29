@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from hbllm.hcir.bytecode import Opcode
+from hbllm.hcir.graph import HCIRNodeType
 from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from hbllm.hcir.workspace_tiers import TieredWorkspace
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.entorhinal_grid_cortex import (
     EntorhinalGridCortex,
@@ -229,6 +232,81 @@ def test_skill_synthesizer_engine_integration() -> None:
     skills = engine.synthesize_procedural_skills_from_traces(min_support=2)
     assert len(skills) >= 1
     assert isinstance(skills[0], DeclarativeNeuroSymbolicSkill)
+
+
+def test_active_inference_loop_and_consolidation_pipeline() -> None:
+    """Verify active inference updates (odometry, predictive coding, agency) and persistent consolidation."""
+    tiered_ws = TieredWorkspace()
+    frame = tiered_ws.create_task_frame("goal_test")
+    engine = AutonomousEpistemicEngine(exploration_budget=50)
+    engine.attach_tiered_workspace(tiered_ws, frame.frame_id)
+
+    grid1 = np.zeros((10, 10), dtype=int)
+    grid1[2, 2] = 1  # avatar
+    grid2 = np.zeros((10, 10), dtype=int)
+    grid2[2, 3] = 1  # avatar displaced by (0, 1)
+
+    # 1. First perception step
+    engine.perceive(grid1)
+    engine.prev_grid = grid1
+    engine.avatar_feature = 1
+    engine.avatar_features = {1}
+    engine.avatar_pos = (2, 2)
+    engine.last_action = 1
+    engine.last_predicted_pos = (2, 3)
+
+    # 2. Feedback assimilation triggers odometry, predictive coding, and agency attribution
+    engine.assimilate_feedback(
+        curr_grid=grid2,
+        available_actions=[1, 2, 3, 4],
+        action=1,
+    )
+
+    # Verify odometric displacement occurred
+    assert engine.entorhinal_grid_cortex.current_estimated_coord != (0, 0)
+    # Verify predictive coding layer errors recorded
+    assert engine.predictive_coding_cortex.total_free_energy >= 0.0
+    # Verify metacognitive agency history has assessment
+    assert len(engine.metacognitive_agency_cortex.assessment_history) >= 1
+
+    # 3. Simulate winning transitions in episodic buffer and test consolidation
+    engine.episodic_cortex.record_transition(
+        step=1,
+        avatar_pos=(2, 2),
+        action=1,
+        reward=0.1,
+    )
+    engine.episodic_cortex.record_transition(
+        step=2,
+        avatar_pos=(2, 3),
+        action=2,
+        reward=1.0,
+        is_win=True,
+    )
+
+    # Repeat once to achieve min_support=2 for trace pattern induction
+    engine.skill_synthesizer.min_support_traces = 2
+    engine.consolidate_episodic_memory(terminal_reward=1.0)
+    engine.episodic_cortex.record_transition(
+        step=1,
+        avatar_pos=(2, 2),
+        action=1,
+        reward=0.1,
+    )
+    engine.episodic_cortex.record_transition(
+        step=2,
+        avatar_pos=(2, 3),
+        action=2,
+        reward=1.0,
+        is_win=True,
+    )
+    res = engine.consolidate_episodic_memory(terminal_reward=1.0)
+
+    assert "induced_skills" in res
+    assert len(res["induced_skills"]) >= 1
+    # Verify skill node promoted into persistent tier
+    pers_nodes = tiered_ws.persistent.graph.nodes_by_type(HCIRNodeType.SKILL)
+    assert len(pers_nodes) >= 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

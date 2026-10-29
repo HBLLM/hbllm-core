@@ -632,6 +632,64 @@ class MetadataPredicate(SymbolicPredicate):
         return f"MetadataPredicate({self.key}={self.expected_value})"
 
 
+class PearlCausalDoPredicate(SymbolicPredicate):
+    """Evaluates whether an intervention condition is satisfied under Pearl's do(X=x) calculus.
+
+    Verifies that an interventional variable or state metadata matches the desired target value,
+    enforcing that the skill only triggers when causal preconditions are actively held.
+    """
+
+    def __init__(self, variable: str, expected_value: Any, operator: str = "==") -> None:
+        self.variable = variable
+        self.expected_value = expected_value
+        self.operator = operator
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        if not ctx.metadata:
+            return False
+        val = ctx.metadata.get(self.variable)
+        if val is None:
+            return False
+        if self.operator == "==":
+            return val == self.expected_value
+        elif self.operator == "!=":
+            return val != self.expected_value
+        elif self.operator == ">":
+            return float(val) > float(self.expected_value)
+        elif self.operator == "<":
+            return float(val) < float(self.expected_value)
+        elif self.operator == "in":
+            return val in self.expected_value
+        return False
+
+    def __repr__(self) -> str:
+        return f"PearlCausalDoPredicate(do({self.variable}{self.operator}{self.expected_value}))"
+
+
+class PredictiveConfidencePredicate(SymbolicPredicate):
+    """Evaluates whether the agent's hierarchical predictive coding confidence/free-energy
+    is within acceptable precision bounds before executing a declarative skill.
+    """
+
+    def __init__(self, max_free_energy: float = 1.0, min_confidence: float = 0.5) -> None:
+        self.max_free_energy = max_free_energy
+        self.min_confidence = min_confidence
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        if not ctx.metadata:
+            return True  # Permissive default if no predictive metadata is present
+        fe = ctx.metadata.get("total_free_energy")
+        if fe is not None and float(fe) > self.max_free_energy:
+            return False
+        conf = ctx.metadata.get("calibrated_confidence")
+        if conf is not None and float(conf) < self.min_confidence:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"PredictiveConfidencePredicate(max_free_energy={self.max_free_energy}, min_confidence={self.min_confidence})"
+
+
 class PixelDensityPredicate(SymbolicPredicate):
     """Evaluates non-background pixel count within a region."""
 

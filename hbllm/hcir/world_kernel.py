@@ -65,6 +65,21 @@ class WorldKernel:
         self.active_inference = ActiveInferenceEngine()
         self.verification_gate = VerificationGate()
         self.promotion = PredictionPromotion(self.verification_gate)
+        self._epistemic_engine: Any | None = None
+
+    @property
+    def epistemic_engine(self) -> Any:
+        """Attached or lazily provisioned AutonomousEpistemicEngine instance."""
+        if self._epistemic_engine is None:
+            from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+
+            branch = getattr(self._workspace, "branch_name", "default")
+            self._epistemic_engine = AutonomousEpistemicEngine(world_id=branch)
+        return self._epistemic_engine
+
+    @epistemic_engine.setter
+    def epistemic_engine(self, engine: Any) -> None:
+        self._epistemic_engine = engine
 
     def get_current_world_state(self) -> WorldStateSummary:
         """Aggregate current world variables and physical entities from workspace graph."""

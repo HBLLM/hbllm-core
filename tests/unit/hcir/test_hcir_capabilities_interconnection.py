@@ -291,3 +291,54 @@ class TestWorldKernelCapabilitiesInterconnection:
         services2 = KernelServices.create_default(ws2)
         engine.attach_kernel_services(services2)
         assert engine.world_kernel is services2.world_kernel
+
+    @pytest.mark.asyncio
+    async def test_frontier_faculties_via_capability_resolver(self):
+        ws = HCIRWorkspaceState()
+        services = KernelServices.create_default(ws)
+
+        # 1. Odometry capability
+        res_odo = await services.capability_resolver.resolve_and_execute(
+            "world.path_integrate_odometry",
+            {"delta_r": 1.0, "delta_c": 0.0},
+        )
+        assert res_odo.get("status") == "success"
+        assert "integrated_position" in res_odo
+
+        # 2. Predictive coding capability
+        res_pc = await services.capability_resolver.resolve_and_execute(
+            "world.predictive_coding_cycle",
+            {"sensory_inputs": {"pos_r": 2.0}, "abstract_priors": {"pos_r": 1.0}},
+        )
+        assert res_pc.get("status") == "success"
+        assert "total_free_energy" in res_pc
+
+        # 3. Metacognitive agency capability
+        res_meta = await services.capability_resolver.resolve_and_execute(
+            "world.assess_metacognitive_agency",
+            {
+                "action_id": 1,
+                "raw_confidence": 0.9,
+                "predicted_avatar_pos": [2, 3],
+                "observed_avatar_pos": [2, 3],
+            },
+        )
+        assert res_meta.get("status") == "success"
+        assert "agency_attribution_score" in res_meta
+        assert res_meta["agency_attribution_score"] >= 0.9
+
+        # 4. Superposition rollout capability
+        res_sp = await services.capability_resolver.resolve_and_execute(
+            "world.superposition_rollout",
+            {"candidate_actions": [1, 2]},
+        )
+        assert res_sp.get("status") == "success"
+        assert "best_action" in res_sp
+
+        # 5. Skill synthesis capability
+        res_synth = await services.capability_resolver.resolve_and_execute(
+            "world.synthesize_skills",
+            {"min_support": 2},
+        )
+        assert res_synth.get("status") == "success"
+        assert "synthesized_count" in res_synth

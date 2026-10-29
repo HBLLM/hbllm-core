@@ -329,6 +329,9 @@ class SchemaVerifier:
                 op.node_data["id"] = op.node_id
             node_type_str = op.node_data.get("node_type")
             if not node_type_str:
+                if op.op == TransactionOp.ADD_NODE:
+                    self._reject(transaction, "ADD_NODE: missing node_type")
+                    return False
                 node_type_str = HCIRNodeType.CONCEPT.value
                 op.node_data["node_type"] = node_type_str
             if node_type_str in NODE_TYPE_ALIASES:

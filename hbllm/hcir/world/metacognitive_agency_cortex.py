@@ -90,6 +90,11 @@ class MetacognitiveAgencyCortex:
         self.history: list[MetacognitiveAssessment] = []
         self.outcome_history: list[tuple[float, bool]] = []  # (confidence, success)
 
+    @property
+    def assessment_history(self) -> list[MetacognitiveAssessment]:
+        """Historical log of metacognitive assessments."""
+        return self.history
+
     def compute_agency_attribution(
         self,
         predicted_avatar_pos: tuple[int, int] | None,

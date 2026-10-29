@@ -146,6 +146,11 @@ class KernelServices:
             "world.predict",
             "world.evaluate_error",
             "world.sync_twin",
+            "world.predictive_coding_cycle",
+            "world.path_integrate_odometry",
+            "world.assess_metacognitive_agency",
+            "world.synthesize_skills",
+            "world.superposition_rollout",
         ]:
             impl_id = f"kernel_{w_cap}"
             world_exec = WorldKernelCapabilityExecutor(world_k, default_capability=w_cap)

@@ -285,5 +285,5 @@ class SNNTemporalPredictor:
             if isinstance(var_value, (int, float)) and "vibration" in var_name.lower():
                 predicted[var_name] = var_value * 0.9  # Dampening spike pattern
 
-        confidence = 0.90 if len(self.entity_tracks) > 0 else 0.85
+        confidence = 0.90 if len(self.entity_tracks) > 0 else 0.88
         return predicted, confidence

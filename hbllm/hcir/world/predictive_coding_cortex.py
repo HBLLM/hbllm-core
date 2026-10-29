@@ -97,6 +97,13 @@ class HierarchicalPredictiveCodingCortex:
         ]
         self.snapshot_history: list[PredictiveCodingSnapshot] = []
 
+    @property
+    def total_free_energy(self) -> float:
+        """Current total variational free energy across cortical columns."""
+        if self.snapshot_history:
+            return self.snapshot_history[-1].total_free_energy
+        return sum(layer.free_energy for layer in self.layers)
+
     def set_layer_precision(self, layer_idx: int, precision: float) -> None:
         """Set precision weighting Pi_l for a specific hierarchical layer (e.g., modulated by ACh)."""
         if 0 <= layer_idx < len(self.layers):

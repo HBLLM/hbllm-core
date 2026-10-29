@@ -223,3 +223,79 @@ class TestCanonicalHashInvariance:
 
         assert hash1 == hash2, "Canonical hash must be strictly order-invariant"
         assert len(hash1) == 64, "BLAKE3 hash must be 64-char hex string"
+
+
+class TestPythonFallbackGraphParity:
+    """Level 4: Pure-Python In-Memory Fallback Parity when Native Substrate is Disabled."""
+
+    def test_pure_python_fallback_full_lifecycle(self, monkeypatch):
+        """Verify NativeGraphAdapter works identically in pure-Python fallback mode."""
+        import hbllm.hcir.native_adapter as na
+
+        # Force native to None to test pure-Python fallback
+        monkeypatch.setattr(na, "_PyNativeGraph", None)
+
+        adapter = na.NativeGraphAdapter()
+        assert adapter.is_native is False
+
+        # 1. Node insertion & retrieval
+        adapter.add_node(
+            node_id="py_node_1",
+            node_type=HCIRNodeType.PHYSICAL_ENTITY,
+            lifecycle="ACTIVE",
+            properties={"color": "blue", "val": "42"},
+            created_at=100.0,
+        )
+        assert adapter.has_node("py_node_1") is True
+        assert adapter.has_node("py_node_none") is False
+
+        n_data = adapter.get_node("py_node_1")
+        assert n_data is not None
+        assert n_data["id"] == "py_node_1"
+        assert n_data["properties"]["color"] == "blue"
+
+        # 2. Edge insertion & indexing
+        adapter.add_node("py_node_2", HCIRNodeType.GOAL)
+        adapter.add_edge(
+            edge_id="py_edge_1",
+            edge_type=HCIREdgeType.CAUSES,
+            sources=["py_node_1"],
+            targets=["py_node_2"],
+            weight=0.9,
+            properties={"rule": "action"},
+        )
+        assert adapter.has_edge("py_edge_1") is True
+        assert len(adapter.edges_from("py_node_1")) == 1
+        assert len(adapter.edges_to("py_node_2")) == 1
+
+        # 3. BFS path & subgraph
+        adapter.add_node("py_node_3", HCIRNodeType.GOAL)
+        adapter.add_edge(
+            "py_edge_2", HCIREdgeType.CAUSES, sources=["py_node_2"], targets=["py_node_3"]
+        )
+        path = adapter.bfs_path("py_node_1", "py_node_3")
+        assert path == ["py_node_1", "py_node_2", "py_node_3"]
+
+        sub_nodes, sub_edges = adapter.subgraph_bfs("py_node_2", max_depth=1)
+        sub_ids = {n["id"] for n in sub_nodes}
+        assert "py_node_1" in sub_ids
+        assert "py_node_2" in sub_ids
+        assert "py_node_3" in sub_ids
+
+        # 4. Snapshot isolation
+        snap = adapter.snapshot()
+        assert snap.has_node("py_node_1") is True
+        adapter.add_node("py_node_4", HCIRNodeType.ACTION)
+        assert snap.has_node("py_node_4") is False
+        assert adapter.has_node("py_node_4") is True
+
+        # 5. Deterministic canonical hash
+        g_a = na.NativeGraphAdapter()
+        g_b = na.NativeGraphAdapter()
+        g_a.add_node("A", HCIRNodeType.ACTION, properties={"k": "1", "m": "2"})
+        g_a.add_node("B", HCIRNodeType.GOAL, properties={"z": "9"})
+        g_b.add_node("B", HCIRNodeType.GOAL, properties={"z": "9"})
+        g_b.add_node("A", HCIRNodeType.ACTION, properties={"m": "2", "k": "1"})
+
+        assert g_a.canonical_hash() == g_b.canonical_hash()
+        assert len(g_a.canonical_hash()) == 64

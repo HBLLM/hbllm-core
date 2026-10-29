@@ -222,3 +222,51 @@ def test_tile_frame_predicate() -> None:
     assert TileFramePredicate(frame_size=7, min_frames=2).evaluate(ctx) is True
     assert TileFramePredicate(frame_size=7, min_frames=3).evaluate(ctx) is False
     assert TileFramePredicate(frame_size=5, min_frames=1).evaluate(ctx) is False
+
+
+def test_pearl_causal_do_predicate(sample_grid: np.ndarray) -> None:
+    from hbllm.hcir.skills.declarative import PearlCausalDoPredicate
+
+    ctx = SkillEvaluationContext(
+        grid=sample_grid,
+        available_actions=[1, 2],
+        metadata={"switch_state": "OPEN", "lever_pos": 3},
+    )
+
+    pred_eq = PearlCausalDoPredicate("switch_state", "OPEN")
+    assert pred_eq.evaluate(ctx) is True
+
+    pred_neq = PearlCausalDoPredicate("switch_state", "CLOSED", operator="!=")
+    assert pred_neq.evaluate(ctx) is True
+
+    pred_gt = PearlCausalDoPredicate("lever_pos", 2, operator=">")
+    assert pred_gt.evaluate(ctx) is True
+
+    pred_missing = PearlCausalDoPredicate("nonexistent", True)
+    assert pred_missing.evaluate(ctx) is False
+
+
+def test_predictive_confidence_predicate(sample_grid: np.ndarray) -> None:
+    from hbllm.hcir.skills.declarative import PredictiveConfidencePredicate
+
+    ctx_calibrated = SkillEvaluationContext(
+        grid=sample_grid,
+        available_actions=[1],
+        metadata={"total_free_energy": 0.35, "calibrated_confidence": 0.88},
+    )
+    pred_conf = PredictiveConfidencePredicate(max_free_energy=0.5, min_confidence=0.7)
+    assert pred_conf.evaluate(ctx_calibrated) is True
+
+    ctx_high_error = SkillEvaluationContext(
+        grid=sample_grid,
+        available_actions=[1],
+        metadata={"total_free_energy": 1.2, "calibrated_confidence": 0.88},
+    )
+    assert pred_conf.evaluate(ctx_high_error) is False
+
+    ctx_low_conf = SkillEvaluationContext(
+        grid=sample_grid,
+        available_actions=[1],
+        metadata={"total_free_energy": 0.2, "calibrated_confidence": 0.4},
+    )
+    assert pred_conf.evaluate(ctx_low_conf) is False

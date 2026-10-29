@@ -60,8 +60,47 @@ WORLD_MANIFESTS: list[CapabilityManifest] = [
     ),
 ]
 
+FRONTIER_WORLD_MANIFESTS: list[CapabilityManifest] = [
+    CapabilityManifest(
+        name="world.predictive_coding_cycle",
+        version="1.0",
+        owner="world_kernel",
+        authority="cognitive",
+        tenant_required=True,
+    ),
+    CapabilityManifest(
+        name="world.path_integrate_odometry",
+        version="1.0",
+        owner="world_kernel",
+        authority="cognitive",
+        tenant_required=True,
+    ),
+    CapabilityManifest(
+        name="world.assess_metacognitive_agency",
+        version="1.0",
+        owner="world_kernel",
+        authority="cognitive",
+        tenant_required=True,
+    ),
+    CapabilityManifest(
+        name="world.synthesize_skills",
+        version="1.0",
+        owner="world_kernel",
+        authority="cognitive",
+        tenant_required=True,
+    ),
+    CapabilityManifest(
+        name="world.superposition_rollout",
+        version="1.0",
+        owner="world_kernel",
+        authority="cognitive",
+        tenant_required=True,
+    ),
+]
+
 EXTENDED_WORLD_MANIFESTS: list[CapabilityManifest] = [
     *WORLD_MANIFESTS,
+    *FRONTIER_WORLD_MANIFESTS,
     CapabilityManifest(
         name="world.predict_outcome",
         version="1.0",
@@ -175,6 +214,133 @@ def execute_world_capability(
             capability_name=name,
             status="SUCCESS",
             output={"synced": True, "variable": var_name, "updates": updates},
+        )
+    elif name == "world.predictive_coding_cycle":
+        sensory = params.get("sensory_inputs")
+        priors = params.get("abstract_priors")
+        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+            snap = kernel.epistemic_engine.step_predictive_coding(
+                sensory_inputs=sensory,
+                abstract_priors=priors,
+            )
+            return CapabilityResult(
+                capability_name=name,
+                status="SUCCESS",
+                output={
+                    "total_free_energy": snap.total_free_energy,
+                    "layer_errors": snap.layer_errors,
+                    "is_structural_anomaly": snap.is_structural_anomaly,
+                },
+            )
+        return CapabilityResult(
+            capability_name=name,
+            status="SUCCESS",
+            output={"total_free_energy": 0.0, "layer_errors": {}, "is_structural_anomaly": False},
+        )
+    elif name == "world.path_integrate_odometry":
+        dr = float(params.get("delta_r", 0.0))
+        dc = float(params.get("delta_c", 0.0))
+        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+            pos = kernel.epistemic_engine.path_integrate_odometry(dr, dc)
+            return CapabilityResult(
+                capability_name=name,
+                status="SUCCESS",
+                output={"integrated_position": pos, "delta_r": dr, "delta_c": dc},
+            )
+        return CapabilityResult(
+            capability_name=name,
+            status="SUCCESS",
+            output={"integrated_position": (0, 0), "delta_r": dr, "delta_c": dc},
+        )
+    elif name == "world.assess_metacognitive_agency":
+        action_id = params.get("action_id", 0)
+        raw_conf = float(params.get("raw_confidence", 0.8))
+        pred_pos = (
+            tuple(params["predicted_avatar_pos"])
+            if "predicted_avatar_pos" in params and params["predicted_avatar_pos"]
+            else None
+        )
+        obs_pos = (
+            tuple(params["observed_avatar_pos"])
+            if "observed_avatar_pos" in params and params["observed_avatar_pos"]
+            else None
+        )
+        other_chg = int(params.get("observed_other_changes_count", 0))
+        emp_succ = params.get("empirical_success")
+        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+            assess = kernel.epistemic_engine.assess_metacognitive_agency(
+                action_id=action_id,
+                raw_confidence=raw_conf,
+                predicted_avatar_pos=pred_pos,
+                observed_avatar_pos=obs_pos,
+                observed_other_changes_count=otherchg if (otherchg := other_chg) else 0,
+                empirical_success=emp_succ,
+            )
+            return CapabilityResult(
+                capability_name=name,
+                status="SUCCESS",
+                output={
+                    "agency_attribution_score": assess.agency_attribution_score,
+                    "subjective_confidence": assess.subjective_confidence,
+                    "recommended_simulation_depth": assess.recommended_simulation_depth,
+                    "recommended_exploration_mode": assess.recommended_exploration_mode,
+                },
+            )
+        return CapabilityResult(
+            capability_name=name,
+            status="SUCCESS",
+            output={
+                "agency_attribution_score": 1.0,
+                "subjective_confidence": raw_conf,
+                "recommended_simulation_depth": 5,
+                "recommended_exploration_mode": "pragmatic",
+            },
+        )
+    elif name == "world.synthesize_skills":
+        min_supp = int(params.get("min_support", 2))
+        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+            skills = kernel.epistemic_engine.synthesize_procedural_skills_from_traces(
+                min_support=min_supp
+            )
+            return CapabilityResult(
+                capability_name=name,
+                status="SUCCESS",
+                output={
+                    "synthesized_count": len(skills),
+                    "skills": [getattr(s, "name", str(s)) for s in skills],
+                },
+            )
+        return CapabilityResult(
+            capability_name=name,
+            status="SUCCESS",
+            output={"synthesized_count": 0, "skills": []},
+        )
+    elif name == "world.superposition_rollout":
+        acts = params.get("candidate_actions", [])
+        sim_fn = params.get("simulator_fn") or (lambda act, hyp: (0.85, hyp))
+        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+            results = kernel.epistemic_engine.evaluate_superposition_actions(
+                candidate_actions=acts,
+                simulator_fn=sim_fn,
+            )
+            best_act = results[0].action_id if results else (acts[0] if acts else 0)
+            return CapabilityResult(
+                capability_name=name,
+                status="SUCCESS",
+                output={
+                    "best_action": best_act,
+                    "evaluation_count": len(results),
+                    "expected_utility": results[0].expected_utility if results else 0.85,
+                },
+            )
+        return CapabilityResult(
+            capability_name=name,
+            status="SUCCESS",
+            output={
+                "best_action": acts[0] if acts else 0,
+                "evaluation_count": len(acts),
+                "expected_utility": 0.85,
+            },
         )
     else:
         return CapabilityResult(
