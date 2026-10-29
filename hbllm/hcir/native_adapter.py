@@ -1027,6 +1027,217 @@ class NativeGraphAdapter:
 
         return scc_map, sorted(list(metagraph_edges_set))
 
+    def find_eulerian_path_or_circuit(
+        self,
+    ) -> tuple[bool, list[tuple[str, str]]]:
+        """Find an Eulerian path or circuit traversing every directed edge exactly once (Hierholzer).
+
+        Returns:
+            Tuple of (is_eulerian, edge_sequence).
+        """
+        all_nodes = self.all_node_ids()
+        if not all_nodes:
+            return True, []
+
+        collected_edges: list[dict[str, Any]] = []
+        if self._native is not None:
+            for nid in all_nodes:
+                collected_edges.extend(self._native.edges_from(nid))
+        else:
+            collected_edges = list(self._py_edges.values())
+
+        all_directed_edges: list[tuple[str, str]] = []
+        in_deg: dict[str, int] = defaultdict(int)
+        out_deg: dict[str, int] = defaultdict(int)
+
+        for edge in collected_edges:
+            sources = [s for s in edge.get("sources", []) if s in all_nodes]
+            targets = [t for t in edge.get("targets", []) if t in all_nodes]
+            for s in sources:
+                for t in targets:
+                    all_directed_edges.append((s, t))
+                    out_deg[s] += 1
+                    in_deg[t] += 1
+
+        if not all_directed_edges:
+            return True, []
+
+        # Check degree conditions
+        start_candidates: list[str] = []
+        end_candidates: list[str] = []
+        unbalanced: list[str] = []
+
+        active_nodes = sorted(
+            list({u for u, v in all_directed_edges} | {v for u, v in all_directed_edges})
+        )
+
+        for v in active_nodes:
+            diff = out_deg[v] - in_deg[v]
+            if diff == 1:
+                start_candidates.append(v)
+            elif diff == -1:
+                end_candidates.append(v)
+            elif diff != 0:
+                unbalanced.append(v)
+
+        if unbalanced:
+            return False, []
+
+        if len(start_candidates) == 0 and len(end_candidates) == 0:
+            # Eulerian Circuit: can start at any active node with out_deg > 0
+            start_node = min(active_nodes, key=lambda n: (out_deg[n] == 0, n))
+        elif len(start_candidates) == 1 and len(end_candidates) == 1:
+            # Eulerian Path
+            start_node = start_candidates[0]
+        else:
+            return False, []
+
+        # Hierholzer's algorithm
+        adj: dict[str, list[str]] = defaultdict(list)
+        for u, v in sorted(all_directed_edges, reverse=True):
+            adj[u].append(v)
+
+        curr_path: list[str] = [start_node]
+        circuit: list[str] = []
+
+        while curr_path:
+            curr = curr_path[-1]
+            if adj[curr]:
+                nxt = adj[curr].pop()
+                curr_path.append(nxt)
+            else:
+                circuit.append(curr_path.pop())
+
+        circuit.reverse()
+        path_edges = [(circuit[i], circuit[i + 1]) for i in range(len(circuit) - 1)]
+
+        if len(path_edges) != len(all_directed_edges):
+            return False, []
+
+        return True, path_edges
+
+    def chinese_postman_tour(
+        self,
+        weight_attribute: str = "weight",
+    ) -> tuple[float, list[tuple[str, str]]]:
+        """Compute minimum-weight edge-covering tour traversing every edge at least once (CPP).
+
+        Returns:
+            Tuple of (total_tour_weight, tour_edge_sequence).
+        """
+        all_nodes = self.all_node_ids()
+        if not all_nodes:
+            return 0.0, []
+
+        collected_edges: list[dict[str, Any]] = []
+        if self._native is not None:
+            for nid in all_nodes:
+                collected_edges.extend(self._native.edges_from(nid))
+        else:
+            collected_edges = list(self._py_edges.values())
+
+        directed_edges: list[tuple[str, str, float]] = []
+        for edge in collected_edges:
+            w = max(0.1, float(edge.get(weight_attribute, 1.0)))
+            for s in edge.get("sources", []):
+                if s in all_nodes:
+                    for t in edge.get("targets", []):
+                        if t in all_nodes:
+                            directed_edges.append((s, t, w))
+
+        if not directed_edges:
+            return 0.0, []
+
+        # First check if already Eulerian
+        is_eul, eul_path = self.find_eulerian_path_or_circuit()
+        if is_eul and eul_path and eul_path[0][0] == eul_path[-1][1]:
+            edge_weight_map: dict[tuple[str, str], float] = defaultdict(lambda: 1.0)
+            for u, v, w in directed_edges:
+                edge_weight_map[(u, v)] = w
+            total_w = sum(edge_weight_map.get((u, v), 1.0) for u, v in eul_path)
+            return float(total_w), eul_path
+
+        # Degree balancing via shortest path augmentations
+        in_deg: dict[str, int] = defaultdict(int)
+        out_deg: dict[str, int] = defaultdict(int)
+        adj_dist: dict[tuple[str, str], float] = {}
+
+        for u, v, w in directed_edges:
+            out_deg[u] += 1
+            in_deg[v] += 1
+            if (u, v) not in adj_dist or w < adj_dist[(u, v)]:
+                adj_dist[(u, v)] = w
+
+        active_nodes = sorted(
+            list({u for u, v, _ in directed_edges} | {v for u, v, _ in directed_edges})
+        )
+
+        # Compute all-pairs shortest paths using Floyd-Warshall
+        dist: dict[tuple[str, str], float] = {}
+        nxt_hop: dict[tuple[str, str], str] = {}
+        for u in active_nodes:
+            for v in active_nodes:
+                if u == v:
+                    dist[(u, v)] = 0.0
+                elif (u, v) in adj_dist:
+                    dist[(u, v)] = adj_dist[(u, v)]
+                    nxt_hop[(u, v)] = v
+                else:
+                    dist[(u, v)] = float("inf")
+
+        for k in active_nodes:
+            for i in active_nodes:
+                for j in active_nodes:
+                    if dist[(i, k)] + dist[(k, j)] < dist[(i, j)]:
+                        dist[(i, j)] = dist[(i, k)] + dist[(k, j)]
+                        nxt_hop[(i, j)] = nxt_hop.get((i, k), k)
+
+        deficit = {v: in_deg[v] - out_deg[v] for v in active_nodes}
+        demand = [v for v in active_nodes if deficit[v] > 0]
+        supply = [v for v in active_nodes if deficit[v] < 0]
+
+        augmented_edges: list[tuple[str, str]] = [(u, v) for u, v, _ in directed_edges]
+        added_cost = 0.0
+
+        for d in demand:
+            needed = deficit[d]
+            while needed > 0 and supply:
+                s = min(supply, key=lambda sup: dist.get((d, sup), float("inf")))
+                d_s_dist = dist.get((d, s), float("inf"))
+                if d_s_dist == float("inf"):
+                    break
+                curr = d
+                while curr != s and (curr, s) in nxt_hop:
+                    nxt = nxt_hop[(curr, s)]
+                    augmented_edges.append((curr, nxt))
+                    added_cost += adj_dist.get((curr, nxt), 1.0)
+                    curr = nxt
+                needed -= 1
+                deficit[s] += 1
+                if deficit[s] >= 0:
+                    supply.remove(s)
+
+        adj_aug: dict[str, list[str]] = defaultdict(list)
+        for u, v in sorted(augmented_edges, reverse=True):
+            adj_aug[u].append(v)
+
+        start_node = active_nodes[0]
+        curr_path = [start_node]
+        circuit: list[str] = []
+
+        while curr_path:
+            curr = curr_path[-1]
+            if adj_aug[curr]:
+                nxt = adj_aug[curr].pop()
+                curr_path.append(nxt)
+            else:
+                circuit.append(curr_path.pop())
+
+        circuit.reverse()
+        tour = [(circuit[i], circuit[i + 1]) for i in range(len(circuit) - 1)]
+        total_weight = sum(adj_dist.get((u, v), 1.0) for u, v, _ in directed_edges) + added_cost
+        return float(total_weight), tour
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

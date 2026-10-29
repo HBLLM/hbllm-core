@@ -56,6 +56,11 @@ from hbllm.hcir.world.active_inference_efe import (
     ExpectedFreeEnergyEvaluator,
     ExpectedFreeEnergyScore,
 )
+from hbllm.hcir.world.amygdalar_threat_conditioning import (
+    AmygdalarThreatConditioningEngine,
+    ConditionedThreatStimulus,
+    DefensiveVigilanceState,
+)
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
     AnteriorCingulateEffortAllocator,
@@ -89,6 +94,10 @@ from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualComparison,
     CounterfactualDeadlockDetector,
     CounterfactualRegretEvaluator,
+)
+from hbllm.hcir.world.entorhinal_border_cell import (
+    EntorhinalBorderCellEngine,
+    GridModuleRescalingResult,
 )
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
@@ -248,6 +257,10 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
 from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
     VentralPremotorAffordanceResonator,
+)
+from hbllm.hcir.world.ventral_tegmental_curiosity import (
+    EpistemicInformationGain,
+    VentralTegmentalCuriosityEngine,
 )
 from hbllm.hcir.world.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
@@ -711,6 +724,17 @@ class AutonomousEpistemicEngine:
 
         # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
         self.somatosensory_haptic: SomatosensoryHapticEngine = SomatosensoryHapticEngine()
+
+        # Round 15 Faculty: Entorhinal Border Cells & Grid Module Rescaling (Solstad / Barry)
+        self.entorhinal_border: EntorhinalBorderCellEngine = EntorhinalBorderCellEngine()
+
+        # Round 15 Faculty: Amygdalar Pavlovian Threat Conditioning & Defensive Cascades (LeDoux / Phelps)
+        self.amygdala_threat: AmygdalarThreatConditioningEngine = (
+            AmygdalarThreatConditioningEngine()
+        )
+
+        # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
+        self.vta_curiosity: VentralTegmentalCuriosityEngine = VentralTegmentalCuriosityEngine()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2524,6 +2548,83 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.condense_scc_metagraph()
+
+    def rescale_grid_modules_from_borders(
+        self,
+        boundary_grid: np.ndarray,
+        avatar_pos: tuple[int, int],
+    ) -> GridModuleRescalingResult:
+        """Evaluate entorhinal border cell firing and rescale grid module wavelengths (Solstad-Barry)."""
+        rescaling = self.entorhinal_border.evaluate_borders_and_rescaling(
+            boundary_grid=boundary_grid,
+            avatar_pos=avatar_pos,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(rescaling.to_causal_predicate())
+        return rescaling
+
+    def condition_threat_stimulus(
+        self,
+        stimulus_key: str,
+        aversive_magnitude: float,
+    ) -> ConditionedThreatStimulus:
+        """Rapidly potentiate amygdalar threat association (CS -> US) (LeDoux-Phelps)."""
+        cs = self.amygdala_threat.associate_threat(
+            stimulus_key=stimulus_key,
+            aversive_magnitude=aversive_magnitude,
+        )
+        return cs
+
+    def evaluate_defensive_vigilance(
+        self,
+        present_stimuli: list[str],
+    ) -> DefensiveVigilanceState:
+        """Evaluate amygdalar sensory threat cues and trigger defensive vigilance mode (LeDoux-Phelps)."""
+        state = self.amygdala_threat.evaluate_sensory_vigilance(present_stimuli)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def compute_epistemic_curiosity_bonus(
+        self,
+        state_key: str,
+    ) -> EpistemicInformationGain:
+        """Compute VTA dopaminergic epistemic information gain and curiosity bonus (Schultz-Friston)."""
+        gain = self.vta_curiosity.record_visit(state_key)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(gain.to_causal_predicate())
+        return gain
+
+    def compute_graph_eulerian_inspection_tour(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> tuple[bool, list[tuple[str, str]]]:
+        """Find an Eulerian path or circuit covering all directed graph transitions (Hierholzer)."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.find_eulerian_path_or_circuit()
+
+    def compute_graph_chinese_postman_tour(
+        self,
+        graph: CognitiveGraph | None = None,
+        weight_attribute: str = "weight",
+    ) -> tuple[float, list[tuple[str, str]]]:
+        """Compute optimal minimal-cost Chinese Postman Tour covering all edges at least once."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.chinese_postman_tour(weight_attribute=weight_attribute)
 
     @property
     def phase(self) -> EpistemicPhase:

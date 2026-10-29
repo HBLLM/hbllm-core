@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from hbllm.hcir.world.amygdalar_threat_conditioning import (
+    AmygdalarThreatConditioningEngine,
+    ConditionedThreatStimulus,
+    DefensiveVigilanceMode,
+    DefensiveVigilanceState,
+)
 from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
     AnteriorCingulateEffortAllocator,
     ConflictProfile,
@@ -40,6 +46,11 @@ from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 from hbllm.hcir.world.disagreement_analyzer import (
     DisagreementReport,
     PredictorDisagreementAnalyzer,
+)
+from hbllm.hcir.world.entorhinal_border_cell import (
+    BorderCell,
+    EntorhinalBorderCellEngine,
+    GridModuleRescalingResult,
 )
 from hbllm.hcir.world.frontopolar_exploration_horizon import (
     BranchSwitchDecision,
@@ -177,6 +188,11 @@ from hbllm.hcir.world.ventral_premotor_resonator import (
     VentralPremotorAffordanceResonator,
     VicariousCausalInference,
 )
+from hbllm.hcir.world.ventral_tegmental_curiosity import (
+    CuriosityDriveSignal,
+    EpistemicInformationGain,
+    VentralTegmentalCuriosityEngine,
+)
 from hbllm.hcir.world.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
     SomaticMarker,
@@ -205,11 +221,13 @@ __all__ = [
     "AffordanceResonancePattern",
     "AllocentricLandmark",
     "AllostaticRegime",
+    "AmygdalarThreatConditioningEngine",
     "AnteriorCingulateEffortAllocator",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
     "BeliefTransitionEvent",
+    "BorderCell",
     "BoundaryVectorCell",
     "BoundaryVectorMap",
     "BranchMode",
@@ -221,18 +239,24 @@ __all__ = [
     "ClaustrumSalienceConductor",
     "ClimbingFiberFeedback",
     "CognitiveTaskSet",
+    "ConditionedThreatStimulus",
     "ConflictProfile",
     "ContextTransitionEvent",
     "CounterfactualBranch",
     "CounterfactualOutcome",
+    "CuriosityDriveSignal",
     "DefaultPerceptionAdapter",
+    "DefensiveVigilanceMode",
+    "DefensiveVigilanceState",
     "DisagreementReport",
     "DriftDiffusionDecision",
     "DualValueOpponencyCortex",
     "EffortAllocationDecision",
     "EnsemblePrediction",
     "EntityRole",
+    "EntorhinalBorderCellEngine",
     "EpistemicFeedbackAssimilator",
+    "EpistemicInformationGain",
     "EpistemicObservation",
     "EpistemicPhase",
     "EpistemicTruthValue",
@@ -241,6 +265,7 @@ __all__ = [
     "FoveatedSaliencyMap",
     "FoveationResolution",
     "FrontopolarExplorationHorizonEngine",
+    "GridModuleRescalingResult",
     "HapticAffordanceFeedback",
     "HCIRSymbolicWorldTheory",
     "HippocampalPhasePrecessionEngine",
@@ -309,6 +334,7 @@ __all__ = [
     "TransthalamicRoute",
     "UnifiedPerceptualGestalt",
     "VentralPremotorAffordanceResonator",
+    "VentralTegmentalCuriosityEngine",
     "VentromedialSomaticMarkerEngine",
     "VicariousCausalInference",
     "VisuospatialWorkingMemory",
