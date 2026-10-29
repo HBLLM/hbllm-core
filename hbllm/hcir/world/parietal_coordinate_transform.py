@@ -857,3 +857,119 @@ class GeometricModelSelector:
             is_isometric=is_iso,
             perspective_distortion=round(persp_dist, 6),
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Retrosplenial Cortex (RSC) Egocentric-to-Allocentric Spatial Frame Transform
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class EgocentricCoordinate:
+    """An agent-centered coordinate with forward and lateral components."""
+
+    forward: int  # Positive = ahead of agent, negative = behind
+    lateral: int  # Positive = right of agent, negative = left of agent
+
+    def to_tuple(self) -> tuple[int, int]:
+        return (self.forward, self.lateral)
+
+
+class RetrosplenialCoordinateTransformer:
+    """Retrosplenial Cortex (RSC) egocentric-to-allocentric reference frame transformer.
+
+    Biologically modeled on Burgess (2008) and Taube (1995) Head-Direction / RSC network:
+    Translates between:
+    - Egocentric frame: oriented around the agent's current gaze / heading direction.
+      (Forward, Right, Left, Backward)
+    - Allocentric frame: world-fixed grid coordinates (row, col).
+    """
+
+    @staticmethod
+    def infer_heading_from_displacement(
+        prev_pos: tuple[int, int] | None,
+        curr_pos: tuple[int, int],
+        fallback: HeadingOrientation = HeadingOrientation.NORTH,
+    ) -> HeadingOrientation:
+        """Infer current heading from consecutive positions."""
+        if prev_pos is None:
+            return fallback
+        dr = curr_pos[0] - prev_pos[0]
+        dc = curr_pos[1] - prev_pos[1]
+        if dr < 0 and abs(dr) >= abs(dc):
+            return HeadingOrientation.NORTH
+        elif dr > 0 and abs(dr) >= abs(dc):
+            return HeadingOrientation.SOUTH
+        elif dc > 0 and abs(dc) > abs(dr):
+            return HeadingOrientation.EAST
+        elif dc < 0 and abs(dc) > abs(dr):
+            return HeadingOrientation.WEST
+        return fallback
+
+    @staticmethod
+    def ego_to_allo(
+        ego_coord: EgocentricCoordinate | tuple[int, int],
+        agent_pos: tuple[int, int],
+        heading: HeadingOrientation = HeadingOrientation.NORTH,
+    ) -> tuple[int, int]:
+        """Convert egocentric (forward, lateral) offset to world allocentric (row, col)."""
+        if isinstance(ego_coord, EgocentricCoordinate):
+            fwd, lat = ego_coord.forward, ego_coord.lateral
+        else:
+            fwd, lat = ego_coord
+
+        fr, fc = heading.unit_vector
+        rr, rc = heading.right_vector
+
+        ar, ac = agent_pos
+        target_r = ar + fwd * fr + lat * rr
+        target_c = ac + fwd * fc + lat * rc
+        return (target_r, target_c)
+
+    @staticmethod
+    def allo_to_ego(
+        target_pos: tuple[int, int],
+        agent_pos: tuple[int, int],
+        heading: HeadingOrientation = HeadingOrientation.NORTH,
+    ) -> EgocentricCoordinate:
+        """Convert world allocentric (row, col) target to egocentric (forward, lateral) offset."""
+        dr = target_pos[0] - agent_pos[0]
+        dc = target_pos[1] - agent_pos[1]
+
+        fr, fc = heading.unit_vector
+        rr, rc = heading.right_vector
+
+        # Dot product with forward and right unit vectors
+        fwd = dr * fr + dc * fc
+        lat = dr * rr + dc * rc
+        return EgocentricCoordinate(forward=fwd, lateral=lat)
+
+    @staticmethod
+    def extract_egocentric_view(
+        grid: np.ndarray,
+        agent_pos: tuple[int, int],
+        heading: HeadingOrientation = HeadingOrientation.NORTH,
+        view_radius: int = 3,
+        pad_value: int = 0,
+    ) -> np.ndarray:
+        """Extract egocentric oriented visual patch centered on agent with forward pointing up."""
+        H, W = grid.shape
+        size = 2 * view_radius + 1
+        raw_patch = np.full((size, size), pad_value, dtype=grid.dtype)
+
+        ar, ac = agent_pos
+        for r_off in range(-view_radius, view_radius + 1):
+            for c_off in range(-view_radius, view_radius + 1):
+                gr, gc = ar + r_off, ac + c_off
+                if 0 <= gr < H and 0 <= gc < W:
+                    raw_patch[r_off + view_radius, c_off + view_radius] = grid[gr, gc]
+
+        if heading == HeadingOrientation.NORTH:
+            return raw_patch
+        elif heading == HeadingOrientation.EAST:
+            return np.rot90(raw_patch, k=1)
+        elif heading == HeadingOrientation.SOUTH:
+            return np.rot90(raw_patch, k=2)
+        elif heading == HeadingOrientation.WEST:
+            return np.rot90(raw_patch, k=3)
+        return raw_patch

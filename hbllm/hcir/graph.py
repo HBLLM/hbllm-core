@@ -1863,6 +1863,14 @@ class CognitiveGraph:
                         queue.append((tgt, depth + 1))
         return visited
 
+    def parallel_reachability_cones(
+        self, seed_nodes: list[str], max_depth: int = 10
+    ) -> dict[str, set[str]]:
+        """Compute forward reachability cones across multiple seed nodes concurrently."""
+        if self._native_adapter is not None:
+            return self._native_adapter.parallel_reachability_cones(seed_nodes, max_depth)
+        return {s: self.reachable_nodes(s, max_depth) for s in seed_nodes}
+
     def connected_components(self) -> list[set[str]]:
         """Decompose active graph into disjoint undirected connected components."""
         if self._native_adapter is not None:

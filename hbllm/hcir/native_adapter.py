@@ -279,6 +279,26 @@ class NativeGraphAdapter:
                         queue.append((target, depth + 1))
         return visited
 
+    def parallel_reachability_cones(
+        self, seed_nodes: list[str], max_depth: int = 10
+    ) -> dict[str, set[str]]:
+        """Compute forward reachability cones across multiple seed anchors simultaneously."""
+        if not seed_nodes:
+            return {}
+        if len(seed_nodes) == 1:
+            return {seed_nodes[0]: self.reachable_nodes(seed_nodes[0], max_depth)}
+
+        results: dict[str, set[str]] = {}
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(len(seed_nodes), 8)) as executor:
+            futures = {
+                seed: executor.submit(self.reachable_nodes, seed, max_depth) for seed in seed_nodes
+            }
+            for seed, fut in futures.items():
+                results[seed] = fut.result()
+        return results
+
     def connected_components(self) -> list[set[str]]:
         """Decompose active graph into disjoint undirected connected components."""
         all_node_ids = {

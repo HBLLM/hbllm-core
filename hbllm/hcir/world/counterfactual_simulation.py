@@ -15,7 +15,12 @@ Modeled on primate orbitofrontal cortex and hippocampal preplay (CA3 sharp-wave 
 from __future__ import annotations
 
 import logging
-from typing import NamedTuple
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, NamedTuple
+
+import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -304,3 +309,147 @@ class CounterfactualDeadlockDetector:
         """Run deadlock evaluation and propose atomic state transaction if deadlock detected."""
         eval_res = cls.evaluate_deadlock(pos, goals, static_barriers, all_blocks, grid_shape)
         return eval_res, eval_res.to_transaction_operations()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Pearl Level-3 Counterfactual Simulation & Regret Minimization
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class CounterfactualComparison:
+    """Evaluation of an observed action against a counterfactual alternative."""
+
+    actual_action: Any
+    actual_outcome_value: float
+    counterfactual_action: Any
+    counterfactual_outcome_value: float
+    regret: float
+    is_counterfactually_superior: bool
+    justification: str = ""
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export counterfactual comparison as a declarative causal predicate."""
+        return CausalPredicate(
+            variable="counterfactual:regret",
+            operator="==",
+            value=f"regret:{self.regret:.3f}",
+            relation=f"actual:{self.actual_action}:counterfactual:{self.counterfactual_action}:superior:{self.is_counterfactually_superior}",
+            target_entity=str(self.actual_action),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction recording counterfactual evaluation."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"counterfactual_{self.actual_action}_{self.counterfactual_action}",
+                node_data={
+                    "actual_action": str(self.actual_action),
+                    "actual_outcome_value": float(self.actual_outcome_value),
+                    "counterfactual_action": str(self.counterfactual_action),
+                    "counterfactual_outcome_value": float(self.counterfactual_outcome_value),
+                    "regret": float(self.regret),
+                    "is_counterfactually_superior": self.is_counterfactually_superior,
+                    "justification": self.justification,
+                },
+            )
+        ]
+
+
+class CounterfactualRegretEvaluator:
+    """Orbitofrontal counterfactual regret evaluator (Pearl Level 3 Counterfactual Reasoning).
+
+    Biologically modeled on Camille et al. (2004) & Marchiori & Warglien (2008):
+    Evaluates: "What would the outcome value have been if alternative action a' was chosen instead of a?"
+    Quantifies counterfactual regret: Regret(a, a') = max(0, V(a') - V(a)).
+    When regret exceeds the threshold, flags counterfactually superior branches to update the causal theory.
+    """
+
+    def __init__(self, regret_threshold: float = 0.10) -> None:
+        self.regret_threshold = regret_threshold
+
+    def evaluate_counterfactuals(
+        self,
+        actual_action: Any,
+        actual_reward: float,
+        current_pos: tuple[int, int] | None,
+        actual_next_pos: tuple[int, int] | None,
+        candidate_actions: Sequence[Any],
+        grid: np.ndarray,
+        goal_positions: set[tuple[int, int]] | None = None,
+        static_barriers: set[tuple[int, int]] | None = None,
+        lethal_positions: set[tuple[int, int]] | None = None,
+        action_deltas: dict[Any, tuple[int, int]] | None = None,
+    ) -> list[CounterfactualComparison]:
+        """Compute counterfactual regret across all unchosen candidate actions."""
+        H, W = grid.shape
+        max_dist = math.sqrt(H * H + W * W) or 1.0
+
+        goals = goal_positions or set()
+        barriers = static_barriers or set()
+        lethals = lethal_positions or set()
+        deltas = action_deltas or {}
+
+        # 1. Baseline value of actual outcome
+        actual_val = actual_reward
+        if actual_next_pos is not None:
+            if actual_next_pos in lethals:
+                actual_val -= 2.0
+            elif actual_next_pos in goals:
+                actual_val += 2.0
+            elif goals:
+                min_g_dist = min(
+                    math.sqrt((actual_next_pos[0] - g[0]) ** 2 + (actual_next_pos[1] - g[1]) ** 2)
+                    for g in goals
+                )
+                actual_val += max(0.0, 1.0 - (min_g_dist / max_dist))
+
+        comparisons: list[CounterfactualComparison] = []
+
+        if current_pos is None:
+            return comparisons
+
+        ar, ac = current_pos
+
+        for alt_action in candidate_actions:
+            if alt_action == actual_action:
+                continue
+
+            dr, dc = deltas.get(alt_action, (0, 0))
+            alt_r, alt_c = ar + dr, ac + dc
+
+            if not (0 <= alt_r < H and 0 <= alt_c < W) or (alt_r, alt_c) in barriers:
+                cf_val = -1.0
+                justification = f"Counterfactual action {alt_action} blocked by boundary or barrier"
+            elif (alt_r, alt_c) in lethals:
+                cf_val = -2.0
+                justification = f"Counterfactual action {alt_action} leads to lethal hazard"
+            elif (alt_r, alt_c) in goals:
+                cf_val = 2.0
+                justification = f"Counterfactual action {alt_action} reaches primary goal directly"
+            else:
+                cf_val = 0.0
+                if goals:
+                    alt_dist = min(
+                        math.sqrt((alt_r - g[0]) ** 2 + (alt_c - g[1]) ** 2) for g in goals
+                    )
+                    cf_val = max(0.0, 1.0 - (alt_dist / max_dist))
+                justification = f"Counterfactual progress toward goal (val={cf_val:.2f})"
+
+            regret = max(0.0, cf_val - actual_val)
+            is_superior = regret >= self.regret_threshold
+
+            comp = CounterfactualComparison(
+                actual_action=actual_action,
+                actual_outcome_value=actual_val,
+                counterfactual_action=alt_action,
+                counterfactual_outcome_value=cf_val,
+                regret=regret,
+                is_counterfactually_superior=is_superior,
+                justification=justification,
+            )
+            comparisons.append(comp)
+
+        comparisons.sort(key=lambda c: c.regret, reverse=True)
+        return comparisons

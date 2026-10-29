@@ -73,7 +73,9 @@ from hbllm.hcir.world.cerebellar_phase_clock import (
 )
 from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
+    CounterfactualComparison,
     CounterfactualDeadlockDetector,
+    CounterfactualRegretEvaluator,
 )
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
@@ -116,8 +118,11 @@ from hbllm.hcir.world.optical_ray_projection import (
     OpticalRayProjector,
 )
 from hbllm.hcir.world.parietal_coordinate_transform import (
+    EgocentricCoordinate,
     GeometricModelSelector,
+    HeadingOrientation,
     ParietalCoordinateTransformer,
+    RetrosplenialCoordinateTransformer,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -230,8 +235,10 @@ from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.cortex_deliberation import (
+    AdaptiveNeuromodulationGovernor,
     BasalGangliaDecision,
     BasalGangliaGatingCircuit,
+    NeuromodulatoryState,
     PrefrontalDeliberationEngine,
 )
 from hbllm.hcir.world.cortex_episodic import (
@@ -468,12 +475,16 @@ class AutonomousEpistemicEngine:
         # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
         self.coordinate_transformer: ParietalCoordinateTransformer = ParietalCoordinateTransformer()
         self.geometric_selector: GeometricModelSelector = GeometricModelSelector()
+        self.retrosplenial_transformer: RetrosplenialCoordinateTransformer = (
+            RetrosplenialCoordinateTransformer()
+        )
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
+        self.counterfactual_regret: CounterfactualRegretEvaluator = CounterfactualRegretEvaluator()
 
         # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
         self.gnw: GlobalNeuronalWorkspace = GlobalNeuronalWorkspace()
@@ -1613,6 +1624,53 @@ class AutonomousEpistemicEngine:
             risk_penalties=risk_penalties,
         )
 
+    @property
+    def neuromodulation_governor(self) -> AdaptiveNeuromodulationGovernor:
+        """Dual Neuromodulatory Governor (VTA Dopamine & LC Noradrenaline)."""
+        return self.deliberation_engine.neuromodulation
+
+    def step_neuromodulatory_dynamics(
+        self,
+        reward: float = 0.0,
+        predicted_value: float = 0.0,
+        actual_value: float = 0.0,
+        conflict_level: float = 0.0,
+    ) -> NeuromodulatoryState:
+        """Update VTA-LC coupled neuromodulatory state."""
+        return self.deliberation_engine.step_neuromodulatory_dynamics(
+            self,
+            reward=reward,
+            predicted_value=predicted_value,
+            actual_value=actual_value,
+            conflict_level=conflict_level,
+        )
+
+    def to_egocentric_coordinate(
+        self,
+        target_pos: tuple[int, int],
+        heading: HeadingOrientation | None = None,
+    ) -> EgocentricCoordinate | None:
+        """Convert allocentric target to agent-centered egocentric coordinate."""
+        if self.avatar_pos is None:
+            return None
+        h = heading or self.retrosplenial_transformer.infer_heading_from_displacement(
+            getattr(self, "prev_avatar_pos", None), self.avatar_pos
+        )
+        return self.retrosplenial_transformer.allo_to_ego(target_pos, self.avatar_pos, h)
+
+    def to_allocentric_coordinate(
+        self,
+        ego_coord: EgocentricCoordinate | tuple[int, int],
+        heading: HeadingOrientation | None = None,
+    ) -> tuple[int, int] | None:
+        """Convert agent-relative egocentric coordinate to world allocentric position."""
+        if self.avatar_pos is None:
+            return None
+        h = heading or self.retrosplenial_transformer.infer_heading_from_displacement(
+            getattr(self, "prev_avatar_pos", None), self.avatar_pos
+        )
+        return self.retrosplenial_transformer.ego_to_allo(ego_coord, self.avatar_pos, h)
+
     def evaluate_policy_expected_free_energy(
         self,
         candidate_transitions: dict[Any, tuple[int, int]],
@@ -1639,6 +1697,37 @@ class AutonomousEpistemicEngine:
             unconfirmed_hypotheses_count=unconfirmed,
             goal_confidence=goal_confidence,
             world_theory_uncertainty=uncertainty,
+        )
+
+    def evaluate_counterfactual_regret(
+        self,
+        actual_action: Any,
+        actual_reward: float,
+        actual_next_pos: tuple[int, int] | None,
+        candidate_actions: Sequence[Any],
+        grid: np.ndarray | None = None,
+    ) -> list[CounterfactualComparison]:
+        """Compute counterfactual regret across unchosen candidate actions (Pearl Level 3)."""
+        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
+        if curr_g is None:
+            curr_g = np.zeros((10, 10), dtype=int)
+
+        barriers: set[tuple[int, int]] = set(self.learned_barriers)
+        lethals: set[tuple[int, int]] = set()
+        if hasattr(self, "level_lethal_positions") and self.current_level is not None:
+            lethals = self.level_lethal_positions.get(self.current_level, set())
+
+        return self.counterfactual_regret.evaluate_counterfactuals(
+            actual_action=actual_action,
+            actual_reward=actual_reward,
+            current_pos=self.avatar_pos,
+            actual_next_pos=actual_next_pos,
+            candidate_actions=candidate_actions,
+            grid=curr_g,
+            goal_positions=self.learned_goal_positions,
+            static_barriers=barriers,
+            lethal_positions=lethals,
+            action_deltas=self.action_deltas,
         )
 
     def extract_affordance_field(
