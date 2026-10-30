@@ -1704,7 +1704,6 @@ class MotorCortexEffector:
                     or feat in av_feats
                     or feat == bg
                     or feat == engine.bg_feature
-                    or (feat == 0 and bg != 0)
                     or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
                     or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)

@@ -467,7 +467,8 @@ class HippocampalEpisodicCortex:
                     if is_walkable_fn and is_walkable_fn(cand_int):
                         continue
                     # Compact features (likely entities / hazards)
-                    if int(np.sum(prev_grid == cand_int)) < 40:
+                    total_cells = prev_grid.shape[0] * prev_grid.shape[1]
+                    if int(np.sum(prev_grid == cand_int)) <= max(64, int(total_cells * 0.40)):
                         suspected_hazards.add(cand_int)
                         self.discovered_lethal_features.add(cand_int)
 

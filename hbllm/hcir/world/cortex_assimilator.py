@@ -360,7 +360,7 @@ class EpistemicFeedbackAssimilator:
                         step=engine.step_counter,
                     )
                     # Categorical Causal Lifting: If clicking background produced 0 diff, background is inert
-                    if probed_feat == engine.bg_feature or probed_feat == 0:
+                    if probed_feat == engine.bg_feature:
                         engine.quiescent_features.add(probed_feat)
                     else:
                         q_count = getattr(engine, "feature_quiescent_counts", None)
@@ -490,23 +490,24 @@ class EpistemicFeedbackAssimilator:
                         )
 
                 # Numerical / neighborhood cardinality constraint discovery:
-                tr, tc = target_coord
-                if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
-                    new_feat = int(curr_grid[tr, tc])
-                    if 0 <= new_feat <= 8 and new_feat != engine.bg_feature:
-                        new_safe, new_hazards = (
-                            engine.working_memory.register_cardinality_constraint(
-                                center=target_coord,
-                                count=new_feat,
-                                grid_shape=curr_grid.shape,
-                                radius=1,
+                if getattr(engine.working_memory, "has_cardinality_hypothesis", False):
+                    tr, tc = target_coord
+                    if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
+                        new_feat = int(curr_grid[tr, tc])
+                        if 0 <= new_feat <= 8 and new_feat != engine.bg_feature:
+                            new_safe, new_hazards = (
+                                engine.working_memory.register_cardinality_constraint(
+                                    center=target_coord,
+                                    count=new_feat,
+                                    grid_shape=curr_grid.shape,
+                                    radius=1,
+                                )
                             )
-                        )
-                        for hz in new_hazards:
-                            engine.hazard_tracker.register_lethal_feature(
-                                int(curr_grid[hz[0], hz[1]])
-                            )
-                            engine.record_learned_barrier(hz)
+                            for hz in new_hazards:
+                                engine.hazard_tracker.register_lethal_feature(
+                                    int(curr_grid[hz[0], hz[1]])
+                                )
+                                engine.record_learned_barrier(hz)
 
             # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attribution
             loci: list[tuple[int, int]] = []
@@ -748,7 +749,6 @@ class EpistemicFeedbackAssimilator:
                 and ce.feature_id not in engine.hazard_tracker.known_lethal_features
                 and ce.feature_id != bg
                 and ce.feature_id != engine.bg_feature
-                and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
             ]
             if len(candidate_bilat) >= 2:
                 bilat_state = engine.bilateral_integrator.detect_bilateral_pairing(
@@ -1057,11 +1057,7 @@ class EpistemicFeedbackAssimilator:
             and (cmd_delta[0] != 0 or cmd_delta[1] != 0)
         ):
             valid_feats = {
-                f
-                for f in kinetic_res.self_avatar.features
-                if f != bg
-                and f != engine.bg_feature
-                and (f != 0 or (bg != 0 and engine.bg_feature != 0))
+                f for f in kinetic_res.self_avatar.features if f != bg and f != engine.bg_feature
             }
             if valid_feats:
                 engine.avatar_features = valid_feats
@@ -1146,7 +1142,6 @@ class EpistemicFeedbackAssimilator:
                     for pe, ce, delta in moved_entities
                     if ce.feature_id != bg
                     and ce.feature_id != engine.bg_feature
-                    and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
                     and ce.area <= max(49, int(H * W * 0.15))
                 ]
                 if valid_moved:
@@ -1165,9 +1160,7 @@ class EpistemicFeedbackAssimilator:
                     engine.avatar_features = {
                         ce.feature_id
                         for _, ce in comp_pairs
-                        if ce.feature_id != bg
-                        and ce.feature_id != engine.bg_feature
-                        and (ce.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
+                        if ce.feature_id != bg and ce.feature_id != engine.bg_feature
                     }
                     if engine.avatar_features:
                         engine.avatar_feature = next(iter(engine.avatar_features))
@@ -1773,6 +1766,7 @@ class EpistemicFeedbackAssimilator:
                             win_target,
                         )
 
+                max_entity_area = max(64, int(H * W * 0.15))
                 for pe in prev_entities:
                     is_distant_pe = (
                         prev_avatar_pos is None
@@ -1784,7 +1778,7 @@ class EpistemicFeedbackAssimilator:
                         and pe.feature_id != bg
                         and pe.feature_id != engine.bg_feature
                         and not engine.symbolic_theory.is_barrier(pe.feature_id)
-                        and 1 <= pe.area <= 64
+                        and 1 <= pe.area <= max_entity_area
                     ):
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
@@ -1800,13 +1794,15 @@ class EpistemicFeedbackAssimilator:
                 if 0 <= sr < H and 0 <= sc < W:
                     sim_feat = int(engine.prev_grid[sr, sc])
                     sim_extent = int(np.count_nonzero(engine.prev_grid == sim_feat))
+                    max_sim_extent = max(64, int(H * W * 0.15))
                     if (
                         sim_feat != bg
                         and sim_feat != engine.bg_feature
                         and sim_feat not in av_feats
                         and not engine.symbolic_theory.is_barrier(sim_feat)
                         and not (
-                            sim_feat in engine.symbolic_theory.walkable_features or sim_extent > 64
+                            sim_feat in engine.symbolic_theory.walkable_features
+                            or sim_extent > max_sim_extent
                         )
                     ):
                         engine.symbolic_theory.induce_goal(sim_feat)
@@ -1914,17 +1910,18 @@ class EpistemicFeedbackAssimilator:
                                 candidate_cells.add(val)
                             curr_r += dr
                             curr_c += dc
+                    total_cells = H * W
                     for cand_feat in candidate_cells:
                         cand_feat_int = int(cand_feat)
+                        feat_count = int(np.sum(engine.prev_grid == cand_feat_int))
                         if (
                             cand_feat_int != engine.bg_feature
                             and cand_feat_int not in av_feats
                             and not engine.symbolic_theory.is_walkable(cand_feat_int)
-                            and int(np.sum(engine.prev_grid == cand_feat_int)) < 40
+                            and feat_count <= max(64, int(total_cells * 0.40))
                         ):
                             engine.hazard_tracker.register_lethal_feature(cand_feat_int)
-                            if int(np.sum(engine.prev_grid == cand_feat_int)) >= 25:
-                                engine.symbolic_theory.induce_barrier(cand_feat_int)
+                            engine.symbolic_theory.induce_barrier(cand_feat_int)
                             engine.symbolic_theory.cargo_features.discard(cand_feat_int)
                             engine.symbolic_theory.goal_features.discard(cand_feat_int)
                             engine.symbolic_theory.candidate_goal_features.discard(cand_feat_int)
@@ -1971,7 +1968,8 @@ class EpistemicFeedbackAssimilator:
                 if (
                     pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
                     and pe.feature_id not in av_feats
-                    and (pe.feature_id != 0 or (bg != 0 and engine.bg_feature != 0))
+                    and pe.feature_id != bg
+                    and pe.feature_id != engine.bg_feature
                     and not engine.symbolic_theory.is_walkable(pe.feature_id)
                 ):
                     dist_to_av = abs(pe.grid_pos[0] - engine.avatar_pos[0]) + abs(
@@ -1999,9 +1997,7 @@ class EpistemicFeedbackAssimilator:
                     orig_val in engine.symbolic_theory.barrier_features
                     or (int(mr), int(mc)) in engine.learned_barriers
                 ) and (
-                    post_val == engine.bg_feature
-                    or post_val == 0
-                    or engine.symbolic_theory.is_walkable(post_val)
+                    post_val == engine.bg_feature or engine.symbolic_theory.is_walkable(post_val)
                 ):
                     for h_item in engine.working_memory.held_items:
                         engine.working_memory.register_tool_unlock(h_item.feature_id, orig_val)

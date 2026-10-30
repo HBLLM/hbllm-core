@@ -177,16 +177,20 @@ class EpistemicGoalScheduler:
             # that recur in large quantities cannot be the singular exit/goal.
             feat_total_cells = int(np.count_nonzero(curr_grid == e.feature_id))
             feat_instance_count = sum(1 for ent in entities if ent.feature_id == e.feature_id)
+            max_entity_area = max(64, int(H * W * 0.15))
             is_pervasive_substrate = (
                 e.feature_id in engine.symbolic_theory.walkable_features
-            ) and (feat_instance_count > 2 or feat_total_cells > 64)
+            ) and (feat_instance_count > 2 or feat_total_cells > max_entity_area)
             if is_pervasive_substrate:
                 engine.symbolic_theory.goal_features.discard(e.feature_id)
                 continue
 
             is_goal_candidate = (
                 e.feature_id in engine.symbolic_theory.goal_features
-                and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                and (
+                    1 <= e.area <= max_entity_area
+                    or not engine.symbolic_theory.is_walkable(e.feature_id)
+                )
             ) or e.role == EntityRole.GOAL
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
@@ -304,13 +308,19 @@ class EpistemicGoalScheduler:
                     continue
                 if e.grid_pos in panel_coords:
                     continue
+                max_entity_area = max(64, int(H * W * 0.15))
                 if (
                     e.feature_id in engine.symbolic_theory.goal_features
-                    and e.feature_id != 0
-                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                    and (
+                        1 <= e.area <= max_entity_area
+                        or not engine.symbolic_theory.is_walkable(e.feature_id)
+                    )
                 ) or (
                     e.feature_id in engine.symbolic_theory.candidate_goal_features
-                    and (1 <= e.area <= 64 or not engine.symbolic_theory.is_walkable(e.feature_id))
+                    and (
+                        1 <= e.area <= max_entity_area
+                        or not engine.symbolic_theory.is_walkable(e.feature_id)
+                    )
                 ):
                     if e.grid_pos not in hypothesized_goals:
                         hypothesized_goals.append(e.grid_pos)
@@ -980,7 +990,6 @@ class MentalSimulationPlanner:
         for e in entities:
             if (
                 e.feature_id != bg
-                and e.feature_id != 0
                 and e.feature_id not in av_feats
                 and not engine.symbolic_theory.is_walkable(e.feature_id)
                 and not engine.symbolic_theory.is_goal(e)

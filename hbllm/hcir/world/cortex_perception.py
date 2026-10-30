@@ -575,7 +575,6 @@ class GestaltAffordanceDetector:
                 feat_int = int(feat)
                 if (
                     feat_int == bg
-                    or feat_int == 0
                     or feat_int in av_feats
                     or (barrier_features and feat_int in barrier_features)
                     or (known_lethal_features and feat_int in known_lethal_features)
@@ -932,7 +931,7 @@ class PerceptionEngine:
 
         for feat in np.unique(prev_grid):
             feat_int = int(feat)
-            if feat_int == 0 or feat_int == bg:
+            if feat_int == bg:
                 continue
             prev_pts = np.where(prev_grid == feat_int)
             curr_pts = np.where(curr_grid == feat_int)

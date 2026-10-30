@@ -337,7 +337,7 @@ class ActionMutationObserver(HypothesisObserver):
         hypotheses: dict[str, RelationalRuleHypothesis],
         min_support_to_confirm: int,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
-        if context.changed_count not in (1, 2) or context.action is None:
+        if not (1 <= context.changed_count <= 16) or context.action is None:
             return []
 
         changed_coords = np.argwhere(context.diff_mask)
