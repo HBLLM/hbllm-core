@@ -1123,12 +1123,20 @@ class ObjectStateGraphPlanner:
         """Finalize the primitive action sequence, attaching terminal interaction if necessary."""
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
 
+        interact_candidates = [
+            a
+            for a in available_actions
+            if engine.is_spatial_effector(a)
+            or (not engine.is_displacement_action(a) and engine.inhibited_actions.get(a, 0) == 0)
+        ]
+        interact_act = interact_candidates[0] if interact_candidates else None
+
         if not path:
             # Avatar is already at or adjacent to the object stance!
-            if 5 in available_actions:
+            if interact_act is not None:
                 return [
                     MentalSimulationStep(
-                        action=5,
+                        action=interact_act,
                         predicted_avatar_pos=engine.avatar_pos,
                         expected_mutation="INTERACT",
                     )
@@ -1139,9 +1147,9 @@ class ObjectStateGraphPlanner:
 
         # If the object is solid and the stance is adjacent to it, execute terminal interaction
         if obj.is_solid and target_stance not in obj.cells:
-            if 5 in available_actions:
+            if interact_act is not None:
                 interact_step = MentalSimulationStep(
-                    action=5,
+                    action=interact_act,
                     predicted_avatar_pos=target_stance,
                     expected_mutation="INTERACT",
                 )

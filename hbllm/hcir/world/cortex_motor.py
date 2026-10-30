@@ -566,8 +566,6 @@ class EpistemicCuriosityExplorer:
             undo_acts.update(engine.working_memory.undo_actions)
         if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
             undo_acts.update(engine.symbolic_theory.undo_actions)
-        if 7 in available_actions and len(available_actions) > 1:
-            undo_acts.add(7)
         uninhibited_available = [
             a
             for a in available_actions

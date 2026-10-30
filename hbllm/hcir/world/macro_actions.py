@@ -803,11 +803,9 @@ class ExploreObject(MacroAction):
         self.consecutive_steps += 1
         # Allocentric click effector only if agent lacks displacement capabilities
         if not engine.has_displacement_capabilities(available_actions) and any(
-            engine.is_spatial_effector(a) or a == 6 for a in available_actions
+            engine.is_spatial_effector(a) for a in available_actions
         ):
-            eff_candidates = [
-                a for a in available_actions if engine.is_spatial_effector(a) or a == 6
-            ]
+            eff_candidates = [a for a in available_actions if engine.is_spatial_effector(a)]
             if eff_candidates:
                 self.probed = True
                 self.status = MacroActionStatus.SATISFIED
@@ -833,7 +831,7 @@ class ExploreObject(MacroAction):
         ]
         if interact_candidates:
             chosen = interact_candidates[0]
-            if engine.is_spatial_effector(chosen) or chosen == 6:
+            if engine.is_spatial_effector(chosen):
                 return chosen, {
                     "x": int(self.target_pos[1]),
                     "y": int(self.target_pos[0]),
