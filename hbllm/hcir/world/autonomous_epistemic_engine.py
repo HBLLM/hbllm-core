@@ -85,6 +85,10 @@ from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarSmithPredictor,
     PhaseGateDecision,
 )
+from hbllm.hcir.world.claustrum_interhemispheric import (
+    ClaustrumInterhemisphericIntegrator,
+    CrossModalSynchronyPacket,
+)
 from hbllm.hcir.world.claustrum_salience_conductor import (
     ClaustrumSalienceConductor,
     UnifiedPerceptualGestalt,
@@ -131,6 +135,10 @@ from hbllm.hcir.world.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
     ReplayTransition,
+)
+from hbllm.hcir.world.hippocampal_time_cell import (
+    HippocampalTimeCellEngine,
+    TimeIntervalState,
 )
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
@@ -273,6 +281,10 @@ from hbllm.hcir.world.ventral_premotor_resonator import (
 from hbllm.hcir.world.ventral_tegmental_curiosity import (
     EpistemicInformationGain,
     VentralTegmentalCuriosityEngine,
+)
+from hbllm.hcir.world.ventrolateral_motor_inhibition import (
+    ResponseInhibitionCommand,
+    VentrolateralMotorInhibitionEngine,
 )
 from hbllm.hcir.world.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
@@ -757,6 +769,19 @@ class AutonomousEpistemicEngine:
         # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
         self.rule_abstraction: DorsolateralRuleAbstractionEngine = (
             DorsolateralRuleAbstractionEngine()
+        )
+
+        # Round 17 Faculty: Hippocampal CA1 Temporal Distance Cells & Relative Interval Timing (MacDonald / Eichenbaum)
+        self.hippocampal_time: HippocampalTimeCellEngine = HippocampalTimeCellEngine()
+
+        # Round 17 Faculty: Ventrolateral Prefrontal Cortex (vlPFC / rIFG) Motor Rule Retrieval & Response Inhibition (Aron / Wiecki)
+        self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine = (
+            VentrolateralMotorInhibitionEngine()
+        )
+
+        # Round 17 Faculty: Claustrum Dynamic Inter-Hemispheric Synchrony & Cross-Modal Gestalt Binding (Crick & Koch / Smythies)
+        self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator = (
+            ClaustrumInterhemisphericIntegrator()
         )
 
         # Connect GNW conscious broadcast listener for executive arbitration
@@ -2735,6 +2760,100 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.maximum_independent_set()
+
+    def track_temporal_interval(
+        self,
+        interval_id: str,
+        duration: float,
+        dt: float = 0.0,
+    ) -> TimeIntervalState:
+        """Track temporal distance cells across a delayed interval (MacDonald-Eichenbaum)."""
+        if interval_id not in self.hippocampal_time._intervals:
+            self.hippocampal_time.register_interval(interval_id=interval_id, duration=duration)
+        if dt > 0.0:
+            states = self.hippocampal_time.step(dt=dt, interval_id=interval_id)
+            state = states[interval_id]
+        else:
+            state = self.hippocampal_time.get_interval_state(
+                interval_id
+            ) or self.hippocampal_time._compute_state(interval_id)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def evaluate_motor_response_inhibition(
+        self,
+        intended_action: str | int,
+        conflict_level: float = 0.0,
+        risk_score: float = 0.0,
+        time_to_impact: float = float("inf"),
+        active_conditions: set[str] | list[str] | None = None,
+    ) -> ResponseInhibitionCommand:
+        """Evaluate vlPFC motor rule retrieval and response inhibition (Aron-Wiecki)."""
+        cmd = self.vl_motor_inhibition.evaluate_action_gating(
+            intended_action=intended_action,
+            conflict_level=conflict_level,
+            risk_score=risk_score,
+            time_to_impact=time_to_impact,
+            active_conditions=active_conditions,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(cmd.to_causal_predicate())
+        return cmd
+
+    def bind_cross_modal_gestalt(
+        self,
+        timestamp: float,
+        spatial_state: dict[str, Any] | None = None,
+        somatic_valence: float = 0.0,
+        haptic_friction: float = 1.0,
+        threat_vigilance: float = 0.0,
+        temporal_progress: float = 0.0,
+        rule_active: bool = False,
+    ) -> CrossModalSynchronyPacket:
+        """Bind multimodal streams into a synchronous claustrum gestalt (Crick & Koch / Smythies)."""
+        packet = self.claustrum_interhemispheric.bind_cross_modal_streams(
+            timestamp=timestamp,
+            spatial_state=spatial_state,
+            somatic_valence=somatic_valence,
+            haptic_friction=haptic_friction,
+            threat_vigilance=threat_vigilance,
+            temporal_progress=temporal_progress,
+            rule_active=rule_active,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(packet.to_causal_predicate())
+        return packet
+
+    def compute_graph_vertex_cover(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> set[str]:
+        """Compute an approximate Minimum Vertex Cover (MVC) of structural bottleneck nodes."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.minimum_vertex_cover()
+
+    def compute_graph_edge_coloring(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> dict[tuple[str, str], int]:
+        """Compute a proper greedy edge coloring (Vizing's theorem) of non-conflicting transitions."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.greedy_edge_coloring()
 
     @property
     def phase(self) -> EpistemicPhase:

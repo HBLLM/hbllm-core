@@ -34,6 +34,11 @@ from hbllm.hcir.world.cerebellar_microzone_adaptor import (
     ClimbingFiberFeedback,
     MotorPrediction,
 )
+from hbllm.hcir.world.claustrum_interhemispheric import (
+    ClaustrumInterhemisphericIntegrator,
+    CrossModalSynchronyPacket,
+    InterHemisphericBindingState,
+)
 from hbllm.hcir.world.claustrum_salience_conductor import (
     ClaustrumSalienceConductor,
     UnifiedPerceptualGestalt,
@@ -82,6 +87,11 @@ from hbllm.hcir.world.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
     ReplayTransition,
+)
+from hbllm.hcir.world.hippocampal_time_cell import (
+    HippocampalTimeCellEngine,
+    TemporalTimeCell,
+    TimeIntervalState,
 )
 from hbllm.hcir.world.inferotemporal_shape_hasher import (
     InferotemporalShapeHasher,
@@ -208,6 +218,11 @@ from hbllm.hcir.world.ventral_tegmental_curiosity import (
     EpistemicInformationGain,
     VentralTegmentalCuriosityEngine,
 )
+from hbllm.hcir.world.ventrolateral_motor_inhibition import (
+    InhibitionRegime,
+    ResponseInhibitionCommand,
+    VentrolateralMotorInhibitionEngine,
+)
 from hbllm.hcir.world.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
     SomaticMarker,
@@ -253,6 +268,7 @@ __all__ = [
     "CausalPredicate",
     "CausalVariable",
     "CerebellarMicrozoneAdaptor",
+    "ClaustrumInterhemisphericIntegrator",
     "ClaustrumSalienceConductor",
     "ClimbingFiberFeedback",
     "CognitiveTaskSet",
@@ -261,6 +277,7 @@ __all__ = [
     "ContextTransitionEvent",
     "CounterfactualBranch",
     "CounterfactualOutcome",
+    "CrossModalSynchronyPacket",
     "CuriosityDriveSignal",
     "DefaultPerceptionAdapter",
     "DefensiveVigilanceMode",
@@ -289,7 +306,10 @@ __all__ = [
     "HeadDirectionAttractorState",
     "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
+    "HippocampalTimeCellEngine",
     "InferotemporalShapeHasher",
+    "InhibitionRegime",
+    "InterHemisphericBindingState",
     "InteroceptiveAllostasisCortex",
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
@@ -323,6 +343,7 @@ __all__ = [
     "RelationalGraphMatcher",
     "ReplayBatch",
     "ReplayTransition",
+    "ResponseInhibitionCommand",
     "RetrosplenialLandmarkAnchorEngine",
     "RetrosplenialHeadingEngine",
     "ReversibilityEngine",
@@ -352,13 +373,16 @@ __all__ = [
     "TaskArbitrationResult",
     "TaskSwitchEvent",
     "TemporalStateBuffer",
+    "TemporalTimeCell",
     "ThalamicReticularGatingEngine",
     "ThetaPhase",
+    "TimeIntervalState",
     "TRNGateChannel",
     "TransthalamicRoute",
     "UnifiedPerceptualGestalt",
     "VentralPremotorAffordanceResonator",
     "VentralTegmentalCuriosityEngine",
+    "VentrolateralMotorInhibitionEngine",
     "VentromedialSomaticMarkerEngine",
     "VicariousCausalInference",
     "VisuospatialWorkingMemory",
