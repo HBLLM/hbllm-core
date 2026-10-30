@@ -1580,20 +1580,26 @@ class EpistemicFeedbackAssimilator:
             if pH < 24 or pW < 24:
                 return False
 
-            # Check if (r, c) is partitioned by a solid non-background divider line spanning >= 85% width
-            if r < 6:
-                for div_r in range(r + 1, min(8, pH)):
-                    div_val = int(engine.prev_grid[div_r, 0])
-                    if div_val != bg and np.count_nonzero(
-                        engine.prev_grid[div_r, :] == div_val
-                    ) >= int(pW * 0.85):
+            max_hud_depth = max(16, pH // 4)
+
+            # Check if (r, c) is in top peripheral band partitioned by a solid non-background divider line spanning >= 85% width
+            if r <= max_hud_depth:
+                for div_r in range(r + 1, min(max_hud_depth + 1, pH)):
+                    line = engine.prev_grid[div_r, :]
+                    vals, counts = np.unique(line, return_counts=True)
+                    dom_idx = int(np.argmax(counts))
+                    div_val = int(vals[dom_idx])
+                    if div_val != bg and counts[dom_idx] >= int(pW * 0.85):
                         return True
-            elif r >= pH - 6:
-                for div_r in range(max(pH - 8, 0), r):
-                    div_val = int(engine.prev_grid[div_r, 0])
-                    if div_val != bg and np.count_nonzero(
-                        engine.prev_grid[div_r, :] == div_val
-                    ) >= int(pW * 0.85):
+
+            # Check if (r, c) is in bottom peripheral band partitioned by a solid non-background divider line spanning >= 85% width
+            if r >= pH - 1 - max_hud_depth:
+                for div_r in range(max(0, pH - 1 - max_hud_depth), r):
+                    line = engine.prev_grid[div_r, :]
+                    vals, counts = np.unique(line, return_counts=True)
+                    dom_idx = int(np.argmax(counts))
+                    div_val = int(vals[dom_idx])
+                    if div_val != bg and counts[dom_idx] >= int(pW * 0.85):
                         return True
             return False
 

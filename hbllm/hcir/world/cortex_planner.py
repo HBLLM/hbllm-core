@@ -1051,9 +1051,21 @@ class MentalSimulationPlanner:
                 for dc_t in (-1, 0, 1):
                     rr_t, cc_t = tr + dr_t, tc + dc_t
                     if 0 <= rr_t < H and 0 <= cc_t < W:
-                        if int(curr_grid[rr_t, cc_t]) == t.feature_id:
+                        val_t = int(curr_grid[rr_t, cc_t])
+                        if val_t == t.feature_id or (
+                            val_t != bg
+                            and not engine.symbolic_theory.is_barrier(val_t)
+                            and val_t not in av_feats
+                            and (rr_t, cc_t) not in goals
+                        ):
                             threat_cells.add((rr_t, cc_t))
                             threat_map[(rr_t, cc_t)] = t
+
+        # Oriented dynamic hazards are governed by approach angles rather than static immobility;
+        # remove them from static barriers and grid walls so tactical flanking can neutralize them.
+        static_barriers.difference_update(threat_cells)
+        _grid_walls.difference_update(threat_cells)
+        unknown_entity_cells.difference_update(threat_cells)
 
         init_threats = frozenset(threat_cells)
         trajectory_features = {
