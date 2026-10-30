@@ -67,6 +67,14 @@ class ProceduralMacro:
     replay_successes: int = 0
     replay_failures: int = 0
     waypoints: list[Any] = field(default_factory=list)  # RelationalWaypoint milestones
+    compressed_action_sequence: list[Any] = field(default_factory=list)
+    compressed_action_data_sequence: list[dict[str, Any] | None] = field(default_factory=list)
+
+    def get_execution_sequence(self) -> tuple[list[Any], list[dict[str, Any] | None]]:
+        """Return the optimal execution sequence: prefers compressed cycle-free actions if available."""
+        if self.compressed_action_sequence:
+            return list(self.compressed_action_sequence), list(self.compressed_action_data_sequence)
+        return list(self.action_sequence), list(self.action_data_sequence)
 
     def is_compatible(self, available_actions: set[int]) -> bool:
         """Check if this macro's actions are all available in the given action space."""
@@ -279,6 +287,74 @@ class TDReplaySummary:
                 )
             )
         return ops
+
+
+def compress_action_trajectory(
+    winning_trajectory: Sequence[EpisodicTransition],
+) -> tuple[list[Any], list[dict[str, Any] | None]]:
+    """Cortico-Striatal Trajectory Compression:
+    Optimizes a winning raw episodic trajectory by:
+    1. Pruning zero-mutation topological cyclic loops (where the agent wandered back to an earlier cell
+       without causing any environmental changes or winning the level).
+    2. Canceling immediate ping-pong oscillatory reversals that did not modify the state.
+    Returns:
+        (compressed_actions, compressed_action_data)
+    """
+    if not winning_trajectory:
+        return [], []
+
+    valid_transitions = [t for t in winning_trajectory if t.action_id is not None]
+    if not valid_transitions:
+        return [], []
+
+    def has_state_mutation(t: EpisodicTransition) -> bool:
+        if t.is_win:
+            return True
+        if t.observation_diff and (
+            t.observation_diff.changed_pixel_count > 0
+            or t.observation_diff.displaced_entities
+            or t.observation_diff.mutated_pixels
+            or t.observation_diff.appeared_features
+            or t.observation_diff.disappeared_features
+        ):
+            return True
+        return False
+
+    N = len(valid_transitions)
+    actions = [t.action_id for t in valid_transitions]
+    data = [t.action_data for t in valid_transitions]
+    positions = [t.avatar_pos for t in valid_transitions]
+    mutations = [has_state_mutation(t) for t in valid_transitions]
+
+    keep = [True] * N
+    i = 0
+    while i < N:
+        if positions[i] is None or not keep[i]:
+            i += 1
+            continue
+
+        latest_j = None
+        for j in range(N - 1, i, -1):
+            if keep[j] and positions[j] == positions[i]:
+                if not any(mutations[k] for k in range(i, j) if keep[k]):
+                    latest_j = j
+                    break
+
+        if latest_j is not None and latest_j > i:
+            for k in range(i, latest_j):
+                keep[k] = False
+            i = latest_j
+        else:
+            i += 1
+
+    compressed_actions = [actions[k] for k in range(N) if keep[k]]
+    compressed_data = [data[k] for k in range(N) if keep[k]]
+
+    if not compressed_actions and actions:
+        compressed_actions = [actions[-1]]
+        compressed_data = [data[-1]]
+
+    return compressed_actions, compressed_data
 
 
 class HippocampalEpisodicCortex:
@@ -830,16 +906,20 @@ class HippocampalEpisodicCortex:
                                     )
                                 )
 
+                comp_actions, comp_data = compress_action_trajectory(winning_trajectory)
+
                 macro = ProceduralMacro(
                     macro_id=macro_id,
                     action_sequence=action_seq,
                     action_data_sequence=action_data_seq,
+                    compressed_action_sequence=comp_actions,
+                    compressed_action_data_sequence=comp_data,
                     initial_grid_hash=init_hash,
                     initial_grid_shape=init_shape,
                     available_actions=avail_actions,
                     level=current_level,
                     game_id=game_id,
-                    num_steps=len(action_seq),
+                    num_steps=len(comp_actions) if comp_actions else len(action_seq),
                     waypoints=extracted_waypoints,
                 )
                 self.consolidated_macros[macro_id] = macro
@@ -854,9 +934,10 @@ class HippocampalEpisodicCortex:
                     )
 
                 logger.info(
-                    "Procedural Consolidation: Compiled macro '%s' (%d actions, %d relational waypoints) from winning trajectory",
+                    "Procedural Consolidation: Compiled macro '%s' (%d raw actions -> %d compressed, %d relational waypoints) from winning trajectory",
                     macro_id,
                     len(action_seq),
+                    len(comp_actions),
                     len(extracted_waypoints),
                 )
 

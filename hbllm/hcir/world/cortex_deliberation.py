@@ -32,6 +32,7 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler, MentalSimulationStep
+from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -435,6 +436,73 @@ class CausalUndoSafetyPredicate(PlanSafetyPredicate):
         return SafetyGateResult(is_safe=True)
 
 
+class OFCCounterfactualMentalSimulationPredicate(PlanSafetyPredicate):
+    """Orbitofrontal Cortex (OFC) Counterfactual Mental Simulation Gating:
+    Simulates candidate trajectory forward in imagination up to depth K (default 3 steps).
+    Evaluates:
+    1. Irreversible corner deadlock on pushable cargo or avatar entrapment.
+    2. Boundary wall deadlock without accessible goals.
+    3. Impasse into spatiotemporal hazard cones or lethal entities along the simulated path.
+    """
+
+    def __init__(self, simulation_depth: int = 3) -> None:
+        self.simulation_depth = simulation_depth
+
+    def evaluate(
+        self,
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        next_step: MentalSimulationStep,
+        future_steps: Sequence[MentalSimulationStep],
+        available_actions: Sequence[Any],
+    ) -> SafetyGateResult:
+        if next_step.predicted_avatar_pos is None:
+            return SafetyGateResult(is_safe=True)
+
+        H, W = curr_grid.shape
+        goals = set(getattr(engine, "learned_goal_positions", set()))
+        static_barriers = set(getattr(engine, "learned_barriers", set()))
+        if hasattr(engine, "current_level_lethal_positions"):
+            static_barriers.update(engine.current_level_lethal_positions)
+
+        sim_steps: list[MentalSimulationStep] = []
+        if next_step is not None:
+            sim_steps.append(next_step)
+        for f_step in future_steps:
+            if f_step is not next_step and len(sim_steps) < self.simulation_depth:
+                sim_steps.append(f_step)
+
+        for step_idx, step in enumerate(sim_steps):
+            pos = step.predicted_avatar_pos
+            if pos is None:
+                continue
+            r, c = pos
+            if not (0 <= r < H and 0 <= c < W):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"OFC mental rollout: Step {step_idx} out of grid bounds at ({r}, {c})",
+                )
+
+            # Check corner deadlock if position is trapped and not a goal
+            if (r, c) not in goals and CounterfactualDeadlockDetector.is_corner_deadlock(
+                (r, c), goals, static_barriers, (H, W)
+            ):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"OFC mental rollout detected corner deadlock at ({r}, {c}) on step {step_idx}",
+                )
+
+            # Check collision hazard at future timestep
+            cones = getattr(engine, "collision_cones", None)
+            if cones is not None and cones.is_collision_hazard(r, c, time_step=step_idx + 1):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"OFC mental rollout detected collision cone intersection at ({r}, {c}) on step {step_idx + 1}",
+                )
+
+        return SafetyGateResult(is_safe=True)
+
+
 class PlanSafetyEvaluator:
     """Prefrontal safety arbitration engine composing typed PlanSafetyPredicates."""
 
@@ -450,6 +518,7 @@ class PlanSafetyEvaluator:
                 CerebellarPhaseGatePredicate(),
                 AnteriorCingulateConflictPredicate(),
                 CausalUndoSafetyPredicate(),
+                OFCCounterfactualMentalSimulationPredicate(),
             ]
         )
 

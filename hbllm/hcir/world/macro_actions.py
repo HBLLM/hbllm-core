@@ -1107,8 +1107,13 @@ class ProceduralReplayAction(MacroAction):
             intent=SpatialActionIntent.NAVIGATE,
         )
         self._macro = macro
-        self._action_seq: list[Any] = list(getattr(macro, "action_sequence", []))
-        self._data_seq: list[Any] = list(getattr(macro, "action_data_sequence", []))
+        if hasattr(macro, "get_execution_sequence"):
+            act_seq, data_seq = macro.get_execution_sequence()
+            self._action_seq = list(act_seq)
+            self._data_seq = list(data_seq)
+        else:
+            self._action_seq = list(getattr(macro, "action_sequence", []))
+            self._data_seq = list(getattr(macro, "action_data_sequence", []))
         self._cursor: int = 0
         self.max_steps = len(self._action_seq) + 5  # Small buffer for timing
         self.is_strict = True  # Trust the proven sequence

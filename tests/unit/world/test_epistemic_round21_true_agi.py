@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_episodic import ProceduralMacro
 from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
@@ -44,6 +45,7 @@ def test_category_theoretic_structure_mapping_macro() -> None:
     """Validate Category-Theoretic Structure-Mapping:
     Computes relational topological graph functor score across different grid layouts and colors.
     """
+
     class MockWaypoint:
         def __init__(self, role: str) -> None:
             self.role = role
@@ -61,8 +63,8 @@ def test_category_theoretic_structure_mapping_macro() -> None:
     # Completely different grid shape and hash
     new_grid = np.zeros((20, 20), dtype=int)
     mock_entities = [
-        SpatialEntity(id="e1", feature_id=4, cells=[(2, 2)], role="key"),
-        SpatialEntity(id="e2", feature_id=7, cells=[(18, 18)], role="goal"),
+        SpatialEntity(id="e1", feature_id=4, cells=[(2, 2)], role=EntityRole.KEY),
+        SpatialEntity(id="e2", feature_id=7, cells=[(18, 18)], role=EntityRole.GOAL),
     ]
 
     score = macro.match_score(new_grid, {1, 2, 5}, entities=mock_entities)
@@ -74,6 +76,7 @@ def test_friston_expected_free_energy_curiosity() -> None:
     """Validate Karl Friston's Expected Free Energy (EFE) Affordance Epistemic Value:
     Unverified interactive affordances exhibit high Shannon entropy and receive higher probing priority.
     """
+
     class MockDyn:
         def is_displacement_action(self) -> bool:
             return True
@@ -111,6 +114,7 @@ def test_recursive_multi_hop_backward_chaining_planner() -> None:
     Goal guarded by Door 1 (Key 1), Key 1 is blocked by Door 2 (Switch 2).
     Planner resolves Switch 2 as the initial subgoal in the causal chain.
     """
+
     class MockDisplacementDyn:
         def __init__(self, dr: int, dc: int) -> None:
             self.dr = dr
@@ -135,9 +139,9 @@ def test_recursive_multi_hop_backward_chaining_planner() -> None:
     # Actions: Cardinal moves
     movable_actions = [
         (1, -1, 0),  # UP
-        (2, 1, 0),   # DOWN
+        (2, 1, 0),  # DOWN
         (3, 0, -1),  # LEFT
-        (4, 0, 1),   # RIGHT
+        (4, 0, 1),  # RIGHT
     ]
     for act, dr, dc in movable_actions:
         engine.action_dynamics[act] = MockDisplacementDyn(dr, dc)

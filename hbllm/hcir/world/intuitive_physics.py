@@ -94,6 +94,7 @@ class IntuitivePhysicsEngine:
         self.gravity_evidence: int = 0
         self.has_gravity: bool = False
         self.gravity_vector: tuple[int, int] = (0, 0)
+        self.field_evidence: dict[tuple[int, int], int] = {}
         self.known_platforms: set[tuple[int, int]] = set()
 
     def reset_episode(self) -> None:
@@ -113,27 +114,52 @@ class IntuitivePhysicsEngine:
             return
 
         actual_dr = curr_pos[0] - prev_pos[0]
+        actual_dc = curr_pos[1] - prev_pos[1]
 
-        # Passive downward drift detection:
-        # If the commanded action was NOT downward (commanded_delta[0] <= 0)
-        # but the actual displacement moved downward (actual_dr > 0), this is gravity.
-        if commanded_delta[0] <= 0 and actual_dr > 0:
-            self.gravity_evidence += 1
-            if self.gravity_evidence >= 2:
+        # Calculate uncommanded environmental force vector
+        # (what the world added beyond the agent's motor command)
+        uncommanded_r = actual_dr - commanded_delta[0]
+        uncommanded_c = actual_dc - commanded_delta[1]
+
+        if uncommanded_r != 0 or uncommanded_c != 0:
+            unit_r = 0 if uncommanded_r == 0 else (1 if uncommanded_r > 0 else -1)
+            unit_c = 0 if uncommanded_c == 0 else (1 if uncommanded_c > 0 else -1)
+            uncommanded_dir = (unit_r, unit_c)
+
+            self.field_evidence[uncommanded_dir] = self.field_evidence.get(uncommanded_dir, 0) + 1
+            if self.field_evidence[uncommanded_dir] >= 2:
                 self.has_gravity = True
-                self.gravity_vector = (1, 0)
+                self.gravity_vector = uncommanded_dir
+                self.gravity_evidence = self.field_evidence[uncommanded_dir]
                 logger.info(
-                    "IntuitivePhysicsEngine: Confirmed environmental gravity field g=%s (evidence=%d).",
+                    "IntuitivePhysicsEngine: Confirmed environmental force field g=%s (evidence=%d).",
                     self.gravity_vector,
                     self.gravity_evidence,
                 )
-        elif commanded_delta[0] > 0 and actual_dr > 0:
-            # Commanded downward move, neutral evidence
-            pass
-        elif actual_dr == 0 and not is_displacement_action:
-            # Stationary on a surface -> decay false gravity evidence if not confirmed
-            if not self.has_gravity and self.gravity_evidence > 0:
-                self.gravity_evidence -= 1
+        elif not is_displacement_action and actual_dr == 0 and actual_dc == 0:
+            # Stationary on a surface -> decay unconfirmed evidence
+            if not self.has_gravity:
+                for k in list(self.field_evidence.keys()):
+                    if self.field_evidence[k] > 0:
+                        self.field_evidence[k] -= 1
+
+    def record_passive_entity_motion(
+        self,
+        prev_pos: tuple[int, int],
+        curr_pos: tuple[int, int],
+    ) -> None:
+        """Observe unprompted motion of third-party / passive entities to induce environmental fields."""
+        dr = curr_pos[0] - prev_pos[0]
+        dc = curr_pos[1] - prev_pos[1]
+        if dr != 0 or dc != 0:
+            unit_r = 0 if dr == 0 else (1 if dr > 0 else -1)
+            unit_c = 0 if dc == 0 else (1 if dc > 0 else -1)
+            motion_dir = (unit_r, unit_c)
+            self.field_evidence[motion_dir] = self.field_evidence.get(motion_dir, 0) + 1
+            if self.field_evidence[motion_dir] >= 2:
+                self.has_gravity = True
+                self.gravity_vector = motion_dir
+                self.gravity_evidence = self.field_evidence[motion_dir]
 
     def is_supported(
         self,
@@ -143,18 +169,22 @@ class IntuitivePhysicsEngine:
         barrier_features: set[int],
         static_barriers: set[tuple[int, int]] | None = None,
     ) -> bool:
-        """Check if an entity at (r, c) rests on a solid surface / floor."""
-        H, _ = grid.shape
-        below_r = r + 1
+        """Check if an entity at (r, c) rests on a solid surface / floor along gravity direction."""
+        H, W = grid.shape
+        gr, gc = self.gravity_vector if self.has_gravity else (1, 0)
 
-        # Grid bottom boundary acts as ground support
-        if below_r >= H:
+        # Support is at the adjacent cell in the direction of the force
+        supp_r = r + gr
+        supp_c = c + gc
+
+        # Boundary contact acts as physical support
+        if supp_r >= H or supp_r < 0 or supp_c >= W or supp_c < 0:
             return True
 
-        if static_barriers and (below_r, c) in static_barriers:
+        if static_barriers and (supp_r, supp_c) in static_barriers:
             return True
 
-        val = int(grid[below_r, c])
+        val = int(grid[supp_r, supp_c])
         return val in barrier_features
 
     def project_fall(
@@ -168,28 +198,31 @@ class IntuitivePhysicsEngine:
         lethal_coords: set[tuple[int, int]] | None = None,
         max_fall: int = 16,
     ) -> tuple[tuple[int, int], list[tuple[int, int]], bool]:
-        """Project the vertical falling trajectory until hitting ground support or hazard.
+        """Project the passive trajectory under environmental force field until hitting support or hazard.
 
         Returns:
             (landing_pos, trajectory_path, is_lethal)
         """
-        H, _ = grid.shape
+        H, W = grid.shape
         cur_r = start_r
         cur_c = start_c
         trajectory: list[tuple[int, int]] = []
+        gr, gc = self.gravity_vector if self.has_gravity else (1, 0)
 
         for _ in range(max_fall):
             if self.is_supported(cur_r, cur_c, grid, barrier_features, static_barriers):
                 return (cur_r, cur_c), trajectory, False
 
-            next_r = cur_r + 1
-            if next_r >= H:
+            next_r = cur_r + gr
+            next_c = cur_c + gc
+            if not (0 <= next_r < H and 0 <= next_c < W):
                 return (cur_r, cur_c), trajectory, False
 
-            if static_barriers and (next_r, cur_c) in static_barriers:
+            if static_barriers and (next_r, next_c) in static_barriers:
                 return (cur_r, cur_c), trajectory, False
 
             cur_r = next_r
+            cur_c = next_c
             trajectory.append((cur_r, cur_c))
 
             if lethal_features and int(grid[cur_r, cur_c]) in lethal_features:
@@ -243,13 +276,13 @@ class IntuitivePhysicsEngine:
         if not self.has_gravity:
             return GravityDirection.NONE
         dr, dc = self.gravity_vector
-        if dr > 0:
+        if dr > 0 and dc == 0:
             return GravityDirection.DOWN
-        elif dr < 0:
+        elif dr < 0 and dc == 0:
             return GravityDirection.UP
-        elif dc > 0:
+        elif dr == 0 and dc > 0:
             return GravityDirection.RIGHT
-        elif dc < 0:
+        elif dr == 0 and dc < 0:
             return GravityDirection.LEFT
         return GravityDirection.NONE
 
