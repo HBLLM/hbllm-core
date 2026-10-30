@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -65,6 +65,10 @@ from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConfli
 from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
     AnteriorCingulateEffortAllocator,
     EffortAllocationDecision,
+)
+from hbllm.hcir.world.anterior_insular_timing import (
+    AnteriorInsularTimingEngine,
+    InteroceptivePacingState,
 )
 from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
@@ -187,6 +191,10 @@ from hbllm.hcir.world.object_state_graph import (
 from hbllm.hcir.world.optical_ray_projection import (
     OpticalRayProjector,
 )
+from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+    CounterfactualCreditReport,
+    OrbitofrontalCreditAssignmentEngine,
+)
 from hbllm.hcir.world.parahippocampal_context import (
     ParahippocampalContextEngine,
     SpatialContextSchema,
@@ -205,6 +213,10 @@ from hbllm.hcir.world.parietal_foveated_attention import (
 from hbllm.hcir.world.parietal_potential_field import (
     ParietalPotentialFieldNavigator,
     PotentialFieldVector,
+)
+from hbllm.hcir.world.pedunculopontine_locomotor import (
+    LocomotorDriveCommand,
+    PedunculopontineLocomotorEngine,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -783,6 +795,17 @@ class AutonomousEpistemicEngine:
         self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator = (
             ClaustrumInterhemisphericIntegrator()
         )
+
+        # Round 18 Faculty: Anterior Insular Cortex (AIC) Subjective Time Dilation & Interoceptive Pacing (Craig / Wittmann)
+        self.anterior_insula_timing: AnteriorInsularTimingEngine = AnteriorInsularTimingEngine()
+
+        # Round 18 Faculty: Orbitofrontal Cortex (OFC) Counterfactual Credit Assignment & Contingent Updating (Walton / Rushworth)
+        self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine = (
+            OrbitofrontalCreditAssignmentEngine()
+        )
+
+        # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
+        self.ppn_locomotor: PedunculopontineLocomotorEngine = PedunculopontineLocomotorEngine()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2854,6 +2877,80 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.greedy_edge_coloring()
+
+    def compute_subjective_time_dilation(
+        self,
+        objective_dt: float,
+        threat_level: float = 0.0,
+        salience_score: float = 0.0,
+        visceral_conflict: float = 0.0,
+    ) -> InteroceptivePacingState:
+        """Compute anterior insular subjective time dilation & interoceptive pacing (Craig-Wittmann)."""
+        state = self.anterior_insula_timing.compute_subjective_dilation(
+            objective_dt=objective_dt,
+            threat_level=threat_level,
+            salience_score=salience_score,
+            visceral_conflict=visceral_conflict,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def evaluate_counterfactual_credit(
+        self,
+        state_key: str,
+        chosen_action: str | int,
+        observed_outcome: float,
+        available_actions: Collection[str | int],
+        relational_similarities: Mapping[str, float]
+        | Mapping[int, float]
+        | Mapping[str | int, float]
+        | None = None,
+    ) -> CounterfactualCreditReport:
+        """Evaluate OFC counterfactual value updates and unchosen branch credit (Walton-Rushworth)."""
+        report = self.ofc_counterfactual.update_contingent_credit(
+            state_key=state_key,
+            chosen_action=chosen_action,
+            observed_outcome=observed_outcome,
+            available_actions=available_actions,
+            relational_similarities=relational_similarities,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(report.to_causal_predicate())
+        return report
+
+    def modulate_locomotor_velocity(
+        self,
+        distance_to_obstacle: float,
+        surface_friction: float = 1.0,
+        urgency_score: float = 0.0,
+        is_narrow_aperture: bool = False,
+    ) -> LocomotorDriveCommand:
+        """Modulate PPN graded locomotor velocity and anticipatory deceleration (Garcia-Rill / Takakusaki)."""
+        cmd = self.ppn_locomotor.modulate_locomotor_velocity(
+            distance_to_obstacle=distance_to_obstacle,
+            surface_friction=surface_friction,
+            urgency_score=urgency_score,
+            is_narrow_aperture=is_narrow_aperture,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(cmd.to_causal_predicate())
+        return cmd
+
+    def compute_graph_feedback_vertex_set(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> set[str]:
+        """Compute an approximate minimal Feedback Vertex Set (FVS) to break all directed cycles."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.feedback_vertex_set()
 
     @property
     def phase(self) -> EpistemicPhase:

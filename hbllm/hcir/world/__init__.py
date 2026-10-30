@@ -13,6 +13,11 @@ from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
     ConflictProfile,
     EffortAllocationDecision,
 )
+from hbllm.hcir.world.anterior_insular_timing import (
+    AnteriorInsularTimingEngine,
+    InteroceptivePacingState,
+    PacingMode,
+)
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
@@ -119,6 +124,11 @@ from hbllm.hcir.world.object_state_graph import (
     RelationalGraphMatcher,
     SalientObject,
 )
+from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+    CounterfactualCreditReport,
+    InferredBranchValue,
+    OrbitofrontalCreditAssignmentEngine,
+)
 from hbllm.hcir.world.parahippocampal_context import (
     ContextTransitionEvent,
     ParahippocampalContextEngine,
@@ -132,6 +142,11 @@ from hbllm.hcir.world.parietal_foveated_attention import (
 from hbllm.hcir.world.parietal_potential_field import (
     ParietalPotentialFieldNavigator,
     PotentialFieldVector,
+)
+from hbllm.hcir.world.pedunculopontine_locomotor import (
+    LocomotorDriveCommand,
+    LocomotorPacingRegime,
+    PedunculopontineLocomotorEngine,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -255,6 +270,7 @@ __all__ = [
     "AllostaticRegime",
     "AmygdalarThreatConditioningEngine",
     "AnteriorCingulateEffortAllocator",
+    "AnteriorInsularTimingEngine",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
@@ -276,6 +292,7 @@ __all__ = [
     "ConflictProfile",
     "ContextTransitionEvent",
     "CounterfactualBranch",
+    "CounterfactualCreditReport",
     "CounterfactualOutcome",
     "CrossModalSynchronyPacket",
     "CuriosityDriveSignal",
@@ -307,13 +324,17 @@ __all__ = [
     "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
     "HippocampalTimeCellEngine",
+    "InferredBranchValue",
     "InferotemporalShapeHasher",
     "InhibitionRegime",
     "InterHemisphericBindingState",
     "InteroceptiveAllostasisCortex",
+    "InteroceptivePacingState",
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
     "LateralPrefrontalTaskSwitcher",
+    "LocomotorDriveCommand",
+    "LocomotorPacingRegime",
     "LocusCoeruleusNoradrenalineEngine",
     "MotorPrediction",
     "MultisensoryPriorityMap",
@@ -322,9 +343,12 @@ __all__ = [
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
     "OpponencyValueState",
+    "OrbitofrontalCreditAssignmentEngine",
+    "PacingMode",
     "ParahippocampalContextEngine",
     "ParietalFoveatedAttentionEngine",
     "ParietalPotentialFieldNavigator",
+    "PedunculopontineLocomotorEngine",
     "PerceptionFrame",
     "PerceptionRegistry",
     "PhasePrecessionBurst",

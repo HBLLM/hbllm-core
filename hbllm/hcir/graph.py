@@ -2887,6 +2887,98 @@ class CognitiveGraph:
 
         return edge_colors
 
+    def feedback_vertex_set(
+        self,
+    ) -> set[str]:
+        """Compute an approximate minimal Feedback Vertex Set (FVS) to break all directed cycles.
+
+        Returns:
+            Minimal set of node IDs whose removal from the graph leaves a Directed Acyclic Graph (DAG).
+        """
+        all_nodes = set(self._nodes.keys())
+        if not all_nodes:
+            return set()
+
+        directed_edges: set[tuple[str, str]] = set()
+        for edge in self._edges.values():
+            for s in edge.sources:
+                if s in all_nodes:
+                    for t in edge.targets:
+                        if t in all_nodes:
+                            directed_edges.add((s, t))
+
+        if not directed_edges:
+            return set()
+
+        # Helper to check if a subset of vertices is acyclic under directed_edges
+        def is_subgraph_acyclic(remaining_vertices: set[str]) -> bool:
+            in_deg: dict[str, int] = {v: 0 for v in remaining_vertices}
+            sub_adj: dict[str, list[str]] = {v: [] for v in remaining_vertices}
+            for u, v in directed_edges:
+                if u in remaining_vertices and v in remaining_vertices:
+                    if u == v:
+                        return False  # Self-loop
+                    sub_adj[u].append(v)
+                    in_deg[v] += 1
+
+            queue = deque([v for v, d in in_deg.items() if d == 0])
+            peeled_count = 0
+            while queue:
+                curr = queue.popleft()
+                peeled_count += 1
+                for nxt in sub_adj[curr]:
+                    in_deg[nxt] -= 1
+                    if in_deg[nxt] == 0:
+                        queue.append(nxt)
+            return peeled_count == len(remaining_vertices)
+
+        # If already acyclic, no vertices need removal
+        if is_subgraph_acyclic(all_nodes):
+            return set()
+
+        fvs: set[str] = set()
+
+        # Step 1: Self-loops must be in FVS immediately
+        for u, v in directed_edges:
+            if u == v:
+                fvs.add(u)
+
+        curr_nodes = all_nodes - fvs
+
+        # Step 2: Greedily pick vertices with highest cyclic degree product
+        while not is_subgraph_acyclic(curr_nodes):
+            sub_in: dict[str, int] = {v: 0 for v in curr_nodes}
+            sub_out: dict[str, int] = {v: 0 for v in curr_nodes}
+            for u, v in directed_edges:
+                if u in curr_nodes and v in curr_nodes and u != v:
+                    sub_out[u] += 1
+                    sub_in[v] += 1
+
+            # Peel off nodes that cannot be part of any cycle (in_degree 0 or out_degree 0)
+            active_cyclic = {v for v in curr_nodes if sub_in[v] > 0 and sub_out[v] > 0}
+            if not active_cyclic:
+                break
+
+            # Pick vertex maximizing in_deg * out_deg (Becker-Geiger heuristic)
+            best_v = max(
+                sorted(list(active_cyclic)),
+                key=lambda u: (
+                    sub_in[u] * sub_out[u],
+                    sub_in[u] + sub_out[u],
+                    -ord(u[0]) if u else 0,
+                ),
+            )
+            fvs.add(best_v)
+            curr_nodes.remove(best_v)
+
+        # Step 3: Minimalize FVS via reverse pruning
+        for node in sorted(list(fvs)):
+            candidate_remaining = (all_nodes - fvs) | {node}
+            if is_subgraph_acyclic(candidate_remaining):
+                fvs.remove(node)
+
+        return fvs
+
     # ── Indexed Queries ──────────────────────────────────────────────
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
