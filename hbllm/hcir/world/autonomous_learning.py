@@ -1092,5 +1092,5 @@ class DeliberationEntropyMonitor:
         engine.working_memory.active_macro_goal = None
         if engine.avatar_pos is not None:
             engine.working_memory.exhausted_candidate_goals.add(engine.avatar_pos)
-        engine.simulation_cooldown = 15
+        engine.simulation_cooldown = 0
         self.stagnation_counter = 0

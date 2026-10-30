@@ -95,6 +95,8 @@ class HCIRSymbolicWorldTheory:
     cargo_features: set[int] = field(default_factory=set)
     receptacle_features: set[int] = field(default_factory=set)
     actuator_features: set[int] = field(default_factory=set)
+    _barrier_eval_cache: dict[int, bool] = field(default_factory=dict, repr=False)
+    _walkable_eval_cache: dict[int, bool] = field(default_factory=dict, repr=False)
 
     # Functional action categorization
     undo_actions: set[Any] = field(default_factory=set)
@@ -223,15 +225,25 @@ class HCIRSymbolicWorldTheory:
             return False
         if feature_id in self.barrier_features:
             return True
+        cached = self._barrier_eval_cache.get(feature_id)
+        if cached is not None:
+            return cached
         props = {"feature_id": feature_id, "visual_id": feature_id}
-        return any(pred.evaluate(props) for pred in self.barrier_predicates)
+        res = any(pred.evaluate(props) for pred in self.barrier_predicates)
+        self._barrier_eval_cache[feature_id] = res
+        return res
 
     def is_walkable(self, feature_id: int) -> bool:
         """True if feature satisfies any induced walkable space predicate."""
         if feature_id in self.walkable_features:
             return True
+        cached = self._walkable_eval_cache.get(feature_id)
+        if cached is not None:
+            return cached
         props = {"feature_id": feature_id, "visual_id": feature_id}
-        return any(pred.evaluate(props) for pred in self.walkable_predicates)
+        res = any(pred.evaluate(props) for pred in self.walkable_predicates)
+        self._walkable_eval_cache[feature_id] = res
+        return res
 
     def is_cargo(self, entity: SpatialEntity | int) -> bool:
         """True if entity or feature satisfies any pushable cargo predicate."""
@@ -300,6 +312,8 @@ class HCIRSymbolicWorldTheory:
         if feature_id in self.walkable_features:
             return
         if feature_id not in self.barrier_features:
+            self._barrier_eval_cache.clear()
+            self._walkable_eval_cache.clear()
             self.barrier_features.add(feature_id)
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
             self.barrier_predicates.append(pred)
@@ -311,6 +325,8 @@ class HCIRSymbolicWorldTheory:
         if feature_id in self.barrier_features:
             return
         if feature_id not in self.walkable_features:
+            self._barrier_eval_cache.clear()
+            self._walkable_eval_cache.clear()
             self.walkable_features.add(feature_id)
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
             self.walkable_predicates.append(pred)
@@ -672,6 +688,8 @@ class HCIRSymbolicWorldTheory:
         self.goal_predicates.clear()
         self.barrier_predicates.clear()
         self.walkable_predicates.clear()
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
         self.cargo_predicates.clear()
         self.receptacle_predicates.clear()
         self.goal_features.clear()

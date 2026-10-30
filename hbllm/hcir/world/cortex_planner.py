@@ -220,7 +220,7 @@ class EpistemicGoalScheduler:
                 curr_st = wm.active_schema.current_stage
                 if curr_st is not None and curr_st.target_positions:
                     for sp in reversed(list(curr_st.target_positions)):
-                        if 0 <= sp[0] < H and 0 <= sp[1] < W:
+                        if 0 <= sp[0] < H and 0 <= sp[1] < W and sp != avatar_pos:
                             if sp in goals:
                                 goals.remove(sp)
                             goals.insert(0, sp)
@@ -230,11 +230,22 @@ class EpistemicGoalScheduler:
                     skill_name, _ = matched
                     schema = wm.instantiate_skill_as_schema(skill_name)
                     if schema and schema.current_stage and schema.current_stage.target_positions:
-                        for sp in reversed(list(schema.current_stage.target_positions)):
-                            if 0 <= sp[0] < H and 0 <= sp[1] < W:
-                                if sp in goals:
-                                    goals.remove(sp)
-                                goals.insert(0, sp)
+                        valid_schema_targets = [
+                            sp
+                            for sp in schema.current_stage.target_positions
+                            if 0 <= sp[0] < H
+                            and 0 <= sp[1] < W
+                            and sp != avatar_pos
+                            and (
+                                not confirmed_goals
+                                or sp in confirmed_goals
+                                or any(e.grid_pos == sp for e in entities)
+                            )
+                        ]
+                        for sp in reversed(valid_schema_targets):
+                            if sp in goals:
+                                goals.remove(sp)
+                            goals.insert(0, sp)
 
         # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
         if engine.subgoal_stack.has_pending_goals:
@@ -695,27 +706,11 @@ class MentalSimulationPlanner:
             if 0 <= r < H and 0 <= c < W:
                 static_barriers.add((r, c))
 
-        # Corridor Manifold Continuity
-        walkable_and_safe = engine.symbolic_theory.walkable_features
-        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
-        if not bg_is_impassable_void:
-            bg_count = int(feat_counts.get(bg, 0))
-            bg_ratio = bg_count / max(1, H * W)
-            ar, ac = (
-                (engine.avatar_pos[0], engine.avatar_pos[1])
-                if (
-                    engine.avatar_pos
-                    and 0 <= engine.avatar_pos[0] < H
-                    and 0 <= engine.avatar_pos[1] < W
-                )
-                else (-1, -1)
-            )
-            avatar_on_bg = bg in engine.verified_safe_features or (
-                ar >= 0 and int(curr_grid[ar, ac]) == bg
-            )
-            if bg_ratio >= 0.20 and not avatar_on_bg:
-                bg_is_impassable_void = True
-
+        # Empirical Barrier & Void Gating: Only treat background as void if empirically confirmed
+        bg_is_impassable_void = (
+            engine.symbolic_theory.is_barrier(bg)
+            or bg in engine.hazard_tracker.known_lethal_features
+        )
         if bg_is_impassable_void:
             for r in range(H):
                 for c in range(W):
@@ -763,50 +758,20 @@ class MentalSimulationPlanner:
         curr_grid: np.ndarray,
         bg: int,
     ) -> dict[tuple[int, int], set[tuple[int, int]]]:
-        """Extract state mutation triggers (switches that toggle doors) and remote causal triggers."""
+        """Extract verified state mutation triggers (switches that toggle doors) via Pearl's causal calculus."""
         H, W = curr_grid.shape
         mutation_triggers: dict[tuple[int, int], set[tuple[int, int]]] = {}
 
-        for m in engine.state_mutations:
-            opened_cells: set[tuple[int, int]] = set()
-            for r in range(H):
-                for c in range(W):
-                    if int(curr_grid[r, c]) == m.prior_value and (
-                        m.posterior_value == bg or m.posterior_value == 0
+        # vmPFC Remote Causal Triggers (Pearl's do(a) causal attribution)
+        if hasattr(engine.working_memory, "remote_causal"):
+            for trig_pos, aff_list in engine.working_memory.remote_causal.trigger_registry.items():
+                for aff in aff_list:
+                    if (
+                        aff.confidence >= 0.70
+                        and 0 <= aff.remote_pos[0] < H
+                        and 0 <= aff.remote_pos[1] < W
                     ):
-                        opened_cells.add((r, c))
-            if not opened_cells:
-                continue
-
-            if (
-                m.trigger_pos is not None
-                and len(m.trigger_pos) >= 2
-                and 0 <= m.trigger_pos[0] < H
-                and 0 <= m.trigger_pos[1] < W
-            ):
-                tr_p = (int(m.trigger_pos[0]), int(m.trigger_pos[1]))
-                mutation_triggers.setdefault(tr_p, set()).update(opened_cells)
-
-            if (
-                m.trigger_feature is not None
-                and m.trigger_feature != bg
-                and m.trigger_feature != engine.bg_feature
-                and not engine.symbolic_theory.is_walkable(m.trigger_feature)
-            ):
-                for r in range(H):
-                    for c in range(W):
-                        if int(curr_grid[r, c]) == m.trigger_feature:
-                            mutation_triggers.setdefault((r, c), set()).update(opened_cells)
-
-        # vmPFC Remote Causal Triggers
-        for trig_pos, aff_list in engine.working_memory.remote_causal.trigger_registry.items():
-            for aff in aff_list:
-                if (
-                    aff.confidence >= 0.70
-                    and 0 <= aff.remote_pos[0] < H
-                    and 0 <= aff.remote_pos[1] < W
-                ):
-                    mutation_triggers.setdefault(trig_pos, set()).add(aff.remote_pos)
+                        mutation_triggers.setdefault(trig_pos, set()).add(aff.remote_pos)
 
         return mutation_triggers
 
@@ -1352,7 +1317,7 @@ class MentalSimulationPlanner:
 
         # Precompute Vectorized 2D Geodesic Distance Field Matrix for O(1) heuristic lookup
         grid_dist_field = np.full((H, W), 999999.0, dtype=np.float32)
-        if goals and not is_block_delivery:
+        if goals:
             b_step = step_size if step_size > 1 else 1
             bfs_q: deque[tuple[int, int]] = deque()
             for gr, gc in all_goal_cells:
@@ -1548,11 +1513,7 @@ class MentalSimulationPlanner:
                     continue
                 visited_states.add(state_key)
 
-                if (
-                    not is_block_delivery
-                    and (cur_pos in goals or cur_pos in all_goal_cells)
-                    and path_len > 0
-                ):
+                if (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
                     path = _reconstruct_path(node_id)
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",

@@ -254,6 +254,7 @@ class GeodesicManifoldRouter:
         barrier_features: set[int],
         avatar_features: set[int],
         max_candidate_goals: int = 5,
+        prune_cavities: bool = False,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
@@ -316,16 +317,19 @@ class GeodesicManifoldRouter:
         passable_mask[start_pos[0], start_pos[1]] = True
 
         # Homological cul-de-sac cavity pruning via Betti invariants (Area 7 / VIP)
-        traversable_cells = {(r, c) for r in range(H) for c in range(W) if passable_mask[r, c]}
-        if len(traversable_cells) > 4:
-            from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
+        if prune_cavities:
+            traversable_cells = {(r, c) for r in range(H) for c in range(W) if passable_mask[r, c]}
+            if len(traversable_cells) > 4:
+                from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 
-            betti = TopologicalCutSetAnalyzer.compute_betti_invariants((H, W), traversable_cells)
-            goal_set = set(goals)
-            for cavity in betti.cavities:
-                if start_pos not in cavity and not (cavity & goal_set):
-                    for cr, cc in cavity:
-                        passable_mask[cr, cc] = False
+                betti = TopologicalCutSetAnalyzer.compute_betti_invariants(
+                    (H, W), traversable_cells
+                )
+                goal_set = set(goals)
+                for cavity in betti.cavities:
+                    if start_pos not in cavity and not (cavity & goal_set):
+                        for cr, cc in cavity:
+                            passable_mask[cr, cc] = False
 
         sorted_goals = sorted(
             goals,

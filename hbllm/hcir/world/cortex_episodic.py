@@ -962,6 +962,9 @@ class HippocampalEpisodicCortex:
             engine.mental_plan.clear()
             engine.consecutive_simulation_failures = 0
             engine.simulation_cooldown = 0
+            engine.state_mutations.clear()
+            if hasattr(engine.working_memory, "active_schema"):
+                engine.working_memory.active_schema = None
         else:
             engine.hazard_tracker.grid_history.clear()
             engine.hazard_tracker.step_history.clear()
