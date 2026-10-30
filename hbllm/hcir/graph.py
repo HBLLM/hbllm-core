@@ -25,6 +25,8 @@ Design invariants:
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import logging
 import time
 import uuid
@@ -1580,6 +1582,11 @@ class CognitiveGraph:
         self._edges_by_source: dict[str, set[str]] = {}  # node_id → edge IDs
         self._edges_by_target: dict[str, set[str]] = {}  # node_id → edge IDs
 
+        # ── Incremental content digest (order-independent XOR of element digests) ──
+        self._node_digests: dict[str, int] = {}
+        self._edge_digests: dict[str, int] = {}
+        self._content_digest: int = 0
+
         # ── Native Substrate Sync ──
         self._enable_native_substrate = enable_native_substrate
         self._native_adapter: Any | None = None
@@ -1600,6 +1607,7 @@ class CognitiveGraph:
             raise ValueError(f"Duplicate node ID: {node.id}")
         self._nodes[node.id] = node
         self._index_node(node)
+        self._track_digest(self._node_digests, "n", node)
         if self._native_adapter is not None:
             try:
                 ntype = (
@@ -1628,8 +1636,10 @@ class CognitiveGraph:
         old = self._nodes.get(node.id)
         if old is not None:
             self._deindex_node(old)
+            self._untrack_digest(self._node_digests, node.id)
         self._nodes[node.id] = node
         self._index_node(node)
+        self._track_digest(self._node_digests, "n", node)
         if self._native_adapter is not None:
             try:
                 if self._native_adapter.has_node(node.id):
@@ -1661,6 +1671,7 @@ class CognitiveGraph:
         if node is None:
             return None
         self._deindex_node(node)
+        self._untrack_digest(self._node_digests, node_id)
         if self._native_adapter is not None:
             try:
                 self._native_adapter.remove_node(node_id)
@@ -1673,6 +1684,7 @@ class CognitiveGraph:
         for eid in connected_edge_ids:
             edge = self._edges.pop(eid, None)
             if edge:
+                self._untrack_digest(self._edge_digests, eid)
                 if self._native_adapter is not None:
                     try:
                         self._native_adapter.remove_edge(eid)
@@ -1716,6 +1728,7 @@ class CognitiveGraph:
             self._edges_by_source.setdefault(src, set()).add(edge.id)
         for tgt in edge.targets:
             self._edges_by_target.setdefault(tgt, set()).add(edge.id)
+        self._track_digest(self._edge_digests, "e", edge)
         if self._native_adapter is not None:
             try:
                 etype = (
@@ -1740,6 +1753,7 @@ class CognitiveGraph:
         edge = self._edges.pop(edge_id, None)
         if edge is None:
             return None
+        self._untrack_digest(self._edge_digests, edge_id)
         if self._native_adapter is not None:
             try:
                 self._native_adapter.remove_edge(edge_id)
@@ -3190,6 +3204,35 @@ class CognitiveGraph:
 
     # ── Internal Indexing ────────────────────────────────────────────
 
+    @staticmethod
+    def _element_digest(prefix: str, model: BaseModel) -> int:
+        try:
+            payload = model.model_dump_json()
+        except Exception:
+            payload = json.dumps(model.model_dump(), sort_keys=True, default=str)
+        return int.from_bytes(
+            hashlib.blake2b(f"{prefix}:{payload}".encode(), digest_size=16).digest(), "big"
+        )
+
+    def _track_digest(self, table: dict[str, int], prefix: str, model: BaseModel) -> None:
+        d = self._element_digest(prefix, model)
+        table[model.id] = d  # type: ignore[attr-defined]
+        self._content_digest ^= d
+
+    def _untrack_digest(self, table: dict[str, int], element_id: str) -> None:
+        d = table.pop(element_id, None)
+        if d is not None:
+            self._content_digest ^= d
+
+    def content_hash(self) -> str:
+        """O(1) payload-aware content hash maintained incrementally on every mutation.
+
+        Unlike ``canonical_state_hash`` (structural: IDs only), this digest changes
+        whenever any node or edge payload changes, making it suitable for
+        event-sourced snapshot equality checks.
+        """
+        return f"{self._content_digest:032x}{len(self._nodes):08x}{len(self._edges):08x}"
+
     def _index_node(self, node: HCIRNode) -> None:
         self._idx_by_type[node.node_type].add(node.id)
         self._idx_by_category[node.category].add(node.id)
@@ -3232,6 +3275,9 @@ class CognitiveGraph:
         self._idx_by_tag.clear()
         self._edges_by_source.clear()
         self._edges_by_target.clear()
+        self._node_digests.clear()
+        self._edge_digests.clear()
+        self._content_digest = 0
         if self._native_adapter is not None:
             try:
                 from hbllm.hcir.native_adapter import NativeGraphAdapter
@@ -3241,32 +3287,13 @@ class CognitiveGraph:
                 self._native_adapter = None
 
     def find_shortest_path(self, source_id: str, target_id: str) -> list[str] | None:
-        """Find the shortest directed path between two nodes using the native BFS substrate."""
-        if self._native_adapter is not None:
-            p = self._native_adapter.find_path(source_id, target_id)
-            return p if p else None
-        if source_id not in self._nodes or target_id not in self._nodes:
-            return None
-        if source_id == target_id:
-            return [source_id]
-        from collections import deque
+        """Unbounded-depth shortest directed path; ``None`` when unreachable.
 
-        visited = {source_id}
-        queue: deque[list[str]] = deque([[source_id]])
-        while queue:
-            path = queue.popleft()
-            curr = path[-1]
-            for edge_id in self._edges_by_source.get(curr, set()):
-                edge = self._edges.get(edge_id)
-                if not edge:
-                    continue
-                for tgt in edge.targets:
-                    if tgt == target_id:
-                        return path + [tgt]
-                    if tgt not in visited:
-                        visited.add(tgt)
-                        queue.append(path + [tgt])
-        return None
+        Thin wrapper over :meth:`find_path` (single BFS implementation) with the
+        Optional return convention used by the planners.
+        """
+        path = self.find_path(source_id, target_id, max_depth=max(1, len(self._nodes)))
+        return path or None
 
     def extract_subgraph_by_depth(self, seed_id: str, max_depth: int = 2) -> CognitiveGraph:
         """Extract a depth-limited ego subgraph centered on seed_id using the native substrate."""

@@ -25,14 +25,27 @@ from hbllm.hcir.graph import (
     EpisodeNode,
     HCIREdge,
     HCIREdgeType,
+    HCIRNode,
     NodeLifecycle,
     SkillNode,
     ValueNode,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope, UncertaintyVector
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
+
+
+def _upsert(workspace: HCIRWorkspaceState, node: HCIRNode, author: str) -> None:
+    workspace.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
+            )
+        ],
+        author=author,
+    )
 
 
 class MemoryAdapter:
@@ -66,7 +79,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["episodic", "imported"],
         )
-        workspace.upsert_node(node, author=author)
+        _upsert(workspace, node, author)
         self._consistency_checker.record_migration(f"ep_{session_id}", node.id, summary)
         logger.debug("Imported episode: %s", node.id)
         return node
@@ -94,7 +107,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["semantic", "imported", domain] if domain else ["semantic", "imported"],
         )
-        workspace.upsert_node(node, author=author)
+        _upsert(workspace, node, author)
         logger.debug("Imported concept: %s", node.id)
         return node
 
@@ -121,7 +134,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["procedural", "imported"],
         )
-        workspace.upsert_node(node, author=author)
+        _upsert(workspace, node, author)
         logger.debug("Imported skill: %s", node.id)
         return node
 
@@ -144,7 +157,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["value", "imported"],
         )
-        workspace.upsert_node(node, author=author)
+        _upsert(workspace, node, author)
         logger.debug("Imported value: %s", node.id)
         return node
 
@@ -175,7 +188,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["knowledge_graph", "imported"],
         )
-        workspace.upsert_node(subj_node, author=author)
+        _upsert(workspace, subj_node, author)
 
         obj_node = BeliefNode(
             id=obj_id,
@@ -186,7 +199,7 @@ class MemoryAdapter:
             scope=Scope(tenant_id=tenant_id),
             tags=["knowledge_graph", "imported"],
         )
-        workspace.upsert_node(obj_node, author=author)
+        _upsert(workspace, obj_node, author)
 
         # Map relation string to edge type
         edge_type_map = {
@@ -203,8 +216,6 @@ class MemoryAdapter:
         edge_type = edge_type_map.get(relation, HCIREdgeType.SUPPORTS)
 
         edge_id = f"kg_{subj_id}_{relation}_{obj_id}"
-        # Remove old edge if exists (upsert semantics)
-        workspace.remove_edge(edge_id)
         edge = HCIREdge(
             id=edge_id,
             edge_type=edge_type,
@@ -213,7 +224,15 @@ class MemoryAdapter:
             properties={"relation": relation},
             provenance=Provenance(created_by=author),
         )
-        workspace.add_edge(edge, author=author)
+        ops: list[TransactionOperation] = []
+        if workspace.get_edge(edge_id) is not None:
+            ops.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=edge_id))
+        ops.append(
+            TransactionOperation(
+                op=TransactionOp.ADD_EDGE, edge_id=edge_id, edge_data=edge.model_dump()
+            )
+        )
+        workspace.commit_operations(ops, author=author)
 
         logger.debug("Imported triple: %s -[%s]-> %s", subject, relation, obj)
         return subj_node, obj_node, edge

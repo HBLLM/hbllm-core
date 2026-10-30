@@ -5,22 +5,26 @@ Enforces Kernel Invariants:
     #1: Transactions are immutable after proposal.
     #2: Only the TransactionManager commits state changes.
     #3: Every committed transaction has provenance.
+    #4: Commits are atomic — a transaction either applies in full or leaves
+        the workspace untouched (in-flight undo on partial failure).
 
 Transaction lifecycle::
 
     Proposal → [Policy Check] → [Validation] → [Resource Check] → Commit
                                                                  ↘ Reject
 
-The manager also maintains a committed transaction log for
-audit, reflection, and skill induction.
+The manager also maintains a bounded committed transaction log for
+audit, reflection, skill induction, and version rollback.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
     NODE_TYPE_REGISTRY,
@@ -28,6 +32,7 @@ from hbllm.hcir.graph import (
     HCIRNode,
     HCIRNodeType,
 )
+from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventType
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import (
     HCIRDelta,
@@ -40,10 +45,15 @@ from hbllm.hcir.transactions import (
 from hbllm.hcir.validation import GraphValidator
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
+if TYPE_CHECKING:
+    from hbllm.hcir.kernel.event_bus import KernelEventBus
+
 logger = logging.getLogger(__name__)
 
 # Canonical alias for committed transaction results
 TransactionResult = HCIRTransaction
+
+KERNEL_AUTHOR = "transaction_manager"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -96,6 +106,11 @@ class TransactionBuilder:
                 changes=changes,
             )
         )
+        return self
+
+    def add_operations(self, ops: list[TransactionOperation]) -> TransactionBuilder:
+        """Add a batch of pre-built operations."""
+        self.operations.extend(ops)
         return self
 
     async def commit(self, context: Any = None) -> HCIRTransaction:
@@ -160,13 +175,34 @@ class TransactionManager:
         workspace: HCIRWorkspaceState,
         verification_stages: list[IVerificationStage] | None = None,
         validator: GraphValidator | None = None,
+        event_bus: KernelEventBus | None = None,
+        max_log_size: int = 10_000,
     ) -> None:
         self._workspace = workspace
         self._verification_stages = verification_stages or []
         self._validator = validator or GraphValidator()
-        self._committed_log: list[HCIRTransaction] = []
-        self._rejected_log: list[HCIRTransaction] = []
+        self._event_bus = event_bus
+        self._max_log_size = max(1, max_log_size)
+        self._committed_log: deque[HCIRTransaction] = deque(maxlen=self._max_log_size)
+        self._rejected_log: deque[HCIRTransaction] = deque(maxlen=self._max_log_size)
         self._undo_logs: dict[str, list[dict[str, Any]]] = {}
+        self._tx_versions: dict[str, int] = {}
+        self._lock = threading.RLock()
+        attach = getattr(workspace, "attach_transaction_manager", None)
+        if callable(attach):
+            attach(self)
+
+    @property
+    def workspace(self) -> HCIRWorkspaceState:
+        return self._workspace
+
+    @property
+    def event_bus(self) -> KernelEventBus | None:
+        return self._event_bus
+
+    @event_bus.setter
+    def event_bus(self, bus: KernelEventBus | None) -> None:
+        self._event_bus = bus
 
     @property
     def committed_count(self) -> int:
@@ -200,6 +236,8 @@ class TransactionManager:
             if auto_commit and builder.transaction is None and builder.operations:
                 await builder.commit()
 
+    # ── Commit path ──────────────────────────────────────────────────
+
     def commit(
         self,
         transaction: HCIRTransaction,
@@ -209,78 +247,53 @@ class TransactionManager:
 
         Returns the transaction with updated status.
         """
+        with self._lock:
+            return self._commit(transaction, context, self._verification_stages)
+
+    def _commit(
+        self,
+        transaction: HCIRTransaction,
+        context: Any,
+        stages: list[IVerificationStage],
+    ) -> HCIRTransaction:
         # Invariant #1: don't re-process committed/rejected transactions
         if transaction.status in (TransactionStatus.COMMITTED, TransactionStatus.REJECTED):
             logger.warning("Transaction %s already %s", transaction.id, transaction.status)
             return transaction
 
-        if context is not None:
-            if hasattr(context, "authority_chain"):
-                auth_chain = getattr(context, "authority_chain")
-                transaction.annotations.append(
-                    TransactionAnnotation(
-                        author="CognitiveAuthorityChain",
-                        assertion=f"Authority: {auth_chain}",
-                        severity="info",
-                    )
-                )
-            if hasattr(context, "execution_context"):
-                exec_ctx = getattr(context, "execution_context")
-                if hasattr(exec_ctx, "tenant_scope"):
-                    transaction.annotations.append(
-                        TransactionAnnotation(
-                            author="IdentityBridge",
-                            assertion=f"Enforced scope: {exec_ctx.tenant_scope}",
-                            severity="info",
-                        )
-                    )
-            else:
-                transaction.annotations.append(
-                    TransactionAnnotation(
-                        author="IdentityBridge",
-                        assertion=f"Enforced context: {getattr(context, 'metadata', context)}",
-                        severity="info",
-                    )
-                )
+        self._annotate_context(transaction, context)
 
-        # Run verification pipeline
-        for stage in self._verification_stages:
-            if not stage.verify(transaction, self._workspace):
-                transaction.status = TransactionStatus.REJECTED
-                self._rejected_log.append(transaction)
-                self._workspace.snapshot_manager.record_kernel_event(
-                    EventType.TRANSACTION_REJECTED,
-                    {"tx_id": transaction.id, "author": transaction.author},
-                )
-                logger.info("Transaction %s rejected by %s", transaction.id, type(stage).__name__)
-                return transaction
+        if not self._verify(transaction, stages):
+            return transaction
 
         transaction.status = TransactionStatus.VALIDATED
 
-        # Apply operations to the workspace
+        # Apply operations atomically: on any failure, revert the partial effects.
         try:
-            self._apply_operations(transaction)
+            undo_entries = self._apply_operations(transaction)
         except Exception as exc:
             transaction.status = TransactionStatus.REJECTED
             transaction.annotations.append(
                 TransactionAnnotation(
                     author="TransactionManager",
-                    assertion=f"Apply failed: {exc}",
+                    assertion=f"Apply failed (atomically reverted): {exc}",
                     severity="error",
                 )
             )
             self._rejected_log.append(transaction)
-            logger.error("Transaction %s apply failed: %s", transaction.id, exc)
+            self._publish(
+                KernelEventType.TRANSACTION_REJECTED,
+                {"tx_id": transaction.id, "author": transaction.author, "reason": str(exc)},
+            )
+            logger.error("Transaction %s apply failed, reverted: %s", transaction.id, exc)
             return transaction
 
-        # Commit
         transaction.status = TransactionStatus.COMMITTED
-        self._committed_log.append(transaction)
+        self._record_committed(transaction, undo_entries)
 
-        # Create a new snapshot
-        self._workspace.create_snapshot()
+        snap = self._workspace.create_snapshot()
+        self._tx_versions[transaction.id] = snap.version
 
-        # Emit kernel event
         self._workspace.snapshot_manager.record_kernel_event(
             EventType.TRANSACTION_COMMITTED,
             {
@@ -289,11 +302,88 @@ class TransactionManager:
                 "op_count": transaction.operation_count,
             },
         )
-
+        self._publish(
+            KernelEventType.TRANSACTION_COMMITTED,
+            {
+                "tx_id": transaction.id,
+                "author": transaction.author,
+                "op_count": transaction.operation_count,
+                "version": snap.version,
+            },
+        )
         logger.debug(
             "Transaction %s committed (%d ops)", transaction.id, transaction.operation_count
         )
         return transaction
+
+    def _verify(self, transaction: HCIRTransaction, stages: list[IVerificationStage]) -> bool:
+        for stage in stages:
+            if not stage.verify(transaction, self._workspace):
+                transaction.status = TransactionStatus.REJECTED
+                self._rejected_log.append(transaction)
+                self._workspace.snapshot_manager.record_kernel_event(
+                    EventType.TRANSACTION_REJECTED,
+                    {"tx_id": transaction.id, "author": transaction.author},
+                )
+                self._publish(
+                    KernelEventType.TRANSACTION_REJECTED,
+                    {
+                        "tx_id": transaction.id,
+                        "author": transaction.author,
+                        "stage": type(stage).__name__,
+                    },
+                )
+                logger.info("Transaction %s rejected by %s", transaction.id, type(stage).__name__)
+                return False
+        return True
+
+    @staticmethod
+    def _annotate_context(transaction: HCIRTransaction, context: Any) -> None:
+        if context is None:
+            return
+        if hasattr(context, "authority_chain"):
+            transaction.annotations.append(
+                TransactionAnnotation(
+                    author="CognitiveAuthorityChain",
+                    assertion=f"Authority: {context.authority_chain}",
+                    severity="info",
+                )
+            )
+        if hasattr(context, "execution_context"):
+            exec_ctx = context.execution_context
+            if hasattr(exec_ctx, "tenant_scope"):
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="IdentityBridge",
+                        assertion=f"Enforced scope: {exec_ctx.tenant_scope}",
+                        severity="info",
+                    )
+                )
+        else:
+            transaction.annotations.append(
+                TransactionAnnotation(
+                    author="IdentityBridge",
+                    assertion=f"Enforced context: {getattr(context, 'metadata', context)}",
+                    severity="info",
+                )
+            )
+
+    def _record_committed(
+        self, transaction: HCIRTransaction, undo_entries: list[dict[str, Any]]
+    ) -> None:
+        if len(self._committed_log) == self._committed_log.maxlen:
+            evicted = self._committed_log[0]
+            self._undo_logs.pop(evicted.id, None)
+            self._tx_versions.pop(evicted.id, None)
+        self._committed_log.append(transaction)
+        self._undo_logs[transaction.id] = undo_entries
+
+    def _publish(self, event_type: KernelEventType, data: dict[str, Any]) -> None:
+        if self._event_bus is None:
+            return
+        self._event_bus.publish(
+            KernelEvent(event_type=event_type.value, source=KERNEL_AUTHOR, data=data)
+        )
 
     def commit_with_verification(
         self,
@@ -304,14 +394,13 @@ class TransactionManager:
         """Two-phase constitutional commit with automated compensating rollback on failure.
 
         Phase 1 (Prepare & Verify):
-            Evaluates transaction against all verification stages (constitutional,
-            multi-tenant scope, safety invariants, and budget). If any check fails,
-            the transaction is marked REJECTED and no state is mutated.
+            Evaluates transaction against the default pipeline plus any extra
+            ``verifiers`` exactly once. If any check fails, the transaction is
+            marked REJECTED and no state is mutated.
 
         Phase 2 (Atomic Commit & Compensating Rollback):
-            Attempts atomic state mutation. If an exception occurs, automatically
-            rolls back any partial effects using inverse operations and commits a
-            compensating transaction to preserve graph consistency.
+            Attempts atomic state mutation. If an exception escapes, any partial
+            effects are rolled back and a compensating transaction is committed.
 
         Returns:
             (is_successful, committed_or_rejected_tx, compensating_tx_if_any)
@@ -320,35 +409,18 @@ class TransactionManager:
         if verifiers:
             all_stages.extend(verifiers)
 
-        # Phase 1: Prepare & Verify
-        for stage in all_stages:
-            if not stage.verify(transaction, self._workspace):
-                transaction.status = TransactionStatus.REJECTED
-                self._rejected_log.append(transaction)
-                self._workspace.snapshot_manager.record_kernel_event(
-                    EventType.TRANSACTION_REJECTED,
-                    {"tx_id": transaction.id, "author": transaction.author},
+        with self._lock:
+            try:
+                res = self._commit(transaction, context, all_stages)
+                return res.is_committed, res, None
+            except Exception as exc:
+                logger.error(
+                    "Phase 2 commit failed for tx %s: %s; initiating compensating rollback",
+                    transaction.id,
+                    exc,
                 )
-                logger.info(
-                    "Transaction %s rejected by %s in 2PC", transaction.id, type(stage).__name__
-                )
-                return False, transaction, None
-
-        # Phase 2: Atomic Commit with automated compensation on failure
-        try:
-            res = self.commit(transaction, context=context)
-            if res.is_committed:
-                return True, res, None
-            else:
-                return False, res, None
-        except Exception as exc:
-            logger.error(
-                "Phase 2 commit failed for tx %s: %s; initiating compensating rollback",
-                transaction.id,
-                exc,
-            )
-            comp_tx = self.compensate(transaction.id, reason=f"phase_2_failure: {exc}")
-            return False, transaction, comp_tx
+                comp_tx = self.compensate(transaction.id, reason=f"phase_2_failure: {exc}")
+                return False, transaction, comp_tx
 
     def commit_delta(self, delta: HCIRDelta, author: str) -> HCIRTransaction:
         """Wrap an HCIRDelta in a transaction and commit it.
@@ -367,10 +439,16 @@ class TransactionManager:
         self, limit: int = 100, author: str | None = None
     ) -> list[HCIRTransaction]:
         """Retrieve committed transaction history for skill induction."""
-        txs = self._committed_log
+        txs: list[HCIRTransaction] = list(self._committed_log)
         if author:
             txs = [t for t in txs if t.author == author]
         return txs[-limit:]
+
+    def version_of(self, tx_id: str) -> int | None:
+        """Workspace snapshot version produced by a committed transaction."""
+        return self._tx_versions.get(tx_id)
+
+    # ── Compensation & Rollback ──────────────────────────────────────
 
     def compensate(
         self,
@@ -392,39 +470,25 @@ class TransactionManager:
             The committed compensating transaction, or ``None`` if the
             original transaction was not found.
         """
-        # Find the original committed transaction
         original = self._find_committed(original_tx_id)
         if original is None:
             logger.warning("compensate: transaction %s not found", original_tx_id)
             return None
 
-        # Generate inverse operations
         reverse_ops = self._invert_operations(original.operations)
         if not reverse_ops:
             logger.info("compensate: no invertible operations in %s", original_tx_id)
             return None
 
-        from hbllm.hcir.types import Provenance
-
-        compensating_tx = HCIRTransaction(
-            author="transaction_manager",
-            operations=reverse_ops,
-            provenance=Provenance(
-                created_by="transaction_manager",
+        result = self.commit(
+            self._kernel_transaction(
+                reverse_ops,
                 reason=f"Compensating tx {original_tx_id}: {reason}",
-            ),
-            annotations=[
-                TransactionAnnotation(
-                    author="TransactionManager",
-                    assertion=f"Compensating transaction for {original_tx_id}: {reason}",
-                    severity="warning",
-                )
-            ],
+                assertion=f"Compensating transaction for {original_tx_id}: {reason}",
+            )
         )
-        result = self.commit(compensating_tx)
 
         if result.is_committed:
-            # Record the compensation event
             self._workspace.snapshot_manager.record_kernel_event(
                 EventType.TRANSACTION_COMPENSATED,
                 {
@@ -463,6 +527,79 @@ class TransactionManager:
             # Fall back to compensate if no undo log captured
             return self.compensate(original_tx_id, reason=reason)
 
+        inverse = self._inverse_from_undo(undo_records)
+        if not inverse:
+            return None
+
+        return self.commit(
+            self._kernel_transaction(
+                inverse,
+                reason=f"Rollback tx {original_tx_id}: {reason}",
+                assertion=f"Rollback transaction for {original_tx_id}: {reason}",
+            )
+        )
+
+    def rollback_to_version(
+        self,
+        target_version: int,
+        reason: str = "isa_rollback",
+    ) -> list[HCIRTransaction]:
+        """Restore the workspace to the state it had at snapshot ``target_version``.
+
+        Every transaction committed after the target version (including prior
+        rollback/compensation transactions) is reverted in reverse order using
+        its exact undo log, so the result is the precise before-image.
+
+        Returns the list of committed rollback transactions (newest first).
+        """
+        with self._lock:
+            to_revert = [
+                tx
+                for tx in reversed(list(self._committed_log))
+                if self._tx_versions.get(tx.id, 0) > target_version
+            ]
+            reverted: list[HCIRTransaction] = []
+            for tx in to_revert:
+                rb = self.rollback(tx.id, reason=reason)
+                if rb is not None and rb.is_committed:
+                    reverted.append(rb)
+            self._workspace.snapshot_manager.record_kernel_event(
+                EventType.ROLLBACK,
+                {
+                    "target_version": target_version,
+                    "transactions_reverted": len(to_revert),
+                    "reason": reason,
+                },
+            )
+            return reverted
+
+    @staticmethod
+    def _kernel_transaction(
+        ops: list[TransactionOperation], *, reason: str, assertion: str
+    ) -> HCIRTransaction:
+        from hbllm.hcir.types import Provenance
+
+        return HCIRTransaction(
+            author=KERNEL_AUTHOR,
+            operations=ops,
+            provenance=Provenance(created_by=KERNEL_AUTHOR, reason=reason),
+            annotations=[
+                TransactionAnnotation(
+                    author="TransactionManager", assertion=assertion, severity="warning"
+                )
+            ],
+        )
+
+    def _find_committed(self, tx_id: str) -> HCIRTransaction | None:
+        """Find a committed transaction by ID."""
+        for tx in self._committed_log:
+            if tx.id == tx_id:
+                return tx
+        return None
+
+    @staticmethod
+    def _inverse_from_undo(undo_records: list[dict[str, Any]]) -> list[TransactionOperation]:
+        """Build exact inverse operations from captured before-images (newest first)."""
         inverse: list[TransactionOperation] = []
         for rec in reversed(undo_records):
             op = rec["op"]
@@ -471,94 +608,41 @@ class TransactionManager:
             nid = rec.get("node_id")
             eid = rec.get("edge_id")
 
-            if op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+            if op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE, TransactionOp.MODIFY_NODE):
                 if prev_node:
                     inverse.append(
                         TransactionOperation(
-                            op=TransactionOp.UPSERT_NODE,
-                            node_id=nid,
-                            node_data=prev_node,
+                            op=TransactionOp.UPSERT_NODE, node_id=nid, node_data=prev_node
                         )
                     )
                 elif nid:
-                    inverse.append(
-                        TransactionOperation(
-                            op=TransactionOp.REMOVE_NODE,
-                            node_id=nid,
-                        )
-                    )
-            elif op == TransactionOp.MODIFY_NODE:
-                if prev_node:
-                    inverse.append(
-                        TransactionOperation(
-                            op=TransactionOp.UPSERT_NODE,
-                            node_id=nid,
-                            node_data=prev_node,
-                        )
-                    )
+                    inverse.append(TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=nid))
             elif op == TransactionOp.REMOVE_NODE:
                 if prev_node:
                     inverse.append(
                         TransactionOperation(
-                            op=TransactionOp.ADD_NODE,
-                            node_id=nid,
-                            node_data=prev_node,
+                            op=TransactionOp.UPSERT_NODE, node_id=nid, node_data=prev_node
                         )
                     )
+                    for edge_data in rec.get("cascaded_edges", []):
+                        inverse.append(
+                            TransactionOperation(
+                                op=TransactionOp.ADD_EDGE,
+                                edge_id=edge_data.get("id"),
+                                edge_data=edge_data,
+                            )
+                        )
             elif op == TransactionOp.ADD_EDGE:
-                if prev_edge:
-                    inverse.append(
-                        TransactionOperation(
-                            op=TransactionOp.ADD_EDGE,
-                            edge_id=eid,
-                            edge_data=prev_edge,
-                        )
-                    )
-                elif eid:
-                    inverse.append(
-                        TransactionOperation(
-                            op=TransactionOp.REMOVE_EDGE,
-                            edge_id=eid,
-                        )
-                    )
+                if eid:
+                    inverse.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
             elif op == TransactionOp.REMOVE_EDGE:
                 if prev_edge:
                     inverse.append(
                         TransactionOperation(
-                            op=TransactionOp.ADD_EDGE,
-                            edge_id=eid,
-                            edge_data=prev_edge,
+                            op=TransactionOp.ADD_EDGE, edge_id=eid, edge_data=prev_edge
                         )
                     )
-
-        if not inverse:
-            return None
-
-        from hbllm.hcir.types import Provenance
-
-        rollback_tx = HCIRTransaction(
-            author="transaction_manager",
-            operations=inverse,
-            provenance=Provenance(
-                created_by="transaction_manager",
-                reason=f"Rollback tx {original_tx_id}: {reason}",
-            ),
-            annotations=[
-                TransactionAnnotation(
-                    author="TransactionManager",
-                    assertion=f"Rollback transaction for {original_tx_id}: {reason}",
-                    severity="warning",
-                )
-            ],
-        )
-        return self.commit(rollback_tx)
-
-    def _find_committed(self, tx_id: str) -> HCIRTransaction | None:
-        """Find a committed transaction by ID."""
-        for tx in self._committed_log:
-            if tx.id == tx_id:
-                return tx
-        return None
+        return inverse
 
     def _invert_operations(
         self,
@@ -595,99 +679,115 @@ class TransactionManager:
                     )
         return inverse
 
-    def _apply_operations(self, transaction: HCIRTransaction) -> None:
-        """Apply transaction operations to the workspace graph with undo logging."""
+    # ── Raw application (kernel-internal) ────────────────────────────
+
+    def _apply_operations(self, transaction: HCIRTransaction) -> list[dict[str, Any]]:
+        """Apply transaction operations to the workspace graph with undo logging.
+
+        Atomic: if any operation raises, every operation already applied is
+        reverted from its captured before-image before the exception propagates.
+        """
         undo_entries: list[dict[str, Any]] = []
+        try:
+            for op in transaction.operations:
+                self._apply_one(op, transaction.author, undo_entries)
+        except Exception:
+            if undo_entries:
+                self._revert_in_flight(undo_entries)
+            raise
+        return undo_entries
 
-        for op in transaction.operations:
-            if op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
-                raw_data = dict(op.node_data or {})
-                if "id" not in raw_data and op.node_id:
-                    raw_data["id"] = op.node_id
-                target_id = raw_data.get("id") or op.node_id
-                existing = self._workspace.get_node(target_id) if target_id else None
+    def _revert_in_flight(self, undo_entries: list[dict[str, Any]]) -> None:
+        inverse = self._inverse_from_undo(undo_entries)
+        scratch: list[dict[str, Any]] = []
+        for op in inverse:
+            try:
+                self._apply_one(op, KERNEL_AUTHOR, scratch)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.critical("In-flight revert failed for %s: %s", op.op, exc)
+
+    def _edge_snapshot(self, edge_id: str | None) -> dict[str, Any] | None:
+        if not edge_id:
+            return None
+        edge = self._workspace.get_edge(edge_id)
+        return edge.model_dump() if edge is not None else None
+
+    def _apply_one(
+        self, op: TransactionOperation, author: str, undo_entries: list[dict[str, Any]]
+    ) -> None:
+        ws = self._workspace
+        if op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+            raw_data = dict(op.node_data or {})
+            if "id" not in raw_data and op.node_id:
+                raw_data["id"] = op.node_id
+            target_id = raw_data.get("id") or op.node_id
+            existing = ws.get_node(target_id) if target_id else None
+            node = self._deserialize_node(raw_data)
+            if op.op == TransactionOp.ADD_NODE:
+                ws.add_node(node, author=author)
+            else:
+                ws.upsert_node(node, author=author)
+            undo_entries.append(
+                {
+                    "op": op.op,
+                    "node_id": target_id,
+                    "previous_node": existing.model_dump() if existing else None,
+                }
+            )
+
+        elif op.op == TransactionOp.MODIFY_NODE:
+            changes = op.changes or op.node_data
+            if op.node_id and changes:
+                existing = ws.get_node(op.node_id)
+                if existing is None:
+                    raise ValueError(f"Cannot modify non-existent node: {op.node_id}")
+                updated_data = existing.model_dump()
+                updated_data.update(changes)
+                updated = type(existing).model_validate(updated_data)
+                ws.upsert_node(updated, author=author)
                 undo_entries.append(
                     {
                         "op": op.op,
-                        "node_id": target_id,
+                        "node_id": op.node_id,
+                        "previous_node": existing.model_dump(),
+                    }
+                )
+
+        elif op.op == TransactionOp.REMOVE_NODE:
+            if op.node_id:
+                existing = ws.get_node(op.node_id)
+                cascaded: list[dict[str, Any]] = []
+                if existing is not None:
+                    touched = {
+                        e.id: e
+                        for e in [*ws.graph.edges_from(op.node_id), *ws.graph.edges_to(op.node_id)]
+                    }
+                    cascaded = [e.model_dump() for e in touched.values()]
+                ws.remove_node(op.node_id, author=author)
+                undo_entries.append(
+                    {
+                        "op": op.op,
+                        "node_id": op.node_id,
                         "previous_node": existing.model_dump() if existing else None,
+                        "cascaded_edges": cascaded,
                     }
                 )
-                node = self._deserialize_node(raw_data)
-                if op.op == TransactionOp.ADD_NODE:
-                    self._workspace.add_node(node, author=transaction.author)
-                else:
-                    self._workspace.upsert_node(node, author=transaction.author)
 
-            elif op.op == TransactionOp.MODIFY_NODE:
-                changes = op.changes or op.node_data
-                if op.node_id and changes:
-                    existing = self._workspace.get_node(op.node_id)
-                    if existing is None:
-                        raise ValueError(f"Cannot modify non-existent node: {op.node_id}")
-                    undo_entries.append(
-                        {
-                            "op": op.op,
-                            "node_id": op.node_id,
-                            "previous_node": existing.model_dump(),
-                        }
-                    )
-                    # Create updated copy with changes applied
-                    updated_data = existing.model_dump()
-                    updated_data.update(changes)
-                    updated = type(existing).model_validate(updated_data)
-                    self._workspace.upsert_node(updated, author=transaction.author)
+        elif op.op == TransactionOp.ADD_EDGE:
+            raw_edge = dict(op.edge_data or {})
+            if "id" not in raw_edge and op.edge_id:
+                raw_edge["id"] = op.edge_id
+            edge = HCIREdge.model_validate(raw_edge)
+            ws.add_edge(edge, author=author)
+            undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": None})
 
-            elif op.op == TransactionOp.REMOVE_NODE:
-                if op.node_id:
-                    existing = self._workspace.get_node(op.node_id)
-                    undo_entries.append(
-                        {
-                            "op": op.op,
-                            "node_id": op.node_id,
-                            "previous_node": existing.model_dump() if existing else None,
-                        }
-                    )
-                    self._workspace.remove_node(op.node_id, author=transaction.author)
-
-            elif op.op == TransactionOp.ADD_EDGE:
-                raw_edge = dict(op.edge_data or {})
-                edge_id = raw_edge.get("id") or op.edge_id
-                existing_edge = (
-                    self._workspace.graph.edges.get(edge_id)
-                    if edge_id
-                    and hasattr(self._workspace.graph, "edges")
-                    and isinstance(self._workspace.graph.edges, dict)
-                    else None
-                )
+        elif op.op == TransactionOp.REMOVE_EDGE:
+            if op.edge_id:
+                prev_edge = self._edge_snapshot(op.edge_id)
+                ws.remove_edge(op.edge_id, author=author)
                 undo_entries.append(
-                    {
-                        "op": op.op,
-                        "edge_id": edge_id,
-                        "previous_edge": existing_edge.model_dump() if existing_edge else None,
-                    }
+                    {"op": op.op, "edge_id": op.edge_id, "previous_edge": prev_edge}
                 )
-                edge = HCIREdge.model_validate(op.edge_data or {})
-                self._workspace.add_edge(edge, author=transaction.author)
-
-            elif op.op == TransactionOp.REMOVE_EDGE:
-                if op.edge_id:
-                    existing_edge = (
-                        self._workspace.graph.edges.get(op.edge_id)
-                        if hasattr(self._workspace.graph, "edges")
-                        and isinstance(self._workspace.graph.edges, dict)
-                        else None
-                    )
-                    undo_entries.append(
-                        {
-                            "op": op.op,
-                            "edge_id": op.edge_id,
-                            "previous_edge": existing_edge.model_dump() if existing_edge else None,
-                        }
-                    )
-                    self._workspace.remove_edge(op.edge_id, author=transaction.author)
-
-        self._undo_logs[transaction.id] = undo_entries
 
     @staticmethod
     def _deserialize_node(data: dict[str, Any]) -> HCIRNode:

@@ -197,6 +197,8 @@ class EpistemicGoalScheduler:
         # Object Permanence: Retain known goal positions if currently occluded by mobile entities
         for gp in engine.learned_goal_positions:
             if 0 <= gp[0] < H and 0 <= gp[1] < W and gp != avatar_pos:
+                if av_feats and int(curr_grid[gp[0], gp[1]]) in av_feats:
+                    continue
                 if gp not in confirmed_goals:
                     confirmed_goals.append(gp)
 
@@ -355,6 +357,9 @@ class EpistemicGoalScheduler:
                     continue
                 if feat is not None and feat != bg and feat not in av_feats:
                     new_candidate_feats.add(feat)
+                is_high_conf = sg.get("confidence", 0.0) >= 0.7 and (
+                    avatar_pos is not None or bool(av_feats)
+                )
                 cells = sg.get("cells")
                 if cells:
                     for cp in cells:
@@ -366,6 +371,8 @@ class EpistemicGoalScheduler:
                         ):
                             if cp not in goals:
                                 goals.append(cp)
+                            if is_high_conf:
+                                new_learned_positions.add(cp)
                 else:
                     pos = sg.get("position")
                     if (
@@ -377,6 +384,8 @@ class EpistemicGoalScheduler:
                     ):
                         if pos not in goals:
                             goals.append(pos)
+                        if is_high_conf:
+                            new_learned_positions.add(pos)
 
         # (d) Exploratory guesses: unknown entities
         if not goals:
@@ -701,14 +710,8 @@ class MentalSimulationPlanner:
                 )
                 else (-1, -1)
             )
-            avatar_on_bg = ar >= 0 and (
-                int(curr_grid[ar, ac]) == bg
-                or any(
-                    0 <= ar + dr_a < H
-                    and 0 <= ac + dc_a < W
-                    and int(curr_grid[ar + dr_a, ac + dc_a]) == bg
-                    for dr_a, dc_a in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                )
+            avatar_on_bg = bg in engine.verified_safe_features or (
+                ar >= 0 and int(curr_grid[ar, ac]) == bg
             )
             if bg_ratio >= 0.20 and not avatar_on_bg:
                 bg_is_impassable_void = True
@@ -846,6 +849,11 @@ class MentalSimulationPlanner:
         blocked_cells: set[tuple[int, int]] | None = None,
     ) -> list[MentalSimulationStep] | None:
         """Simulate candidate action sequences internally in memory without taking physical steps."""
+        if not isinstance(curr_grid, np.ndarray):
+            curr_grid = np.asarray(curr_grid, dtype=int)
+        if curr_grid.ndim == 3 and len(curr_grid) > 0:
+            curr_grid = curr_grid[-1]
+
         if engine.avatar_pos is None and (
             engine.avatar_features
             or engine.avatar_feature is not None
@@ -895,6 +903,7 @@ class MentalSimulationPlanner:
         if proposal.clear_exhausted_goals:
             engine.exhausted_candidate_goals.clear()
         engine.symbolic_theory.goal_features.difference_update(av_feats)
+        engine.symbolic_theory.candidate_goal_features.difference_update(av_feats)
 
         goals = proposal.goals
 
@@ -1093,10 +1102,15 @@ class MentalSimulationPlanner:
                             threat_map[(rr_t, cc_t)] = t
 
         init_threats = frozenset(threat_cells)
+        trajectory_features = {
+            proj.feature_id for proj in engine.collision_cones.projected_trajectories
+        }
         patrol_items: set[tuple[tuple[int, int], tuple[int, int]]] = {
             (t.pos, t.facing)
             for t in oriented_threats
-            if t.feature_id in engine.mobile_threat_features and t.facing != (0, 0)
+            if t.feature_id in engine.mobile_threat_features
+            and t.facing != (0, 0)
+            and t.feature_id not in trajectory_features
         }
         for proj in engine.collision_cones.projected_trajectories:
             if (
@@ -1112,17 +1126,20 @@ class MentalSimulationPlanner:
         def advance_patrols(
             patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]],
             avatar_new: tuple[int, int],
+            avatar_old: tuple[int, int] | None = None,
         ) -> frozenset[tuple[tuple[int, int], tuple[int, int]]] | None:
             nxt: set[tuple[tuple[int, int], tuple[int, int]]] = set()
             for p, f in patrols:
-                if p == avatar_new:
-                    return None
                 dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
                 if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in _grid_walls:
                     new_f = (-f[0], -f[1])
                     nxt.add((p, new_f))
+                    if p == avatar_new:
+                        return None
                     continue
                 if dest == avatar_new:
+                    return None
+                if avatar_old is not None and p == avatar_new and dest == avatar_old:
                     return None
                 new_f = f
                 if _corridor_blocked(dest, f):
@@ -1197,13 +1214,16 @@ class MentalSimulationPlanner:
                 nxt.add(dest)
             return frozenset(nxt)
 
+        has_confirmed_cargo = bool(
+            engine.symbolic_theory.cargo_features or engine.learned_cargo_features
+        )
         is_block_delivery = bool(
-            1 <= len(pushable_blocks) <= 16
+            has_confirmed_cargo
+            and 1 <= len(pushable_blocks) <= 16
             and any(
                 (
                     engine.symbolic_theory.is_cargo(e)
                     or e.feature_id in engine.learned_cargo_features
-                    or e.role == EntityRole.MANIPULABLE
                 )
                 and e.feature_id not in av_feats
                 and e.grid_pos in pushable_blocks
@@ -1228,7 +1248,14 @@ class MentalSimulationPlanner:
         # route deterministic shortest action paths over traversable manifolds.
         # When temporal threats (patrols, chasers) exist, defer to Space-Time A*.
         # ─────────────────────────────────────────────────────────────────────
-        if goals and not is_block_delivery and not has_temporal and start_pos is not None:
+        if (
+            goals
+            and not is_block_delivery
+            and not has_temporal
+            and not mutation_triggers
+            and not pushable_blocks
+            and start_pos is not None
+        ):
             geodesic_movable_actions = list(movable_actions)
             action_plan = (
                 GeodesicManifoldRouter.route_geodesic(
@@ -1710,7 +1737,7 @@ class MentalSimulationPlanner:
                     new_patrols = cur_patrols
                     patrol_proximity_cost = 0.0
                     if cur_patrols:
-                        predicted = advance_patrols(cur_patrols, (nr, nc))
+                        predicted = advance_patrols(cur_patrols, (nr, nc), avatar_old=cur_pos)
                         if predicted is None:
                             continue
                         new_patrols = predicted
@@ -1920,8 +1947,8 @@ class MentalSimulationPlanner:
                             new_threats,
                             new_patrols,
                             new_chasers,
-                            path_len + 1,
                             new_waits,
+                            path_len + 1,
                         ),
                     )
 
@@ -1955,7 +1982,18 @@ class MentalSimulationPlanner:
                 movable_actions,
             )
             if subgoal_plan:
-                return subgoal_plan
+                # Prefrontal Safety Gate: Validate first step does not step into a collision hazard
+                first_pos = subgoal_plan[0].predicted_avatar_pos
+                if first_pos is not None and engine.collision_cones.is_collision_hazard(
+                    first_pos[0], first_pos[1], 1
+                ):
+                    logger.info(
+                        "MentalSimulationPlanner: Hierarchical static plan rejected - first step collides with dynamic hazard at %s",
+                        first_pos,
+                    )
+                    subgoal_plan = None
+                else:
+                    return subgoal_plan
 
         # Teleological Backward Cut-Set Decomposition Fallback (Human BA10 Reasoning)
         if goals and start_pos is not None:
@@ -1970,7 +2008,17 @@ class MentalSimulationPlanner:
                 oriented_threats=oriented_threats,
             )
             if teleo_plan:
-                return teleo_plan
+                first_pos = teleo_plan[0].predicted_avatar_pos
+                if first_pos is not None and engine.collision_cones.is_collision_hazard(
+                    first_pos[0], first_pos[1], 1
+                ):
+                    logger.info(
+                        "MentalSimulationPlanner: Teleological static plan rejected - first step collides with dynamic hazard at %s",
+                        first_pos,
+                    )
+                    teleo_plan = None
+                else:
+                    return teleo_plan
 
         return None
 

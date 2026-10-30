@@ -23,10 +23,37 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     WorldVariableNode,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 
 logger = logging.getLogger(__name__)
+
+
+def _commit_node(workspace: HCIRWorkspaceState, node: GoalNode) -> None:
+    """Propose a subgoal node through the workspace commit authority."""
+    workspace.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
+            )
+        ],
+        author="hierarchical_goal_decomposer",
+    )
+
+
+def _commit_edge(workspace: HCIRWorkspaceState, edge: HCIREdge) -> None:
+    """Propose a dependency edge through the workspace commit authority (idempotent)."""
+    if workspace.get_edge(edge.id) is not None:
+        return
+    workspace.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.ADD_EDGE, edge_id=edge.id, edge_data=edge.model_dump()
+            )
+        ],
+        author="hierarchical_goal_decomposer",
+    )
 
 
 class EpistemicFrontierDetector:
@@ -166,7 +193,7 @@ class HierarchicalGoalDecomposer:
         """
         # Ensure primary goal is in workspace
         if workspace.graph.get_node(primary_goal.id) is None:
-            workspace.upsert_node(primary_goal)
+            _commit_node(workspace, primary_goal)
 
         target_pos = primary_goal.properties.get("target_position")
         if target_pos is None:
@@ -249,13 +276,14 @@ class HierarchicalGoalDecomposer:
                         "is_recharge": True,
                     },
                 )
-                workspace.upsert_node(recharge_node)
-                workspace.add_edge(
+                _commit_node(workspace, recharge_node)
+                _commit_edge(
+                    workspace,
                     HCIREdge(
                         sources=[primary_goal.id],
                         targets=[recharge_node.id],
                         edge_type=HCIREdgeType.DEPENDS_ON,
-                    )
+                    ),
                 )
                 return recharge_node
 
@@ -354,7 +382,7 @@ class HierarchicalGoalDecomposer:
                         "affordance": best_cand.get("affordance", "INTERACTION"),
                     },
                 )
-                workspace.upsert_node(subgoal)
+                _commit_node(workspace, subgoal)
 
                 # Link: primary_goal DEPENDS_ON subgoal
                 dep_edge = HCIREdge(
@@ -363,7 +391,7 @@ class HierarchicalGoalDecomposer:
                     targets=[subgoal_id],
                     weight=1.0,
                 )
-                workspace.graph.add_edge(dep_edge)
+                _commit_edge(workspace, dep_edge)
 
                 logger.info(
                     "HierarchicalGoalDecomposer: Obstructed goal '%s' decomposed into prerequisite '%s' at %s",
@@ -399,14 +427,14 @@ class HierarchicalGoalDecomposer:
                         "affordance": "CONTACT",
                     },
                 )
-                workspace.upsert_node(frontier_subgoal)
+                _commit_node(workspace, frontier_subgoal)
                 dep_edge = HCIREdge(
                     edge_type=HCIREdgeType.DEPENDS_ON,
                     sources=[primary_goal.id],
                     targets=[frontier_subgoal_id],
                     weight=1.0,
                 )
-                workspace.graph.add_edge(dep_edge)
+                _commit_edge(workspace, dep_edge)
                 logger.info(
                     "HierarchicalGoalDecomposer: Obstructed goal '%s' decomposed into epistemic frontier '%s' at (%d, %d)",
                     primary_goal.id,
@@ -467,14 +495,14 @@ class HierarchicalGoalDecomposer:
                                                 "action": 6,
                                             },
                                         )
-                                        workspace.upsert_node(clear_subgoal)
+                                        _commit_node(workspace, clear_subgoal)
                                         dep_edge = HCIREdge(
                                             edge_type=HCIREdgeType.DEPENDS_ON,
                                             sources=[primary_goal.id],
                                             targets=[clear_subgoal_id],
                                             weight=1.0,
                                         )
-                                        workspace.graph.add_edge(dep_edge)
+                                        _commit_edge(workspace, dep_edge)
                                         logger.info(
                                             "HierarchicalGoalDecomposer: Obstructed goal '%s' synthesized obstacle clearance '%s' at (%d, %d)",
                                             primary_goal.id,
@@ -504,7 +532,7 @@ class HierarchicalGoalDecomposer:
         constructs a dependency tree linked with DEPENDS_ON, and returns the next immediate subgoal.
         """
         if workspace.graph.get_node(primary_goal.id) is None:
-            workspace.upsert_node(primary_goal)
+            _commit_node(workspace, primary_goal)
 
         # Identify unsatisfied preconditions
         unsatisfied: list[tuple[str, Any]] = []
@@ -558,7 +586,7 @@ class HierarchicalGoalDecomposer:
                         "affordance": best_mod.get("affordance", "CONTACT"),
                     },
                 )
-                workspace.upsert_node(subgoal)
+                _commit_node(workspace, subgoal)
 
                 dep_edge = HCIREdge(
                     edge_type=HCIREdgeType.DEPENDS_ON,
@@ -566,7 +594,7 @@ class HierarchicalGoalDecomposer:
                     targets=[subgoal_id],
                     weight=1.0,
                 )
-                workspace.graph.add_edge(dep_edge)
+                _commit_edge(workspace, dep_edge)
 
                 if immediate_subgoal is None:
                     immediate_subgoal = subgoal
@@ -580,7 +608,7 @@ class HierarchicalGoalDecomposer:
         if isinstance(node, GoalNode):
             node.resolved = True
             node.goal_lifecycle = GoalLifecycle.COMPLETED
-            workspace.upsert_node(node)
+            _commit_node(workspace, node)
             target_ent = node.properties.get("target_entity", subgoal_id)
             self.completed_subgoals.add(str(target_ent))
             self.completed_subgoals.add(subgoal_id)
@@ -696,7 +724,7 @@ class HierarchicalGoalDecomposer:
                     "parent_goal_id": primary_goal.id,
                 },
             )
-            workspace.upsert_node(feature_subgoal)
+            _commit_node(workspace, feature_subgoal)
             return feature_subgoal
 
         # Step 2: Precondition - Tool alignment match
@@ -714,7 +742,7 @@ class HierarchicalGoalDecomposer:
                     "parent_goal_id": primary_goal.id,
                 },
             )
-            workspace.upsert_node(tool_subgoal)
+            _commit_node(workspace, tool_subgoal)
             return tool_subgoal
 
         # Step 3: Application - Apply stamp
@@ -731,7 +759,7 @@ class HierarchicalGoalDecomposer:
                 "parent_goal_id": primary_goal.id,
             },
         )
-        workspace.upsert_node(stamp_subgoal)
+        _commit_node(workspace, stamp_subgoal)
         return stamp_subgoal
 
     @staticmethod
@@ -775,7 +803,7 @@ class HierarchicalGoalDecomposer:
                     "parent_goal_id": primary_goal.id,
                 },
             )
-            workspace.upsert_node(node)
+            _commit_node(workspace, node)
             subgoals.append(node)
 
             if prev_subgoal is not None:
@@ -786,7 +814,7 @@ class HierarchicalGoalDecomposer:
                     targets=[prev_subgoal.id],
                     weight=1.0,
                 )
-                workspace.graph.add_edge(dep_edge)
+                _commit_edge(workspace, dep_edge)
 
             prev_subgoal = node
 

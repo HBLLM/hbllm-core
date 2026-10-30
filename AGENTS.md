@@ -123,7 +123,20 @@ async with tx_mgr.begin_transaction() as tx:
         )
     )
     await tx.commit()
+
+# ✅ ALSO CORRECT: subsystems holding only a workspace reference (adapters, tier
+# promotion, world kernel) use the workspace's attached commit authority
+workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)],
+                            author="memory_adapter")
+
+# ❌ FORBIDDEN: the raw primitives `workspace.add_node/upsert_node/remove_node/add_edge/
+# remove_edge` are kernel-internal (used only by TransactionManager._apply_one).
 ```
+
+Kernel guarantees you can rely on: commits are atomic (partial failure is reverted
+in-flight), `MERGE`/`merge_branch` is a single verified diff transaction, `ROLLBACK`
+restores the exact snapshot via `TransactionManager.rollback_to_version`, and every
+commit/rejection is published on `KernelEventBus` as `transaction.committed|rejected`.
 
 ### Pattern B: Defining Skills & Behaviors
 

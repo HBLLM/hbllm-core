@@ -255,7 +255,23 @@ async def sys_wait(
             return {"waited": True, "event_type": event_type, "resolved": False, "error": str(exc)}
 
     condition = ins.params.get("condition", "")
-    return {"waited": True, "condition": condition, "resolved": True}
+    if condition:
+        # Declarative condition: poll-free resolution against the workspace query engine
+        from hbllm.hcir.graph import HCIRNodeType
+
+        try:
+            node_type = HCIRNodeType(condition)
+        except ValueError:
+            node_type = None
+        if node_type is not None:
+            satisfied = workspace.query(GraphQuery(node_type=node_type, limit=1)).total_matches > 0
+            return {"waited": True, "condition": condition, "resolved": satisfied}
+    return {
+        "waited": False,
+        "condition": condition,
+        "resolved": False,
+        "error": "WAIT requires 'event_type' or a resolvable 'condition'",
+    }
 
 
 async def sys_fork(
@@ -287,27 +303,29 @@ async def sys_merge(
         branch_name (str): Branch to merge.
     """
     branch_name = ins.params.get("branch_name", "simulation")
-    branch = workspace.get_branch(branch_name)
-    if branch is None:
+    if workspace.get_branch(branch_name) is None:
         return {"error": f"Branch '{branch_name}' not found"}
 
-    # Merge: add all nodes/edges from branch that are new or modified
-    merged_count = 0
-    for node in branch.graph.all_nodes():
-        existing = workspace.get_node(node.id)
-        if existing is None:
-            workspace.add_node(node.model_copy(deep=True), author="merge")
-            merged_count += 1
-        elif node.model_dump() != existing.model_dump():
-            workspace.upsert_node(node.model_copy(deep=True), author="merge")
-            merged_count += 1
+    # Merge is a single atomic transaction through the TransactionManager so it
+    # passes the constitutional pipeline and propagates removals as well as adds.
+    ops = workspace.diff_branch(branch_name)
+    merged = workspace.merge_branch(
+        branch_name,
+        transaction_manager=services.transaction_manager,
+        author=ins.params.get("author", "merge"),
+    )
+    if not merged:
+        return {
+            "error": f"Merge of branch '{branch_name}' rejected by transaction pipeline",
+            "branch": branch_name,
+            "merged_count": 0,
+        }
 
-    workspace.drop_branch(branch_name)
     workspace.snapshot_manager.record_kernel_event(
         EventType.SIMULATION_FINISHED,
-        {"branch": branch_name, "merged_count": merged_count},
+        {"branch": branch_name, "merged_count": len(ops)},
     )
-    return {"merged": True, "branch": branch_name, "merged_count": merged_count}
+    return {"merged": True, "branch": branch_name, "merged_count": len(ops)}
 
 
 async def sys_rollback(
@@ -326,11 +344,17 @@ async def sys_rollback(
     if snapshot is None:
         return {"error": f"Snapshot version {target_version} not found"}
 
-    workspace.snapshot_manager.record_kernel_event(
-        EventType.ROLLBACK,
-        {"target_version": target_version},
+    reverted = services.transaction_manager.rollback_to_version(
+        target_version, reason=ins.params.get("reason", "isa_rollback")
     )
-    return {"rolled_back": True, "target_version": target_version}
+    restored_hash = workspace.graph.content_hash()
+    return {
+        "rolled_back": True,
+        "target_version": target_version,
+        "transactions_reverted": len(reverted),
+        "rollback_tx_ids": [tx.id for tx in reverted],
+        "state_matches_snapshot": restored_hash == snapshot.content_hash,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

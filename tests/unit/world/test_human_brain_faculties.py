@@ -969,7 +969,7 @@ class TestInductiveHypothesisEngine:
 
         # Verify CausalPredicate compilation
         pred = conf_rule.to_causal_predicate()
-        assert pred.variable == "contact_feature"
+        assert pred.variable == f"inductive_rule:{conf_rule.rule_id}"
         assert pred.value == 2
         assert pred.relation == "clears_barrier"
         assert pred.target_entity == "9"

@@ -90,6 +90,7 @@ class EpistemicFeedbackAssimilator:
         """Propagate discovered lattice quantum to uncalibrated cardinal action priors."""
         if stride <= 1 or not hasattr(engine, "action_dynamics"):
             return
+        engine.spatial_lattice_stride = stride
         for other_act, other_dyn in engine.action_dynamics.items():
             if getattr(other_dyn, "probes_tested", 0) == 0:
                 if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
@@ -144,6 +145,11 @@ class EpistemicFeedbackAssimilator:
         engine.avatar_features = {ce.feature_id for _, ce in comp_pairs}
         engine.avatar_feature = next(iter(engine.avatar_features))
         engine.mobile_threat_features.difference_update(engine.avatar_features)
+        engine.hazard_tracker.known_lethal_features.difference_update(engine.avatar_features)
+        if hasattr(engine, "episodic_cortex"):
+            engine.episodic_cortex.discovered_lethal_features.difference_update(
+                engine.avatar_features
+            )
         engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
         all_cells = [
             cell for _, ce in comp_pairs for cell in ce.properties.get("cells", [ce.grid_pos])
@@ -721,10 +727,18 @@ class EpistemicFeedbackAssimilator:
         # Only evaluate bilateral pairing if entities belong to controllable agent features,
         # never autonomous mobile threats, lethal hazards, or background void.
         if engine.bilateral_state is None and len(moved_entities) >= 2:
+            av_feats = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
             candidate_bilat = [
                 (ce.grid_pos, delta, ce.feature_id)
                 for pe, ce, delta in moved_entities
                 if ce.area <= 64
+                and (
+                    ce.feature_id in av_feats
+                    or getattr(engine, "_avatar_controllability_evidence", {}).get(ce.feature_id, 0)
+                    > 0
+                )
                 and ce.feature_id not in engine.mobile_threat_features
                 and ce.feature_id not in engine.hazard_tracker.known_lethal_features
                 and ce.feature_id != bg
@@ -1001,8 +1015,24 @@ class EpistemicFeedbackAssimilator:
         static_walls = set(engine.learned_barriers)
         for r_w in range(H):
             for c_w in range(W):
-                if int(curr_grid[r_w, c_w]) in engine.symbolic_theory.barrier_features:
+                c_val = int(curr_grid[r_w, c_w])
+                if c_val in engine.symbolic_theory.barrier_features:
                     static_walls.add((r_w, c_w))
+                elif (
+                    len(engine.symbolic_theory.walkable_features) > 0
+                    and engine.bg_feature is not None
+                    and engine.bg_feature not in engine.symbolic_theory.walkable_features
+                    and c_val == engine.bg_feature
+                ):
+                    static_walls.add((r_w, c_w))
+
+        # Dynamic entities cannot be static barriers to themselves
+        for ext_entity in kinetic_res.external_agents:
+            if ext_entity.cells:
+                static_walls.difference_update(ext_entity.cells)
+            if ext_entity.centroid is not None:
+                cr_i, cc_i = int(round(ext_entity.centroid[0])), int(round(ext_entity.centroid[1]))
+                static_walls.discard((cr_i, cc_i))
         engine.collision_cones.update_trajectories(
             kinetic_entities=kinetic_res.external_agents,
             static_barriers=static_walls,
@@ -1032,6 +1062,15 @@ class EpistemicFeedbackAssimilator:
                 engine.avatar_features = valid_feats
                 engine.avatar_feature = next(iter(valid_feats))
                 engine.mobile_threat_features.difference_update(valid_feats)
+                engine.symbolic_theory.goal_features.difference_update(valid_feats)
+                engine.symbolic_theory.candidate_goal_features.difference_update(valid_feats)
+                cells_to_purge = set(kinetic_res.self_avatar.cells)
+                if kinetic_res.raw_delta is not None:
+                    dr_p, dc_p = kinetic_res.raw_delta
+                    cells_to_purge.update(
+                        (r - dr_p, c - dc_p) for r, c in kinetic_res.self_avatar.cells
+                    )
+                engine.learned_goal_positions.difference_update(cells_to_purge)
                 engine.avatar_size = kinetic_res.self_avatar.area
                 engine.avatar_pos = (
                     int(round(kinetic_res.self_avatar.centroid[0])),
@@ -1046,13 +1085,17 @@ class EpistemicFeedbackAssimilator:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, kinetic_res.self_avatar.cells, (dr, dc), H, W
                     )
-                    if action not in engine.action_dynamics:
+                    if (
+                        action not in engine.action_dynamics
+                        or not engine.action_dynamics[action].is_displacement_action()
+                    ):
+                        prev_p = getattr(engine.action_dynamics.get(action), "probes_tested", 0)
                         engine.action_dynamics[action] = ActionDynamicsModel(
                             action_id=action,
                             delta_r=dr,
                             delta_c=dc,
-                            confidence=0.75,
-                            probes_tested=1,
+                            confidence=0.8,
+                            probes_tested=max(1, prev_p + 1),
                         )
                     else:
                         engine.action_dynamics[action].update_from_trial((dr, dc), success=True)
@@ -1254,9 +1297,19 @@ class EpistemicFeedbackAssimilator:
             if engine.avatar_features:
                 engine.symbolic_theory.goal_features.difference_update(engine.avatar_features)
                 engine.symbolic_theory.barrier_features.difference_update(engine.avatar_features)
+                engine.hazard_tracker.known_lethal_features.difference_update(
+                    engine.avatar_features
+                )
+                if hasattr(engine, "episodic_cortex"):
+                    engine.episodic_cortex.discovered_lethal_features.difference_update(
+                        engine.avatar_features
+                    )
             if engine.avatar_feature is not None:
                 engine.symbolic_theory.goal_features.discard(engine.avatar_feature)
                 engine.symbolic_theory.barrier_features.discard(engine.avatar_feature)
+                engine.hazard_tracker.known_lethal_features.discard(engine.avatar_feature)
+                if hasattr(engine, "episodic_cortex"):
+                    engine.episodic_cortex.discovered_lethal_features.discard(engine.avatar_feature)
 
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
@@ -1299,29 +1352,45 @@ class EpistemicFeedbackAssimilator:
                                 if engine.prev_grid is not None
                                 else int(curr_grid[adj_r, adj_c])
                             )
-                            if val == bg or val == engine.bg_feature:
-                                # Stopped by platform boundary / void
-                                engine.record_learned_barrier((adj_r, adj_c))
-                            elif (
+                            is_candidate_goal = (
+                                val in engine.learned_goal_features
+                                or val in cand_goal_feats
+                                or (adj_r, adj_c) in cand_goal_positions
+                            )
+                            if (
                                 val not in av_feats
                                 and val not in engine.avatar_features
                                 and val != engine.avatar_feature
-                                and val not in engine.learned_goal_features
-                                and val not in cand_goal_feats
-                                and (adj_r, adj_c) not in cand_goal_positions
-                                and not engine.symbolic_theory.is_walkable(val)
+                                and not is_candidate_goal
                             ):
-                                engine.record_learned_barrier((adj_r, adj_c))
-                                if not engine.symbolic_theory.is_barrier(val):
-                                    engine.symbolic_theory.induce_barrier(val)
-                                    logger.info(
-                                        "AutonomousEpistemicEngine: Proprioceptive obstacle grounded at leading edge (%d, %d) with feature %d",
-                                        adj_r,
-                                        adj_c,
-                                        val,
-                                    )
-                                    if engine.bg_feature == val:
-                                        engine.bg_feature = engine.estimate_background(curr_grid)
+                                # Multi-cell leading edge recording
+                                if step_c != 0:
+                                    for r_off in range(-av_rad_r, av_rad_r + 1):
+                                        edge_r = prev_avatar_pos[0] + r_off
+                                        if 0 <= edge_r < H and 0 <= adj_c < W:
+                                            engine.record_learned_barrier((edge_r, adj_c))
+                                elif step_r != 0:
+                                    for c_off in range(-av_rad_c, av_rad_c + 1):
+                                        edge_c = prev_avatar_pos[1] + c_off
+                                        if 0 <= adj_r < H and 0 <= edge_c < W:
+                                            engine.record_learned_barrier((adj_r, edge_c))
+                                else:
+                                    engine.record_learned_barrier((adj_r, adj_c))
+
+                                if val not in engine.verified_safe_features:
+                                    engine.symbolic_theory.walkable_features.discard(val)
+                                    if not engine.symbolic_theory.is_barrier(val):
+                                        engine.symbolic_theory.induce_barrier(val)
+                                        logger.info(
+                                            "AutonomousEpistemicEngine: Proprioceptive obstacle grounded at leading edge (%d, %d) with feature %d",
+                                            adj_r,
+                                            adj_c,
+                                            val,
+                                        )
+                                        if engine.bg_feature == val:
+                                            engine.bg_feature = engine.estimate_background(
+                                                curr_grid
+                                            )
                         else:
                             end_r = prev_avatar_pos[0] + step_r * dist
                             end_c = prev_avatar_pos[1] + step_c * dist

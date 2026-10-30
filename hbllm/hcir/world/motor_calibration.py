@@ -206,14 +206,20 @@ class ActionDynamicsModel:
                             )
                         return
 
-                if self.probes_tested <= 1:
+                if (target_r != 0 or target_c != 0) and self.delta_r == 0 and self.delta_c == 0:
+                    # Transition from ungrounded/obstructed prior to verified empirical displacement
+                    self.delta_r = target_r
+                    self.delta_c = target_c
+                elif self.probes_tested <= 1:
                     new_dr = float(target_r)
                     new_dc = float(target_c)
+                    self.delta_r = int(round(new_dr))
+                    self.delta_c = int(round(new_dc))
                 else:
                     new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * float(target_r)
                     new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * float(target_c)
-                self.delta_r = int(round(new_dr))
-                self.delta_c = int(round(new_dc))
+                    self.delta_r = int(round(new_dr))
+                    self.delta_c = int(round(new_dc))
                 if abs(self.delta_c) >= 2 * abs(self.delta_r):
                     self.delta_r = 0
                 elif abs(self.delta_r) >= 2 * abs(self.delta_c):

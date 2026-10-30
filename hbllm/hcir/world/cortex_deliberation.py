@@ -26,11 +26,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
-from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler, MentalSimulationStep
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -224,7 +225,7 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 if (
                     t.feature_id in engine.mobile_threat_features
                     or any(
-                        e.properties.get("dynamic_hazard") or e.role == "hazard"
+                        e.properties.get("dynamic_hazard")
                         for e in entities
                         if e.feature_id == t.feature_id
                     )
@@ -258,14 +259,12 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 return False
 
             sim_patrols = frozenset(live_patrols)
+            cur_av_pos = engine.avatar_pos
             for future_step in future_steps:
                 avatar_dest = future_step.predicted_avatar_pos
                 new_patrol_set: set[tuple[tuple[int, int], tuple[int, int]]] = set()
                 collision = False
                 for pat_pos, pat_facing in sim_patrols:
-                    if pat_pos == avatar_dest:
-                        collision = True
-                        break
                     dest = (
                         pat_pos[0] + pat_facing[0] * step_size,
                         pat_pos[1] + pat_facing[1] * step_size,
@@ -273,8 +272,15 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                     if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in patrol_walls:
                         new_f = (-pat_facing[0], -pat_facing[1])
                         new_patrol_set.add((pat_pos, new_f))
+                        if pat_pos == avatar_dest:
+                            collision = True
+                            break
                         continue
                     if dest == avatar_dest:
+                        collision = True
+                        break
+                    # Physical head-on swap collision: entities cross each other on the corridor edge
+                    if cur_av_pos is not None and pat_pos == avatar_dest and dest == cur_av_pos:
                         collision = True
                         break
                     new_f = pat_facing
@@ -287,11 +293,16 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                         and future_step != next_step
                     ):
                         continue
-                    return SafetyGateResult(
-                        is_safe=False,
-                        reason="Collision with simulated patrol threat along plan: space-time replanning required",
-                    )
+                    if future_step == next_step:
+                        return SafetyGateResult(
+                            is_safe=False,
+                            reason="Immediate collision with simulated patrol threat: space-time replanning required",
+                        )
+                    # Distal collision along trajectory: the immediate next_step does not collide with the threat.
+                    # Allow next_step to proceed toward the corridor while re-evaluating each step online.
+                    continue
                 sim_patrols = frozenset(new_patrol_set)
+                cur_av_pos = avatar_dest
 
         except Exception as e:
             logger.debug("Dynamic patrol trajectory simulation error: %s", e)
@@ -1458,41 +1469,62 @@ class PrefrontalDeliberationEngine:
         engine.acc_conflict_monitor.record_step(engine.last_action, engine.avatar_pos)
         is_osc, cyclic_acts = engine.acc_conflict_monitor.detect_oscillation()
         if is_osc:
-            for cyc_a in cyclic_acts:
-                engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
-            engine.mental_plan.clear()
-            from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
-
-            ortho_acts = ACCConflictMonitor.get_orthogonal_actions(
-                available_actions=available_actions,
-                cyclic_actions=cyclic_acts,
-                action_dynamics=engine.action_dynamics,
+            # Purposeful Active Inference & Hesitation Invariant:
+            # An action oscillation is NOT a pathological stereotypy if the organism is engaged
+            # in intentional temporal pacing/evasion around dynamic threats, or if an active
+            # mental plan exhibits future forward progress once the looming hazard clears.
+            has_progress = (
+                engine.phase == EpistemicPhase.EXPLOITATION
+                and bool(engine.mental_plan)
+                and any(
+                    s.predicted_avatar_pos is not None
+                    and s.predicted_avatar_pos != engine.avatar_pos
+                    for s in engine.mental_plan
+                )
             )
-            H, W = curr_grid.shape
-            for cand_a in ortho_acts:
-                if engine.inhibited_actions.get(cand_a, 0) > 0:
-                    continue
-                if (engine.avatar_pos, cand_a) in engine.failed_transitions:
-                    continue
-                dyn = engine.action_dynamics.get(cand_a)
-                if dyn is not None and dyn.is_displacement_action():
-                    dr, dc = dyn.get_displacement()
-                    if engine.avatar_pos is not None:
-                        nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        if (nr, nc) in engine.hazard_tracker.static_lethal_positions:
-                            continue
-                        if (nr, nc) in engine.learned_barriers:
-                            continue
-                        feat_at_dest = int(curr_grid[nr, nc])
-                        if feat_at_dest in engine.hazard_tracker.known_lethal_features:
-                            continue
+            is_deliberate_pacing = has_temporal and (
+                engine.consecutive_pacing_steps > 0
+                or bool(
+                    getattr(engine, "collision_cones", None)
+                    and engine.collision_cones.projected_trajectories
+                )
+            )
+            if not has_progress and not is_deliberate_pacing:
+                for cyc_a in cyclic_acts:
+                    engine.inhibited_actions[cyc_a] = max(engine.inhibited_actions.get(cyc_a, 0), 8)
+                engine.mental_plan.clear()
+                from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
+
+                ortho_acts = ACCConflictMonitor.get_orthogonal_actions(
+                    available_actions=available_actions,
+                    cyclic_actions=cyclic_acts,
+                    action_dynamics=engine.action_dynamics,
+                )
+                H, W = curr_grid.shape
+                for cand_a in ortho_acts:
+                    if engine.inhibited_actions.get(cand_a, 0) > 0:
+                        continue
+                    if (engine.avatar_pos, cand_a) in engine.failed_transitions:
+                        continue
+                    dyn = engine.action_dynamics.get(cand_a)
+                    if dyn is not None and dyn.is_displacement_action():
+                        dr, dc = dyn.get_displacement()
+                        if engine.avatar_pos is not None:
+                            nr, nc = engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc
+                            if not (0 <= nr < H and 0 <= nc < W):
+                                continue
+                            if (nr, nc) in engine.hazard_tracker.static_lethal_positions:
+                                continue
+                            if (nr, nc) in engine.learned_barriers:
+                                continue
+                            feat_at_dest = int(curr_grid[nr, nc])
+                            if feat_at_dest in engine.hazard_tracker.known_lethal_features:
+                                continue
+                            forced_acc_perturbation = cand_a
+                            break
+                    else:
                         forced_acc_perturbation = cand_a
                         break
-                else:
-                    forced_acc_perturbation = cand_a
-                    break
 
         # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
         acc_death_conflict = getattr(engine.working_memory, "acc_conflict", None)
@@ -1576,6 +1608,34 @@ class PrefrontalDeliberationEngine:
         # Observe creature motion
         engine._observe_oriented_threat_motion(curr_grid, available_actions, known_av_feats)
 
+        # Faculty: Epistemic & Perceptual Goal Scheduling (Stage 1 Active Inference)
+        # Identify structural and candidate goals prior to forward mental simulation once avatar is recognized.
+        if not engine.learned_goal_positions and (
+            engine.avatar_pos is not None or bool(engine.avatar_features)
+        ):
+            bg_val = (
+                engine.bg_feature
+                if engine.bg_feature is not None
+                else engine.estimate_background(curr_grid)
+            )
+            entities = engine.extract_entities(curr_grid, bg_val)
+            av_feats_cand = engine.avatar_features or (
+                {engine.avatar_feature} if engine.avatar_feature is not None else set()
+            )
+            proposal = EpistemicGoalScheduler.schedule_goals(
+                engine=engine,
+                curr_grid=curr_grid,
+                entities=entities,
+                bg=bg_val,
+                av_feats=av_feats_cand,
+                target_role=EntityRole.GOAL,
+                available_actions=available_actions,
+            )
+            for gp in proposal.new_learned_goal_positions:
+                engine.record_learned_goal(gp)
+            for feat in proposal.new_candidate_features:
+                engine.symbolic_theory.candidate_goal_features.add(feat)
+
         # Faculty E: Basal Ganglia Motor Gating & Phase Entrainment
         if engine.pending_phase_wait_steps > 0:
             engine.pending_phase_wait_steps -= 1
@@ -1638,10 +1698,14 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+                    return self._finalize_step(
+                        engine, curr_grid, chosen_action, chosen_data, predicted_pos
+                    )
                 else:
                     chosen_action, chosen_data = engine.plan_epistemic_probe(
                         curr_grid, available_actions
                     )
+                    return self._finalize_step(engine, curr_grid, chosen_action, chosen_data)
             else:
                 next_step = engine.mental_plan.popleft()
             if not engine.mental_plan:

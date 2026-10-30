@@ -82,16 +82,30 @@ class SnapshotManager:
             )
         )
 
-    def record_node_modified(self, node_id: str, changes: dict, author: str = "system") -> None:
-        """Record a node modification event."""
+    def record_node_modified(
+        self,
+        node_id: str,
+        changes: dict,
+        author: str = "system",
+        node: HCIRNode | None = None,
+    ) -> None:
+        """Record a node modification event.
+
+        When ``node`` is supplied the full post-modification payload is stored so
+        the event log remains sufficient to reconstruct state (lossless event sourcing).
+        """
         seq = self._event_store.latest_sequence() + 1
+        data: dict = {"node_id": node_id, "changes": changes}
+        if node is not None:
+            data["node_type"] = node.node_type
+            data["node_data"] = node.model_dump()
         self._event_store.append(
             GraphEvent(
                 sequence=seq,
                 event_type=EventType.NODE_MODIFIED,
                 timestamp=time.time(),
                 author=author,
-                data={"node_id": node_id, "changes": changes},
+                data=data,
             )
         )
 
@@ -183,13 +197,17 @@ class SnapshotManager:
 
     @staticmethod
     def _hash_graph(graph: CognitiveGraph) -> str:
-        """Compute a deterministic hash of the graph state."""
+        """Compute a deterministic, payload-aware hash of the graph state.
+
+        Uses the graph's incrementally maintained O(1) content digest so that
+        snapshotting on every commit does not cost O(N log N).
+        """
+        content_hash = getattr(graph, "content_hash", None)
+        if callable(content_hash):
+            return content_hash()
         hasher = hashlib.sha256()
-        # Hash nodes in sorted order for determinism
         for node in sorted(graph.all_nodes(), key=lambda n: n.id):
-            hasher.update(node.id.encode())
-            hasher.update(node.node_type.encode())
+            hasher.update(node.model_dump_json().encode())
         for edge in sorted(graph.all_edges(), key=lambda e: e.id):
-            hasher.update(edge.id.encode())
-            hasher.update(edge.edge_type.encode())
+            hasher.update(edge.model_dump_json().encode())
         return hasher.hexdigest()

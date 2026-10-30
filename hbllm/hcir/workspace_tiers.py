@@ -41,6 +41,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.query import GraphQuery, QueryResult
 from hbllm.hcir.snapshot import Snapshot
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import BranchMode
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
@@ -497,7 +498,20 @@ class TieredWorkspace:
 
         # Copy the node to the destination tier
         promoted = source_node.model_copy(deep=True)
-        dest_ws.upsert_node(promoted, author=f"promotion:{from_tier}→{to_tier}")
+        result = dest_ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=promoted.id,
+                    node_data=promoted.model_dump(),
+                )
+            ],
+            author=f"promotion:{from_tier}→{to_tier}",
+            metadata={"tier_transfer": "promote", "from": str(from_tier), "to": str(to_tier)},
+        )
+        if not result.is_committed:
+            logger.warning("promote: transaction rejected for node %s → %s", node_id, to_tier)
+            return False
 
         logger.info(
             "Promoted node %s from %s to %s",
@@ -529,9 +543,25 @@ class TieredWorkspace:
         if dest_ws is None:
             return False
 
-        # Move: add to destination, remove from source
-        dest_ws.upsert_node(node.model_copy(deep=True), author=f"demotion:{from_tier}→{to_tier}")
-        source_ws.remove_node(node_id, author=f"demotion:{from_tier}→{to_tier}")
+        # Move: add to destination first, then remove from source (each atomic per tier)
+        author = f"demotion:{from_tier}→{to_tier}"
+        moved = dest_ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_copy(deep=True).model_dump(),
+                )
+            ],
+            author=author,
+            metadata={"tier_transfer": "demote", "from": str(from_tier), "to": str(to_tier)},
+        )
+        if not moved.is_committed:
+            return False
+        source_ws.commit_operations(
+            [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
+            author=author,
+        )
 
         logger.info("Demoted node %s from %s to %s", node_id, from_tier, to_tier)
         return True
@@ -596,23 +626,30 @@ class TieredWorkspace:
         Returns:
             Number of nodes archived.
         """
-        count = 0
-        for node in self.brain.graph.all_nodes():
-            self.persistent.upsert_node(
-                node.model_copy(deep=True),
-                author="archive:brain→persistent",
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
             )
-            count += 1
-
-        # Copy edges too
+            for node in self.brain.graph.all_nodes()
+        ]
+        count = len(ops)
         for edge in self.brain.graph.all_edges():
-            try:
-                self.persistent.add_edge(
-                    edge.model_copy(deep=True),
-                    author="archive:brain→persistent",
+            if self.persistent.get_edge(edge.id) is None:
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE, edge_id=edge.id, edge_data=edge.model_dump()
+                    )
                 )
-            except Exception:
-                pass  # Edge may reference nodes already present
+        if ops:
+            # One atomic transaction: the archive either lands in full or not at all.
+            result = self.persistent.commit_operations(
+                ops,
+                author="archive:brain→persistent",
+                metadata={"tier_transfer": "archive"},
+            )
+            if not result.is_committed:
+                logger.warning("archive_brain rejected: %s", result.annotations)
+                return 0
 
         logger.info("Archived %d brain nodes to persistent workspace", count)
         return count
@@ -701,7 +738,16 @@ class TieredWorkspace:
             sensor_source="tiered_workspace",
             tags=["meta", "self_model", "performance_stats"],
         )
-        self.meta.upsert_node(meta_node, author="tiered_workspace")
+        self.meta.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=meta_node.id,
+                    node_data=meta_node.model_dump(),
+                )
+            ],
+            author="tiered_workspace",
+        )
 
         logger.debug("Meta workspace stats updated: %s", stats)
         return stats

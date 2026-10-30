@@ -1,9 +1,12 @@
-"""Object Identity Assignment and Causal Identity Graph (W003, W019).
+"""Deprecated re-export shim — import from ``hbllm.hcir.identity`` instead.
 
-Re-exports core HCIR identity faculties for world model domain integration.
+Kept only for backward compatibility; emits a ``DeprecationWarning`` on import and
+will be removed once no external callers remain.
 """
 
 from __future__ import annotations
+
+import warnings
 
 from hbllm.hcir.identity import (
     CausalEvent,
@@ -13,6 +16,12 @@ from hbllm.hcir.identity import (
     HCIRObjectID,
     IdentityCausalGraph,
     IDFactory,
+)
+
+warnings.warn(
+    "hbllm.hcir.world.identity is deprecated; import from hbllm.hcir.identity",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
 __all__ = [

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -468,6 +468,39 @@ from hbllm.hcir.world.thalamocortical_binding import (
 )
 
 
+class _LazyFaculty:
+    """Non-data descriptor that instantiates a faculty on first attribute access.
+
+    Instances may still assign the attribute directly (e.g. to inject a configured
+    faculty), which shadows the descriptor for that instance.
+    """
+
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        self._factory = factory
+        self._name = ""
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self._name = name
+
+    def __get__(self, obj: Any, objtype: type | None = None) -> Any:
+        if obj is None:
+            return self
+        value = self._factory()
+        obj.__dict__[self._name] = value
+        return value
+
+
+def _autonomous_learning_factory(class_name: str) -> Callable[[], Any]:
+    """Deferred factory for ``autonomous_learning`` faculties (avoids a circular import)."""
+
+    def _make() -> Any:
+        import hbllm.hcir.world.autonomous_learning as learning
+
+        return getattr(learning, class_name)()
+
+    return _make
+
+
 @dataclass(frozen=True)
 class UnifiedActiveInferenceDecision:
     """Canonical Grand Capstone decision record unifying the 5 cortical active inference stages."""
@@ -510,6 +543,41 @@ class AutonomousEpistemicEngine:
     and forward mental simulation.
     """
 
+    # ── Lazily provisioned faculties ─────────────────────────────────────────
+    # Faculties that are not on the per-step decision path are instantiated on
+    # first access only, so an engine instance does not pay construction and
+    # memory cost for capabilities a given episode never exercises.
+    active_experimenter: ConstrainedActiveExperimenter = _LazyFaculty(ConstrainedActiveExperimenter)
+    causal_discovery_engine: BaseCausalDiscoveryEngine = _LazyFaculty(BaseCausalDiscoveryEngine)
+    causal_planner: Any = _LazyFaculty(_autonomous_learning_factory("CausalTheoryPlanner"))
+    change_detector: EnvironmentChangeDetector = _LazyFaculty(EnvironmentChangeDetector)
+    concept_engine: ConceptFormationEngine = _LazyFaculty(ConceptFormationEngine)
+    coordinate_transformer: ParietalCoordinateTransformer = _LazyFaculty(
+        ParietalCoordinateTransformer
+    )
+    deadlock_detector: CounterfactualDeadlockDetector = _LazyFaculty(CounterfactualDeadlockDetector)
+    dependency_graph: LongHorizonDependencyGraph = _LazyFaculty(LongHorizonDependencyGraph)
+    difference_computer: StateDifferenceComputer = _LazyFaculty(StateDifferenceComputer)
+    efficiency_tracker: ObjectiveLearningEfficiencyTracker = _LazyFaculty(
+        ObjectiveLearningEfficiencyTracker
+    )
+    geometric_selector: GeometricModelSelector = _LazyFaculty(GeometricModelSelector)
+    goal_gate: GoalConfirmationGate = _LazyFaculty(GoalConfirmationGate)
+    knowledge_transfer: Any = _LazyFaculty(
+        _autonomous_learning_factory("CrossGameKnowledgeTransfer")
+    )
+    meta_governor: Any = _LazyFaculty(_autonomous_learning_factory("MetaLearningGovernor"))
+    model_deadlock_detector: ModelBasedDeadlockDetector = _LazyFaculty(ModelBasedDeadlockDetector)
+    precondition_learner: ActionPreconditionLearner = _LazyFaculty(ActionPreconditionLearner)
+    progress_estimator: DynamicProgressEstimator = _LazyFaculty(DynamicProgressEstimator)
+    relational_matcher: RelationalGraphMatcher = _LazyFaculty(RelationalGraphMatcher)
+    reversibility_engine: ReversibilityEngine = _LazyFaculty(ReversibilityEngine)
+    rule_induction_engine: RuleInductionEngine = _LazyFaculty(RuleInductionEngine)
+    subgoal_tree: RecursiveSubgoalTree = _LazyFaculty(RecursiveSubgoalTree)
+    unknown_mechanics: UnknownMechanicsLedger = _LazyFaculty(UnknownMechanicsLedger)
+    visual_symmetry: VisualSymmetryAnalyzer = _LazyFaculty(VisualSymmetryAnalyzer)
+    whole_grid_predictor: WholeGridPredictor = _LazyFaculty(WholeGridPredictor)
+
     MIN_PROBES_PER_ACTION: int = 3
     consecutive_pacing_steps: int = 0
 
@@ -530,6 +598,8 @@ class AutonomousEpistemicEngine:
         self.world_id: str = world_id
         self.step_counter: int = 0
         self.environmental_step_limit: int | None = None
+        # Discovered lattice quantum (cells per cardinal displacement); 1 until calibrated
+        self.spatial_lattice_stride: int = 1
 
         # Memory of frames & actions
         self.prev_grid: np.ndarray | None = None
@@ -603,7 +673,6 @@ class AutonomousEpistemicEngine:
         self.collision_cones: SpatiotemporalCollisionCones = SpatiotemporalCollisionCones()
 
         # Faculty: Orbitofrontal Cortex (OFC) Counterfactual Deadlock Detector
-        self.deadlock_detector: CounterfactualDeadlockDetector = CounterfactualDeadlockDetector()
 
         # Faculty: Hippocampal & Lateral Habenula Episodic Memory (Trial-and-Error Loop)
         self.episodic_cortex: HippocampalEpisodicCortex = HippocampalEpisodicCortex(
@@ -671,14 +740,11 @@ class AutonomousEpistemicEngine:
         self.entity_lineage_graph: dict[str, EntityLineageNode] = {}
 
         # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
-        self.coordinate_transformer: ParietalCoordinateTransformer = ParietalCoordinateTransformer()
-        self.geometric_selector: GeometricModelSelector = GeometricModelSelector()
         self.retrosplenial_transformer: RetrosplenialCoordinateTransformer = (
             RetrosplenialCoordinateTransformer()
         )
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
-        self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
@@ -725,7 +791,6 @@ class AutonomousEpistemicEngine:
         self.claustrum_conductor: ClaustrumSalienceConductor = ClaustrumSalienceConductor()
 
         # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
-        self.subgoal_tree: RecursiveSubgoalTree = RecursiveSubgoalTree()
 
         # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
         self.distance_transform_engine: SpatialDistanceTransformEngine = (
@@ -872,29 +937,22 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
         self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
-        self.difference_computer: StateDifferenceComputer = StateDifferenceComputer()
 
         # Faculty: Transition Sequence Model & Reversibility Engine (W048-W050)
         self.transition_sequence_model: TransitionSequenceModel = TransitionSequenceModel()
-        self.reversibility_engine: ReversibilityEngine = ReversibilityEngine()
 
         # Faculty: Interventional Causal Discovery Engine (W061-W070)
-        self.causal_discovery_engine: BaseCausalDiscoveryEngine = BaseCausalDiscoveryEngine()
 
         # Faculty: Rule Induction & Latent Structure Engine (W071-W080)
-        self.rule_induction_engine: RuleInductionEngine = RuleInductionEngine()
 
         # Faculty: Whole-Grid Outcome Predictor & Rollout Engine (W081-W089)
-        self.whole_grid_predictor: WholeGridPredictor = WholeGridPredictor()
 
         # Faculty: Predictive Confidence Calibrator (W090)
         self.confidence_calibrator: ConfidenceCalibrator = ConfidenceCalibrator()
 
         # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
-        self.concept_engine: ConceptFormationEngine = ConceptFormationEngine()
 
         # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
-        self.visual_symmetry: VisualSymmetryAnalyzer = VisualSymmetryAnalyzer()
 
         # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
         self.relational_confidence_map: dict[str, float] = {}
@@ -903,28 +961,17 @@ class AutonomousEpistemicEngine:
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
         self.action_discovery: UngroundedActionDiscoveryEngine = UngroundedActionDiscoveryEngine()
-        self.unknown_mechanics: UnknownMechanicsLedger = UnknownMechanicsLedger()
-        self.active_experimenter: ConstrainedActiveExperimenter = ConstrainedActiveExperimenter()
-        self.precondition_learner: ActionPreconditionLearner = ActionPreconditionLearner()
         self.budget_governor: ActionBudgetGovernor = ActionBudgetGovernor(
             max_budget=self.exploration_budget
         )
 
         # Module 2: Open-Set Goal Induction & Reachability Deadlock Pruning (W168-W170, W174, W175, W181, W182)
         self.goal_induction: BayesianGoalInductionEngine = BayesianGoalInductionEngine()
-        self.goal_gate: GoalConfirmationGate = GoalConfirmationGate()
-        self.progress_estimator: DynamicProgressEstimator = DynamicProgressEstimator()
-        self.model_deadlock_detector: ModelBasedDeadlockDetector = ModelBasedDeadlockDetector()
 
         # Module 3: Temporal Dynamics, Dual-Store Memory & Objective Efficiency (W167, W172, W173, W176-W180, W189, W190)
         self.delayed_effects: DelayedEffectModeler = DelayedEffectModeler()
         self.delayed_effect_modeler: DelayedEffectModeler = self.delayed_effects
-        self.dependency_graph: LongHorizonDependencyGraph = LongHorizonDependencyGraph()
         self.dual_memory: DualStoreMemoryManager = DualStoreMemoryManager()
-        self.change_detector: EnvironmentChangeDetector = EnvironmentChangeDetector()
-        self.efficiency_tracker: ObjectiveLearningEfficiencyTracker = (
-            ObjectiveLearningEfficiencyTracker()
-        )
 
         self.bg_feature: int = 0
         self.hypotheses: list[CausalHypothesis] = []
@@ -957,16 +1004,10 @@ class AutonomousEpistemicEngine:
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
         from hbllm.hcir.world.autonomous_learning import (
-            CausalTheoryPlanner,
             ClickAffordanceLearner,
-            CrossGameKnowledgeTransfer,
             DeliberationEntropyMonitor,
-            MetaLearningGovernor,
         )
 
-        self.causal_planner: CausalTheoryPlanner = CausalTheoryPlanner()
-        self.knowledge_transfer: CrossGameKnowledgeTransfer = CrossGameKnowledgeTransfer()
-        self.meta_governor: MetaLearningGovernor = MetaLearningGovernor()
         self.click_learner: ClickAffordanceLearner = ClickAffordanceLearner()
         self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
 
@@ -1836,11 +1877,21 @@ class AutonomousEpistemicEngine:
 
         if not has_errors:
             if sim_ws is not workspace:
-                for node in sim_ws.graph.all_nodes():
-                    existing = workspace.get_node(node.id)
-                    if existing is None or node.model_dump() != existing.model_dump():
-                        workspace.upsert_node(node.model_copy(deep=True), author="subgoal_exec")
-                workspace.drop_branch(sim_branch)
+                merged = workspace.merge_branch(
+                    sim_branch,
+                    transaction_manager=self.transaction_manager,
+                    author="subgoal_exec",
+                )
+                if not merged:
+                    workspace.drop_branch(sim_branch)
+                    return (
+                        {
+                            "status": "failure",
+                            "error": "subgoal merge rejected by transaction pipeline",
+                            "branch": sim_branch,
+                        },
+                        False,
+                    )
             return ({"status": "success", "result": exec_result, "branch": sim_branch}, True)
         else:
             if sim_ws is not workspace:
@@ -3534,8 +3585,15 @@ class AutonomousEpistemicEngine:
                     preconditions=[str(getattr(skill, "signature", ""))],
                     success_rate=0.9,
                 )
-                self.tiered_workspace.persistent.upsert_node(
-                    skill_node, author="SkillProgramSynthesizer"
+                self.tiered_workspace.persistent.commit_operations(
+                    [
+                        TransactionOperation(
+                            op=TransactionOp.UPSERT_NODE,
+                            node_id=skill_node.id,
+                            node_data=skill_node.model_dump(),
+                        )
+                    ],
+                    author="SkillProgramSynthesizer",
                 )
 
         # Propose state mutations through TransactionManager if present
@@ -3648,7 +3706,8 @@ class AutonomousEpistemicEngine:
                     and old_bg not in getattr(self, "verified_safe_features", set())
                 ):
                     self.symbolic_theory.walkable_features.discard(old_bg)
-                self.symbolic_theory.induce_walkable(bg)
+                if bg in getattr(self, "verified_safe_features", set()):
+                    self.symbolic_theory.induce_walkable(bg)
         return bg
 
     def extract_entities(self, grid: np.ndarray, bg: int) -> list[SpatialEntity]:
@@ -4466,21 +4525,17 @@ class AutonomousEpistemicEngine:
            commits cognitive transaction, and returns the canonical decision output.
         """
         # --- Stage 1: Sensory Perception & Coordinate Lifting ---
-        h, w = 16, 16
-        if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2:
-            h, w = int(curr_grid.shape[0]), int(curr_grid.shape[1])
-        elif (
-            isinstance(curr_grid, (list, tuple))
-            and curr_grid
-            and isinstance(curr_grid[0], (list, tuple))
-        ):
-            h, w = len(curr_grid), len(curr_grid[0])
+        grid_arr = np.asarray(curr_grid)
+        if grid_arr.ndim >= 2:
+            h, w = int(grid_arr.shape[0]), int(grid_arr.shape[1])
+        else:
+            h = w = max(1, int(grid_arr.size))
 
-        pos = (
-            (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
-            if self.avatar_pos is not None
-            else (float(h) / 2.0, float(w) / 2.0)
-        )
+        if self.avatar_pos is not None:
+            pos = (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
+        else:
+            # Unlocalised: assume the lattice centroid (maximum-entropy prior over position)
+            pos = (float(h - 1) / 2.0, float(w - 1) / 2.0)
         observed_boundaries = {
             "north": max(0.0, pos[0]),
             "south": max(0.0, float(h - 1) - pos[0]),
@@ -4505,10 +4560,18 @@ class AutonomousEpistemicEngine:
         dominant_schema = schema_report.dominant_schema
 
         # --- Stage 2: Assimilation & Surprise Induction ---
-        surprise_val = float(getattr(self, "last_surprise_score", 0.15))
+        surprise_val = float(getattr(self, "last_surprise", 0.0) or 0.0)
+        if is_lost:
+            surprise_val = 1.0
+
+        # Amygdalar vigilance over the features actually present in the sensory field
+        present_features = [str(int(v)) for v in np.unique(grid_arr)] if grid_arr.ndim >= 2 else []
+        vigilance = self.amygdala_threat.evaluate_sensory_vigilance(present_features)
+        threat_level = float(vigilance.composite_threat_level)
+
         pacing = self.anterior_insula_timing.compute_subjective_dilation(
             objective_dt=1.0,
-            threat_level=0.10,
+            threat_level=threat_level,
             salience_score=surprise_val,
         )
 
@@ -4524,6 +4587,14 @@ class AutonomousEpistemicEngine:
                 salience_score=min(1.0, surprise_val * 1.5),
             ),
         ]
+        if threat_level > 0.0:
+            candidate_signals.append(
+                CandidateIgnitionSignal(
+                    source_modality="threat",
+                    content_payload=f"vigilance:{vigilance.vigilance_mode.value}",
+                    salience_score=threat_level,
+                )
+            )
         if dominant_schema:
             candidate_signals.append(
                 CandidateIgnitionSignal(
@@ -4555,6 +4626,23 @@ class AutonomousEpistemicEngine:
             experienced_reward=1.0 if is_win else (-1.0 if is_lost else 0.0),
         )
 
+        # Friston EFE over the kinematically grounded candidate transitions
+        efe_by_action: dict[Any, float] = {}
+        if self.avatar_pos is not None and grid_arr.ndim >= 2:
+            deltas = self.action_deltas
+            candidate_transitions = {
+                a: (self.avatar_pos[0] + deltas[a][0], self.avatar_pos[1] + deltas[a][1])
+                for a in available_actions
+                if a in deltas
+            }
+            if candidate_transitions:
+                efe_by_action = {
+                    s.action: float(s.expected_free_energy)
+                    for s in self.evaluate_policy_expected_free_energy(
+                        candidate_transitions, grid=grid_arr
+                    )
+                }
+
         # --- Stage 4: Prefrontal Deliberation & Safety Gating ---
         q_vals = [cf_report.chosen_updated_value] + [
             branch.updated_value for branch in cf_report.branch_updates
@@ -4564,35 +4652,53 @@ class AutonomousEpistemicEngine:
             elapsed_deliberation_steps=self.step_counter,
         )
 
-        # Inhibit motor dispatch if hard stop triggered and alternatives exist
+        # Inhibit motor dispatch if the STN brake fires and a better-credited alternative exists;
+        # amygdalar evasion additionally vetoes actions whose target cue is a conditioned threat.
         final_action = chosen_action
         if stn_decision.status == STNBrakingStatus.BRAKE_ACTIVE and len(available_actions) > 1:
             if cf_report.counterfactual_regret > 0.5:
                 final_action = cf_report.best_alternative_action
+        if vigilance.evasion_recommended and efe_by_action:
+            final_action = min(efe_by_action.items(), key=lambda kv: kv[1])[0]
 
         # --- Stage 5: Motor Dispatch & Locomotor Modulation ---
-        dist_to_goal = 5.0
-        if self.avatar_pos and self.learned_goal_positions:
-            dist_to_goal = min(
-                abs(self.avatar_pos[0] - g[0]) + abs(self.avatar_pos[1] - g[1])
-                for g in self.learned_goal_positions
+        dist_to_goal: float | None = None
+        if self.avatar_pos is not None and self.learned_goal_positions:
+            dist_to_goal = float(
+                min(
+                    abs(self.avatar_pos[0] - g[0]) + abs(self.avatar_pos[1] - g[1])
+                    for g in self.learned_goal_positions
+                )
             )
+        surface = (
+            self.somatosensory_haptic.get_surface_profile_at(self.avatar_pos)
+            if self.avatar_pos is not None
+            else None
+        )
 
         locomotor_cmd = self.ppn_locomotor.modulate_drive(
             drive_urgency=0.50 + 0.30 * (1.0 - stn_decision.detected_conflict),
-            target_proximity=float(dist_to_goal),
-            surface_friction=0.10,
+            target_proximity=dist_to_goal if dist_to_goal is not None else float(max(h, w)),
+            surface_friction=surface.friction_coefficient if surface else 0.0,
         )
 
-        # Calibrated confidence vector
+        # Metacognitively calibrated confidence (BA10) grounded in the last agency assessment
+        last_assessment = getattr(self.working_memory, "last_metacognitive_assessment", None)
+        raw_conf = (
+            float(last_assessment.subjective_confidence)
+            if last_assessment is not None
+            else max(0.0, 1.0 - surprise_val)
+        )
         calibrated_conf = self.confidence_calibrator.calibrate(
-            raw_confidence=float(getattr(self, "_confidence", 0.85)),
+            raw_confidence=raw_conf
         ).calibrated_confidence
 
-        # Compute expected free energy (EFE = epistemic value + pragmatic value)
-        expected_fe = float(
-            (1.0 - calibrated_conf) * 0.50 + (1.0 - (1.0 / (1.0 + max(0.0, dist_to_goal)))) * 0.50
-        )
+        # EFE gap of the dispatched action relative to the EFE-optimal candidate (0 = optimal).
+        if efe_by_action:
+            best_efe = min(efe_by_action.values())
+            expected_fe = float(efe_by_action.get(final_action, best_efe) - best_efe)
+        else:
+            expected_fe = 0.0
 
         # Subgoal summary
         active_subgoal = self.subgoal_stack.current_subgoal
@@ -4652,10 +4758,6 @@ class AutonomousEpistemicEngine:
 
     def record_learned_barrier(self, barrier_pos: tuple[int, int]) -> None:
         """Record learned barrier locally and propose atomic state transaction."""
-        if barrier_pos == (16, 16):
-            import traceback
-
-            logger.warning("GROUNDED (16, 16) AS BARRIER:\n%s", "".join(traceback.format_stack()))
         if barrier_pos not in self.learned_barriers:
             self.learned_barriers.add(barrier_pos)
             bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"

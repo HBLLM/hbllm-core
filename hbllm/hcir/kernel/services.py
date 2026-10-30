@@ -30,6 +30,28 @@ if TYPE_CHECKING:
     from hbllm.persistence.service import PersistenceService
 
 
+# Canonical world-kernel capabilities exposed through the resolver.
+WORLD_CAPABILITIES: tuple[str, ...] = (
+    "world.predict_outcome",
+    "world.query_state",
+    "world.evaluate_prediction_error",
+    "world.sync_digital_twin",
+    "world.select_action",
+    "world.predictive_coding_cycle",
+    "world.path_integrate_odometry",
+    "world.assess_metacognitive_agency",
+    "world.synthesize_skills",
+    "world.superposition_rollout",
+)
+
+# Short-form aliases retained for the public manifest; they resolve to the canonical name.
+WORLD_CAPABILITY_ALIASES: dict[str, str] = {
+    "world.predict": "world.predict_outcome",
+    "world.evaluate_error": "world.evaluate_prediction_error",
+    "world.sync_twin": "world.sync_digital_twin",
+}
+
+
 class DefaultWorldPredictionExecutor:
     """Default in-memory executor for world_prediction capability in simulation branches."""
 
@@ -86,6 +108,12 @@ class KernelServices:
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Guarantee the TM publishes lifecycle events on the shared bus so that
+        # ``WAIT event_type="transaction.*"`` can resolve.
+        if self.transaction_manager.event_bus is None:
+            self.transaction_manager.event_bus = self.event_bus
+
     @classmethod
     def create_default(
         cls,
@@ -106,7 +134,8 @@ class KernelServices:
         from hbllm.hcir.world_kernel import WorldKernel
 
         pipeline = verification_pipeline or create_default_pipeline()
-        tx_mgr = TransactionManager(workspace, verification_stages=pipeline)
+        event_bus = KernelEventBus()
+        tx_mgr = TransactionManager(workspace, verification_stages=pipeline, event_bus=event_bus)
         sandbox_mgr = CapabilitySandboxManager()
         resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
         world_k = WorldKernel(workspace)
@@ -137,31 +166,22 @@ class KernelServices:
             )
         )
 
-        for w_cap in [
-            "world.predict_outcome",
-            "world.query_state",
-            "world.evaluate_prediction_error",
-            "world.sync_digital_twin",
-            "world.select_action",
-            "world.predict",
-            "world.evaluate_error",
-            "world.sync_twin",
-            "world.predictive_coding_cycle",
-            "world.path_integrate_odometry",
-            "world.assess_metacognitive_agency",
-            "world.synthesize_skills",
-            "world.superposition_rollout",
-        ]:
+        for w_cap in [*WORLD_CAPABILITIES, *WORLD_CAPABILITY_ALIASES]:
+            canonical = WORLD_CAPABILITY_ALIASES.get(w_cap, w_cap)
             impl_id = f"kernel_{w_cap}"
-            world_exec = WorldKernelCapabilityExecutor(world_k, default_capability=w_cap)
+            world_exec = WorldKernelCapabilityExecutor(world_k, default_capability=canonical)
             resolver.register(
                 CapabilityImplementation(
                     capability_name=w_cap,
                     implementation_id=impl_id,
                     executor=world_exec,
                     priority=5,
-                    description=f"Kernel-governed live {w_cap} capability",
-                    tags=["safe", "internal"],
+                    description=(
+                        f"Kernel-governed live {canonical} capability"
+                        if canonical == w_cap
+                        else f"Alias of {canonical}"
+                    ),
+                    tags=["safe", "internal"] + (["alias"] if canonical != w_cap else []),
                 )
             )
             sandbox_mgr.register_policy(
@@ -233,7 +253,7 @@ class KernelServices:
             transaction_manager=tx_mgr,
             capability_resolver=resolver,
             scheduler=KernelInstructionScheduler(),
-            event_bus=KernelEventBus(),
+            event_bus=event_bus,
             executor=KernelExecutor(),
             telemetry=KernelTelemetry(),
             sandbox_manager=sandbox_mgr,

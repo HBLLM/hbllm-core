@@ -20,6 +20,7 @@ from hbllm.hcir.graph import (
     PredictionNode,
     WorldVariableNode,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope, UncertaintyVector
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
@@ -66,6 +67,16 @@ class WorldKernel:
         self.verification_gate = VerificationGate()
         self.promotion = PredictionPromotion(self.verification_gate)
         self._epistemic_engine: Any | None = None
+
+    def _commit_upsert(self, node: Any, author: str) -> None:
+        self._workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
+                )
+            ],
+            author=author,
+        )
 
     @property
     def epistemic_engine(self) -> Any:
@@ -202,7 +213,7 @@ class WorldKernel:
             properties={"predicted_state": ensemble_pred.predicted_state},
         )
 
-        self._workspace.upsert_node(pred_node, author=author)
+        self._commit_upsert(pred_node, author)
         logger.info(
             "WorldKernel generated PredictionNode '%s' for action '%s'", node_id, action.intent
         )
@@ -316,7 +327,7 @@ class WorldKernel:
                 "divergent_keys": divergent_keys,
             },
         )
-        self._workspace.upsert_node(graph_belief, author=author)
+        self._commit_upsert(graph_belief, author)
         self.digital_twin.sync_sensor_telemetry(latent_name, world_belief.value)
 
         logger.info(
@@ -350,10 +361,26 @@ class WorldKernel:
 
         workspace_node = self._workspace.graph.get_node(belief.belief_id)
         if workspace_node and isinstance(workspace_node, BeliefNode):
-            workspace_node.uncertainty.confidence = belief.confidence
-            workspace_node.properties["value"] = belief.value
-            workspace_node.properties["distribution"] = dict(belief.distribution)
-            self._workspace.upsert_node(workspace_node, author=author)
+            # Propose the belief update as an immutable MODIFY_NODE; never mutate in place.
+            self._workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.MODIFY_NODE,
+                        node_id=workspace_node.id,
+                        changes={
+                            "uncertainty": workspace_node.uncertainty.model_copy(
+                                update={"confidence": belief.confidence}
+                            ).model_dump(),
+                            "properties": {
+                                **workspace_node.properties,
+                                "value": belief.value,
+                                "distribution": dict(belief.distribution),
+                            },
+                        },
+                    )
+                ],
+                author=author,
+            )
 
         logger.info(
             "WorldKernel updated latent belief '%s': MAP=%s (confidence=%.3f, dist=%s)",

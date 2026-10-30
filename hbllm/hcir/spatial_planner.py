@@ -30,6 +30,7 @@ from hbllm.hcir.graph import (
     NodeLifecycle,
 )
 from hbllm.hcir.topological_cut_set import CutSetResult, TopologicalCutSetAnalyzer
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
@@ -1359,8 +1360,6 @@ class HCIRSpatialEntityPlanner:
             },
             tags=["trial_failure", reason],
         )
-        workspace.upsert_node(ep_node)
-
         # 2. Upsert BeliefNode for constraint retention
         belief_id = (
             f"belief_barrier_{failure_pos[0]}_{failure_pos[1]}"
@@ -1381,15 +1380,27 @@ class HCIRSpatialEntityPlanner:
             },
             tags=["negative_constraint", reason],
         )
-        workspace.upsert_node(belief_node)
-
-        # Link Episode -> Belief
-        workspace.add_edge(
-            HCIREdge(
-                sources=[ep_node.id],
-                targets=[belief_node.id],
-                edge_type=HCIREdgeType.CAUSES,
-            )
+        link = HCIREdge(
+            sources=[ep_node.id],
+            targets=[belief_node.id],
+            edge_type=HCIREdgeType.CAUSES,
+        )
+        # Commit Episode, Belief and the Episode -> Belief link as one atomic proposal
+        workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE, node_id=ep_node.id, node_data=ep_node.model_dump()
+                ),
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=belief_node.id,
+                    node_data=belief_node.model_dump(),
+                ),
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE, edge_id=link.id, edge_data=link.model_dump()
+                ),
+            ],
+            author="HCIRSpatialEntityPlanner",
         )
 
     def _recall_memory_constraints(

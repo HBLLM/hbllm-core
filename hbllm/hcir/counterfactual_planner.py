@@ -449,7 +449,11 @@ class CounterfactualPlanner:
         )
 
         # 8. Merge best branch to main workspace state and cleanup unused branches
-        self._workspace.merge_branch(best_candidate.branch_name)
+        self._workspace.merge_branch(
+            best_candidate.branch_name,
+            transaction_manager=self._services.transaction_manager,
+            author=author,
+        )
         for r in results:
             if r.branch_name != best_candidate.branch_name:
                 self._workspace.drop_branch(r.branch_name)
@@ -659,7 +663,11 @@ class CounterfactualPlanner:
         )
 
         # Merge best branch and clean up all other simulation branches
-        self._workspace.merge_branch(best_child.state_branch)
+        self._workspace.merge_branch(
+            best_child.state_branch,
+            transaction_manager=self._services.transaction_manager,
+            author=author,
+        )
         for b in all_created_branches:
             if b != best_child.state_branch:
                 self._workspace.drop_branch(b)

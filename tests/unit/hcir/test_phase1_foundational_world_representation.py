@@ -21,6 +21,7 @@ import pytest
 
 from hbllm.hcir.identity import IDFactory
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.capability_evidence import (
     ArchitecturalIntegrity,
@@ -49,7 +50,6 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
     MorphologicalDeformationTracker,
     MorphologicalEntity,
 )
-from hbllm.hcir.world.topological_cut_set import TopologicalCutSetAnalyzer
 
 # =============================================================================
 # SUITE 0: Perceptual Representation and Scene Construction (W001–W010)

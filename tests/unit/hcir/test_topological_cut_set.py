@@ -39,3 +39,14 @@ def test_partitioned_maze_detects_cut_set_and_gate() -> None:
     assert res.best_gate_cell[1] == 5
     assert res.best_gate_cell[0] == 2  # Closest to (2, 8)
     assert res.approach_cell == (2, 4)  # Accessible cell adjacent to (2, 5)
+
+
+def test_compute_betti_invariants_deep_grid_no_recursion_error() -> None:
+    """Verify that compute_betti_invariants handles deep graphs (> recursion limit) without RecursionError."""
+    # A single corridor of 2500 cells exceeds Python's default recursion limit (1000)
+    cells = {(0, c) for c in range(2500)}
+    betti = TopologicalCutSetAnalyzer.compute_betti_invariants((1, 2500), cells)
+    assert betti.betti_0 == 1
+    assert betti.betti_1 == 0
+    # Endpoints are not articulation points; inner 2498 cells are bottlenecks
+    assert len(betti.bottlenecks) == 2498

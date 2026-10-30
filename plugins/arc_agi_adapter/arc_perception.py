@@ -556,10 +556,11 @@ def extract_arc_objects(
                         and 1 <= h <= 12
                         and s_name != "background"
                         and (
-                            engine.avatar_pos is None
-                            or s_feat in getattr(engine, "avatar_features", set())
-                            or s_feat == getattr(engine, "avatar_feature", None)
-                            or not getattr(engine, "avatar_features", set())
+                            s_feat in getattr(engine, "avatar_features", set())
+                            or (
+                                getattr(engine, "avatar_feature", None) is not None
+                                and s_feat == engine.avatar_feature
+                            )
                         )
                     ):
                         role = "avatar"
@@ -608,8 +609,6 @@ def extract_arc_objects(
                             symbolic_theory is not None
                             and s_feat in getattr(symbolic_theory, "barrier_features", set())
                         )
-                        or _is_truthy_flag(getattr(sp, "blocking", False))
-                        or _is_truthy_flag(getattr(sp, "solid", False))
                         or _is_truthy_flag(getattr(sp, "impassable", False))
                         or "wall" in s_name.lower()
                         or "barrier" in s_name.lower()
@@ -701,11 +700,15 @@ def extract_arc_objects(
                         except Exception:
                             pass
                     if is_active_avatar:
-                        if engine is not None:
+                        if (
+                            engine is not None
+                            and engine.avatar_pos is not None
+                            and (
+                                s_feat in getattr(engine, "avatar_features", set())
+                                or s_feat == getattr(engine, "avatar_feature", None)
+                            )
+                        ):
                             engine.avatar_pos = s_pos
-                            engine.avatar_feature = s_feat
-                            if hasattr(engine, "avatar_features"):
-                                engine.avatar_features.add(s_feat)
                         av_pos = s_pos
                         av_feat = s_feat
                         av_feats.add(s_feat)
@@ -713,10 +716,6 @@ def extract_arc_objects(
                     continue
                 elif role == "barrier":
                     seen_positions.add(s_pos)
-                    if engine is not None:
-                        engine.learned_barriers.add(s_pos)
-                        if s_feat:
-                            engine.symbolic_theory.barrier_features.add(s_feat)
                     continue
 
                 # 1. Interactive clickable switches & buttons & actuators
@@ -813,11 +812,6 @@ def extract_arc_objects(
                 # 4. Movable manipulandums, shapes, sliders
                 elif role == "manipulandum":
                     seen_positions.add(s_pos)
-                    if engine is not None and engine.avatar_pos is None:
-                        engine.avatar_pos = s_pos
-                        engine.avatar_feature = s_feat
-                        if hasattr(engine, "avatar_features"):
-                            engine.avatar_features.add(s_feat)
                     m_id = f"shape_sprite_{disp_y}_{disp_x}"
                     m_props = {
                         "source": "sprite_manipulandum",

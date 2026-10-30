@@ -526,12 +526,12 @@ class TestGovernanceEngineKernelGate:
         ws = HCIRWorkspaceState()
         kernel = CognitiveKernel(workspace=ws, governance_engine=gov)
 
-        # 1. Execute authorized request
-        kernel.execute("sensor.read_temperature", {"room": "kitchen"})
+        # 1. Execute authorized request (inside a running loop the async entry must be used)
+        await kernel.execute_async("sensor.read_temperature", {"room": "kitchen"})
 
         # 2. Attempt denied request
         with pytest.raises(PermissionError):
-            kernel.execute("disable_smoke_detector", {})
+            await kernel.execute_async("disable_smoke_detector", {})
 
         # Verify hash chain integrity
         integrity = audit.verify_integrity()

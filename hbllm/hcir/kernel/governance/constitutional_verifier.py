@@ -204,46 +204,55 @@ class ConstitutionalVerifier:
         if not self._enforce_scope:
             return True
 
+        tx_tenant = self._transaction_tenant(transaction)
+        if not tx_tenant:
+            # System-level / unscoped transactions may operate across scopes
+            return True
+
         for op in transaction.operations:
+            node_tenant: str | None = None
             if op.op in (TransactionOp.MODIFY_NODE, TransactionOp.REMOVE_NODE):
                 if op.node_id:
                     existing = workspace.get_node(op.node_id)
                     if existing is not None:
-                        # Check that the transaction's tenant scope matches the existing node's scope
-                        tx_metadata = getattr(transaction, "metadata", None)
-                        tx_tenant = (
-                            tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
-                        )
-                        if (
-                            not tx_tenant
-                            and hasattr(transaction, "provenance")
-                            and transaction.provenance
-                        ):
-                            tx_tenant = (
-                                getattr(
-                                    getattr(transaction.provenance, "scope", None),
-                                    "tenant_id",
-                                    None,
-                                )
-                                or transaction.provenance.session_id
-                                or ""
-                            )
                         node_tenant = existing.scope.tenant_id
+            elif op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+                scope = (op.node_data or {}).get("scope")
+                if isinstance(scope, dict):
+                    node_tenant = scope.get("tenant_id")
+                else:
+                    node_tenant = getattr(scope, "tenant_id", None)
+                target_id = (op.node_data or {}).get("id") or op.node_id
+                existing = workspace.get_node(target_id) if target_id else None
+                if existing is not None and existing.scope.tenant_id != "default":
+                    # Overwriting an existing node is governed by the node's current owner
+                    node_tenant = existing.scope.tenant_id
 
-                        # Allow system-level transactions to modify any scope
-                        if tx_tenant and node_tenant != "default" and tx_tenant != node_tenant:
-                            transaction.annotations.append(
-                                TransactionAnnotation(
-                                    author="ConstitutionalVerifier",
-                                    assertion=(
-                                        f"Scope isolation violation: tx tenant={tx_tenant} "
-                                        f"vs node tenant={node_tenant}"
-                                    ),
-                                    severity="error",
-                                )
-                            )
-                            return False
+            if node_tenant and node_tenant != "default" and tx_tenant != node_tenant:
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ConstitutionalVerifier",
+                        assertion=(
+                            f"Scope isolation violation: tx tenant={tx_tenant} "
+                            f"vs node tenant={node_tenant}"
+                        ),
+                        severity="error",
+                    )
+                )
+                return False
         return True
+
+    @staticmethod
+    def _transaction_tenant(transaction: HCIRTransaction) -> str | None:
+        tx_metadata = getattr(transaction, "metadata", None)
+        tx_tenant = tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
+        if not tx_tenant and getattr(transaction, "provenance", None):
+            tx_tenant = (
+                getattr(getattr(transaction.provenance, "scope", None), "tenant_id", None)
+                or transaction.provenance.session_id
+                or None
+            )
+        return tx_tenant
 
     def _check_safety(
         self,

@@ -116,76 +116,6 @@ class CognitiveKernel(CognitiveKernelProtocol):
             result_data = {"executed": True, "capability": capability_name, "args": arguments}
 
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
-        return KernelExecutionReceipt(
-            receipt_id=receipt_id,
-            capability_name=capability_name,
-            status="SUCCESS" if "error" not in result_data else "FAILED",
-            result=result_data,
-            elapsed_ms=elapsed_ms,
-            governance_decision=gov_dec,
-        )
-
-    def execute(
-        self,
-        capability_name: str,
-        arguments: dict[str, Any],
-        context: Any = None,
-    ) -> KernelExecutionReceipt:
-        """Execute a capability call through the 9-stage kernel pipeline."""
-        start_time = time.monotonic()
-        self._execution_count += 1
-        receipt_id = f"rcpt_k_{self._execution_count}"
-
-        # Stage 3: Governance evaluation
-        gov_dec = self._governance.evaluate_execution(capability_name, arguments, context)
-        if not gov_dec.allowed:
-            raise PermissionError(
-                f"Kernel governance blocked capability '{capability_name}': {gov_dec.reason}"
-            )
-
-        # Stage 4 & 5: Capability resolution and execution
-        result_data: dict[str, Any]
-        if self._services and self._services.capability_resolver:
-            resolver = self._services.capability_resolver
-            if resolver.has_capability(capability_name):
-                import asyncio
-                import concurrent.futures
-
-                try:
-                    # Execute safely across sync/async boundaries
-                    try:
-                        asyncio.get_running_loop()
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                            fut = pool.submit(
-                                lambda: asyncio.run(
-                                    resolver.resolve_and_execute(capability_name, arguments)
-                                )
-                            )
-                            result_data = fut.result()
-                    except RuntimeError:
-                        result_data = asyncio.run(
-                            resolver.resolve_and_execute(capability_name, arguments)
-                        )
-                except Exception as exc:
-                    result_data = {
-                        "executed": False,
-                        "error": str(exc),
-                        "capability": capability_name,
-                    }
-            else:
-                result_data = {
-                    "executed": True,
-                    "capability": capability_name,
-                    "args": arguments,
-                }
-        else:
-            result_data = {
-                "executed": True,
-                "capability": capability_name,
-                "args": arguments,
-            }
-
-        elapsed_ms = int((time.monotonic() - start_time) * 1000)
         receipt = KernelExecutionReceipt(
             receipt_id=receipt_id,
             capability_name=capability_name,
@@ -198,3 +128,47 @@ class CognitiveKernel(CognitiveKernelProtocol):
             "CognitiveKernel executed capability '%s' [receipt: %s]", capability_name, receipt_id
         )
         return receipt
+
+    def execute(
+        self,
+        capability_name: str,
+        arguments: dict[str, Any],
+        context: Any = None,
+    ) -> KernelExecutionReceipt:
+        """Execute a capability call through the 9-stage kernel pipeline (synchronous entry).
+
+        This is the blocking facade for callers outside an event loop. Inside a running
+        loop callers must ``await execute_async`` — executing capabilities on a side
+        thread would race the single-threaded commit path of the TransactionManager.
+        """
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._execute_guarded(capability_name, arguments, context))
+        raise RuntimeError(
+            "CognitiveKernel.execute() called from within a running event loop; "
+            "use `await CognitiveKernel.execute_async(...)` instead"
+        )
+
+    async def _execute_guarded(
+        self,
+        capability_name: str,
+        arguments: dict[str, Any],
+        context: Any,
+    ) -> KernelExecutionReceipt:
+        """``execute_async`` with capability failures captured into the receipt."""
+        try:
+            return await self.execute_async(capability_name, arguments, context)
+        except PermissionError:
+            raise
+        except Exception as exc:
+            self._execution_count += 1
+            return KernelExecutionReceipt(
+                receipt_id=f"rcpt_k_{self._execution_count}",
+                capability_name=capability_name,
+                status="FAILED",
+                result={"executed": False, "error": str(exc), "capability": capability_name},
+                elapsed_ms=0,
+            )

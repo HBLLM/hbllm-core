@@ -552,7 +552,12 @@ class CrossGameKnowledgeTransfer:
                 )
 
         # Extract lethal features (contact hazards)
+        av_feats = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
         for feat in engine.episodic_cortex.discovered_lethal_features:
+            if feat in av_feats:
+                continue
             inv_id = f"lethal_feature_{feat}"
             invariants.append(
                 TransferableInvariant(
@@ -643,7 +648,10 @@ class CrossGameKnowledgeTransfer:
                         applied += 1
             elif inv.category == "hazard":
                 feat = inv.data.get("feature")
-                if feat is not None:
+                av_f = engine.avatar_features or (
+                    {engine.avatar_feature} if engine.avatar_feature is not None else set()
+                )
+                if feat is not None and feat not in av_f:
                     engine.episodic_cortex.discovered_lethal_features.add(feat)
                     self.active_transfers[inv.invariant_id] = inv
                     applied += 1

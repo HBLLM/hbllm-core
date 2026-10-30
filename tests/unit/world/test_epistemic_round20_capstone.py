@@ -134,7 +134,8 @@ def test_unified_closed_loop_active_inference_decision() -> None:
     assert decision.selected_action in [1, 2, 3, 4]
     assert decision.expected_free_energy >= 0.0
     assert decision.locomotor_velocity > 0.0
-    assert decision.time_dilation_factor >= 1.0
+    # Interoceptive pacing: compression (<1) under low salience, dilation (>1) under threat/surprise
+    assert decision.time_dilation_factor > 0.0
     assert decision.subthalamic_status in (
         "dispatch_permitted",
         "brake_active",

@@ -146,7 +146,10 @@ class SpatiotemporalCollisionCones:
                 rebound_r = any(
                     (next_r + dr_o < 0)
                     or (next_r + dr_o >= H)
-                    or ((next_r + dr_o, curr_c + dc_o) in static_barriers)
+                    or (
+                        (next_r + dr_o, curr_c + dc_o) in static_barriers
+                        and (curr_r + dr_o, curr_c + dc_o) not in static_barriers
+                    )
                     for dr_o, dc_o in rel_offsets
                 )
                 if rebound_r:
@@ -157,7 +160,10 @@ class SpatiotemporalCollisionCones:
                     or (curr_r + dr_o >= H)
                     or (next_c + dc_o < 0)
                     or (next_c + dc_o >= W)
-                    or ((curr_r + dr_o, next_c + dc_o) in static_barriers)
+                    or (
+                        (curr_r + dr_o, next_c + dc_o) in static_barriers
+                        and (curr_r + dr_o, curr_c + dc_o) not in static_barriers
+                    )
                     for dr_o, dc_o in rel_offsets
                 )
                 if rebound_c:
@@ -170,7 +176,10 @@ class SpatiotemporalCollisionCones:
                     if any(
                         (next_r + dr_o < 0)
                         or (next_r + dr_o >= H)
-                        or ((next_r + dr_o, curr_c + dc_o) in static_barriers)
+                        or (
+                            (next_r + dr_o, curr_c + dc_o) in static_barriers
+                            and (curr_r + dr_o, curr_c + dc_o) not in static_barriers
+                        )
                         for dr_o, dc_o in rel_offsets
                     ):
                         next_r = curr_r
@@ -179,7 +188,10 @@ class SpatiotemporalCollisionCones:
                         or (curr_r + dr_o >= H)
                         or (next_c + dc_o < 0)
                         or (next_c + dc_o >= W)
-                        or ((curr_r + dr_o, next_c + dc_o) in static_barriers)
+                        or (
+                            (curr_r + dr_o, next_c + dc_o) in static_barriers
+                            and (curr_r + dr_o, curr_c + dc_o) not in static_barriers
+                        )
                         for dr_o, dc_o in rel_offsets
                     ):
                         next_c = curr_c

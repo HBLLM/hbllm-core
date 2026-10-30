@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -29,6 +30,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.query import GraphQuery, InMemoryQueryEngine, QueryResult
 from hbllm.hcir.snapshot import Snapshot, SnapshotManager
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
+from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.types import Attention, BranchMode
 
 logger = logging.getLogger(__name__)
@@ -105,6 +107,9 @@ class HCIRWorkspaceState:
         # Simulation branches (branch_name → cloned workspace)
         self._branches: dict[str, HCIRWorkspaceState] = {}
 
+        # Single commit authority bound to this workspace (attached by the kernel)
+        self._transaction_manager: Any | None = None
+
         # Bootstrap: create initial snapshot
         self._snapshot_manager.create_snapshot(self._graph)
 
@@ -142,7 +147,48 @@ class HCIRWorkspaceState:
     def attention(self, value: Attention) -> None:
         self._global_attention = value
 
-    # ── Graph Operations (recorded in event log) ─────────────────────
+    # ── Commit Authority ─────────────────────────────────────────────
+
+    def attach_transaction_manager(self, manager: Any, replace: bool = False) -> None:
+        """Bind the kernel ``TransactionManager`` that governs this workspace.
+
+        The first manager attached wins unless ``replace`` is set, so that the
+        governed kernel manager (with its verification pipeline) remains the
+        single commit authority even if ad-hoc managers are created later.
+        """
+        if self._transaction_manager is None or replace:
+            self._transaction_manager = manager
+
+    @property
+    def transaction_manager(self) -> Any:
+        """The commit authority for this workspace.
+
+        Lazily creates a bare kernel manager when none has been attached so that
+        every write still flows through the atomic, event-sourced commit path.
+        """
+        if self._transaction_manager is None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            self._transaction_manager = TransactionManager(self)
+        return self._transaction_manager
+
+    def commit_operations(
+        self,
+        operations: list[TransactionOperation],
+        author: str = "system",
+        metadata: dict[str, Any] | None = None,
+    ) -> HCIRTransaction:
+        """Propose and commit a batch of operations through the commit authority.
+
+        This is the canonical write path for subsystems that hold a workspace
+        reference but no ``KernelServices`` (adapters, tier promotion, world kernel).
+        """
+        tx = HCIRTransaction(author=author, operations=list(operations), metadata=metadata or {})
+        return self.transaction_manager.commit(tx)
+
+    # ── Graph Operations (kernel-internal; recorded in event log) ────
+    # These are the raw primitives used by the TransactionManager. Subsystems
+    # must not call them directly — use ``commit_operations`` or a transaction.
 
     def add_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add a node and record the event."""
@@ -154,7 +200,9 @@ class HCIRWorkspaceState:
         existing = self._graph.get_node(node.id)
         self._graph.upsert_node(node)
         if existing:
-            self._snapshot_manager.record_node_modified(node.id, {"replaced": True}, author)
+            self._snapshot_manager.record_node_modified(
+                node.id, {"replaced": True}, author, node=node
+            )
         else:
             self._snapshot_manager.record_node_added(node, author)
 
@@ -260,16 +308,92 @@ class HCIRWorkspaceState:
         """Convenience alias for fork()."""
         return self.fork(branch_name)
 
-    def merge_branch(self, branch_name: str) -> bool:
-        """Merge a forked branch into the main workspace state."""
-        branch_ws = self._branches.pop(branch_name, None)
+    def diff_branch(self, branch_name: str) -> list[TransactionOperation]:
+        """Compute the transactional diff that would bring this workspace to the
+        branch's state (adds, upserts, removals of nodes and edges).
+
+        Pure: does not mutate anything. Operation order is safe to apply:
+        edge removals → node removals → node adds/upserts → edge adds.
+        """
+        branch_ws = self._branches.get(branch_name)
         if branch_ws is None:
+            raise ValueError(f"Branch '{branch_name}' not found")
+
+        main_g, br_g = self._graph, branch_ws._graph
+        main_nodes = {n.id: n for n in main_g.all_nodes()}
+        br_nodes = {n.id: n for n in br_g.all_nodes()}
+        main_edges = {e.id: e for e in main_g.all_edges()}
+        br_edges = {e.id: e for e in br_g.all_edges()}
+
+        removed_nodes = [nid for nid in main_nodes if nid not in br_nodes]
+        changed_edges = {
+            eid
+            for eid, e in br_edges.items()
+            if eid in main_edges and main_edges[eid].model_dump() != e.model_dump()
+        }
+        ops: list[TransactionOperation] = []
+        for eid in main_edges:
+            if eid not in br_edges or eid in changed_edges:
+                edge = main_edges[eid]
+                if any(n in removed_nodes for n in [*edge.sources, *edge.targets]):
+                    continue  # cascaded by the node removal
+                ops.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
+        for nid in removed_nodes:
+            ops.append(TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=nid))
+        for nid, node in br_nodes.items():
+            existing = main_nodes.get(nid)
+            if existing is None:
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_NODE, node_id=nid, node_data=node.model_dump()
+                    )
+                )
+            elif existing.model_dump() != node.model_dump():
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE, node_id=nid, node_data=node.model_dump()
+                    )
+                )
+        for eid, edge in br_edges.items():
+            if eid not in main_edges or eid in changed_edges:
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE, edge_id=eid, edge_data=edge.model_dump()
+                    )
+                )
+        return ops
+
+    def merge_branch(
+        self,
+        branch_name: str,
+        transaction_manager: Any | None = None,
+        author: str = "merge",
+    ) -> bool:
+        """Merge a forked branch into this workspace as a single atomic transaction.
+
+        The diff is committed through ``transaction_manager`` (default: the commit
+        authority attached to this workspace) so that it passes the constitutional
+        verification pipeline.
+
+        Returns True only if the merge transaction was committed; the branch is
+        dropped only on success.
+        """
+        if branch_name not in self._branches:
             return False
-        # Copy newly created nodes/edges from branch to main workspace
-        for node in branch_ws._graph.all_nodes():
-            self.upsert_node(node)
-        for edge in branch_ws._graph.all_edges():
-            self.add_edge(edge)
+        ops = self.diff_branch(branch_name)
+        transaction_manager = transaction_manager or self.transaction_manager
+
+        if ops:
+            tx = HCIRTransaction(
+                author=author,
+                operations=ops,
+                metadata={"merge_branch": branch_name},
+            )
+            result = transaction_manager.commit(tx)
+            if not result.is_committed:
+                logger.warning("merge_branch('%s') rejected: %s", branch_name, result.annotations)
+                return False
+        self._branches.pop(branch_name, None)
         return True
 
     def drop_branch(self, branch_name: str) -> bool:
