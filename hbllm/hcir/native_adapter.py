@@ -1238,6 +1238,93 @@ class NativeGraphAdapter:
         total_weight = sum(adj_dist.get((u, v), 1.0) for u, v, _ in directed_edges) + added_cost
         return float(total_weight), tour
 
+    def minimum_dominating_set(
+        self,
+    ) -> set[str]:
+        """Compute an approximate Minimum Dominating Set (MDS) using greedy coverage heuristic.
+
+        Returns:
+            Set of node IDs such that every node in the graph is either in the set
+            or adjacent to a node in the set.
+        """
+        all_nodes = set(self.all_node_ids())
+        if not all_nodes:
+            return set()
+
+        neighbors: dict[str, set[str]] = {nid: {nid} for nid in all_nodes}
+
+        if self._native is not None:
+            for nid in all_nodes:
+                for edge in self._native.edges_from(nid):
+                    for target in edge.get("targets", []):
+                        if target in all_nodes:
+                            neighbors[nid].add(target)
+                            neighbors[target].add(nid)
+        else:
+            for edge in self._py_edges.values():
+                for s in edge.get("sources", []):
+                    if s in all_nodes:
+                        for t in edge.get("targets", []):
+                            if t in all_nodes:
+                                neighbors[s].add(t)
+                                neighbors[t].add(s)
+
+        uncovered = set(all_nodes)
+        dominating_set: set[str] = set()
+
+        while uncovered:
+            best_node = max(
+                sorted(list(all_nodes)),
+                key=lambda u: (len(neighbors[u] & uncovered), -ord(u[0]) if u else 0),
+            )
+            dominating_set.add(best_node)
+            uncovered -= neighbors[best_node]
+
+        return dominating_set
+
+    def maximum_independent_set(
+        self,
+    ) -> set[str]:
+        """Compute an approximate Maximum Independent Set (MIS) using minimum-degree greedy heuristic.
+
+        Returns:
+            Set of mutually non-adjacent node IDs representing non-conflicting concurrent elements.
+        """
+        all_nodes = set(self.all_node_ids())
+        if not all_nodes:
+            return set()
+
+        adj: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+        if self._native is not None:
+            for nid in all_nodes:
+                for edge in self._native.edges_from(nid):
+                    for target in edge.get("targets", []):
+                        if target in all_nodes and target != nid:
+                            adj[nid].add(target)
+                            adj[target].add(nid)
+        else:
+            for edge in self._py_edges.values():
+                for s in edge.get("sources", []):
+                    if s in all_nodes:
+                        for t in edge.get("targets", []):
+                            if t in all_nodes and s != t:
+                                adj[s].add(t)
+                                adj[t].add(s)
+
+        candidates = set(all_nodes)
+        independent_set: set[str] = set()
+
+        while candidates:
+            best_node = min(
+                sorted(list(candidates)),
+                key=lambda u: (len(adj[u] & candidates), u),
+            )
+            independent_set.add(best_node)
+            candidates.remove(best_node)
+            candidates -= adj[best_node]
+
+        return independent_set
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

@@ -95,6 +95,10 @@ from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualDeadlockDetector,
     CounterfactualRegretEvaluator,
 )
+from hbllm.hcir.world.dorsolateral_rule_abstraction import (
+    DorsolateralRuleAbstractionEngine,
+    RuleTransferResult,
+)
 from hbllm.hcir.world.entorhinal_border_cell import (
     EntorhinalBorderCellEngine,
     GridModuleRescalingResult,
@@ -215,6 +219,10 @@ from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
 from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
+from hbllm.hcir.world.retrosplenial_heading import (
+    AllocentricHeadingVector,
+    RetrosplenialHeadingEngine,
+)
 from hbllm.hcir.world.retrosplenial_landmark_anchor import (
     LandmarkRecalibrationResult,
     RetrosplenialLandmarkAnchorEngine,
@@ -253,6 +261,10 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     EnvironmentChangeDetector,
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
+)
+from hbllm.hcir.world.thalamic_reticular_gating import (
+    SensoryShieldingState,
+    ThalamicReticularGatingEngine,
 )
 from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
@@ -735,6 +747,17 @@ class AutonomousEpistemicEngine:
 
         # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
         self.vta_curiosity: VentralTegmentalCuriosityEngine = VentralTegmentalCuriosityEngine()
+
+        # Round 16 Faculty: Retrosplenial Heading Integration & Ring Attractors (Taube / Burgess)
+        self.retrosplenial_heading: RetrosplenialHeadingEngine = RetrosplenialHeadingEngine()
+
+        # Round 16 Faculty: Thalamic Reticular Nucleus (TRN) Sensory Gating & Shielding (Crick / Halassa)
+        self.trn_gating: ThalamicReticularGatingEngine = ThalamicReticularGatingEngine()
+
+        # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
+        self.rule_abstraction: DorsolateralRuleAbstractionEngine = (
+            DorsolateralRuleAbstractionEngine()
+        )
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -2625,6 +2648,93 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return target_graph.chinese_postman_tour(weight_attribute=weight_attribute)
+
+    def update_allocentric_heading(
+        self,
+        omega_rad: float,
+        dt: float = 1.0,
+    ) -> AllocentricHeadingVector:
+        """Integrate self-motion angular velocity into head direction ring attractor (Taube-Burgess)."""
+        vec = self.retrosplenial_heading.integrate_angular_velocity(omega_rad=omega_rad, dt=dt)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        return vec
+
+    def recalibrate_heading_from_landmark(
+        self,
+        observed_bearing_rad: float,
+        landmark_true_bearing_rad: float,
+        kalman_gain: float = 0.40,
+    ) -> AllocentricHeadingVector:
+        """Recalibrate heading against visual landmark bearing innovation (Taube-Burgess)."""
+        vec = self.retrosplenial_heading.recalibrate_from_landmark(
+            observed_bearing_rad=observed_bearing_rad,
+            landmark_true_bearing_rad=landmark_true_bearing_rad,
+            kalman_gain=kalman_gain,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        return vec
+
+    def apply_trn_sensory_shielding(
+        self,
+        attended_modality: str,
+        conflict_level: float = 0.0,
+    ) -> SensoryShieldingState:
+        """Modulate TRN inhibitory gating to shield primary task modalities (Crick-Halassa)."""
+        state = self.trn_gating.modulate_sensory_shielding(
+            attended_modality=attended_modality,
+            conflict_level=conflict_level,
+        )
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        return state
+
+    def induce_and_transfer_abstract_rules(
+        self,
+        antecedents: dict[str, Any],
+        action: str | None = None,
+    ) -> RuleTransferResult:
+        """Induce relational rule schema (if action provided) and evaluate zero-shot transfer (Badre-D'Esposito)."""
+        if action is not None:
+            self.rule_abstraction.induce_rule_schema(
+                abstract_antecedents=antecedents,
+                successful_action=action,
+            )
+        result = self.rule_abstraction.evaluate_rule_transfer(current_state_features=antecedents)
+        if self.symbolic_theory is not None:
+            self.symbolic_theory.record_causal_predicate(result.to_causal_predicate())
+        return result
+
+    def compute_graph_dominating_set(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> set[str]:
+        """Compute an approximate Minimum Dominating Set (MDS) of observer / waypoint nodes."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.minimum_dominating_set()
+
+    def compute_graph_independent_set(
+        self,
+        graph: CognitiveGraph | None = None,
+    ) -> set[str]:
+        """Compute an approximate Maximum Independent Set (MIS) of non-conflicting concurrent nodes."""
+        if graph is not None:
+            target_graph = graph
+        elif self.tiered_workspace is not None:
+            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
+                False
+            )
+        else:
+            target_graph = CognitiveGraph(False)
+        return target_graph.maximum_independent_set()
 
     @property
     def phase(self) -> EpistemicPhase:

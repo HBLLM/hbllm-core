@@ -47,6 +47,11 @@ from hbllm.hcir.world.disagreement_analyzer import (
     DisagreementReport,
     PredictorDisagreementAnalyzer,
 )
+from hbllm.hcir.world.dorsolateral_rule_abstraction import (
+    AbstractRuleSchema,
+    DorsolateralRuleAbstractionEngine,
+    RuleTransferResult,
+)
 from hbllm.hcir.world.entorhinal_border_cell import (
     BorderCell,
     EntorhinalBorderCellEngine,
@@ -151,6 +156,11 @@ from hbllm.hcir.world.pulvinar_attention_router import (
     PulvinarRoutingState,
     TransthalamicRoute,
 )
+from hbllm.hcir.world.retrosplenial_heading import (
+    AllocentricHeadingVector,
+    HeadDirectionAttractorState,
+    RetrosplenialHeadingEngine,
+)
 from hbllm.hcir.world.retrosplenial_landmark_anchor import (
     AllocentricLandmark,
     LandmarkRecalibrationResult,
@@ -182,6 +192,11 @@ from hbllm.hcir.world.superior_colliculus_arbiter import (
 from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
     SurpriseEvaluation,
+)
+from hbllm.hcir.world.thalamic_reticular_gating import (
+    SensoryShieldingState,
+    ThalamicReticularGatingEngine,
+    TRNGateChannel,
 )
 from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
@@ -218,7 +233,9 @@ from hbllm.hcir.world.world_transaction import (
 )
 
 __all__ = [
+    "AbstractRuleSchema",
     "AffordanceResonancePattern",
+    "AllocentricHeadingVector",
     "AllocentricLandmark",
     "AllostaticRegime",
     "AmygdalarThreatConditioningEngine",
@@ -249,6 +266,7 @@ __all__ = [
     "DefensiveVigilanceMode",
     "DefensiveVigilanceState",
     "DisagreementReport",
+    "DorsolateralRuleAbstractionEngine",
     "DriftDiffusionDecision",
     "DualValueOpponencyCortex",
     "EffortAllocationDecision",
@@ -268,6 +286,7 @@ __all__ = [
     "GridModuleRescalingResult",
     "HapticAffordanceFeedback",
     "HCIRSymbolicWorldTheory",
+    "HeadDirectionAttractorState",
     "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
     "InferotemporalShapeHasher",
@@ -305,9 +324,12 @@ __all__ = [
     "ReplayBatch",
     "ReplayTransition",
     "RetrosplenialLandmarkAnchorEngine",
+    "RetrosplenialHeadingEngine",
     "ReversibilityEngine",
+    "RuleTransferResult",
     "SaccadeTarget",
     "SalientObject",
+    "SensoryShieldingState",
     "ShapeArchetypeSignature",
     "SomaticAffectiveBias",
     "SomaticMarker",
@@ -330,7 +352,9 @@ __all__ = [
     "TaskArbitrationResult",
     "TaskSwitchEvent",
     "TemporalStateBuffer",
+    "ThalamicReticularGatingEngine",
     "ThetaPhase",
+    "TRNGateChannel",
     "TransthalamicRoute",
     "UnifiedPerceptualGestalt",
     "VentralPremotorAffordanceResonator",
