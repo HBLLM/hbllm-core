@@ -1287,11 +1287,13 @@ class PrefrontalDeliberationEngine:
             and hasattr(engine, "episodic_cortex")
             and engine.episodic_cortex.consolidated_macros
         ):
+            curr_entities = engine.extract_entities(curr_grid, engine.bg_feature)
             applicable_macros = engine.episodic_cortex.query_applicable_macros(
                 grid=curr_grid,
                 available_actions=set(available_actions),
                 top_k=1,
                 min_confidence=0.5,
+                entities=curr_entities,
             )
             if applicable_macros:
                 best_macro = applicable_macros[0]

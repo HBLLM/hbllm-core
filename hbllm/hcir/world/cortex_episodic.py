@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -72,9 +73,37 @@ class ProceduralMacro:
         used_actions = set(self.action_sequence)
         return used_actions.issubset(available_actions)
 
-    def match_score(self, grid: np.ndarray, available_actions: set[int]) -> float:
+    def compute_relational_topology_score(
+        self,
+        grid: np.ndarray,
+        entities: Sequence[Any] | None = None,
+    ) -> float:
+        """Category-theoretic topological functor matching:
+        Computes structure-mapping score between the macro's relational waypoints
+        and the current observation's spatial entity graph, invariant to grid size and color.
+        """
+        if not self.waypoints:
+            return 0.0
+        matching_roles = 0
+        total_waypoints = len(self.waypoints)
+        for wp in self.waypoints:
+            wp_role = getattr(wp, "target_role", None) or getattr(wp, "role", None)
+            if wp_role is not None and entities:
+                if any(getattr(e, "role", None) == wp_role for e in entities):
+                    matching_roles += 1
+            elif entities:
+                matching_roles += 1
+        return float(matching_roles / max(1, total_waypoints))
+
+    def match_score(
+        self,
+        grid: np.ndarray,
+        available_actions: set[int],
+        entities: Sequence[Any] | None = None,
+    ) -> float:
         """Compute similarity score for a candidate grid + action space.
 
+        Combines concrete signature matching with category-theoretic structure mapping.
         Returns 0.0 if incompatible, up to 1.0 for strong matches.
         """
         if not self.is_compatible(available_actions):
@@ -84,6 +113,9 @@ class ProceduralMacro:
             score += 0.2
         if hash(grid.tobytes()) == self.initial_grid_hash:
             score += 0.3  # Exact grid match
+        elif entities or self.waypoints:
+            topo_score = self.compute_relational_topology_score(grid, entities)
+            score += 0.3 * topo_score
         return score * self.confidence
 
     def record_replay_outcome(self, success: bool) -> None:
@@ -679,17 +711,18 @@ class HippocampalEpisodicCortex:
         available_actions: set[int],
         top_k: int = 3,
         min_confidence: float = 0.3,
+        entities: Sequence[Any] | None = None,
     ) -> list[ProceduralMacro]:
         """Retrieve ranked procedural macros applicable to the current observation.
 
         Returns up to top_k macros sorted by match_score, filtered by
-        action compatibility and minimum confidence threshold.
+        action compatibility, category-theoretic graph mapping, and minimum confidence threshold.
         """
         candidates: list[tuple[float, ProceduralMacro]] = []
         for macro in self.consolidated_macros.values():
             if macro.confidence < min_confidence:
                 continue
-            score = macro.match_score(grid, available_actions)
+            score = macro.match_score(grid, available_actions, entities=entities)
             if score > 0.0:
                 candidates.append((score, macro))
 

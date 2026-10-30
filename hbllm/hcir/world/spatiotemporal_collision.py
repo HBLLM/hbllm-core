@@ -68,6 +68,8 @@ class SpatiotemporalCollisionCones:
         self.step_occupied_by_feat: dict[int, dict[int, set[tuple[int, int]]]] = {}
         # Persistent memory of entity velocities across frames (entity_id or feature_id -> velocity)
         self.persistent_velocities: dict[int, tuple[int, int]] = {}
+        # Object Permanence Tracking: feat_id -> {"centroid": (r, c), "velocity": (vr, vc), "rel_offsets": [...], "frames_unseen": int}
+        self.occluded_trackers: dict[int, dict[str, Any]] = {}
 
     def reset_episode(self) -> None:
         """Clear all active trajectory projections for a new trial."""
@@ -75,6 +77,7 @@ class SpatiotemporalCollisionCones:
         self.step_occupied_cells.clear()
         self.step_occupied_by_feat.clear()
         self.persistent_velocities.clear()
+        self.occluded_trackers.clear()
 
     def update_trajectories(
         self,
@@ -223,6 +226,80 @@ class SpatiotemporalCollisionCones:
             )
             self.projected_trajectories.append(proj)
             projected_feats.add(feat_id)
+            if feat_id != 0:
+                self.occluded_trackers[feat_id] = {
+                    "centroid": (curr_r, curr_c),
+                    "velocity": (cur_vr, cur_vc),
+                    "rel_offsets": rel_offsets,
+                    "frames_unseen": 0,
+                }
+
+        # Object Permanence (Intuitive Physics): Extrapolate unobserved/occluded moving entities
+        for occ_feat, trk in list(self.occluded_trackers.items()):
+            if occ_feat in projected_feats:
+                continue
+            trk["frames_unseen"] += 1
+            if trk["frames_unseen"] > 3:
+                del self.occluded_trackers[occ_feat]
+                continue
+
+            last_r, last_c = trk["centroid"]
+            cur_vr, cur_vc = trk["velocity"]
+            rel_offsets = trk.get("rel_offsets", [(0, 0)])
+            virtual_positions: list[tuple[int, int]] = []
+            curr_r, curr_c = last_r, last_c
+
+            for step in range(1, T + 1):
+                next_r = curr_r + cur_vr
+                next_c = curr_c + cur_vc
+                rebound_r = any(
+                    (next_r + dr_o < 0)
+                    or (next_r + dr_o >= H)
+                    or ((next_r + dr_o, curr_c + dc_o) in static_barriers)
+                    for dr_o, dc_o in rel_offsets
+                )
+                if rebound_r:
+                    cur_vr = -cur_vr
+                rebound_c = any(
+                    (curr_r + dr_o < 0)
+                    or (curr_r + dr_o >= H)
+                    or (next_c + dc_o < 0)
+                    or (next_c + dc_o >= W)
+                    or ((curr_r + dr_o, next_c + dc_o) in static_barriers)
+                    for dr_o, dc_o in rel_offsets
+                )
+                if rebound_c:
+                    cur_vc = -cur_vc
+                if rebound_r or rebound_c:
+                    next_r = curr_r + cur_vr
+                    next_c = curr_c + cur_vc
+
+                next_r = max(0, min(H - 1, next_r))
+                next_c = max(0, min(W - 1, next_c))
+                virtual_positions.append((next_r, next_c))
+
+                for dr_o, dc_o in rel_offsets:
+                    cell_r = next_r + dr_o
+                    cell_c = next_c + dc_o
+                    if 0 <= cell_r < H and 0 <= cell_c < W:
+                        self.step_occupied_cells[step].add((cell_r, cell_c))
+                        self.step_occupied_by_feat.setdefault(occ_feat, {}).setdefault(
+                            step, set()
+                        ).add((cell_r, cell_c))
+                curr_r, curr_c = next_r, next_c
+
+            trk["centroid"] = (next_r, next_c)
+            trk["velocity"] = (cur_vr, cur_vc)
+            self.projected_trajectories.append(
+                ProjectedTrajectory(
+                    entity_id=f"occluded_{occ_feat}",
+                    feature_id=occ_feat,
+                    initial_pos=(last_r, last_c),
+                    velocity=(cur_vr, cur_vc),
+                    positions=virtual_positions,
+                )
+            )
+            projected_feats.add(occ_feat)
 
         # Incorporate oriented threats (e.g., directional patrollers) not captured by diffs
         if oriented_threats and mobile_threat_features:

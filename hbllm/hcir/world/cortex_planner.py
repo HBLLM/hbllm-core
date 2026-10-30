@@ -2129,6 +2129,7 @@ class MentalSimulationPlanner:
                     if engine.working_memory.is_holding(req_tool):
                         open_barriers.add(b_pos)
                     else:
+                        tool_found = False
                         for e in entities:
                             if e.feature_id == req_tool and e.grid_pos in reachable_cells:
                                 t_path = find_shortest_path(
@@ -2136,6 +2137,52 @@ class MentalSimulationPlanner:
                                 )
                                 if t_path is not None:
                                     candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
+                                    tool_found = True
+
+                        # Multi-Hop Backward-Chaining: If required tool is blocked behind another barrier,
+                        # deduce the intervening cut-set barrier and resolve its clearance trigger!
+                        if not tool_found:
+                            unreached_tools = [
+                                e.grid_pos
+                                for e in entities
+                                if e.feature_id == req_tool and e.grid_pos not in reachable_cells
+                            ]
+                            for ut_pos in unreached_tools:
+                                unconstrained_path = find_shortest_path(cur_pos, {ut_pos}, set())
+                                if unconstrained_path:
+                                    intervening_barrier = None
+                                    for step in unconstrained_path:
+                                        if step.predicted_avatar_pos in effective_barriers:
+                                            intervening_barrier = step.predicted_avatar_pos
+                                            break
+                                    if intervening_barrier is not None:
+                                        ib_feat = int(
+                                            curr_grid[intervening_barrier[0], intervening_barrier[1]]
+                                        )
+                                        ib_trig, ib_tool = engine.causal_cortex.query_barrier_clearance(
+                                            intervening_barrier, ib_feat
+                                        )
+                                        if ib_trig and ib_trig in reachable_cells:
+                                            tr_path = find_shortest_path(
+                                                cur_pos, {ib_trig}, effective_barriers
+                                            )
+                                            if tr_path is not None:
+                                                candidate_triggers.append(
+                                                    (ib_trig, tr_path, 95, {intervening_barrier, b_pos})
+                                                )
+                                        elif ib_tool is not None:
+                                            for e2 in entities:
+                                                if (
+                                                    e2.feature_id == ib_tool
+                                                    and e2.grid_pos in reachable_cells
+                                                ):
+                                                    t_path2 = find_shortest_path(
+                                                        cur_pos, {e2.grid_pos}, effective_barriers
+                                                    )
+                                                    if t_path2 is not None:
+                                                        candidate_triggers.append(
+                                                            (e2.grid_pos, t_path2, 90, {intervening_barrier, b_pos})
+                                                        )
 
             # 4. Known state mutation triggers (switches and pressure plates)
             for tr_pos, opened_set in mutation_triggers.items():

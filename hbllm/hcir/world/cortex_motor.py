@@ -926,7 +926,20 @@ class EpistemicCuriosityExplorer:
                         e.grid_pos[1] - engine.avatar_pos[1]
                     )
                     visits = engine.entity_visit_counts.get(e.id, 0)
-                    info_val = 10.0 / (visits + 1.0)
+                    # Friston Expected Free Energy (EFE): Epistemic Information Gain
+                    # Shannon entropy of unverified affordance properties (permeability, tool role, causal trigger)
+                    f_id = e.feature_id
+                    affordance_uncertainty = 1.0
+                    if f_id not in engine.symbolic_theory.walkable_features:
+                        affordance_uncertainty += 0.8
+                    if f_id not in engine.symbolic_theory.barrier_features:
+                        affordance_uncertainty += 0.8
+                    if not any(m.trigger_feature == f_id for m in getattr(engine, "state_mutations", [])):
+                        affordance_uncertainty += 1.0
+                    if f_id in engine.symbolic_theory.candidate_goal_features:
+                        affordance_uncertainty += 1.5
+
+                    info_val = (12.0 * affordance_uncertainty) / (visits + 1.0)
                     if current_room_cells and e.grid_pos in current_room_cells:
                         info_val *= 1.5
                     cost = dist + 1.0
