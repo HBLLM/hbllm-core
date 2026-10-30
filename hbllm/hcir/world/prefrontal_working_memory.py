@@ -844,7 +844,16 @@ class PrefrontalWorkingMemory:
         context: Any = None,
     ) -> tuple[str, DeclarativeNeuroSymbolicSkill] | None:
         """Match stored procedural skills against available actions and context signature."""
+        curr_lvl = (
+            context.get("current_level")
+            if isinstance(context, dict)
+            else getattr(context, "current_level", None)
+        )
         for name, skill in self.procedural_library.items():
+            proc_macro = getattr(skill, "_procedural_macro", None)
+            if proc_macro is not None and curr_lvl is not None:
+                if proc_macro.level != curr_lvl:
+                    continue
             sig = getattr(skill, "signature", None)
             if sig is None:
                 return name, skill

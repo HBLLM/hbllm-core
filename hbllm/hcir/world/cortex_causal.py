@@ -295,9 +295,15 @@ class HCIRSymbolicWorldTheory:
 
     def induce_goal(self, feature_id: int) -> None:
         """Induce universal goal predicate with minimum description length."""
-        if feature_id == 0:
-            return
-        self.barrier_features.discard(feature_id)
+        if feature_id in self.barrier_features:
+            self.barrier_features.discard(feature_id)
+            self.barrier_predicates = [
+                p
+                for p in self.barrier_predicates
+                if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+            ]
+            self._barrier_eval_cache.clear()
+            self._walkable_eval_cache.clear()
         if feature_id not in self.goal_features:
             self.goal_features.add(feature_id)
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
@@ -321,9 +327,16 @@ class HCIRSymbolicWorldTheory:
             logger.info("HCIRSymbolicWorldTheory: Induced Barrier Rule: %s", pred.describe())
 
     def induce_walkable(self, feature_id: int) -> None:
-        """Induce universal walkable space predicate."""
+        """Induce universal walkable space predicate with self-correcting belief revision."""
         if feature_id in self.barrier_features:
-            return
+            self.barrier_features.discard(feature_id)
+            self.barrier_predicates = [
+                p
+                for p in self.barrier_predicates
+                if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+            ]
+            self._barrier_eval_cache.clear()
+            self._walkable_eval_cache.clear()
         if feature_id not in self.walkable_features:
             self._barrier_eval_cache.clear()
             self._walkable_eval_cache.clear()

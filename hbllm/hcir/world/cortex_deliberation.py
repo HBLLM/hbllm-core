@@ -1836,7 +1836,9 @@ class PrefrontalDeliberationEngine:
 
                 else:
                     engine.consecutive_simulation_failures += 1
-                    engine.simulation_cooldown = 0
+                    engine.simulation_cooldown = min(
+                        12, 2 ** min(engine.consecutive_simulation_failures, 4)
+                    )
                     engine.working_memory.update_salience_baseline(engine)
 
             # 3A-bis. Causal Theory Planning (Phase B):

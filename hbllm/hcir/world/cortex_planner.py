@@ -225,7 +225,10 @@ class EpistemicGoalScheduler:
                                 goals.remove(sp)
                             goals.insert(0, sp)
             elif wm.active_schema is None and wm.procedural_library:
-                matched = wm.find_matching_skill(available_actions=available_actions)
+                matched = wm.find_matching_skill(
+                    available_actions=available_actions,
+                    context={"current_level": getattr(engine, "current_level", 0)},
+                )
                 if matched is not None:
                     skill_name, _ = matched
                     schema = wm.instantiate_skill_as_schema(skill_name)
@@ -658,48 +661,14 @@ class MentalSimulationPlanner:
                 ):
                     static_barriers.add((r, c))
 
-        u_vals, u_counts = np.unique(curr_grid, return_counts=True)
-        feat_counts = dict(zip(u_vals, u_counts))
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
                 if engine.symbolic_theory.is_barrier(val) or (
                     val in engine.hazard_tracker.known_lethal_features
-                    and feat_counts.get(val, 0) >= 25
+                    and val not in engine.mobile_threat_features
                 ):
                     static_barriers.add((r, c))
-
-        # General Intelligence & Physics Grounding:
-        # Physical surfaces (roads, tracks, rails, corridors, bridges) can have narrow elongated
-        # geometries in 2D lattices or 3D LiDAR/occupancy scans. Empirical traversal evidence
-        # strictly supersedes geometric bounding-box priors.
-        for feat in np.unique(curr_grid):
-            feat_int = int(feat)
-            if (
-                feat_int == bg
-                or feat_int in av_feats
-                or feat_int in engine.symbolic_theory.walkable_features
-                or feat_int in engine.symbolic_theory.goal_features
-                or feat_int in engine.symbolic_theory.candidate_goal_features
-            ):
-                continue
-            if engine.avatar_pos is not None:
-                ar, ac = engine.avatar_pos
-                if 0 <= ar < H and 0 <= ac < W and int(curr_grid[ar, ac]) == feat_int:
-                    continue
-            pts = np.argwhere(curr_grid == feat_int)
-            if 15 <= len(pts) <= H * W * 0.15:
-                min_r, min_c = pts.min(axis=0)
-                max_r, max_c = pts.max(axis=0)
-                h_span = max_r - min_r + 1
-                w_span = max_c - min_c + 1
-                if (w_span <= 3 and h_span >= 20 and len(pts) >= h_span * 0.7) or (
-                    h_span <= 3 and w_span >= 20 and len(pts) >= w_span * 0.7
-                ):
-                    for pr, pc in pts:
-                        p_coord = (int(pr), int(pc))
-                        if p_coord not in goals:
-                            static_barriers.add(p_coord)
 
         # Explicitly ground all static lethal positions from hazard tracker and level memory
         for r, c in engine.current_level_lethal_positions:
@@ -772,6 +741,39 @@ class MentalSimulationPlanner:
                         and 0 <= aff.remote_pos[1] < W
                     ):
                         mutation_triggers.setdefault(trig_pos, set()).add(aff.remote_pos)
+
+        # Historical state mutations
+        if hasattr(engine, "state_mutations"):
+            for m in engine.state_mutations:
+                opened_cells: set[tuple[int, int]] = set()
+                for r in range(H):
+                    for c in range(W):
+                        if int(curr_grid[r, c]) == m.prior_value and (
+                            m.posterior_value == bg or m.posterior_value == 0
+                        ):
+                            opened_cells.add((r, c))
+                if not opened_cells:
+                    continue
+
+                if (
+                    m.trigger_pos is not None
+                    and len(m.trigger_pos) >= 2
+                    and 0 <= m.trigger_pos[0] < H
+                    and 0 <= m.trigger_pos[1] < W
+                ):
+                    tr_p = (int(m.trigger_pos[0]), int(m.trigger_pos[1]))
+                    mutation_triggers.setdefault(tr_p, set()).update(opened_cells)
+
+                if (
+                    m.trigger_feature is not None
+                    and m.trigger_feature != bg
+                    and m.trigger_feature != engine.bg_feature
+                    and not engine.symbolic_theory.is_walkable(m.trigger_feature)
+                ):
+                    for r in range(H):
+                        for c in range(W):
+                            if int(curr_grid[r, c]) == m.trigger_feature:
+                                mutation_triggers.setdefault((r, c), set()).update(opened_cells)
 
         return mutation_triggers
 
@@ -1023,23 +1025,10 @@ class MentalSimulationPlanner:
                 if cell_val in _barrier_feats or (bg_is_impassable_void and cell_val == bg):
                     _grid_walls.add((rr, cc))
 
-        # Topological Dead-End Pruning: When navigating under step/energy constraints,
-        # prune dead-end branches from searchable space so search never enters dead ends.
-        if step_size >= 1 and goals:
-            passable_grid = np.ones((H, W), dtype=bool)
-            for w in _grid_walls:
-                if 0 <= w[0] < H and 0 <= w[1] < W:
-                    passable_grid[w[0], w[1]] = False
-            pruned_topology = PerceptionEngine.prune_topological_dead_ends(
-                passable=passable_grid,
-                goals=set(goals),
-                avatar_pos=engine.avatar_pos,
-                step_size=step_size,
-            )
-            for rr in range(H):
-                for cc in range(W):
-                    if not pruned_topology[rr, cc]:
-                        _grid_walls.add((rr, cc))
+        # Note: Do not artificially inject topological cul-de-sacs as solid walls into _grid_walls,
+        # as doing so locks the agent out of evasive nooks, hiding alcoves, and side rooms
+        # needed for pacing, threat evasion, and item retrieval. Space-Time A* with grid_dist_field
+        # naturally prioritizes shortest geodesic paths without artificial topological mutilation.
 
         def _corridor_blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
             probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
@@ -1908,8 +1897,8 @@ class MentalSimulationPlanner:
                             new_threats,
                             new_patrols,
                             new_chasers,
-                            new_waits,
                             path_len + 1,
+                            new_waits,
                         ),
                     )
 

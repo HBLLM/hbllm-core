@@ -735,8 +735,13 @@ class EpistemicFeedbackAssimilator:
                 for pe, ce, delta in moved_entities
                 if ce.area <= 64
                 and (
-                    ce.feature_id in av_feats
-                    or getattr(engine, "_avatar_controllability_evidence", {}).get(ce.feature_id, 0)
+                    (not av_feats and not getattr(engine, "_avatar_controllability_evidence", {}))
+                    or ce.feature_id in av_feats
+                    or len(
+                        getattr(engine, "_avatar_controllability_evidence", {}).get(
+                            ce.feature_id, []
+                        )
+                    )
                     > 0
                 )
                 and ce.feature_id not in engine.mobile_threat_features
@@ -1568,38 +1573,28 @@ class EpistemicFeedbackAssimilator:
             movable_features.update(engine.hazard_tracker.mobile_threat_features)
 
         def is_hud_mutation(r: int, c: int) -> bool:
-            """Perimeter status bar / HUD isolation: detects mutations in edge bands or behind solid non-background divider lines."""
+            """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
             if engine.prev_grid is None:
                 return False
             pH, pW = engine.prev_grid.shape
             if pH < 24 or pW < 24:
                 return False
 
-            if engine.avatar_pos is not None:
-                ar, ac = int(engine.avatar_pos[0]), int(engine.avatar_pos[1])
-                if r >= pH - 6 and ar < pH - 8:
-                    return True
-                if r < 3 and ar >= 5:
-                    return True
-
-                min_r, max_r = max(0, min(ar, r)), min(pH, max(ar, r))
-                for div_r in range(min_r + 1, max_r):
-                    if 0 <= div_r < pH:
-                        div_val = int(engine.prev_grid[div_r, 0])
-                        if div_val != bg and np.all(engine.prev_grid[div_r, :] == div_val):
-                            if div_r >= pH - 16 or div_r <= 16:
-                                return True
-
-                min_c, max_c = max(0, min(ac, c)), min(pW, max(ac, c))
-                for div_c in range(min_c + 1, max_c):
-                    if 0 <= div_c < pW:
-                        div_val = int(engine.prev_grid[0, div_c])
-                        if div_val != bg and np.all(engine.prev_grid[:, div_c] == div_val):
-                            if div_c >= pW - 16 or div_c <= 16:
-                                return True
-            else:
-                if r >= pH - 6 or r < 3:
-                    return True
+            # Check if (r, c) is partitioned by a solid non-background divider line spanning >= 85% width
+            if r < 6:
+                for div_r in range(r + 1, min(8, pH)):
+                    div_val = int(engine.prev_grid[div_r, 0])
+                    if div_val != bg and np.count_nonzero(
+                        engine.prev_grid[div_r, :] == div_val
+                    ) >= int(pW * 0.85):
+                        return True
+            elif r >= pH - 6:
+                for div_r in range(max(pH - 8, 0), r):
+                    div_val = int(engine.prev_grid[div_r, 0])
+                    if div_val != bg and np.count_nonzero(
+                        engine.prev_grid[div_r, :] == div_val
+                    ) >= int(pW * 0.85):
+                        return True
             return False
 
         av_radius = max(2, int(round(math.sqrt(max(1, engine.avatar_size)))))
@@ -1656,19 +1651,10 @@ class EpistemicFeedbackAssimilator:
                 else None
             )
 
-            if (
-                trigger_feat is None
-                or trigger_feat == bg
-                or trigger_feat == engine.bg_feature
-                or engine.symbolic_theory.is_walkable(trigger_feat)
-            ):
+            if trigger_feat is None or trigger_feat == bg or trigger_feat == engine.bg_feature:
                 trigger_feat = None
 
-            # Stepping onto empty background or normal walkable terrain during displacement
-            # cannot be an ungrounded contact trigger for an environmental toggle.
-            if is_known_displacement and trigger_feat is None:
-                pass
-            else:
+            if trigger_pos is not None or trigger_feat is not None:
                 existing_mut = next(
                     (
                         m

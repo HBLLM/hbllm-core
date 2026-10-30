@@ -706,16 +706,16 @@ class GestaltAffordanceDetector:
         oriented_threats: list[OrientedThreat] = []
 
         for e in entities:
-            if e.area < 4 or e.area > 20:
+            if e.area < 2 or e.area > 36:
                 continue
             if getattr(e, "role", None) == EntityRole.MANIPULABLE:
                 continue
             r0, r1, c0, c1 = e.bounding_box
-            if not (2 <= r1 - r0 <= 4 and 2 <= c1 - c0 <= 4):
+            if not (1 <= r1 - r0 <= 6 and 1 <= c1 - c0 <= 6):
                 continue
             patch = grid[r0 : r1 + 1, c0 : c1 + 1]
             vals, counts = np.unique(patch, return_counts=True)
-            if len(vals) == 2 and np.min(counts) <= 2:
+            if len(vals) == 2 and np.min(counts) <= max(2, int(e.area * 0.35)):
                 body_val = int(vals[np.argmax(counts)])
                 eye_val = int(vals[np.argmin(counts)])
                 if (
