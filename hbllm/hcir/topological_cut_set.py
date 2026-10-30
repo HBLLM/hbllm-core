@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 try:
@@ -298,34 +299,46 @@ class TopologicalCutSetAnalyzer:
         b_1 = max(0, edge_count - V + b_0)
 
         # 2. Articulation points / Bottlenecks (cells whose removal increases b_0)
+        # Computed iteratively to avoid recursion depth limits on large grid manifolds
         bottlenecks: set[tuple[int, int]] = set()
         tin: dict[tuple[int, int], int] = {}
         low: dict[tuple[int, int], int] = {}
         timer = 0
 
-        def dfs_articulation(u: tuple[int, int], p: tuple[int, int] | None = None) -> None:
-            nonlocal timer
-            timer += 1
-            tin[u] = low[u] = timer
-            children = 0
-            for v in adj[u]:
-                if v == p:
-                    continue
-                if v in tin:
-                    low[u] = min(low[u], tin[v])
-                else:
-                    dfs_articulation(v, u)
-                    low[u] = min(low[u], low[v])
-                    if low[v] >= tin[u] and p is not None:
-                        bottlenecks.add(u)
-                    children += 1
-            if p is None and children > 1:
-                bottlenecks.add(u)
-
         for comp in components:
-            if comp:
-                root = next(iter(comp))
-                dfs_articulation(root)
+            if not comp:
+                continue
+            root = next(iter(comp))
+            timer += 1
+            tin[root] = low[root] = timer
+            # Stack stores: [node, parent, neighbor_iterator, children_count]
+            stack: list[
+                tuple[tuple[int, int], tuple[int, int] | None, Iterator[tuple[int, int]], int]
+            ] = [(root, None, iter(adj[root]), 0)]
+
+            while stack:
+                u, p, it, children = stack[-1]
+                try:
+                    v = next(it)
+                    if v == p:
+                        continue
+                    if v in tin:
+                        low[u] = min(low[u], tin[v])
+                    else:
+                        timer += 1
+                        tin[v] = low[v] = timer
+                        stack.append((v, u, iter(adj[v]), 0))
+                except StopIteration:
+                    stack.pop()
+                    if p is None:
+                        if children > 1:
+                            bottlenecks.add(u)
+                    else:
+                        pu, pp, pit, pchildren = stack[-1]
+                        low[pu] = min(low[pu], low[u])
+                        if low[u] >= tin[pu] and pp is not None:
+                            bottlenecks.add(pu)
+                        stack[-1] = (pu, pp, pit, pchildren + 1)
 
         # 3. Cavities (dead-end pockets / cul-de-sacs with degree <= 1)
         cavities: list[set[tuple[int, int]]] = []
@@ -335,6 +348,8 @@ class TopologicalCutSetAnalyzer:
             curr = de
             prev: tuple[int, int] | None = None
             while curr not in bottlenecks and len(adj[curr]) <= 2:
+                if curr in cavity:
+                    break
                 cavity.add(curr)
                 next_cells = [n for n in adj[curr] if n != prev]
                 if not next_cells:

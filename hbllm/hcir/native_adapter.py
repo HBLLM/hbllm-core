@@ -1570,6 +1570,124 @@ class NativeGraphAdapter:
 
         return fvs
 
+    def essential_causal_skeleton(
+        self,
+    ) -> set[tuple[str, str]]:
+        """Compute the irreducible causal skeleton DAG via transitive reduction."""
+        reduced = self.transitive_reduction()
+        edges: set[tuple[str, str]] = set()
+        for nid in reduced.all_node_ids():
+            for edge in reduced.edges_from(nid):
+                for target in edge.get("targets", []):
+                    edges.add((nid, target))
+        return edges
+
+    def graph_radius_and_diameter(self, weight_attribute: str = "weight") -> tuple[float, float]:
+        """Compute the radius and diameter of the graph based on node eccentricities.
+
+        Eccentricity e(u) = max_{v != u, reachable} dist(u, v).
+        Radius R = min_u e(u), Diameter D = max_u e(u).
+
+        Returns:
+            Tuple of (radius, diameter). Returns (0.0, 0.0) if disconnected or empty.
+        """
+        all_nodes = list(self.all_node_ids())
+        if len(all_nodes) <= 1:
+            return (0.0, 0.0)
+
+        dist, _ = self.all_pairs_shortest_paths(weight_attribute=weight_attribute)
+        eccentricities: list[float] = []
+
+        for u in all_nodes:
+            dists = [
+                d for (src, tgt), d in dist.items() if src == u and tgt != u and d < float("inf")
+            ]
+            if dists:
+                eccentricities.append(max(dists))
+
+        if not eccentricities:
+            return (0.0, 0.0)
+
+        return (min(eccentricities), max(eccentricities))
+
+    def betweenness_centrality(
+        self, normalized: bool = True, directed: bool = False
+    ) -> dict[str, float]:
+        """Compute exact betweenness centrality for all nodes via Brandes (2001) algorithm.
+
+        Args:
+            normalized: If True, normalizes scores by (n-1)(n-2) for directed or 2/((n-1)(n-2)) for undirected.
+            directed: If True, treats edges as directed.
+
+        Returns:
+            Dictionary mapping node IDs to betweenness centrality scores.
+        """
+        all_nodes = set(self.all_node_ids())
+        cb: dict[str, float] = {v: 0.0 for v in all_nodes}
+        n = len(all_nodes)
+        if n <= 2:
+            return cb
+
+        adj: dict[str, list[str]] = defaultdict(list)
+        if self._native is not None:
+            for nid in all_nodes:
+                for edge in self._native.edges_from(nid):
+                    for target in edge.get("targets", []):
+                        if target in all_nodes and target != nid:
+                            adj[nid].append(target)
+                            if not directed:
+                                adj[target].append(nid)
+        else:
+            for edge in self._py_edges.values():
+                for s in edge.get("sources", []):
+                    if s in all_nodes:
+                        for t in edge.get("targets", []):
+                            if t in all_nodes and s != t:
+                                adj[s].append(t)
+                                if not directed:
+                                    adj[t].append(s)
+
+        for s in all_nodes:
+            stack: list[str] = []
+            p: dict[str, list[str]] = {w: [] for w in all_nodes}
+            sigma: dict[str, float] = {w: 0.0 for w in all_nodes}
+            sigma[s] = 1.0
+            d: dict[str, int] = {w: -1 for w in all_nodes}
+            d[s] = 0
+            queue: deque[str] = deque([s])
+
+            while queue:
+                v = queue.popleft()
+                stack.append(v)
+                for w in adj[v]:
+                    if d[w] < 0:
+                        d[w] = d[v] + 1
+                        queue.append(w)
+                    if d[w] == d[v] + 1:
+                        sigma[w] += sigma[v]
+                        p[w].append(v)
+
+            delta: dict[str, float] = {w: 0.0 for w in all_nodes}
+            while stack:
+                w = stack.pop()
+                for v in p[w]:
+                    if sigma[w] > 0:
+                        delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+                if w != s:
+                    cb[w] += delta[w]
+
+        # Symmetrize / scale for undirected graphs where each path is traversed twice
+        if not directed:
+            for v in cb:
+                cb[v] /= 2.0
+
+        if normalized and n > 2:
+            scale = 1.0 / ((n - 1) * (n - 2)) if directed else 2.0 / ((n - 1) * (n - 2))
+            for v in cb:
+                cb[v] *= scale
+
+        return cb
+
     def extract_subgraph(
         self, seed: str, max_depth: int = 2
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

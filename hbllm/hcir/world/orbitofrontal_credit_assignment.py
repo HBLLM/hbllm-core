@@ -193,3 +193,23 @@ class OrbitofrontalCreditAssignmentEngine:
     def is_branch_switch_indicated(self, report: CounterfactualCreditReport) -> bool:
         """Determine if counterfactual regret exceeds the policy re-arbitration threshold."""
         return report.counterfactual_regret >= self.regret_threshold
+
+    def assign_counterfactual_credit(
+        self,
+        chosen_action: str | int,
+        available_actions: Collection[str | int],
+        experienced_reward: float = 0.0,
+        state_key: str = "current_state",
+        relational_similarities: Mapping[str, float]
+        | Mapping[int, float]
+        | Mapping[str | int, float]
+        | None = None,
+    ) -> CounterfactualCreditReport:
+        """Assign experiential credit to chosen action and propagate counterfactual credit to alternatives."""
+        return self.update_contingent_credit(
+            state_key=state_key,
+            chosen_action=chosen_action,
+            observed_outcome=experienced_reward,
+            available_actions=available_actions,
+            relational_similarities=relational_similarities,
+        )

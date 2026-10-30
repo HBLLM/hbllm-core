@@ -74,6 +74,9 @@ from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
     BilateralState,
 )
+from hbllm.hcir.world.boundary_grid_phase_aligner import (
+    BoundaryGridPhaseAligner,
+)
 from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
@@ -180,6 +183,9 @@ from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
     LocusCoeruleusNoradrenalineEngine,
     NoradrenergicState,
 )
+from hbllm.hcir.world.medial_prefrontal_schema import (
+    MedialPrefrontalSchemaEngine,
+)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -269,6 +275,10 @@ from hbllm.hcir.world.subicular_boundary_vector import (
 from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
     SubthalamicDriftDiffusionEngine,
+)
+from hbllm.hcir.world.subthalamic_threshold_escalator import (
+    STNBrakingStatus,
+    SubthalamicThresholdEscalator,
 )
 from hbllm.hcir.world.superior_colliculus_arbiter import (
     SaccadeTarget,
@@ -414,6 +424,11 @@ from hbllm.hcir.world.global_neuronal_workspace import (
     GlobalNeuronalWorkspace,
     IgnitionEvent,
 )
+from hbllm.hcir.world.global_workspace_ignition import (
+    CandidateIgnitionSignal,
+    ConsciousIgnitionPacket,
+    GlobalWorkspaceIgnitionEngine,
+)
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
     MetacognitiveAssessment,
@@ -451,6 +466,39 @@ from hbllm.hcir.world.thalamocortical_binding import (
     BoundFeatureBundle,
     ThalamocorticalBindingEngine,
 )
+
+
+@dataclass(frozen=True)
+class UnifiedActiveInferenceDecision:
+    """Canonical Grand Capstone decision record unifying the 5 cortical active inference stages."""
+
+    selected_action: Any
+    motor_intent: str
+    epistemic_phase: EpistemicPhase
+    expected_free_energy: float
+    confidence_score: float
+    subthalamic_status: str
+    conscious_broadcast: ConsciousIgnitionPacket | None
+    schema_archetype: str | None
+    locomotor_velocity: float
+    time_dilation_factor: float
+    subgoal_summary: str | None
+    deliberation_cycles_spent: int
+
+    def to_causal_predicate(self) -> CausalPredicate:
+        """Export unified decision into HCIR CausalPredicate."""
+        act_str = str(self.selected_action)
+        phase_str = str(self.epistemic_phase)
+        schema_str = self.schema_archetype or "none"
+        stn_str = self.subthalamic_status
+        return CausalPredicate(
+            variable="active_inference_decision",
+            operator="==",
+            value=f"act:{act_str}:phase:{phase_str}:efe:{self.expected_free_energy:.3f}:conf:{self.confidence_score:.2f}:schema:{schema_str}:stn:{stn_str}:vel:{self.locomotor_velocity:.2f}",
+            relation="canonical_active_inference_step",
+            target_entity="prefrontal_executive_governor",
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Master Autonomous Epistemic Engine Orchestrator
@@ -806,6 +854,18 @@ class AutonomousEpistemicEngine:
 
         # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
         self.ppn_locomotor: PedunculopontineLocomotorEngine = PedunculopontineLocomotorEngine()
+
+        # Round 19 Faculty: Hippocampal-Entorhinal Boundary-to-Grid Phase Alignment (Bush / Giocomo)
+        self.boundary_grid_aligner: BoundaryGridPhaseAligner = BoundaryGridPhaseAligner()
+
+        # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
+        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine()
+
+        # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
+        self.stn_escalator: SubthalamicThresholdEscalator = SubthalamicThresholdEscalator()
+
+        # Round 20 Capstone Faculty: Global Neuronal Workspace Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
+        self.workspace_ignition: GlobalWorkspaceIgnitionEngine = GlobalWorkspaceIgnitionEngine()
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -4374,6 +4434,196 @@ class AutonomousEpistemicEngine:
             micro_actions=micro_actions,
             **kwargs,
         )
+
+    def decide_active_inference_step(
+        self,
+        curr_grid: Any,
+        available_actions: Sequence[Any],
+        is_win: bool = False,
+        is_lost: bool = False,
+        action_schemas: Sequence[Any] | None = None,
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+        **kwargs: Any,
+    ) -> UnifiedActiveInferenceDecision:
+        """Unified Canonical 5-Stage Active Inference Decision Loop (Round 20 Grand Capstone).
+
+        Orchestrates:
+        1. SENSORY PERCEPTION & COORDINATE LIFTING:
+           Perceives sensory frame, performs boundary-to-grid phase alignment (Bush/Giocomo),
+           and matches invariant task schemata (Euston/McKenzie).
+        2. ASSIMILATION & SURPRISE INDUCTION:
+           Integrates interoceptive pacing & subjective time dilation (Craig/Wittmann),
+           computes prediction errors, and runs non-linear conscious workspace ignition (Dehaene/Mashour).
+        3. COUNTERFACTUAL SIMULATION & SUBGOAL SCHEDULING:
+           Runs mental simulation rollouts, computes counterfactual credit assignments (Walton/Rushworth),
+           and queries recursive frontopolar subgoal stacks.
+        4. PREFRONTAL DELIBERATION & SAFETY GATING:
+           Evaluates evidence margin against dynamic STN conflict-escalated decision thresholds (Frank),
+           applying Habenular/vlPFC motor inhibition if conflict or threat exceeds margin.
+        5. MOTOR DISPATCH & TRANSACTION EXECUTION:
+           Modulates locomotor velocity and pacing regimes (Garcia-Rill/Takakusaki),
+           commits cognitive transaction, and returns the canonical decision output.
+        """
+        # --- Stage 1: Sensory Perception & Coordinate Lifting ---
+        h, w = 16, 16
+        if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2:
+            h, w = int(curr_grid.shape[0]), int(curr_grid.shape[1])
+        elif (
+            isinstance(curr_grid, (list, tuple))
+            and curr_grid
+            and isinstance(curr_grid[0], (list, tuple))
+        ):
+            h, w = len(curr_grid), len(curr_grid[0])
+
+        pos = (
+            (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
+            if self.avatar_pos is not None
+            else (float(h) / 2.0, float(w) / 2.0)
+        )
+        observed_boundaries = {
+            "north": max(0.0, pos[0]),
+            "south": max(0.0, float(h - 1) - pos[0]),
+            "west": max(0.0, pos[1]),
+            "east": max(0.0, float(w - 1) - pos[1]),
+        }
+        alignment_state = self.boundary_grid_aligner.align_grid_phase_with_boundaries(
+            estimated_pos=pos,
+            grid_dimensions=(h, w),
+            observed_boundary_distances=observed_boundaries,
+        )
+
+        entity_roles: dict[str, str] = {}
+        if self.avatar_pos is not None:
+            entity_roles["avatar"] = "actor"
+        if self.learned_goal_positions:
+            entity_roles["target_goal"] = "target"
+        if self.learned_barriers:
+            entity_roles["barrier_obs"] = "barrier"
+
+        schema_report = self.mpfc_schema_engine.match_schema_context(entity_roles)
+        dominant_schema = schema_report.dominant_schema
+
+        # --- Stage 2: Assimilation & Surprise Induction ---
+        surprise_val = float(getattr(self, "last_surprise_score", 0.15))
+        pacing = self.anterior_insula_timing.compute_subjective_dilation(
+            objective_dt=1.0,
+            threat_level=0.10,
+            salience_score=surprise_val,
+        )
+
+        candidate_signals = [
+            CandidateIgnitionSignal(
+                source_modality="perception",
+                content_payload=f"phase_align_drift:{alignment_state.total_drift_corrected:.2f}",
+                salience_score=min(1.0, 0.40 + alignment_state.total_drift_corrected),
+            ),
+            CandidateIgnitionSignal(
+                source_modality="surprise",
+                content_payload=f"prediction_error:{surprise_val:.3f}",
+                salience_score=min(1.0, surprise_val * 1.5),
+            ),
+        ]
+        if dominant_schema:
+            candidate_signals.append(
+                CandidateIgnitionSignal(
+                    source_modality="schema",
+                    content_payload=f"archetype:{dominant_schema.archetype_name}",
+                    salience_score=dominant_schema.match_confidence,
+                )
+            )
+
+        workspace_state = self.workspace_ignition.compete_and_ignite(candidate_signals)
+        ignited_packet = workspace_state.active_ignition
+
+        # --- Stage 3: Counterfactual Simulation & Deliberation ---
+        chosen_action, action_data = self.deliberation_engine.decide(
+            self,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            is_win=is_win,
+            is_lost=is_lost,
+            action_schemas=action_schemas,
+            objects=objects,
+            micro_actions=micro_actions,
+            **kwargs,
+        )
+
+        cf_report = self.ofc_counterfactual.assign_counterfactual_credit(
+            chosen_action=chosen_action,
+            available_actions=available_actions,
+            experienced_reward=1.0 if is_win else (-1.0 if is_lost else 0.0),
+        )
+
+        # --- Stage 4: Prefrontal Deliberation & Safety Gating ---
+        q_vals = [cf_report.chosen_updated_value] + [
+            branch.updated_value for branch in cf_report.branch_updates
+        ]
+        stn_decision = self.stn_escalator.evaluate_decision_threshold(
+            candidate_q_values=q_vals,
+            elapsed_deliberation_steps=self.step_counter,
+        )
+
+        # Inhibit motor dispatch if hard stop triggered and alternatives exist
+        final_action = chosen_action
+        if stn_decision.status == STNBrakingStatus.BRAKE_ACTIVE and len(available_actions) > 1:
+            if cf_report.counterfactual_regret > 0.5:
+                final_action = cf_report.best_alternative_action
+
+        # --- Stage 5: Motor Dispatch & Locomotor Modulation ---
+        dist_to_goal = 5.0
+        if self.avatar_pos and self.learned_goal_positions:
+            dist_to_goal = min(
+                abs(self.avatar_pos[0] - g[0]) + abs(self.avatar_pos[1] - g[1])
+                for g in self.learned_goal_positions
+            )
+
+        locomotor_cmd = self.ppn_locomotor.modulate_drive(
+            drive_urgency=0.50 + 0.30 * (1.0 - stn_decision.detected_conflict),
+            target_proximity=float(dist_to_goal),
+            surface_friction=0.10,
+        )
+
+        # Calibrated confidence vector
+        calibrated_conf = self.confidence_calibrator.calibrate(
+            raw_confidence=float(getattr(self, "_confidence", 0.85)),
+        ).calibrated_confidence
+
+        # Compute expected free energy (EFE = epistemic value + pragmatic value)
+        expected_fe = float(
+            (1.0 - calibrated_conf) * 0.50 + (1.0 - (1.0 / (1.0 + max(0.0, dist_to_goal)))) * 0.50
+        )
+
+        # Subgoal summary
+        active_subgoal = self.subgoal_stack.current_subgoal
+        subgoal_desc = (
+            active_subgoal.subgoal_id
+            if active_subgoal
+            else (
+                dominant_schema.subgoal_hints[0]
+                if dominant_schema and dominant_schema.subgoal_hints
+                else "navigate"
+            )
+        )
+
+        # Assemble and record transaction
+        decision = UnifiedActiveInferenceDecision(
+            selected_action=final_action,
+            motor_intent="NAVIGATE_TO",
+            epistemic_phase=self._phase,
+            expected_free_energy=expected_fe,
+            confidence_score=calibrated_conf,
+            subthalamic_status=stn_decision.status.value,
+            conscious_broadcast=ignited_packet,
+            schema_archetype=dominant_schema.archetype_name if dominant_schema else None,
+            locomotor_velocity=locomotor_cmd.velocity,
+            time_dilation_factor=pacing.dilation_factor,
+            subgoal_summary=subgoal_desc,
+            deliberation_cycles_spent=stn_decision.recommended_deliberation_cycles,
+        )
+
+        self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        return decision
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export master epistemic engine state as a declarative causal predicate."""

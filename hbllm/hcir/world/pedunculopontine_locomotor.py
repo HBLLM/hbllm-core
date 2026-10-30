@@ -148,3 +148,16 @@ class PedunculopontineLocomotorEngine:
             friction_coefficient=float(friction),
             deceleration_reason=reason,
         )
+
+    def modulate_drive(
+        self,
+        drive_urgency: float,
+        target_proximity: float = 10.0,
+        surface_friction: float = 0.0,
+    ) -> LocomotorDriveCommand:
+        """Modulate locomotor drive and pacing velocity based on urgency, proximity, and friction."""
+        return self.modulate_locomotor_velocity(
+            distance_to_obstacle=target_proximity,
+            surface_friction=surface_friction if surface_friction > 0 else 0.10,
+            urgency_score=drive_urgency,
+        )

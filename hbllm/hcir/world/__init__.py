@@ -22,6 +22,12 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
     EpistemicTruthValue,
+    UnifiedActiveInferenceDecision,
+)
+from hbllm.hcir.world.boundary_grid_phase_aligner import (
+    BoundaryGridPhaseAligner,
+    BoundaryPhaseAlignmentState,
+    PhaseInnovationVector,
 )
 from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
@@ -78,6 +84,13 @@ from hbllm.hcir.world.frontopolar_subgoal_tree import (
     SubgoalTreeNode,
     SubgoalTreeStatus,
 )
+from hbllm.hcir.world.global_workspace_ignition import (
+    CandidateIgnitionSignal,
+    ConsciousIgnitionPacket,
+    GlobalWorkspaceIgnitionEngine,
+    GlobalWorkspaceState,
+    IgnitionPriority,
+)
 from hbllm.hcir.world.habenula_striatum_opponency import (
     DualValueOpponencyCortex,
     OpponencyRegime,
@@ -117,6 +130,12 @@ from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
     ExplorationRegime,
     LocusCoeruleusNoradrenalineEngine,
     NoradrenergicState,
+)
+from hbllm.hcir.world.medial_prefrontal_schema import (
+    GeneralizedTaskSchema,
+    MedialPrefrontalSchemaEngine,
+    SchemaGeneralizationReport,
+    SchemaMatchResult,
 )
 from hbllm.hcir.world.object_state_graph import (
     ObjectCategory,
@@ -209,6 +228,11 @@ from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
     SubthalamicDriftDiffusionEngine,
 )
+from hbllm.hcir.world.subthalamic_threshold_escalator import (
+    STNBrakingStatus,
+    SubthalamicThresholdEscalator,
+    ThresholdModulationDecision,
+)
 from hbllm.hcir.world.superior_colliculus_arbiter import (
     MultisensoryPriorityMap,
     SaccadeTarget,
@@ -276,10 +300,13 @@ __all__ = [
     "BasePerceptionAdapter",
     "BeliefTransitionEvent",
     "BorderCell",
+    "BoundaryGridPhaseAligner",
+    "BoundaryPhaseAlignmentState",
     "BoundaryVectorCell",
     "BoundaryVectorMap",
     "BranchMode",
     "BranchSwitchDecision",
+    "CandidateIgnitionSignal",
     "CausalHypothesis",
     "CausalPredicate",
     "CausalVariable",
@@ -290,6 +317,7 @@ __all__ = [
     "CognitiveTaskSet",
     "ConditionedThreatStimulus",
     "ConflictProfile",
+    "ConsciousIgnitionPacket",
     "ContextTransitionEvent",
     "CounterfactualBranch",
     "CounterfactualCreditReport",
@@ -317,6 +345,9 @@ __all__ = [
     "FoveatedSaliencyMap",
     "FoveationResolution",
     "FrontopolarExplorationHorizonEngine",
+    "GeneralizedTaskSchema",
+    "GlobalWorkspaceIgnitionEngine",
+    "GlobalWorkspaceState",
     "GridModuleRescalingResult",
     "HapticAffordanceFeedback",
     "HCIRSymbolicWorldTheory",
@@ -324,6 +355,7 @@ __all__ = [
     "HippocampalPhasePrecessionEngine",
     "HippocampalPrioritizedReplayBuffer",
     "HippocampalTimeCellEngine",
+    "IgnitionPriority",
     "InferredBranchValue",
     "InferotemporalShapeHasher",
     "InhibitionRegime",
@@ -336,6 +368,7 @@ __all__ = [
     "LocomotorDriveCommand",
     "LocomotorPacingRegime",
     "LocusCoeruleusNoradrenalineEngine",
+    "MedialPrefrontalSchemaEngine",
     "MotorPrediction",
     "MultisensoryPriorityMap",
     "NoradrenergicState",
@@ -351,6 +384,7 @@ __all__ = [
     "PedunculopontineLocomotorEngine",
     "PerceptionFrame",
     "PerceptionRegistry",
+    "PhaseInnovationVector",
     "PhasePrecessionBurst",
     "PlanAttributionReport",
     "PotentialFieldVector",
@@ -372,8 +406,11 @@ __all__ = [
     "RetrosplenialHeadingEngine",
     "ReversibilityEngine",
     "RuleTransferResult",
+    "STNBrakingStatus",
     "SaccadeTarget",
     "SalientObject",
+    "SchemaGeneralizationReport",
+    "SchemaMatchResult",
     "SensoryShieldingState",
     "ShapeArchetypeSignature",
     "SomaticAffectiveBias",
@@ -390,6 +427,7 @@ __all__ = [
     "SubgoalTreeStatus",
     "SubicularBoundaryVectorEngine",
     "SubthalamicDriftDiffusionEngine",
+    "SubthalamicThresholdEscalator",
     "SuperiorColliculusTargetArbiter",
     "SurfaceFrictionProfile",
     "SurpriseEngine",
@@ -400,9 +438,11 @@ __all__ = [
     "TemporalTimeCell",
     "ThalamicReticularGatingEngine",
     "ThetaPhase",
+    "ThresholdModulationDecision",
     "TimeIntervalState",
     "TRNGateChannel",
     "TransthalamicRoute",
+    "UnifiedActiveInferenceDecision",
     "UnifiedPerceptualGestalt",
     "VentralPremotorAffordanceResonator",
     "VentralTegmentalCuriosityEngine",
