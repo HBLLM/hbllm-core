@@ -35,6 +35,7 @@ from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.cortex_perception import SpatialEntity
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,11 @@ class ReplayCreditAssignment:
     inhibited_transitions: list[tuple[tuple[int, int] | None, Any]] = field(default_factory=list)
     suspected_lethal_features: set[int] = field(default_factory=set)
     confidence: float = 1.0
+    root_causal_step: int | None = None
+    root_fatal_pos: tuple[int, int] | None = None
+    root_fatal_action: Any | None = None
+    max_shapley_blame: float = 0.0
+    shapley_explanation: str = ""
 
 
 @dataclass
@@ -580,8 +586,27 @@ class HippocampalEpisodicCortex:
                         suspected_hazards.add(cand_int)
                         self.discovered_lethal_features.add(cand_int)
 
-        # 4. Extract inhibited state-actions from SWR backward horizon
+        # 4. Long-Horizon Counterfactual Shapley Credit Attribution
+        from hbllm.hcir.world.shapley_credit_attribution import (
+            CounterfactualShapleyCreditAttributor,
+        )
+
+        shapley_res = CounterfactualShapleyCreditAttributor.attribute_blame(
+            trajectory=self.current_episode,
+            learned_goals=getattr(self, "learned_goals", set()),
+            learned_barriers=getattr(self, "learned_barriers", set()),
+        )
         inhibited: list[tuple[tuple[int, int] | None, Any]] = []
+        if shapley_res.root_fatal_pos is not None and shapley_res.root_fatal_action is not None:
+            inhibited.append((shapley_res.root_fatal_pos, shapley_res.root_fatal_action))
+            self.grounded_lethal_transitions.add(
+                (shapley_res.root_fatal_pos, shapley_res.root_fatal_action)
+            )
+            self.habenular_ior.preemptively_inhibit_action(
+                shapley_res.root_fatal_pos, shapley_res.root_fatal_action, penalty=50.0
+            )
+
+        # 4b. Extract inhibited state-actions from SWR backward horizon
         horizon = min(len(self.current_episode), self.replay_horizon)
         for i in range(len(self.current_episode) - 1, len(self.current_episode) - horizon - 1, -1):
             ep = self.current_episode[i]
@@ -594,6 +619,11 @@ class HippocampalEpisodicCortex:
             inhibited_transitions=inhibited,
             suspected_lethal_features=suspected_hazards,
             confidence=1.0,
+            root_causal_step=shapley_res.root_causal_step,
+            root_fatal_pos=shapley_res.root_fatal_pos,
+            root_fatal_action=shapley_res.root_fatal_action,
+            max_shapley_blame=shapley_res.max_blame_score,
+            shapley_explanation=shapley_res.causal_explanation,
         )
         self.catastrophic_replays.append(assignment)
         self._archive_and_clear()
@@ -1399,6 +1429,44 @@ class FalsifiableAnalogyEngine:
             return False
         m = self.active_analogies[analogy_id]
         return m.status != AnalogyStatus.REJECTED and m.counterexamples == 0
+
+    def induce_structure_mapping_functor(
+        self,
+        source_entities: Sequence[SpatialEntity],
+        target_entities: Sequence[SpatialEntity],
+        source_domain: str = "source",
+        target_domain: str = "target",
+        source_subgoals: Sequence[Any] | None = None,
+        grid_shape: tuple[int, int] = (64, 64),
+    ) -> SchemaMorphism | None:
+        """Automatically induce a category-theoretic structure-mapping functor between domains."""
+        from hbllm.hcir.world.structure_mapping_functor import (
+            CategoryTheoreticStructureMappingEngine,
+        )
+
+        functor_res = CategoryTheoreticStructureMappingEngine.induce_functor(
+            source_entities=source_entities,
+            target_entities=target_entities,
+            source_domain=source_domain,
+            target_domain=target_domain,
+            source_subgoals=source_subgoals,
+            grid_shape=grid_shape,
+        )
+        if functor_res.alignment_score >= 0.50:
+            morphism = SchemaMorphism(
+                source_domain=source_domain,
+                target_domain=target_domain,
+                predicate_mapping=functor_res.role_mapping,
+                feature_mapping=functor_res.feature_mapping,
+                confidence=functor_res.alignment_score,
+                status=AnalogyStatus.CONFIRMED
+                if functor_res.is_homomorphic
+                else AnalogyStatus.TENTATIVE,
+            )
+            analogy_id = f"{source_domain}__to__{target_domain}"
+            self.active_analogies[analogy_id] = morphism
+            return morphism
+        return None
 
 
 @dataclass

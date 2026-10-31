@@ -770,6 +770,17 @@ class PerceptionEngine:
         )
 
     @staticmethod
+    def compute_foveal_saccade(
+        curr_grid: np.ndarray,
+        prev_grid: np.ndarray | None = None,
+    ) -> Any:
+        """Compute active visual saccade focus and gaze centroid from sensory diffs."""
+        from hbllm.hcir.world.foveal_saccade_attention import FovealSaccadeAttention
+
+        att = FovealSaccadeAttention()
+        return att.compute_saccade(curr_grid, prev_grid)
+
+    @staticmethod
     def extract_entities(
         grid: np.ndarray,
         bg: int,

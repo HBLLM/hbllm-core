@@ -57,13 +57,13 @@ def test_category_theoretic_structure_mapping_macro() -> None:
         initial_grid_hash=123456,
         initial_grid_shape=(10, 10),
         available_actions={1, 2, 5},
-        waypoints=[MockWaypoint(role="key"), MockWaypoint(role="goal")],
+        waypoints=[MockWaypoint(role=EntityRole.RESOURCE), MockWaypoint(role=EntityRole.GOAL)],
     )
 
     # Completely different grid shape and hash
     new_grid = np.zeros((20, 20), dtype=int)
     mock_entities = [
-        SpatialEntity(id="e1", feature_id=4, cells=[(2, 2)], role=EntityRole.KEY),
+        SpatialEntity(id="e1", feature_id=4, cells=[(2, 2)], role=EntityRole.RESOURCE),
         SpatialEntity(id="e2", feature_id=7, cells=[(18, 18)], role=EntityRole.GOAL),
     ]
 
