@@ -410,6 +410,7 @@ class HippocampalEpisodicCortex:
             gamma=self.discount_factor
         )
         self.attractor_network: HippocampalAttractorNetwork = HippocampalAttractorNetwork()
+        self.distilled_relational_rules: list[Any] = []
 
     def consolidate_sleep_replay(self, terminal_reward: float = 1.0) -> dict[str, Any]:
         """Perform Hippocampal Sharp-Wave Ripple (SWR) replay and cross-episode schema distillation."""
@@ -440,6 +441,24 @@ class HippocampalEpisodicCortex:
             sensory_state, match_threshold=match_threshold
         )
         return plan, comp_res.retrieval_confidence
+
+    def distill_relational_policy(
+        self,
+        entities: Sequence[SpatialEntity] | None = None,
+        min_support: int = 1,
+        min_confidence: float = 0.60,
+    ) -> list[Any]:
+        """Distill compact neuro-symbolic relational production rules from episodic transitions."""
+        from hbllm.hcir.world.relational_policy_distillation import RelationalPolicyDistiller
+
+        rules = RelationalPolicyDistiller.distill_trajectory(
+            trajectory=list(self.current_episode),
+            entities=entities,
+            min_support=min_support,
+            min_confidence=min_confidence,
+        )
+        self.distilled_relational_rules.extend(rules)
+        return rules
 
     def record_transition(
         self,

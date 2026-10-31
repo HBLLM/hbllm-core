@@ -134,6 +134,9 @@ from hbllm.hcir.world.habenula_striatum_opponency import (
     OpponencyValueState,
 )
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
+from hbllm.hcir.world.hierarchical_precision_control import (
+    HierarchicalPrecisionController,
+)
 from hbllm.hcir.world.hippocampal_phase_precession import (
     HippocampalPhasePrecessionEngine,
     PhasePrecessionBurst,
@@ -723,6 +726,9 @@ class AutonomousEpistemicEngine:
                 lambda_extrinsic=0.6,
                 lambda_risk=0.5,
             )
+        )
+        self.precision_controller: HierarchicalPrecisionController = (
+            HierarchicalPrecisionController()
         )
         self.prediction_budget: PredictionBudget = PredictionBudget()
         self.pending_transactions: list[TransactionOperation] = []
@@ -3820,6 +3826,17 @@ class AutonomousEpistemicEngine:
         self.step_predictive_coding(
             sensory_inputs=sensory_evidence, abstract_priors=abstract_priors
         )
+
+        # Biological Faculty: Hierarchical Active Inference with Free Energy Precision Control
+        if self.prev_grid is not None and curr_grid.ndim == 2:
+            prec_state = self.precision_controller.record_observation(
+                step=self.step_counter,
+                predicted_grid=self.prev_grid,
+                observed_grid=curr_grid,
+                is_reset=is_lost,
+            )
+            self.hierarchical_active_inference.sensory_precision = prec_state.sensory_precision
+            self.hierarchical_active_inference.dynamic_precision = prec_state.prior_precision
 
         # Biological Faculty: Spiking Neural Network Kinematic Tracking & Limit Cycles
         if curr_grid.ndim == 2:
