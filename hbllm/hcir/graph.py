@@ -1552,6 +1552,10 @@ class HCIREdge(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class SubstrateDivergenceError(RuntimeError):
+    """Raised when native graph acceleration substrate diverges from authoritative Python graph."""
+
+
 class CognitiveGraph:
     """The unified typed cognitive hypergraph.
 
@@ -1609,27 +1613,30 @@ class CognitiveGraph:
         self._index_node(node)
         self._track_digest(self._node_digests, "n", node)
         if self._native_adapter is not None:
+            ntype = (
+                node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type)
+            )
+            lifecycle = (
+                node.lifecycle.value if hasattr(node.lifecycle, "value") else str(node.lifecycle)
+            )
+            cat = node.category.value if hasattr(node.category, "value") else str(node.category)
+            props = {"category": cat}
+            if hasattr(node, "properties") and isinstance(node.properties, dict):
+                props.update(node.properties)
+            elif hasattr(node, "payload") and isinstance(node.payload, dict):
+                props.update(node.payload)
             try:
-                ntype = (
-                    node.node_type.value
-                    if hasattr(node.node_type, "value")
-                    else str(node.node_type)
-                )
-                lifecycle = (
-                    node.lifecycle.value
-                    if hasattr(node.lifecycle, "value")
-                    else str(node.lifecycle)
-                )
-                cat = node.category.value if hasattr(node.category, "value") else str(node.category)
                 self._native_adapter.add_node(
                     node_id=node.id,
                     node_type=ntype,
                     lifecycle=lifecycle,
-                    properties={"category": cat},
+                    properties=props,
                     created_at=getattr(node, "created_at", 0.0),
                 )
             except Exception as e:
-                logger.debug("CognitiveGraph: native add_node error: %s", e)
+                raise SubstrateDivergenceError(
+                    f"Native substrate diverged on add_node for {node.id}: {e}"
+                ) from e
 
     def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add or replace a node in the graph."""
@@ -1641,29 +1648,32 @@ class CognitiveGraph:
         self._index_node(node)
         self._track_digest(self._node_digests, "n", node)
         if self._native_adapter is not None:
+            ntype = (
+                node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type)
+            )
+            lifecycle = (
+                node.lifecycle.value if hasattr(node.lifecycle, "value") else str(node.lifecycle)
+            )
+            cat = node.category.value if hasattr(node.category, "value") else str(node.category)
+            props = {"category": cat}
+            if hasattr(node, "properties") and isinstance(node.properties, dict):
+                props.update(node.properties)
+            elif hasattr(node, "payload") and isinstance(node.payload, dict):
+                props.update(node.payload)
             try:
                 if self._native_adapter.has_node(node.id):
                     self._native_adapter.remove_node(node.id)
-                ntype = (
-                    node.node_type.value
-                    if hasattr(node.node_type, "value")
-                    else str(node.node_type)
-                )
-                lifecycle = (
-                    node.lifecycle.value
-                    if hasattr(node.lifecycle, "value")
-                    else str(node.lifecycle)
-                )
-                cat = node.category.value if hasattr(node.category, "value") else str(node.category)
                 self._native_adapter.add_node(
                     node_id=node.id,
                     node_type=ntype,
                     lifecycle=lifecycle,
-                    properties={"category": cat},
+                    properties=props,
                     created_at=getattr(node, "created_at", 0.0),
                 )
             except Exception as e:
-                logger.debug("CognitiveGraph: native upsert_node error: %s", e)
+                raise SubstrateDivergenceError(
+                    f"Native substrate diverged on upsert_node for {node.id}: {e}"
+                ) from e
 
     def remove_node(self, node_id: str) -> HCIRNode | None:
         """Remove a node and all its connected edges.  Returns the removed node."""
@@ -1676,7 +1686,9 @@ class CognitiveGraph:
             try:
                 self._native_adapter.remove_node(node_id)
             except Exception as e:
-                logger.debug("CognitiveGraph: native remove_node error: %s", e)
+                raise SubstrateDivergenceError(
+                    f"Native substrate diverged on remove_node for {node_id}: {e}"
+                ) from e
         # Remove edges connected to this node
         connected_edge_ids = set()
         connected_edge_ids.update(self._edges_by_source.pop(node_id, set()))
@@ -1688,8 +1700,10 @@ class CognitiveGraph:
                 if self._native_adapter is not None:
                     try:
                         self._native_adapter.remove_edge(eid)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        raise SubstrateDivergenceError(
+                            f"Native substrate diverged on remove_edge for {eid}: {e}"
+                        ) from e
                 # Clean up reverse indexes for other endpoints
                 for src in edge.sources:
                     if src != node_id:
@@ -1730,23 +1744,26 @@ class CognitiveGraph:
             self._edges_by_target.setdefault(tgt, set()).add(edge.id)
         self._track_digest(self._edge_digests, "e", edge)
         if self._native_adapter is not None:
+            etype = (
+                edge.edge_type.value if hasattr(edge.edge_type, "value") else str(edge.edge_type)
+            )
+            props = {}
+            if hasattr(edge, "properties") and isinstance(edge.properties, dict):
+                props.update(edge.properties)
             try:
-                etype = (
-                    edge.edge_type.value
-                    if hasattr(edge.edge_type, "value")
-                    else str(edge.edge_type)
-                )
                 self._native_adapter.add_edge(
                     edge_id=edge.id,
                     edge_type=etype,
                     sources=edge.sources,
                     targets=edge.targets,
                     weight=edge.weight,
-                    properties={},
+                    properties=props,
                     created_at=getattr(edge, "created_at", 0.0),
                 )
             except Exception as e:
-                logger.debug("CognitiveGraph: native add_edge error: %s", e)
+                raise SubstrateDivergenceError(
+                    f"Native substrate diverged on add_edge for {edge.id}: {e}"
+                ) from e
 
     def remove_edge(self, edge_id: str) -> HCIREdge | None:
         """Remove an edge by ID."""
@@ -1758,6 +1775,9 @@ class CognitiveGraph:
             try:
                 self._native_adapter.remove_edge(edge_id)
             except Exception as e:
+                raise SubstrateDivergenceError(
+                    f"Native substrate diverged on remove_edge for {edge_id}: {e}"
+                ) from e
                 logger.debug("CognitiveGraph: native remove_edge error: %s", e)
         for src in edge.sources:
             self._edges_by_source.get(src, set()).discard(edge_id)
@@ -3352,6 +3372,25 @@ class CognitiveGraph:
         return self._native_adapter is not None and getattr(
             self._native_adapter, "is_native", False
         )
+
+    def fork(self) -> CognitiveGraph:
+        """Create a structural-sharing copy-on-write fork of this graph in < 1 ms (WP4)."""
+        forked = CognitiveGraph(enable_native_substrate=False)
+        forked._enable_native_substrate = self._enable_native_substrate
+        forked._nodes = dict(self._nodes)
+        forked._edges = dict(self._edges)
+        forked._edges_by_source = {k: set(v) for k, v in self._edges_by_source.items()}
+        forked._edges_by_target = {k: set(v) for k, v in self._edges_by_target.items()}
+        forked._idx_by_type = {k: set(v) for k, v in self._idx_by_type.items()}
+        forked._idx_by_category = {k: set(v) for k, v in self._idx_by_category.items()}
+        forked._node_digests = dict(self._node_digests)
+        forked._edge_digests = dict(self._edge_digests)
+        if self._native_adapter is not None:
+            try:
+                forked._native_adapter = self._native_adapter.snapshot()
+            except Exception:
+                forked._native_adapter = None
+        return forked
 
     def subgraph(self, node_ids: set[str] | list[str] | Iterator[str]) -> CognitiveGraph:
         """Extract an induced subgraph containing only specified nodes and edges between them."""

@@ -229,8 +229,10 @@ from hbllm.hcir.world.pedunculopontine_locomotor import (
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
+    EmbodiedObservation,
     PerceptionFrame,
     PerceptionRegistry,
+    TerminalSignal,
 )
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
@@ -420,6 +422,7 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
+from hbllm.hcir.world.engine_state import CognitiveContext, EngineState
 from hbllm.hcir.world.entorhinal_grid_cortex import (
     EntorhinalGridCortex,
 )
@@ -595,7 +598,8 @@ class AutonomousEpistemicEngine:
         self.exploration_budget = exploration_budget
         self.enable_logging = enable_logging
 
-        # Cognitive state
+        # Cognitive state & authoritative EngineState model (WP1)
+        self.state: EngineState = EngineState(world_id=world_id)
         self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
         self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
         self.world_id: str = world_id
@@ -1016,6 +1020,14 @@ class AutonomousEpistemicEngine:
 
         self.click_learner: ClickAffordanceLearner = ClickAffordanceLearner()
         self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
+
+        # Canonical 5-Stage Active Inference Pipeline (AGENTS.md §2, WP1)
+        from hbllm.hcir.world.cortical_pipeline import CorticalPipeline
+
+        self.cortical_pipeline: CorticalPipeline = CorticalPipeline(
+            transaction_manager=self.transaction_manager
+        )
+        self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
 
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)
@@ -3716,18 +3728,75 @@ class AutonomousEpistemicEngine:
                     self.symbolic_theory.induce_walkable(bg)
         return bg
 
-    def extract_entities(self, grid: np.ndarray, bg: int) -> list[SpatialEntity]:
-        return PerceptionEngine.extract_entities(
-            grid,
+    def _perception_cache_key(self, grid: np.ndarray, bg: int) -> tuple[Any, ...]:
+        """Key capturing every input that can change entity segmentation or role assignment."""
+        theory = self.symbolic_theory
+        theory_sig: tuple[Any, ...] = ()
+        if theory is not None:
+            theory_sig = tuple(
+                frozenset(getattr(theory, attr, ()) or ())
+                for attr in (
+                    "goal_features",
+                    "candidate_goal_features",
+                    "receptacle_features",
+                    "walkable_features",
+                    "barrier_features",
+                    "cargo_features",
+                )
+            )
+        return (
+            grid.shape,
+            grid.tobytes(),
             bg,
-            symbolic_theory=self.symbolic_theory,
-            avatar_features=self.avatar_features,
-            state_mutations=self.state_mutations,
-            learned_barriers=self.learned_barriers,
-            learned_goal_positions=self.learned_goal_positions,
-            learned_receptacle_positions=self.learned_receptacle_positions,
-            avatar_pos=self.avatar_pos,
+            self.avatar_pos,
+            frozenset(self.avatar_features),
+            len(self.state_mutations),
+            frozenset(self.learned_goal_positions),
+            frozenset(self.learned_receptacle_positions),
+            theory_sig,
         )
+
+    def extract_entities(self, grid: np.ndarray, bg: int) -> list[SpatialEntity]:
+        """Segment the frame into typed entities.
+
+        Memoised per frame: perception is invoked by several faculties within one
+        cognitive step on the same observation, so the (expensive) connected-component
+        lifting is computed once per distinct (frame, theory) key. Callers receive
+        fresh ``SpatialEntity`` copies so role reassignment never leaks between callers.
+        """
+        key = self._perception_cache_key(grid, bg)
+        cached = self._entity_cache.get(key)
+        if cached is None:
+            cached = PerceptionEngine.extract_entities(
+                grid,
+                bg,
+                symbolic_theory=self.symbolic_theory,
+                avatar_features=self.avatar_features,
+                state_mutations=self.state_mutations,
+                learned_barriers=self.learned_barriers,
+                learned_goal_positions=self.learned_goal_positions,
+                learned_receptacle_positions=self.learned_receptacle_positions,
+                avatar_pos=self.avatar_pos,
+            )
+            if len(self._entity_cache) >= 4:
+                self._entity_cache.pop(next(iter(self._entity_cache)))
+            self._entity_cache[key] = cached
+        return [
+            SpatialEntity(
+                id=e.id,
+                role=e.role,
+                centroid=e.centroid,
+                grid_pos=e.grid_pos,
+                area=e.area,
+                bounding_box=e.bounding_box,
+                component_id=e.component_id,
+                is_deliverable=e.is_deliverable,
+                is_delivered=e.is_delivered,
+                shape_archetype=e.shape_archetype,
+                properties=dict(e.properties),
+            )
+            for e in cached
+        ]
 
     def compute_frame_diff(
         self, prev_grid: np.ndarray, curr_grid: np.ndarray
@@ -4484,6 +4553,24 @@ class AutonomousEpistemicEngine:
 
     # ── Master Decision Loop ──────────────────────────────────────────────────
 
+    def step(self, obs: EmbodiedObservation) -> tuple[Any, dict[str, Any] | None]:
+        """Canonical domain-agnostic step entry point for the epistemic engine (WP3).
+
+        Consumes an EmbodiedObservation and executes active inference deliberation.
+        """
+        is_win = obs.terminal == TerminalSignal.SUCCESS
+        is_lost = obs.terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        return self.decide(
+            curr_grid=obs.lattice,
+            available_actions=obs.available_actions,
+            is_win=is_win,
+            is_lost=is_lost,
+            context_id=obs.context_id,
+            episode_id=obs.episode_id,
+            objects=list(obs.entities) if obs.entities else None,
+            **dict(obs.metadata),
+        )
+
     def decide(
         self,
         curr_grid: Any,
@@ -4878,3 +4965,11 @@ class AutonomousEpistemicEngine:
                 )
             )
         return ops
+
+    def freeze(self) -> CognitiveContext:
+        """Capture an immutable CognitiveContext snapshot of engine state for pure cortical stages.
+
+        In accordance with WP1 (Faculties emit intent; engine owns no mutable truth),
+        cortical faculties observe this frozen snapshot and emit transactional operations.
+        """
+        return EngineState.from_engine(self).freeze()

@@ -14,12 +14,43 @@ into a PerceptionFrame, and the core operates exclusively over these percepts.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from enum import StrEnum
+from typing import Any, Literal
 
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+
+
+class TerminalSignal(StrEnum):
+    """Domain-agnostic terminal feedback signal."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    TIMEOUT = "timeout"
+
+
+@dataclass(frozen=True)
+class EmbodiedObservation:
+    """Universal domain-agnostic sensory observation consumed by HCIR cognitive core."""
+
+    lattice: np.ndarray | None = None  # dense sensory field (any dims)
+    entities: Sequence[SpatialEntity] = ()  # lifted percepts
+    available_actions: Sequence[Any] = ()
+    terminal: TerminalSignal | None = None  # SUCCESS / FAILURE / TIMEOUT
+    context_id: str = "default_context"  # replaces game_id
+    episode_id: str = "0"  # replaces level
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EpisodeBoundary:
+    """Explicit episode lifecycle boundary marker."""
+
+    kind: Literal["reset", "context_change", "retry"] = "reset"
+    retain_dynamics: bool = True
 
 
 @dataclass

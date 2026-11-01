@@ -1198,6 +1198,7 @@ class BrainFactory:
             from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.semantic_normalizer import SemanticNormalizer
             from hbllm.hcir.stores import InMemoryEventStore
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
             from hbllm.hcir.workspace import HCIRWorkspaceState
             from hbllm.hcir.workspace_tiers import TieredWorkspace
 
@@ -1275,8 +1276,20 @@ class BrainFactory:
             # 9. Export capability nodes for all brain nodes & record to metrics
             for node_obj in nodes:
                 adapter = NodeAdapter(node_obj)
-                for cap_node in adapter.export_capabilities(tenant_id="default"):
-                    hcir_ws.upsert_node(cap_node)
+                cap_nodes = adapter.export_capabilities(tenant_id="default")
+                if cap_nodes:
+                    hcir_ws.commit_operations(
+                        [
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_NODE,
+                                node_id=c.id,
+                                node_data=c.model_dump(),
+                            )
+                            for c in cap_nodes
+                        ],
+                        author="brain_factory:capability_export",
+                    )
+                for cap_node in cap_nodes:
                     migration_metrics.record_execution(
                         capability_name=cap_node.id,
                         mode=migration_mode,

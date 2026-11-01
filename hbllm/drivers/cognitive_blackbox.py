@@ -63,6 +63,7 @@ from hbllm.hcir.subgoal_decomposer import (
     HCIRSkill,
     HierarchicalGoalDecomposer,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.affordance_discovery import (
@@ -865,15 +866,15 @@ class CognitiveBlackbox:
         """Upsert a WorldVariableNode into the workspace graph."""
         existing = self.workspace.graph.get_node(name)
         if isinstance(existing, WorldVariableNode):
-            existing.value = value
-            self.workspace.upsert_node(existing)
-        else:
-            node = WorldVariableNode(
-                id=name,
-                variable_name=name,
-                value=value,
+            op = TransactionOperation(
+                op=TransactionOp.MODIFY_NODE, node_id=name, changes={"value": value}
             )
-            self.workspace.upsert_node(node)
+        else:
+            node = WorldVariableNode(id=name, variable_name=name, value=value)
+            op = TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=name, node_data=node.model_dump()
+            )
+        self.workspace.commit_operations([op], author="cognitive_blackbox")
 
     # ── Observation (Input) ───────────────────────────────────────────────
 

@@ -19,7 +19,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.ndimage import label
@@ -27,7 +27,11 @@ from scipy.ndimage import label
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.engine_state import CognitiveContext
 
 logger = logging.getLogger(__name__)
 
@@ -337,15 +341,16 @@ class SpatialRoleClassifier:
                 or val in symbolic_theory.receptacle_features
             )
         )
+        cell_set = set(cells) if cells is not None else None
+        touches_goal = cell_set is not None and not goal_set.isdisjoint(cell_set)
         is_spatial_goal = (
-            (grid_pos in goal_set or any(p in goal_set for p in (cells or [])))
-            and (cells is None or any(p in goal_set for p in cells))
+            (grid_pos in goal_set or touches_goal) and (cell_set is None or touches_goal)
         ) or grid_pos in receptacle_set
 
         has_known_goals = bool(symbolic_theory and symbolic_theory.goal_features)
         if val in av_set or (
             avatar_pos is not None
-            and (grid_pos == avatar_pos or (cells is not None and avatar_pos in cells))
+            and (grid_pos == avatar_pos or (cell_set is not None and avatar_pos in cell_set))
         ):
             return EntityRole.AGENT
         elif is_candidate_goal or (
@@ -1289,3 +1294,36 @@ class GibsonianAffordanceExtractor:
             )
 
         return contours
+
+
+@dataclass
+class PerceptionStage(CorticalStage):
+    """Cortical Stage 1: Sensory Perception & Coordinate Lifting.
+
+    Transforms raw sensory arrays into SpatialEntity objects and coordinate frames.
+    """
+
+    name: str = "perception_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.prev_grid
+        entities: list[SpatialEntity] = []
+        if grid is not None:
+            entities = ctx.extract_entities(grid)
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="perception_observation",
+                node_data={
+                    "stage": self.name,
+                    "entity_count": len(entities),
+                    "step": ctx.step_counter,
+                },
+            )
+        ]
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals={"extracted_entities": entities, "step": ctx.step_counter},
+            proposed_action=None,
+        )

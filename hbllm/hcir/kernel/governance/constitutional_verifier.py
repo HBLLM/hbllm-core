@@ -30,8 +30,39 @@ from hbllm.hcir.transactions import (
     TransactionOp,
 )
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.workspace_tiers import WorkspaceTier
 
 logger = logging.getLogger(__name__)
+
+
+class ConstitutionalViolationError(RuntimeError):
+    """Raised when an operation or transaction violates constitutional constraints."""
+
+
+TIER_COMMIT_AUTHORITY: dict[WorkspaceTier | str, set[str] | None] = {
+    WorkspaceTier.WORKING: None,  # open
+    WorkspaceTier.BRAIN: {
+        "cortex_deliberation",
+        "cortex_planner",
+        "prefrontal_working_memory",
+        "deliberation_stage",
+        "simulation_stage",
+        "cortical_pipeline",
+        "system",
+    },
+    WorkspaceTier.PERSISTENT: {
+        "cortex_episodic",
+        "episodic_stage",
+        "constitutional_verifier",
+        "system",
+    },
+    WorkspaceTier.META: {
+        "self_model",
+        "reflection_engine",
+        "metacognition",
+        "system",
+    },
+}
 
 
 class ConstitutionalVerifier:
@@ -123,6 +154,11 @@ class ConstitutionalVerifier:
 
         # Check 5: Safety (no destructive operations on protected nodes)
         if not self._check_safety(transaction, workspace):
+            self._rejections += 1
+            return False
+
+        # Check 6: Per-tier commit authority (WP6)
+        if not self._check_tier_commit_authority(transaction, workspace):
             self._rejections += 1
             return False
 
@@ -278,6 +314,36 @@ class ConstitutionalVerifier:
                             )
                         )
                         return False
+        return True
+
+    def _check_tier_commit_authority(
+        self,
+        transaction: HCIRTransaction,
+        workspace: HCIRWorkspaceState,
+    ) -> bool:
+        """Enforce per-tier commit authority (WP6)."""
+        target_tier = getattr(workspace, "tier", None)
+        if (
+            target_tier is None
+            and hasattr(transaction, "metadata")
+            and isinstance(transaction.metadata, dict)
+        ):
+            target_tier = transaction.metadata.get("target_tier")
+
+        if target_tier is not None and target_tier in TIER_COMMIT_AUTHORITY:
+            allowed = TIER_COMMIT_AUTHORITY[target_tier]
+            if allowed is not None and transaction.author not in allowed:
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ConstitutionalVerifier",
+                        assertion=(
+                            f"Commit authority violation: author '{transaction.author}' "
+                            f"not permitted to commit to tier '{target_tier}'"
+                        ),
+                        severity="critical",
+                    )
+                )
+                return False
         return True
 
 

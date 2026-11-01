@@ -76,6 +76,16 @@ class NativeGraphAdapter:
         """Whether this adapter is backed by the compiled Rust substrate."""
         return self._native is not None
 
+    @property
+    def node_count(self) -> int:
+        """Return the number of active nodes."""
+        return len(self.all_node_ids())
+
+    @property
+    def edge_count(self) -> int:
+        """Return the number of active edges."""
+        return len({eid for eid in self._edge_ids if eid not in self._removed_edges})
+
     def all_node_ids(self) -> set[str]:
         """Return the set of all active node IDs."""
         return {

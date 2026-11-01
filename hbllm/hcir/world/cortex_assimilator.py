@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,7 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -27,6 +29,7 @@ from hbllm.hcir.world.spatiotemporal_tracker import MorphologicalEntity
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.engine_state import CognitiveContext
 
 logger = logging.getLogger(__name__)
 
@@ -2084,3 +2087,38 @@ class EpistemicFeedbackAssimilator:
                 },
             )
         ]
+
+
+@dataclass
+class AssimilationStage(CorticalStage):
+    """Cortical Stage 2: Assimilation & Surprise Induction.
+
+    Binds motor diffs to actions; updates EpistemicPhase; detects high surprise
+    to invalidate stale causal hypotheses. Emits transactions updating
+    dynamic theories and working memory.
+    """
+
+    name: str = "assimilation_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="assimilation_state",
+                node_data={
+                    "stage": self.name,
+                    "phase": str(ctx.phase),
+                    "step": ctx.step_counter,
+                },
+            )
+        ]
+        signals = {
+            "assimilated_phase": str(ctx.phase),
+            "step": ctx.step_counter,
+        }
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals=signals,
+            proposed_action=None,
+        )

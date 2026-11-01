@@ -34,7 +34,9 @@ from hbllm.hcir.world.active_inference import ActionNode
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
+from hbllm.hcir.world.engine_state import CognitiveContext
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.parietal_coordinate_transform import HeadingOrientation
 from hbllm.hcir.world.spatial_containment import RoomDoor
@@ -820,7 +822,11 @@ class EpistemicCuriosityExplorer:
     ) -> EpistemicProbeProposal:
         """Pure reasoning calculation producing an EpistemicProbeProposal."""
         H, W = curr_grid.shape
-        bg = engine.estimate_background(curr_grid)
+        bg = (
+            engine.bg_feature
+            if getattr(engine, "bg_feature", None) is not None
+            else engine.estimate_background(curr_grid)
+        )
         walkable_and_safe = engine.symbolic_theory.walkable_features
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
         entities = engine.extract_entities(curr_grid, bg)
@@ -934,7 +940,9 @@ class EpistemicCuriosityExplorer:
                         affordance_uncertainty += 0.8
                     if f_id not in engine.symbolic_theory.barrier_features:
                         affordance_uncertainty += 0.8
-                    if not any(m.trigger_feature == f_id for m in getattr(engine, "state_mutations", [])):
+                    if not any(
+                        m.trigger_feature == f_id for m in getattr(engine, "state_mutations", [])
+                    ):
                         affordance_uncertainty += 1.0
                     if f_id in engine.symbolic_theory.candidate_goal_features:
                         affordance_uncertainty += 1.5
@@ -1262,6 +1270,47 @@ class EpistemicCuriosityExplorer:
         )
 
     @classmethod
+    def proposal_to_stage_result(
+        cls,
+        proposal: EpistemicProbeProposal,
+        author: str = "cortex_motor",
+    ) -> StageResult:
+        """Convert EpistemicProbeProposal into a pure StageResult proposing state transactions (WP1)."""
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_data={
+                    "id": f"epistemic_probe:{proposal.action}",
+                    "type": "ObservationNode",
+                    "properties": {
+                        "action": proposal.action,
+                        "action_data": proposal.action_data,
+                        "new_probe_target": list(proposal.new_probe_target)
+                        if proposal.new_probe_target
+                        else None,
+                        "new_probe_id": proposal.new_probe_id,
+                        "tested_action": proposal.tested_action,
+                        "tested_action_position": (
+                            [
+                                proposal.tested_action_position[0],
+                                list(proposal.tested_action_position[1]),
+                            ]
+                            if proposal.tested_action_position
+                            and proposal.tested_action_position[1]
+                            else None
+                        ),
+                    },
+                },
+            )
+        ]
+        return StageResult(
+            author=author,
+            operations=ops,
+            signals={"probe_proposal": proposal},
+            proposed_action=proposal.action,
+        )
+
+    @classmethod
     def apply_proposal_to_engine(
         cls,
         engine: AutonomousEpistemicEngine,
@@ -1535,7 +1584,11 @@ class MotorCortexEffector:
         aff = engine.action_affordances.get(action)
         param_keys = aff.target_param_keys if aff else ("x", "y")
 
-        bg = engine.estimate_background(curr_grid)
+        bg = (
+            engine.bg_feature
+            if getattr(engine, "bg_feature", None) is not None
+            else engine.estimate_background(curr_grid)
+        )
         entities = engine.extract_entities(curr_grid, bg)
         av_feats = engine.avatar_features or (
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
@@ -2071,3 +2124,27 @@ class ParietalMotorDispatcher:
                     # Default tool reach extends 1 cell further along forward heading
                     targets.add((avatar_pos[0] + 2 * fwd_r, avatar_pos[1] + 2 * fwd_c))
         return targets
+
+
+class MotorStage:
+    """Pure CorticalStage for Stage 5: Motor Dispatch & Transaction Execution.
+
+    In accordance with Invariant 1 and WP1, this stage observes an immutable CognitiveContext
+    and emits a pure StageResult containing the selected motor action and state mutation intent.
+    """
+
+    name: str = "motor_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        proposed_action = ctx.signals.get("proposed_action")
+        ops: list[TransactionOperation] = []
+        signals: dict[str, Any] = {}
+        if proposed_action is None:
+            actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
+            proposed_action = actions[0] if actions else 1
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals=signals,
+            proposed_action=proposed_action,
+        )

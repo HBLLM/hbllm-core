@@ -24,6 +24,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent
+from hbllm.hcir.transactions import TransactionOperation
+from hbllm.hcir.world.cortical_stage import StageResult
+from hbllm.hcir.world.engine_state import CognitiveContext
 from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
@@ -1533,7 +1536,7 @@ class MacroPlanSynthesizer:
     @classmethod
     def ingest_knowledge(
         cls,
-        engine: AutonomousEpistemicEngine,
+        engine: AutonomousEpistemicEngine | Any,
         objects: Sequence[Any] | None = None,
         micro_actions: Sequence[Any] | None = None,
     ) -> None:
@@ -1713,7 +1716,7 @@ class MacroPlanSynthesizer:
     @classmethod
     def synthesize_plan(
         cls,
-        engine: AutonomousEpistemicEngine,
+        engine: AutonomousEpistemicEngine | Any,
         curr_grid: np.ndarray,
         available_actions: Sequence[Any],
         objects: Sequence[Any] | None = None,
@@ -1731,7 +1734,7 @@ class MacroPlanSynthesizer:
             return driver_plan
 
         # 0B. Query declarative skills registered on engine
-        skills = getattr(engine, "declarative_skills", [])
+        skills = getattr(engine, "declarative_skills", []) or []
         for skill in skills:
             if hasattr(skill, "can_handle") and skill.can_handle(
                 curr_grid, list(available_actions), metadata={"engine": engine}
@@ -2239,3 +2242,54 @@ class MacroPlanSynthesizer:
                 return plan
 
         return None
+
+    @classmethod
+    def synthesize_stage_result(
+        cls,
+        ctx: CognitiveContext | Any,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        objects: Sequence[Any] | None = None,
+        micro_actions: Sequence[Any] | None = None,
+    ) -> StageResult:
+        """Pure generation of StageResult from immutable CognitiveContext (WP1)."""
+        ops: list[TransactionOperation] = []
+        signals: dict[str, Any] = {}
+        plan = cls.synthesize_plan(
+            ctx,
+            curr_grid,
+            available_actions,
+            objects=objects,
+            micro_actions=micro_actions,
+        )
+        if plan is not None:
+            signals["macro_plan"] = plan
+            signals["has_macro_plan"] = True
+            if not plan.is_empty():
+                cur = plan.current()
+                if cur:
+                    signals["current_macro_action"] = cur.name
+        else:
+            signals["has_macro_plan"] = False
+
+        return StageResult(
+            author="macro_action_planner",
+            operations=ops,
+            signals=signals,
+            proposed_action=None,
+        )
+
+
+class MacroActionStage:
+    """Pure CorticalStage for macro-action planning.
+
+    In accordance with Invariant 1 and WP1, this stage observes an immutable CognitiveContext
+    and emits a pure StageResult containing proposed macro-plans and transactional intent.
+    """
+
+    name: str = "macro_action_planner"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        grid = ctx.prev_grid if ctx.prev_grid is not None else np.zeros((1, 1), dtype=np.int32)
+        actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
+        return MacroPlanSynthesizer.synthesize_stage_result(ctx, grid, actions)

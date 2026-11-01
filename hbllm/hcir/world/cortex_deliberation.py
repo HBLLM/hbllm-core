@@ -32,7 +32,9 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler, MentalSimulationStep
+from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
+from hbllm.hcir.world.engine_state import CognitiveContext
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -2099,3 +2101,43 @@ class PrefrontalDeliberationEngine:
                 },
             )
         ]
+
+
+@dataclass
+class DeliberationStage(CorticalStage):
+    """Cortical Stage 4: Prefrontal Deliberation & Arbitration.
+
+    Receives CognitiveContext containing candidate proposals from upstream stages
+    (such as simulation, macro actions, or episodic habit) and outputs a pure StageResult
+    with arbitrated action and proposed transaction operations.
+    """
+
+    name: str = "deliberation_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        act = ctx.signals.get("mental_plan_action")
+        if act is None:
+            act = ctx.signals.get("macro_action")
+        if act is None:
+            act = ctx.signals.get("curiosity_action")
+        if act is None:
+            actions = list(ctx.action_dynamics.keys())
+            act = actions[0] if actions else 1
+
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="deliberation_decision",
+                node_data={
+                    "stage": self.name,
+                    "arbitrated_action": str(act),
+                    "step": ctx.step_counter,
+                },
+            )
+        ]
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals={"arbitrated_action": act},
+            proposed_action=act,
+        )

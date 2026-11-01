@@ -28,6 +28,7 @@ from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
+from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.prefrontal_working_memory import HeldItem
@@ -35,6 +36,7 @@ from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.engine_state import CognitiveContext
 
 logger = logging.getLogger(__name__)
 
@@ -2157,10 +2159,14 @@ class MentalSimulationPlanner:
                                             break
                                     if intervening_barrier is not None:
                                         ib_feat = int(
-                                            curr_grid[intervening_barrier[0], intervening_barrier[1]]
+                                            curr_grid[
+                                                intervening_barrier[0], intervening_barrier[1]
+                                            ]
                                         )
-                                        ib_trig, ib_tool = engine.causal_cortex.query_barrier_clearance(
-                                            intervening_barrier, ib_feat
+                                        ib_trig, ib_tool = (
+                                            engine.causal_cortex.query_barrier_clearance(
+                                                intervening_barrier, ib_feat
+                                            )
                                         )
                                         if ib_trig and ib_trig in reachable_cells:
                                             tr_path = find_shortest_path(
@@ -2168,7 +2174,12 @@ class MentalSimulationPlanner:
                                             )
                                             if tr_path is not None:
                                                 candidate_triggers.append(
-                                                    (ib_trig, tr_path, 95, {intervening_barrier, b_pos})
+                                                    (
+                                                        ib_trig,
+                                                        tr_path,
+                                                        95,
+                                                        {intervening_barrier, b_pos},
+                                                    )
                                                 )
                                         elif ib_tool is not None:
                                             for e2 in entities:
@@ -2181,7 +2192,12 @@ class MentalSimulationPlanner:
                                                     )
                                                     if t_path2 is not None:
                                                         candidate_triggers.append(
-                                                            (e2.grid_pos, t_path2, 90, {intervening_barrier, b_pos})
+                                                            (
+                                                                e2.grid_pos,
+                                                                t_path2,
+                                                                90,
+                                                                {intervening_barrier, b_pos},
+                                                            )
                                                         )
 
             # 4. Known state mutation triggers (switches and pressure plates)
@@ -3075,4 +3091,39 @@ class FrontopolarSubgoalMCTSPlanner:
             tree_depth=len(best_path),
             expected_value=root.q_value,
             pruned_dead_ends=pruned_count,
+        )
+
+
+@dataclass
+class SimulationStage(CorticalStage):
+    """Cortical Stage 3: Counterfactual Simulation & Subgoal Scheduling.
+
+    OFC mental simulation rollouts; dead-end pruning; BA10 recursive subgoal decomposition.
+    """
+
+    name: str = "simulation_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        proposed = None
+        if ctx.mental_plan:
+            first_step = ctx.mental_plan[0]
+            proposed = first_step.action if hasattr(first_step, "action") else first_step
+
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="simulation_plan",
+                node_data={
+                    "stage": self.name,
+                    "plan_len": len(ctx.mental_plan),
+                    "step": ctx.step_counter,
+                },
+            )
+        ]
+        signals = {"mental_plan_action": proposed} if proposed is not None else {}
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals=signals,
+            proposed_action=proposed,
         )

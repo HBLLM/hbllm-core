@@ -59,6 +59,14 @@ from hbllm.hcir.world.cortex_assimilator import (
     EpistemicPhase,
 )
 from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+from hbllm.hcir.world.cortical_pipeline import (
+    CorticalPipeline,
+    PipelineResult,
+)
+from hbllm.hcir.world.cortical_stage import (
+    CorticalStage,
+    StageResult,
+)
 from hbllm.hcir.world.disagreement_analyzer import (
     DisagreementReport,
     PredictorDisagreementAnalyzer,
@@ -67,6 +75,10 @@ from hbllm.hcir.world.dorsolateral_rule_abstraction import (
     AbstractRuleSchema,
     DorsolateralRuleAbstractionEngine,
     RuleTransferResult,
+)
+from hbllm.hcir.world.engine_state import (
+    CognitiveContext,
+    EngineState,
 )
 from hbllm.hcir.world.entorhinal_border_cell import (
     BorderCell,
@@ -314,11 +326,14 @@ __all__ = [
     "ClaustrumInterhemisphericIntegrator",
     "ClaustrumSalienceConductor",
     "ClimbingFiberFeedback",
+    "CognitiveContext",
     "CognitiveTaskSet",
     "ConditionedThreatStimulus",
     "ConflictProfile",
     "ConsciousIgnitionPacket",
     "ContextTransitionEvent",
+    "CorticalPipeline",
+    "CorticalStage",
     "CounterfactualBranch",
     "CounterfactualCreditReport",
     "CounterfactualOutcome",
@@ -332,6 +347,7 @@ __all__ = [
     "DriftDiffusionDecision",
     "DualValueOpponencyCortex",
     "EffortAllocationDecision",
+    "EngineState",
     "EnsemblePrediction",
     "EntityRole",
     "EntorhinalBorderCellEngine",
@@ -385,6 +401,7 @@ __all__ = [
     "PerceptionFrame",
     "PerceptionRegistry",
     "PhaseInnovationVector",
+    "PipelineResult",
     "PhasePrecessionBurst",
     "PlanAttributionReport",
     "PotentialFieldVector",
@@ -419,6 +436,7 @@ __all__ = [
     "SpatialContextSchema",
     "SpatialDistanceTransformEngine",
     "SpatialEntity",
+    "StageResult",
     "StateDifferenceComputer",
     "StructuralCausalModel",
     "SubgoalBlameScore",

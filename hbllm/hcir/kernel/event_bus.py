@@ -31,7 +31,7 @@ import asyncio
 import inspect
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -140,7 +140,7 @@ class KernelEventBus:
     def __init__(self, history_size: int = 1000) -> None:
         self._handlers: dict[str, list[KernelEventHandler]] = defaultdict(list)
         self._prefix_handlers: dict[str, list[KernelEventHandler]] = defaultdict(list)
-        self._history: list[KernelEvent] = []
+        self._history: deque[KernelEvent] = deque(maxlen=history_size)
         self._history_size = history_size
         self._event_count = 0
 
@@ -181,10 +181,8 @@ class KernelEventBus:
         """Publish an event to all matching subscribers."""
         self._event_count += 1
 
-        # Store in history
+        # Store in bounded history
         self._history.append(event)
-        if len(self._history) > self._history_size:
-            self._history = self._history[-self._history_size :]
 
         # Dispatch to handlers
         matched = set()
@@ -271,7 +269,7 @@ class KernelEventBus:
         last_n: int = 50,
     ) -> list[KernelEvent]:
         """Retrieve recent events from the ring buffer."""
-        events = self._history
+        events = list(self._history)
         if event_type:
             events = [e for e in events if e.event_type == event_type]
         return events[-last_n:]

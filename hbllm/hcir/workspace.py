@@ -273,12 +273,9 @@ class HCIRWorkspaceState:
         if branch_name in self._branches:
             raise ValueError(f"Branch '{branch_name}' already exists")
 
-        # Deep copy the graph and create a new workspace with specified branch mode
+        # Structural sharing copy-on-write fork (WP4: < 1 ms @ 10k nodes)
         forked = HCIRWorkspaceState(branch_mode=mode, branch_name=branch_name)
-        for node in self._graph.all_nodes():
-            forked._graph.add_node(node.model_copy(deep=True))
-        for edge in self._graph.all_edges():
-            forked._graph.add_edge(edge.model_copy(deep=True))
+        forked._graph = self._graph.fork()
         forked._global_attention = self._global_attention.model_copy(deep=True)
         forked._resources = {
             k: ResourceBudget(
@@ -307,6 +304,71 @@ class HCIRWorkspaceState:
     def fork_branch(self, branch_name: str) -> HCIRWorkspaceState:
         """Convenience alias for fork()."""
         return self.fork(branch_name)
+
+    def resume_from_event(self, sequence_or_id: int | str) -> HCIRWorkspaceState:
+        """Roll back or replay the event log to the specified point-in-time and produce
+        an active workspace ready for new transactions (WP7).
+        """
+        all_events = self._event_store.get_events()
+        target_seq = int(sequence_or_id) if str(sequence_or_id).isdigit() else None
+
+        target_idx = -1
+        for idx, ev in enumerate(all_events):
+            if (target_seq is not None and ev.sequence == target_seq) or getattr(
+                ev, "id", None
+            ) == sequence_or_id:
+                target_idx = idx
+                break
+
+        if target_idx == -1:
+            raise ValueError(f"Event point '{sequence_or_id}' not found in event store")
+
+        from hbllm.hcir.stores import EventType
+
+        resumed = HCIRWorkspaceState(
+            branch_mode=self._branch_mode,
+            branch_name=f"{self._branch_name}_resumed_{sequence_or_id}",
+        )
+        for ev in all_events[: target_idx + 1]:
+            d = ev.data or {}
+            if ev.event_type == EventType.NODE_ADDED:
+                node_payload = d.get("node") or d.get("node_data")
+                if node_payload is not None:
+                    resumed._graph.add_node(
+                        node_payload
+                        if isinstance(node_payload, HCIRNode)
+                        else HCIRNode.model_validate(node_payload)
+                    )
+            elif ev.event_type == EventType.NODE_MODIFIED:
+                node_payload = d.get("node") or d.get("node_data")
+                if node_payload is not None:
+                    resumed._graph.upsert_node(
+                        node_payload
+                        if isinstance(node_payload, HCIRNode)
+                        else HCIRNode.model_validate(node_payload)
+                    )
+                elif "node_id" in d and "changes" in d:
+                    if resumed._graph.has_node(d["node_id"]):
+                        curr = resumed._graph.get_node(d["node_id"])
+                        for k, v in d["changes"].items():
+                            if k == "properties" and isinstance(v, dict):
+                                curr.properties.update(v)
+                            elif hasattr(curr, k):
+                                setattr(curr, k, v)
+            elif ev.event_type == EventType.NODE_REMOVED and "node_id" in d:
+                resumed._graph.remove_node(d["node_id"])
+            elif ev.event_type == EventType.EDGE_ADDED:
+                edge_payload = d.get("edge") or d.get("edge_data")
+                if edge_payload is not None:
+                    resumed._graph.add_edge(
+                        edge_payload
+                        if isinstance(edge_payload, HCIREdge)
+                        else HCIREdge.model_validate(edge_payload)
+                    )
+            elif ev.event_type == EventType.EDGE_REMOVED and "edge_id" in d:
+                resumed._graph.remove_edge(d["edge_id"])
+
+        return resumed
 
     def diff_branch(self, branch_name: str) -> list[TransactionOperation]:
         """Compute the transactional diff that would bring this workspace to the

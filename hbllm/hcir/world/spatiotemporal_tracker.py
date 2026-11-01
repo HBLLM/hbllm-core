@@ -115,6 +115,30 @@ class PhasePrecessionEstimator:
         return None, 0.0
 
     @staticmethod
+    def estimate_periods_batch(
+        series_matrix: np.ndarray,
+        max_period: int = 8,
+        min_match_ratio: float = 0.85,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Vectorised :meth:`estimate_period` over many series at once.
+
+        Args:
+            series_matrix: array of shape ``(n_steps, n_series)``.
+
+        Returns:
+            ``(periods, confidences)`` arrays of shape ``(n_series,)``; period 0 means none.
+        """
+        n, m = series_matrix.shape
+        best_t = np.zeros(m, dtype=np.int64)
+        best_conf = np.zeros(m, dtype=np.float64)
+        for t in range(2, min(max_period + 1, n // 2 + 1)):
+            ratio = (series_matrix[t:] == series_matrix[:-t]).mean(axis=0)
+            better = (ratio >= min_match_ratio) & (ratio > best_conf)
+            best_t[better] = t
+            best_conf[better] = ratio[better]
+        return best_t, best_conf
+
+    @staticmethod
     def compute_lcm(numbers: Sequence[int], cap: int = 24) -> int:
         """Compute least common multiple of a sequence of integers (capped to prevent explosion)."""
         lcm = 1
@@ -226,14 +250,18 @@ class SpatiotemporalHazardTracker:
         if avatar_features:
             safe_features.update(avatar_features)
 
-        for r, c in fluctuating_indices:
-            r_idx, c_idx = int(r), int(c)
-            series = [int(g[r_idx, c_idx]) for g in self.grid_history]
+        # One vectorised autocorrelation pass over every fluctuating cell
+        series_matrix = grids_arr[:, fluctuating_indices[:, 0], fluctuating_indices[:, 1]]
+        periods, confidences = PhasePrecessionEstimator.estimate_periods_batch(
+            series_matrix, max_period=self.max_period
+        )
 
-            best_period, confidence = PhasePrecessionEstimator.estimate_period(
-                series, max_period=self.max_period
-            )
-            if best_period is not None and best_period >= 2:
+        for k, (r, c) in enumerate(fluctuating_indices):
+            r_idx, c_idx = int(r), int(c)
+            best_period = int(periods[k])
+            confidence = float(confidences[k])
+            if best_period >= 2:
+                series = series_matrix[:, k].tolist()
                 cycle = series[-best_period:]
                 haz_vals = {
                     v
@@ -590,25 +618,32 @@ class MorphologicalDeformationTracker:
         if not cells:
             return 0
 
-        vertices: set[tuple[float, float]] = set()
-        edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+        # Vectorised cubical complex: rasterise the cells into a local boolean mask and
+        # count lattice vertices / unit edges touched by any cell via shifted ORs.
+        coords = np.fromiter((v for rc in cells for v in rc), dtype=np.int64, count=2 * len(cells))
+        coords = coords.reshape(-1, 2)
+        r0, c0 = coords.min(axis=0)
+        rr, cc = coords[:, 0] - r0, coords[:, 1] - c0
+        h, w = int(rr.max()) + 1, int(cc.max()) + 1
+        mask = np.zeros((h, w), dtype=bool)
+        mask[rr, cc] = True
 
-        for r, c in cells:
-            v_tl = (float(r), float(c))
-            v_tr = (float(r), float(c + 1))
-            v_bl = (float(r + 1), float(c))
-            v_br = (float(r + 1), float(c + 1))
+        verts = np.zeros((h + 1, w + 1), dtype=bool)
+        verts[:-1, :-1] |= mask
+        verts[:-1, 1:] |= mask
+        verts[1:, :-1] |= mask
+        verts[1:, 1:] |= mask
 
-            vertices.update([v_tl, v_tr, v_bl, v_br])
+        h_edges = np.zeros((h + 1, w), dtype=bool)  # horizontal unit edges
+        h_edges[:-1, :] |= mask
+        h_edges[1:, :] |= mask
+        v_edges = np.zeros((h, w + 1), dtype=bool)  # vertical unit edges
+        v_edges[:, :-1] |= mask
+        v_edges[:, 1:] |= mask
 
-            edges.add((min(v_tl, v_tr), max(v_tl, v_tr)))
-            edges.add((min(v_tr, v_br), max(v_tr, v_br)))
-            edges.add((min(v_bl, v_br), max(v_bl, v_br)))
-            edges.add((min(v_tl, v_bl), max(v_tl, v_bl)))
-
-        v = len(vertices)
-        e = len(edges)
-        f = len(cells)
+        v = int(verts.sum())
+        e = int(h_edges.sum()) + int(v_edges.sum())
+        f = int(mask.sum())
         return v - e + f
 
     @staticmethod

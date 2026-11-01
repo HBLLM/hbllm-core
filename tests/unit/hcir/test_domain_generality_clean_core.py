@@ -167,3 +167,19 @@ def test_candidate_generation_and_ranking_path_code_review():
         assert hasattr(op, "propose"), f"Operator {op} missing propose method"
         assert hasattr(op, "apply"), f"Operator {op} missing apply method"
         assert hasattr(op, "verify"), f"Operator {op} missing verify method"
+
+
+def test_skills_all_has_no_grid_puzzle_solvers():
+    """Verify that hbllm.hcir.skills.__all__ contains zero grid-puzzle specific solvers (WP3)."""
+    import hbllm.hcir.skills as skills
+
+    forbidden = {
+        "BlockPushPlanner",
+        "GF2LinearSolver",
+        "TileGridPredicate",
+        "TileFramePredicate",
+        "PanelConstraint",
+        "LatticeConduitPredicate",
+    }
+    present = forbidden.intersection(set(skills.__all__))
+    assert not present, f"Grid-puzzle specific solvers leaked into core skills __all__: {present}"

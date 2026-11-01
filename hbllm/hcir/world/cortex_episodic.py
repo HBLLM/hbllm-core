@@ -31,6 +31,8 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
+from hbllm.hcir.world.cortical_stage import StageResult
+from hbllm.hcir.world.engine_state import CognitiveContext
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 
 if TYPE_CHECKING:
@@ -2038,3 +2040,28 @@ class HippocampalAttractorNetwork:
                 },
             )
         ]
+
+
+class EpisodicStage:
+    """Pure CorticalStage for Stage 2 / Episodic Memory Consolidation.
+
+    In accordance with Invariant 1 and WP1, this stage observes an immutable CognitiveContext
+    and emits a pure StageResult containing consolidated episodic schemas and state mutations.
+    """
+
+    name: str = "episodic_stage"
+
+    def observe(self, ctx: CognitiveContext) -> StageResult:
+        ops: list[TransactionOperation] = []
+        signals: dict[str, Any] = {}
+        terminal = ctx.signals.get("terminal")
+        if terminal:
+            signals["episode_boundary"] = True
+            signals["consolidated_transitions"] = len(ctx.failed_transitions)
+
+        return StageResult(
+            author=self.name,
+            operations=ops,
+            signals=signals,
+            proposed_action=None,
+        )

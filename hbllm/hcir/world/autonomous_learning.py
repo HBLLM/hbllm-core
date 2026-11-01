@@ -454,15 +454,15 @@ class TransferableInvariant:
         )
 
 
-class CrossGameKnowledgeTransfer:
-    """Manages extraction, promotion, and retrieval of cross-game knowledge.
+class CrossContextKnowledgeTransfer:
+    """Manages extraction, promotion, and retrieval of cross-context knowledge.
 
-    On game completion:
+    On context completion:
         1. Extracts universal causal invariants from the symbolic theory
         2. Abstracts position-specific data into transferable patterns
         3. Stores in persistent knowledge base
 
-    On new game start:
+    On new context start:
         1. Queries persistent knowledge for applicable priors
         2. Seeds the engine's symbolic theory with transferable invariants
         3. Tracks transfer success/failure for confidence updating
@@ -979,8 +979,8 @@ class ClickObservation:
     timestamp: float = field(default_factory=time.time)
 
 
-class ClickAffordanceLearner:
-    """Empirical affordance learner for spatial click actions (Action 6)."""
+class PointActuationAffordanceLearner:
+    """Empirical affordance learner for coordinate-targeted actuation."""
 
     def __init__(self) -> None:
         self.click_history: list[ClickObservation] = []
@@ -1094,3 +1094,8 @@ class DeliberationEntropyMonitor:
             engine.working_memory.exhausted_candidate_goals.add(engine.avatar_pos)
         engine.simulation_cooldown = 0
         self.stagnation_counter = 0
+
+
+# Backwards compatibility aliases (WP3)
+CrossGameKnowledgeTransfer = CrossContextKnowledgeTransfer
+ClickAffordanceLearner = PointActuationAffordanceLearner

@@ -1,0 +1,114 @@
+{
+  "timestamp": "2026-10-31T21:29:36.104719",
+  "summary": "12 faculties evaluated",
+  "results": [
+    {
+      "faculty": "perception_stage",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 4.143,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "assimilation_stage",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 0.206,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "simulation_stage",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -12.105,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "deliberation_stage",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 87.109,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "motor_stage",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 0.02,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "ppn_locomotor",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 4.393,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "stn_escalator",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 0.449,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "workspace_ignition",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 2.533,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "mpfc_schema_engine",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 8.548,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "boundary_grid_aligner",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -18.839,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "vta_curiosity",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -0.16,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    },
+    {
+      "faculty": "trn_gating",
+      "delta_score": 0.0,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -5.421,
+      "baseline_score_mean": 1.0,
+      "baseline_score_sd": 0.0,
+      "decision": "keep"
+    }
+  ]
+}
