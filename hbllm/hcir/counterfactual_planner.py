@@ -161,7 +161,7 @@ class CounterfactualPlanner:
         vals, counts = np.unique(curr, return_counts=True)
         bg = int(vals[np.argmax(counts)])
 
-        # ── 1. Spatial target effector simulation (allocentric click/destruction/impulse) ────
+        # ── 1. Spatial target effector simulation (allocentric actuation/destruction/impulse) ────
         is_spatial_action = False
         tx, ty = None, None
         if action_data and isinstance(action_data, dict):
@@ -172,12 +172,12 @@ class CounterfactualPlanner:
 
         if is_spatial_action and tx is not None and ty is not None and 0 <= ty < H and 0 <= tx < W:
             target_col = int(curr[ty, tx])
-            # Destruction: if clicked cell is non-background and destructible or obstacle
+            # Destruction: if actuated cell is non-background and destructible or obstacle
             if target_col != bg and (
                 destructible_colors is None or target_col in destructible_colors
             ):
                 predicted[ty, tx] = bg
-            # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward click
+            # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward actuation point
             if movable_colors:
                 for r in range(max(0, ty - 8), min(H, ty + 9)):
                     for c in range(max(0, tx - 8), min(W, tx + 9)):

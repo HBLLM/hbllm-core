@@ -211,3 +211,54 @@ class SnapshotManager:
         for edge in sorted(graph.all_edges(), key=lambda e: e.id):
             hasher.update(edge.model_dump_json().encode())
         return hasher.hexdigest()
+
+    def replay(self, event_store: IEventStore, to_sequence: int | None = None) -> CognitiveGraph:
+        """Replay events from the store up to a given sequence number to reconstruct a CognitiveGraph (WP7)."""
+        from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
+        from hbllm.hcir.stores import EventType
+
+        graph = CognitiveGraph(enable_native_substrate=False)
+        events = event_store.get_events()
+        for ev in events:
+            if to_sequence is not None and ev.sequence > to_sequence:
+                break
+            d = ev.data or {}
+            if ev.event_type == EventType.NODE_ADDED:
+                node_payload = d.get("node") or d.get("node_data")
+                if node_payload is not None:
+                    graph.add_node(
+                        node_payload
+                        if isinstance(node_payload, HCIRNode)
+                        else HCIRNode.model_validate(node_payload)
+                    )
+            elif ev.event_type == EventType.NODE_MODIFIED:
+                node_payload = d.get("node") or d.get("node_data")
+                if node_payload is not None:
+                    graph.upsert_node(
+                        node_payload
+                        if isinstance(node_payload, HCIRNode)
+                        else HCIRNode.model_validate(node_payload)
+                    )
+                elif "node_id" in d and "changes" in d:
+                    if graph.has_node(d["node_id"]):
+                        curr = graph.get_node(d["node_id"])
+                        if curr is not None:
+                            for k, v in d["changes"].items():
+                                if k == "properties" and isinstance(v, dict):
+                                    curr.properties.update(v)
+                                elif hasattr(curr, k):
+                                    setattr(curr, k, v)
+            elif ev.event_type == EventType.NODE_REMOVED and "node_id" in d:
+                graph.remove_node(d["node_id"])
+            elif ev.event_type == EventType.EDGE_ADDED:
+                edge_payload = d.get("edge") or d.get("edge_data")
+                if edge_payload is not None:
+                    graph.add_edge(
+                        edge_payload
+                        if isinstance(edge_payload, HCIREdge)
+                        else HCIREdge.model_validate(edge_payload)
+                    )
+            elif ev.event_type == EventType.EDGE_REMOVED and "edge_id" in d:
+                graph.remove_edge(d["edge_id"])
+
+        return graph

@@ -15,6 +15,11 @@ Biologically modeled on mammalian OFC counterfactual preplay and frontopolar (BA
 
 from __future__ import annotations
 
+
+def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
+    return getattr(target, attr, default) if target is not None else default
+
+
 import heapq
 import logging
 from collections import deque
@@ -30,6 +35,7 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
 from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
+from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.prefrontal_working_memory import HeldItem
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
@@ -213,7 +219,7 @@ class EpistemicGoalScheduler:
             goals = list(confirmed_goals)
 
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
-        wm = getattr(engine, "working_memory", None)
+        wm = get_engine_state_attr(engine, "working_memory", None)
         if wm is not None:
             if wm.active_schema is not None and not wm.active_schema.is_finished:
                 if wm.active_schema.is_current_stage_satisfied(
@@ -233,7 +239,7 @@ class EpistemicGoalScheduler:
             elif wm.active_schema is None and wm.procedural_library:
                 matched = wm.find_matching_skill(
                     available_actions=available_actions,
-                    context={"current_level": getattr(engine, "current_level", 0)},
+                    context={"current_level": get_engine_state_attr(engine, "current_level", 0)},
                 )
                 if matched is not None:
                     skill_name, _ = matched
@@ -846,9 +852,9 @@ class MentalSimulationPlanner:
             engine._update_avatar_position_from_grid(curr_grid, known_av)
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            manip = getattr(engine.working_memory.body_schema, "active_manipulandum", None)
+            manip = get_sub_attr(engine.working_memory.body_schema, "active_manipulandum", None)
             if manip is not None and getattr(manip, "pos", None) is not None:
-                engine.avatar_pos = manip.pos
+                engine.state.avatar_pos = manip.pos
 
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
             return None
@@ -1393,14 +1399,14 @@ class MentalSimulationPlanner:
             or has_periodic
             or bool(engine.collision_cones.projected_trajectories)
         )
-        meta_depth = getattr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
+        meta_depth = get_sub_attr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
         meta_mode = (
             getattr(
                 engine.working_memory.last_metacognitive_assessment,
                 "recommended_exploration_mode",
                 None,
             )
-            if getattr(engine.working_memory, "last_metacognitive_assessment", None)
+            if get_sub_attr(engine.working_memory, "last_metacognitive_assessment", None)
             else None
         )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
@@ -1532,7 +1538,7 @@ class MentalSimulationPlanner:
                         len(path),
                         cur_pos,
                     )
-                    engine.current_simulated_goal = cur_pos
+                    engine.state.current_simulated_goal = cur_pos
                     return path, had_relaxable_block
 
                 if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
@@ -1541,7 +1547,7 @@ class MentalSimulationPlanner:
                         "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
                         len(path),
                     )
-                    engine.current_simulated_goal = list(goals)[0] if goals else None
+                    engine.state.current_simulated_goal = list(goals)[0] if goals else None
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
@@ -2293,7 +2299,7 @@ class MentalSimulationPlanner:
                     held_items=held_set,
                     lethal_positions=engine.current_level_lethal_positions,
                     max_iterations=32,
-                    body_schema=getattr(engine.working_memory, "body_schema", None),
+                    body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
                     tool_barrier_affinities=getattr(
                         engine.working_memory, "tool_barrier_affinities", None
                     ),
@@ -2615,7 +2621,7 @@ class MentalSimulationPlanner:
                 held_items=held_set,
                 lethal_positions=engine.current_level_lethal_positions,
                 max_iterations=32,
-                body_schema=getattr(engine.working_memory, "body_schema", None),
+                body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
                 tool_barrier_affinities=getattr(
                     engine.working_memory, "tool_barrier_affinities", None
                 ),

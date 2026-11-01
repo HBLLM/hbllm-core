@@ -13,6 +13,11 @@ Conforms strictly to HBLLM Cognitive OS invariants (LLM-free, deterministic, sta
 
 from __future__ import annotations
 
+
+def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
+    return getattr(target, attr, default) if target is not None else default
+
+
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
@@ -26,7 +31,7 @@ import numpy as np
 from hbllm.hcir.spatial_planner import EntityRole, SpatialActionIntent
 from hbllm.hcir.transactions import TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
-from hbllm.hcir.world.engine_state import CognitiveContext
+from hbllm.hcir.world.engine_state import CognitiveContext, get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
@@ -196,7 +201,7 @@ class NavigateTo(MacroAction):
             self.status = MacroActionStatus.BLOCKED
             return available_actions[0], None
 
-        failed_tx = getattr(engine, "failed_transitions", set())
+        failed_tx = get_engine_state_attr(engine, "failed_transitions", set())
         movable_actions = [
             (a, engine.action_dynamics[a].delta_r, engine.action_dynamics[a].delta_c)
             for a in available_actions
@@ -211,11 +216,11 @@ class NavigateTo(MacroAction):
 
         from hbllm.hcir.world.cortex_perception import PerceptionEngine
 
-        threats = getattr(engine, "_prev_oriented_threats", [])
+        threats = get_engine_state_attr(engine, "_prev_oriented_threats", [])
         if not threats:
             threats = PerceptionEngine.detect_oriented_threats(
                 curr_grid,
-                getattr(engine, "previous_entities", []),
+                get_engine_state_attr(engine, "previous_entities", []),
                 engine.bg_feature or 0,
                 avatar_pos=av_pos,
             )
@@ -224,7 +229,7 @@ class NavigateTo(MacroAction):
         bg_val = engine.bg_feature or 0
         wall_feats = set(engine.symbolic_theory.barrier_features)
         walkable_and_safe = set(engine.symbolic_theory.walkable_features) | set(
-            getattr(engine, "verified_safe_features", set()) or set()
+            get_engine_state_attr(engine, "verified_safe_features", set()) or set()
         )
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg_val not in walkable_and_safe
         if not bg_is_impassable_void:
@@ -308,7 +313,7 @@ class NavigateTo(MacroAction):
 
                 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
-                engine.mental_plan = deque(
+                engine.state.mental_plan = deque(
                     [
                         MentalSimulationStep(
                             action=act,
@@ -326,12 +331,12 @@ class NavigateTo(MacroAction):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. InteractWith Operator (Actuate / Click Target)
+# 2. InteractWith Operator (Actuate / Targeted Effector)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class InteractWith(MacroAction):
-    """Allocentric spatial effector command (e.g. click widget, toggle optical mirror)."""
+    """Allocentric spatial effector command (e.g. actuate widget, toggle optical mirror)."""
 
     def __init__(
         self,
@@ -804,7 +809,7 @@ class ExploreObject(MacroAction):
         available_actions: Sequence[Any],
     ) -> tuple[Any, dict[str, Any] | None] | None:
         self.consecutive_steps += 1
-        # Allocentric click effector only if agent lacks displacement capabilities
+        # Allocentric targeted effector only if agent lacks displacement capabilities
         if not engine.has_displacement_capabilities(available_actions) and any(
             engine.is_spatial_effector(a) for a in available_actions
         ):
@@ -1207,7 +1212,7 @@ def attribute_macro_action_outcome(
                 if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
                     feat = int(prev_grid[r, c])
             if feat is not None and feat != 0:
-                step_cnt = getattr(engine, "step_count", 0)
+                step_cnt = get_engine_state_attr(engine, "step_count", 0)
                 engine.working_memory.body_schema.acquire_tool(feat, step=step_cnt, role="key")
                 engine.symbolic_theory.cargo_features.add(feat)
                 if hasattr(engine, "learned_cargo_features"):
@@ -1290,7 +1295,11 @@ def attribute_macro_action_outcome(
                 attributor = getattr(
                     engine,
                     "remote_causal",
-                    getattr(getattr(engine, "causal_cortex", None), "causal_attributor", None),
+                    getattr(
+                        get_engine_state_attr(engine, "causal_cortex", None),
+                        "causal_attributor",
+                        None,
+                    ),
                 )
                 if attributor is not None:
                     attributor.record_transition(
@@ -1657,10 +1666,10 @@ class MacroPlanSynthesizer:
                                 engine.working_memory.focus_switch_actions.add(sw_a)
 
                     if role == "goal" or "exit" in role:
-                        rec_pos = getattr(engine, "recent_positions", set())
-                        av_f = getattr(engine, "avatar_features", set())
+                        rec_pos = get_engine_state_attr(engine, "recent_positions", set())
+                        av_f = get_engine_state_attr(engine, "avatar_features", set())
                         if (
-                            pos != getattr(engine, "avatar_pos", None)
+                            pos != get_engine_state_attr(engine, "avatar_pos", None)
                             and pos not in rec_pos
                             and (not feat or feat not in av_f)
                         ):
@@ -1734,7 +1743,7 @@ class MacroPlanSynthesizer:
             return driver_plan
 
         # 0B. Query declarative skills registered on engine
-        skills = getattr(engine, "declarative_skills", []) or []
+        skills = get_engine_state_attr(engine, "declarative_skills", []) or []
         for skill in skills:
             if hasattr(skill, "can_handle") and skill.can_handle(
                 curr_grid, list(available_actions), metadata={"engine": engine}
@@ -1805,12 +1814,12 @@ class MacroPlanSynthesizer:
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
-        known_objs = list(getattr(engine.working_memory, "known_objects", {}).values())
-        trial_counts = getattr(engine.working_memory, "object_trial_counts", {})
+        known_objs = list(get_sub_attr(engine.working_memory, "known_objects", {}).values())
+        trial_counts = get_sub_attr(engine.working_memory, "object_trial_counts", {})
 
         # Collect candidate goals
         av_pos = engine.avatar_pos
-        recent_pos = set(getattr(engine, "recent_positions", set()))
+        recent_pos = set(get_engine_state_attr(engine, "recent_positions", set()))
         av_feats = set(engine.avatar_features or set())
         if engine.avatar_feature is not None:
             av_feats.add(engine.avatar_feature)
@@ -1846,7 +1855,7 @@ class MacroPlanSynthesizer:
         has_multi_agent = (
             len(engine.working_memory.focus_switch_actions) > 0
             or len(engine.focus_switch_actions) > 0
-            or len(getattr(engine.working_memory, "controllable_avatar_features", set())) > 1
+            or len(get_sub_attr(engine.working_memory, "controllable_avatar_features", set())) > 1
         )
         focus_switch = next(
             (

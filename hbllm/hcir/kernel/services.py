@@ -127,6 +127,7 @@ class KernelServices:
         from hbllm.hcir.kernel.capability_sandboxing import (
             CapabilityPermissions,
             CapabilitySandboxManager,
+            IsolationMode,
             SandboxedCapabilityPolicy,
             TrustLevel,
         )
@@ -140,11 +141,11 @@ class KernelServices:
         resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
         world_k = WorldKernel(workspace)
 
-        system_perms = CapabilityPermissions(
-            allow_filesystem=True,
-            allow_network=True,
-            allow_subprocess=True,
-            allow_db_write=True,
+        least_privilege_in_memory = CapabilityPermissions(
+            allow_filesystem=False,
+            allow_network=False,
+            allow_subprocess=False,
+            allow_db_write=False,
         )
 
         resolver.register(
@@ -155,6 +156,7 @@ class KernelServices:
                 priority=1,
                 description="Default in-memory forward simulation executor",
                 tags=["safe", "internal"],
+                required_permissions=set(),
             )
         )
         sandbox_mgr.register_policy(
@@ -162,7 +164,7 @@ class KernelServices:
                 capability_name="world_prediction",
                 provider_id="default_world_prediction",
                 trust_level=TrustLevel.SYSTEM,
-                permissions=system_perms,
+                permissions=least_privilege_in_memory,
             )
         )
 
@@ -182,6 +184,7 @@ class KernelServices:
                         else f"Alias of {canonical}"
                     ),
                     tags=["safe", "internal"] + (["alias"] if canonical != w_cap else []),
+                    required_permissions=set(),
                 )
             )
             sandbox_mgr.register_policy(
@@ -189,7 +192,7 @@ class KernelServices:
                     capability_name=w_cap,
                     provider_id=impl_id,
                     trust_level=TrustLevel.SYSTEM,
-                    permissions=system_perms,
+                    permissions=least_privilege_in_memory,
                 )
             )
 
@@ -208,6 +211,7 @@ class KernelServices:
                     priority=5,
                     description=f"Kernel-governed live {p_cap} capability",
                     tags=["safe", "internal"],
+                    required_permissions=set(),
                 )
             )
             sandbox_mgr.register_policy(
@@ -215,7 +219,7 @@ class KernelServices:
                     capability_name=p_cap,
                     provider_id=impl_id,
                     trust_level=TrustLevel.SYSTEM,
-                    permissions=system_perms,
+                    permissions=least_privilege_in_memory,
                 )
             )
 
@@ -229,6 +233,17 @@ class KernelServices:
                 sandbox_manager=sandbox_mgr,
                 default_capability=r_cap,
             )
+            is_sandbox_run = r_cap == "execution.sandbox_run"
+            cap_perms = (
+                CapabilityPermissions(
+                    allow_filesystem=False,
+                    allow_network=False,
+                    allow_subprocess=True,
+                    allow_db_write=False,
+                )
+                if is_sandbox_run
+                else least_privilege_in_memory
+            )
             resolver.register(
                 CapabilityImplementation(
                     capability_name=r_cap,
@@ -237,14 +252,19 @@ class KernelServices:
                     priority=5,
                     description=f"Kernel-governed live {r_cap} capability",
                     tags=["safe", "internal"],
+                    required_permissions={"subprocess"} if is_sandbox_run else set(),
                 )
             )
             sandbox_mgr.register_policy(
                 SandboxedCapabilityPolicy(
                     capability_name=r_cap,
                     provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    permissions=system_perms,
+                    trust_level=TrustLevel.VERIFIED if is_sandbox_run else TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.SUBPROCESS
+                    if is_sandbox_run
+                    else IsolationMode.IN_PROCESS,
+                    permissions=cap_perms,
+                    required_permissions={"subprocess"} if is_sandbox_run else set(),
                 )
             )
 

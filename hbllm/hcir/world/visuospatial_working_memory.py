@@ -4,13 +4,13 @@ Modeled on primate visuospatial working memory and Baddeley's episodic buffer:
 1. Feature-Location Coordinate Binding: Retains item-location associations
    M_WM = {(r, c): (revealed_feature, step, visit_count)}.
 2. CA3 Pattern Completion & Pair-Matching Induction:
-   When an action (e.g. click at (r, c)) reveals feature F, immediately queries
+   When an action (e.g. actuate at (r, c)) reveals feature F, immediately queries
    working memory for another location (r', c') known to hold feature F. If present,
    emits a high-priority motor target to complete the pair.
 3. Causal Stencil Discovery: Learns operator receptive fields:
-   - Point mutation: click(r, c) modifies only (r, c).
-   - Cardinal cross: click(r, c) toggles (r, c) and its 4 von Neumann neighbors.
-   - Row/Column stencil: click(r, c) inverts entire axis.
+   - Point mutation: actuate(r, c) modifies only (r, c).
+   - Cardinal cross: actuate(r, c) toggles (r, c) and its 4 von Neumann neighbors.
+   - Row/Column stencil: actuate(r, c) inverts entire axis.
 4. Systematic Epistemic Scanning: Coordinates saccadic fixation in structured raster
    order over affordance arrays to avoid chaotic stochastic jitter.
 5. Declarative Neuro-Symbolic Integration: Synthesizes formal CausalPredicates, SymbolicSubgoals,

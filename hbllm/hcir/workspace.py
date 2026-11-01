@@ -187,16 +187,16 @@ class HCIRWorkspaceState:
         return self.transaction_manager.commit(tx)
 
     # ── Graph Operations (kernel-internal; recorded in event log) ────
-    # These are the raw primitives used by the TransactionManager. Subsystems
-    # must not call them directly — use ``commit_operations`` or a transaction.
+    # These are the raw primitives used exclusively by TransactionManager.
+    # External callers must use ``commit_operations`` or a transaction.
 
-    def add_node(self, node: HCIRNode, author: str = "system") -> None:
-        """Add a node and record the event."""
+    def _add_node(self, node: HCIRNode, author: str = "system") -> None:
+        """Add a node and record the event (kernel-internal)."""
         self._graph.add_node(node)
         self._snapshot_manager.record_node_added(node, author)
 
-    def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
-        """Add or replace a node and record the event."""
+    def _upsert_node(self, node: HCIRNode, author: str = "system") -> None:
+        """Add or replace a node and record the event (kernel-internal)."""
         existing = self._graph.get_node(node.id)
         self._graph.upsert_node(node)
         if existing:
@@ -206,24 +206,98 @@ class HCIRWorkspaceState:
         else:
             self._snapshot_manager.record_node_added(node, author)
 
-    def remove_node(self, node_id: str, author: str = "system") -> HCIRNode | None:
-        """Remove a node and record the event."""
+    def _remove_node(self, node_id: str, author: str = "system") -> HCIRNode | None:
+        """Remove a node and record the event (kernel-internal)."""
         node = self._graph.remove_node(node_id)
         if node is not None:
             self._snapshot_manager.record_node_removed(node_id, author)
         return node
 
-    def add_edge(self, edge: HCIREdge, author: str = "system") -> None:
-        """Add an edge and record the event."""
+    def _add_edge(self, edge: HCIREdge, author: str = "system") -> None:
+        """Add an edge and record the event (kernel-internal)."""
         self._graph.add_edge(edge)
         self._snapshot_manager.record_edge_added(edge, author)
 
-    def remove_edge(self, edge_id: str, author: str = "system") -> HCIREdge | None:
-        """Remove an edge and record the event."""
+    def _remove_edge(self, edge_id: str, author: str = "system") -> HCIREdge | None:
+        """Remove an edge and record the event (kernel-internal)."""
         edge = self._graph.remove_edge(edge_id)
         if edge is not None:
             self._snapshot_manager.record_edge_removed(edge_id, author)
         return edge
+
+    def add_node(self, node: HCIRNode, author: str = "system") -> None:
+        """Deprecated: Use commit_operations or TransactionManager."""
+        import warnings
+
+        warnings.warn(
+            "Direct workspace.add_node is deprecated; routing through commit_operations.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.commit_operations(
+            [TransactionOperation(op=TransactionOp.ADD_NODE, node_data=node.model_dump())],
+            author=author,
+        )
+
+    def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
+        """Deprecated: Use commit_operations or TransactionManager."""
+        import warnings
+
+        warnings.warn(
+            "Direct workspace.upsert_node is deprecated; routing through commit_operations.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.commit_operations(
+            [TransactionOperation(op=TransactionOp.UPSERT_NODE, node_data=node.model_dump())],
+            author=author,
+        )
+
+    def remove_node(self, node_id: str, author: str = "system") -> HCIRNode | None:
+        """Deprecated: Use commit_operations or TransactionManager."""
+        import warnings
+
+        warnings.warn(
+            "Direct workspace.remove_node is deprecated; routing through commit_operations.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        existing = self.get_node(node_id)
+        self.commit_operations(
+            [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
+            author=author,
+        )
+        return existing
+
+    def add_edge(self, edge: HCIREdge, author: str = "system") -> None:
+        """Deprecated: Use commit_operations or TransactionManager."""
+        import warnings
+
+        warnings.warn(
+            "Direct workspace.add_edge is deprecated; routing through commit_operations.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.commit_operations(
+            [TransactionOperation(op=TransactionOp.ADD_EDGE, edge_data=edge.model_dump())],
+            author=author,
+        )
+
+    def remove_edge(self, edge_id: str, author: str = "system") -> HCIREdge | None:
+        """Deprecated: Use commit_operations or TransactionManager."""
+        import warnings
+
+        warnings.warn(
+            "Direct workspace.remove_edge is deprecated; routing through commit_operations.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        existing = self.get_edge(edge_id)
+        self.commit_operations(
+            [TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=edge_id)],
+            author=author,
+        )
+        return existing
 
     def get_node(self, node_id: str) -> HCIRNode | None:
         return self._graph.get_node(node_id)

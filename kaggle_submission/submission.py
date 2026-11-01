@@ -1230,7 +1230,20 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
             except Exception:
                 pass
 
-            if hasattr(self.internal_agent, "decide"):
+            if hasattr(self.internal_agent, "step"):
+                from hbllm.hcir.world.percept import EmbodiedObservation
+
+                obs = EmbodiedObservation(
+                    lattice=grid,
+                    entities=_objects or [],
+                    available_actions=available_actions,
+                    terminal=None,
+                    context_id=getattr(self, "game_id", "default"),
+                    episode_id=str(getattr(self, "current_level", 0)),
+                    metadata={"action_schemas": _arc_schema, "micro_actions": _arc_schema},
+                )
+                action_id, action_data = self.internal_agent.step(obs)
+            elif hasattr(self.internal_agent, "decide"):
                 action_id, action_data = self.internal_agent.decide(
                     grid,
                     available_actions,

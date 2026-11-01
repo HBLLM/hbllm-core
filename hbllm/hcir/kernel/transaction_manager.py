@@ -724,9 +724,9 @@ class TransactionManager:
             existing = ws.get_node(target_id) if target_id else None
             node = self._deserialize_node(raw_data)
             if op.op == TransactionOp.ADD_NODE:
-                ws.add_node(node, author=author)
+                ws._add_node(node, author=author)
             else:
-                ws.upsert_node(node, author=author)
+                ws._upsert_node(node, author=author)
             undo_entries.append(
                 {
                     "op": op.op,
@@ -744,7 +744,7 @@ class TransactionManager:
                 updated_data = existing.model_dump()
                 updated_data.update(changes)
                 updated = type(existing).model_validate(updated_data)
-                ws.upsert_node(updated, author=author)
+                ws._upsert_node(updated, author=author)
                 undo_entries.append(
                     {
                         "op": op.op,
@@ -763,7 +763,7 @@ class TransactionManager:
                         for e in [*ws.graph.edges_from(op.node_id), *ws.graph.edges_to(op.node_id)]
                     }
                     cascaded = [e.model_dump() for e in touched.values()]
-                ws.remove_node(op.node_id, author=author)
+                ws._remove_node(op.node_id, author=author)
                 undo_entries.append(
                     {
                         "op": op.op,
@@ -778,13 +778,13 @@ class TransactionManager:
             if "id" not in raw_edge and op.edge_id:
                 raw_edge["id"] = op.edge_id
             edge = HCIREdge.model_validate(raw_edge)
-            ws.add_edge(edge, author=author)
+            ws._add_edge(edge, author=author)
             undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": None})
 
         elif op.op == TransactionOp.REMOVE_EDGE:
             if op.edge_id:
                 prev_edge = self._edge_snapshot(op.edge_id)
-                ws.remove_edge(op.edge_id, author=author)
+                ws._remove_edge(op.edge_id, author=author)
                 undo_entries.append(
                     {"op": op.op, "edge_id": op.edge_id, "previous_edge": prev_edge}
                 )

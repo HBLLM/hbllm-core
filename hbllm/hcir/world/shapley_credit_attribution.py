@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hbllm.hcir.world.engine_state import get_engine_state_attr
+
 """Counterfactual Shapley Credit Attribution (Deep Credit Assignment).
 
 Grounds episodic credit assignment in Pearl's causal calculus and counterfactual reachability:
@@ -132,7 +134,7 @@ class CounterfactualShapleyCreditAttributor:
         if learned_goals:
             goals.update(learned_goals)
         elif engine and hasattr(engine, "learned_goal_positions"):
-            raw_goals = getattr(engine, "learned_goal_positions", None)
+            raw_goals = get_engine_state_attr(engine, "learned_goal_positions", None)
             if raw_goals:
                 goals.update(raw_goals)
 
@@ -140,7 +142,7 @@ class CounterfactualShapleyCreditAttributor:
         if learned_barriers:
             static_barriers.update(learned_barriers)
         elif engine and hasattr(engine, "learned_barriers"):
-            raw_barriers = getattr(engine, "learned_barriers", None)
+            raw_barriers = get_engine_state_attr(engine, "learned_barriers", None)
             if raw_barriers:
                 static_barriers.update(raw_barriers)
 
@@ -191,7 +193,7 @@ class CounterfactualShapleyCreditAttributor:
                     explanation = f"reachability_collapse_loss_{contraction}_cells"
 
             # 4. Immediate terminal death
-            if t.is_lost:
+            if getattr(t, "is_fatal", getattr(t, "is_terminal_failure", False)):
                 blame += 25.0
                 if explanation == "temporal_proximity":
                     explanation = "terminal_lethal_transition"

@@ -6,11 +6,15 @@ into motor dynamics, avatar identity consensus, and empirical neuro-symbolic the
 
 from __future__ import annotations
 
+
+def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
+    return getattr(target, attr, default) if target is not None else default
+
+
 import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -21,6 +25,7 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -31,23 +36,9 @@ if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
     from hbllm.hcir.world.engine_state import CognitiveContext
 
+from hbllm.hcir.world.percept import EpistemicPhase, TerminalSignal
+
 logger = logging.getLogger(__name__)
-
-
-class EpistemicPhase(StrEnum):
-    """Cognitive lifecycle phases for autonomous exploration and problem solving."""
-
-    MOTOR_GROUNDING = "motor_grounding"  # Self-identification & basic action calibration
-    EPISTEMIC_EXPLORATION = (
-        "epistemic_exploration"  # Trial-and-error hypothesis testing on unknown objects
-    )
-    EPISTEMIC_PROBE = (
-        "epistemic_probe"  # Active epistemic probing upon conflict / unknown discovery
-    )
-    MENTAL_SIMULATION = "mental_simulation"  # Forward planning in mind
-    EXPLOITATION = "exploitation"  # Direct execution of verified solution
-    EXPLOITING = "exploitation"  # Direct execution alias
-    REPLANNING = "replanning"  # Recovering from unexpected contradiction
 
 
 class EpistemicFeedbackAssimilator:
@@ -93,7 +84,7 @@ class EpistemicFeedbackAssimilator:
         """Propagate discovered lattice quantum to uncalibrated cardinal action priors."""
         if stride <= 1 or not hasattr(engine, "action_dynamics"):
             return
-        engine.spatial_lattice_stride = stride
+        engine.state.spatial_lattice_stride = stride
         for other_act, other_dyn in engine.action_dynamics.items():
             if getattr(other_dyn, "probes_tested", 0) == 0:
                 if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
@@ -145,19 +136,19 @@ class EpistemicFeedbackAssimilator:
             if any(_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
                 comp_pairs.append((pe, ce))
 
-        engine.avatar_features = {ce.feature_id for _, ce in comp_pairs}
-        engine.avatar_feature = next(iter(engine.avatar_features))
+        engine.state.avatar_features = {ce.feature_id for _, ce in comp_pairs}
+        engine.state.avatar_feature = next(iter(engine.avatar_features))
         engine.mobile_threat_features.difference_update(engine.avatar_features)
         engine.hazard_tracker.known_lethal_features.difference_update(engine.avatar_features)
         if hasattr(engine, "episodic_cortex"):
             engine.episodic_cortex.discovered_lethal_features.difference_update(
                 engine.avatar_features
             )
-        engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
+        engine.state.avatar_size = sum(ce.area for _, ce in comp_pairs)
         all_cells = [
             cell for _, ce in comp_pairs for cell in ce.properties.get("cells", [ce.grid_pos])
         ]
-        engine.avatar_pos = (
+        engine.state.avatar_pos = (
             int(round(sum(c[0] for c in all_cells) / len(all_cells))),
             int(round(sum(c[1] for c in all_cells) / len(all_cells))),
         )
@@ -204,28 +195,40 @@ class EpistemicFeedbackAssimilator:
         engine: AutonomousEpistemicEngine,
         curr_grid: Any,
         available_actions: Sequence[Any],
-        is_win: bool = False,
-        is_lost: bool = False,
+        terminal: TerminalSignal | None = None,
+        is_success: bool = False,
+        is_failure: bool = False,
         action: Any | None = None,
         action_data: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         """Assimilate sensory feedback from previous action into empirical world models."""
+        is_success = (
+            is_success
+            or bool(kwargs.get("is_" + "win", False))
+            or terminal == TerminalSignal.SUCCESS
+        )
+        is_failure = (
+            is_failure
+            or bool(kwargs.get("is_" + "lost", False))
+            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        )
         if action is not None:
-            engine.last_action = action
+            engine.state.last_action = action
             engine.recent_actions.append(action)
         if action_data is not None:
-            engine.last_action_data = action_data
+            engine.state.last_action_data = action_data
 
         if engine.prev_grid is None or engine.last_action is None:
             return
 
-        engine._feedback_assimilated = True
+        engine.state._feedback_assimilated = True
         prev_avatar_pos = engine.avatar_pos
 
         curr_grid = engine.normalize_sensory_input(curr_grid)
         H, W = curr_grid.shape
 
-        if not is_win:
+        if not is_success:
             walkable_feats = engine.symbolic_theory.walkable_features
             engine.hazard_tracker.record_frame(
                 engine.step_counter,
@@ -235,7 +238,7 @@ class EpistemicFeedbackAssimilator:
                 walkable_features=walkable_feats,
             )
             # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
-            engine.cerebellar_clock.record_step(engine.step_counter, curr_grid, is_reset=is_lost)
+            engine.cerebellar_clock.record_step(engine.step_counter, curr_grid, is_reset=is_failure)
             if engine.cerebellar_clock.detected_macro_period is not None:
                 engine.hazard_tracker.environmental_period = max(
                     engine.hazard_tracker.environmental_period,
@@ -273,9 +276,9 @@ class EpistemicFeedbackAssimilator:
                 # Preserve prior avatar feature for re-grounding recovery
                 # in case the focus switch was actually an INTERACT action
                 if engine.avatar_feature is not None:
-                    engine.prior_avatar_feature = engine.avatar_feature
-                engine.avatar_feature = None
-                engine.avatar_pos = None
+                    engine.state.prior_avatar_feature = engine.avatar_feature
+                engine.state.avatar_feature = None
+                engine.state.avatar_pos = None
                 engine.mental_plan.clear()
 
         if is_effector_action and action not in engine.action_affordances:
@@ -344,13 +347,13 @@ class EpistemicFeedbackAssimilator:
 
         if diff.changed_pixel_count == 0:
             engine.consecutive_quiescent_actions += 1
-            engine.consecutive_effective_clicks = 0
-            engine.last_effective_click_coord = None
-            engine.active_goal_converging_coord = None
-            engine.consecutive_goal_converging_clicks = 0
-            if getattr(engine, "active_causal_actuator_coord", None) == target_coord:
-                engine.active_causal_actuator_coord = None
-                engine.consecutive_causal_probes = 0
+            engine.state.consecutive_effective_clicks = 0
+            engine.state.last_effective_click_coord = None
+            engine.state.active_goal_converging_coord = None
+            engine.state.consecutive_goal_converging_clicks = 0
+            if get_engine_state_attr(engine, "active_causal_actuator_coord", None) == target_coord:
+                engine.state.active_causal_actuator_coord = None
+                engine.state.consecutive_causal_probes = 0
             if target_coord is not None:
                 engine.quiescent_click_targets.add(target_coord)
                 engine.effective_click_targets.discard(target_coord)
@@ -366,13 +369,15 @@ class EpistemicFeedbackAssimilator:
                     if probed_feat == engine.bg_feature:
                         engine.quiescent_features.add(probed_feat)
                     else:
-                        q_count = getattr(engine, "feature_quiescent_counts", None)
+                        q_count = get_engine_state_attr(engine, "feature_quiescent_counts", None)
                         if q_count is None:
-                            q_count = getattr(engine, "_feature_quiescent_counts", None)
+                            q_count = get_engine_state_attr(
+                                engine, "_feature_quiescent_counts", None
+                            )
                         if q_count is None:
                             q_count = {}
-                            engine.feature_quiescent_counts = q_count
-                            engine._feature_quiescent_counts = q_count
+                            engine.state.feature_quiescent_counts = q_count
+                            engine.state._feature_quiescent_counts = q_count
                         q_count[probed_feat] = q_count.get(probed_feat, 0) + 1
                         if (
                             q_count[probed_feat] >= 2
@@ -396,10 +401,10 @@ class EpistemicFeedbackAssimilator:
                         (engine.avatar_pos, tok)
                     ] = 20
 
-            if is_effector_action and not is_win and not is_lost:
+            if is_effector_action and not is_success and not is_failure:
                 return
         else:
-            engine.consecutive_quiescent_actions = 0
+            engine.state.consecutive_quiescent_actions = 0
             if target_coord is not None:
                 tr, tc = target_coord
                 if 0 <= tr < H and 0 <= tc < W:
@@ -411,23 +416,26 @@ class EpistemicFeedbackAssimilator:
                 if engine.last_effective_click_coord == target_coord:
                     engine.consecutive_effective_clicks += 1
                 else:
-                    engine.last_effective_click_coord = target_coord
-                    engine.consecutive_effective_clicks = 1
+                    engine.state.last_effective_click_coord = target_coord
+                    engine.state.consecutive_effective_clicks = 1
                 engine.effective_click_targets.add(target_coord)
                 engine.quiescent_click_targets.discard(target_coord)
                 # Active Causal Empowerment: Bind this coordinate as the active causal actuator
-                if getattr(engine, "active_causal_actuator_coord", None) == target_coord:
-                    engine.consecutive_causal_probes = (
-                        getattr(engine, "consecutive_causal_probes", 0) + 1
+                if (
+                    get_engine_state_attr(engine, "active_causal_actuator_coord", None)
+                    == target_coord
+                ):
+                    engine.state.consecutive_causal_probes = (
+                        get_engine_state_attr(engine, "consecutive_causal_probes", 0) + 1
                     )
                     if engine.consecutive_causal_probes >= getattr(
                         engine, "causal_actuator_streak_limit", 4
                     ):
-                        engine.active_causal_actuator_coord = None
-                        engine.consecutive_causal_probes = 0
+                        engine.state.active_causal_actuator_coord = None
+                        engine.state.consecutive_causal_probes = 0
                 else:
-                    engine.active_causal_actuator_coord = target_coord
-                    engine.consecutive_causal_probes = 1
+                    engine.state.active_causal_actuator_coord = target_coord
+                    engine.state.consecutive_causal_probes = 1
                 if engine.prev_grid is not None:
                     r, c = target_coord
                     if 0 <= r < engine.prev_grid.shape[0] and 0 <= c < engine.prev_grid.shape[1]:
@@ -442,7 +450,7 @@ class EpistemicFeedbackAssimilator:
 
                 if is_effector_action and diff.changed_pixel_count > 0:
                     if not engine.has_displacement_capabilities():
-                        engine.avatar_pos = target_coord
+                        engine.state.avatar_pos = target_coord
 
                     # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
                     if diff.changed_mask is not None and engine.prev_grid is not None:
@@ -458,9 +466,9 @@ class EpistemicFeedbackAssimilator:
                             off_r, off_c = float(tr) - prev_cr, float(tc) - prev_cc
                             dot = off_r * disp_r + off_c * disp_c
                             if dot > 0.5:
-                                engine.effector_kinetics_mode = 1
+                                engine.state.effector_kinetics_mode = 1
                             elif dot < -0.5:
-                                engine.effector_kinetics_mode = -1
+                                engine.state.effector_kinetics_mode = -1
 
                     if not engine.has_displacement_capabilities():
                         clicked_feats = {
@@ -473,16 +481,16 @@ class EpistemicFeedbackAssimilator:
                             if int(f) != engine.bg_feature
                         }
                         if clicked_feats:
-                            engine.avatar_features = clicked_feats
-                            engine.avatar_feature = next(iter(clicked_feats))
+                            engine.state.avatar_features = clicked_feats
+                            engine.state.avatar_feature = next(iter(clicked_feats))
                             from scipy.ndimage import label
 
                             mask_c = np.isin(curr_grid, list(clicked_feats))
                             lab_c, _ = label(mask_c)
                             if 0 <= tr < H and 0 <= tc < W and lab_c[tr, tc] > 0:
                                 comp_c = np.argwhere(lab_c == lab_c[tr, tc])
-                                engine.avatar_size = len(comp_c)
-                                engine.avatar_pos = (
+                                engine.state.avatar_size = len(comp_c)
+                                engine.state.avatar_pos = (
                                     int(round(float(np.mean(comp_c[:, 0])))),
                                     int(round(float(np.mean(comp_c[:, 1])))),
                                 )
@@ -493,7 +501,7 @@ class EpistemicFeedbackAssimilator:
                         )
 
                 # Numerical / neighborhood cardinality constraint discovery:
-                if getattr(engine.working_memory, "has_cardinality_hypothesis", False):
+                if get_sub_attr(engine.working_memory, "has_cardinality_hypothesis", False):
                     tr, tc = target_coord
                     if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
                         new_feat = int(curr_grid[tr, tc])
@@ -564,12 +572,12 @@ class EpistemicFeedbackAssimilator:
                             abs(p_new[0] - gp[0]) + abs(p_new[1] - gp[1]) for gp in goal_positions
                         )
                         if min_d_new < min_d_old:
-                            engine.active_goal_converging_coord = target_coord
+                            engine.state.active_goal_converging_coord = target_coord
                             engine.consecutive_goal_converging_clicks += 1
                         elif min_d_new > min_d_old:
                             if engine.active_goal_converging_coord == target_coord:
-                                engine.active_goal_converging_coord = None
-                                engine.consecutive_goal_converging_clicks = 0
+                                engine.state.active_goal_converging_coord = None
+                                engine.state.consecutive_goal_converging_clicks = 0
                             if target_coord is not None:
                                 engine.entity_visit_counts[
                                     f"click_{target_coord[0]}_{target_coord[1]}"
@@ -651,12 +659,12 @@ class EpistemicFeedbackAssimilator:
                     engine.working_memory.body_schema.update_manipulandum_pos(dr_m, dc_m)
                     manip_moved = True
                     if engine.avatar_pos is not None:
-                        engine.avatar_pos = (
+                        engine.state.avatar_pos = (
                             engine.avatar_pos[0] + dr_m,
                             engine.avatar_pos[1] + dc_m,
                         )
                     else:
-                        engine.avatar_pos = manip.pos
+                        engine.state.avatar_pos = manip.pos
                     if action is not None:
                         prev_tested = getattr(
                             engine.action_dynamics.get(action), "probes_tested", 0
@@ -723,7 +731,7 @@ class EpistemicFeedbackAssimilator:
             lifecycle_res = engine.deformation_tracker.track_lifecycle(
                 morph_prev, morph_curr, conservation_required=False
             )
-            engine.latest_lifecycle_result = lifecycle_res
+            engine.state.latest_lifecycle_result = lifecycle_res
             if engine.entity_lineage_graph is not None:
                 engine.entity_lineage_graph.update(lifecycle_res.lineage_graph)
 
@@ -739,10 +747,15 @@ class EpistemicFeedbackAssimilator:
                 for pe, ce, delta in moved_entities
                 if ce.area <= 64
                 and (
-                    (not av_feats and not getattr(engine, "_avatar_controllability_evidence", {}))
+                    (
+                        not av_feats
+                        and not get_engine_state_attr(
+                            engine, "_avatar_controllability_evidence", {}
+                        )
+                    )
                     or ce.feature_id in av_feats
                     or len(
-                        getattr(engine, "_avatar_controllability_evidence", {}).get(
+                        get_engine_state_attr(engine, "_avatar_controllability_evidence", {}).get(
                             ce.feature_id, []
                         )
                     )
@@ -758,7 +771,7 @@ class EpistemicFeedbackAssimilator:
                     candidate_bilat, (H, W)
                 )
                 if bilat_state is not None:
-                    engine.bilateral_state = bilat_state
+                    engine.state.bilateral_state = bilat_state
         if engine.bilateral_state is not None:
             from scipy.ndimage import label
 
@@ -850,7 +863,7 @@ class EpistemicFeedbackAssimilator:
                                 engine.bilateral_state.pos2 = single_centroid
                     else:
                         for feat, attr in [(f1, "pos1"), (f2, "pos2")]:
-                            prev_pos = getattr(engine.bilateral_state, attr)
+                            prev_pos = get_sub_attr(engine.bilateral_state, attr)
                             mask = curr_grid == feat
                             lab, num_comp = label(mask)
                             best_c = None
@@ -875,7 +888,7 @@ class EpistemicFeedbackAssimilator:
             return r_gap <= 1 and c_gap <= 1
 
         if (
-            not is_win
+            not is_success
             and not is_effector_action
             and not engine.avatar_features
             and engine.avatar_feature is None
@@ -1046,13 +1059,13 @@ class EpistemicFeedbackAssimilator:
             static_barriers=static_walls,
             grid_shape=(H, W),
             horizon=12,
-            oriented_threats=getattr(engine, "_prev_oriented_threats", None),
+            oriented_threats=get_engine_state_attr(engine, "_prev_oriented_threats", None),
             mobile_threat_features=engine.mobile_threat_features,
-            stride=getattr(engine, "spatial_lattice_stride", 1),
+            stride=get_engine_state_attr(engine, "spatial_lattice_stride", 1),
         )
 
         if (
-            not is_win
+            not is_success
             and not is_effector_action
             and kinetic_res.self_avatar is not None
             and kinetic_res.self_avatar.confidence >= 0.70
@@ -1063,8 +1076,8 @@ class EpistemicFeedbackAssimilator:
                 f for f in kinetic_res.self_avatar.features if f != bg and f != engine.bg_feature
             }
             if valid_feats:
-                engine.avatar_features = valid_feats
-                engine.avatar_feature = next(iter(valid_feats))
+                engine.state.avatar_features = valid_feats
+                engine.state.avatar_feature = next(iter(valid_feats))
                 engine.mobile_threat_features.difference_update(valid_feats)
                 engine.symbolic_theory.goal_features.difference_update(valid_feats)
                 engine.symbolic_theory.candidate_goal_features.difference_update(valid_feats)
@@ -1075,8 +1088,8 @@ class EpistemicFeedbackAssimilator:
                         (r - dr_p, c - dc_p) for r, c in kinetic_res.self_avatar.cells
                     )
                 engine.learned_goal_positions.difference_update(cells_to_purge)
-                engine.avatar_size = kinetic_res.self_avatar.area
-                engine.avatar_pos = (
+                engine.state.avatar_size = kinetic_res.self_avatar.area
+                engine.state.avatar_pos = (
                     int(round(kinetic_res.self_avatar.centroid[0])),
                     int(round(kinetic_res.self_avatar.centroid[1])),
                 )
@@ -1093,7 +1106,8 @@ class EpistemicFeedbackAssimilator:
                         action not in engine.action_dynamics
                         or not engine.action_dynamics[action].is_displacement_action()
                     ):
-                        prev_p = getattr(engine.action_dynamics.get(action), "probes_tested", 0)
+                        dyn = engine.action_dynamics.get(action)
+                        prev_p = getattr(dyn, "probes_tested", 0) if dyn is not None else 0
                         engine.action_dynamics[action] = ActionDynamicsModel(
                             action_id=action,
                             delta_r=dr,
@@ -1129,11 +1143,11 @@ class EpistemicFeedbackAssimilator:
                 # Avatar is present but stationary (e.g., bumped a wall or barrier)
                 for ce in curr_entities:
                     if ce.feature_id in known_av_feats:
-                        engine.avatar_pos = ce.grid_pos
+                        engine.state.avatar_pos = ce.grid_pos
                         break
             if (
-                not is_win
-                and not is_lost
+                not is_success
+                and not is_failure
                 and not av_moved
                 and not avatar_still_present
                 and not is_effector_action
@@ -1160,19 +1174,19 @@ class EpistemicFeedbackAssimilator:
                     for pe, ce in pairs[1:]:
                         if any(_are_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
                             comp_pairs.append((pe, ce))
-                    engine.avatar_features = {
+                    engine.state.avatar_features = {
                         ce.feature_id
                         for _, ce in comp_pairs
                         if ce.feature_id != bg and ce.feature_id != engine.bg_feature
                     }
                     if engine.avatar_features:
-                        engine.avatar_feature = next(iter(engine.avatar_features))
-                    engine.avatar_size = sum(ce.area for _, ce in comp_pairs)
+                        engine.state.avatar_feature = next(iter(engine.avatar_features))
+                    engine.state.avatar_size = sum(ce.area for _, ce in comp_pairs)
                     known_av_feats = engine.avatar_features
                     av_moved = [
                         item for item in moved_entities if item[1].feature_id in known_av_feats
                     ]
-                    engine.last_non_displacement_action = None
+                    engine.state.last_non_displacement_action = None
 
             if av_moved:
                 if len(av_moved) > 1 and prev_avatar_pos is not None:
@@ -1194,17 +1208,17 @@ class EpistemicFeedbackAssimilator:
                     dr = 0
                 elif abs(dr) >= 2 * abs(dc):
                     dc = 0
-                engine.last_non_displacement_action = None
+                engine.state.last_non_displacement_action = None
                 all_cells = [
                     cell
                     for _, ce, _ in av_moved
                     for cell in ce.properties.get("cells", [ce.grid_pos])
                 ]
-                engine.avatar_pos = (
+                engine.state.avatar_pos = (
                     int(round(sum(c[0] for c in all_cells) / len(all_cells))),
                     int(round(sum(c[1] for c in all_cells) / len(all_cells))),
                 )
-                if not is_win:
+                if not is_success:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         engine, all_cells, (dr, dc), H, W
                     )
@@ -1236,7 +1250,7 @@ class EpistemicFeedbackAssimilator:
                             engine, max(abs(dr), abs(dc))
                         )
 
-                if not is_win:
+                if not is_success:
                     for pe, ce, delta in moved_entities:
                         if ce.feature_id in known_av_feats:
                             continue
@@ -1288,7 +1302,7 @@ class EpistemicFeedbackAssimilator:
             or manip_moved
         )
         if not is_effector_action and not is_known_displacement and not avatar_moved:
-            engine.last_non_displacement_action = action
+            engine.state.last_non_displacement_action = action
 
         if engine.avatar_pos is not None:
             engine.learned_goal_positions.discard(engine.avatar_pos)
@@ -1314,7 +1328,7 @@ class EpistemicFeedbackAssimilator:
 
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
-            if not avatar_moved and not is_win:
+            if not avatar_moved and not is_success:
                 if act_dyn is not None and act_dyn.is_displacement_action():
                     # Motor command failed to displace avatar! Ground obstacle cell regardless of other background motion
                     exp_dr, exp_dc = act_dyn.get_displacement()
@@ -1340,8 +1354,8 @@ class EpistemicFeedbackAssimilator:
                         }
                         engine.symbolic_theory.candidate_goal_features.update(cand_goal_feats)
 
-                        av_rad_r = max(0, (getattr(engine, "avatar_h", 1) or 1) // 2)
-                        av_rad_c = max(0, (getattr(engine, "avatar_w", 1) or 1) // 2)
+                        av_rad_r = max(0, (get_engine_state_attr(engine, "avatar_h", 1) or 1) // 2)
+                        av_rad_c = max(0, (get_engine_state_attr(engine, "avatar_w", 1) or 1) // 2)
 
                         # Proprioceptive obstacle grounding: only the immediate leading edge cell
                         # can physically impede motor displacement. Distant features across void are NEVER obstacles.
@@ -1389,7 +1403,7 @@ class EpistemicFeedbackAssimilator:
                                             val,
                                         )
                                         if engine.bg_feature == val:
-                                            engine.bg_feature = engine.estimate_background(
+                                            engine.state.bg_feature = engine.estimate_background(
                                                 curr_grid
                                             )
                         else:
@@ -1407,10 +1421,10 @@ class EpistemicFeedbackAssimilator:
                             engine.immobile_entity_actions.add(engine.last_action)
                         prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
                         engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
-                        engine.simulation_cooldown = 0
-                        engine.consecutive_simulation_failures = 0
+                        engine.state.simulation_cooldown = 0
+                        engine.state.consecutive_simulation_failures = 0
 
-            if diff.changed_pixel_count == 0 and not is_win and not is_lost:
+            if diff.changed_pixel_count == 0 and not is_success and not is_failure:
                 engine.consecutive_stuck_steps += 1
                 if engine.last_action is not None:
                     prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
@@ -1423,7 +1437,7 @@ class EpistemicFeedbackAssimilator:
                             (prev_avatar_pos, engine.last_action)
                         )
             elif prev_avatar_pos is not None and engine.avatar_pos is not None:
-                if engine.avatar_pos == prev_avatar_pos and not is_win and not is_lost:
+                if engine.avatar_pos == prev_avatar_pos and not is_success and not is_failure:
                     engine.consecutive_stuck_steps += 1
                     if engine.last_action is not None:
                         prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
@@ -1434,9 +1448,9 @@ class EpistemicFeedbackAssimilator:
                                 (prev_avatar_pos, engine.last_action)
                             )
                 else:
-                    engine.consecutive_stuck_steps = 0
+                    engine.state.consecutive_stuck_steps = 0
             else:
-                engine.consecutive_stuck_steps = 0
+                engine.state.consecutive_stuck_steps = 0
 
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (
@@ -1484,11 +1498,11 @@ class EpistemicFeedbackAssimilator:
                 prediction_source="motor_calibration",
                 context_signature=f"act_{action}",
             )
-            engine.last_surprise = surprise_eval.surprise_score
-            engine.last_surprise_eval = surprise_eval
+            engine.state.last_surprise = surprise_eval.surprise_score
+            engine.state.last_surprise_eval = surprise_eval
 
             discrepancy = False
-            if not is_win:
+            if not is_success:
                 if (
                     not avatar_moved
                     and diff.changed_pixel_count == 0
@@ -1552,11 +1566,11 @@ class EpistemicFeedbackAssimilator:
                     if not did_displace_correctly:
                         engine.consecutive_plan_failures += 1
                         if engine.consecutive_plan_failures >= 2:
-                            engine.exploration_cooldown = 2
-                            engine.consecutive_plan_failures = 0
+                            engine.state.exploration_cooldown = 2
+                            engine.state.consecutive_plan_failures = 0
             else:
                 if avatar_moved or diff.changed_pixel_count > 0:
-                    engine.consecutive_plan_failures = 0
+                    engine.state.consecutive_plan_failures = 0
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
         movable_features = set(engine.symbolic_theory.cargo_features)
@@ -1707,7 +1721,12 @@ class EpistemicFeedbackAssimilator:
         elif engine.is_displacement_action(action):
             is_locomotion = True
 
-        if diff.mutated_pixels and not is_lost and not is_locomotion and engine.is_motor_grounded():
+        if (
+            diff.mutated_pixels
+            and not is_failure
+            and not is_locomotion
+            and engine.is_motor_grounded()
+        ):
             for r, c, old_v, new_v in diff.mutated_pixels:
                 if (
                     new_v == bg
@@ -1719,7 +1738,7 @@ class EpistemicFeedbackAssimilator:
                     engine.symbolic_theory.induce_depletion_goal(old_v)
                     break
 
-        if is_win:
+        if is_success:
             win_target = None
             if prev_avatar_pos is not None:
                 dr, dc = 0, 0
@@ -1819,14 +1838,14 @@ class EpistemicFeedbackAssimilator:
                 retain_dynamics=True, is_new_level=True, level=engine.current_level + 1
             )
             return
-        elif engine.avatar_pos is not None and not is_lost:
+        elif engine.avatar_pos is not None and not is_failure:
             engine.exhausted_candidate_goals.add(engine.avatar_pos)
 
-        if is_lost:
+        if is_failure:
             # Faculty: Lateral Habenula & aMCC Fatal Prefix Backpropagation & Negative Valence
             engine.working_memory.habenular_ior.record_catastrophe(
                 final_step=engine.step_counter,
-                is_lost=True,
+                is_fatal=True,
             )
             # Faculty: Anterior Cingulate Cortex Conflict & Frustration Monitor
             actor = prev_avatar_pos or engine.avatar_pos
@@ -1850,8 +1869,8 @@ class EpistemicFeedbackAssimilator:
                     )
             # Faculty: Hippocampal Sharp-Wave Ripple (SWR) Backward Negative Replay
             engine.episodic_cortex.trigger_sharp_wave_ripple_replay(
-                is_lost=True,
-                is_win=False,
+                is_failure=True,
+                is_success=False,
                 prev_grid=engine.prev_grid,
                 curr_grid=curr_grid,
                 bg_feature=engine.bg_feature,
@@ -2012,10 +2031,11 @@ class EpistemicFeedbackAssimilator:
             action=action,
             action_data=action_data,
             observation_diff=diff,
-            reward=1.0 if is_win else (-1.0 if is_lost else 0.0),
-            is_terminal=is_win or is_lost,
-            is_lost=is_lost,
-            is_win=is_win,
+            reward=1.0 if is_success else (-1.0 if is_failure else 0.0),
+            is_terminal=is_success or is_failure,
+            terminal=terminal,
+            is_failure=is_failure,
+            is_success=is_success,
             grid_snapshot=curr_grid,
         )
 
@@ -2052,8 +2072,8 @@ class EpistemicFeedbackAssimilator:
                 curr_grid=curr_grid,
                 prev_avatar_pos=prev_avatar_pos,
                 curr_avatar_pos=engine.avatar_pos,
-                is_dead=is_lost,
-                is_won=is_win,
+                is_dead=is_failure,
+                is_won=is_success,
                 background_feature=engine.bg_feature,
             )
 

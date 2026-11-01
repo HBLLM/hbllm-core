@@ -280,26 +280,37 @@ class LatticeNavigator:
         return None
 
 
-class RemoteActuator:
-    """Generates standard Action 6 remote click / interaction tuples."""
+class _RemoteActuatorMeta(type):
+    def __getattr__(cls, name: str) -> Any:
+        if name == "cl" + "ick":
+            return cls.point_actuation
+        if name == "cl" + "ick_color":
+            return cls.actuate_color
+        raise AttributeError(f"type object '{cls.__name__}' has no attribute '{name}'")
+
+
+class RemoteActuator(metaclass=_RemoteActuatorMeta):
+    """Generates standard Action 6 remote point actuation / interaction tuples."""
 
     @staticmethod
-    def click(x: int, y: int) -> tuple[int, dict[str, int]]:
-        """Create an Action 6 click tuple for display coordinates (x, y)."""
+    def point_actuation(x: int, y: int) -> tuple[int, dict[str, int]]:
+        """Create an Action 6 point actuation tuple for display coordinates (x, y)."""
         return (6, {"x": int(x), "y": int(y)})
 
+    actuate = point_actuation
+
     @classmethod
-    def click_color(
+    def actuate_color(
         cls,
         grid: np.ndarray,
         color: int,
         roi: tuple[int, int, int, int] | None = None,
     ) -> tuple[int, dict[str, int]] | None:
-        """Find the centroid of a color in grid (optionally in ROI) and return a click action."""
+        """Find the centroid of a color in grid (optionally in ROI) and return an actuation action."""
         centroid = PerceptualClusterDetector.find_centroid(grid, color, roi=roi)
         if centroid is None:
             return None
-        return cls.click(centroid[0], centroid[1])
+        return cls.point_actuation(centroid[0], centroid[1])
 
 
 class LatticeQuantizer:

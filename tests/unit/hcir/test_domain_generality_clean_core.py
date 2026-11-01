@@ -183,3 +183,64 @@ def test_skills_all_has_no_grid_puzzle_solvers():
     }
     present = forbidden.intersection(set(skills.__all__))
     assert not present, f"Grid-puzzle specific solvers leaked into core skills __all__: {present}"
+
+
+def test_zero_forbidden_domain_tokens_in_cognitive_core():
+    """Guard test verifying ZERO forbidden domain-specific tokens exist in core (WP3).
+
+    Scans core/hbllm/hcir and core/hbllm/brain for:
+        game_id, level_id, is_win, is_lost, click
+    """
+    forbidden_pat = re.compile(r"\b(game_id|level_id|is_win|is_lost|click)\b")
+    core_dirs = [
+        Path(__file__).resolve().parents[3] / "hbllm" / "hcir",
+        Path(__file__).resolve().parents[3] / "hbllm" / "brain",
+    ]
+
+    violations = []
+    for d in core_dirs:
+        for py_file in d.rglob("*.py"):
+            content = py_file.read_text(encoding="utf-8")
+            try:
+                tree = ast.parse(content, filename=str(py_file))
+            except SyntaxError:
+                continue
+
+            # Collect docstring line ranges to allow environment reference examples in docstrings
+            docstring_lines: set[int] = set()
+            for node in ast.walk(tree):
+                if isinstance(
+                    node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+                ):
+                    doc = ast.get_docstring(node, clean=False)
+                    if doc and hasattr(node, "body") and node.body:
+                        first_expr = node.body[0]
+                        if (
+                            isinstance(first_expr, ast.Expr)
+                            and isinstance(first_expr.value, ast.Constant)
+                            and isinstance(first_expr.value.value, str)
+                        ):
+                            docstring_lines.update(
+                                range(
+                                    first_expr.lineno,
+                                    getattr(first_expr, "end_lineno", first_expr.lineno) + 1,
+                                )
+                            )
+
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                # Ignore docstring lines and pure comments
+                if line_no in docstring_lines:
+                    continue
+                code_part = line.split("#")[0].strip()
+                if not code_part:
+                    continue
+                match = forbidden_pat.search(code_part)
+                if match:
+                    violations.append(
+                        f"{py_file.relative_to(d.parents[1])}:{line_no}: token '{match.group()}' in '{code_part}'"
+                    )
+
+    assert not violations, (
+        "Domain-specific forbidden tokens detected in cognitive core (WP3 violation):\n"
+        + "\n".join(violations)
+    )

@@ -670,13 +670,22 @@ class MyAgent(Agent):
                 if g_ctx is not None:
                     self.internal_engine._arc_game = g_ctx
 
-                action_id, action_data = self.internal_engine.decide(
-                    grid,
-                    available_actions,
-                    action_schemas=_arc_schema,
-                    micro_actions=_arc_schema,
-                    objects=_objects,
+                from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
+
+                is_win = bool(getattr(latest_frame, "is_win", False))
+                is_lost = bool(getattr(latest_frame, "is_lost", False))
+                obs = EmbodiedObservation(
+                    lattice=grid,
+                    entities=_objects or [],
+                    available_actions=available_actions,
+                    terminal=TerminalSignal.SUCCESS
+                    if is_win
+                    else (TerminalSignal.FAILURE if is_lost else None),
+                    context_id=self.game_id,
+                    episode_id=str(self.current_level),
+                    metadata={"action_schemas": _arc_schema, "micro_actions": _arc_schema},
                 )
+                action_id, action_data = self.internal_engine.step(obs)
                 conf = 1.0
             else:
                 action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)

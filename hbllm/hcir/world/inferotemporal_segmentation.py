@@ -214,14 +214,14 @@ class InferotemporalSegmentationEngine:
         effective_features: set[int] | None = None,
         visit_counts: dict[str, int] | None = None,
     ) -> list[tuple[int, int, float]]:
-        """Extract prioritized (row, col, score) click targets based on ventral stream object tokens.
+        """Extract prioritized (row, col, score) actuation targets based on ventral stream object tokens.
 
         Args:
             grid: 2D scene grid.
             background_feature: Empty background index.
             avatar_features: Self-avatar feature set.
-            quiescent_coords: Coordinates confirmed to cause zero environmental changes when clicked.
-            effective_coords: Coordinates confirmed to induce state mutations when clicked.
+            quiescent_coords: Coordinates confirmed to cause zero environmental changes when actuated.
+            effective_coords: Coordinates confirmed to induce state mutations when actuated.
             quiescent_features: Feature values confirmed ineffective.
             effective_features: Feature values confirmed effective.
             visit_counts: Visitation history for habituation / inhibition of return.

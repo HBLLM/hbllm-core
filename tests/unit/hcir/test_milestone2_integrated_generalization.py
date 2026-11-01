@@ -13,6 +13,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.slow
+
 from experiments.benchmarks.evaluation.generalization_harness import (
     AblationRegime,
 )

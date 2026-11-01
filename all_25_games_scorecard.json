@@ -1,19 +1,19 @@
 {
-  "timestamp": 1793345097.946218,
-  "total_games_tested": 11,
-  "total_levels_passed": 0,
-  "total_levels_possible": 78,
-  "pass_rate_pct": 0.0,
+  "timestamp": 1793497377.3166342,
+  "total_games_tested": 1,
+  "total_levels_passed": 2,
+  "total_levels_possible": 9,
+  "pass_rate_pct": 22.22,
   "games": {
     "tu93-0768757b": {
       "title": "TU93",
-      "levels_passed": 0,
+      "levels_passed": 2,
       "target_levels": 9,
       "won": false,
-      "steps": 119,
-      "total_steps": 119,
+      "steps": 566,
+      "total_steps": 566,
       "attempts": 1,
-      "elapsed_seconds": 609.41,
+      "elapsed_seconds": 600.03,
       "baseline": [
         19,
         16,
@@ -24,195 +24,6 @@
         14,
         23,
         111
-      ]
-    },
-    "ar25-0c556536": {
-      "title": "AR25",
-      "levels_passed": 0,
-      "target_levels": 8,
-      "won": false,
-      "steps": 304,
-      "total_steps": 304,
-      "attempts": 1,
-      "elapsed_seconds": 603.29,
-      "baseline": [
-        32,
-        50,
-        75,
-        37,
-        89,
-        159,
-        233,
-        73
-      ]
-    },
-    "re86-8af5384d": {
-      "title": "RE86",
-      "levels_passed": 0,
-      "target_levels": 8,
-      "won": false,
-      "steps": 109,
-      "total_steps": 109,
-      "attempts": 1,
-      "elapsed_seconds": 622.2,
-      "baseline": [
-        26,
-        42,
-        86,
-        108,
-        189,
-        139,
-        424,
-        241
-      ]
-    },
-    "su15-1944f8ab": {
-      "title": "SU15",
-      "levels_passed": 0,
-      "target_levels": 9,
-      "won": false,
-      "steps": 1000,
-      "total_steps": 1000,
-      "attempts": 1,
-      "elapsed_seconds": 416.5,
-      "baseline": [
-        22,
-        42,
-        26,
-        115,
-        36,
-        31,
-        8,
-        40,
-        41
-      ]
-    },
-    "m0r0-492f87ba": {
-      "title": "M0R0",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 256,
-      "total_steps": 256,
-      "attempts": 1,
-      "elapsed_seconds": 602.5,
-      "baseline": [
-        30,
-        111,
-        203,
-        26,
-        500,
-        237
-      ]
-    },
-    "cn04-2fe56bfb": {
-      "title": "CN04",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 101,
-      "total_steps": 101,
-      "attempts": 1,
-      "elapsed_seconds": 606.16,
-      "baseline": [
-        29,
-        54,
-        85,
-        300,
-        208,
-        113
-      ]
-    },
-    "ft09-0d8bbf25": {
-      "title": "FT09",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 1000,
-      "total_steps": 1000,
-      "attempts": 1,
-      "elapsed_seconds": 278.03,
-      "baseline": [
-        43,
-        12,
-        23,
-        28,
-        65,
-        37
-      ]
-    },
-    "tr87-cd924810": {
-      "title": "TR87",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 176,
-      "total_steps": 176,
-      "attempts": 1,
-      "elapsed_seconds": 601.83,
-      "baseline": [
-        54,
-        58,
-        40,
-        45,
-        71,
-        146
-      ]
-    },
-    "sc25-635fd71a": {
-      "title": "SC25",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 1000,
-      "total_steps": 1000,
-      "attempts": 1,
-      "elapsed_seconds": 192.88,
-      "baseline": [
-        36,
-        6,
-        32,
-        83,
-        143,
-        50
-      ]
-    },
-    "lp85-305b61c3": {
-      "title": "LP85",
-      "levels_passed": 0,
-      "target_levels": 8,
-      "won": false,
-      "steps": 876,
-      "total_steps": 876,
-      "attempts": 1,
-      "elapsed_seconds": 600.22,
-      "baseline": [
-        17,
-        38,
-        31,
-        16,
-        41,
-        60,
-        26,
-        159
-      ]
-    },
-    "dc22-fdcac232": {
-      "title": "DC22",
-      "levels_passed": 0,
-      "target_levels": 6,
-      "won": false,
-      "steps": 1000,
-      "total_steps": 1000,
-      "attempts": 1,
-      "elapsed_seconds": 402.39,
-      "baseline": [
-        59,
-        102,
-        67,
-        98,
-        324,
-        578
       ]
     }
   }

@@ -32,16 +32,32 @@ class TerminalSignal(StrEnum):
     TIMEOUT = "timeout"
 
 
+class EpistemicPhase(StrEnum):
+    """Cognitive lifecycle phases for autonomous exploration and problem solving."""
+
+    MOTOR_GROUNDING = "motor_grounding"  # Self-identification & basic action calibration
+    EPISTEMIC_EXPLORATION = (
+        "epistemic_exploration"  # Trial-and-error hypothesis testing on unknown objects
+    )
+    EPISTEMIC_PROBE = (
+        "epistemic_probe"  # Active epistemic probing upon conflict / unknown discovery
+    )
+    MENTAL_SIMULATION = "mental_simulation"  # Forward planning in mind
+    EXPLOITATION = "exploitation"  # Direct execution of verified solution
+    EXPLOITING = "exploitation"  # Direct execution alias
+    REPLANNING = "replanning"  # Recovering from unexpected contradiction
+
+
 @dataclass(frozen=True)
 class EmbodiedObservation:
     """Universal domain-agnostic sensory observation consumed by HCIR cognitive core."""
 
     lattice: np.ndarray | None = None  # dense sensory field (any dims)
-    entities: Sequence[SpatialEntity] = ()  # lifted percepts
+    entities: Sequence[Any] = ()  # lifted percepts (SpatialEntity or adapter specs)
     available_actions: Sequence[Any] = ()
     terminal: TerminalSignal | None = None  # SUCCESS / FAILURE / TIMEOUT
-    context_id: str = "default_context"  # replaces game_id
-    episode_id: str = "0"  # replaces level
+    context_id: str = "default_context"  # context scope ID
+    episode_id: str = "0"  # episode index ID
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

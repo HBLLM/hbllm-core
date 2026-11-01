@@ -130,3 +130,27 @@ def test_workspace_resume_from_event_not_found():
     ws = HCIRWorkspaceState()
     with pytest.raises(ValueError, match="not found in event store"):
         ws.resume_from_event(9999)
+
+
+def test_snapshot_manager_replay():
+    """Verify SnapshotManager.replay reconstructs identical state up to sequence number (WP7)."""
+    ws = HCIRWorkspaceState()
+    node_a = HCIRNode(
+        id="a", node_type="concept", category=CognitiveCategory.MEMORY, properties={"val": 10}
+    )
+    node_b = HCIRNode(
+        id="b", node_type="concept", category=CognitiveCategory.MEMORY, properties={"val": 20}
+    )
+    edge = HCIREdge(id="e1", edge_type=HCIREdgeType.CAUSES, sources=["a"], targets=["b"])
+
+    ws.snapshot_manager.record_node_added(node_a, author="sys")
+    ws.snapshot_manager.record_node_added(node_b, author="sys")
+    ws.snapshot_manager.record_edge_added(edge, author="sys")
+
+    reconstructed = ws.snapshot_manager.replay(ws.event_store)
+    assert reconstructed.node_count == 2
+    assert reconstructed.edge_count == 1
+    assert reconstructed.get_node("a") is not None
+    assert reconstructed.get_node("a").properties["val"] == 10
+    assert reconstructed.get_edge("e1") is not None
+    assert reconstructed.get_edge("e1").targets == ["b"]

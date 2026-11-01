@@ -2,7 +2,7 @@
 
 Modeled on mammalian habenular anti-reward signaling and aMCC catastrophic failure tracking:
 1. Fatal Prefix Tracing: Records episodic action-state trajectories tau = [(s_0, a_0), ..., (s_T, a_T)].
-2. Habenular Negative Prediction Error: Upon catastrophic episode reset or death (is_lost=True),
+2. Habenular Negative Prediction Error: Upon catastrophic episode reset or death (is_fatal=True),
    computes temporal credit assignment backpropagating negative value through the fatal prefix:
    Delta Q(s_t, a_t) = -kappa * gamma^(T - t) for t in [T - k, T].
 3. Pre-Emptive Branching Gating: On subsequent attempts, when approaching a previously fatal
@@ -159,12 +159,14 @@ class HabenularEpisodicIOR:
         for k in to_remove:
             self.active_inhibitions.pop(k, None)
 
-    def record_catastrophe(self, final_step: int, is_lost: bool = True) -> FatalPrefixRecord | None:
+    def record_catastrophe(
+        self, final_step: int, is_fatal: bool = True
+    ) -> FatalPrefixRecord | None:
         """Lateral Habenula punishment signal: backpropagate penalties along the fatal trace.
 
         Args:
             final_step: The step index where reset or death occurred.
-            is_lost: True if explicit death/loss, or unexpected reset.
+            is_fatal: True if explicit death/loss, or unexpected reset.
 
         Returns:
             FatalPrefixRecord if trace existed, else None.
@@ -299,7 +301,7 @@ class HabenularEpisodicIOR:
             action: Action identifier or token.
             penalty: Repulsion penalty magnitude.
             duration_steps: Number of planning/deliberation steps this inhibition persists.
-            action_data: Optional parameter payload (e.g. click coordinates).
+            action_data: Optional parameter payload (e.g. actuation coordinates).
         """
         act_token = self._make_action_token(action, action_data)
         key = (pos, act_token)

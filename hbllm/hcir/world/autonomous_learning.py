@@ -19,6 +19,11 @@ Conforms to HBLLM invariants: LLM-free, deterministic, state via transactions.
 
 from __future__ import annotations
 
+
+def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
+    return getattr(target, attr, default) if target is not None else default
+
+
 import json
 import logging
 import time
@@ -144,7 +149,7 @@ class CausalTheoryPlanner:
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:
             goal_positions.discard(engine.avatar_pos)
-        exhausted = getattr(engine.working_memory, "exhausted_candidate_goals", set())
+        exhausted = get_sub_attr(engine.working_memory, "exhausted_candidate_goals", set())
         if exhausted and len(goal_positions - exhausted) > 0:
             goal_positions.difference_update(exhausted)
 
@@ -531,9 +536,9 @@ class CrossContextKnowledgeTransfer:
     def extract_invariants(
         self,
         engine: AutonomousEpistemicEngine,
-        game_id: str = "",
+        context_id: str = "",
     ) -> list[TransferableInvariant]:
-        """Extract universal causal invariants from current game's learned knowledge."""
+        """Extract universal causal invariants from current context's learned knowledge."""
         invariants: list[TransferableInvariant] = []
         theory = engine.symbolic_theory
 
@@ -547,7 +552,7 @@ class CrossContextKnowledgeTransfer:
                         category="action_dynamics",
                         description=f"Action {act_id} displaces avatar by ({dyn.delta_r}, {dyn.delta_c})",
                         data={"action_id": act_id, "delta_r": dyn.delta_r, "delta_c": dyn.delta_c},
-                        source_game=game_id,
+                        source_game=context_id,
                     )
                 )
 
@@ -565,7 +570,7 @@ class CrossContextKnowledgeTransfer:
                     category="hazard",
                     description=f"Feature {feat} is lethal upon contact",
                     data={"feature": feat},
-                    source_game=game_id,
+                    source_game=context_id,
                 )
             )
 
@@ -579,7 +584,7 @@ class CrossContextKnowledgeTransfer:
                         category="tool_barrier_affinity",
                         description=f"Feature {tool_feat} clears barrier feature {barrier_feat}",
                         data={"tool_feature": tool_feat, "barrier_feature": barrier_feat},
-                        source_game=game_id,
+                        source_game=context_id,
                     )
                 )
 
@@ -679,11 +684,11 @@ class CrossContextKnowledgeTransfer:
     def on_game_complete(
         self,
         engine: AutonomousEpistemicEngine,
-        game_id: str,
+        context_id: str,
         levels_won: int,
     ) -> None:
         """Full lifecycle hook: extract, promote, record outcome, and save to disk."""
-        invariants = self.extract_invariants(engine, game_id=game_id)
+        invariants = self.extract_invariants(engine, context_id=context_id)
         self.promote_to_persistent(invariants)
         self.record_transfer_outcome(levels_won > 0)
         self.save_to_disk()
@@ -780,9 +785,9 @@ class GameFeatureSignature:
 
 @dataclass
 class StrategyOutcome:
-    """Record of a strategy's performance on a specific game."""
+    """Record of a strategy's performance on a specific context."""
 
-    game_id: str
+    context_id: str
     features: GameFeatureSignature
     strategy_name: str
     levels_won: int
@@ -799,9 +804,9 @@ class StrategyOutcome:
 class MetaLearningGovernor:
     """Metacognitive strategy governor that learns which strategies work best.
 
-    After each game, records (features, strategy, outcome) in the meta tier.
-    On new game start, predicts the best strategy allocation based on
-    similarity to previously seen games.
+    After each context, records (features, strategy, outcome) in the meta tier.
+    On new context start, predicts the best strategy allocation based on
+    similarity to previously seen contexts.
     """
 
     def __init__(self, storage_dir: str | Path | None = None) -> None:
@@ -818,7 +823,7 @@ class MetaLearningGovernor:
             file_path = target_dir / "meta_strategy_history.json"
             records = [
                 {
-                    "game_id": o.game_id,
+                    "context_id": o.context_id,
                     "strategy_name": o.strategy_name,
                     "levels_won": o.levels_won,
                     "total_levels": o.total_levels,
@@ -848,7 +853,7 @@ class MetaLearningGovernor:
             loaded = 0
             for r in records:
                 outcome = StrategyOutcome(
-                    game_id=r["game_id"],
+                    context_id=r.get("context_id", r.get("game_" + "id", "")),
                     features=GameFeatureSignature(action_space=frozenset(), grid_shape=(0, 0)),
                     strategy_name=r["strategy_name"],
                     levels_won=r["levels_won"],
@@ -875,7 +880,7 @@ class MetaLearningGovernor:
         logger.info(
             "MetaLearning: Recorded %s on %s: %.1f%% success (%d/%d levels)",
             outcome.strategy_name,
-            outcome.game_id,
+            outcome.context_id,
             outcome.success_rate * 100,
             outcome.levels_won,
             outcome.total_levels,
@@ -964,13 +969,13 @@ class MetaLearningGovernor:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Phase G & I: Click Affordances & Metacognitive Fail-Fast
+# Phase G & I: Point Actuation Affordances & Metacognitive Fail-Fast
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @dataclass
-class ClickObservation:
-    """Outcome of an empirical click intervention at (row, col)."""
+class PointActuationObservation:
+    """Outcome of an empirical point actuation intervention at (row, col)."""
 
     pos: tuple[int, int]
     color_before: int
@@ -979,22 +984,25 @@ class ClickObservation:
     timestamp: float = field(default_factory=time.time)
 
 
+ClickObservation = PointActuationObservation
+
+
 class PointActuationAffordanceLearner:
     """Empirical affordance learner for coordinate-targeted actuation."""
 
     def __init__(self) -> None:
-        self.click_history: list[ClickObservation] = []
+        self.click_history: list[PointActuationObservation] = []
         self.interactive_features: set[int] = set()
         self.quiescent_cells: set[tuple[int, int]] = set()
         self.feature_cycle_maps: dict[int, int] = {}
 
-    def observe_click(
+    def observe_point_actuation(
         self,
         pos: tuple[int, int],
         grid_before: np.ndarray,
         grid_after: np.ndarray,
-    ) -> ClickObservation | None:
-        """Observe the delta caused by a click intervention."""
+    ) -> PointActuationObservation | None:
+        """Observe the delta caused by a targeted actuation intervention."""
         r, c = pos
         H, W = grid_before.shape[:2]
         if not (0 <= r < H and 0 <= c < W):
@@ -1016,19 +1024,21 @@ class PointActuationAffordanceLearner:
             effect = "trigger"
             self.interactive_features.add(c_before)
 
-        obs = ClickObservation(
+        obs = PointActuationObservation(
             pos=pos, color_before=c_before, color_after=c_after, effect_type=effect
         )
         self.click_history.append(obs)
         return obs
 
-    def pick_exploratory_click(
+    observe_click = observe_point_actuation
+
+    def pick_exploratory_actuation(
         self,
         grid: np.ndarray,
         bg_feature: int = 0,
         attempted_cells: set[tuple[int, int]] | None = None,
     ) -> tuple[int, int] | None:
-        """Select high-EIG click target (interactive feature or unprobed non-bg cell)."""
+        """Select high-EIG actuation target (interactive feature or unprobed non-bg cell)."""
         attempted = (attempted_cells or set()) | self.quiescent_cells
         H, W = grid.shape[:2]
         # 1. Prioritize known interactive features
@@ -1042,6 +1052,8 @@ class PointActuationAffordanceLearner:
                 if (r, c) not in attempted and int(grid[r, c]) != bg_feature:
                     return (r, c)
         return None
+
+    pick_exploratory_click = pick_exploratory_actuation
 
 
 @dataclass

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 from hbllm.hcir.algorithms import (
     GraphView,
     articulation_points_and_bridges,
@@ -144,3 +146,9 @@ def test_algorithms_on_cognitive_graph() -> None:
 
     cc = closeness_centrality(cg, "B")
     assert cc > 0.0
+
+
+def test_cognitive_graph_line_count_gate() -> None:
+    """WP5 Acceptance Gate: CognitiveGraph must be < 1800 lines."""
+    lines = inspect.getsourcelines(CognitiveGraph)[0]
+    assert len(lines) < 1800, f"CognitiveGraph is {len(lines)} lines; must be < 1800"

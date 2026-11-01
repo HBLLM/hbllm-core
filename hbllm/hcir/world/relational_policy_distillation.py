@@ -184,7 +184,7 @@ class RelationalPolicyDistiller:
                 continue
 
             ar, ac = t.avatar_pos
-            is_fatal = t.is_lost
+            is_fatal = getattr(t, "is_fatal", getattr(t, "is_terminal_failure", False))
 
             # Find active relational premises with surrounding entities
             for role, (er, ec) in entity_role_map:

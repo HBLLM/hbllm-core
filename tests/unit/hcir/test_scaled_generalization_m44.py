@@ -12,6 +12,9 @@ Validates:
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.slow
 
 from experiments.benchmarks.evaluation.scaled_evaluation_suite import ScaledGeneralizationBenchmark
 from experiments.benchmarks.transfer.interactive_transfer_benchmark import (

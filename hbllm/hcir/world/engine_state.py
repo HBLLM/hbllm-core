@@ -10,7 +10,19 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
+from hbllm.hcir.world.percept import EpistemicPhase
+
+
+def get_engine_state_attr(target: Any, attr: str, default: Any = None) -> Any:
+    """Safely read attribute from target.state, target, or CognitiveContext."""
+    if target is None:
+        return default
+    state = getattr(target, "state", None) if not isinstance(target, (dict, list, tuple)) else None
+    if state is not None and hasattr(state, attr):
+        return getattr(state, attr)
+    if hasattr(target, attr):
+        return getattr(target, attr)
+    return default
 
 
 @dataclass(frozen=True)
@@ -237,7 +249,7 @@ class CognitiveContext:
         return False
 
     def is_spatial_effector(self, action: Any) -> bool:
-        """Check if action is a targeted spatial effector / click actuator."""
+        """Check if action is a targeted spatial effector / coordinate actuator."""
         if action in self.action_affordances:
             aff = self.action_affordances[action]
             if getattr(aff, "requires_spatial_target", False):
@@ -463,18 +475,16 @@ class EngineState(BaseModel):
     @classmethod
     def from_engine(cls, engine: Any) -> EngineState:
         """Construct an EngineState snapshot from an AutonomousEpistemicEngine instance."""
+        if hasattr(engine, "state") and isinstance(engine.state, EngineState):
+            return engine.state.model_copy(deep=True)
         attrs: dict[str, Any] = {}
         for f_name, f_info in cls.model_fields.items():
             val = None
             alias = f_info.alias or f_name
-            # Try leading underscore alias, direct field name, or alias
             for candidate in (alias, f"_{f_name}", f_name):
-                if hasattr(engine, candidate):
-                    try:
-                        val = getattr(engine, candidate)
-                        break
-                    except Exception:
-                        pass
+                val = get_engine_state_attr(engine, candidate)
+                if val is not None:
+                    break
             if val is not None:
                 # Copy mutable structures so EngineState is decoupled
                 if isinstance(val, (set, frozenset)):

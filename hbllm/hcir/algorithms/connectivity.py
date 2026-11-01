@@ -57,13 +57,13 @@ def connected_components(graph: Any) -> list[set[str]]:
     return components
 
 
-def articulation_points_and_bridges(graph: Any) -> tuple[set[str], set[str]]:
+def articulation_points_and_bridges(graph: Any) -> tuple[set[str], list[tuple[str, str]]]:
     """Find articulation points (cut vertices) and bridges (cut edges) using Tarjan's algorithm."""
     tin: dict[str, int] = {}
     low: dict[str, int] = {}
     timer = 0
     art_points: set[str] = set()
-    bridges: set[str] = set()
+    bridges: list[tuple[str, str]] = []
 
     if hasattr(graph, "all_nodes"):
         all_ids = [n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()]
@@ -94,7 +94,7 @@ def articulation_points_and_bridges(graph: Any) -> tuple[set[str], set[str]]:
                 if low[v] >= tin[u] and p is not None:
                     art_points.add(u)
                 if low[v] > tin[u]:
-                    bridges.add(f"{u}->{v}")
+                    bridges.append((u, v))
                 children += 1
 
         if p is None and children > 1:
@@ -114,3 +114,124 @@ def is_biconnected(graph: Any) -> bool:
         return False
     art_points, _ = articulation_points_and_bridges(graph)
     return len(art_points) == 0
+
+
+def strongly_connected_components(graph: Any) -> list[set[str]]:
+    """Compute Strongly Connected Components (SCC) of the directed graph using Tarjan's algorithm.
+
+    Returns:
+        List of sets of node IDs, where each set represents a maximal strongly connected component.
+    """
+    if hasattr(graph, "all_nodes"):
+        all_nodes = sorted([n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()])
+    elif hasattr(graph, "_nodes"):
+        all_nodes = sorted(list(graph._nodes.keys()))
+    else:
+        all_nodes = sorted(list(getattr(graph, "nodes", [])))
+
+    if not all_nodes:
+        return []
+
+    all_edges = (
+        list(graph.all_edges())
+        if hasattr(graph, "all_edges")
+        else list(getattr(graph, "_edges", {}).values())
+    )
+
+    adj: dict[str, set[str]] = {nid: set() for nid in all_nodes}
+    for edge in all_edges:
+        sources = edge.sources if hasattr(edge, "sources") else edge.get("sources", [])
+        targets = edge.targets if hasattr(edge, "targets") else edge.get("targets", [])
+        for s in sources:
+            if s in adj:
+                for t in targets:
+                    if t in adj and s != t:
+                        adj[s].add(t)
+
+    index = 0
+    indices: dict[str, int] = {}
+    lowlinks: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    sccs: list[set[str]] = []
+
+    for node in all_nodes:
+        if node not in indices:
+            call_stack: list[tuple[str, int, list[str]]] = [(node, 0, sorted(list(adj[node])))]
+            indices[node] = index
+            lowlinks[node] = index
+            index += 1
+            stack.append(node)
+            on_stack.add(node)
+
+            while call_stack:
+                curr, neighbor_idx, neighbors = call_stack[-1]
+                if neighbor_idx < len(neighbors):
+                    nxt = neighbors[neighbor_idx]
+                    call_stack[-1] = (curr, neighbor_idx + 1, neighbors)
+                    if nxt not in indices:
+                        indices[nxt] = index
+                        lowlinks[nxt] = index
+                        index += 1
+                        stack.append(nxt)
+                        on_stack.add(nxt)
+                        call_stack.append((nxt, 0, sorted(list(adj[nxt]))))
+                    elif nxt in on_stack:
+                        lowlinks[curr] = min(lowlinks[curr], indices[nxt])
+                else:
+                    call_stack.pop()
+                    if call_stack:
+                        parent = call_stack[-1][0]
+                        lowlinks[parent] = min(lowlinks[parent], lowlinks[curr])
+
+                    if lowlinks[curr] == indices[curr]:
+                        component: set[str] = set()
+                        while True:
+                            w = stack.pop()
+                            on_stack.remove(w)
+                            component.add(w)
+                            if w == curr:
+                                break
+                        sccs.append(component)
+
+    return sorted(sccs, key=lambda comp: min(comp) if comp else "")
+
+
+def condense_scc_metagraph(
+    graph: Any,
+) -> tuple[dict[int, set[str]], list[tuple[int, int]]]:
+    """Condense directed graph SCCs into an acyclic metagraph (DAG).
+
+    Returns:
+        Tuple of (scc_map, metagraph_edges).
+    """
+    sccs = strongly_connected_components(graph)
+    node_to_scc: dict[str, int] = {}
+    scc_map: dict[int, set[str]] = {}
+
+    for scc_id, comp in enumerate(sccs):
+        scc_map[scc_id] = comp
+        for nid in comp:
+            node_to_scc[nid] = scc_id
+
+    metagraph_edges_set: set[tuple[int, int]] = set()
+
+    all_edges = (
+        list(graph.all_edges())
+        if hasattr(graph, "all_edges")
+        else list(getattr(graph, "_edges", {}).values())
+    )
+
+    for edge in all_edges:
+        sources = edge.sources if hasattr(edge, "sources") else edge.get("sources", [])
+        targets = edge.targets if hasattr(edge, "targets") else edge.get("targets", [])
+        for s in sources:
+            src_scc = node_to_scc.get(s)
+            if src_scc is None:
+                continue
+            for t in targets:
+                tgt_scc = node_to_scc.get(t)
+                if tgt_scc is not None and src_scc != tgt_scc:
+                    metagraph_edges_set.add((src_scc, tgt_scc))
+
+    return scc_map, sorted(list(metagraph_edges_set))

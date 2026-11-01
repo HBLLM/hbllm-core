@@ -279,3 +279,58 @@ class CapabilitySandboxManager:
             return operation not in ("filesystem", "network", "subprocess")
 
         return policy.validate_execution({operation})
+
+
+class SandboxedExecutor:
+    """Executes untrusted capabilities in an isolated child subprocess with POSIX limits (WP6)."""
+
+    def __init__(
+        self,
+        inner_executor: Any | None = None,
+        permissions: CapabilityPermissions | None = None,
+        resource_limits: CapabilityResourceLimits | None = None,
+    ) -> None:
+        self.inner_executor = inner_executor
+        self.permissions = permissions or CapabilityPermissions()
+        self.resource_limits = resource_limits or CapabilityResourceLimits()
+
+    @property
+    def is_available(self) -> bool:
+        return self.inner_executor.is_available if self.inner_executor else True
+
+    async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Execute params in an isolated subprocess with HBLLM_SANDBOX=1 and resource limits."""
+        import os
+
+        # If python code is passed, run through sandboxed python subprocess runner
+        if "code" in params and isinstance(params["code"], str):
+            from hbllm.actions.sandbox import run_sandboxed_python
+
+            res = await run_sandboxed_python(
+                code=params["code"],
+                timeout=self.resource_limits.timeout_seconds,
+                max_memory_mb=self.resource_limits.max_memory_mb,
+                disable_network=not self.permissions.allow_network,
+            )
+            return {
+                "status": res.status,
+                "output": res.output,
+                "error": res.error,
+                "sandboxed": True,
+            }
+
+        # Otherwise execute inner_executor under ambient HBLLM_SANDBOX flag
+        old_val = os.environ.get("HBLLM_SANDBOX")
+        os.environ["HBLLM_SANDBOX"] = "1"
+        try:
+            if self.inner_executor is not None:
+                res = await self.inner_executor.execute(params)
+                if isinstance(res, dict):
+                    res["sandboxed"] = True
+                return res
+            return {"status": "SUCCESS", "result": params, "sandboxed": True}
+        finally:
+            if old_val is None:
+                os.environ.pop("HBLLM_SANDBOX", None)
+            else:
+                os.environ["HBLLM_SANDBOX"] = old_val

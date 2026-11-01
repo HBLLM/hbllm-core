@@ -25,6 +25,7 @@ import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.percept import PerceptionFrame, PerceptionRegistry
 
 logger = logging.getLogger(__name__)
@@ -526,7 +527,7 @@ class ObjectStateGraphPlanner:
         spatial_effector_actions: list[Any] = []
         for act in available_actions:
             if (
-                getattr(engine, "inhibited_actions", None)
+                get_engine_state_attr(engine, "inhibited_actions", None)
                 and engine.inhibited_actions.get(act, 0) > 0
             ):
                 continue
@@ -534,12 +535,12 @@ class ObjectStateGraphPlanner:
                 spatial_effector_actions.append(act)
                 continue
             if (
-                getattr(engine, "immobile_entity_actions", None)
+                get_engine_state_attr(engine, "immobile_entity_actions", None)
                 and act in engine.immobile_entity_actions
             ):
                 continue
             if (
-                getattr(engine, "inhibited_actions", None)
+                get_engine_state_attr(engine, "inhibited_actions", None)
                 and engine.inhibited_actions.get(act, 0) > 0
             ):
                 continue
@@ -554,7 +555,7 @@ class ObjectStateGraphPlanner:
         # Static barriers and hazards directly from percept
         static_barriers = set(percept.static_barriers)
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
-        failed_transitions = set(getattr(engine, "failed_transitions", set()))
+        failed_transitions = set(get_engine_state_attr(engine, "failed_transitions", set()))
 
         # Detect patroller / dynamic threat positions from abstract perceptual entities
         patroller_cells: set[tuple[int, int]] = set()
@@ -602,7 +603,7 @@ class ObjectStateGraphPlanner:
         # 1B. Spatial Effector Interaction with Exit
         if exit_objects and spatial_effector_actions and not movable_actions:
             eff_act = spatial_effector_actions[0]
-            quiescent_coords = getattr(engine, "quiescent_click_targets", set())
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
             for target_obj in exit_objects:
                 unprobed_exit_cells = [c for c in target_obj.cells if c not in quiescent_coords]
                 if not unprobed_exit_cells:
@@ -631,10 +632,10 @@ class ObjectStateGraphPlanner:
         # ── DIRECTIVE 4B: Active Causal Actuator Contingency Pursuit ──────────
         if spatial_effector_actions:
             eff_act = spatial_effector_actions[0]
-            quiescent_coords = getattr(engine, "quiescent_click_targets", set())
-            actuator_coord = getattr(engine, "active_causal_actuator_coord", None)
-            streak = getattr(engine, "consecutive_causal_probes", 0)
-            streak_limit = getattr(engine, "causal_actuator_streak_limit", 4)
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
+            actuator_coord = get_engine_state_attr(engine, "active_causal_actuator_coord", None)
+            streak = get_engine_state_attr(engine, "consecutive_causal_probes", 0)
+            streak_limit = get_engine_state_attr(engine, "causal_actuator_streak_limit", 4)
             if (
                 actuator_coord is not None
                 and streak < streak_limit
@@ -852,8 +853,10 @@ class ObjectStateGraphPlanner:
                     # 2. Greedy displacement step towards target stance
                     best_step_act = None
                     min_dist = abs(dr_target) + abs(dc_target)
-                    rec = list(getattr(engine, "recent_positions", []))
-                    ior = getattr(getattr(engine, "working_memory", None), "habenular_ior", None)
+                    rec = list(get_engine_state_attr(engine, "recent_positions", []))
+                    ior = getattr(
+                        get_engine_state_attr(engine, "working_memory", None), "habenular_ior", None
+                    )
                     for act, dr, dc in movable_actions:
                         if failed_transitions and (av_pos, act) in failed_transitions:
                             continue
@@ -899,11 +902,11 @@ class ObjectStateGraphPlanner:
                 return None
             from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
-            quiescent_coords = getattr(engine, "quiescent_click_targets", set())
-            quiescent_feats = getattr(engine, "quiescent_features", set())
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
+            quiescent_feats = get_engine_state_attr(engine, "quiescent_features", set())
 
             # Check if this effector action defines discrete valid targets
-            eff_aff = getattr(engine, "action_affordances", {}).get(eff_act)
+            eff_aff = get_engine_state_attr(engine, "action_affordances", {}).get(eff_act)
             raw_valid_targets = (
                 eff_aff.metadata.get("valid_targets")
                 if (eff_aff and hasattr(eff_aff, "metadata") and isinstance(eff_aff.metadata, dict))
@@ -944,7 +947,9 @@ class ObjectStateGraphPlanner:
                             engine.avatar_pos, eff_act, action_data={"x": vx, "y": vy}
                         ):
                             continue
-                    vis = getattr(engine, "entity_visit_counts", {}).get(f"click_{vy}_{vx}", 0)
+                    vis = get_engine_state_attr(engine, "entity_visit_counts", {}).get(
+                        f"click_{vy}_{vx}", 0
+                    )
                     d = float(abs(vy - target_r) + abs(vx - target_c)) + float(vis) * 20.0
                     if d < best_d:
                         best_d = d
@@ -1085,9 +1090,9 @@ class ObjectStateGraphPlanner:
                 ]
                 if unquiescent_vts:
                     unquiescent_vts.sort(
-                        key=lambda item: getattr(engine, "entity_visit_counts", {}).get(
-                            f"click_{item[0]}_{item[1]}", 0
-                        )
+                        key=lambda item: get_engine_state_attr(
+                            engine, "entity_visit_counts", {}
+                        ).get(f"click_{item[0]}_{item[1]}", 0)
                     )
                     best_vy, best_vx, best_vt = unquiescent_vts[0]
                     logger.info(

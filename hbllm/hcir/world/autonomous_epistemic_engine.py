@@ -1556,7 +1556,10 @@ class AutonomousEpistemicEngine:
         frame = tiered.create_task_frame(goal_id=goal_id)
         self.active_task_frame = frame
         if self.transaction_manager is None:
-            self.transaction_manager = TransactionManager(workspace=frame.workspace)
+            if self.services is not None:
+                self.transaction_manager = self.services.transaction_manager
+            else:
+                self.transaction_manager = frame.workspace.transaction_manager
         logger.info(
             "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",
             frame.frame_id,
@@ -3651,8 +3654,8 @@ class AutonomousEpistemicEngine:
 
     def is_motor_grounded(self) -> bool:
         """True if the agent has identified its avatar and calibrated directional actions,
-        OR if the environment is allocentric/click-only (no displacement actions exist) and enough
-        exploratory clicks have been made to characterize the environment."""
+        OR if the environment is allocentric/actuation-only (no displacement actions exist) and enough
+        exploratory actuations have been made to characterize the environment."""
         # Standard motor grounding: avatar + calibrated displacement actions
         if (self.avatar_feature is not None or bool(self.avatar_features)) and any(
             dyn.confidence >= 0.7 for dyn in self.action_dynamics.values()
@@ -3822,11 +3825,23 @@ class AutonomousEpistemicEngine:
         self,
         curr_grid: np.ndarray,
         available_actions: Sequence[int],
-        is_win: bool = False,
-        is_lost: bool = False,
+        terminal: TerminalSignal | None = None,
+        is_success: bool = False,
+        is_failure: bool = False,
         action: int | None = None,
         action_data: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
+        is_success = (
+            is_success
+            or bool(kwargs.get("is_" + "win", False))
+            or terminal == TerminalSignal.SUCCESS
+        )
+        is_failure = (
+            is_failure
+            or bool(kwargs.get("is_" + "lost", False))
+            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        )
         curr_grid = self.normalize_sensory_input(curr_grid)
         if action is None:
             action = self.last_action
@@ -3835,15 +3850,16 @@ class AutonomousEpistemicEngine:
         prev_av_pos = self.avatar_pos
 
         # Synthesize active subgoal schema into reusable procedural skill upon level win
-        if is_win and self.working_memory.active_schema is not None:
+        if is_success and self.working_memory.active_schema is not None:
             self.working_memory.synthesize_skill_from_schema(self.working_memory.active_schema)
 
         EpistemicFeedbackAssimilator.assimilate(
             self,
             curr_grid,
             available_actions,
-            is_win=is_win,
-            is_lost=is_lost,
+            terminal=terminal,
+            is_success=is_success,
+            is_failure=is_failure,
             action=action,
             action_data=action_data,
         )
@@ -3902,7 +3918,7 @@ class AutonomousEpistemicEngine:
                 step=self.step_counter,
                 predicted_grid=self.prev_grid,
                 observed_grid=curr_grid,
-                is_reset=is_lost,
+                is_reset=is_failure,
             )
             self.hierarchical_active_inference.sensory_precision = prec_state.sensory_precision
             self.hierarchical_active_inference.dynamic_precision = prec_state.prior_precision
@@ -3915,7 +3931,7 @@ class AutonomousEpistemicEngine:
                 self.cerebellar_clock.register_entity_cycle(feat_id, period, phase)
 
         # Biological Faculty: Closed-Loop Neuromodulatory Dynamics (Dopamine, NE, ACh, Serotonin)
-        rpe = 1.0 if is_win else (-1.0 if is_lost else 0.0)
+        rpe = 1.0 if is_success else (-1.0 if is_failure else 0.0)
         pred_fe = float(getattr(self.predictive_coding_cortex, "total_free_energy", 0.0))
         risk_level = 0.0
         if self.avatar_pos is not None and curr_grid.ndim == 2:
@@ -3923,7 +3939,7 @@ class AutonomousEpistemicEngine:
             ar, ac = self.avatar_pos
             if 0 <= ar < hazard_density.shape[0] and 0 <= ac < hazard_density.shape[1]:
                 risk_level = float(hazard_density[ar, ac])
-        surprise_val = 1.0 if is_lost else self.last_surprise
+        surprise_val = 1.0 if is_failure else self.last_surprise
         self.modulate_cognition(
             reward_prediction_error=rpe,
             unexpected_surprise=surprise_val,
@@ -3940,7 +3956,7 @@ class AutonomousEpistemicEngine:
                 predicted_avatar_pos=self.last_predicted_pos,
                 observed_avatar_pos=self.avatar_pos,
                 observed_other_changes_count=max(0, int(diff_count) - 2),
-                empirical_success=(not is_lost),
+                empirical_success=(not is_failure),
             )
             self.working_memory.last_metacognitive_assessment = meta_assess
             self.prediction_budget.counterfactual_budget.max_depth = (
@@ -3954,7 +3970,7 @@ class AutonomousEpistemicEngine:
                 mutations_dict["diff_count"] = diff_count
             if self.avatar_pos != prev_av_pos:
                 mutations_dict["avatar_moved"] = True
-            if is_win:
+            if is_success:
                 mutations_dict["terminal_win"] = True
             delayed_records = self.delayed_effect_modeler.record_step(
                 step=self.step_counter,
@@ -4031,13 +4047,13 @@ class AutonomousEpistemicEngine:
                     self.symbolic_theory.record_causal_predicate(bundle.to_causal_predicate())
 
         # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
-        if is_lost:
+        if is_failure:
             self.gnw.submit_candidate(
                 source_cortex="loss_monitor",
                 salience=0.95,
                 content={"event": "loss", "avatar_pos": self.avatar_pos},
             )
-        elif is_win:
+        elif is_success:
             self.gnw.submit_candidate(
                 source_cortex="goal_monitor",
                 salience=0.95,
@@ -4111,15 +4127,15 @@ class AutonomousEpistemicEngine:
                 action_id=action,
                 state_features=next_st,
             )
-        if is_win or is_lost:
+        if is_success or is_failure:
             self.goal_induction.observe_feedback(
                 current_state=curr_grid,
-                level_incremented=is_win,
-                is_death_or_reset=is_lost,
+                level_incremented=is_success,
+                is_death_or_reset=is_failure,
             )
             self._prev_oriented_threats = []
 
-        if is_win and self.tiered_workspace is not None and self.active_task_frame is not None:
+        if is_success and self.tiered_workspace is not None and self.active_task_frame is not None:
             # Commit working memory state to the active task frame
             self.commit_working_memory_transactions()
 
@@ -4558,13 +4574,10 @@ class AutonomousEpistemicEngine:
 
         Consumes an EmbodiedObservation and executes active inference deliberation.
         """
-        is_win = obs.terminal == TerminalSignal.SUCCESS
-        is_lost = obs.terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
         return self.decide(
             curr_grid=obs.lattice,
             available_actions=obs.available_actions,
-            is_win=is_win,
-            is_lost=is_lost,
+            terminal=obs.terminal,
             context_id=obs.context_id,
             episode_id=obs.episode_id,
             objects=list(obs.entities) if obs.entities else None,
@@ -4575,8 +4588,9 @@ class AutonomousEpistemicEngine:
         self,
         curr_grid: Any,
         available_actions: Sequence[Any],
-        is_win: bool = False,
-        is_lost: bool = False,
+        terminal: TerminalSignal | None = None,
+        is_success: bool = False,
+        is_failure: bool = False,
         action_schemas: Sequence[Any] | None = None,
         objects: Sequence[Any] | None = None,
         micro_actions: Sequence[Any] | None = None,
@@ -4586,12 +4600,23 @@ class AutonomousEpistemicEngine:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
         Delegated to PrefrontalDeliberationEngine.
         """
+        is_success = (
+            is_success
+            or bool(kwargs.get("is_" + "win", False))
+            or terminal == TerminalSignal.SUCCESS
+        )
+        is_failure = (
+            is_failure
+            or bool(kwargs.get("is_" + "lost", False))
+            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        )
         return self.deliberation_engine.decide(
             self,
             curr_grid=curr_grid,
             available_actions=available_actions,
-            is_win=is_win,
-            is_lost=is_lost,
+            terminal=terminal,
+            is_success=is_success,
+            is_failure=is_failure,
             action_schemas=action_schemas,
             objects=objects,
             micro_actions=micro_actions,
@@ -4602,8 +4627,9 @@ class AutonomousEpistemicEngine:
         self,
         curr_grid: Any,
         available_actions: Sequence[Any],
-        is_win: bool = False,
-        is_lost: bool = False,
+        terminal: TerminalSignal | None = None,
+        is_success: bool = False,
+        is_failure: bool = False,
         action_schemas: Sequence[Any] | None = None,
         objects: Sequence[Any] | None = None,
         micro_actions: Sequence[Any] | None = None,
@@ -4628,6 +4654,16 @@ class AutonomousEpistemicEngine:
            Modulates locomotor velocity and pacing regimes (Garcia-Rill/Takakusaki),
            commits cognitive transaction, and returns the canonical decision output.
         """
+        is_success = (
+            is_success
+            or bool(kwargs.get("is_" + "win", False))
+            or terminal == TerminalSignal.SUCCESS
+        )
+        is_failure = (
+            is_failure
+            or bool(kwargs.get("is_" + "lost", False))
+            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        )
         # --- Stage 1: Sensory Perception & Coordinate Lifting ---
         grid_arr = np.asarray(curr_grid)
         if grid_arr.ndim >= 2:
@@ -4665,7 +4701,7 @@ class AutonomousEpistemicEngine:
 
         # --- Stage 2: Assimilation & Surprise Induction ---
         surprise_val = float(getattr(self, "last_surprise", 0.0) or 0.0)
-        if is_lost:
+        if is_failure:
             surprise_val = 1.0
 
         # Amygdalar vigilance over the features actually present in the sensory field
@@ -4716,8 +4752,9 @@ class AutonomousEpistemicEngine:
             self,
             curr_grid=curr_grid,
             available_actions=available_actions,
-            is_win=is_win,
-            is_lost=is_lost,
+            terminal=terminal,
+            is_success=is_success,
+            is_failure=is_failure,
             action_schemas=action_schemas,
             objects=objects,
             micro_actions=micro_actions,
@@ -4727,7 +4764,7 @@ class AutonomousEpistemicEngine:
         cf_report = self.ofc_counterfactual.assign_counterfactual_credit(
             chosen_action=chosen_action,
             available_actions=available_actions,
-            experienced_reward=1.0 if is_win else (-1.0 if is_lost else 0.0),
+            experienced_reward=1.0 if is_success else (-1.0 if is_failure else 0.0),
         )
 
         # Friston EFE over the kinematically grounded candidate transitions

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hbllm.hcir.world.engine_state import get_engine_state_attr
+
 """Basal Ganglia & Anterior Cingulate Cortex (ACC) Motor Arbitration Faculty.
 
 Biologically modeled on mammalian striatal action selection, dopamine RPE gating,
@@ -349,7 +351,7 @@ class EpistemicCuriosityExplorer:
         available_actions: Sequence[int],
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
-        undo_acts = set(getattr(engine, "undo_actions", set()))
+        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
         if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
             undo_acts.update(engine.working_memory.undo_actions)
         if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
@@ -563,7 +565,7 @@ class EpistemicCuriosityExplorer:
                 exploration_mode="attractor_loop_effector",
             )
 
-        undo_acts = set(getattr(engine, "undo_actions", set()))
+        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
         if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
             undo_acts.update(engine.working_memory.undo_actions)
         if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
@@ -824,7 +826,7 @@ class EpistemicCuriosityExplorer:
         H, W = curr_grid.shape
         bg = (
             engine.bg_feature
-            if getattr(engine, "bg_feature", None) is not None
+            if get_engine_state_attr(engine, "bg_feature", None) is not None
             else engine.estimate_background(curr_grid)
         )
         walkable_and_safe = engine.symbolic_theory.walkable_features
@@ -941,7 +943,8 @@ class EpistemicCuriosityExplorer:
                     if f_id not in engine.symbolic_theory.barrier_features:
                         affordance_uncertainty += 0.8
                     if not any(
-                        m.trigger_feature == f_id for m in getattr(engine, "state_mutations", [])
+                        m.trigger_feature == f_id
+                        for m in get_engine_state_attr(engine, "state_mutations", [])
                     ):
                         affordance_uncertainty += 1.0
                     if f_id in engine.symbolic_theory.candidate_goal_features:
@@ -1329,14 +1332,14 @@ class EpistemicCuriosityExplorer:
                 engine.probe_target_steps += 1
 
         if proposal.clear_active_probe:
-            engine.active_probe_target = None
-            engine.active_probe_id = None
-            engine.probe_target_steps = 0
+            engine.state.active_probe_target = None
+            engine.state.active_probe_id = None
+            engine.state.probe_target_steps = 0
 
         if proposal.new_probe_target is not None:
-            engine.active_probe_target = proposal.new_probe_target
-            engine.active_probe_id = proposal.new_probe_id
-            engine.probe_target_steps = 0
+            engine.state.active_probe_target = proposal.new_probe_target
+            engine.state.active_probe_id = proposal.new_probe_id
+            engine.state.probe_target_steps = 0
 
         for eid in proposal.probed_entity_ids_to_add:
             engine.probed_entity_ids.add(eid)
@@ -1586,7 +1589,7 @@ class MotorCortexEffector:
 
         bg = (
             engine.bg_feature
-            if getattr(engine, "bg_feature", None) is not None
+            if get_engine_state_attr(engine, "bg_feature", None) is not None
             else engine.estimate_background(curr_grid)
         )
         entities = engine.extract_entities(curr_grid, bg)
@@ -1603,7 +1606,7 @@ class MotorCortexEffector:
             except Exception as e:
                 logger.debug("Registered target scorer %s failed: %s", scorer, e)
 
-        for scorer in getattr(engine, "target_scorers", []):
+        for scorer in get_engine_state_attr(engine, "target_scorers", []):
             try:
                 click_candidates.extend(scorer.score_targets(engine, curr_grid, entities, bg, H, W))
             except Exception as e:
@@ -1745,7 +1748,11 @@ class MotorCortexEffector:
         # 9. Fallback: unvisited non-background cells
         if not click_candidates:
             step_sz = (
-                getattr(getattr(engine, "spatial_tracker", None), "inferred_step_size", None)
+                getattr(
+                    get_engine_state_attr(engine, "spatial_tracker", None),
+                    "inferred_step_size",
+                    None,
+                )
                 or cls.infer_motor_step_size(
                     list(engine.action_dynamics.keys()), engine.action_dynamics
                 )
@@ -1899,14 +1906,14 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        # Ventral Stream Invariant: When an avatar is present and all click candidates are exhausted / quiescent,
-        # inhibit click action and return None so deliberation and exploration switch to locomotion.
+        # Ventral Stream Invariant: When an avatar is present and all targeted actuation candidates are exhausted / quiescent,
+        # inhibit targeted actuation action and return None so deliberation and exploration switch to locomotion.
         if engine.avatar_pos is not None:
             if action is not None:
                 engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
             return None
 
-        # Robust Spatial Grounding Invariant for un-embodied click environments:
+        # Robust Spatial Grounding Invariant for un-embodied targeted actuation environments:
         # Effector actions must not return None on featureless boards when no avatar exists.
         best_r, best_c = H // 2, W // 2
         min_v = float("inf")

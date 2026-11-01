@@ -32,6 +32,7 @@ from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConfli
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
 from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
+from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
@@ -423,13 +424,15 @@ class PrefrontalWorkingMemory:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise
         warrant an executive phase shift back to forward mental simulation.
         """
-        n_act = len(getattr(engine, "action_dynamics", {}))
-        n_goals = len(getattr(engine, "learned_goal_positions", set()))
-        n_barriers = len(getattr(engine, "learned_barriers", set()))
+        n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
+        n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
+        n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
         n_traj = len(
-            getattr(getattr(engine, "collision_cones", None), "projected_trajectories", [])
+            getattr(
+                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
+            )
         )
-        n_threats = len(getattr(engine, "mobile_threat_features", set()))
+        n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
 
         b = self._salience_baseline
         shift = (
@@ -438,7 +441,7 @@ class PrefrontalWorkingMemory:
             or n_barriers != b.barriers
             or n_traj > b.trajectories
             or n_threats > b.mobile_threats
-            or getattr(engine, "last_surprise", 0.0) >= 0.4
+            or get_engine_state_attr(engine, "last_surprise", 0.0) >= 0.4
         )
         if shift:
             self._salience_baseline = WorkingMemorySalienceState(
@@ -452,13 +455,15 @@ class PrefrontalWorkingMemory:
 
     def update_salience_baseline(self, engine: Any) -> None:
         """Explicitly update the salience baseline snapshot to current counts."""
-        n_act = len(getattr(engine, "action_dynamics", {}))
-        n_goals = len(getattr(engine, "learned_goal_positions", set()))
-        n_barriers = len(getattr(engine, "learned_barriers", set()))
+        n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
+        n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
+        n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
         n_traj = len(
-            getattr(getattr(engine, "collision_cones", None), "projected_trajectories", [])
+            getattr(
+                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
+            )
         )
-        n_threats = len(getattr(engine, "mobile_threat_features", set()))
+        n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
         self._salience_baseline = WorkingMemorySalienceState(
             calibrated_actions=n_act,
             goal_positions=n_goals,
