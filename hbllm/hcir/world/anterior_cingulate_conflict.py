@@ -121,6 +121,18 @@ class AnteriorCingulateConflictMonitor:
 
         return MotorACC.get_orthogonal_actions(available_actions, cyclic_actions, action_dynamics)
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient conflict state, optionally preserving long-term failure clusters."""
         self.active_conflict = False

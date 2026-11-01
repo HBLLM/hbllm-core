@@ -30,6 +30,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.query import GraphQuery, InMemoryQueryEngine, QueryResult
 from hbllm.hcir.snapshot import Snapshot, SnapshotManager
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
+from hbllm.hcir.tier_types import WorkspaceTier
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.types import Attention, BranchMode
 
@@ -82,7 +83,9 @@ class HCIRWorkspaceState:
     Usage::
 
         workspace = HCIRWorkspaceState()
-        workspace.add_node(GoalNode(description="Build solar dehydrator"))
+        workspace.commit_operations(
+            [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=GoalNode(description="Build solar dehydrator"))]
+        )
         results = workspace.query(GraphQuery(node_type=HCIRNodeType.GOAL))
     """
 
@@ -92,7 +95,9 @@ class HCIRWorkspaceState:
         branch_mode: BranchMode = BranchMode.LIVE,
         branch_name: str = "main",
         graph: CognitiveGraph | None = None,
+        tier: WorkspaceTier = WorkspaceTier.WORKING,
     ) -> None:
+        self._tier = tier
         self._graph = graph if graph is not None else CognitiveGraph()
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
@@ -172,18 +177,29 @@ class HCIRWorkspaceState:
             self._transaction_manager = TransactionManager(self)
         return self._transaction_manager
 
+    @property
+    def tier(self) -> WorkspaceTier:
+        """The workspace's tier (read-only; set at construction)."""
+        return self._tier
+
     def commit_operations(
         self,
         operations: list[TransactionOperation],
         author: str = "system",
         metadata: dict[str, Any] | None = None,
+        grant: Any = None,
     ) -> HCIRTransaction:
         """Propose and commit a batch of operations through the commit authority.
 
         This is the canonical write path for subsystems that hold a workspace
         reference but no ``KernelServices`` (adapters, tier promotion, world kernel).
+        ``grant`` is a :class:`CommitGrant` issued by the kernel's
+        CommitAuthorityRegistry for gated tiers (WP6.4).
         """
-        tx = HCIRTransaction(author=author, operations=list(operations), metadata=metadata or {})
+        meta = dict(metadata or {})
+        if grant is not None:
+            meta["commit_grant"] = grant.grant_id
+        tx = HCIRTransaction(author=author, operations=list(operations), metadata=meta)
         return self.transaction_manager.commit(tx)
 
     # ── Graph Operations (kernel-internal; recorded in event log) ────
@@ -230,7 +246,7 @@ class HCIRWorkspaceState:
         import warnings
 
         warnings.warn(
-            "Direct workspace.add_node is deprecated; routing through commit_operations.",
+            "Direct workspace.add_node is deprecated; routing through commit_operations. Removal: next minor release.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -244,7 +260,7 @@ class HCIRWorkspaceState:
         import warnings
 
         warnings.warn(
-            "Direct workspace.upsert_node is deprecated; routing through commit_operations.",
+            "Direct workspace.upsert_node is deprecated; routing through commit_operations. Removal: next minor release.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -258,7 +274,7 @@ class HCIRWorkspaceState:
         import warnings
 
         warnings.warn(
-            "Direct workspace.remove_node is deprecated; routing through commit_operations.",
+            "Direct workspace.remove_node is deprecated; routing through commit_operations. Removal: next minor release.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -274,7 +290,7 @@ class HCIRWorkspaceState:
         import warnings
 
         warnings.warn(
-            "Direct workspace.add_edge is deprecated; routing through commit_operations.",
+            "Direct workspace.add_edge is deprecated; routing through commit_operations. Removal: next minor release.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -288,7 +304,7 @@ class HCIRWorkspaceState:
         import warnings
 
         warnings.warn(
-            "Direct workspace.remove_edge is deprecated; routing through commit_operations.",
+            "Direct workspace.remove_edge is deprecated; routing through commit_operations. Removal: next minor release.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -348,8 +364,9 @@ class HCIRWorkspaceState:
             raise ValueError(f"Branch '{branch_name}' already exists")
 
         # Structural sharing copy-on-write fork (WP4: < 1 ms @ 10k nodes)
-        forked = HCIRWorkspaceState(branch_mode=mode, branch_name=branch_name)
+        forked = HCIRWorkspaceState(branch_mode=mode, branch_name=branch_name, tier=self._tier)
         forked._graph = self._graph.fork()
+        forked._graph._fork_base_version = self._snapshot_manager.current_version
         forked._global_attention = self._global_attention.model_copy(deep=True)
         forked._resources = {
             k: ResourceBudget(
@@ -456,19 +473,50 @@ class HCIRWorkspaceState:
             raise ValueError(f"Branch '{branch_name}' not found")
 
         main_g, br_g = self._graph, branch_ws._graph
-        main_nodes = {n.id: n for n in main_g.all_nodes()}
-        br_nodes = {n.id: n for n in br_g.all_nodes()}
-        main_edges = {e.id: e for e in main_g.all_edges()}
-        br_edges = {e.id: e for e in br_g.all_edges()}
+        # diff_branch is read-only: use the underlying dicts directly.
+        main_nodes = main_g._nodes
+        br_nodes = br_g._nodes
+        main_edges = main_g._edges
+        br_edges = br_g._edges
 
-        removed_nodes = [nid for nid in main_nodes if nid not in br_nodes]
-        changed_edges = {
-            eid
-            for eid, e in br_edges.items()
-            if eid in main_edges and main_edges[eid].model_dump() != e.model_dump()
-        }
+        # Fast path (WP4.4): a graph forked from this workspace tracks the ids it
+        # mutated; only dirty ids can differ, so the rest of the comparison is
+        # skipped. It is only sound while the parent is unchanged since the fork —
+        # if this workspace committed afterwards, parent-side changes live outside
+        # the branch's dirty sets, so fall back to the full O(N) comparison.
+        dirty_nodes: set[str] | None = None
+        dirty_edges: set[str] | None = None
+        if (
+            getattr(br_g, "_fork_parent", None) is main_g
+            and getattr(br_g, "_fork_base_version", None) == self._snapshot_manager.current_version
+        ):
+            dirty_nodes = getattr(br_g, "_dirty_nodes", None)
+            dirty_edges = getattr(br_g, "_dirty_edges", None)
+
+        if dirty_nodes is None:
+            removed_nodes = [nid for nid in main_nodes if nid not in br_nodes]
+        else:
+            removed_nodes = [
+                nid for nid in main_nodes if nid in dirty_nodes and nid not in br_nodes
+            ]
+        if dirty_edges is None:
+            changed_edges = {
+                eid
+                for eid, e in br_edges.items()
+                if eid in main_edges and main_edges[eid].model_dump() != e.model_dump()
+            }
+        else:
+            changed_edges = {
+                eid
+                for eid in dirty_edges
+                if eid in main_edges
+                and eid in br_edges
+                and main_edges[eid].model_dump() != br_edges[eid].model_dump()
+            }
         ops: list[TransactionOperation] = []
         for eid in main_edges:
+            if dirty_edges is not None and eid not in dirty_edges:
+                continue
             if eid not in br_edges or eid in changed_edges:
                 edge = main_edges[eid]
                 if any(n in removed_nodes for n in [*edge.sources, *edge.targets]):
@@ -477,6 +525,8 @@ class HCIRWorkspaceState:
         for nid in removed_nodes:
             ops.append(TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=nid))
         for nid, node in br_nodes.items():
+            if dirty_nodes is not None and nid not in dirty_nodes:
+                continue
             existing = main_nodes.get(nid)
             if existing is None:
                 ops.append(
@@ -491,6 +541,8 @@ class HCIRWorkspaceState:
                     )
                 )
         for eid, edge in br_edges.items():
+            if dirty_edges is not None and eid not in dirty_edges:
+                continue
             if eid not in main_edges or eid in changed_edges:
                 ops.append(
                     TransactionOperation(

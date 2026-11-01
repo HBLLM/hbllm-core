@@ -6,6 +6,8 @@ import heapq
 from collections import deque
 from typing import Any
 
+from hbllm.hcir.algorithms.protocol import native_of
+
 
 def bfs_path(graph: Any, start: str, end: str, max_depth: int = 10) -> list[str]:
     """Find the shortest unweighted path using Breadth-First Search."""
@@ -71,6 +73,9 @@ def all_pairs_shortest_paths(
     graph: Any, weight_attr: str = "weight"
 ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], list[str]]]:
     """Compute all-pairs shortest paths using repeated Dijkstra or Floyd-Warshall."""
+    native = native_of(graph)
+    if native is not None:
+        return native.all_pairs_shortest_paths(weight_attribute=weight_attr)
     all_nodes: list[str] = []
     if hasattr(graph, "all_nodes"):
         all_nodes = [n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()]
@@ -114,6 +119,9 @@ def graph_radius_and_diameter(graph: Any, weight_attr: str = "weight") -> tuple[
     Eccentricity e(u) = max_{v != u, reachable} dist(u, v).
     Radius R = min_u e(u), Diameter D = max_u e(u).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.graph_radius_and_diameter()
     apsp, _ = all_pairs_shortest_paths(graph, weight_attr=weight_attr)
     all_nodes = set()
     for u, v in apsp.keys():
@@ -137,6 +145,9 @@ def graph_radius_and_diameter(graph: Any, weight_attr: str = "weight") -> tuple[
 
 def topological_sort(graph: Any) -> list[str]:
     """Compute topological ordering of DAG nodes using Kahn's algorithm."""
+    native = native_of(graph)
+    if native is not None:
+        return native.topological_sort()
     if hasattr(graph, "all_nodes"):
         all_ids = set(n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes())
     elif hasattr(graph, "_nodes"):
@@ -188,6 +199,9 @@ def find_eulerian_path_or_circuit(
     Returns:
         Tuple of (is_eulerian, edge_sequence).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.find_eulerian_path_or_circuit()
     from collections import defaultdict
 
     if hasattr(graph, "all_nodes"):
@@ -284,6 +298,9 @@ def chinese_postman_tour(
     Returns:
         Tuple of (total_tour_weight, tour_edge_sequence).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.chinese_postman_tour()
     from collections import defaultdict
 
     if hasattr(graph, "all_nodes"):

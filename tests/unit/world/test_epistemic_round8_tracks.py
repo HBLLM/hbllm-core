@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+import pytest
+
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    FactNode,
+    HCIREdge,
+    HCIREdgeType,
+)
+from hbllm.hcir.native_adapter import (
+    NativeGraphAdapter,
+)
+from hbllm.hcir.world import (
+    AutonomousEpistemicEngine,
+    PotentialFieldVector,
+    ShapeArchetypeSignature,
+)
+
 """Comprehensive Unit Tests for Round 8 Cognitive Architecture Enhancements:
 
 Track 1: Ventral Striatum & Lateral Habenula Dual Value-Opponency Learning
@@ -8,19 +25,15 @@ Track 3: Inferotemporal (IT) Viewpoint- & Scale-Invariant Morphological Shape Ar
 Track 4: Native Structural Graph Transitive Reduction & Minimal Causal Skeleton Extraction
 """
 
-import pytest
 
-from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
-from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world import (
-    AutonomousEpistemicEngine,
-    DualValueOpponencyCortex,
-    InferotemporalShapeHasher,
     OpponencyRegime,
     OpponencyValueState,
+)
+from hbllm.hcir.world.experimental import (
+    DualValueOpponencyCortex,
+    InferotemporalShapeHasher,
     ParietalPotentialFieldNavigator,
-    PotentialFieldVector,
-    ShapeArchetypeSignature,
     SpatialDistanceTransformEngine,
 )
 
@@ -111,11 +124,6 @@ def test_value_opponency_engine_integration() -> None:
     assert any("opponency:(4,4)" in p.variable for p in engine.symbolic_theory.causal_predicates)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 2: Posterior Parietal Cortex (PPC) Potential Field Navigation & Affordance Routing
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_potential_field_pure_attraction_open_space() -> None:
     """In obstacle-free space, potential field points directly towards the goal."""
     edt_engine = SpatialDistanceTransformEngine()
@@ -200,11 +208,6 @@ def test_potential_field_engine_integration() -> None:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 3: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_shape_hasher_translation_invariance() -> None:
     """Translated instances of the same geometric shape produce identical Hu moments and hash."""
     hasher = InferotemporalShapeHasher()
@@ -274,11 +277,6 @@ def test_shape_hasher_engine_integration() -> None:
     assert isinstance(sig, ShapeArchetypeSignature)
     assert sig.area == 4
     assert any("shape_archetype:" in p.variable for p in engine.symbolic_theory.causal_predicates)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 4: Native Structural Graph Transitive Reduction & Minimal Causal Skeleton
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_native_adapter_transitive_reduction() -> None:

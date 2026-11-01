@@ -180,6 +180,20 @@ class SpatiotemporalHazardTracker:
     """Biologically-inspired tracker for moving hazards and periodic spatial oscillations."""
 
     def __init__(self, history_len: int = 24, max_period: int = 8) -> None:
+        # Lazy: RetentionPolicy lives in percept (import cycle guard).
+        if not SpatiotemporalHazardTracker.FIELD_RETENTION:
+            from hbllm.hcir.world.percept import RetentionPolicy
+
+            SpatiotemporalHazardTracker.FIELD_RETENTION.update(
+                {
+                    "grid_history": RetentionPolicy.LEVEL_LOCAL,
+                    "step_history": RetentionPolicy.LEVEL_LOCAL,
+                    "periodic_cells": RetentionPolicy.LEVEL_LOCAL,
+                    "environmental_period": RetentionPolicy.LEVEL_LOCAL,
+                    "known_lethal_features": RetentionPolicy.CONTEXT_LOCAL,
+                    "static_lethal_positions": RetentionPolicy.CONTEXT_LOCAL,
+                }
+            )
         self.history_len = history_len
         self.max_period = max_period
         self.grid_history: deque[np.ndarray] = deque(maxlen=history_len)
@@ -188,6 +202,24 @@ class SpatiotemporalHazardTracker:
         self.environmental_period: int = 1
         self.known_lethal_features: set[int] = set()
         self.static_lethal_positions: set[tuple[int, int]] = set()
+
+    # WP0.5/F1: per-field retention — temporal observation history is
+    # level-local; learned lethal features/positions are context-local theory
+    # (static_lethal_positions is rebind-shared with engine.level_lethal_positions).
+    FIELD_RETENTION: dict[str, Any] = {}
+
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler — generic per-field retention."""
+        from hbllm.hcir.world.percept import apply_boundary_retention
+
+        apply_boundary_retention(self, boundary)
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
 
     def reset_episode(self) -> None:
         """Reset temporal observation history while preserving learned lethal feature identities and static lethal positions."""
@@ -226,6 +258,11 @@ class SpatiotemporalHazardTracker:
             grid = np.asarray(grid, dtype=int)
         if grid.ndim == 3 and len(grid) > 0:
             grid = grid[-1]
+        if self.grid_history and self.grid_history[-1].shape != grid.shape:
+            # Lattice extent changed (new level/episode) — history from the
+            # previous lattice is incomparable; restart the window.
+            self.grid_history.clear()
+            self.step_history.clear()
         self.grid_history.append(grid.copy())
         self.step_history.append(step)
 

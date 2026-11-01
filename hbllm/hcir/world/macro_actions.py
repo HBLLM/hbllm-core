@@ -2,7 +2,7 @@
 
 Decomposes monolithic procedural cognitive loops into discrete, composable macro-actions:
 1. NavigateTo(from -> to): Geodesic A* navigation across traversable manifold.
-2. InteractWith(target): Allocentric effector actuation (clicks, toggles, widget switches).
+2. InteractWith(target): Allocentric effector actuation (point actuations, toggles, widget switches).
 3. PickUpCargo(target): Locomotion adjacent to cargo followed by body-schema manipulandum docking.
 4. DepositCargo(target): Transport and release of carried cargo to destination receptacle.
 5. SwitchFocus(): Clean multi-agent / multi-slider control handover.
@@ -313,7 +313,7 @@ class NavigateTo(MacroAction):
 
                 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
-                engine.state.mental_plan = deque(
+                _plan_deque = deque(
                     [
                         MentalSimulationStep(
                             action=act,
@@ -324,6 +324,11 @@ class NavigateTo(MacroAction):
                         for act, pos in plan[1:]
                     ]
                 )
+                from hbllm.hcir.world.engine_state import StateDelta
+
+                _d = StateDelta()
+                _d.set("mental_plan", _plan_deque)
+                engine.apply_delta(_d, author="macro_actions")
                 return next_act, None
 
         self.status = MacroActionStatus.BLOCKED
@@ -391,7 +396,7 @@ class InteractWith(MacroAction):
             dist = abs(engine.avatar_pos[0] - self.target_coord[0]) + abs(
                 engine.avatar_pos[1] - self.target_coord[1]
             )
-            is_proven_remote = self.target_coord in engine.effective_click_targets
+            is_proven_remote = self.target_coord in engine.effective_actuation_targets
             if dist > self.contact_radius and not is_proven_remote:
                 if self.nav_op is None:
                     self.nav_op = NavigateTo(
@@ -1599,8 +1604,25 @@ class MacroPlanSynthesizer:
                                 engine.action_deltas[aid] = (dr, dc)
                             aff.is_displacement = True
                             aff.delta = (dr, dc)
-                        if act_spec.get("is_spatial_effector", False) or "CLICK" in str(
-                            act_spec.get("name", "")
+                        _params = act_spec.get("parameters")
+                        if act_spec.get("is_spatial_effector", False) or (
+                            isinstance(_params, dict)
+                            and any(
+                                k in _params
+                                for k in (
+                                    "x",
+                                    "y",
+                                    "col",
+                                    "row",
+                                    "lat",
+                                    "lon",
+                                    "azimuth",
+                                    "elevation",
+                                    "distance",
+                                    "c",
+                                    "r",
+                                )
+                            )
                         ):
                             aff.requires_spatial_target = True
                         if act_spec.get("is_focus_switch", False):

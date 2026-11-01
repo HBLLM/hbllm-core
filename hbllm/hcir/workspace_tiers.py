@@ -16,7 +16,7 @@ Usage::
 
     tiered = TieredWorkspace()
     frame = tiered.create_task_frame("goal_123")
-    frame.workspace.add_node(GoalNode(...))
+    frame.workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=GoalNode(...))])
     tiered.close_task_frame(frame.frame_id, reason="completed")
     tiered.promote("node_xyz", WorkspaceTier.WORKING, WorkspaceTier.PERSISTENT)
 """
@@ -26,7 +26,6 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -53,13 +52,9 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class WorkspaceTier(StrEnum):
-    """The four tiers of the cognitive workspace hierarchy."""
+from hbllm.hcir.tier_types import WorkspaceTier
 
-    WORKING = "working"  # Task frames — ephemeral scratch per goal
-    BRAIN = "brain"  # Session-level cognitive state
-    PERSISTENT = "persistent"  # Long-term memory graph (forever)
-    META = "meta"  # Cognitive performance & self-model
+__all_tier__ = WorkspaceTier  # re-export (canonical home: hbllm.hcir.tier_types)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -92,6 +87,7 @@ class TaskFrame:
         self.workspace: HCIRWorkspaceState = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name=f"frame_{self.frame_id}",
+            tier=WorkspaceTier.WORKING,
         )
         self.created_at: float = time.time()
         self.closed_at: float | None = None
@@ -159,6 +155,10 @@ class WorkingWorkspace:
         self._frames: dict[str, TaskFrame] = {}
         self._max_frames = max_frames
         self._interruption_stack: list[InterruptionCheckpoint] = []
+        # Set by TieredWorkspace.attach_authorities (WP6.4) — when present, new
+        # frames get a dedicated TransactionManager sharing these stages/bus.
+        self._tm_stages: list[Any] | None = None
+        self._tm_bus: Any | None = None
 
     @property
     def interruption_stack(self) -> list[InterruptionCheckpoint]:
@@ -280,6 +280,19 @@ class WorkingWorkspace:
 
         frame = TaskFrame(goal_id=goal_id)
         self._frames[frame.frame_id] = frame
+        # Attach a dedicated TM when kernel authorities have been provisioned
+        # (WP6.4) so future frames are governed like the tier workspaces.
+        if self._tm_stages is not None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            frame.workspace.attach_transaction_manager(
+                TransactionManager(
+                    frame.workspace,
+                    verification_stages=list(self._tm_stages),
+                    event_bus=self._tm_bus,
+                ),
+                replace=True,
+            )
         logger.info(
             "Created task frame %s for goal %s (total=%d)",
             frame.frame_id,
@@ -371,7 +384,7 @@ class TieredWorkspace:
 
         tiered = TieredWorkspace()
         frame = tiered.create_task_frame("goal_abc")
-        frame.workspace.add_node(GoalNode(description="Plan dinner"))
+        frame.workspace.commit_operations([TransactionOperation(op=TransactionOp.ADD_NODE, node=GoalNode(description="Plan dinner"))
         tiered.promote("node_xyz", WorkspaceTier.WORKING, WorkspaceTier.PERSISTENT)
     """
 
@@ -384,15 +397,18 @@ class TieredWorkspace:
         self.brain = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="brain",
+            tier=WorkspaceTier.BRAIN,
         )
         self.persistent = HCIRWorkspaceState(
             event_store=persistent_store or InMemoryEventStore(),
             branch_mode=BranchMode.LIVE,
             branch_name="persistent",
+            tier=WorkspaceTier.PERSISTENT,
         )
         self.meta = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="meta",
+            tier=WorkspaceTier.META,
         )
 
         self._snapshot_interval = snapshot_interval
@@ -468,6 +484,46 @@ class TieredWorkspace:
 
     # ── Node Promotion / Demotion ────────────────────────────────────
 
+    def attach_authorities(
+        self,
+        verification_stages: list[Any],
+        event_bus: Any,
+        registry: Any,
+    ) -> None:
+        """Attach a per-tier TransactionManager and issue the system grant (WP6.4).
+
+        Each tier workspace (brain/persistent/meta) and every task frame —
+        present and future — gets its own TM sharing ``event_bus`` and
+        ``verification_stages``. The kernel-issued system grant authorizes
+        tier-internal moves (promote/demote/archive).
+        """
+        from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+        self._authority_registry = registry
+        self._system_grant = registry.issue(
+            "tiered_workspace",
+            {WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT, WorkspaceTier.META},
+        )
+        self._tm_stages = list(verification_stages)
+        self._tm_bus = event_bus
+        # propagate to WorkingWorkspace so future frames attach TMs too
+        self.working._tm_stages = self._tm_stages
+        self.working._tm_bus = event_bus
+        for ws in (self.brain, self.persistent, self.meta):
+            ws.attach_transaction_manager(
+                TransactionManager(ws, verification_stages=self._tm_stages, event_bus=event_bus),
+                replace=True,
+            )
+        for frame in self.working._frames.values():
+            frame.workspace.attach_transaction_manager(
+                TransactionManager(
+                    frame.workspace,
+                    verification_stages=self._tm_stages,
+                    event_bus=event_bus,
+                ),
+                replace=True,
+            )
+
     def promote(
         self,
         node_id: str,
@@ -507,6 +563,7 @@ class TieredWorkspace:
                 )
             ],
             author=f"promotion:{from_tier}→{to_tier}",
+            grant=getattr(self, "_system_grant", None),
             metadata={"tier_transfer": "promote", "from": str(from_tier), "to": str(to_tier)},
         )
         if not result.is_committed:
@@ -554,6 +611,7 @@ class TieredWorkspace:
                 )
             ],
             author=author,
+            grant=getattr(self, "_system_grant", None),
             metadata={"tier_transfer": "demote", "from": str(from_tier), "to": str(to_tier)},
         )
         if not moved.is_committed:
@@ -645,6 +703,7 @@ class TieredWorkspace:
             result = self.persistent.commit_operations(
                 ops,
                 author="archive:brain→persistent",
+                grant=getattr(self, "_system_grant", None),
                 metadata={"tier_transfer": "archive"},
             )
             if not result.is_committed:

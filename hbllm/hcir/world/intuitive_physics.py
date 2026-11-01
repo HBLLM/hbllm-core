@@ -97,6 +97,18 @@ class IntuitivePhysicsEngine:
         self.field_evidence: dict[tuple[int, int], int] = {}
         self.known_platforms: set[tuple[int, int]] = set()
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self) -> None:
         """Reset transient episode observations while preserving calibrated physics laws."""
         self.observed_transitions.clear()

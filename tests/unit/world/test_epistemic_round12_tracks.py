@@ -18,7 +18,9 @@ from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
     ConflictProfile,
     EffortAllocationDecision,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
 from hbllm.hcir.world.cerebellar_microzone_adaptor import (
     CerebellarMicrozoneAdaptor,
     ClimbingFiberFeedback,

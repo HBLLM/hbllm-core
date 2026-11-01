@@ -35,6 +35,8 @@ class PipelineResult:
     stage_results: list[StageResult] = field(default_factory=list)
     signals: dict[str, Any] = field(default_factory=dict)
     operations: list[Any] = field(default_factory=list)
+    rejected: bool = False
+    rejection_reason: str | None = None
 
 
 class CorticalPipeline:
@@ -44,6 +46,7 @@ class CorticalPipeline:
         self,
         stages: Sequence[CorticalStage] | None = None,
         transaction_manager: TransactionManager | None = None,
+        engine: Any = None,
     ) -> None:
         if stages is not None:
             self.stages: list[CorticalStage] = list(stages)
@@ -56,6 +59,7 @@ class CorticalPipeline:
                 MotorStage(),
             ]
         self.transaction_manager = transaction_manager
+        self.engine = engine
 
     def run(self, ctx: CognitiveContext) -> PipelineResult:
         """Run the active inference cycle across all stages.
@@ -76,17 +80,35 @@ class CorticalPipeline:
                 current_ctx = current_ctx.with_signals(result.signals)
             if result.proposed_action is not None:
                 final_action = result.proposed_action
+            # WP1: each stage's journaled faculty writes commit before the next stage.
+            if getattr(result, "journal", None) is not None and self.engine is not None:
+                if not self.engine.commit_faculty_journal(result.journal):
+                    return PipelineResult(
+                        final_action=None,
+                        stage_results=stage_results,
+                        signals=dict(current_ctx.signals),
+                        operations=all_ops,
+                        rejected=True,
+                        rejection_reason=f"{result.author}: journal commit rejected",
+                    )
 
         # If a transaction manager is attached, batch-commit all operations
         if self.transaction_manager is not None and all_ops:
             tx = HCIRTransaction(author="cortical_pipeline", operations=all_ops)
             try:
                 self.transaction_manager.commit(tx)
-            except Exception:
-                pass
+            except Exception as exc:
+                return PipelineResult(
+                    final_action=None,
+                    stage_results=stage_results,
+                    signals=dict(current_ctx.signals),
+                    operations=all_ops,
+                    rejected=True,
+                    rejection_reason=str(exc),
+                )
 
         return PipelineResult(
-            final_action=final_action if final_action is not None else 1,
+            final_action=final_action,
             stage_results=stage_results,
             signals=dict(current_ctx.signals),
             operations=all_ops,

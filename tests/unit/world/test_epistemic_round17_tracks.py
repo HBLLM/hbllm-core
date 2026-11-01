@@ -19,11 +19,15 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
 )
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
 from hbllm.hcir.world.claustrum_interhemispheric import (
     ClaustrumInterhemisphericIntegrator,
 )
-from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+from hbllm.hcir.world.cortex_causal import (
+    HCIRSymbolicWorldTheory,
+)
 from hbllm.hcir.world.hippocampal_time_cell import (
     HippocampalTimeCellEngine,
 )

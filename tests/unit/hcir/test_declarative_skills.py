@@ -17,13 +17,12 @@ from hbllm.hcir.skills.declarative import (
     EntityCountPredicate,
     GridDimensionPredicate,
     Not,
-    PanelConstraint,
     SkillEvaluationContext,
     SubgoalSequence,
     SymbolicSubgoal,
-    TileFramePredicate,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from plugins.arc_agi_adapter.arc_skills import PanelConstraint, TileFramePredicate
 
 
 @pytest.fixture

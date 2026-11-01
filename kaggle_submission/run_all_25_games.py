@@ -327,8 +327,8 @@ class CognitiveAgentAdapter:
                 engine.assimilate_feedback(
                     curr_grid,
                     avail,
-                    is_win=is_win,
-                    is_lost=is_lost,
+                    is_success=is_win,
+                    is_failure=is_lost,
                     action=action.action_id,
                     action_data=action.parameters,
                 )
@@ -357,6 +357,9 @@ def run_all_25_games(
     max_level_steps: int | None = None,
     retries: int = 0,
     resume: bool = True,
+    per_game_time_limit: float = 600.0,
+    trace_dir: str | None = None,
+    seed: int | None = None,
 ) -> None:
     if instructions is None:
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
@@ -454,7 +457,7 @@ def run_all_25_games(
         total_game_steps_all = 0
 
         # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-        agent = MyAgent(instructions=instructions)
+        agent = MyAgent(instructions=instructions, seed=seed, trace_dir=trace_dir)
         cognitive_engine = CognitiveAgentAdapter(agent)
 
         # Phase C: Seed engine with cross-game prior knowledge
@@ -544,10 +547,9 @@ def run_all_25_games(
 
                 # Per-game time guard in benchmark: prevent expensive games from starving the rest
                 game_elapsed = time.time() - start_time
-                _PER_GAME_TIME_LIMIT = 600.0  # 10 minutes max per game in benchmark
-                if game_elapsed >= _PER_GAME_TIME_LIMIT:
+                if game_elapsed >= per_game_time_limit:
                     print(
-                        f"    ⏱️ Per-game time limit ({_PER_GAME_TIME_LIMIT:.0f}s) exceeded at step {step} "
+                        f"    ⏱️ Per-game time limit ({per_game_time_limit:.0f}s) exceeded at step {step} "
                         f"({completed_prev}/{target_levels} levels). Yielding game."
                     )
                     break
@@ -657,17 +659,48 @@ def run_all_25_games(
             f"({best_game_steps} steps in best run, {total_game_steps_all} total steps across {attempts_taken} attempt(s))"
         )
 
-        results[gid] = {
-            "title": title,
-            "levels_passed": best_completed,
-            "target_levels": best_target,
-            "won": best_is_win,
-            "steps": best_game_steps,
-            "total_steps": total_game_steps_all,
-            "attempts": attempts_taken,
-            "elapsed_seconds": best_elapsed,
-            "baseline": baseline,
-        }
+        try:
+            from plugins.arc_agi_adapter.scorecard import compute_game_metrics
+
+            results[gid] = {
+                "title": title,
+                "levels_passed": best_completed,
+                "target_levels": best_target,
+                "won": best_is_win,
+                "steps": best_game_steps,
+                "total_steps": total_game_steps_all,
+                "attempts": attempts_taken,
+                "elapsed_seconds": best_elapsed,
+                "baseline": baseline,
+                **compute_game_metrics(
+                    steps=best_game_steps,
+                    latencies_ms=getattr(agent, "_step_latencies", []),
+                    stagnant_steps=getattr(agent, "_stagnant_steps", 0),
+                    noop_actions=getattr(agent, "_noop_actions", 0),
+                    contract_violations=getattr(agent, "_contract_violations", 0),
+                    levels_completed=best_completed,
+                    win_levels=best_target,
+                    state="WIN" if best_is_win else "NOT_FINISHED",
+                    stop_reason=(
+                        "win"
+                        if best_is_win
+                        else ("time_limit" if best_elapsed >= per_game_time_limit else "step_limit")
+                    ),
+                    baseline_actions=len(baseline) if baseline else None,
+                ),
+            }
+        except Exception:
+            results[gid] = {
+                "title": title,
+                "levels_passed": best_completed,
+                "target_levels": best_target,
+                "won": best_is_win,
+                "steps": best_game_steps,
+                "total_steps": total_game_steps_all,
+                "attempts": attempts_taken,
+                "elapsed_seconds": best_elapsed,
+                "baseline": baseline,
+            }
 
         # Save continuous scorecard checkpoint
         checkpoint = {
@@ -770,6 +803,11 @@ if __name__ == "__main__":
         help="Restart entire benchmark from Game 1, backing up any prior scorecard.",
     )
 
+    parser.add_argument("--per-game-time-limit", type=float, default=600.0)
+    parser.add_argument("--trace-dir", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--env", choices=["arc"], default="arc")
+
     args = parser.parse_args()
 
     if args.list:
@@ -801,4 +839,7 @@ if __name__ == "__main__":
         max_level_steps=args.max_level_steps,
         retries=args.retries,
         resume=not args.fresh,
+        per_game_time_limit=args.per_game_time_limit,
+        trace_dir=args.trace_dir,
+        seed=args.seed,
     )

@@ -376,14 +376,14 @@ class PrefrontalWorkingMemory:
         self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
         self.recent_actions: deque[Any] = deque(maxlen=16)
         self.exhausted_candidate_goals: set[tuple[int, int]] = set()
-        self.quiescent_click_targets: set[tuple[int, int]] = set()
-        self.effective_click_targets: set[tuple[int, int]] = set()
-        self.last_effective_click_coord: tuple[int, int] | None = None
-        self.consecutive_effective_clicks: int = 0
-        self.click_affordances: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self.quiescent_actuation_targets: set[tuple[int, int]] = set()
+        self.effective_actuation_targets: set[tuple[int, int]] = set()
+        self.last_effective_actuation_coord: tuple[int, int] | None = None
+        self.consecutive_effective_actuations: int = 0
+        self.actuation_affordances: dict[tuple[int, int], list[tuple[int, int]]] = {}
         self.last_effector_target_step: dict[tuple[int, int], int] = {}
         self.active_goal_converging_coord: tuple[int, int] | None = None
-        self.consecutive_goal_converging_clicks: int = 0
+        self.consecutive_goal_converging_actuations: int = 0
 
         # Active Causal Empowerment & Contingency Testing
         self.active_causal_actuator_coord: tuple[int, int] | None = None
@@ -522,8 +522,8 @@ class PrefrontalWorkingMemory:
         self.probe_target_steps = 0
         self.recent_positions.clear()
         self.recent_actions.clear()
-        self.consecutive_effective_clicks = 0
-        self.consecutive_goal_converging_clicks = 0
+        self.consecutive_effective_actuations = 0
+        self.consecutive_goal_converging_actuations = 0
         self.active_causal_actuator_coord = None
         self.consecutive_causal_probes = 0
         self.level_epistemic_probes = 0
@@ -545,10 +545,10 @@ class PrefrontalWorkingMemory:
             self.entity_visit_counts.clear()
             self.position_visit_counts.clear()
             self.exhausted_candidate_goals.clear()
-            self.quiescent_click_targets.clear()
-            self.effective_click_targets.clear()
-            self.last_effective_click_coord = None
-            self.click_affordances.clear()
+            self.quiescent_actuation_targets.clear()
+            self.effective_actuation_targets.clear()
+            self.last_effective_actuation_coord = None
+            self.actuation_affordances.clear()
             self.last_effector_target_step.clear()
             self.active_goal_converging_coord = None
             self.quiescent_features.clear()

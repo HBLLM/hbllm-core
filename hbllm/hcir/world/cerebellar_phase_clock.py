@@ -424,6 +424,18 @@ class CerebellarSmithPredictor:
         self.last_predicted_pos: tuple[int, int] | None = None
         self.prediction_errors: deque[float] = deque(maxlen=64)
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self) -> None:
         """Clear forward prediction buffer and error history."""
         self.efference_queue.clear()

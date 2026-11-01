@@ -34,7 +34,7 @@ from hbllm.hcir.world.thalamocortical_binding import (
 )
 
 try:
-    import hbllm_compute  # type: ignore[import-not-found]
+    import hbllm_compute  # type: ignore[import-not-found]  # noqa: F401
 
     HAS_HBLLM_COMPUTE = True
 except ImportError:
@@ -149,11 +149,6 @@ def test_neuromodulatory_engine_integration() -> None:
     assert engine.hierarchical_active_inference.sensory_precision == params["sensory_precision"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Gating
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_thalamocortical_synchronization_and_gating() -> None:
     engine = ThalamocorticalBindingEngine(
         nominal_frequency_hz=40.0,
@@ -193,11 +188,6 @@ def test_thalamocortical_engine_integration() -> None:
     assert isinstance(bundles, list)
     for b in bundles:
         assert isinstance(b, BoundFeatureBundle)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 4: Superposition Counterfactual Tree Search Planner
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_superposition_counterfactual_planning() -> None:
@@ -263,11 +253,6 @@ def test_superposition_engine_integration() -> None:
     )
     assert isinstance(res, list)
     assert len(res) == 2
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 5: Native Rust Acceleration (hbllm_compute)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.skipif(not HAS_HBLLM_COMPUTE, reason="hbllm_compute native module not compiled")

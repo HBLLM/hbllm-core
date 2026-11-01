@@ -522,7 +522,6 @@ def test_phase3_active_runtime_integration() -> None:
 
     # 1. Attribute presence & correct types
     assert isinstance(engine.whole_grid_predictor, WholeGridPredictor)
-    assert isinstance(engine.confidence_calibrator, ConfidenceCalibrator)
     assert isinstance(engine.concept_engine, ConceptFormationEngine)
     assert isinstance(engine.visual_symmetry, VisualSymmetryAnalyzer)
 
@@ -535,7 +534,7 @@ def test_phase3_active_runtime_integration() -> None:
     assert pred_res.shape == (2, 2)
 
     # Confidence calibration through engine faculty
-    conf = engine.confidence_calibrator.calibrate(raw_confidence=0.92, historical_accuracy=0.88)
+    conf = ConfidenceCalibrator().calibrate(raw_confidence=0.92, historical_accuracy=0.88)
     assert conf.calibrated_confidence > 0.0
 
     # Concept formation through engine faculty

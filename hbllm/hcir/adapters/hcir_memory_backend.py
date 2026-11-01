@@ -42,6 +42,7 @@ from hbllm.hcir.graph import (
     ValueNode,
 )
 from hbllm.hcir.query import GraphQuery
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope
 from hbllm.hcir.workspace_tiers import TieredWorkspace, WorkspaceTier
 
@@ -171,7 +172,16 @@ class HCIRMemoryBackend:
             ),
             tags=["episodic", "hcir_native"],
         )
-        self._workspace.persistent.upsert_node(node, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         logger.debug("Stored episode %s: %s", node_id, summary[:50])
         return node_id
 
@@ -231,7 +241,16 @@ class HCIRMemoryBackend:
             ),
             tags=["semantic", "hcir_native"],
         )
-        self._workspace.persistent.upsert_node(node, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         return node_id
 
     async def recall_concepts(
@@ -286,7 +305,16 @@ class HCIRMemoryBackend:
             ),
             tags=["procedural", "hcir_native"],
         )
-        self._workspace.persistent.upsert_node(node, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         return node_id
 
     async def recall_skills(
@@ -339,7 +367,16 @@ class HCIRMemoryBackend:
             ),
             tags=["value", "hcir_native"],
         )
-        self._workspace.persistent.upsert_node(node, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         return node_id
 
     # ── Knowledge Graph (Beliefs + Edges) ────────────────────────────
@@ -369,7 +406,16 @@ class HCIRMemoryBackend:
             ),
             tags=["knowledge_graph", "belief", "hcir_native"],
         )
-        self._workspace.persistent.upsert_node(node, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         return node_id
 
     async def link_beliefs(
@@ -387,7 +433,16 @@ class HCIRMemoryBackend:
             targets=[target_id],
             edge_type=edge_type,
         )
-        self._workspace.persistent.add_edge(edge, author="hcir_memory_backend")
+        self._workspace.persistent.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.ADD_EDGE,
+                    edge_id=edge.id,
+                    edge_data=edge.model_dump(),
+                )
+            ],
+            author="hcir_memory_backend",
+        )
         return edge_id
 
     # ── Cross-Memory Queries ─────────────────────────────────────────

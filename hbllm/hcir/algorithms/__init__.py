@@ -21,6 +21,7 @@ from hbllm.hcir.algorithms.cycles import (
 )
 from hbllm.hcir.algorithms.flow import (
     edmonds_karp_max_flow,
+    max_flow_min_cut,
     min_st_cut,
 )
 from hbllm.hcir.algorithms.optimization import (
@@ -41,11 +42,14 @@ from hbllm.hcir.algorithms.paths import (
 from hbllm.hcir.algorithms.protocol import (
     EdgeView,
     GraphView,
+    native_of,
 )
 from hbllm.hcir.algorithms.spans_and_trees import (
     minimum_spanning_tree,
+    minimum_spanning_tree_subgraph,
     transitive_closure,
     transitive_reduction,
+    transitive_reduction_subgraph,
 )
 
 __all__ = [
@@ -69,13 +73,17 @@ __all__ = [
     "graph_radius_and_diameter",
     "greedy_edge_coloring",
     "is_biconnected",
+    "max_flow_min_cut",
     "maximum_independent_set",
     "min_st_cut",
     "minimum_dominating_set",
     "minimum_spanning_tree",
+    "minimum_spanning_tree_subgraph",
     "minimum_vertex_cover",
+    "native_of",
     "strongly_connected_components",
     "topological_sort",
     "transitive_closure",
     "transitive_reduction",
+    "transitive_reduction_subgraph",
 ]

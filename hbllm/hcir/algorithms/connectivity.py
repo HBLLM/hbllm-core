@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from hbllm.hcir.algorithms.protocol import native_of
+
 
 def connected_components(graph: Any) -> list[set[str]]:
     """Compute weakly connected components of the graph."""
+    native = native_of(graph)
+    if native is not None:
+        return native.connected_components()
     # Get all node IDs
     if hasattr(graph, "all_nodes"):
         all_ids = [n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()]
@@ -59,6 +64,9 @@ def connected_components(graph: Any) -> list[set[str]]:
 
 def articulation_points_and_bridges(graph: Any) -> tuple[set[str], list[tuple[str, str]]]:
     """Find articulation points (cut vertices) and bridges (cut edges) using Tarjan's algorithm."""
+    native = native_of(graph)
+    if native is not None:
+        return native.find_articulation_points_and_bridges()
     tin: dict[str, int] = {}
     low: dict[str, int] = {}
     timer = 0
@@ -109,6 +117,9 @@ def articulation_points_and_bridges(graph: Any) -> tuple[set[str], list[tuple[st
 
 def is_biconnected(graph: Any) -> bool:
     """Check whether graph is biconnected (connected with >= 2 nodes, 0 articulation points, and 0 bridges)."""
+    native = native_of(graph)
+    if native is not None:
+        return native.is_biconnected()
     comps = connected_components(graph)
     if len(comps) != 1:
         return False
@@ -122,6 +133,9 @@ def strongly_connected_components(graph: Any) -> list[set[str]]:
     Returns:
         List of sets of node IDs, where each set represents a maximal strongly connected component.
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.strongly_connected_components()
     if hasattr(graph, "all_nodes"):
         all_nodes = sorted([n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()])
     elif hasattr(graph, "_nodes"):
@@ -205,6 +219,9 @@ def condense_scc_metagraph(
     Returns:
         Tuple of (scc_map, metagraph_edges).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.condense_scc_metagraph()
     sccs = strongly_connected_components(graph)
     node_to_scc: dict[str, int] = {}
     scc_map: dict[int, set[str]] = {}

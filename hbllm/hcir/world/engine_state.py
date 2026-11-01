@@ -135,8 +135,8 @@ class CognitiveContext:
     consecutive_pacing_steps: int = 0
     pending_phase_wait_steps: int = 0
     consecutive_causal_probes: int = 0
-    consecutive_effective_clicks: int = 0
-    consecutive_goal_converging_clicks: int = 0
+    consecutive_effective_actuations: int = 0
+    consecutive_goal_converging_actuations: int = 0
     consecutive_plan_failures: int = 0
     consecutive_simulation_failures: int = 0
     exploration_cooldown: int = 0
@@ -148,7 +148,7 @@ class CognitiveContext:
     level_epistemic_probes: int = 0
     last_predicted_pos: tuple[int, int] | None = None
     last_non_displacement_action: int | None = None
-    last_effective_click_coord: tuple[int, int] | None = None
+    last_effective_actuation_coord: tuple[int, int] | None = None
     last_surprise: float = 0.0
     last_surprise_eval: Any | None = None
     latest_lifecycle_result: Any | None = None
@@ -185,11 +185,11 @@ class CognitiveContext:
     action_affordances: MappingProxyType[int, Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    click_affordances: MappingProxyType[tuple[int, int], Any] = field(
+    actuation_affordances: MappingProxyType[tuple[int, int], Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    quiescent_click_targets: frozenset[tuple[int, int]] = frozenset()
-    effective_click_targets: frozenset[tuple[int, int]] = frozenset()
+    quiescent_actuation_targets: frozenset[tuple[int, int]] = frozenset()
+    effective_actuation_targets: frozenset[tuple[int, int]] = frozenset()
     spatial_lattice_stride: int = 1
     effector_kinetics_mode: int | None = None
     active_causal_actuator_coord: tuple[int, int] | None = None
@@ -233,7 +233,7 @@ class CognitiveContext:
     )
     current_room_id: int | None = None
     current_level: int = 0
-    current_game_id: str = "default"
+    current_context_id: str = "default"
     world_id: str = "default"
     bilateral_state: Any | None = None
     entropy_monitor: Any | None = None
@@ -393,8 +393,8 @@ class EngineState(BaseModel):
     consecutive_pacing_steps: int = 0
     pending_phase_wait_steps: int = 0
     consecutive_causal_probes: int = 0
-    consecutive_effective_clicks: int = 0
-    consecutive_goal_converging_clicks: int = 0
+    consecutive_effective_actuations: int = 0
+    consecutive_goal_converging_actuations: int = 0
     consecutive_plan_failures: int = 0
     consecutive_simulation_failures: int = 0
     exploration_cooldown: int = 0
@@ -406,7 +406,7 @@ class EngineState(BaseModel):
     level_epistemic_probes: int = 0
     last_predicted_pos: tuple[int, int] | None = None
     last_non_displacement_action: int | None = None
-    last_effective_click_coord: tuple[int, int] | None = None
+    last_effective_actuation_coord: tuple[int, int] | None = None
     last_surprise: float = 0.0
     last_surprise_eval: Any | None = None
     latest_lifecycle_result: Any | None = None
@@ -436,9 +436,9 @@ class EngineState(BaseModel):
     quiescent_features: set[int] = Field(default_factory=set)
     effective_features: set[int] = Field(default_factory=set)
     action_affordances: dict[int, Any] = Field(default_factory=dict)
-    click_affordances: dict[tuple[int, int], Any] = Field(default_factory=dict)
-    quiescent_click_targets: set[tuple[int, int]] = Field(default_factory=set)
-    effective_click_targets: set[tuple[int, int]] = Field(default_factory=set)
+    actuation_affordances: dict[tuple[int, int], Any] = Field(default_factory=dict)
+    quiescent_actuation_targets: set[tuple[int, int]] = Field(default_factory=set)
+    effective_actuation_targets: set[tuple[int, int]] = Field(default_factory=set)
     spatial_lattice_stride: int = 1
     effector_kinetics_mode: int | None = None
     active_causal_actuator_coord: tuple[int, int] | None = None
@@ -468,7 +468,7 @@ class EngineState(BaseModel):
     inhibited_actions: dict[Any, int] | set[int] = Field(default_factory=dict)
     current_room_id: int | None = None
     current_level: int = Field(default=0, alias="_current_level")
-    current_game_id: str = "default"
+    current_context_id: str = "default"
     world_id: str = "default"
     bilateral_state: Any | None = None
     entropy_monitor: Any | None = None
@@ -486,18 +486,18 @@ class EngineState(BaseModel):
             super().__setattr__(name, value)
 
     @classmethod
-    def from_engine(cls, engine: Any) -> EngineState:
+    def from_engine(cls, source: Any) -> EngineState:
         """Construct an EngineState snapshot from an AutonomousEpistemicEngine instance."""
         attrs: dict[str, Any] = {}
-        if hasattr(engine, "state") and isinstance(engine.state, EngineState):
+        if hasattr(source, "state") and isinstance(source.state, EngineState):
             for f_name in cls.model_fields.keys():
-                val = getattr(engine.state, f_name, None)
+                val = getattr(source.state, f_name, None)
                 if val is not None:
                     attrs[f_name] = val
         for f_name, f_info in cls.model_fields.items():
             alias = f_info.alias or f_name
             for candidate in (alias, f"_{f_name}", f_name):
-                val = getattr(engine, candidate, None)
+                val = getattr(source, candidate, None)
                 if val is not None and (
                     not isinstance(val, (dict, set, list, tuple, MappingProxyType))
                     or len(val) > 0
@@ -548,8 +548,8 @@ class EngineState(BaseModel):
             consecutive_pacing_steps=self.consecutive_pacing_steps,
             pending_phase_wait_steps=self.pending_phase_wait_steps,
             consecutive_causal_probes=self.consecutive_causal_probes,
-            consecutive_effective_clicks=self.consecutive_effective_clicks,
-            consecutive_goal_converging_clicks=self.consecutive_goal_converging_clicks,
+            consecutive_effective_actuations=self.consecutive_effective_actuations,
+            consecutive_goal_converging_actuations=self.consecutive_goal_converging_actuations,
             consecutive_plan_failures=self.consecutive_plan_failures,
             consecutive_simulation_failures=self.consecutive_simulation_failures,
             exploration_cooldown=self.exploration_cooldown,
@@ -561,7 +561,7 @@ class EngineState(BaseModel):
             level_epistemic_probes=self.level_epistemic_probes,
             last_predicted_pos=self.last_predicted_pos,
             last_non_displacement_action=self.last_non_displacement_action,
-            last_effective_click_coord=self.last_effective_click_coord,
+            last_effective_actuation_coord=self.last_effective_actuation_coord,
             last_surprise=self.last_surprise,
             last_surprise_eval=self.last_surprise_eval,
             latest_lifecycle_result=self.latest_lifecycle_result,
@@ -592,9 +592,9 @@ class EngineState(BaseModel):
             quiescent_features=frozenset(self.quiescent_features),
             effective_features=frozenset(self.effective_features),
             action_affordances=MappingProxyType(dict(self.action_affordances)),
-            click_affordances=MappingProxyType(dict(self.click_affordances)),
-            quiescent_click_targets=frozenset(self.quiescent_click_targets),
-            effective_click_targets=frozenset(self.effective_click_targets),
+            actuation_affordances=MappingProxyType(dict(self.actuation_affordances)),
+            quiescent_actuation_targets=frozenset(self.quiescent_actuation_targets),
+            effective_actuation_targets=frozenset(self.effective_actuation_targets),
             spatial_lattice_stride=self.spatial_lattice_stride,
             effector_kinetics_mode=self.effector_kinetics_mode,
             active_causal_actuator_coord=self.active_causal_actuator_coord,
@@ -628,7 +628,7 @@ class EngineState(BaseModel):
             ),
             current_room_id=self.current_room_id,
             current_level=self.current_level,
-            current_game_id=self.current_game_id,
+            current_context_id=self.current_context_id,
             world_id=self.world_id,
             bilateral_state=self.bilateral_state,
             entropy_monitor=self.entropy_monitor,
@@ -656,3 +656,179 @@ class EngineState(BaseModel):
                 },
             )
         ]
+
+
+_MISSING: Any = object()
+
+
+class StateDelta:
+    """Write-intent overlay over the engine's state (WP1).
+
+    Faculties propose mutations via ``set``/``mutate``; the engine commits them
+    atomically through ``apply_delta`` — the only assignment path.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[str, Any] = {}
+        self._cow: dict[str, Any] = {}
+
+    def set(self, field: str, value: Any) -> None:
+        self._pending[field] = value
+
+    def get(self, field: str, default: Any = _MISSING) -> Any:
+        """Read-through: pending value if set, else the caller supplies state."""
+        if field in self._pending:
+            return self._pending[field]
+        if default is not _MISSING:
+            return default
+        raise KeyError(field)
+
+    def mutate(self, field: str, current: Any) -> Any:
+        """Mutable view of a container field (WP1).
+
+        Returns the live container (marks the field dirty in the delta so
+        apply_delta emits it) — copy-on-write would produce a stale snapshot
+        that clobbers concurrent in-place edits through owned subsystems.
+        """
+        if field not in self._cow:
+            self._cow[field] = self._pending.get(field, current)
+            self._pending[field] = self._cow[field]
+        return self._cow[field]
+
+    def items(self) -> dict[str, Any]:
+        return dict(self._pending)
+
+    def is_empty(self) -> bool:
+        return not self._pending
+
+
+class ReadOnlyEngineView:
+    """Read-through facade handed to faculties instead of the engine (WP1).
+
+    Attribute reads and method calls pass through to the engine; writes raise.
+    Kernel-service mutation methods are whitelisted via ``_ALLOWED_MUTATORS``
+    (kept minimal: engine-owned bookkeeping the faculty can't express as delta).
+    """
+
+    _ALLOWED_MUTATORS: frozenset[str] = frozenset(
+        {
+            "transition_to_phase",  # engine-owned phase ledger append
+            "register_action_space",  # action-space schema registry (idempotent)
+        }
+    )
+
+    def __init__(self, engine: Any) -> None:
+        object.__setattr__(self, "_engine", engine)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._engine, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in self._ALLOWED_MUTATORS or name.startswith("_"):
+            object.__setattr__(self._engine, name, value)
+            return
+        raise AttributeError("faculties emit intent via StateDelta")
+
+
+# Faculty-owned sub-models: pass-through as-is. They own their internal state
+# and their methods self-mutate — they are NOT engine fields to capture.
+_OWNED_SUBSYSTEMS: frozenset[str] = frozenset(
+    {
+        "symbolic_theory",
+        "hazard_tracker",
+        "collision_cones",
+        "episodic_cortex",
+        "physics_engine",
+        "cerebellar_clock",
+        "working_memory",
+        "object_planner",
+        "deliberation_engine",
+        "deformation_tracker",
+        "surprise_engine",
+        "causal_cortex",
+        "entropy_monitor",
+        "budget_governor",
+        "dual_memory",
+        "workspace_ignition",
+        "spatial_cognitive_agent",
+        "transaction_manager",
+        "services",
+        "state",
+        "prev_grid_cache",
+        "habenular_ior",
+    }
+)
+
+
+class FacultyWriteJournal:
+    """Write-through journal: before-images for undo on rejected commit (WP1).
+
+    Faculties write through to the engine immediately (behaviour-exact); the
+    journal records first-touch before-images so a rejected commit can revert
+    the engine to its pre-faculty state.
+    """
+
+    def __init__(self, author: str) -> None:
+        self.author = author
+        self.before: dict[str, Any] = {}
+        self.touched: set[str] = set()
+
+
+_ABSENT = object()
+
+
+class _JournaledStateProxy:
+    """Write-through proxy for EngineState fields."""
+
+    def __init__(self, view: JournaledEngineView) -> None:
+        object.__setattr__(self, "_view", view)
+
+    def __getattr__(self, name: str) -> Any:
+        view = object.__getattribute__(self, "_view")
+        val = getattr(view._engine.state, name)
+        view._record_touch(f"state.{name}", val)
+        return val
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        view = object.__getattribute__(self, "_view")
+        view._record_touch(f"state.{name}", getattr(view._engine.state, name, _ABSENT))
+        setattr(view._engine.state, name, value)
+
+
+class JournaledEngineView:
+    """Write-through faculty view: writes land on the engine immediately,
+    journaled for undo on rejected commit (WP1 design v2)."""
+
+    def __init__(self, engine: Any, journal: FacultyWriteJournal) -> None:
+        object.__setattr__(self, "_engine", engine)
+        object.__setattr__(self, "_journal", journal)
+        object.__setattr__(self, "_state_proxy", _JournaledStateProxy(self))
+
+    def _record_touch(self, key: str, current: Any) -> None:
+        journal = object.__getattribute__(self, "_journal")
+        if key not in journal.before:
+            try:
+                journal.before[key] = (
+                    current.copy()
+                    if isinstance(current, (dict, set, list)) or type(current).__name__ == "deque"
+                    else current
+                )
+            except Exception:
+                journal.before[key] = _ABSENT
+        journal.touched.add(key)
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "state":
+            return object.__getattribute__(self, "_state_proxy")
+        eng = object.__getattribute__(self, "_engine")
+        val = getattr(eng, name)
+        if name in _OWNED_SUBSYSTEMS:
+            return val
+        if isinstance(val, (dict, set, list)) or type(val).__name__ == "deque":
+            self._record_touch(name, val)
+        return val
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        eng = object.__getattribute__(self, "_engine")
+        self._record_touch(name, getattr(eng, name, _ABSENT))
+        setattr(eng, name, value)

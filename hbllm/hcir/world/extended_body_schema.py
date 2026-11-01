@@ -90,6 +90,18 @@ class ExtendedBodySchema:
         self.tool_barrier_affinities: dict[int, set[int]] = {}
         self.active_manipulandum: ActiveManipulandum | None = None
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset currently held tools while optionally preserving cross-trial tool affinities."""
         self.held_tools.clear()

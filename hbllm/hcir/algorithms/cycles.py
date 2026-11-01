@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from hbllm.hcir.algorithms.protocol import native_of
+
 
 def fundamental_cycle_basis(graph: Any) -> list[list[str]]:
     """Compute Paton's fundamental cycle basis for undirected view of the graph."""
@@ -62,6 +64,9 @@ def feedback_arc_set(graph: Any) -> tuple[list[tuple[str, str]], list[str]]:
         Tuple of (feedback_edges, topological_ordering), where removing feedback_edges
         yields a Directed Acyclic Graph (DAG).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.feedback_arc_set()
     all_nodes: list[str] = []
     if hasattr(graph, "all_nodes"):
         all_nodes = [n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()]
@@ -157,6 +162,9 @@ def feedback_vertex_set(graph: Any) -> set[str]:
     Returns:
         Minimal set of node IDs whose removal from the graph leaves a Directed Acyclic Graph (DAG).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.feedback_vertex_set()
     if hasattr(graph, "all_nodes"):
         all_nodes = {n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()}
     elif hasattr(graph, "_nodes"):
@@ -254,6 +262,9 @@ def feedback_vertex_set(graph: Any) -> set[str]:
 
 def essential_causal_skeleton(graph: Any) -> set[tuple[str, str]]:
     """Compute the irreducible causal skeleton DAG via transitive reduction."""
+    native = native_of(graph)
+    if native is not None:
+        return native.essential_causal_skeleton()
     from hbllm.hcir.algorithms.spans_and_trees import transitive_reduction
 
     return transitive_reduction(graph)

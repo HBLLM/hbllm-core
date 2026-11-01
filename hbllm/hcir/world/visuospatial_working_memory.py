@@ -66,7 +66,7 @@ class VisuospatialWorkingMemory:
         # Most recently probed coordinate and its revealed feature
         self.last_probed_coord: tuple[int, int] | None = None
         self.last_probed_feature: int | None = None
-        # Observed stencils: click_pos relative offsets that changed
+        # Observed stencils: actuation_pos relative offsets that changed
         self.discovered_stencils: list[set[tuple[int, int]]] = []
         # Pair-matching task evidence counter
         self.matching_evidence: int = 0
@@ -88,6 +88,18 @@ class VisuospatialWorkingMemory:
     @learned_barriers.setter
     def learned_barriers(self, val: set[tuple[int, int]]) -> None:
         self.level_learned_barriers[self.current_level] = val
+
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
 
     def reset_episode(self, retain_long_term: bool = False) -> None:
         """Reset transient slot bindings while optionally preserving task-level stencil theories."""

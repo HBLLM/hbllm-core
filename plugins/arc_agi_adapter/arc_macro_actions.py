@@ -174,8 +174,8 @@ class ArcClickCell(MacroAction):
         eff = effector_candidates[0]
         data = {"x": int(self.cell_coord[1]), "y": int(self.cell_coord[0])}
         # Update visit count for this click coordinate so exploration alternates when quiescent
-        engine.entity_visit_counts[f"click_{self.cell_coord[0]}_{self.cell_coord[1]}"] = (
-            engine.entity_visit_counts.get(f"click_{self.cell_coord[0]}_{self.cell_coord[1]}", 0)
+        engine.entity_visit_counts[f"actuate_{self.cell_coord[0]}_{self.cell_coord[1]}"] = (
+            engine.entity_visit_counts.get(f"actuate_{self.cell_coord[0]}_{self.cell_coord[1]}", 0)
             + 1
         )
         self.has_executed = True
@@ -258,7 +258,7 @@ def arc_macro_plan_synthesis_hook(
             if btn_coords:
                 sorted_btns = sorted(
                     btn_coords,
-                    key=lambda b: engine.entity_visit_counts.get(f"click_{b[0]}_{b[1]}", 0),
+                    key=lambda b: engine.entity_visit_counts.get(f"actuate_{b[0]}_{b[1]}", 0),
                 )
                 plan = MacroActionPlan(plan_id="arc_click_button_plan")
                 plan.append(

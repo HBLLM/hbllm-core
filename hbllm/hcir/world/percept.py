@@ -14,6 +14,7 @@ into a PerceptionFrame, and the core operates exclusively over these percepts.
 """
 
 from abc import ABC, abstractmethod
+from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -49,6 +50,16 @@ class EpistemicPhase(StrEnum):
 
 
 @dataclass(frozen=True)
+class ActuatorSchema:
+    """Typed actuator description supplied by environment adapters (WP0.8)."""
+
+    actuator_id: str
+    kind: Literal["discrete", "point", "none"]
+    params: Mapping[str, Any] = field(default_factory=dict)
+    valid_targets: Sequence[tuple[int, int]] | None = None
+
+
+@dataclass(frozen=True)
 class EmbodiedObservation:
     """Universal domain-agnostic sensory observation consumed by HCIR cognitive core."""
 
@@ -59,13 +70,64 @@ class EmbodiedObservation:
     context_id: str = "default_context"  # context scope ID
     episode_id: str = "0"  # episode index ID
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    actuators: Sequence[ActuatorSchema] = field(default_factory=list)
+
+
+class EpisodeBoundaryKind(StrEnum):
+    """Typed episode lifecycle boundaries (WP0.5)."""
+
+    DEATH = "death"  # episode ended in failure; retry same level
+    LEVEL_COMPLETE = "level_complete"  # level solved; advance
+    CONTEXT_RESET = "context_reset"  # lattice/context changed mid-stream
+
+
+class RetentionPolicy(StrEnum):
+    """What state a faculty retains across a boundary kind (WP0.5)."""
+
+    LEVEL_LOCAL = "level_local"  # cleared on LEVEL_COMPLETE and DEATH
+    CONTEXT_LOCAL = "context_local"  # retained across DEATH and LEVEL_COMPLETE
+    LIFELONG = "lifelong"  # never cleared by boundaries
+
+
+def apply_boundary_retention(owner: Any, boundary: Any) -> None:
+    """Generic per-field retention for faculties (WP0.5/F1).
+
+    Reads ``owner.FIELD_RETENTION`` — a class-level mapping of field name to
+    ``RetentionPolicy`` — and clears every field declared ``LEVEL_LOCAL`` on
+    LEVEL_COMPLETE / DEATH boundaries (fresh empty default by current type),
+    leaving ``CONTEXT_LOCAL``/``LIFELONG`` fields untouched.
+    """
+    retention: dict[str, RetentionPolicy] = getattr(owner, "FIELD_RETENTION", {}) or {}
+    if not retention:
+        return
+    kind = getattr(boundary, "kind", boundary)
+    if kind in (
+        EpisodeBoundaryKind.LEVEL_COMPLETE,
+        "level_complete",
+        EpisodeBoundaryKind.DEATH,
+        "death",
+    ):
+        for field_name, policy in retention.items():
+            if policy != RetentionPolicy.LEVEL_LOCAL or not hasattr(owner, field_name):
+                continue
+            cur = getattr(owner, field_name)
+            if isinstance(cur, (set, dict, list)):
+                cur.clear()
+            elif isinstance(cur, deque):
+                cur.clear()
+            elif isinstance(cur, (int, float)):
+                setattr(owner, field_name, type(cur)())
+            else:
+                setattr(owner, field_name, None)
 
 
 @dataclass(frozen=True)
 class EpisodeBoundary:
     """Explicit episode lifecycle boundary marker."""
 
-    kind: Literal["reset", "context_change", "retry"] = "reset"
+    kind: EpisodeBoundaryKind | Literal["reset", "context_change", "retry"] = (
+        EpisodeBoundaryKind.CONTEXT_RESET
+    )
     retain_dynamics: bool = True
 
 

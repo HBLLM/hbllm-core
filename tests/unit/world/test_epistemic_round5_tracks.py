@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from hbllm.hcir.world.cortex_perception import (
+    AffordanceRole,
+)
+from hbllm.hcir.world.prefrontal_working_memory import (
+    PBWMWorkingMemoryBuffer,
+)
+
 """Unit tests for Round 5 Epistemic & Cortical Neuro-Symbolic Enhancements.
 
 Track 1: Basal Ganglia Tri-Pathway Action Arbitration (Direct D1 vs. Indirect D2 vs. Hyperdirect STN)
@@ -19,11 +26,7 @@ from hbllm.hcir.world.cortex_deliberation import (
     BasalGangliaPathway,
 )
 from hbllm.hcir.world.cortex_perception import (
-    AffordanceRole,
     GibsonianAffordanceExtractor,
-)
-from hbllm.hcir.world.prefrontal_working_memory import (
-    PBWMWorkingMemoryBuffer,
 )
 
 
@@ -182,10 +185,6 @@ class TestTrack2ActiveInferenceExpectedFreeEnergy:
         assert ranked[0].action == 1
         assert ranked[0].total_expected_value > ranked[1].total_expected_value
 
-
-class TestTrack3PrefrontalWorkingMemoryPBWM:
-    """Track 3: PBWM Bistable Attractor Dynamics & Distractor Gating."""
-
     def test_striatal_gating_distractor_filtering(self):
         buffer = PBWMWorkingMemoryBuffer(gate_threshold=0.5)
 
@@ -231,10 +230,6 @@ class TestTrack3PrefrontalWorkingMemoryPBWM:
         cleared = buffer.clear_slot("active_key")
         assert cleared
         assert buffer.get_slot("active_key") is None
-
-
-class TestTrack4GibsonianAffordancesAndTopologicalContours:
-    """Track 4: Gibsonian Affordances and Closed Topological Contours."""
 
     def test_gibsonian_affordance_map_generation(self):
         extractor = GibsonianAffordanceExtractor()

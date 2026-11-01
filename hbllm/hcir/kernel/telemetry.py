@@ -57,6 +57,7 @@ class KernelTelemetry:
     def __init__(self) -> None:
         self._metrics: dict[str, MetricWindow] = defaultdict(lambda: MetricWindow(name=""))
         self._counters: dict[str, int] = defaultdict(int)
+        self.health_probe: Any = None  # e.g. CognitiveGraph.native_health
 
     def record_latency(self, subsystem: str, operation: str, duration_ms: float) -> None:
         """Record an operation latency sample."""
@@ -81,4 +82,5 @@ class KernelTelemetry:
                 }
                 for name, win in self._metrics.items()
             },
+            "graph_native_health": self.health_probe() if self.health_probe else None,
         }

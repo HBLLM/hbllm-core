@@ -233,7 +233,7 @@ def test_spatial_effector_macro_option_click() -> None:
     assert len(plan) == 1
     assert plan[0].action == 6
     assert plan[0].action_data == {"x": 5, "y": 5}
-    assert plan[0].expected_mutation == "CLICK_EXIT"
+    assert plan[0].expected_mutation == "ACTUATE_EXIT"
 
 
 def test_object_causal_effect_tracking() -> None:

@@ -17,9 +17,7 @@ import numpy as np
 import hbllm.hcir.skills as skills_module
 from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
-    BlockPushPlanner,
     DiscreteVectorTranslator,
-    GF2LinearSolver,
     LatticeQuantizer,
     PerceptualClusterDetector,
     Raycaster2D,
@@ -27,6 +25,7 @@ from hbllm.hcir.skills.common_subskills import (
     TemporalSyncPlanner,
 )
 from hbllm.hcir.spatial_planner import SpatialActionIntent
+from plugins.arc_agi_adapter.arc_skills import BlockPushPlanner, GF2LinearSolver
 
 
 def test_all_skills_inherit_and_conform_to_protocol():
@@ -123,7 +122,7 @@ def test_perceptual_cluster_detector():
 
 def test_remote_actuator_building_block():
     """Verify click and macro action formulation."""
-    click_act = RemoteActuator.click(x=32, y=48)
+    click_act = RemoteActuator.actuate(x=32, y=48)
     assert click_act == (6, {"x": 32, "y": 48})
 
 

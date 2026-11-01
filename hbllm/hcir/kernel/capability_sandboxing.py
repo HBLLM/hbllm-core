@@ -22,6 +22,7 @@ are automatically dispatched through Tier 2 via ``hbllm.actions.sandbox.run_sand
 from __future__ import annotations
 
 import logging
+import pickle
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -229,21 +230,17 @@ class SandboxedCapabilityPolicy:
         if not self.required_permissions and self.trust_level != TrustLevel.SYSTEM:
             self.required_permissions = infer_capability_permissions(self.capability_name)
 
-    def validate_execution(self, requested_permissions: set[str]) -> bool:
-        """Validate if requested operations exceed granted permissions."""
-        if "filesystem" in requested_permissions and not self.permissions.allow_filesystem:
-            logger.warning("Sandbox violation: %s denied filesystem access", self.provider_id)
-            return False
-        if "network" in requested_permissions and not self.permissions.allow_network:
-            logger.warning("Sandbox violation: %s denied network access", self.provider_id)
-            return False
-        if "subprocess" in requested_permissions and not self.permissions.allow_subprocess:
-            logger.warning("Sandbox violation: %s denied subprocess access", self.provider_id)
-            return False
-        if "db_write" in requested_permissions and not self.permissions.allow_db_write:
-            logger.warning("Sandbox violation: %s denied db_write access", self.provider_id)
-            return False
-        return True
+    def grants(self, permission: str) -> bool:
+        """Whether this policy's manifest grants a single permission."""
+        allowed = {
+            "filesystem": self.permissions.allow_filesystem,
+            "network": self.permissions.allow_network,
+            "subprocess": self.permissions.allow_subprocess,
+            "db_write": self.permissions.allow_db_write,
+        }.get(permission, False)
+        if not allowed:
+            logger.warning("Sandbox violation: %s denied '%s' access", self.provider_id, permission)
+        return allowed
 
 
 class CapabilitySandboxManager:
@@ -277,7 +274,7 @@ class CapabilitySandboxManager:
             # Default: untrusted, deny dangerous operations
             return operation not in ("filesystem", "network", "subprocess")
 
-        return policy.validate_execution({operation})
+        return policy.grants(operation)
 
 
 class SandboxedExecutor:
@@ -299,7 +296,6 @@ class SandboxedExecutor:
 
     async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         """Execute params in an isolated subprocess with HBLLM_SANDBOX=1 and resource limits."""
-        import os
 
         # If python code is passed, run through sandboxed python subprocess runner
         if "code" in params and isinstance(params["code"], str):
@@ -318,18 +314,128 @@ class SandboxedExecutor:
                 "sandboxed": True,
             }
 
-        # Otherwise execute inner_executor under ambient HBLLM_SANDBOX flag
-        old_val = os.environ.get("HBLLM_SANDBOX")
-        os.environ["HBLLM_SANDBOX"] = "1"
+        # Otherwise execute inner_executor in an isolated spawn child process.
+        import asyncio
+        import multiprocessing
+        import pickle
+
         try:
-            if self.inner_executor is not None:
-                res = await self.inner_executor.execute(params)
-                if isinstance(res, dict):
-                    res["sandboxed"] = True
-                return res
-            return {"status": "SUCCESS", "result": params, "sandboxed": True}
+            payload = pickle.dumps((self.inner_executor, params))
+        except Exception as exc:
+            raise PermissionError("untrusted capability must be picklable for isolation") from exc
+
+        ctx = multiprocessing.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        proc = ctx.Process(
+            target=_sandboxed_child_main,
+            args=(child_conn, payload, self.permissions, self.resource_limits),
+        )
+        proc.start()
+        child_conn.close()
+        timeout = self.resource_limits.timeout_seconds or 5.0
+        loop = asyncio.get_running_loop()
+        try:
+            result = await loop.run_in_executor(
+                None, lambda: _await_child(proc, parent_conn, timeout)
+            )
         finally:
-            if old_val is None:
-                os.environ.pop("HBLLM_SANDBOX", None)
-            else:
-                os.environ["HBLLM_SANDBOX"] = old_val
+            parent_conn.close()
+        kind, *rest = result
+        if kind == "ok":
+            res = rest[0]
+            if isinstance(res, dict):
+                res["sandboxed"] = True
+            return res
+        exc_type, exc_msg = rest
+        if exc_type == "TimeoutError":
+            raise TimeoutError(f"sandboxed executor exceeded {timeout}s wall-clock")
+        if exc_type == "PermissionError":
+            raise PermissionError(exc_msg)
+        raise RuntimeError(f"sandboxed executor failed ({exc_type}): {exc_msg}")
+
+
+def _await_child(proc: Any, conn: Any, timeout: float) -> tuple:
+    """Block for the child's reply; terminate on wall-clock timeout."""
+    proc.join(timeout)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(1)
+        return ("err", "TimeoutError", "")
+    if conn.poll():
+        try:
+            return conn.recv()
+        except EOFError:
+            pass
+    return ("err", "RuntimeError", f"child exited {proc.exitcode} without result")
+
+
+def _sandboxed_child_main(
+    conn: Any,
+    payload: bytes,
+    permissions: CapabilityPermissions,
+    resource_limits: CapabilityResourceLimits,
+) -> None:
+    """Spawn-child entry: install isolation, run the executor, reply on the pipe."""
+    import asyncio
+    import os
+    import resource
+    import sys
+    import tempfile
+
+    workdir = tempfile.mkdtemp()
+    os.chdir(workdir)
+    workdir = os.path.realpath(workdir)  # /var -> /private/var on macOS
+    os.environ["HBLLM_SANDBOX"] = "1"
+
+    try:
+        cpu = max(1, int(resource_limits.max_cpu_seconds))
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
+    except (ValueError, OSError, AttributeError):
+        pass
+    try:
+        mem = resource_limits.max_memory_mb * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
+    except (ValueError, OSError, AttributeError):
+        pass  # RLIMIT_AS unsupported on some platforms (e.g. macOS)
+
+    allow_net = permissions.allow_network
+    allow_sub = permissions.allow_subprocess
+    allow_fs = permissions.allow_filesystem
+
+    def _audit(event: str, args: tuple) -> None:
+        if not allow_net and event in {
+            "socket.connect",
+            "socket.connect_ex",
+            "socket.bind",
+            "socket.getaddrinfo",
+            "socket.sendto",
+            "socket.sendmsg",
+        }:
+            raise PermissionError(f"sandbox denied network operation: {event}")
+        if not allow_sub and event.split("(", 1)[0] in {
+            "subprocess.Popen",
+            "os.system",
+            "os.exec",
+            "os.posix_spawn",
+            "os.fork",
+        }:
+            raise PermissionError(f"sandbox denied subprocess operation: {event}")
+        if not allow_fs and event == "open":
+            path, mode = args[0], (args[1] if len(args) > 1 else "r")
+            if any(m in str(mode) for m in ("w", "a", "x", "+")):
+                if not os.path.realpath(str(path)).startswith(workdir):
+                    raise PermissionError(f"sandbox denied filesystem write: {path}")
+
+    sys.addaudithook(_audit)
+
+    try:
+        executor, params = pickle.loads(payload)  # noqa: S301 — payload built in-process
+        result = asyncio.run(executor.execute(params))
+        conn.send(("ok", result))
+    except BaseException as exc:  # relay the failure to the parent
+        try:
+            conn.send(("err", type(exc).__name__, str(exc)))
+        except Exception:
+            pass
+    finally:
+        conn.close()

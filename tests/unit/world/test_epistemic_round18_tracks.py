@@ -23,8 +23,12 @@ from hbllm.hcir.world.anterior_insular_timing import (
     AnteriorInsularTimingEngine,
     PacingMode,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
+from hbllm.hcir.world.cortex_causal import (
+    HCIRSymbolicWorldTheory,
+)
 from hbllm.hcir.world.orbitofrontal_credit_assignment import (
     OrbitofrontalCreditAssignmentEngine,
 )

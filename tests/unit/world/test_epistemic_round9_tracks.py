@@ -8,20 +8,30 @@ Track 3: Prefrontal Counterfactual Blame Attribution & Causal Credit Assignment
 Track 4: Native Structural Graph Minimum Spanning Tree (MST) & Geodesic Spine Extraction
 """
 
+
 from typing import Any
 
 import numpy as np
 import pytest
 
-from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
-from hbllm.hcir.native_adapter import NativeGraphAdapter
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    FactNode,
+    HCIREdge,
+    HCIREdgeType,
+)
+from hbllm.hcir.native_adapter import (
+    NativeGraphAdapter,
+)
 from hbllm.hcir.world import (
     AutonomousEpistemicEngine,
     DriftDiffusionDecision,
     FoveatedSaliencyMap,
     FoveationResolution,
-    ParietalFoveatedAttentionEngine,
     PlanAttributionReport,
+)
+from hbllm.hcir.world.experimental import (
+    ParietalFoveatedAttentionEngine,
     PrefrontalBlameAttributor,
     SubthalamicDriftDiffusionEngine,
 )
@@ -97,11 +107,6 @@ def test_stn_drift_diffusion_engine_integration() -> None:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 2: Parietal Egocentric Foveation & Spatial Saliency Field Compression
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_parietal_foveation_multi_scale_resolution() -> None:
     """Foveation partitions grid into FOVEA, PARAFOVEA, and PERIPHERY tiers."""
     fovea_engine = ParietalFoveatedAttentionEngine(fovea_radius=2, parafovea_radius=4)
@@ -152,11 +157,6 @@ def test_parietal_foveation_engine_integration() -> None:
         "parietal:foveated_attention" in p.variable
         for p in engine.symbolic_theory.causal_predicates
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 3: Prefrontal Counterfactual Blame Attribution & Causal Credit
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_prefrontal_blame_attribution_culprit_isolation() -> None:
@@ -226,11 +226,6 @@ def test_prefrontal_blame_attribution_engine_integration() -> None:
         "blame:plan_attribution_report" in p.variable
         for p in engine.symbolic_theory.causal_predicates
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 4: Native Structural Graph Minimum Spanning Tree (MST)
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_native_adapter_minimum_spanning_tree() -> None:

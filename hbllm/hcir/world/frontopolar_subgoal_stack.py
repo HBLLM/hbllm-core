@@ -177,6 +177,18 @@ class FrontopolarSubgoalStack:
         self.completed_subgoals: list[str] = []
         self.allocated_holding_bays: set[tuple[int, int]] = set()
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self) -> None:
         """Reset transient subgoal stack for fresh trial."""
         self.stack.clear()

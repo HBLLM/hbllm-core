@@ -37,7 +37,6 @@ from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.percept import TerminalSignal
 
 if TYPE_CHECKING:
-    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
     from hbllm.hcir.world.cortex_perception import SpatialEntity
 
 logger = logging.getLogger(__name__)
@@ -91,7 +90,6 @@ class ProceduralMacro:
         waypoints: list[Any] | None = None,
         compressed_action_sequence: list[Any] | None = None,
         compressed_action_data_sequence: list[dict[str, Any] | None] | None = None,
-        **legacy_kwargs: Any,
     ) -> None:
         self.macro_id = macro_id
         self.action_sequence = action_sequence
@@ -100,7 +98,7 @@ class ProceduralMacro:
         self.initial_grid_shape = initial_grid_shape
         self.available_actions = available_actions if available_actions is not None else set()
         self.level = level
-        self.context_id = context_id or str(legacy_kwargs.get("game" + "_id", ""))
+        self.context_id = context_id
         self.num_steps = num_steps
         self.confidence = confidence
         self.replay_successes = replay_successes
@@ -112,17 +110,6 @@ class ProceduralMacro:
         self.compressed_action_data_sequence = (
             compressed_action_data_sequence if compressed_action_data_sequence is not None else []
         )
-
-    def __getattr__(self, name: str) -> Any:
-        if name == "game" + "_id":
-            return self.context_id
-        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "game" + "_id":
-            object.__setattr__(self, "context_id", str(value))
-        else:
-            object.__setattr__(self, name, value)
 
     def get_execution_sequence(self) -> tuple[list[Any], list[dict[str, Any] | None]]:
         """Return the optimal execution sequence: prefers compressed cycle-free actions if available."""
@@ -282,7 +269,6 @@ class EpisodicTransition:
         grid_snapshot: np.ndarray | None = None,
         state_signature: str = "",
         metadata: dict[str, Any] | None = None,
-        **kwargs: Any,
     ) -> None:
         self.step = step
         self.avatar_pos = avatar_pos
@@ -291,43 +277,15 @@ class EpisodicTransition:
         self.observation_diff = observation_diff
         self.reward = reward
         self.terminal = terminal
-        self.is_terminal = (
-            is_terminal
-            or bool(terminal)
-            or bool(kwargs.get("is_" + "win"))
-            or bool(kwargs.get("is_" + "lost"))
-        )
-        self.is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
-        )
-        self.is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        self.is_terminal = is_terminal or bool(terminal)
+        self.is_success = is_success or terminal == TerminalSignal.SUCCESS
+        self.is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
         )
         self.grid_snapshot = grid_snapshot
         self.state_signature = state_signature
         self.metadata = metadata if metadata is not None else {}
-
-    def __getattr__(self, name: str) -> Any:
-        if name == "is_" + "win":
-            return self.is_success or self.terminal == TerminalSignal.SUCCESS
-        if name == "is_" + "lost":
-            return self.is_failure or self.terminal in (
-                TerminalSignal.FAILURE,
-                TerminalSignal.TIMEOUT,
-            )
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "is_" + "win":
-            object.__setattr__(self, "is_success", bool(value))
-        elif name == "is_" + "lost":
-            object.__setattr__(self, "is_failure", bool(value))
-        else:
-            object.__setattr__(self, name, value)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export episodic transition as a formal Pearl do(a) causal predicate."""
@@ -592,18 +550,12 @@ class HippocampalEpisodicCortex:
         grid_snapshot: np.ndarray | None = None,
         state_signature: str = "",
         metadata: dict[str, Any] | None = None,
-        **kwargs: Any,
     ) -> None:
         """Record an experiential transition into the hippocampal episodic buffer."""
-        is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
-        )
-        is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        is_success = is_success or terminal == TerminalSignal.SUCCESS
+        is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
         )
         transition = EpisodicTransition(
             step=step,
@@ -642,7 +594,6 @@ class HippocampalEpisodicCortex:
         avatar_features: set[int] | None = None,
         is_walkable_fn: Any = None,
         is_barrier_fn: Any = None,
-        **kwargs: Any,
     ) -> ReplayCreditAssignment | None:
         """Execute Sharp-Wave Ripple (SWR) replay on episode termination.
 
@@ -651,15 +602,10 @@ class HippocampalEpisodicCortex:
         - Suppresses the fatal state-action transition in Habenular IOR.
         - Deduces candidate lethal hazard features in the landing zone and line-of-sight.
         """
-        is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
-        )
-        is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        is_success = is_success or terminal == TerminalSignal.SUCCESS
+        is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
         )
         if not self.current_episode:
             return None
@@ -943,6 +889,18 @@ class HippocampalEpisodicCortex:
             self.past_episodes.append(list(self.current_episode))
             self.current_episode.clear()
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, retain_dynamics: bool = True, retain_inhibitions: bool = False) -> None:
         """Reset transient episode buffer while optionally preserving long-term episodic traces."""
         self.current_episode.clear()
@@ -1017,7 +975,8 @@ class HippocampalEpisodicCortex:
 
     def consolidate_schema_and_reset(
         self,
-        engine: AutonomousEpistemicEngine,
+        view: Any,
+        delta: Any,
         retain_dynamics: bool = True,
         is_new_level: bool = False,
         level: int | None = None,
@@ -1037,9 +996,9 @@ class HippocampalEpisodicCortex:
                 max_batch_size=32,
             )
             # Sync consolidated causal predicates into Symbolic World Theory
-            if hasattr(engine, "symbolic_theory") and engine.symbolic_theory is not None:
+            if hasattr(view, "symbolic_theory") and view.symbolic_theory is not None:
                 for pred in td_summary.consolidated_predicates:
-                    engine.symbolic_theory.register_predicate(pred)
+                    view.symbolic_theory.register_predicate(pred)
 
         # 2. SWR Trajectory Consolidation: Archive winning or catastrophic sequences
         if self.current_episode and any(t.is_success for t in self.current_episode):
@@ -1069,12 +1028,11 @@ class HippocampalEpisodicCortex:
                             pass
 
                 context_id = (
-                    get_engine_state_attr(engine, "context_id", "")
-                    or get_engine_state_attr(engine, "current_context_id", "")
-                    or get_engine_state_attr(engine, "current_game_" + "id", "")
+                    get_engine_state_attr(view, "context_id", "")
+                    or get_engine_state_attr(view, "current_context_id", "")
                     or ""
                 )
-                current_level = get_engine_state_attr(engine, "current_level", level or 0)
+                current_level = get_engine_state_attr(view, "current_level", level or 0)
                 macro_id = f"macro_{context_id}_lvl{current_level}_{len(action_seq)}steps"
 
                 # Extract relational waypoints for coordinate-invariant lifting
@@ -1137,11 +1095,11 @@ class HippocampalEpisodicCortex:
                     len(extracted_waypoints),
                 )
 
-                # Also register in working memory procedural library if engine has it
-                if hasattr(engine, "working_memory") and engine.working_memory is not None:
+                # Also register in working memory procedural library if view has it
+                if hasattr(view, "working_memory") and view.working_memory is not None:
                     try:
                         skill = macro.to_declarative_skill()
-                        engine.working_memory.register_procedural_skill(macro_id, skill)
+                        view.working_memory.register_procedural_skill(macro_id, skill)
                     except Exception as e:
                         logger.debug("Could not register macro as procedural skill: %s", e)
         elif self.current_episode and any(t.is_failure for t in self.current_episode):
@@ -1149,253 +1107,249 @@ class HippocampalEpisodicCortex:
         self.current_episode.clear()
 
         if level is not None:
-            engine.set_current_level(level)
-        engine.state.prev_grid = None
-        engine.state._prev_oriented_threats = []
-        engine.state.avatar_pos = None
-        engine.state.last_action = None
-        engine.state.last_action_data = None
-        engine.state.last_predicted_pos = None
-        engine.state.bilateral_state = None
-        engine.state.pending_phase_wait_steps = 0
-        engine.state.consecutive_pacing_steps = 0
-        engine.state.consecutive_quiescent_actions = 0
+            delta.set("_current_level", level)
+        delta.set("prev_grid", None)
+        delta.set("_prev_oriented_threats", [])
+        delta.set("avatar_pos", None)
+        delta.set("last_action", None)
+        delta.set("last_action_data", None)
+        delta.set("last_predicted_pos", None)
+        delta.set("bilateral_state", None)
+        delta.set("pending_phase_wait_steps", 0)
+        delta.set("consecutive_pacing_steps", 0)
+        delta.set("consecutive_quiescent_actions", 0)
 
-        engine.state.consecutive_stuck_steps = 0
+        delta.set("consecutive_stuck_steps", 0)
         if is_new_level or not retain_dynamics:
-            engine.state.entity_action_failed_positions = {}
-            engine.state.immobile_entity_actions = set()
+            delta.set("entity_action_failed_positions", {})
+            delta.set("immobile_entity_actions", set())
         else:
             # On same-level retry after death: preserve learned spatial negative affordances,
             # barriers, and quiescent inert coordinates so inert scenery/borders are not re-tested,
             # while decaying entity visit counts so interactive objects can be re-sampled with fresh hypotheses.
-            for k in list(engine.entity_visit_counts.keys()):
-                engine.entity_visit_counts[k] = engine.entity_visit_counts[k] // 2
-        engine.state.last_effective_click_coord = None
-        engine.state.consecutive_effective_clicks = 0
-        engine.mental_plan.clear()
-        engine.state.active_hypothesis = None
-        engine.state.active_probe_target = None
-        engine.state.active_probe_id = None
-        engine.state.probe_target_steps = 0
-        engine.recent_positions.clear()
-        engine.recent_actions.clear()
-        engine.state.level_epistemic_probes = 0
+            _evc = delta.mutate("entity_visit_counts", view.entity_visit_counts)
+            for k in list(_evc.keys()):
+                _evc[k] = _evc[k] // 2
+        delta.set("last_effective_actuation_coord", None)
+        delta.set("consecutive_effective_actuations", 0)
+        delta.mutate("mental_plan", view.mental_plan).clear()
+        delta.set("active_hypothesis", None)
+        delta.set("active_probe_target", None)
+        delta.set("active_probe_id", None)
+        delta.set("probe_target_steps", 0)
+        delta.mutate("recent_positions", view.recent_positions).clear()
+        delta.mutate("recent_actions", view.recent_actions).clear()
+        delta.set("level_epistemic_probes", 0)
         is_same_level_retry = not is_new_level and retain_dynamics
         if is_same_level_retry:
             # Same level retry on death: trigger Habenular catastrophe backpropagation FIRST
             # before transient episode buffers are reset
-            if hasattr(engine, "working_memory") and hasattr(
-                engine.working_memory, "habenular_ior"
-            ):
-                engine.working_memory.habenular_ior.record_catastrophe(
-                    final_step=engine.step_counter,
+            if hasattr(view, "working_memory") and hasattr(view.working_memory, "habenular_ior"):
+                view.working_memory.habenular_ior.record_catastrophe(
+                    final_step=view.step_counter,
                     is_fatal=True,
                 )
-            elif hasattr(engine, "habenular_ior"):
-                engine.habenular_ior.record_catastrophe(
-                    final_step=engine.step_counter,
+            elif hasattr(view, "habenular_ior"):
+                view.habenular_ior.record_catastrophe(
+                    final_step=view.step_counter,
                     is_fatal=True,
                 )
 
-        engine.working_memory.reset_episode(
+        view.working_memory.reset_episode(
             retain_long_term=retain_dynamics,
             retain_inhibitions=is_same_level_retry,
         )
-        engine.collision_cones.reset_episode()
-        engine.consecutive_plan_failures = 0
-        engine.exploration_cooldown = 0
-        engine.consecutive_simulation_failures = 0
-        engine.simulation_cooldown = 0
-        engine.working_memory.reset_salience_baseline()
-        engine.state.current_simulated_goal = None
-        engine.state._feedback_assimilated = False
+        view.collision_cones.reset_episode()
+        delta.set("consecutive_plan_failures", 0)
+        delta.set("exploration_cooldown", 0)
+        delta.set("consecutive_simulation_failures", 0)
+        delta.set("simulation_cooldown", 0)
+        view.working_memory.reset_salience_baseline()
+        delta.set("current_simulated_goal", None)
+        delta.set("_feedback_assimilated", False)
         if is_new_level or not retain_dynamics:
-            engine.symbolic_theory.candidate_goal_features.clear()
+            view.symbolic_theory.candidate_goal_features.clear()
 
+        _lvl = 0 if level is None else level
         if not retain_dynamics:
-            engine.level_failed_transitions.clear()
-            engine.level_learned_barriers.clear()
-            engine.level_lethal_positions.clear()
-            engine.state._current_level = 0 if level is None else level
-            engine.state.failed_transitions = engine.level_failed_transitions.setdefault(
-                engine._current_level, set()
-            )
-            engine.state.learned_barriers = engine.level_learned_barriers.setdefault(
-                engine._current_level, set()
-            )
-            engine.hazard_tracker.clear_lethal_positions()
-            engine.hazard_tracker.reset_episode()
-            engine.physics_engine.reset_episode()
-            engine.exhausted_candidate_goals.clear()
-            engine.tested_action_positions.clear()
-            engine.learned_goal_positions.clear()
-            engine.learned_receptacle_positions.clear()
-            engine.topology_rooms.clear()
-            engine.topology_doors.clear()
-            engine.room_adjacency.clear()
-            engine.state.current_room_id = None
-            engine.surprise_engine.reset_ledger()
-            engine.state.last_surprise = 0.0
-            engine.state.last_surprise_eval = None
+            delta.mutate("level_failed_transitions", view.level_failed_transitions).clear()
+            delta.mutate("level_learned_barriers", view.level_learned_barriers).clear()
+            delta.mutate("level_lethal_positions", view.level_lethal_positions).clear()
+            delta.set("_current_level", _lvl)
+            _lft = delta.mutate("level_failed_transitions", view.level_failed_transitions)
+            delta.set("failed_transitions", _lft.setdefault(_lvl, set()))
+            _llb = delta.mutate("level_learned_barriers", view.level_learned_barriers)
+            delta.set("learned_barriers", _llb.setdefault(_lvl, set()))
+            view.hazard_tracker.clear_lethal_positions()
+            view.hazard_tracker.reset_episode()
+            view.physics_engine.reset_episode()
+            delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
+            delta.mutate("tested_action_positions", view.tested_action_positions).clear()
+            delta.mutate("learned_goal_positions", view.learned_goal_positions).clear()
+            delta.mutate("learned_receptacle_positions", view.learned_receptacle_positions).clear()
+            delta.mutate("topology_rooms", view.topology_rooms).clear()
+            delta.mutate("topology_doors", view.topology_doors).clear()
+            delta.mutate("room_adjacency", view.room_adjacency).clear()
+            delta.set("current_room_id", None)
+            view.surprise_engine.reset_ledger()
+            delta.set("last_surprise", 0.0)
+            delta.set("last_surprise_eval", None)
         elif is_new_level:
             # Level transition: point episodic spatial memory to the target level
-            engine.state.failed_transitions = engine.level_failed_transitions.setdefault(
-                engine._current_level, set()
+            _lft = delta.mutate("level_failed_transitions", view.level_failed_transitions)
+            delta.set("failed_transitions", _lft.setdefault(_lvl, set()))
+            _llb = delta.mutate("level_learned_barriers", view.level_learned_barriers)
+            delta.set("learned_barriers", _llb.setdefault(_lvl, set()))
+            view.hazard_tracker.static_lethal_positions = view.level_lethal_positions.setdefault(
+                view._current_level, set()
             )
-            engine.state.learned_barriers = engine.level_learned_barriers.setdefault(
-                engine._current_level, set()
-            )
-            engine.hazard_tracker.static_lethal_positions = (
-                engine.level_lethal_positions.setdefault(engine._current_level, set())
-            )
-            engine.hazard_tracker.reset_episode()
-            engine.physics_engine.reset_episode()
-            engine.exhausted_candidate_goals.clear()
-            engine.tested_action_positions.clear()
-            engine.learned_goal_positions.clear()
-            engine.learned_receptacle_positions.clear()
-            engine.topology_rooms.clear()
-            engine.topology_doors.clear()
-            engine.room_adjacency.clear()
-            engine.state.current_room_id = None
-            engine.surprise_engine.reset_ledger()
-            engine.state.last_surprise = 0.0
-            engine.state.last_surprise_eval = None
-            engine.collision_cones.reset_episode()
+            view.hazard_tracker.reset_episode()
+            view.physics_engine.reset_episode()
+            delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
+            delta.mutate("tested_action_positions", view.tested_action_positions).clear()
+            delta.mutate("learned_goal_positions", view.learned_goal_positions).clear()
+            delta.mutate("learned_receptacle_positions", view.learned_receptacle_positions).clear()
+            delta.mutate("topology_rooms", view.topology_rooms).clear()
+            delta.mutate("topology_doors", view.topology_doors).clear()
+            delta.mutate("room_adjacency", view.room_adjacency).clear()
+            delta.set("current_room_id", None)
+            view.surprise_engine.reset_ledger()
+            delta.set("last_surprise", 0.0)
+            delta.set("last_surprise_eval", None)
+            view.collision_cones.reset_episode()
             # Preserve mobile_threat_features across level transitions: the same
             # enemy feature-types recur across levels, and forgetting them causes
             # the agent to re-discover threats by collision.
-            engine.state._prev_oriented_threats = []
-            engine.state.prev_grid = None
-            engine.state.last_action = None
-            engine.state.last_predicted_pos = None
-            engine.mental_plan.clear()
-            engine.consecutive_simulation_failures = 0
-            engine.simulation_cooldown = 0
-            engine.state_mutations.clear()
-            if hasattr(engine.working_memory, "active_schema"):
-                engine.working_memory.active_schema = None
+            delta.set("_prev_oriented_threats", [])
+            delta.set("prev_grid", None)
+            delta.set("last_action", None)
+            delta.set("last_predicted_pos", None)
+            delta.mutate("mental_plan", view.mental_plan).clear()
+            delta.set("consecutive_simulation_failures", 0)
+            delta.set("simulation_cooldown", 0)
+            view.state_mutations.clear()
+            if hasattr(view.working_memory, "active_schema"):
+                view.working_memory.active_schema = None
         else:
-            engine.hazard_tracker.grid_history.clear()
-            engine.hazard_tracker.step_history.clear()
-            engine.tested_action_positions.clear()
-            engine.state.last_surprise = 0.0
-            engine.state.last_surprise_eval = None
-            engine.collision_cones.reset_episode()
-            engine.state.prev_grid = None
-            engine.state.last_action = None
-            engine.state.last_predicted_pos = None
-            engine.mental_plan.clear()
-            engine.state._prev_oriented_threats = []
-            engine.recent_positions.clear()
-            if hasattr(engine, "acc_conflict_monitor"):
-                engine.acc_conflict_monitor.reset()
+            view.hazard_tracker.grid_history.clear()
+            view.hazard_tracker.step_history.clear()
+            delta.mutate("tested_action_positions", view.tested_action_positions).clear()
+            delta.set("last_surprise", 0.0)
+            delta.set("last_surprise_eval", None)
+            view.collision_cones.reset_episode()
+            delta.set("prev_grid", None)
+            delta.set("last_action", None)
+            delta.set("last_predicted_pos", None)
+            delta.mutate("mental_plan", view.mental_plan).clear()
+            delta.set("_prev_oriented_threats", [])
+            delta.mutate("recent_positions", view.recent_positions).clear()
+            if hasattr(view, "acc_conflict_monitor"):
+                view.acc_conflict_monitor.reset()
 
         if is_new_level and retain_dynamics:
             # Carry forward hypotheses & semantics as priors
-            if engine.avatar_feature is not None:
-                engine.state.prior_avatar_feature = engine.avatar_feature
-                engine.state.avatar_features = {engine.avatar_feature}
+            if view.avatar_feature is not None:
+                delta.set("prior_avatar_feature", view.avatar_feature)
+                delta.set("avatar_features", {view.avatar_feature})
             else:
-                engine.avatar_features.clear()
-            engine._avatar_controllability_evidence.clear()
-            engine.state_mutations.clear()
-            engine.state.bilateral_state = None
-            engine.bilateral_integrator.active_bilateral_state = None
+                view.avatar_features.clear()
+            view._avatar_controllability_evidence.clear()
+            view.state_mutations.clear()
+            delta.set("bilateral_state", None)
+            view.bilateral_integrator.active_bilateral_state = None
 
-            engine.entity_visit_counts.clear()
-            engine.probed_entity_ids.clear()
-            engine.quiescent_click_targets.clear()
-            engine.effective_click_targets.clear()
-            engine.click_affordances.clear()
-            engine.quiescent_features.clear()
-            if hasattr(engine, "feature_quiescent_counts"):
-                engine.feature_quiescent_counts.clear()
-            if hasattr(engine, "_feature_quiescent_counts"):
-                engine._feature_quiescent_counts.clear()
-            engine.last_effector_target_step.clear()
-            engine.state.active_goal_converging_coord = None
-            engine.state.consecutive_goal_converging_clicks = 0
-            engine.state.active_causal_actuator_coord = None
-            engine.state.consecutive_causal_probes = 0
-            engine.state.consecutive_quiescent_actions = 0
-            engine.inhibited_actions.clear()
+            view.entity_visit_counts.clear()
+            view.probed_entity_ids.clear()
+            view.quiescent_actuation_targets.clear()
+            view.effective_actuation_targets.clear()
+            view.actuation_affordances.clear()
+            view.quiescent_features.clear()
+            if hasattr(view, "feature_quiescent_counts"):
+                view.feature_quiescent_counts.clear()
+            if hasattr(view, "_feature_quiescent_counts"):
+                view._feature_quiescent_counts.clear()
+            view.last_effector_target_step.clear()
+            delta.set("active_goal_converging_coord", None)
+            delta.set("consecutive_goal_converging_actuations", 0)
+            delta.set("active_causal_actuator_coord", None)
+            delta.set("consecutive_causal_probes", 0)
+            delta.set("consecutive_quiescent_actions", 0)
+            view.inhibited_actions.clear()
 
             # Affordance priors re-evaluation on new level transitions:
             # Physical terrain affordances (e.g. tracks, bridges, road surfaces) persist across
             # rooms of the same environment unless counterfactual evidence invalidates them.
             # Local coordinate barriers reset, but empirical walkable affordances are retained.
-            engine.symbolic_theory.barrier_features.clear()
-            engine.symbolic_theory.barrier_predicates.clear()
-            for f in engine.symbolic_theory.walkable_features:
-                if not any(p.value == f for p in engine.symbolic_theory.walkable_predicates):
-                    engine.symbolic_theory.walkable_predicates.append(
+            view.symbolic_theory.barrier_features.clear()
+            view.symbolic_theory.barrier_predicates.clear()
+            for f in view.symbolic_theory.walkable_features:
+                if not any(p.value == f for p in view.symbolic_theory.walkable_predicates):
+                    view.symbolic_theory.walkable_predicates.append(
                         CausalPredicate(variable="feature_id", operator="==", value=f)
                     )
 
-            engine.transition_to_phase(
+            view.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
-                if engine.is_motor_grounded()
+                if view.is_motor_grounded()
                 else EpistemicPhase.MOTOR_GROUNDING,
                 reason="episode_reset_level_transition",
             )
 
         elif not retain_dynamics:
             # Full Cross-Game Isolation: Zero cross-game leakage
-            engine.state.total_epistemic_probes = 0
-            engine.state.avatar_feature = None
-            engine.avatar_features.clear()
-            engine.state.prior_avatar_feature = None
-            engine._avatar_controllability_evidence.clear()
-            engine.verified_safe_features.clear()
-            engine.state.avatar_pos = None
-            engine.action_dynamics.clear()
-            engine.action_affordances.clear()
-            engine.state.effector_kinetics_mode = None
-            engine.focus_switch_actions.clear()
-            engine.state.last_non_displacement_action = None
-            engine.tested_actions.clear()
-            engine.symbolic_theory.clear()
-            engine.state_mutations.clear()
-            engine.entity_visit_counts.clear()
-            engine.position_visit_counts.clear()
-            engine.probed_entity_ids.clear()
-            engine.quiescent_click_targets.clear()
-            engine.effective_click_targets.clear()
-            engine.click_affordances.clear()
-            engine.quiescent_features.clear()
-            if hasattr(engine, "feature_quiescent_counts"):
-                engine.feature_quiescent_counts.clear()
-            if hasattr(engine, "_feature_quiescent_counts"):
-                engine._feature_quiescent_counts.clear()
-            engine.effective_features.clear()
-            engine.state.consecutive_quiescent_actions = 0
-            engine.inhibited_actions.clear()
-            engine.topology_rooms.clear()
-            engine.topology_doors.clear()
-            engine.room_adjacency.clear()
-            engine.state.current_room_id = None
-            engine.surprise_engine.reset_ledger()
-            engine.state.last_surprise = 0.0
-            engine.state.last_surprise_eval = None
-            engine.hazard_tracker.known_lethal_features.clear()
-            engine.hazard_tracker.periodic_cells.clear()
-            engine.mobile_threat_features.clear()
-            engine.transition_to_phase(
+            delta.set("total_epistemic_probes", 0)
+            delta.set("avatar_feature", None)
+            view.avatar_features.clear()
+            delta.set("prior_avatar_feature", None)
+            view._avatar_controllability_evidence.clear()
+            view.verified_safe_features.clear()
+            delta.set("avatar_pos", None)
+            view.action_dynamics.clear()
+            view.action_affordances.clear()
+            delta.set("effector_kinetics_mode", None)
+            view.focus_switch_actions.clear()
+            delta.set("last_non_displacement_action", None)
+            view.tested_actions.clear()
+            view.symbolic_theory.clear()
+            view.state_mutations.clear()
+            view.entity_visit_counts.clear()
+            view.position_visit_counts.clear()
+            view.probed_entity_ids.clear()
+            view.quiescent_actuation_targets.clear()
+            view.effective_actuation_targets.clear()
+            view.actuation_affordances.clear()
+            view.quiescent_features.clear()
+            if hasattr(view, "feature_quiescent_counts"):
+                view.feature_quiescent_counts.clear()
+            if hasattr(view, "_feature_quiescent_counts"):
+                view._feature_quiescent_counts.clear()
+            view.effective_features.clear()
+            delta.set("consecutive_quiescent_actions", 0)
+            view.inhibited_actions.clear()
+            delta.mutate("topology_rooms", view.topology_rooms).clear()
+            delta.mutate("topology_doors", view.topology_doors).clear()
+            delta.mutate("room_adjacency", view.room_adjacency).clear()
+            delta.set("current_room_id", None)
+            view.surprise_engine.reset_ledger()
+            delta.set("last_surprise", 0.0)
+            delta.set("last_surprise_eval", None)
+            view.hazard_tracker.known_lethal_features.clear()
+            view.hazard_tracker.periodic_cells.clear()
+            view.mobile_threat_features.clear()
+            view.transition_to_phase(
                 EpistemicPhase.MOTOR_GROUNDING,
                 reason="episode_reset_cross_game",
             )
         else:
-            engine.transition_to_phase(
+            view.transition_to_phase(
                 EpistemicPhase.MENTAL_SIMULATION
-                if engine.is_motor_grounded()
+                if view.is_motor_grounded()
                 else EpistemicPhase.MOTOR_GROUNDING,
                 reason="episode_reset_retained_dynamics",
             )
 
-        engine.object_planner.reset_episode(is_new_level=is_new_level)
-        engine.subgoal_stack.reset_episode()
+        view.object_planner.reset_episode(is_new_level=is_new_level)
+        view.subgoal_stack.reset_episode()
 
         # Cortical faculties reset
         if not retain_dynamics:
@@ -1406,8 +1360,8 @@ class HippocampalEpisodicCortex:
                 retain_inhibitions=is_same_level_retry,
             )
 
-        engine.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
-        engine.acc_conflict_monitor.reset()
+        view.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
+        view.acc_conflict_monitor.reset()
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export episodic cortex state as a formal Pearl do(a) causal predicate."""

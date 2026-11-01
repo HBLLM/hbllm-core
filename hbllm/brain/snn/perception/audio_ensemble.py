@@ -7,7 +7,7 @@ Channels:
     speech    — detects speech onset/activity (speech band + vocal cues)
     event     — detects transient acoustic events (sharp energy/flux changes)
     change    — detects scene/ambient spectral shifts
-    transient — detects rapid burst sounds (clicks, knocks, snaps)
+    transient — detects rapid burst sounds (taps, knocks, snaps)
 
 Architecture:
     AudioSignals → AudioPerceptionEnsemble → SpikeEvent[] → PerceptionGateDecision

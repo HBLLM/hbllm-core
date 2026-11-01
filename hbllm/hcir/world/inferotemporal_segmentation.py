@@ -4,7 +4,7 @@ Modeled on primate ventral visual stream (V1 -> V2 -> V4 -> TEO -> IT):
 1. Invariant Object Manifolds: Groups non-background sensory stimuli into discrete
    connected-component representations (object files / Kahneman's object tokens).
 2. Medial Axis & Centroid Anchoring: Computes true geometric centroids and medial
-   interior anchor coordinates, preventing out-of-boundary clicks on concave objects.
+   interior anchor coordinates, preventing out-of-boundary actuations on concave objects.
 3. Affordance Salience Filtering: Filters out massive static frames/enclosures and
    pure background sheets, isolating interactive manipulanda (buttons, tiles, switches, tokens).
 4. Saccadic Effector Pacing: Drastically constrains spatial search space from 4,096+
@@ -259,7 +259,7 @@ class InferotemporalSegmentationEngine:
                 score -= 80.0
 
             # Primate Inhibition of Return (IOR) based on past interaction attempts
-            v_count = visits.get(f"click_{ar}_{ac}", 0)
+            v_count = visits.get(f"actuate_{ar}_{ac}", 0)
             ior_penalty = float(v_count) * 25.0 + (float(v_count) ** 2) * 10.0
             score -= ior_penalty
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+from hbllm.hcir.algorithms.protocol import native_of
+
 
 def edmonds_karp_max_flow(
     graph: Any,
     source: str,
     sink: str,
     capacity_attr: str = "capacity",
+    default_capacity: float = 1.0,
 ) -> tuple[float, dict[tuple[str, str], float]]:
     """Compute maximum flow from source to sink using Edmonds-Karp (BFS augmenting paths)."""
     if source == sink:
@@ -32,9 +35,9 @@ def edmonds_karp_max_flow(
             getattr(
                 e,
                 capacity_attr,
-                e.get(capacity_attr, getattr(e, "weight", 1.0))
+                e.get(capacity_attr, getattr(e, "weight", default_capacity))
                 if isinstance(e, dict)
-                else getattr(e, "weight", 1.0),
+                else getattr(e, "weight", default_capacity),
             )
         )
         for u in sources:
@@ -91,9 +94,16 @@ def min_st_cut(
     source: str,
     sink: str,
     capacity_attr: str = "capacity",
+    default_capacity: float = 1.0,
 ) -> tuple[set[str], set[str], float]:
     """Compute the minimum s-t cut partitioning nodes into (S, T)."""
-    max_f, flow = edmonds_karp_max_flow(graph, source, sink, capacity_attr=capacity_attr)
+    max_f, flow = edmonds_karp_max_flow(
+        graph,
+        source,
+        sink,
+        capacity_attr=capacity_attr,
+        default_capacity=default_capacity,
+    )
 
     # Reachable from source in residual graph
     all_edges = (
@@ -112,9 +122,9 @@ def min_st_cut(
             getattr(
                 e,
                 capacity_attr,
-                e.get(capacity_attr, getattr(e, "weight", 1.0))
+                e.get(capacity_attr, getattr(e, "weight", default_capacity))
                 if isinstance(e, dict)
-                else getattr(e, "weight", 1.0),
+                else getattr(e, "weight", default_capacity),
             )
         )
         for u in sources:
@@ -138,3 +148,45 @@ def min_st_cut(
 
     T = all_nodes - S
     return S, T, max_f
+
+
+def max_flow_min_cut(
+    graph: Any,
+    source: str,
+    sink: str,
+    capacity_attr: str = "capacity",
+    default_capacity: float = 1.0,
+) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
+    """Compute maximum flow and the minimum s-t cut edge set (Edmonds-Karp)."""
+    native = native_of(graph)
+    if native is not None:
+        return native.max_flow_min_cut(source, sink, capacity_attribute=capacity_attr)
+    max_flow, _ = edmonds_karp_max_flow(
+        graph,
+        source,
+        sink,
+        capacity_attr=capacity_attr,
+        default_capacity=default_capacity,
+    )
+    s_cut, t_cut, _ = min_st_cut(
+        graph,
+        source,
+        sink,
+        capacity_attr=capacity_attr,
+        default_capacity=default_capacity,
+    )
+    all_edges = (
+        list(graph.all_edges())
+        if hasattr(graph, "all_edges")
+        else list(getattr(graph, "_edges", {}).values())
+    )
+    cut_edges: list[tuple[str, str]] = []
+    for e in all_edges:
+        sources = e.sources if hasattr(e, "sources") else e.get("sources", [])
+        targets = e.targets if hasattr(e, "targets") else e.get("targets", [])
+        for u in sources:
+            if u in s_cut:
+                for v in targets:
+                    if v in t_cut:
+                        cut_edges.append((u, v))
+    return max_flow, cut_edges, s_cut, t_cut

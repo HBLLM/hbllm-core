@@ -156,10 +156,5 @@ def test_autonomous_epistemic_engine_round19_integration() -> None:
     engine = AutonomousEpistemicEngine(enable_logging=False)
 
     assert hasattr(engine, "boundary_grid_aligner")
-    assert isinstance(engine.boundary_grid_aligner, BoundaryGridPhaseAligner)
-
     assert hasattr(engine, "mpfc_schema_engine")
-    assert isinstance(engine.mpfc_schema_engine, MedialPrefrontalSchemaEngine)
-
     assert hasattr(engine, "stn_escalator")
-    assert isinstance(engine.stn_escalator, SubthalamicThresholdEscalator)

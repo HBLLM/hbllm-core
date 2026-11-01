@@ -110,5 +110,6 @@
       "baseline_score_sd": 0.0,
       "decision": "keep"
     }
-  ]
+  ],
+  "superseded_by": "reports/ablation/<new WP2 report> (see latest timestamped file)"
 }

@@ -27,6 +27,7 @@ import uuid
 
 import numpy as np
 
+import hbllm.hcir.algorithms as algorithms
 from hbllm.hcir.bytecode import InstructionStream
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -114,6 +115,7 @@ from hbllm.hcir.world.entorhinal_border_cell import (
     EntorhinalBorderCellEngine,
     GridModuleRescalingResult,
 )
+from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
 )
@@ -282,7 +284,6 @@ from hbllm.hcir.world.subthalamic_drift_diffusion import (
     SubthalamicDriftDiffusionEngine,
 )
 from hbllm.hcir.world.subthalamic_threshold_escalator import (
-    STNBrakingStatus,
     SubthalamicThresholdEscalator,
 )
 from hbllm.hcir.world.superior_colliculus_arbiter import (
@@ -431,8 +432,6 @@ from hbllm.hcir.world.global_neuronal_workspace import (
     IgnitionEvent,
 )
 from hbllm.hcir.world.global_workspace_ignition import (
-    CandidateIgnitionSignal,
-    ConsciousIgnitionPacket,
     GlobalWorkspaceIgnitionEngine,
 )
 from hbllm.hcir.world.metacognitive_agency_cortex import (
@@ -507,38 +506,6 @@ def _autonomous_learning_factory(class_name: str) -> Callable[[], Any]:
     return _make
 
 
-@dataclass(frozen=True)
-class UnifiedActiveInferenceDecision:
-    """Canonical Grand Capstone decision record unifying the 5 cortical active inference stages."""
-
-    selected_action: Any
-    motor_intent: str
-    epistemic_phase: EpistemicPhase
-    expected_free_energy: float
-    confidence_score: float
-    subthalamic_status: str
-    conscious_broadcast: ConsciousIgnitionPacket | None
-    schema_archetype: str | None
-    locomotor_velocity: float
-    time_dilation_factor: float
-    subgoal_summary: str | None
-    deliberation_cycles_spent: int
-
-    def to_causal_predicate(self) -> CausalPredicate:
-        """Export unified decision into HCIR CausalPredicate."""
-        act_str = str(self.selected_action)
-        phase_str = str(self.epistemic_phase)
-        schema_str = self.schema_archetype or "none"
-        stn_str = self.subthalamic_status
-        return CausalPredicate(
-            variable="active_inference_decision",
-            operator="==",
-            value=f"act:{act_str}:phase:{phase_str}:efe:{self.expected_free_energy:.3f}:conf:{self.confidence_score:.2f}:schema:{schema_str}:stn:{stn_str}:vel:{self.locomotor_velocity:.2f}",
-            relation="canonical_active_inference_step",
-            target_entity="prefrontal_executive_governor",
-        )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Master Autonomous Epistemic Engine Orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
@@ -594,8 +561,11 @@ class AutonomousEpistemicEngine:
         instructions: Sequence[str] | str | None = None,
         services: KernelServices | None = None,
         world_id: str = "default",
+        seed: int | None = None,
     ) -> None:
         self.exploration_budget = exploration_budget
+        # Deterministic decide-path RNG (WP0.1 replay determinism)
+        self._rng = __import__("numpy").random.default_rng(seed)
         self.enable_logging = enable_logging
 
         # Cognitive state & authoritative EngineState model (WP1)
@@ -605,8 +575,17 @@ class AutonomousEpistemicEngine:
         self.world_id: str = world_id
         self._step_counter: int = 0
         self.environmental_step_limit: int | None = None
+        # Anytime cognition budget (WP0.2): per-step deadline for faculties
+        self.step_work_units: int = 400
+        self.step_budget_ms: float = 150.0
+        self.deterministic_budget: bool = True
+        self.compute_budget: Any | None = None
+        self._structural_goals_cache: tuple[int, list[Any]] | None = None
         # Discovered lattice quantum (cells per cardinal displacement); 1 until calibrated
         self._spatial_lattice_stride: int = 1
+        # WP0.3 motor-effect posterior: per-action counts over observed effect kinds
+        self.action_effect_counts: dict[Any, dict[str, int]] = {}
+        self._consecutive_null_actions: dict[Any, int] = {}
 
         # Memory of frames & actions
         self._prev_grid: np.ndarray | None = None
@@ -638,7 +617,9 @@ class AutonomousEpistemicEngine:
         self.body_schema: ExtendedBodySchema = self.working_memory.body_schema
         self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
-        self.optical_projector: OpticalRayProjector = self.working_memory.optical_projector
+        self.optical_projector: OpticalRayProjector | Any = _ablated(
+            "optical_projector", OpticalRayProjector
+        )  # WP2 ablated
         self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
         self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
 
@@ -667,7 +648,9 @@ class AutonomousEpistemicEngine:
         self.dorsal_kinetic_stream: DorsalKineticStream = DorsalKineticStream()
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
-        self.bilateral_integrator: BilateralCoordinateIntegrator = BilateralCoordinateIntegrator()
+        self.bilateral_integrator: BilateralCoordinateIntegrator | Any = _ablated(
+            "bilateral_integrator", BilateralCoordinateIntegrator
+        )  # WP2 ablated
         self._bilateral_state: BilateralState | None = None
 
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
@@ -722,25 +705,22 @@ class AutonomousEpistemicEngine:
             w_risk=0.10,
             w_cost=0.10,
         )
-        self.hierarchical_active_inference: HierarchicalActiveInferenceEngine = (
-            HierarchicalActiveInferenceEngine(
-                sensory_precision=1.0,
-                dynamic_precision=1.0,
-                lambda_epistemic=0.4,
-                lambda_extrinsic=0.6,
-                lambda_risk=0.5,
-            )
-        )
+        self.hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any = _ablated(
+            "hierarchical_active_inference", HierarchicalActiveInferenceEngine
+        )  # WP2 ablated
         self.precision_controller: HierarchicalPrecisionController = (
             HierarchicalPrecisionController()
         )
         self.prediction_budget: PredictionBudget = PredictionBudget()
-        self.pending_transactions: list[TransactionOperation] = []
 
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
-        self.efe_evaluator: ExpectedFreeEnergyEvaluator = ExpectedFreeEnergyEvaluator()
-        self.affordance_extractor: GibsonianAffordanceExtractor = GibsonianAffordanceExtractor()
+        self.efe_evaluator: ExpectedFreeEnergyEvaluator | Any = _ablated(
+            "efe_evaluator", ExpectedFreeEnergyEvaluator
+        )  # WP2 ablated
+        self.affordance_extractor: GibsonianAffordanceExtractor | Any = _ablated(
+            "affordance_extractor", GibsonianAffordanceExtractor
+        )  # WP2 ablated
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
         self.deformation_tracker: MorphologicalDeformationTracker = (
@@ -750,15 +730,19 @@ class AutonomousEpistemicEngine:
         self.entity_lineage_graph: dict[str, EntityLineageNode] = {}
 
         # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
-        self.retrosplenial_transformer: RetrosplenialCoordinateTransformer = (
-            RetrosplenialCoordinateTransformer()
-        )
+        self.retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any = _ablated(
+            "retrosplenial_transformer", RetrosplenialCoordinateTransformer
+        )  # WP2 ablated
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
-        self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
-        self.counterfactual_regret: CounterfactualRegretEvaluator = CounterfactualRegretEvaluator()
+        self.analogy_engine: FalsifiableAnalogyEngine | Any = _ablated(
+            "analogy_engine", FalsifiableAnalogyEngine
+        )  # WP2 ablated
+        self.counterfactual_regret: CounterfactualRegretEvaluator | Any = _ablated(
+            "counterfactual_regret", CounterfactualRegretEvaluator
+        )  # WP2 ablated
 
         # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
         self.gnw: GlobalNeuronalWorkspace = GlobalNeuronalWorkspace()
@@ -770,7 +754,9 @@ class AutonomousEpistemicEngine:
         self.thalamocortical_binding: ThalamocorticalBindingEngine = ThalamocorticalBindingEngine()
 
         # Track 4: Superposition Counterfactual Tree Search Planner
-        self.superposition_planner: SuperpositionPlanner = SuperpositionPlanner()
+        self.superposition_planner: SuperpositionPlanner | Any = _ablated(
+            "superposition_planner", SuperpositionPlanner
+        )  # WP2 ablated
 
         # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
         self.predictive_coding_cortex: HierarchicalPredictiveCodingCortex = (
@@ -784,7 +770,9 @@ class AutonomousEpistemicEngine:
         self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
 
         # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
-        self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer()
+        self.skill_synthesizer: SkillProgramSynthesizer | Any = _ablated(
+            "skill_synthesizer", SkillProgramSynthesizer
+        )  # WP2 ablated
 
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
@@ -795,152 +783,206 @@ class AutonomousEpistemicEngine:
         )
 
         # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
-        self.allostasis_cortex: InteroceptiveAllostasisCortex = InteroceptiveAllostasisCortex()
+        self.allostasis_cortex: InteroceptiveAllostasisCortex | Any = _ablated(
+            "allostasis_cortex", InteroceptiveAllostasisCortex
+        )  # WP2 ablated
 
         # Round 7 Faculty: Claustrum Multimodal Salience Conductor & Perceptual Binding (Crick & Koch / Smith)
-        self.claustrum_conductor: ClaustrumSalienceConductor = ClaustrumSalienceConductor()
+        self.claustrum_conductor: ClaustrumSalienceConductor | Any = _ablated(
+            "claustrum_conductor", ClaustrumSalienceConductor
+        )  # WP2 ablated
 
         # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
 
         # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
-        self.distance_transform_engine: SpatialDistanceTransformEngine = (
-            SpatialDistanceTransformEngine()
-        )
+        self.distance_transform_engine: SpatialDistanceTransformEngine | Any = _ablated(
+            "distance_transform_engine", SpatialDistanceTransformEngine
+        )  # WP2 ablated
 
         # Round 8 Faculty: Ventral Striatum & Lateral Habenula Dual Value Opponency (Matsumoto & Hikosaka / Cools)
-        self.value_opponency: DualValueOpponencyCortex = DualValueOpponencyCortex()
+        self.value_opponency: DualValueOpponencyCortex | Any = _ablated(
+            "value_opponency", DualValueOpponencyCortex
+        )  # WP2 ablated
 
         # Round 8 Faculty: Posterior Parietal Cortex (PPC) Potential Field Navigation (Andersen & Buneo / Khatib)
-        self.potential_field_navigator: ParietalPotentialFieldNavigator = (
-            ParietalPotentialFieldNavigator()
-        )
+        self.potential_field_navigator: ParietalPotentialFieldNavigator | Any = _ablated(
+            "potential_field_navigator", ParietalPotentialFieldNavigator
+        )  # WP2 ablated
 
         # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
-        self.shape_hasher: InferotemporalShapeHasher = InferotemporalShapeHasher()
+        self.shape_hasher: InferotemporalShapeHasher | Any = _ablated(
+            "shape_hasher", InferotemporalShapeHasher
+        )  # WP2 ablated
 
         # Round 9 Faculty: Subthalamic Nucleus (STN) Drift-Diffusion Threshold Modulation (Ratcliff / Frank)
-        self.drift_diffusion: SubthalamicDriftDiffusionEngine = SubthalamicDriftDiffusionEngine()
+        self.drift_diffusion: SubthalamicDriftDiffusionEngine | Any = _ablated(
+            "drift_diffusion", SubthalamicDriftDiffusionEngine
+        )  # WP2 ablated
 
         # Round 9 Faculty: Parietal Egocentric Multi-Scale Foveation (Itti & Koch / Schwartz)
-        self.foveated_attention: ParietalFoveatedAttentionEngine = ParietalFoveatedAttentionEngine()
+        self.foveated_attention: ParietalFoveatedAttentionEngine | Any = _ablated(
+            "foveated_attention", ParietalFoveatedAttentionEngine
+        )  # WP2 ablated
 
         # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
-        self.blame_attributor: PrefrontalBlameAttributor = PrefrontalBlameAttributor()
+        self.blame_attributor: PrefrontalBlameAttributor | Any = _ablated(
+            "blame_attributor", PrefrontalBlameAttributor
+        )  # WP2 ablated
 
         # Round 10 Faculty: Hippocampal-Entorhinal Prioritized Experience Replay (Foster & Wilson / Schaul)
-        self.hippocampal_replay: HippocampalPrioritizedReplayBuffer = (
-            HippocampalPrioritizedReplayBuffer()
-        )
+        self.hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any = _ablated(
+            "hippocampal_replay", HippocampalPrioritizedReplayBuffer
+        )  # WP2 ablated
 
         # Round 10 Faculty: Lateral Prefrontal Cortex (LPFC) Dual Task Switcher (Monsell / Koechlin)
-        self.task_switcher: LateralPrefrontalTaskSwitcher = LateralPrefrontalTaskSwitcher()
+        self.task_switcher: LateralPrefrontalTaskSwitcher | Any = _ablated(
+            "task_switcher", LateralPrefrontalTaskSwitcher
+        )  # WP2 ablated
 
         # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
-        self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine = (
-            RetrosplenialLandmarkAnchorEngine()
-        )
+        self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any = _ablated(
+            "retrosplenial_anchor", RetrosplenialLandmarkAnchorEngine
+        )  # WP2 ablated
 
         # Round 11 Faculty: Hippocampal Theta-Gamma Phase Precession & Macro Chunking (O'Keefe / Lisman)
-        self.phase_precession: HippocampalPhasePrecessionEngine = HippocampalPhasePrecessionEngine()
+        self.phase_precession: HippocampalPhasePrecessionEngine | Any = _ablated(
+            "phase_precession", HippocampalPhasePrecessionEngine
+        )  # WP2 ablated
 
         # Round 11 Faculty: Frontopolar BA10 Counterfactual Exploration Horizon Engine (Koechlin / Rushworth)
-        self.exploration_horizon: FrontopolarExplorationHorizonEngine = (
-            FrontopolarExplorationHorizonEngine()
-        )
+        self.exploration_horizon: FrontopolarExplorationHorizonEngine | Any = _ablated(
+            "exploration_horizon", FrontopolarExplorationHorizonEngine
+        )  # WP2 ablated
 
         # Round 11 Faculty: Superior Colliculus Multisensory Alignment & Saccadic Arbiter (Stein & Meredith)
-        self.superior_colliculus: SuperiorColliculusTargetArbiter = (
-            SuperiorColliculusTargetArbiter()
-        )
+        self.superior_colliculus: SuperiorColliculusTargetArbiter | Any = _ablated(
+            "superior_colliculus", SuperiorColliculusTargetArbiter
+        )  # WP2 ablated
 
         # Round 12 Faculty: Cerebellar Microzone Granule-Purkinje Forward Adaptation (Marr-Albus-Ito)
-        self.cerebellar_microzone: CerebellarMicrozoneAdaptor = CerebellarMicrozoneAdaptor()
+        self.cerebellar_microzone: CerebellarMicrozoneAdaptor | Any = _ablated(
+            "cerebellar_microzone", CerebellarMicrozoneAdaptor
+        )  # WP2 ablated
 
         # Round 12 Faculty: Ventral Premotor (F5 / Mirror Neuron) Affordance Resonator (Rizzolatti)
-        self.premotor_resonator: VentralPremotorAffordanceResonator = (
-            VentralPremotorAffordanceResonator()
-        )
+        self.premotor_resonator: VentralPremotorAffordanceResonator | Any = _ablated(
+            "premotor_resonator", VentralPremotorAffordanceResonator
+        )  # WP2 ablated
 
         # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
-        self.effort_allocator: AnteriorCingulateEffortAllocator = AnteriorCingulateEffortAllocator()
+        self.effort_allocator: AnteriorCingulateEffortAllocator | Any = _ablated(
+            "effort_allocator", AnteriorCingulateEffortAllocator
+        )  # WP2 ablated
 
         # Round 13 Faculty: Subicular Egocentric-to-Allocentric Boundary Vector Cell (BVC) Map (Hartley-Burgess)
-        self.subicular_bvc: SubicularBoundaryVectorEngine = SubicularBoundaryVectorEngine()
+        self.subicular_bvc: SubicularBoundaryVectorEngine | Any = _ablated(
+            "subicular_bvc", SubicularBoundaryVectorEngine
+        )  # WP2 ablated
 
         # Round 13 Faculty: Ventromedial Prefrontal Cortex (vmPFC) Somatic Marker Engine (Damasio-Bechara)
-        self.somatic_marker: VentromedialSomaticMarkerEngine = VentromedialSomaticMarkerEngine()
+        self.somatic_marker: VentromedialSomaticMarkerEngine | Any = _ablated(
+            "somatic_marker", VentromedialSomaticMarkerEngine
+        )  # WP2 ablated
 
         # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
-        self.pulvinar_router: PulvinarAttentionRouter = PulvinarAttentionRouter()
+        self.pulvinar_router: PulvinarAttentionRouter | Any = _ablated(
+            "pulvinar_router", PulvinarAttentionRouter
+        )  # WP2 ablated
 
         # Round 14 Faculty: Parahippocampal Scene Schemas & Topological Recognition (Epstein / Bar)
-        self.parahippocampal_context: ParahippocampalContextEngine = ParahippocampalContextEngine()
+        self.parahippocampal_context: ParahippocampalContextEngine | Any = _ablated(
+            "parahippocampal_context", ParahippocampalContextEngine
+        )  # WP2 ablated
 
         # Round 14 Faculty: Locus Coeruleus Noradrenergic Exploration-Exploitation Switch (Aston-Jones / Cohen)
-        self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine = (
-            LocusCoeruleusNoradrenalineEngine()
-        )
+        self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any = _ablated(
+            "locus_coeruleus", LocusCoeruleusNoradrenalineEngine
+        )  # WP2 ablated
 
         # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
-        self.somatosensory_haptic: SomatosensoryHapticEngine = SomatosensoryHapticEngine()
+        self.somatosensory_haptic: SomatosensoryHapticEngine | Any = _ablated(
+            "somatosensory_haptic", SomatosensoryHapticEngine
+        )  # WP2 ablated
 
         # Round 15 Faculty: Entorhinal Border Cells & Grid Module Rescaling (Solstad / Barry)
-        self.entorhinal_border: EntorhinalBorderCellEngine = EntorhinalBorderCellEngine()
+        self.entorhinal_border: EntorhinalBorderCellEngine | Any = _ablated(
+            "entorhinal_border", EntorhinalBorderCellEngine
+        )  # WP2 ablated
 
         # Round 15 Faculty: Amygdalar Pavlovian Threat Conditioning & Defensive Cascades (LeDoux / Phelps)
-        self.amygdala_threat: AmygdalarThreatConditioningEngine = (
-            AmygdalarThreatConditioningEngine()
-        )
+        self.amygdala_threat: AmygdalarThreatConditioningEngine | Any = _ablated(
+            "amygdala_threat", AmygdalarThreatConditioningEngine
+        )  # WP2 ablated
 
         # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
-        self.vta_curiosity: VentralTegmentalCuriosityEngine = VentralTegmentalCuriosityEngine()
+        self.vta_curiosity: VentralTegmentalCuriosityEngine | Any = _ablated(
+            "vta_curiosity", VentralTegmentalCuriosityEngine
+        )  # WP2 ablated
 
         # Round 16 Faculty: Retrosplenial Heading Integration & Ring Attractors (Taube / Burgess)
-        self.retrosplenial_heading: RetrosplenialHeadingEngine = RetrosplenialHeadingEngine()
+        self.retrosplenial_heading: RetrosplenialHeadingEngine | Any = _ablated(
+            "retrosplenial_heading", RetrosplenialHeadingEngine
+        )  # WP2 ablated
 
         # Round 16 Faculty: Thalamic Reticular Nucleus (TRN) Sensory Gating & Shielding (Crick / Halassa)
-        self.trn_gating: ThalamicReticularGatingEngine = ThalamicReticularGatingEngine()
+        self.trn_gating: ThalamicReticularGatingEngine | Any = _ablated(
+            "trn_gating", ThalamicReticularGatingEngine
+        )  # WP2 ablated
 
         # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
-        self.rule_abstraction: DorsolateralRuleAbstractionEngine = (
-            DorsolateralRuleAbstractionEngine()
-        )
+        self.rule_abstraction: DorsolateralRuleAbstractionEngine | Any = _ablated(
+            "rule_abstraction", DorsolateralRuleAbstractionEngine
+        )  # WP2 ablated
 
         # Round 17 Faculty: Hippocampal CA1 Temporal Distance Cells & Relative Interval Timing (MacDonald / Eichenbaum)
-        self.hippocampal_time: HippocampalTimeCellEngine = HippocampalTimeCellEngine()
+        self.hippocampal_time: HippocampalTimeCellEngine | Any = _ablated(
+            "hippocampal_time", HippocampalTimeCellEngine
+        )  # WP2 ablated
 
         # Round 17 Faculty: Ventrolateral Prefrontal Cortex (vlPFC / rIFG) Motor Rule Retrieval & Response Inhibition (Aron / Wiecki)
-        self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine = (
-            VentrolateralMotorInhibitionEngine()
-        )
+        self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any = _ablated(
+            "vl_motor_inhibition", VentrolateralMotorInhibitionEngine
+        )  # WP2 ablated
 
         # Round 17 Faculty: Claustrum Dynamic Inter-Hemispheric Synchrony & Cross-Modal Gestalt Binding (Crick & Koch / Smythies)
-        self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator = (
-            ClaustrumInterhemisphericIntegrator()
-        )
+        self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any = _ablated(
+            "claustrum_interhemispheric", ClaustrumInterhemisphericIntegrator
+        )  # WP2 ablated
 
         # Round 18 Faculty: Anterior Insular Cortex (AIC) Subjective Time Dilation & Interoceptive Pacing (Craig / Wittmann)
-        self.anterior_insula_timing: AnteriorInsularTimingEngine = AnteriorInsularTimingEngine()
+        self.anterior_insula_timing: AnteriorInsularTimingEngine | Any = _ablated(
+            "anterior_insula_timing", AnteriorInsularTimingEngine
+        )  # WP2 ablated
 
         # Round 18 Faculty: Orbitofrontal Cortex (OFC) Counterfactual Credit Assignment & Contingent Updating (Walton / Rushworth)
-        self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine = (
-            OrbitofrontalCreditAssignmentEngine()
-        )
+        self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any = _ablated(
+            "ofc_counterfactual", OrbitofrontalCreditAssignmentEngine
+        )  # WP2 ablated
 
         # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
-        self.ppn_locomotor: PedunculopontineLocomotorEngine = PedunculopontineLocomotorEngine()
+        self.ppn_locomotor: PedunculopontineLocomotorEngine | Any = _ablated(
+            "ppn_locomotor", PedunculopontineLocomotorEngine
+        )  # WP2 ablated
 
         # Round 19 Faculty: Hippocampal-Entorhinal Boundary-to-Grid Phase Alignment (Bush / Giocomo)
-        self.boundary_grid_aligner: BoundaryGridPhaseAligner = BoundaryGridPhaseAligner()
+        self.boundary_grid_aligner: BoundaryGridPhaseAligner | Any = _ablated(
+            "boundary_grid_aligner", BoundaryGridPhaseAligner
+        )  # WP2 ablated
 
         # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
-        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine()
+        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine | Any = _ablated(
+            "mpfc_schema_engine", MedialPrefrontalSchemaEngine
+        )  # WP2 ablated
 
         # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
-        self.stn_escalator: SubthalamicThresholdEscalator = SubthalamicThresholdEscalator()
+        self.stn_escalator: SubthalamicThresholdEscalator | Any = _ablated(
+            "stn_escalator", SubthalamicThresholdEscalator
+        )  # WP2 ablated
 
         # Round 20 Capstone Faculty: Global Neuronal Workspace Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
-        self.workspace_ignition: GlobalWorkspaceIgnitionEngine = GlobalWorkspaceIgnitionEngine()
+        self.workspace_ignition: GlobalWorkspaceIgnitionEngine | Any = _ablated(
+            "workspace_ignition", GlobalWorkspaceIgnitionEngine
+        )  # WP2 ablated
 
         # Connect GNW conscious broadcast listener for executive arbitration
         self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
@@ -958,7 +1000,9 @@ class AutonomousEpistemicEngine:
         # Faculty: Whole-Grid Outcome Predictor & Rollout Engine (W081-W089)
 
         # Faculty: Predictive Confidence Calibrator (W090)
-        self.confidence_calibrator: ConfidenceCalibrator = ConfidenceCalibrator()
+        self.confidence_calibrator: ConfidenceCalibrator | Any = _ablated(
+            "confidence_calibrator", ConfidenceCalibrator
+        )  # WP2 ablated
 
         # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
 
@@ -1014,18 +1058,21 @@ class AutonomousEpistemicEngine:
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
         from hbllm.hcir.world.autonomous_learning import (
-            ClickAffordanceLearner,
             DeliberationEntropyMonitor,
+            PointActuationAffordanceLearner,
         )
 
-        self.click_learner: ClickAffordanceLearner = ClickAffordanceLearner()
+        self.point_actuation_learner: PointActuationAffordanceLearner | Any = _ablated(
+            "point_actuation_learner", PointActuationAffordanceLearner
+        )  # WP2 ablated
         self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
 
         # Canonical 5-Stage Active Inference Pipeline (AGENTS.md §2, WP1)
         from hbllm.hcir.world.cortical_pipeline import CorticalPipeline
 
         self.cortical_pipeline: CorticalPipeline = CorticalPipeline(
-            transaction_manager=self.transaction_manager
+            transaction_manager=self.transaction_manager,
+            engine=self,
         )
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
 
@@ -1305,44 +1352,44 @@ class AutonomousEpistemicEngine:
         self.working_memory.exhausted_candidate_goals = val
 
     @property
-    def quiescent_click_targets(self) -> set[tuple[int, int]]:
-        return self.working_memory.quiescent_click_targets
+    def quiescent_actuation_targets(self) -> set[tuple[int, int]]:
+        return self.working_memory.quiescent_actuation_targets
 
-    @quiescent_click_targets.setter
-    def quiescent_click_targets(self, val: set[tuple[int, int]]) -> None:
-        self.working_memory.quiescent_click_targets = val
-
-    @property
-    def effective_click_targets(self) -> set[tuple[int, int]]:
-        return self.working_memory.effective_click_targets
-
-    @effective_click_targets.setter
-    def effective_click_targets(self, val: set[tuple[int, int]]) -> None:
-        self.working_memory.effective_click_targets = val
+    @quiescent_actuation_targets.setter
+    def quiescent_actuation_targets(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.quiescent_actuation_targets = val
 
     @property
-    def last_effective_click_coord(self) -> tuple[int, int] | None:
-        return self.working_memory.last_effective_click_coord
+    def effective_actuation_targets(self) -> set[tuple[int, int]]:
+        return self.working_memory.effective_actuation_targets
 
-    @last_effective_click_coord.setter
-    def last_effective_click_coord(self, val: tuple[int, int] | None) -> None:
-        self.working_memory.last_effective_click_coord = val
-
-    @property
-    def consecutive_effective_clicks(self) -> int:
-        return self.working_memory.consecutive_effective_clicks
-
-    @consecutive_effective_clicks.setter
-    def consecutive_effective_clicks(self, val: int) -> None:
-        self.working_memory.consecutive_effective_clicks = val
+    @effective_actuation_targets.setter
+    def effective_actuation_targets(self, val: set[tuple[int, int]]) -> None:
+        self.working_memory.effective_actuation_targets = val
 
     @property
-    def click_affordances(self) -> dict[tuple[int, int], list[tuple[int, int]]]:
-        return self.working_memory.click_affordances
+    def last_effective_actuation_coord(self) -> tuple[int, int] | None:
+        return self.working_memory.last_effective_actuation_coord
 
-    @click_affordances.setter
-    def click_affordances(self, val: dict[tuple[int, int], list[tuple[int, int]]]) -> None:
-        self.working_memory.click_affordances = val
+    @last_effective_actuation_coord.setter
+    def last_effective_actuation_coord(self, val: tuple[int, int] | None) -> None:
+        self.working_memory.last_effective_actuation_coord = val
+
+    @property
+    def consecutive_effective_actuations(self) -> int:
+        return self.working_memory.consecutive_effective_actuations
+
+    @consecutive_effective_actuations.setter
+    def consecutive_effective_actuations(self, val: int) -> None:
+        self.working_memory.consecutive_effective_actuations = val
+
+    @property
+    def actuation_affordances(self) -> dict[tuple[int, int], list[tuple[int, int]]]:
+        return self.working_memory.actuation_affordances
+
+    @actuation_affordances.setter
+    def actuation_affordances(self, val: dict[tuple[int, int], list[tuple[int, int]]]) -> None:
+        self.working_memory.actuation_affordances = val
 
     @property
     def last_effector_target_step(self) -> dict[tuple[int, int], int]:
@@ -1361,12 +1408,12 @@ class AutonomousEpistemicEngine:
         self.working_memory.active_goal_converging_coord = val
 
     @property
-    def consecutive_goal_converging_clicks(self) -> int:
-        return self.working_memory.consecutive_goal_converging_clicks
+    def consecutive_goal_converging_actuations(self) -> int:
+        return self.working_memory.consecutive_goal_converging_actuations
 
-    @consecutive_goal_converging_clicks.setter
-    def consecutive_goal_converging_clicks(self, val: int) -> None:
-        self.working_memory.consecutive_goal_converging_clicks = val
+    @consecutive_goal_converging_actuations.setter
+    def consecutive_goal_converging_actuations(self, val: int) -> None:
+        self.working_memory.consecutive_goal_converging_actuations = val
 
     @property
     def active_causal_actuator_coord(self) -> tuple[int, int] | None:
@@ -1571,7 +1618,7 @@ class AutonomousEpistemicEngine:
         self.world_kernel = getattr(services, "world_kernel", None)
         if getattr(services, "transaction_manager", None) is not None:
             self.transaction_manager = services.transaction_manager
-        if getattr(services, "tiered_workspace", None) is not None:
+        if services.tiered_workspace is not None:
             self.attach_tiered_workspace(
                 services.tiered_workspace,
                 goal_id=goal_id,
@@ -1754,7 +1801,6 @@ class AutonomousEpistemicEngine:
             )
 
         # Clear transient pending buffer
-        self.pending_transactions.clear()
         return committed_tx
 
     def submit_to_workspace(
@@ -1918,7 +1964,11 @@ class AutonomousEpistemicEngine:
         sim_ws = workspace.get_branch(sim_branch) or workspace
 
         if services is None:
-            tx_mgr = TransactionManager(sim_ws)
+            # Use the engine's services when present; otherwise the sim branch
+            # workspace's own attached transaction authority (no ad-hoc mirror TM).
+            services = getattr(self, "services", None)
+        if services is None:
+            tx_mgr = sim_ws.transaction_manager
             resolver = CapabilityResolver()
             scheduler = KernelInstructionScheduler()
             services = KernelServices(
@@ -2339,7 +2389,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.transitive_reduction()
+        return algorithms.transitive_reduction_subgraph(target_graph)
 
     def step_drift_diffusion(
         self,
@@ -2407,7 +2457,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.minimum_spanning_tree()
+        return algorithms.minimum_spanning_tree_subgraph(target_graph)
 
     def record_replay_transition(
         self,
@@ -2514,7 +2564,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.all_pairs_shortest_paths(weight_attribute=weight_attribute)
+        return algorithms.all_pairs_shortest_paths(target_graph, weight_attr=weight_attribute)
 
     def compress_trajectory_phase_precession(
         self,
@@ -2578,7 +2628,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.find_articulation_points_and_bridges()
+        return algorithms.articulation_points_and_bridges(target_graph)
 
     def is_graph_fault_tolerant_biconnected(self, graph: CognitiveGraph | None = None) -> bool:
         """Check if cognitive graph has redundant alternate paths between all vertices."""
@@ -2590,7 +2640,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.is_biconnected()
+        return algorithms.is_biconnected(target_graph)
 
     def adapt_cerebellar_motor_outcome(
         self,
@@ -2672,8 +2722,8 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.max_flow_min_cut(
-            source=source, sink=sink, capacity_attribute=capacity_attribute
+        return algorithms.max_flow_min_cut(
+            target_graph, source, sink, capacity_attr=capacity_attribute
         )
 
     def compute_subicular_boundary_map(
@@ -2731,7 +2781,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.feedback_arc_set()
+        return algorithms.feedback_arc_set(target_graph)
 
     def classify_spatial_context(
         self,
@@ -2788,7 +2838,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.condense_scc_metagraph()
+        return algorithms.condense_scc_metagraph(target_graph)
 
     def rescale_grid_modules_from_borders(
         self,
@@ -2849,7 +2899,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.find_eulerian_path_or_circuit()
+        return algorithms.find_eulerian_path_or_circuit(target_graph)
 
     def compute_graph_chinese_postman_tour(
         self,
@@ -2865,7 +2915,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.chinese_postman_tour(weight_attribute=weight_attribute)
+        return algorithms.chinese_postman_tour(target_graph, weight_attr=weight_attribute)
 
     def update_allocentric_heading(
         self,
@@ -2937,7 +2987,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.minimum_dominating_set()
+        return algorithms.minimum_dominating_set(target_graph)
 
     def compute_graph_independent_set(
         self,
@@ -2952,7 +3002,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.maximum_independent_set()
+        return algorithms.maximum_independent_set(target_graph)
 
     def track_temporal_interval(
         self,
@@ -3031,7 +3081,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.minimum_vertex_cover()
+        return algorithms.minimum_vertex_cover(target_graph)
 
     def compute_graph_edge_coloring(
         self,
@@ -3046,7 +3096,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.greedy_edge_coloring()
+        return algorithms.greedy_edge_coloring(target_graph)
 
     def compute_subjective_time_dilation(
         self,
@@ -3120,7 +3170,7 @@ class AutonomousEpistemicEngine:
             )
         else:
             target_graph = CognitiveGraph(False)
-        return target_graph.feedback_vertex_set()
+        return algorithms.feedback_vertex_set(target_graph)
 
     @property
     def phase(self) -> EpistemicPhase:
@@ -3226,7 +3276,7 @@ class AutonomousEpistemicEngine:
 
         Accepts:
         - List of dicts (from SynapticDeviceDescriptor.action_schema):
-          e.g. [{'action_id': 1, 'name': 'MOVE_UP'}, {'action_id': 6, 'name': 'CLICK_CELL', 'parameters': {'x': 'int', 'y': 'int'}}]
+          e.g. [{'action_id': 1, 'name': 'MOVE_UP'}, {'action_id': 6, 'name': 'ACTUATE_CELL', 'parameters': {'x': 'int', 'y': 'int'}}]
         - List of ActionAffordance instances
         - List of bare action IDs (int, str, Enum)
         """
@@ -3723,6 +3773,33 @@ class AutonomousEpistemicEngine:
 
     # ── Episodic State Management ─────────────────────────────────────────────
 
+    def on_boundary(self, boundary: Any) -> None:
+        """Episode lifecycle boundary dispatch (WP0.5).
+
+        Kinds: DEATH (same level retry), LEVEL_COMPLETE (advance),
+        CONTEXT_RESET (lattice/context change mid-stream). Motor posteriors
+        are context-local (retained across DEATH/LEVEL_COMPLETE); level-local
+        state (goals, inhibitions, object ids, mental plans) is cleared;
+        long-term skills are lifelong.
+        """
+        from hbllm.hcir.world.percept import EpisodeBoundaryKind
+
+        kind = getattr(boundary, "kind", boundary)
+        if kind == EpisodeBoundaryKind.LEVEL_COMPLETE or kind == "level_complete":
+            self.reset_episode(retain_dynamics=True, is_new_level=True)
+        elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
+            self.reset_episode(retain_dynamics=True, is_new_level=False)
+        else:
+            self.reset_episode(retain_dynamics=True, is_new_level=True)
+        # Fan out to every faculty exposing a boundary handler (WP0.5).
+        for attr in vars(self).values():
+            handler = getattr(attr, "on_boundary", None)
+            if callable(handler) and attr is not self:
+                try:
+                    handler(boundary)
+                except Exception:
+                    pass
+
     def reset_episode(
         self,
         retain_dynamics: bool = True,
@@ -3731,13 +3808,20 @@ class AutonomousEpistemicEngine:
     ) -> None:
         """Reset episodic state upon level transition or death.
         Delegated to HippocampalEpisodicCortex for schema consolidation.
+
+        Deprecated: prefer on_boundary(EpisodeBoundary) (WP0.5).
         """
+        from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
+
+        delta = StateDelta()
         self.episodic_cortex.consolidate_schema_and_reset(
-            self,
+            ReadOnlyEngineView(self),
+            delta,
             retain_dynamics=retain_dynamics,
             is_new_level=is_new_level,
             level=level,
         )
+        self.apply_delta(delta, author="episodic_cortex")
         self.step_counter = 0
         if hasattr(self, "entropy_monitor") and self.entropy_monitor is not None:
             self.entropy_monitor.reset_for_level()
@@ -3852,6 +3936,42 @@ class AutonomousEpistemicEngine:
 
         return res
 
+    def record_action_effect(self, action: Any, kind: str) -> None:
+        """Increment the per-action effect-kind count (WP0.3)."""
+        counts = self.action_effect_counts.setdefault(action, {})
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind in ("no_op", "blocked"):
+            self._consecutive_null_actions[action] = (
+                self._consecutive_null_actions.get(action, 0) + 1
+            )
+        else:
+            self._consecutive_null_actions[action] = 0
+
+    def motor_posterior(self, action: Any) -> dict[str, float]:
+        """Posterior P(effect_kind | action) from observed samples (WP0.3)."""
+        counts = self.action_effect_counts.get(action)
+        if not counts:
+            return {}
+        total = sum(counts.values())
+        return {k: v / total for k, v in counts.items()}
+
+    def expected_effect(self, action: Any) -> str | None:
+        """Most probable effect kind for an action (WP0.3)."""
+        post = self.motor_posterior(action)
+        return max(post, key=lambda k: post[k]) if post else None
+
+    def effect_entropy(self, action: Any) -> float:
+        """Shannon entropy over the action's effect posterior (WP0.3)."""
+        import math
+
+        post = self.motor_posterior(action)
+        if not post:
+            return 1.0  # unprobed action -> maximally uncertain
+        return -sum(p * math.log2(p) for p in post.values() if p > 0)
+
+    def consecutive_null_count(self, action: Any) -> int:
+        return self._consecutive_null_actions.get(action, 0)
+
     def set_environmental_step_limit(self, limit: int) -> None:
         """Set strict environmental step countdown or step limit."""
         self.environmental_step_limit = limit
@@ -3880,7 +4000,7 @@ class AutonomousEpistemicEngine:
             dyn.confidence >= 0.7 for dyn in self.action_dynamics.values()
         ):
             return True
-        # Click-only environment grounding: if no displacement dynamics were ever
+        # Point-actuation-only environment grounding: if no displacement dynamics were ever
         # calibrated and only spatial effectors are known, treat as grounded after
         # enough exploration to let the object planner engage.
         has_displacement = any(
@@ -3916,11 +4036,9 @@ class AutonomousEpistemicEngine:
         adapter = self.perception_adapter or PerceptionRegistry.get_default()
         if adapter is not None:
             return adapter.lift_percept(raw_observation, context=self)
-        H, W = (
-            (raw_observation.shape[0], raw_observation.shape[1])
-            if hasattr(raw_observation, "shape") and len(raw_observation.shape) >= 2
-            else (16, 16)
-        )
+        if not (hasattr(raw_observation, "shape") and len(raw_observation.shape) >= 2):
+            raise ValueError("lattice extent unknown")
+        H, W = raw_observation.shape[0], raw_observation.shape[1]
         return PerceptionFrame(shape=(H, W))
 
     def estimate_background(self, grid: np.ndarray) -> int:
@@ -4029,7 +4147,20 @@ class AutonomousEpistemicEngine:
         self, grid: np.ndarray, bg: int | None = None, **kwargs: Any
     ) -> list[dict[str, Any]]:
         bg_val = bg if bg is not None else self.bg_feature
-        return PerceptionEngine.detect_structural_goals(
+        # Anytime cognition (WP0.2): cache by frame-content hash — identical
+        # frames yield identical structural goals; skip re-analysis.
+        try:
+            import hashlib
+
+            _h = int.from_bytes(
+                hashlib.blake2b(np.ascontiguousarray(grid).tobytes(), digest_size=8).digest(),
+                "little",
+            )
+            if self._structural_goals_cache and self._structural_goals_cache[0] == _h:
+                return list(self._structural_goals_cache[1])
+        except Exception:
+            _h = None
+        result = PerceptionEngine.detect_structural_goals(
             grid,
             bg=bg_val,
             avatar_features=self.avatar_features,
@@ -4039,6 +4170,9 @@ class AutonomousEpistemicEngine:
             avatar_pos=self.avatar_pos,
             **kwargs,
         )
+        if _h is not None:
+            self._structural_goals_cache = (_h, list(result))
+        return result
 
     def assimilate_feedback(
         self,
@@ -4049,17 +4183,17 @@ class AutonomousEpistemicEngine:
         is_failure: bool = False,
         action: int | None = None,
         action_data: dict[str, Any] | None = None,
+        actuation_rejected: bool = False,
         **kwargs: Any,
     ) -> None:
-        is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
-        )
-        is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        if actuation_rejected:
+            # The environment rejected the action — this sample teaches
+            # nothing about dynamics, so skip binding it (WP0.4).
+            return
+        is_success = is_success or terminal == TerminalSignal.SUCCESS
+        is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
         )
         curr_grid = self.normalize_sensory_input(curr_grid)
         if action is None:
@@ -4072,8 +4206,14 @@ class AutonomousEpistemicEngine:
         if is_success and self.working_memory.active_schema is not None:
             self.working_memory.synthesize_skill_from_schema(self.working_memory.active_schema)
 
+        from hbllm.hcir.world.engine_state import (
+            FacultyWriteJournal,
+            JournaledEngineView,
+        )
+
+        journal = FacultyWriteJournal(author="assimilator")
         EpistemicFeedbackAssimilator.assimilate(
-            self,
+            JournaledEngineView(self, journal),
             curr_grid,
             available_actions,
             terminal=terminal,
@@ -4082,6 +4222,7 @@ class AutonomousEpistemicEngine:
             action=action,
             action_data=action_data,
         )
+        self.commit_faculty_journal(journal)
 
         # Biological Faculty: Popperian Inductive Hypothesis Consolidation & Retraction (Track 2)
         self.working_memory.hypothesis_engine.export_to_world_theory(self.symbolic_theory)
@@ -4304,8 +4445,8 @@ class AutonomousEpistemicEngine:
             action is not None
             and action_data is not None
             and self.prev_grid is not None
-            and hasattr(self, "click_learner")
-            and self.click_learner is not None
+            and hasattr(self, "point_actuation_learner")
+            and self.point_actuation_learner is not None
         ):
             coord = None
             if "row" in action_data and "col" in action_data:
@@ -4315,7 +4456,9 @@ class AutonomousEpistemicEngine:
             elif self.is_spatial_effector(action) and "pos" in action_data:
                 coord = tuple(action_data["pos"])
             if coord is not None:
-                self.click_learner.observe_click(coord, self.prev_grid, curr_grid)
+                self.point_actuation_learner.observe_point_actuation(
+                    coord, self.prev_grid, curr_grid
+                )
 
         # Wire W041-W050 temporal buffer & state transition sequence modeling
         new_snap = WorldStateSnapshot(
@@ -4593,7 +4736,13 @@ class AutonomousEpistemicEngine:
 
     def apply_probe_proposal(self, proposal: EpistemicProbeProposal) -> None:
         """Commit an EpistemicProbeProposal's state updates atomically."""
-        EpistemicCuriosityExplorer.apply_proposal_to_engine(self, proposal)
+        from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
+
+        delta = StateDelta()
+        EpistemicCuriosityExplorer.apply_proposal_to_engine(
+            view=ReadOnlyEngineView(self), delta=delta, proposal=proposal
+        )
+        self.apply_delta(delta, author="epistemic_curiosity")
 
     def update_room_topology(self, curr_grid: np.ndarray) -> None:
         """Extract rooms and doorways from current occupancy grid knowledge."""
@@ -4800,7 +4949,22 @@ class AutonomousEpistemicEngine:
             context_id=obs.context_id,
             episode_id=obs.episode_id,
             objects=list(obs.entities) if obs.entities else None,
-            **dict(obs.metadata),
+            action_schemas=(
+                [
+                    {
+                        "action_id": a.actuator_id,
+                        "kind": a.kind,
+                        "valid_targets": list(a.valid_targets) if a.valid_targets else None,
+                    }
+                    for a in obs.actuators
+                ]
+                or None
+            ),
+            **{
+                k: obs.metadata[k]
+                for k in ("actuation_rejected", "step_limit")
+                if k in obs.metadata
+            },
         )
 
     def decide(
@@ -4819,277 +4983,51 @@ class AutonomousEpistemicEngine:
         Perceive -> Assimilate -> Simulate in Mind -> Exploit / Epistemically Probe.
         Delegated to PrefrontalDeliberationEngine.
         """
-        is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
+        if (lim := kwargs.pop("step_limit", None)) is not None:
+            self.set_environmental_step_limit(int(lim))
+        from hbllm.hcir.world.compute_budget import ComputeBudget
+
+        self.compute_budget = ComputeBudget.for_step(
+            self.step_work_units,
+            remaining_actions=self.get_remaining_step_budget()
+            if hasattr(self, "get_remaining_step_budget")
+            else None,
+            deterministic=self.deterministic_budget,
+            step_budget_ms=None if self.deterministic_budget else self.step_budget_ms,
         )
-        is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
+        is_success = is_success or terminal == TerminalSignal.SUCCESS
+        is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
         )
-        return self.deliberation_engine.decide(
-            self,
+        from hbllm.hcir.world.engine_state import CognitiveContext
+
+        self._pipeline_runs = getattr(self, "_pipeline_runs", 0) + 1
+        from types import MappingProxyType
+
+        ctx = CognitiveContext(
             curr_grid=curr_grid,
-            available_actions=available_actions,
-            terminal=terminal,
-            is_success=is_success,
-            is_failure=is_failure,
-            action_schemas=action_schemas,
-            objects=objects,
-            micro_actions=micro_actions,
-            **kwargs,
-        )
-
-    def decide_active_inference_step(
-        self,
-        curr_grid: Any,
-        available_actions: Sequence[Any],
-        terminal: TerminalSignal | None = None,
-        is_success: bool = False,
-        is_failure: bool = False,
-        action_schemas: Sequence[Any] | None = None,
-        objects: Sequence[Any] | None = None,
-        micro_actions: Sequence[Any] | None = None,
-        **kwargs: Any,
-    ) -> UnifiedActiveInferenceDecision:
-        """Unified Canonical 5-Stage Active Inference Decision Loop (Round 20 Grand Capstone).
-
-        Orchestrates:
-        1. SENSORY PERCEPTION & COORDINATE LIFTING:
-           Perceives sensory frame, performs boundary-to-grid phase alignment (Bush/Giocomo),
-           and matches invariant task schemata (Euston/McKenzie).
-        2. ASSIMILATION & SURPRISE INDUCTION:
-           Integrates interoceptive pacing & subjective time dilation (Craig/Wittmann),
-           computes prediction errors, and runs non-linear conscious workspace ignition (Dehaene/Mashour).
-        3. COUNTERFACTUAL SIMULATION & SUBGOAL SCHEDULING:
-           Runs mental simulation rollouts, computes counterfactual credit assignments (Walton/Rushworth),
-           and queries recursive frontopolar subgoal stacks.
-        4. PREFRONTAL DELIBERATION & SAFETY GATING:
-           Evaluates evidence margin against dynamic STN conflict-escalated decision thresholds (Frank),
-           applying Habenular/vlPFC motor inhibition if conflict or threat exceeds margin.
-        5. MOTOR DISPATCH & TRANSACTION EXECUTION:
-           Modulates locomotor velocity and pacing regimes (Garcia-Rill/Takakusaki),
-           commits cognitive transaction, and returns the canonical decision output.
-        """
-        is_success = (
-            is_success
-            or bool(kwargs.get("is_" + "win", False))
-            or terminal == TerminalSignal.SUCCESS
-        )
-        is_failure = (
-            is_failure
-            or bool(kwargs.get("is_" + "lost", False))
-            or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
-        )
-        # --- Stage 1: Sensory Perception & Coordinate Lifting ---
-        grid_arr = np.asarray(curr_grid)
-        if grid_arr.ndim >= 2:
-            h, w = int(grid_arr.shape[0]), int(grid_arr.shape[1])
-        else:
-            h = w = max(1, int(grid_arr.size))
-
-        if self.avatar_pos is not None:
-            pos = (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
-        else:
-            # Unlocalised: assume the lattice centroid (maximum-entropy prior over position)
-            pos = (float(h - 1) / 2.0, float(w - 1) / 2.0)
-        observed_boundaries = {
-            "north": max(0.0, pos[0]),
-            "south": max(0.0, float(h - 1) - pos[0]),
-            "west": max(0.0, pos[1]),
-            "east": max(0.0, float(w - 1) - pos[1]),
-        }
-        alignment_state = self.boundary_grid_aligner.align_grid_phase_with_boundaries(
-            estimated_pos=pos,
-            grid_dimensions=(h, w),
-            observed_boundary_distances=observed_boundaries,
-        )
-
-        entity_roles: dict[str, str] = {}
-        if self.avatar_pos is not None:
-            entity_roles["avatar"] = "actor"
-        if self.learned_goal_positions:
-            entity_roles["target_goal"] = "target"
-        if self.learned_barriers:
-            entity_roles["barrier_obs"] = "barrier"
-
-        schema_report = self.mpfc_schema_engine.match_schema_context(entity_roles)
-        dominant_schema = schema_report.dominant_schema
-
-        # --- Stage 2: Assimilation & Surprise Induction ---
-        surprise_val = float(getattr(self, "last_surprise", 0.0) or 0.0)
-        if is_failure:
-            surprise_val = 1.0
-
-        # Amygdalar vigilance over the features actually present in the sensory field
-        present_features = [str(int(v)) for v in np.unique(grid_arr)] if grid_arr.ndim >= 2 else []
-        vigilance = self.amygdala_threat.evaluate_sensory_vigilance(present_features)
-        threat_level = float(vigilance.composite_threat_level)
-
-        pacing = self.anterior_insula_timing.compute_subjective_dilation(
-            objective_dt=1.0,
-            threat_level=threat_level,
-            salience_score=surprise_val,
-        )
-
-        candidate_signals = [
-            CandidateIgnitionSignal(
-                source_modality="perception",
-                content_payload=f"phase_align_drift:{alignment_state.total_drift_corrected:.2f}",
-                salience_score=min(1.0, 0.40 + alignment_state.total_drift_corrected),
-            ),
-            CandidateIgnitionSignal(
-                source_modality="surprise",
-                content_payload=f"prediction_error:{surprise_val:.3f}",
-                salience_score=min(1.0, surprise_val * 1.5),
-            ),
-        ]
-        if threat_level > 0.0:
-            candidate_signals.append(
-                CandidateIgnitionSignal(
-                    source_modality="threat",
-                    content_payload=f"vigilance:{vigilance.vigilance_mode.value}",
-                    salience_score=threat_level,
-                )
-            )
-        if dominant_schema:
-            candidate_signals.append(
-                CandidateIgnitionSignal(
-                    source_modality="schema",
-                    content_payload=f"archetype:{dominant_schema.archetype_name}",
-                    salience_score=dominant_schema.match_confidence,
-                )
-            )
-
-        workspace_state = self.workspace_ignition.compete_and_ignite(candidate_signals)
-        ignited_packet = workspace_state.active_ignition
-
-        # --- Stage 3: Counterfactual Simulation & Deliberation ---
-        chosen_action, action_data = self.deliberation_engine.decide(
-            self,
-            curr_grid=curr_grid,
-            available_actions=available_actions,
-            terminal=terminal,
-            is_success=is_success,
-            is_failure=is_failure,
-            action_schemas=action_schemas,
-            objects=objects,
-            micro_actions=micro_actions,
-            **kwargs,
-        )
-
-        cf_report = self.ofc_counterfactual.assign_counterfactual_credit(
-            chosen_action=chosen_action,
-            available_actions=available_actions,
-            experienced_reward=1.0 if is_success else (-1.0 if is_failure else 0.0),
-        )
-
-        # Friston EFE over the kinematically grounded candidate transitions
-        efe_by_action: dict[Any, float] = {}
-        if self.avatar_pos is not None and grid_arr.ndim >= 2:
-            deltas = self.action_deltas
-            candidate_transitions = {
-                a: (self.avatar_pos[0] + deltas[a][0], self.avatar_pos[1] + deltas[a][1])
-                for a in available_actions
-                if a in deltas
-            }
-            if candidate_transitions:
-                efe_by_action = {
-                    s.action: float(s.expected_free_energy)
-                    for s in self.evaluate_policy_expected_free_energy(
-                        candidate_transitions, grid=grid_arr
-                    )
+            step_counter=self.step_counter,
+            signals=MappingProxyType(
+                {
+                    "_engine": self,
+                    "_curr_grid": curr_grid,
+                    "_available_actions": list(available_actions),
+                    "_terminal": terminal,
+                    "_is_success": is_success,
+                    "_is_failure": is_failure,
+                    "_action_schemas": action_schemas,
+                    "_objects": objects,
+                    "_micro_actions": micro_actions,
+                    "_kwargs": dict(kwargs),
                 }
-
-        # --- Stage 4: Prefrontal Deliberation & Safety Gating ---
-        q_vals = [cf_report.chosen_updated_value] + [
-            branch.updated_value for branch in cf_report.branch_updates
-        ]
-        stn_decision = self.stn_escalator.evaluate_decision_threshold(
-            candidate_q_values=q_vals,
-            elapsed_deliberation_steps=self.step_counter,
+            ),
         )
-
-        # Inhibit motor dispatch if the STN brake fires and a better-credited alternative exists;
-        # amygdalar evasion additionally vetoes actions whose target cue is a conditioned threat.
-        final_action = chosen_action
-        if stn_decision.status == STNBrakingStatus.BRAKE_ACTIVE and len(available_actions) > 1:
-            if cf_report.counterfactual_regret > 0.5:
-                final_action = cf_report.best_alternative_action
-        if vigilance.evasion_recommended and efe_by_action:
-            final_action = min(efe_by_action.items(), key=lambda kv: kv[1])[0]
-
-        # --- Stage 5: Motor Dispatch & Locomotor Modulation ---
-        dist_to_goal: float | None = None
-        if self.avatar_pos is not None and self.learned_goal_positions:
-            dist_to_goal = float(
-                min(
-                    abs(self.avatar_pos[0] - g[0]) + abs(self.avatar_pos[1] - g[1])
-                    for g in self.learned_goal_positions
-                )
-            )
-        surface = (
-            self.somatosensory_haptic.get_surface_profile_at(self.avatar_pos)
-            if self.avatar_pos is not None
-            else None
-        )
-
-        locomotor_cmd = self.ppn_locomotor.modulate_drive(
-            drive_urgency=0.50 + 0.30 * (1.0 - stn_decision.detected_conflict),
-            target_proximity=dist_to_goal if dist_to_goal is not None else float(max(h, w)),
-            surface_friction=surface.friction_coefficient if surface else 0.0,
-        )
-
-        # Metacognitively calibrated confidence (BA10) grounded in the last agency assessment
-        last_assessment = getattr(self.working_memory, "last_metacognitive_assessment", None)
-        raw_conf = (
-            float(last_assessment.subjective_confidence)
-            if last_assessment is not None
-            else max(0.0, 1.0 - surprise_val)
-        )
-        calibrated_conf = self.confidence_calibrator.calibrate(
-            raw_confidence=raw_conf
-        ).calibrated_confidence
-
-        # EFE gap of the dispatched action relative to the EFE-optimal candidate (0 = optimal).
-        if efe_by_action:
-            best_efe = min(efe_by_action.values())
-            expected_fe = float(efe_by_action.get(final_action, best_efe) - best_efe)
-        else:
-            expected_fe = 0.0
-
-        # Subgoal summary
-        active_subgoal = self.subgoal_stack.current_subgoal
-        subgoal_desc = (
-            active_subgoal.subgoal_id
-            if active_subgoal
-            else (
-                dominant_schema.subgoal_hints[0]
-                if dominant_schema and dominant_schema.subgoal_hints
-                else "navigate"
-            )
-        )
-
-        # Assemble and record transaction
-        decision = UnifiedActiveInferenceDecision(
-            selected_action=final_action,
-            motor_intent="NAVIGATE_TO",
-            epistemic_phase=self._phase,
-            expected_free_energy=expected_fe,
-            confidence_score=calibrated_conf,
-            subthalamic_status=stn_decision.status.value,
-            conscious_broadcast=ignited_packet,
-            schema_archetype=dominant_schema.archetype_name if dominant_schema else None,
-            locomotor_velocity=locomotor_cmd.velocity,
-            time_dilation_factor=pacing.dilation_factor,
-            subgoal_summary=subgoal_desc,
-            deliberation_cycles_spent=stn_decision.recommended_deliberation_cycles,
-        )
-
-        self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
-        return decision
+        result = self.cortical_pipeline.run(ctx)
+        self._last_decision_branch = result.signals.get("branch")
+        if result.rejected:
+            return None, {"pipeline_rejected": True, "reason": result.rejection_reason}
+        return result.final_action
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export master epistemic engine state as a declarative causal predicate."""
@@ -5128,12 +5066,15 @@ class AutonomousEpistemicEngine:
                 target=f"position_{barrier_pos[0]}_{barrier_pos[1]}",
                 properties={"position": list(barrier_pos), "role": "BARRIER"},
             )
-            self.pending_transactions.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=bid,
-                    node_data=bnode.model_dump(),
-                )
+            self._commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=bid,
+                        node_data=bnode.model_dump(),
+                    )
+                ],
+                author="record_learned_barrier",
             )
 
     def record_learned_goal(self, goal_pos: tuple[int, int]) -> None:
@@ -5150,16 +5091,29 @@ class AutonomousEpistemicEngine:
                 description=f"Learned goal location at {goal_pos}",
                 properties={"position": list(goal_pos), "role": "GOAL"},
             )
-            self.pending_transactions.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=gid,
-                    node_data=gnode.model_dump(),
-                )
+            self._commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=gid,
+                        node_data=gnode.model_dump(),
+                    )
+                ],
+                author="record_learned_goal",
             )
 
-    def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Convert epistemic engine state, internal memory, and knowledge base into transactional HCIR mutations."""
+    def _commit_operations(self, ops: list[TransactionOperation], author: str) -> None:
+        """Commit ops to the engine's TM-governed workspace (task-frame fallback)."""
+        if not ops:
+            return
+        ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
+        if ws is None and getattr(self, "active_task_frame", None) is not None:
+            ws = getattr(self.active_task_frame, "workspace", None)
+        if ws is not None:
+            ws.commit_operations(ops, author=author)
+
+    def _telemetry_operation(self) -> TransactionOperation:
+        """Single op mirroring _MIRRORED executive fields as one ObservationNode."""
         node_id = "autonomous_epistemic_engine"
         engine_node = ObservationNode(
             id=node_id,
@@ -5176,14 +5130,15 @@ class AutonomousEpistemicEngine:
                 "consecutive_plan_failures": self.consecutive_plan_failures,
             },
         )
-        ops = [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=node_id,
-                node_data=engine_node.model_dump(),
-            )
-        ]
-        ops.extend(self.pending_transactions)
+        return TransactionOperation(
+            op=TransactionOp.UPSERT_NODE,
+            node_id=node_id,
+            node_data=engine_node.model_dump(),
+        )
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Convert epistemic engine state, internal memory, and knowledge base into transactional HCIR mutations."""
+        ops = [self._telemetry_operation()]
         ops.extend(self.symbolic_theory.to_transaction_operations())
         ops.extend(self.working_memory.to_transaction_operations())
         all_goal_positions = set(self.learned_goal_positions)
@@ -5229,3 +5184,120 @@ class AutonomousEpistemicEngine:
         cortical faculties observe this frozen snapshot and emit transactional operations.
         """
         return EngineState.from_engine(self).freeze()
+
+    def apply_delta(self, delta: Any, author: str = "unknown") -> None:
+        """The ONLY faculty write path: apply a StateDelta to engine state (WP1).
+
+        Assigns each pending field on self/self.state and emits HCIR
+        transaction operations for changed fields (one commit per call).
+        """
+        if delta is None or getattr(delta, "is_empty", lambda: True)():
+            return
+        cow = getattr(delta, "_cow", {})
+        for field, value in delta.items().items():
+            if (
+                field in cow
+                and cow[field] is not None
+                and (hasattr(value, "__len__") or field in cow)
+                and cow[field] is value
+                and (
+                    # live-container mutations are already in place — skip reassign
+                    getattr(self, field, None) is value or getattr(self.state, field, None) is value
+                )
+            ):
+                continue
+            # Engine-first: properties proxy correctly to their true owner
+            # (working_memory / state / trackers). state is the fallback for
+            # fields not exposed on the engine.
+            if hasattr(self, field):
+                setattr(self, field, value)
+            elif hasattr(self.state, field):
+                setattr(self.state, field, value)
+            else:
+                setattr(self, field, value)
+        # HCIR emission: fields mirrored into the world-theory snapshot get a
+        # single transaction commit; unmapped fields are engine-transient.
+        _MIRRORED = {
+            "phase",
+            "step_counter",
+            "avatar_pos",
+            "avatar_feature",
+            "avatar_features",
+            "tested_actions",
+            "exploration_budget",
+            "consecutive_plan_failures",
+        }
+        if _MIRRORED & set(delta.items()):
+            try:
+                ops = [self._telemetry_operation()]
+                ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
+                if ws is None and getattr(self, "active_task_frame", None) is not None:
+                    ws = getattr(self.active_task_frame, "workspace", None)
+                if ws is not None:
+                    ws.commit_operations(ops, author=author)
+            except Exception as exc:
+                self.rejected_delta_commits = getattr(self, "rejected_delta_commits", 0) + 1
+                logger.error("apply_delta commit rejected (author=%s): %s", author, exc)
+
+    def commit_faculty_journal(self, journal: Any) -> bool:
+        """Commit a journaled faculty write set as one HCIR transaction (WP1).
+
+        Writes already landed (write-through); on rejection, before-images are
+        restored (containers via in-place clear+update so external refs hold).
+        """
+        if journal is None or not journal.touched:
+            return True
+        changed: dict[str, Any] = {}
+        for key in journal.touched:
+            before = journal.before.get(key)
+            if key.startswith("state."):
+                current = getattr(self.state, key[6:], None)
+            else:
+                current = getattr(self, key, None)
+            if repr(current) != repr(before):
+                changed[key] = before
+        if not changed:
+            return True
+        try:
+            _MIRRORED = {
+                "phase",
+                "step_counter",
+                "avatar_pos",
+                "avatar_feature",
+                "avatar_features",
+                "tested_actions",
+                "exploration_budget",
+                "consecutive_plan_failures",
+            }
+            if _MIRRORED & {k.removeprefix("state.") for k in changed}:
+                ops = [self._telemetry_operation()]
+                ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
+                if ws is None and getattr(self, "active_task_frame", None) is not None:
+                    ws = getattr(self.active_task_frame, "workspace", None)
+                if ws is not None:
+                    ws.commit_operations(ops, author=journal.author)
+            return True
+        except Exception as exc:
+            self.rejected_faculty_commits = getattr(self, "rejected_faculty_commits", 0) + 1
+            logger.error("faculty journal commit rejected (author=%s): %s", journal.author, exc)
+            for key in journal.touched:
+                before = journal.before.get(key)
+                target = self.state if key.startswith("state.") else self
+                fname = key[6:] if key.startswith("state.") else key
+                live = getattr(target, fname, None)
+                if isinstance(live, dict) and isinstance(before, dict):
+                    live.clear()
+                    live.update(before)
+                elif isinstance(live, (set, frozenset)) and isinstance(
+                    before, (set, frozenset, list)
+                ):
+                    live.clear()
+                    live.update(before)
+                elif isinstance(live, list) and isinstance(before, list):
+                    live[:] = before
+                elif before is not None and repr(before) != "<object object>":
+                    try:
+                        setattr(target, fname, before)
+                    except Exception:
+                        pass
+            return False

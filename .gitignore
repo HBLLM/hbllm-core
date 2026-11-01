@@ -92,3 +92,4 @@ kaggle_submission/environment_files/
 /kaggle_arc2_submission/
 /graphify-out
 *_backup_*.json
+/reports

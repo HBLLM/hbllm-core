@@ -1117,7 +1117,7 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                 hasattr(self.internal_agent, "assimilate_feedback")
                 and getattr(self.internal_agent, "prev_grid", None) is not None
             ):
-                self.internal_agent.assimilate_feedback(grid, avail, is_lost=True)
+                self.internal_agent.assimilate_feedback(grid, avail, is_failure=True)
             self.reset_episode(
                 retain_dynamics=True,
                 is_new_level=False,
@@ -1162,7 +1162,9 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                     hasattr(self.internal_agent, "assimilate_feedback")
                     and getattr(self.internal_agent, "prev_grid", None) is not None
                 ):
-                    self.internal_agent.assimilate_feedback(grid, available_actions, is_win=True)
+                    self.internal_agent.assimilate_feedback(
+                        grid, available_actions, is_success=True
+                    )
             self.current_levels_completed = lvl_completed
             if hasattr(self.internal_agent, "current_level"):
                 self.internal_agent.current_level = lvl_completed
@@ -1222,9 +1224,6 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
             g_ctx = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
                 getattr(self, "arc_env", None), "game", None
             )
-            if g_ctx is not None:
-                self.internal_agent._arc_game = g_ctx
-
             # Extract perceptual objects for macro plan synthesis
             _objects = None
             try:

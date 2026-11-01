@@ -30,8 +30,8 @@ except (ImportError, AttributeError):
         allow_module_level=True,
     )
 
-from hbllm.hcir.skills import GF2LinearSolver
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from plugins.arc_agi_adapter.arc_skills import GF2LinearSolver
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Spatiotemporal Dynamics & Periodic Phase

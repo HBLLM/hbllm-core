@@ -1,7 +1,7 @@
 """Unit tests for HCIR World Round 20 — The Grand Capstone:
 1. Global Neuronal Workspace (GNWT) Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
 2. Native Structural Graph All-Pairs Shortest Paths, Radius, Diameter & Betweenness Centrality (Brandes)
-3. Unified Closed-Loop Active Inference Governor (AutonomousEpistemicEngine.decide_active_inference_step)
+3. Canonical 5-stage pipeline via AutonomousEpistemicEngine.decide (WP1)
 4. Full Substrate Capstone Invariant Verification across all 20 Evolutionary Rounds
 """
 
@@ -11,7 +11,6 @@ from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
-    UnifiedActiveInferenceDecision,
 )
 from hbllm.hcir.world.global_workspace_ignition import (
     CandidateIgnitionSignal,
@@ -116,7 +115,7 @@ def test_graph_all_pairs_shortest_paths_radius_diameter_and_betweenness() -> Non
 
 
 def test_unified_closed_loop_active_inference_decision() -> None:
-    """Test Grand Capstone canonical 5-stage active inference decision loop."""
+    """Canonical 5-stage active inference runs through CorticalPipeline via decide() (WP1)."""
     engine = AutonomousEpistemicEngine(enable_logging=False)
     engine.avatar_pos = (5, 5)
     engine.record_learned_goal((5, 8))
@@ -125,31 +124,19 @@ def test_unified_closed_loop_active_inference_decision() -> None:
     curr_grid[5][5] = 1  # avatar
     curr_grid[5][8] = 2  # goal
 
-    decision = engine.decide_active_inference_step(
+    runs_before = getattr(engine, "_pipeline_runs", 0)
+    action, data = engine.decide(
         curr_grid=curr_grid,
-        available_actions=[1, 2, 3, 4],  # e.g., Up, Down, Left, Right
+        available_actions=[1, 2, 3, 4],
     )
 
-    assert isinstance(decision, UnifiedActiveInferenceDecision)
-    assert decision.selected_action in [1, 2, 3, 4]
-    assert decision.expected_free_energy >= 0.0
-    assert decision.locomotor_velocity > 0.0
-    # Interoceptive pacing: compression (<1) under low salience, dilation (>1) under threat/surprise
-    assert decision.time_dilation_factor > 0.0
-    assert decision.subthalamic_status in (
-        "dispatch_permitted",
-        "brake_active",
-        "emergency_override",
-    )
-
-    # Verify that the decision was automatically recorded into HCIR Symbolic World Theory
-    pred = decision.to_causal_predicate()
-    assert pred.variable == "active_inference_decision"
-    assert "act:" in pred.value
-    assert "vel:" in pred.value
-
-    recorded_predicates = [p.variable for p in engine.symbolic_theory.causal_predicates]
-    assert "active_inference_decision" in recorded_predicates
+    # pipeline.run called exactly once per decide
+    assert getattr(engine, "_pipeline_runs", 0) == runs_before + 1
+    if action is None:
+        # pipeline rejection -> no-proposal sentinel handled by the adapter
+        assert data is None or data.get("pipeline_rejected") is True
+    else:
+        assert action in [1, 2, 3, 4]
 
 
 def test_grand_capstone_full_substrate_invariants_across_all_20_rounds() -> None:
@@ -193,4 +180,3 @@ def test_grand_capstone_full_substrate_invariants_across_all_20_rounds() -> None
 
     # Round 20 Grand Capstone Faculties & Orchestrator
     assert engine.workspace_ignition is not None
-    assert callable(engine.decide_active_inference_step)

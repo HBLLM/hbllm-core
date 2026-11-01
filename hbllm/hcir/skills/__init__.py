@@ -14,10 +14,8 @@ from hbllm.hcir.skills.base import (
     BaseHierarchicalSkill,
 )
 from hbllm.hcir.skills.common_subskills import (
-    BlockPushPlanner,
     ColorCluster,
     DiscreteVectorTranslator,
-    GF2LinearSolver,
     LatticeNavigator,
     LatticeQuantizer,
     PerceptualClusterDetector,
@@ -41,10 +39,8 @@ from hbllm.hcir.skills.declarative import (
     EntityCountPredicate,
     GridDimensionPredicate,
     HomogeneousRegionPredicate,
-    LatticeConduitPredicate,
     MetadataPredicate,
     Not,
-    PanelConstraint,
     PearlCausalDoPredicate,
     PixelDensityPredicate,
     PredictiveConfidencePredicate,
@@ -53,8 +49,6 @@ from hbllm.hcir.skills.declarative import (
     SymbolicPredicate,
     SymbolicSubgoal,
     SymmetryPredicate,
-    TileFramePredicate,
-    TileGridPredicate,
 )
 from hbllm.hcir.skills.induction import (
     SkillInductionEngine,

@@ -41,7 +41,7 @@ def test_ofc_counterfactual_mental_simulation_gating() -> None:
         predicted_avatar_pos=(0, 0),
     )
     result = evaluator.evaluate(
-        engine=engine,
+        view=engine,
         curr_grid=grid,
         next_step=deadlock_step,
         available_actions=[1, 2, 3, 4],
@@ -55,7 +55,7 @@ def test_ofc_counterfactual_mental_simulation_gating() -> None:
         predicted_avatar_pos=(3, 3),
     )
     safe_result = evaluator.evaluate(
-        engine=engine,
+        view=engine,
         curr_grid=grid,
         next_step=safe_step,
         available_actions=[1, 2, 3, 4],
@@ -70,7 +70,7 @@ def test_ofc_counterfactual_mental_simulation_gating() -> None:
         predicted_avatar_pos=(4, 4),
     )
     hazard_result = evaluator.evaluate(
-        engine=engine,
+        view=engine,
         curr_grid=grid,
         next_step=hazard_step,
         available_actions=[1, 2, 3, 4],
@@ -142,28 +142,28 @@ def test_dynamic_macro_skill_compression_loop_elimination() -> None:
             avatar_pos=(1, 1),
             action_id=4,
             reward=0.0,
-            is_win=False,
+            is_success=False,
         ),
         EpisodicTransition(
             step=1,
             avatar_pos=(1, 2),
             action_id=3,
             reward=0.0,
-            is_win=False,
+            is_success=False,
         ),
         EpisodicTransition(
             step=2,
             avatar_pos=(1, 1),
             action_id=2,
             reward=0.0,
-            is_win=False,
+            is_success=False,
         ),
         EpisodicTransition(
             step=3,
             avatar_pos=(2, 1),
             action_id=2,
             reward=1.0,
-            is_win=True,
+            is_success=True,
         ),
     ]
 

@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    GoalNode,
+    HCIREdge,
+    HCIREdgeType,
+)
+from hbllm.hcir.native_adapter import (
+    NativeGraphAdapter,
+)
+
 """Unit tests for Round 6 Epistemic & Cortical Neuro-Symbolic Enhancements.
 
 Track 1: Dual Neuromodulation (VTA Dopamine RPE vs. LC Noradrenaline Adaptive Gain)
@@ -10,8 +20,6 @@ Track 4: Native Structural Graph Multi-Source Parallel Reachability Cones
 
 import numpy as np
 
-from hbllm.hcir.graph import CognitiveGraph, GoalNode, HCIREdge, HCIREdgeType
-from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_deliberation import (
     AdaptiveNeuromodulationGovernor,
@@ -165,10 +173,6 @@ class TestTrack2RetrosplenialSpatialCoordinateTransform:
         allo = engine.to_allocentric_coordinate(ego)
         assert allo == (6, 8)
 
-
-class TestTrack3PearlLevel3CounterfactualRegret:
-    """Track 3: Counterfactual Simulation and Regret Minimization."""
-
     def test_counterfactual_regret_evaluation(self):
         evaluator = CounterfactualRegretEvaluator(regret_threshold=0.10)
         grid = np.zeros((10, 10), dtype=int)
@@ -229,10 +233,6 @@ class TestTrack3PearlLevel3CounterfactualRegret:
         assert comps[0].is_counterfactually_superior
         assert comps[0].to_causal_predicate().variable == "counterfactual:regret"
         assert len(comps[0].to_transaction_operations()) > 0
-
-
-class TestTrack4NativeGraphMultiSourceReachabilityCones:
-    """Track 4: Native Multi-Source Parallel Reachability Cones."""
 
     def test_native_adapter_parallel_reachability(self):
         adapter = NativeGraphAdapter()

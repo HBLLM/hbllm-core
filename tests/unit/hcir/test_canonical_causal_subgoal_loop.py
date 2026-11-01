@@ -15,10 +15,18 @@ from __future__ import annotations
 
 import numpy as np
 
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.cortex_planner import MentalSimulationPlanner
-from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
-from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
+from hbllm.hcir.world.cortex_planner import (
+    MentalSimulationPlanner,
+)
+from hbllm.hcir.world.frontopolar_subgoal_stack import (
+    SubgoalType,
+)
+from hbllm.hcir.world.remote_causal_attribution import (
+    RemoteCausalAffordance,
+)
 
 
 def test_spatial_effector_causal_binding_and_remote_attribution():

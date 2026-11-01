@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from hbllm.hcir.algorithms.protocol import native_of
+
 
 def minimum_dominating_set(graph: Any) -> set[str]:
     """Compute an approximate Minimum Dominating Set (MDS) using greedy coverage heuristic.
@@ -13,6 +15,9 @@ def minimum_dominating_set(graph: Any) -> set[str]:
         Set of node IDs such that every node in the graph is either in the set
         or adjacent to a node in the set.
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.minimum_dominating_set()
     if hasattr(graph, "all_nodes"):
         all_nodes = {n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()}
     elif hasattr(graph, "_nodes"):
@@ -60,6 +65,9 @@ def maximum_independent_set(graph: Any) -> set[str]:
     Returns:
         Set of mutually non-adjacent node IDs representing non-conflicting concurrent elements.
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.maximum_independent_set()
     if hasattr(graph, "all_nodes"):
         all_nodes = {n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()}
     elif hasattr(graph, "_nodes"):
@@ -108,6 +116,9 @@ def minimum_vertex_cover(graph: Any) -> set[str]:
     Returns:
         Minimal set of node IDs such that every undirected edge has at least one endpoint in the set.
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.minimum_vertex_cover()
     if hasattr(graph, "all_nodes"):
         all_nodes = {n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()}
     elif hasattr(graph, "_nodes"):
@@ -202,6 +213,9 @@ def greedy_edge_coloring(graph: Any) -> dict[tuple[str, str], int]:
     Returns:
         Dictionary mapping canonical edge pairs (min(u, v), max(u, v)) to discrete color indices (0, 1, 2, ...).
     """
+    native = native_of(graph)
+    if native is not None:
+        return native.greedy_edge_coloring()
     if hasattr(graph, "all_nodes"):
         all_nodes = {n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()}
     elif hasattr(graph, "_nodes"):

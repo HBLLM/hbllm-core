@@ -111,7 +111,7 @@ def test_counterfactual_shapley_credit_attribution() -> None:
         )
     trajectory.append(
         EpisodicTransition(
-            step=10, avatar_pos=(0, 0), action_id=2, is_lost=True, grid_snapshot=grid
+            step=10, avatar_pos=(0, 0), action_id=2, is_failure=True, grid_snapshot=grid
         )
     )
 
@@ -136,8 +136,8 @@ def test_counterfactual_shapley_credit_attribution() -> None:
     setattr(hippocampus, "learned_goals", goals)
     setattr(hippocampus, "learned_barriers", barriers)
     assignment = hippocampus.trigger_sharp_wave_ripple_replay(
-        is_lost=True,
-        is_win=False,
+        is_failure=True,
+        is_success=False,
         prev_grid=grid,
     )
     assert assignment is not None

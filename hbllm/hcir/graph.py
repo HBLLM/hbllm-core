@@ -27,9 +27,11 @@ Design invariants:
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
 import logging
+import warnings
 from collections import deque
 from collections.abc import Iterator
 from typing import Any
@@ -135,6 +137,29 @@ class SubstrateDivergenceError(RuntimeError):
     """Raised when native graph acceleration substrate diverges from authoritative Python graph."""
 
 
+_NATIVE_INIT_WARNED = False
+
+
+def _deprecated_algorithm(algo_name: str) -> Any:
+    """Emit a DeprecationWarning steering callers to ``hbllm.hcir.algorithms`` (WP5)."""
+
+    def decorator(fn: Any) -> Any:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            warnings.warn(
+                f"CognitiveGraph.{fn.__name__}() is deprecated; "
+                f"use hbllm.hcir.algorithms.{algo_name}(graph, ...) instead. "
+                "Removal: next minor release.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 class CognitiveGraph:
     """The unified typed cognitive hypergraph.
 
@@ -173,21 +198,68 @@ class CognitiveGraph:
         # ── Native Substrate Sync ──
         self._enable_native_substrate = enable_native_substrate
         self._native_adapter: Any | None = None
+        self._native_divergence_count: int = 0
+        self._native_last_error: str | None = None
+
+        # ── Copy-on-write fork state (WP4) ──
+        self._cow_indexes: bool = False
+        self._dirty_nodes: set[str] | None = None
+        self._dirty_edges: set[str] | None = None
+        self._fork_parent: CognitiveGraph | None = None
+        self._fork_base_version: int | None = None
         if enable_native_substrate:
             try:
                 from hbllm.hcir.native_adapter import NativeGraphAdapter
 
                 self._native_adapter = NativeGraphAdapter()
             except Exception as e:
-                logger.debug("CognitiveGraph: native adapter initialization skipped: %s", e)
+                global _NATIVE_INIT_WARNED
+                if not _NATIVE_INIT_WARNED:
+                    logger.warning("CognitiveGraph: requested native substrate unavailable: %s", e)
+                    _NATIVE_INIT_WARNED = True
+                self._native_last_error = str(e)
                 self._native_adapter = None
 
     # ── Node Operations ──────────────────────────────────────────────
 
+    def _materialize_indexes(self) -> None:
+        """Copy-on-write: detach shared index structures on first branch mutation."""
+        if not self._cow_indexes:
+            return
+        self._edges_by_source = {k: set(v) for k, v in self._edges_by_source.items()}
+        self._edges_by_target = {k: set(v) for k, v in self._edges_by_target.items()}
+        self._idx_by_type = {k: set(v) for k, v in self._idx_by_type.items()}
+        self._idx_by_category = {k: set(v) for k, v in self._idx_by_category.items()}
+        self._idx_by_lifecycle = {k: set(v) for k, v in self._idx_by_lifecycle.items()}
+        self._idx_by_scope = {k: set(v) for k, v in self._idx_by_scope.items()}
+        self._idx_by_tag = {k: set(v) for k, v in self._idx_by_tag.items()}
+        self._node_digests = dict(self._node_digests)
+        self._edge_digests = dict(self._edge_digests)
+        self._cow_indexes = False
+
+    def _mark_dirty_node(self, node_id: str) -> None:
+        if self._dirty_nodes is not None:
+            self._dirty_nodes.add(node_id)
+
+    def _mark_dirty_edge(self, edge_id: str) -> None:
+        if self._dirty_edges is not None:
+            self._dirty_edges.add(edge_id)
+
+    def native_health(self) -> dict[str, Any]:
+        """Native substrate health report for kernel telemetry (WP4)."""
+        return {
+            "enabled": bool(self._enable_native_substrate),
+            "available": self._native_adapter is not None,
+            "divergences": self._native_divergence_count,
+            "last_error": self._native_last_error,
+        }
+
     def add_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add a node to the graph.  Raises ValueError on duplicate ID."""
+        self._materialize_indexes()
         if node.id in self._nodes:
             raise ValueError(f"Duplicate node ID: {node.id}")
+        self._mark_dirty_node(node.id)
         self._nodes[node.id] = node
         self._index_node(node)
         self._track_digest(self._node_digests, "n", node)
@@ -213,12 +285,16 @@ class CognitiveGraph:
                     created_at=getattr(node, "created_at", 0.0),
                 )
             except Exception as e:
+                self._native_divergence_count += 1
+                self._native_last_error = str(e)
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on add_node for {node.id}: {e}"
                 ) from e
 
     def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add or replace a node in the graph."""
+        self._materialize_indexes()
+        self._mark_dirty_node(node.id)
         old = self._nodes.get(node.id)
         if old is not None:
             self._deindex_node(old)
@@ -250,21 +326,27 @@ class CognitiveGraph:
                     created_at=getattr(node, "created_at", 0.0),
                 )
             except Exception as e:
+                self._native_divergence_count += 1
+                self._native_last_error = str(e)
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on upsert_node for {node.id}: {e}"
                 ) from e
 
     def remove_node(self, node_id: str) -> HCIRNode | None:
         """Remove a node and all its connected edges.  Returns the removed node."""
+        self._materialize_indexes()
         node = self._nodes.pop(node_id, None)
         if node is None:
             return None
+        self._mark_dirty_node(node_id)
         self._deindex_node(node)
         self._untrack_digest(self._node_digests, node_id)
         if self._native_adapter is not None:
             try:
                 self._native_adapter.remove_node(node_id)
             except Exception as e:
+                self._native_divergence_count += 1
+                self._native_last_error = str(e)
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on remove_node for {node_id}: {e}"
                 ) from e
@@ -275,11 +357,14 @@ class CognitiveGraph:
         for eid in connected_edge_ids:
             edge = self._edges.pop(eid, None)
             if edge:
+                self._mark_dirty_edge(eid)
                 self._untrack_digest(self._edge_digests, eid)
                 if self._native_adapter is not None:
                     try:
                         self._native_adapter.remove_edge(eid)
                     except Exception as e:
+                        self._native_divergence_count += 1
+                        self._native_last_error = str(e)
                         raise SubstrateDivergenceError(
                             f"Native substrate diverged on remove_edge for {eid}: {e}"
                         ) from e
@@ -311,6 +396,8 @@ class CognitiveGraph:
 
     def add_edge(self, edge: HCIREdge) -> None:
         """Add an edge.  Raises ValueError on duplicate ID or dangling refs."""
+        self._materialize_indexes()
+        self._mark_dirty_edge(edge.id)
         if edge.id in self._edges:
             raise ValueError(f"Duplicate edge ID: {edge.id}")
         for nid in edge.sources + edge.targets:
@@ -340,24 +427,29 @@ class CognitiveGraph:
                     created_at=getattr(edge, "created_at", 0.0),
                 )
             except Exception as e:
+                self._native_divergence_count += 1
+                self._native_last_error = str(e)
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on add_edge for {edge.id}: {e}"
                 ) from e
 
     def remove_edge(self, edge_id: str) -> HCIREdge | None:
         """Remove an edge by ID."""
+        self._materialize_indexes()
         edge = self._edges.pop(edge_id, None)
         if edge is None:
             return None
+        self._mark_dirty_edge(edge_id)
         self._untrack_digest(self._edge_digests, edge_id)
         if self._native_adapter is not None:
             try:
                 self._native_adapter.remove_edge(edge_id)
             except Exception as e:
+                self._native_divergence_count += 1
+                self._native_last_error = str(e)
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on remove_edge for {edge_id}: {e}"
                 ) from e
-                logger.debug("CognitiveGraph: native remove_edge error: %s", e)
         for src in edge.sources:
             self._edges_by_source.get(src, set()).discard(edge_id)
         for tgt in edge.targets:
@@ -485,78 +577,57 @@ class CognitiveGraph:
             return self._native_adapter.parallel_reachability_cones(seed_nodes, max_depth)
         return {s: self.reachable_nodes(s, max_depth) for s in seed_nodes}
 
+    @_deprecated_algorithm("connected_components")
     def connected_components(self) -> list[set[str]]:
         """Decompose active graph into disjoint undirected connected components."""
-        if self._native_adapter is not None:
-            return self._native_adapter.connected_components()
         return algorithms.connected_components(self)
 
+    @_deprecated_algorithm("topological_sort")
     def topological_sort(self) -> list[str]:
         """Compute topological ordering of DAG nodes using Kahn's algorithm."""
-        if self._native_adapter is not None:
-            return self._native_adapter.topological_sort()
         return algorithms.topological_sort(self)
 
+    @_deprecated_algorithm("transitive_reduction_subgraph")
     def transitive_reduction(self) -> CognitiveGraph:
         """Compute the transitive reduction of the cognitive graph DAG."""
-        surviving = algorithms.transitive_reduction(self)
-        reduced_graph = CognitiveGraph(enable_native_substrate=False)
-        for node in self.all_nodes():
-            reduced_graph.add_node(copy.deepcopy(node))
-        for edge in self.all_edges():
-            keep = False
-            for s in edge.sources:
-                for t in edge.targets:
-                    if (s, t) in surviving:
-                        keep = True
-                        break
-                if keep:
-                    break
-            if keep:
-                reduced_graph.add_edge(copy.deepcopy(edge))
-        return reduced_graph
+        return algorithms.transitive_reduction_subgraph(self)
 
+    @_deprecated_algorithm("minimum_spanning_tree_subgraph")
     def minimum_spanning_tree(self) -> tuple[CognitiveGraph, float]:
         """Compute the Minimum Spanning Tree (MST) across cognitive graph vertices using Kruskal's algorithm."""
-        mst_edges, total_weight = algorithms.minimum_spanning_tree(self)
-        mst_graph = CognitiveGraph(enable_native_substrate=False)
-        for node in self.all_nodes():
-            mst_graph.add_node(copy.deepcopy(node))
-        for edge in mst_edges:
-            mst_graph.add_edge(copy.deepcopy(edge))
-        return mst_graph, total_weight
+        return algorithms.minimum_spanning_tree_subgraph(self)
 
+    @_deprecated_algorithm("all_pairs_shortest_paths")
     def all_pairs_shortest_paths(
         self,
         weight_attribute: str = "weight",
     ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], list[str]]]:
         """Compute all-pairs shortest paths using Floyd-Warshall or repeated Dijkstra."""
-        if self._native_adapter is not None:
-            return self._native_adapter.all_pairs_shortest_paths(weight_attribute=weight_attribute)
         return algorithms.all_pairs_shortest_paths(self, weight_attr=weight_attribute)
 
+    @_deprecated_algorithm("graph_radius_and_diameter")
     def graph_diameter(self, weight_attribute: str = "weight") -> float:
         """Compute the diameter (maximum shortest path distance) of the graph."""
-        return self.graph_radius_and_diameter(weight_attribute=weight_attribute)[1]
+        return algorithms.graph_radius_and_diameter(self, weight_attr=weight_attribute)[1]
 
+    @_deprecated_algorithm("closeness_centrality")
     def closeness_centrality(self, node_id: str, weight_attribute: str = "weight") -> float:
         """Compute normalized closeness centrality for a node."""
         return algorithms.closeness_centrality(self, node_id, weight_attr=weight_attribute)
 
+    @_deprecated_algorithm("articulation_points_and_bridges")
     def find_articulation_points_and_bridges(
         self,
     ) -> tuple[set[str], list[tuple[str, str]]]:
         """Identify critical articulation points and bridges (Hopcroft-Tarjan)."""
-        if self._native_adapter is not None:
-            return self._native_adapter.find_articulation_points_and_bridges()
         return algorithms.articulation_points_and_bridges(self)
 
+    @_deprecated_algorithm("is_biconnected")
     def is_biconnected(self) -> bool:
         """Verify if the graph is biconnected (2-vertex-connected)."""
-        if self._native_adapter is not None:
-            return self._native_adapter.is_biconnected()
         return algorithms.is_biconnected(self)
 
+    @_deprecated_algorithm("max_flow_min_cut")
     def max_flow_min_cut(
         self,
         source: str,
@@ -565,133 +636,107 @@ class CognitiveGraph:
         default_capacity: float = 1.0,
     ) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
         """Compute the maximum flow and minimum s-t cut using Edmonds-Karp algorithm."""
-        if self._native_adapter is not None:
-            return self._native_adapter.max_flow_min_cut(
-                source, sink, capacity_attribute=capacity_attribute
-            )
-        max_flow, _ = algorithms.edmonds_karp_max_flow(
-            self, source, sink, capacity_attr=capacity_attribute
+        return algorithms.max_flow_min_cut(
+            self,
+            source,
+            sink,
+            capacity_attr=capacity_attribute,
+            default_capacity=default_capacity,
         )
-        s_cut, t_cut, _ = algorithms.min_st_cut(
-            self, source, sink, capacity_attr=capacity_attribute
-        )
-        cut_edges: list[tuple[str, str]] = []
-        for edge in self.all_edges():
-            for u in edge.sources:
-                if u in s_cut:
-                    for v in edge.targets:
-                        if v in t_cut:
-                            cut_edges.append((u, v))
-        return max_flow, cut_edges, s_cut, t_cut
 
+    @_deprecated_algorithm("feedback_arc_set")
     def feedback_arc_set(
         self,
     ) -> tuple[list[tuple[str, str]], list[str]]:
         """Compute approximate minimum feedback arc set to break all directed cycles."""
-        if self._native_adapter is not None:
-            return self._native_adapter.feedback_arc_set()
         return algorithms.feedback_arc_set(self)
 
+    @_deprecated_algorithm("strongly_connected_components")
     def strongly_connected_components(
         self,
     ) -> list[set[str]]:
         """Compute Strongly Connected Components (SCC) of the directed graph using Tarjan's algorithm."""
-        if self._native_adapter is not None:
-            return self._native_adapter.strongly_connected_components()
         return algorithms.strongly_connected_components(self)
 
+    @_deprecated_algorithm("condense_scc_metagraph")
     def condense_scc_metagraph(
         self,
     ) -> tuple[dict[int, set[str]], list[tuple[int, int]]]:
         """Condense directed graph SCCs into an acyclic metagraph (DAG)."""
-        if self._native_adapter is not None:
-            return self._native_adapter.condense_scc_metagraph()
         return algorithms.condense_scc_metagraph(self)
 
+    @_deprecated_algorithm("find_eulerian_path_or_circuit")
     def find_eulerian_path_or_circuit(
         self,
     ) -> tuple[bool, list[tuple[str, str]]]:
         """Find an Eulerian path or circuit traversing every directed edge exactly once (Hierholzer)."""
-        if self._native_adapter is not None:
-            return self._native_adapter.find_eulerian_path_or_circuit()
         return algorithms.find_eulerian_path_or_circuit(self)
 
+    @_deprecated_algorithm("chinese_postman_tour")
     def chinese_postman_tour(
         self,
         weight_attribute: str = "weight",
     ) -> tuple[float, list[tuple[str, str]]]:
         """Compute minimum-weight edge-covering tour traversing every edge at least once (CPP)."""
-        if self._native_adapter is not None:
-            return self._native_adapter.chinese_postman_tour()
         return algorithms.chinese_postman_tour(self, weight_attr=weight_attribute)
 
+    @_deprecated_algorithm("minimum_dominating_set")
     def minimum_dominating_set(
         self,
     ) -> set[str]:
         """Compute an approximate Minimum Dominating Set (MDS) using greedy coverage heuristic."""
-        if self._native_adapter is not None:
-            return self._native_adapter.minimum_dominating_set()
         return algorithms.minimum_dominating_set(self)
 
+    @_deprecated_algorithm("maximum_independent_set")
     def maximum_independent_set(
         self,
     ) -> set[str]:
         """Compute an approximate Maximum Independent Set (MIS) using minimum-degree greedy heuristic."""
-        if self._native_adapter is not None:
-            return self._native_adapter.maximum_independent_set()
         return algorithms.maximum_independent_set(self)
 
+    @_deprecated_algorithm("minimum_vertex_cover")
     def minimum_vertex_cover(
         self,
     ) -> set[str]:
         """Compute an approximate Minimum Vertex Cover (MVC) using greedy coverage and Gallai duality."""
-        if self._native_adapter is not None:
-            return self._native_adapter.minimum_vertex_cover()
         return algorithms.minimum_vertex_cover(self)
 
+    @_deprecated_algorithm("greedy_edge_coloring")
     def greedy_edge_coloring(
         self,
     ) -> dict[tuple[str, str], int]:
         """Compute a proper greedy edge coloring (Vizing's theorem) of undirected edges."""
-        if self._native_adapter is not None:
-            return self._native_adapter.greedy_edge_coloring()
         return algorithms.greedy_edge_coloring(self)
 
+    @_deprecated_algorithm("feedback_vertex_set")
     def feedback_vertex_set(
         self,
     ) -> set[str]:
         """Compute an approximate minimal Feedback Vertex Set (FVS) to break all directed cycles."""
-        if self._native_adapter is not None:
-            return self._native_adapter.feedback_vertex_set()
         return algorithms.feedback_vertex_set(self)
 
+    @_deprecated_algorithm("essential_causal_skeleton")
     def essential_causal_skeleton(
         self,
     ) -> set[tuple[str, str]]:
         """Compute the irreducible causal skeleton DAG via transitive reduction."""
-        if self._native_adapter is not None:
-            return self._native_adapter.essential_causal_skeleton()
         return algorithms.essential_causal_skeleton(self)
 
+    @_deprecated_algorithm("graph_radius_and_diameter")
     def graph_radius_and_diameter(
         self,
         weight_attribute: str = "weight",
     ) -> tuple[float, float]:
         """Compute the radius and diameter of the graph based on node eccentricities."""
-        if self._native_adapter is not None:
-            return self._native_adapter.graph_radius_and_diameter()
         return algorithms.graph_radius_and_diameter(self, weight_attr=weight_attribute)
 
+    @_deprecated_algorithm("betweenness_centrality")
     def betweenness_centrality(
         self,
         normalized: bool = True,
         directed: bool = False,
     ) -> dict[str, float]:
         """Compute Brandes' betweenness centrality for all vertices in the graph."""
-        if self._native_adapter is not None:
-            return self._native_adapter.betweenness_centrality(
-                normalized=normalized, directed=directed
-            )
         return algorithms.betweenness_centrality(self, normalized=normalized, directed=directed)
 
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
@@ -943,12 +988,22 @@ class CognitiveGraph:
         forked._enable_native_substrate = self._enable_native_substrate
         forked._nodes = dict(self._nodes)
         forked._edges = dict(self._edges)
-        forked._edges_by_source = {k: set(v) for k, v in self._edges_by_source.items()}
-        forked._edges_by_target = {k: set(v) for k, v in self._edges_by_target.items()}
-        forked._idx_by_type = {k: set(v) for k, v in self._idx_by_type.items()}
-        forked._idx_by_category = {k: set(v) for k, v in self._idx_by_category.items()}
-        forked._node_digests = dict(self._node_digests)
-        forked._edge_digests = dict(self._edge_digests)
+        # Copy-on-write: parent and child share index dicts until either mutates
+        forked._edges_by_source = self._edges_by_source
+        forked._edges_by_target = self._edges_by_target
+        forked._idx_by_type = self._idx_by_type
+        forked._idx_by_category = self._idx_by_category
+        forked._idx_by_lifecycle = self._idx_by_lifecycle
+        forked._idx_by_scope = self._idx_by_scope
+        forked._idx_by_tag = self._idx_by_tag
+        forked._node_digests = self._node_digests
+        forked._edge_digests = self._edge_digests
+        forked._content_digest = self._content_digest
+        forked._cow_indexes = True
+        self._cow_indexes = True
+        forked._dirty_nodes = set()
+        forked._dirty_edges = set()
+        forked._fork_parent = self
         if self._native_adapter is not None:
             try:
                 forked._native_adapter = self._native_adapter.snapshot()

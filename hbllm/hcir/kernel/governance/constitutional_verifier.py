@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from hbllm.hcir.transactions import (
     HCIRTransaction,
@@ -37,32 +38,6 @@ logger = logging.getLogger(__name__)
 
 class ConstitutionalViolationError(RuntimeError):
     """Raised when an operation or transaction violates constitutional constraints."""
-
-
-TIER_COMMIT_AUTHORITY: dict[WorkspaceTier | str, set[str] | None] = {
-    WorkspaceTier.WORKING: None,  # open
-    WorkspaceTier.BRAIN: {
-        "cortex_deliberation",
-        "cortex_planner",
-        "prefrontal_working_memory",
-        "deliberation_stage",
-        "simulation_stage",
-        "cortical_pipeline",
-        "system",
-    },
-    WorkspaceTier.PERSISTENT: {
-        "cortex_episodic",
-        "episodic_stage",
-        "constitutional_verifier",
-        "system",
-    },
-    WorkspaceTier.META: {
-        "self_model",
-        "reflection_engine",
-        "metacognition",
-        "system",
-    },
-}
 
 
 class ConstitutionalVerifier:
@@ -93,11 +68,13 @@ class ConstitutionalVerifier:
         forbidden_node_types: list[str] | None = None,
         require_provenance: bool = True,
         enforce_scope_isolation: bool = True,
+        authority_registry: Any | None = None,
     ) -> None:
         self._max_operations = max_operations_per_tx
         self._forbidden_types = set(forbidden_node_types or [])
         self._require_provenance = require_provenance
         self._enforce_scope = enforce_scope_isolation
+        self.authority_registry = authority_registry
         self._evaluations: int = 0
         self._approvals: int = 0
         self._rejections: int = 0
@@ -159,6 +136,11 @@ class ConstitutionalVerifier:
 
         # Check 6: Per-tier commit authority (WP6)
         if not self._check_tier_commit_authority(transaction, workspace):
+            self._rejections += 1
+            return False
+
+        # Check 6b: Persistent skills are removed only via supersession
+        if not self._check_persistent_supersede(transaction, workspace):
             self._rejections += 1
             return False
 
@@ -321,29 +303,68 @@ class ConstitutionalVerifier:
         transaction: HCIRTransaction,
         workspace: HCIRWorkspaceState,
     ) -> bool:
-        """Enforce per-tier commit authority (WP6)."""
-        target_tier = getattr(workspace, "tier", None)
-        if (
-            target_tier is None
-            and hasattr(transaction, "metadata")
-            and isinstance(transaction.metadata, dict)
-        ):
-            target_tier = transaction.metadata.get("target_tier")
+        """Enforce per-tier commit authority via kernel-issued grants (WP6.4).
 
-        if target_tier is not None and target_tier in TIER_COMMIT_AUTHORITY:
-            allowed = TIER_COMMIT_AUTHORITY[target_tier]
-            if allowed is not None and transaction.author not in allowed:
-                transaction.annotations.append(
-                    TransactionAnnotation(
-                        author="ConstitutionalVerifier",
-                        assertion=(
-                            f"Commit authority violation: author '{transaction.author}' "
-                            f"not permitted to commit to tier '{target_tier}'"
-                        ),
-                        severity="critical",
+        WORKING is always open. Higher tiers require a ``commit_grant``
+        metadata entry naming a live grant issued by the kernel's
+        CommitAuthorityRegistry — self-declared author strings are ignored.
+        Without a configured registry (standalone workspaces) all tiers
+        remain open for backward compatibility.
+        """
+        if self.authority_registry is None:
+            return True
+        target_tier = getattr(workspace, "tier", None)
+        if target_tier is None or target_tier == WorkspaceTier.WORKING:
+            return True
+        grant_id = (
+            transaction.metadata.get("commit_grant")
+            if isinstance(transaction.metadata, dict)
+            else None
+        )
+        if self.authority_registry.authorizes(grant_id, target_tier):
+            return True
+        transaction.annotations.append(
+            TransactionAnnotation(
+                author="ConstitutionalVerifier",
+                assertion=(
+                    f"Commit authority violation: no valid grant for tier "
+                    f"'{target_tier}' (author '{transaction.author}')"
+                ),
+                severity="critical",
+            )
+        )
+        return False
+
+    def _check_persistent_supersede(
+        self,
+        transaction: HCIRTransaction,
+        workspace: HCIRWorkspaceState,
+    ) -> bool:
+        """PERSISTENT: removing a SkillNode requires metadata['supersedes']."""
+        if getattr(workspace, "tier", None) != WorkspaceTier.PERSISTENT:
+            return True
+        from hbllm.hcir.graph import SkillNode
+
+        supersedes = (
+            transaction.metadata.get("supersedes")
+            if isinstance(transaction.metadata, dict)
+            else None
+        )
+        for op in transaction.operations:
+            if op.op == TransactionOp.REMOVE_NODE and op.node_id:
+                node = workspace.get_node(op.node_id)
+                if isinstance(node, SkillNode) and not supersedes:
+                    transaction.annotations.append(
+                        TransactionAnnotation(
+                            author="ConstitutionalVerifier",
+                            assertion=(
+                                f"Persistent skill {op.node_id} may only be removed "
+                                "via supersedes (replacement node id in metadata)"
+                            ),
+                            severity="critical",
+                        )
                     )
-                )
-                return False
+                    return False
         return True
 
 

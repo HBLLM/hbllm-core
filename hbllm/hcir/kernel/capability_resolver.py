@@ -19,8 +19,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from hbllm.hcir.kernel.capability_sandboxing import infer_capability_permissions
-
 if TYPE_CHECKING:
     from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 
@@ -140,7 +138,22 @@ class CapabilityResolver:
         self.health_registry = health_registry
 
     def register(self, impl: CapabilityImplementation) -> None:
-        """Register a capability implementation."""
+        """Register a capability implementation.
+
+        If a sandbox policy is already bound to this provider, the
+        implementation's manifest permissions must all be granted by it —
+        otherwise the registration is denied (WP6.1 least-privilege).
+        """
+        if self.sandbox_manager is not None and impl.required_permissions:
+            policy = self.sandbox_manager.get_policy(impl.capability_name, impl.implementation_id)
+            if policy is not None:
+                denied = [p for p in impl.required_permissions if not policy.grants(p)]
+                if denied:
+                    raise PermissionError(
+                        f"capability '{impl.capability_name}:{impl.implementation_id}' "
+                        f"requires permissions {sorted(denied)} that its sandbox "
+                        "policy does not grant"
+                    )
         impls = self._registry.setdefault(impl.capability_name, [])
         impls.append(impl)
         # Sort by priority descending (highest first)
@@ -323,27 +336,9 @@ class CapabilityResolver:
                         )
                     }
 
-            # Derive effective permissions: caller override > policy > implementation > runtime inference
-            effective_perms: set[str] = set()
-            if required_permissions is not None:
-                if isinstance(required_permissions, (list, set, tuple)):
-                    effective_perms.update(required_permissions)
-                else:
-                    effective_perms.add(str(required_permissions))
-            else:
-                # 1. Derive from policy (which declares required permissions or infers them)
-                if policy is not None and getattr(policy, "required_permissions", None):
-                    effective_perms.update(policy.required_permissions)
-                # 2. Derive from implementation
-                if impl.required_permissions:
-                    effective_perms.update(impl.required_permissions)
-                elif "safe" in impl.tags or "internal" in impl.tags:
-                    pass  # Explicitly internal/safe capability, do not infer external permissions
-                # 3. If still empty, infer from capability name, tags, and runtime params
-                elif not effective_perms:
-                    effective_perms.update(
-                        infer_capability_permissions(capability_name, tags=impl.tags, params=params)
-                    )
+            # Effective permissions come ONLY from the implementation
+            # manifest — never from call arguments (WP6.2).
+            effective_perms: set[str] = set(impl.required_permissions)
 
             for perm in effective_perms:
                 if not self.sandbox_manager.check_permission(
@@ -368,6 +363,25 @@ class CapabilityResolver:
                 timeout = policy.resource_limits.timeout_seconds
 
         try:
+            # Non-SYSTEM capabilities execute through the sandboxed child
+            # process (WP6.2): subprocess isolation, resource limits, audit hooks.
+            if policy is not None and getattr(policy, "trust_level", None) != "system":
+                from hbllm.hcir.kernel.capability_sandboxing import (
+                    SandboxedExecutor,
+                    TrustLevel,
+                )
+
+                if policy.trust_level != TrustLevel.SYSTEM:
+                    sandbox_exec = SandboxedExecutor(
+                        inner_executor=impl.executor,
+                        permissions=policy.permissions,
+                        resource_limits=policy.resource_limits,
+                    )
+                    result = await sandbox_exec.execute(params)
+                    if budget is not None:
+                        self._total_cost += impl.estimated_cost
+                    return result
+
             # Tier 2 physical process isolation enforcement
             if (
                 policy is not None

@@ -75,8 +75,8 @@ class TestTrack1ThalamocorticalBinding:
         ep_engine.assimilate_feedback(
             curr_grid=grid,
             available_actions=[1, 2, 3, 4],
-            is_win=False,
-            is_lost=False,
+            is_success=False,
+            is_failure=False,
         )
 
         assert len(ep_engine.working_memory.active_bound_bundles) > 0

@@ -251,6 +251,18 @@ class ObjectStateGraphPlanner:
         self.active_target_object_id: str | None = None
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, is_new_level: bool = False) -> None:
         """Reset planner state for a new level or trial."""
         if is_new_level:
@@ -406,11 +418,9 @@ class ObjectStateGraphPlanner:
             if adapter is not None:
                 percept = adapter.lift_percept(curr_grid, context=engine)
             else:
-                H, W = (
-                    (curr_grid.shape[0], curr_grid.shape[1])
-                    if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2
-                    else (16, 16)
-                )
+                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
+                    raise ValueError("lattice extent unknown")
+                H, W = curr_grid.shape[0], curr_grid.shape[1]
                 percept = PerceptionFrame(shape=(H, W))
         return self.lift_salient_objects(percept, engine)
 
@@ -426,6 +436,7 @@ class ObjectStateGraphPlanner:
         patroller_cells: set[tuple[int, int]] | None = None,
         failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
         percept: PerceptionFrame | None = None,
+        engine: Any | None = None,
     ) -> list[Any] | None:
         """Find the shortest deterministic path of primitive motor actions to any target stance."""
         if start_pos in target_stances:
@@ -437,7 +448,12 @@ class ObjectStateGraphPlanner:
         q: deque[tuple[tuple[int, int], list[MentalSimulationStep]]] = deque([(start_pos, [])])
         visited: set[tuple[int, int]] = {start_pos}
 
+        _budget = engine.compute_budget if engine is not None else None
         while q:
+            if _budget is not None and not _budget.allows("cheap"):
+                return None  # anytime: expansion budget exhausted
+            if _budget is not None:
+                _budget.charge(1)
             cur_pos, path = q.popleft()
             if cur_pos in target_stances:
                 return list(path)
@@ -492,10 +508,12 @@ class ObjectStateGraphPlanner:
         available_actions: Sequence[Any],
     ) -> list[Any] | None:
         """Synthesize a complete macro-option plan adhering to the 5 executive cognitive directives.
-        Supports continuous spatial displacement paths (BFS/A*) and allocentric spatial effector (Click) actions.
+        Supports continuous spatial displacement paths (BFS/A*) and allocentric spatial effector (point actuation) actions.
         """
         if not available_actions:
             return None
+        if curr_grid is None:
+            return None  # lattice extent unknown — no plan on a guessed shape
 
         # 1. Resolve PerceptionFrame from domain sensory adapter
         percept: PerceptionFrame
@@ -511,11 +529,9 @@ class ObjectStateGraphPlanner:
             if adapter is not None:
                 percept = adapter.lift_percept(curr_grid, context=engine)
             else:
-                H, W = (
-                    (curr_grid.shape[0], curr_grid.shape[1])
-                    if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2
-                    else (16, 16)
-                )
+                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
+                    return None  # lattice extent unknown — no plan on a guessed shape
+                H, W = curr_grid.shape[0], curr_grid.shape[1]
                 percept = PerceptionFrame(shape=(H, W))
             grid_arr = curr_grid
 
@@ -584,6 +600,7 @@ class ObjectStateGraphPlanner:
                 lethal_features=lethal_features,
                 movable_actions=movable_actions,
                 grid_shape=(H, W),
+                engine=engine,
                 curr_grid=grid_arr,
                 patroller_cells=patroller_cells,
                 failed_transitions=failed_transitions,
@@ -603,7 +620,7 @@ class ObjectStateGraphPlanner:
         # 1B. Spatial Effector Interaction with Exit
         if exit_objects and spatial_effector_actions and not movable_actions:
             eff_act = spatial_effector_actions[0]
-            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_actuation_targets", set())
             for target_obj in exit_objects:
                 unprobed_exit_cells = [c for c in target_obj.cells if c not in quiescent_coords]
                 if not unprobed_exit_cells:
@@ -622,7 +639,7 @@ class ObjectStateGraphPlanner:
                         action=eff_act,
                         action_data={"x": tc, "y": tr},
                         predicted_avatar_pos=av_pos or (tr, tc),
-                        expected_mutation="CLICK_EXIT",
+                        expected_mutation="ACTUATE_EXIT",
                     )
                 ]
 
@@ -632,7 +649,7 @@ class ObjectStateGraphPlanner:
         # ── DIRECTIVE 4B: Active Causal Actuator Contingency Pursuit ──────────
         if spatial_effector_actions:
             eff_act = spatial_effector_actions[0]
-            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_actuation_targets", set())
             actuator_coord = get_engine_state_attr(engine, "active_causal_actuator_coord", None)
             streak = get_engine_state_attr(engine, "consecutive_causal_probes", 0)
             streak_limit = get_engine_state_attr(engine, "causal_actuator_streak_limit", 4)
@@ -895,14 +912,14 @@ class ObjectStateGraphPlanner:
                             )
                         ]
 
-        # 2B. Spatial Effector (Click) Object Interaction
+        # 2B. Spatial Effector (Point Actuation) Object Interaction
         if spatial_effector_actions:
             eff_act = spatial_effector_actions[0]
             if movable_actions and engine.inhibited_actions.get(eff_act, 0) > 0:
                 return None
             from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
-            quiescent_coords = get_engine_state_attr(engine, "quiescent_click_targets", set())
+            quiescent_coords = get_engine_state_attr(engine, "quiescent_actuation_targets", set())
             quiescent_feats = get_engine_state_attr(engine, "quiescent_features", set())
 
             # Check if this effector action defines discrete valid targets
@@ -948,7 +965,7 @@ class ObjectStateGraphPlanner:
                         ):
                             continue
                     vis = get_engine_state_attr(engine, "entity_visit_counts", {}).get(
-                        f"click_{vy}_{vx}", 0
+                        f"actuate_{vy}_{vx}", 0
                     )
                     d = float(abs(vy - target_r) + abs(vx - target_c)) + float(vis) * 20.0
                     if d < best_d:
@@ -981,7 +998,7 @@ class ObjectStateGraphPlanner:
                                     action=eff_act,
                                     action_data=dict(svt),
                                     predicted_avatar_pos=av_pos or (svy, svx),
-                                    expected_mutation="CLICK_UNLOCK",
+                                    expected_mutation="ACTUATE_UNLOCK",
                                 )
                             ]
                     else:
@@ -991,14 +1008,14 @@ class ObjectStateGraphPlanner:
                                 action=eff_act,
                                 action_data={"x": tc, "y": tr},
                                 predicted_avatar_pos=av_pos or (tr, tc),
-                                expected_mutation="CLICK_UNLOCK",
+                                expected_mutation="ACTUATE_UNLOCK",
                             )
                         ]
 
             # DIRECTIVE 5 for effectors: Probe highest-saliency object with unprobed cell selection & quiescence avoidance
             from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 
-            clickable_candidates: list[
+            actuatable_candidates: list[
                 tuple[SalientObject, tuple[int, int], dict[str, Any], float]
             ] = []
             for obj in non_exit_objects:
@@ -1050,12 +1067,12 @@ class ObjectStateGraphPlanner:
                 score = (
                     untouched_bonus + saliency - ior_penalty - quiescent_pen - frame_pen - inert_pen
                 )
-                clickable_candidates.append((obj, (target_r, target_c), action_data, score))
+                actuatable_candidates.append((obj, (target_r, target_c), action_data, score))
 
-            if clickable_candidates:
-                clickable_candidates.sort(key=lambda x: x[3], reverse=True)
+            if actuatable_candidates:
+                actuatable_candidates.sort(key=lambda x: x[3], reverse=True)
                 chosen_obj, chosen_target_cell, chosen_act_data, chosen_score = (
-                    clickable_candidates[0]
+                    actuatable_candidates[0]
                 )
                 tr, tc = chosen_target_cell
                 self.active_target_object_id = chosen_obj.object_id
@@ -1077,7 +1094,7 @@ class ObjectStateGraphPlanner:
                         action=eff_act,
                         action_data=chosen_act_data,
                         predicted_avatar_pos=av_pos or (tr, tc),
-                        expected_mutation="CLICK_OBJECT",
+                        expected_mutation="ACTUATE_OBJECT",
                     )
                 ]
 
@@ -1092,7 +1109,7 @@ class ObjectStateGraphPlanner:
                     unquiescent_vts.sort(
                         key=lambda item: get_engine_state_attr(
                             engine, "entity_visit_counts", {}
-                        ).get(f"click_{item[0]}_{item[1]}", 0)
+                        ).get(f"actuate_{item[0]}_{item[1]}", 0)
                     )
                     best_vy, best_vx, best_vt = unquiescent_vts[0]
                     logger.info(
@@ -1111,7 +1128,7 @@ class ObjectStateGraphPlanner:
                             action=eff_act,
                             action_data=dict(best_vt),
                             predicted_avatar_pos=av_pos or (best_vy, best_vx),
-                            expected_mutation="CLICK_OBJECT",
+                            expected_mutation="ACTUATE_OBJECT",
                         )
                     ]
 

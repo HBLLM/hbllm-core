@@ -17,7 +17,9 @@ import pytest
 
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
 from hbllm.hcir.world.pulvinar_attention_router import (
     PulvinarAttentionRouter,
     PulvinarRoutingState,

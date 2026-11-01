@@ -27,6 +27,16 @@ from hbllm.hcir.stores import IEventStore
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 if TYPE_CHECKING:
+    from hbllm.hcir.adapters.hcir_bus_bridge import HCIRBusBridge
+    from hbllm.hcir.cognitive_event_log import CognitiveEventLog
+    from hbllm.hcir.cognitive_journal import CognitiveJournal
+    from hbllm.hcir.kernel.commit_authority import CommitAuthorityRegistry
+    from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+    from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationPolicy
+    from hbllm.hcir.kernel.migration_metrics import MigrationMetrics
+    from hbllm.hcir.semantic_normalizer import SemanticNormalizer
+    from hbllm.hcir.workspace_tiers import TieredWorkspace
+    from hbllm.hcir.world_kernel import WorldKernel
     from hbllm.persistence.service import PersistenceService
 
 
@@ -95,15 +105,16 @@ class KernelServices:
     sandbox_manager: CapabilitySandboxManager | None = None
 
     # ── HCIR Cognitive OS extensions ──
-    tiered_workspace: Any = None  # TieredWorkspace (lazy import to avoid circular)
-    world_kernel: Any = None  # WorldKernel
-    cognitive_journal: Any = None  # CognitiveJournal
-    cognitive_event_log: Any = None  # CognitiveEventLog
-    semantic_normalizer: Any = None  # SemanticNormalizer
-    constitutional_verifier: Any = None  # ConstitutionalVerifier
-    bus_bridge: Any = None  # HCIRBusBridge
-    migration_policy: Any = None  # MigrationPolicy
-    migration_metrics: Any = None  # MigrationMetrics
+    tiered_workspace: TieredWorkspace | None = None
+    world_kernel: WorldKernel | None = None
+    cognitive_journal: CognitiveJournal | None = None
+    cognitive_event_log: CognitiveEventLog | None = None
+    semantic_normalizer: SemanticNormalizer | None = None
+    constitutional_verifier: ConstitutionalVerifier | None = None
+    bus_bridge: HCIRBusBridge | None = None
+    migration_policy: MigrationPolicy | None = None
+    migration_metrics: MigrationMetrics | None = None
+    commit_authority_registry: CommitAuthorityRegistry | None = None
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
@@ -113,12 +124,38 @@ class KernelServices:
         # ``WAIT event_type="transaction.*"`` can resolve.
         if self.transaction_manager.event_bus is None:
             self.transaction_manager.event_bus = self.event_bus
+        # Per-tier commit authorities (WP6.4): when a TieredWorkspace is
+        # provisioned, ensure a registry exists (injecting it into the
+        # constitutional verifier if needed) and attach per-tier TMs.
+        if self.tiered_workspace is not None:
+            from hbllm.hcir.kernel.commit_authority import CommitAuthorityRegistry
+            from hbllm.hcir.kernel.governance.constitutional_verifier import (
+                ConstitutionalVerifier,
+            )
+
+            if self.commit_authority_registry is None:
+                self.commit_authority_registry = CommitAuthorityRegistry()
+            stages = list(getattr(self.transaction_manager, "_verification_stages", []))
+            for stage in stages:
+                if isinstance(stage, ConstitutionalVerifier) and stage.authority_registry is None:
+                    stage.authority_registry = self.commit_authority_registry
+            self.tiered_workspace.attach_authorities(
+                stages, self.event_bus, self.commit_authority_registry
+            )
+        # Surface graph substrate health via telemetry (WP4).
+        ws = getattr(self, "workspace", None)
+        if ws is None and self.tiered_workspace is not None:
+            ws = getattr(self.tiered_workspace, "working", None)
+        graph = getattr(ws, "graph", None)
+        if self.telemetry is not None and hasattr(graph, "native_health"):
+            self.telemetry.health_probe = graph.native_health
 
     @classmethod
     def create_default(
         cls,
         workspace: HCIRWorkspaceState,
         verification_pipeline: list[Any] | None = None,
+        tiered_workspace: TieredWorkspace | None = None,
     ) -> KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
@@ -131,10 +168,17 @@ class KernelServices:
             SandboxedCapabilityPolicy,
             TrustLevel,
         )
+        from hbllm.hcir.kernel.commit_authority import CommitAuthorityRegistry
+        from hbllm.hcir.kernel.governance.constitutional_verifier import (
+            ConstitutionalVerifier,
+        )
         from hbllm.hcir.kernel.verification import create_default_pipeline
         from hbllm.hcir.world_kernel import WorldKernel
 
-        pipeline = verification_pipeline or create_default_pipeline()
+        registry = CommitAuthorityRegistry()
+        pipeline = verification_pipeline or create_default_pipeline(
+            constitutional_verifier=ConstitutionalVerifier(authority_registry=registry)
+        )
         event_bus = KernelEventBus()
         tx_mgr = TransactionManager(workspace, verification_stages=pipeline, event_bus=event_bus)
         sandbox_mgr = CapabilitySandboxManager()
@@ -259,7 +303,9 @@ class KernelServices:
                 SandboxedCapabilityPolicy(
                     capability_name=r_cap,
                     provider_id=impl_id,
-                    trust_level=TrustLevel.VERIFIED if is_sandbox_run else TrustLevel.SYSTEM,
+                    # The sandbox runner itself is kernel-trusted; its *target*
+                    # code still executes via IsolationMode.SUBPROCESS.
+                    trust_level=TrustLevel.SYSTEM,
                     isolation_mode=IsolationMode.SUBPROCESS
                     if is_sandbox_run
                     else IsolationMode.IN_PROCESS,
@@ -276,6 +322,8 @@ class KernelServices:
             event_bus=event_bus,
             executor=KernelExecutor(),
             telemetry=KernelTelemetry(),
+            tiered_workspace=tiered_workspace,
+            commit_authority_registry=registry,
             sandbox_manager=sandbox_mgr,
             runtime_state=RuntimeState(),
             world_kernel=world_k,

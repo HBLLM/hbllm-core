@@ -16,10 +16,14 @@ import numpy as np
 import pytest
 
 from hbllm.hcir.bytecode import Opcode
-from hbllm.hcir.graph import HCIRNodeType
+from hbllm.hcir.graph import (
+    HCIRNodeType,
+)
 from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.spatial_planner import SpatialActionIntent
-from hbllm.hcir.workspace_tiers import TieredWorkspace
+from hbllm.hcir.workspace_tiers import (
+    TieredWorkspace,
+)
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.entorhinal_grid_cortex import (
     EntorhinalGridCortex,
@@ -39,7 +43,7 @@ from hbllm.hcir.world.skill_program_synthesizer import (
 )
 
 try:
-    import hbllm_compute  # type: ignore[import-not-found]
+    import hbllm_compute  # type: ignore[import-not-found]  # noqa: F401
 
     HAS_HBLLM_COMPUTE = True
 except ImportError:
@@ -307,11 +311,6 @@ def test_active_inference_loop_and_consolidation_pipeline() -> None:
     # Verify skill node promoted into persistent tier
     pers_nodes = tiered_ws.persistent.graph.nodes_by_type(HCIRNodeType.SKILL)
     assert len(pers_nodes) >= 1
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 5: Native Rust SIMD Acceleration in hbllm_compute
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.skipif(not HAS_HBLLM_COMPUTE, reason="hbllm_compute native module not compiled")

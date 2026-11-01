@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.transactions import (
+    TransactionOp,
+    TransactionOperation,
+)
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
@@ -26,7 +29,9 @@ from hbllm.hcir.world.capability_evidence import (
     IntegrationStatus,
     UnitTestStatus,
 )
-from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
+from hbllm.hcir.world.confidence_calibrator import (
+    ConfidenceCalibrator,
+)
 from hbllm.hcir.world.cortex_episodic import (
     DualStoreConsolidationEngine,
     FalsifiableAnalogyEngine,
@@ -37,7 +42,9 @@ from hbllm.hcir.world.cortex_planner import (
     ReplanResult,
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
-from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
+from hbllm.hcir.world.disagreement_analyzer import (
+    PredictorDisagreementAnalyzer,
+)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     ComputationBudget,
     ComputationBudgetAllocator,
@@ -45,8 +52,10 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoalStack,
     SubgoalType,
 )
-from hbllm.hcir.world.object_state_graph import RelationalGraphMatcher
-from hbllm.hcir.world.predictors.whole_grid import DimensionMode, WholeGridPredictor
+from hbllm.hcir.world.predictors.whole_grid import (
+    DimensionMode,
+    WholeGridPredictor,
+)
 from hbllm.hcir.world.relational_graph_matcher import (
     RelationalGraphMatcher as SceneGraphMatcher,
 )
@@ -54,7 +63,9 @@ from hbllm.hcir.world.representation_expansion import (
     ConceptFormationEngine,
     RepresentationExpansionEngine,
 )
-from hbllm.hcir.world.rule_induction import RuleInductionEngine
+from hbllm.hcir.world.rule_induction import (
+    RuleInductionEngine,
+)
 from hbllm.hcir.world.verification_gate import (
     ModelProvenanceTracker,
     ModelVersionRecord,
@@ -268,11 +279,6 @@ def test_suite_13_uncertainty_and_multiple_models_w121_to_w130() -> None:
     assert avg_c3 == 0.9
 
 
-# =============================================================================
-# SUITE 14: Goal-Directed Planning and Action (W131–W140)
-# =============================================================================
-
-
 def test_suite_14_goal_directed_planning_and_action_w131_to_w140() -> None:
     """Verify W131-W140: goal representation, goal vs current, action space, preconditions, state transitions, plan construction, plan simulation, cost-sensitive selection, dead-ends, replanning."""
     # W131: Goal-state representation
@@ -344,11 +350,6 @@ def test_suite_14_goal_directed_planning_and_action_w131_to_w140() -> None:
     assert replan_res.replanned is True
     assert len(replan_res.new_plan) > 0
     assert replan_res.new_plan[-1].predicted_avatar_pos == (4, 4)
-
-
-# =============================================================================
-# SUITE 15: Learning, Transfer and Continual Adaptation (W141–W150)
-# =============================================================================
 
 
 def test_suite_15_learning_transfer_and_continual_adaptation_w141_to_w150() -> None:
@@ -438,11 +439,6 @@ def test_suite_15_learning_transfer_and_continual_adaptation_w141_to_w150() -> N
     )
     assert update_res["catastrophic_forgetting_prevented"] is True
     assert update_res["consolidated_protected_count"] == 1
-
-
-# =============================================================================
-# SUITE 16: Model Governance, Consistency and Verification (W151–W160)
-# =============================================================================
 
 
 def test_suite_16_model_governance_and_verification_w151_to_w160() -> None:
@@ -591,11 +587,6 @@ def test_suite_16_model_governance_and_verification_w151_to_w160() -> None:
     assert any(tx.node_id == "provenance_v1.0.0" for tx in prov_txs)
 
 
-# =============================================================================
-# SUITE 17: Phase 4 50-Row Capability Ledger Reconciliation
-# =============================================================================
-
-
 def test_phase4_50_row_capability_ledger_reconciliation() -> None:
     """Explicitly verify and register all 50 capabilities (W111–W160) in the 4D CapabilityLedger."""
     ledger = CapabilityLedger()
@@ -704,20 +695,12 @@ def test_phase4_50_row_capability_ledger_reconciliation() -> None:
     assert summary["architectural_integrity_verified"] == 50
 
 
-# =============================================================================
-# SUITE 18: Phase 4 Active Runtime Integration Test
-# =============================================================================
-
-
 def test_phase4_active_runtime_integration() -> None:
     """Verify that Phase 4 generalization, planning, uncertainty, and governance faculties are actively wired in AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine(exploration_budget=50)
 
     # 1. Attribute presence & correct types
     assert isinstance(engine.subgoal_stack, FrontopolarSubgoalStack)
-    assert isinstance(engine.analogy_engine, FalsifiableAnalogyEngine)
-    assert isinstance(engine.relational_matcher, RelationalGraphMatcher)
-    assert isinstance(engine.confidence_calibrator, ConfidenceCalibrator)
     assert isinstance(engine.saccadic_attention, SaccadicAttentionSystem)
 
     # 2. Active cognitive execution

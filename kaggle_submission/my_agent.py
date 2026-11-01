@@ -240,10 +240,23 @@ class MyAgent(Agent):
         self.arc_env = arc_env
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
-        self.internal_engine = AutonomousEpistemicEngine(instructions=instructions)
+        self._seed = kwargs.get("seed")
+        self.internal_engine = AutonomousEpistemicEngine(instructions=instructions, seed=self._seed)
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None
+        self._last_decided_action: int | None = None
+        self._grid_before_action: np.ndarray | None = None
+        self._action_was_available: bool = True
+        self._step_limit: int | None = None
+        self._contract_violations: int = 0
+        self._actuation_rejected: bool = False
+        try:
+            from plugins.arc_agi_adapter.trace import TraceRecorder
+
+            self._trace = TraceRecorder.from_env(kwargs.get("trace_dir"))
+        except Exception:
+            self._trace = None
         self.current_game_id: str | None = (
             game_id.split("-")[0].strip() if game_id not in ("default_game", "", None) else None
         )
@@ -312,9 +325,21 @@ class MyAgent(Agent):
         level: int | None = None,
     ) -> None:
         self.last_grid = None
+        self._grid_before_action = None
         if not retain_dynamics or not is_new_level:
             self.level_executed_actions.clear()
-        if hasattr(self.internal_agent, "reset_episode"):
+        if hasattr(self.internal_agent, "on_boundary"):
+            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+            self.internal_agent.on_boundary(
+                EpisodeBoundary(
+                    kind=EpisodeBoundaryKind.LEVEL_COMPLETE
+                    if is_new_level
+                    else EpisodeBoundaryKind.DEATH,
+                    retain_dynamics=retain_dynamics,
+                )
+            )
+        elif hasattr(self.internal_agent, "reset_episode"):
             try:
                 self.internal_agent.reset_episode(
                     retain_dynamics=retain_dynamics, is_new_level=is_new_level, level=level
@@ -434,7 +459,12 @@ class MyAgent(Agent):
         else:
             raw = np.zeros((64, 64), dtype=int)
 
-        return SensoryThalamus.normalize(raw)
+        raw_arr = np.asarray(raw)
+        if raw_arr.ndim != 2:
+            raise ValueError(
+                f"extracted grid is not 2D (shape={raw_arr.shape}) — frame layers must be 2D"
+            )
+        return SensoryThalamus.normalize(raw_arr)
 
     def _extract_available_actions(self, latest_frame: Any) -> list[int]:
         if hasattr(latest_frame, "available_actions"):
@@ -477,7 +507,7 @@ class MyAgent(Agent):
                 hasattr(self.internal_engine, "assimilate_feedback")
                 and getattr(self.internal_engine, "prev_grid", None) is not None
             ):
-                self.internal_engine.assimilate_feedback(grid, avail, is_lost=True)
+                self.internal_engine.assimilate_feedback(grid, avail, is_failure=True)
             # Per competition semantics with ONLY_RESET_LEVELS=true,
             # reset retries the same level: retain learned dynamics and lethal memories
             self.reset_episode(
@@ -512,7 +542,9 @@ class MyAgent(Agent):
                 self.action_counter = 0
                 self._stagnation_grid_hash = None
                 self._stagnation_steps = 0
-                self.internal_engine = AutonomousEpistemicEngine(instructions=self.instructions)
+                self.internal_engine = AutonomousEpistemicEngine(
+                    instructions=self.instructions, seed=self._seed
+                )
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 
@@ -532,7 +564,9 @@ class MyAgent(Agent):
                     hasattr(self.internal_engine, "assimilate_feedback")
                     and getattr(self.internal_engine, "prev_grid", None) is not None
                 ):
-                    self.internal_engine.assimilate_feedback(grid, available_actions, is_win=True)
+                    self.internal_engine.assimilate_feedback(
+                        grid, available_actions, is_success=True
+                    )
 
                 # Consolidate winning dynamic trajectory into persistent procedural memory
                 if self.level_executed_actions and self.current_game_id:
@@ -627,8 +661,8 @@ class MyAgent(Agent):
                 sc = latest_frame.get("StepCounter")
             except Exception:
                 pass
-        if sc is not None and hasattr(self.internal_engine, "set_environmental_step_limit"):
-            self.internal_engine.set_environmental_step_limit(int(sc))
+        if sc is not None:
+            self._step_limit = int(sc)
 
         # Diagnostic telemetry per step
         step_idx = getattr(self.internal_agent, "step_counter", 0)
@@ -675,17 +709,50 @@ class MyAgent(Agent):
                 except Exception as _e:
                     logger.debug("extract_arc_objects failed: %s", _e)
 
-                if g_ctx is not None:
-                    self.internal_engine._arc_game = g_ctx
+                from hbllm.hcir.world.percept import (
+                    ActuatorSchema,
+                    EmbodiedObservation,
+                    TerminalSignal,
+                )
+                from plugins.arc_agi_adapter.action_contract import (
+                    ActionContract,
+                    EffectKind,
+                )
 
-                from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
+                # C3: was the last actuation rejected by the env? (zero-motion
+                # sample must not teach dynamics — flagged into metadata)
+                if self._grid_before_action is not None and self._last_decided_action is not None:
+                    _eff = ActionContract.reconcile(
+                        self._grid_before_action,
+                        grid,
+                        self._last_decided_action,
+                        action_was_available=self._action_was_available,
+                    )
+                    self._actuation_rejected = _eff.kind == EffectKind.ENV_REJECTED
 
                 is_win = bool(getattr(latest_frame, "is_win", False))
                 is_lost = bool(getattr(latest_frame, "is_lost", False))
+                _actuators = [
+                    ActuatorSchema(
+                        actuator_id=str(s.get("action_id", i)),
+                        kind="point" if s.get("action_id") == 6 else "discrete",
+                        params={
+                            k: v for k, v in s.items() if k not in ("action_id", "valid_targets")
+                        },
+                        valid_targets=s.get("valid_targets"),
+                    )
+                    for i, s in enumerate(_arc_schema or [])
+                ]
+                _meta: dict[str, Any] = {}
+                if self._step_limit is not None:
+                    _meta["step_limit"] = self._step_limit
+                if self._actuation_rejected:
+                    _meta["actuation_rejected"] = True
                 obs = EmbodiedObservation(
                     lattice=grid,
                     entities=_objects or [],
                     available_actions=available_actions,
+                    actuators=_actuators,
                     terminal=TerminalSignal.SUCCESS
                     if is_win
                     else (TerminalSignal.FAILURE if is_lost else None),
@@ -693,10 +760,31 @@ class MyAgent(Agent):
                         self.game_id or self.current_game_id or raw_gid or "default_context"
                     ),
                     episode_id=str(self.current_levels_completed),
-                    metadata={"action_schemas": _arc_schema, "micro_actions": _arc_schema},
+                    metadata=_meta,
                 )
+                _t0 = __import__("time").perf_counter()
                 action_id, action_data = self.internal_engine.step(obs)
+                self._decide_latency_ms = (__import__("time").perf_counter() - _t0) * 1000.0
                 conf = 1.0
+                # WP1: no-proposal sentinel (pipeline commit rejected) -> deterministic
+                # nearest-legal fallback, surfaced via the action contract repair path.
+                if action_id is None:
+                    self._contract_violations += 1
+                    self._last_violation = "pipeline_rejected"
+                    action_id = sorted(available_actions)[0] if available_actions else 0
+                    action_data = None
+                # C3: validate chosen action; repair to nearest legal on violation
+                _res = ActionContract.validate_or_repair(
+                    int(action_id),
+                    action_data,
+                    list(available_actions),
+                    (int(grid.shape[0]), int(grid.shape[1])),
+                )
+                if not _res.ok:
+                    self._contract_violations += 1
+                    self._last_violation = _res.violation
+                    if _res.repaired_action_id is not None:
+                        action_id, action_data = _res.repaired_action_id, None
             else:
                 action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
                 action_data = getattr(self.internal_agent, "last_action_data", None)
@@ -707,6 +795,7 @@ class MyAgent(Agent):
         except Exception as e:
             import traceback
 
+            self.decision_exceptions = getattr(self, "decision_exceptions", 0) + 1
             print(
                 f"[HBLLM ERROR] plan_next_action failed game={raw_gid} base={self.current_game_id} "
                 f"step={step_idx} lvl={lvl_completed} state={state_name}: {e}. Falling back to default available action.",
@@ -771,6 +860,31 @@ class MyAgent(Agent):
             if hasattr(act_enum, "set_data"):
                 act_enum.set_data(coords)
             act_enum.data = coords
+
+        self._last_decided_action = action_id
+        self._grid_before_action = np.asarray(grid).copy()
+        self._action_was_available = action_id in list(available_actions) or action_id == 0
+        self.last_grid = np.asarray(grid).copy()
+        if getattr(self, "_trace", None) is not None:
+            try:
+                self._trace.record_step(
+                    game=str(self.current_game_id or raw_gid),
+                    level=int(lvl_completed),
+                    step=int(step_idx),
+                    grid=grid,
+                    available_actions=list(available_actions),
+                    action_id=int(action_id),
+                    action_data=action_data if isinstance(action_data, dict) else None,
+                    observed_effect=None,
+                    levels_completed=int(lvl_completed),
+                    state=state_name,
+                    latency_ms=float(getattr(self, "_decide_latency_ms", 0.0)),
+                    contract_violation=getattr(self, "_last_violation", None),
+                    branch=getattr(self.internal_engine, "_last_decision_branch", None),
+                )
+                self._last_violation = None
+            except Exception:
+                pass
 
         # Record executed action for episodic procedural consolidation
         act_data_rec = (

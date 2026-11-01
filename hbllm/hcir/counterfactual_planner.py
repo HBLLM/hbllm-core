@@ -696,7 +696,7 @@ class CounterfactualPlanner:
 
         Filters and prioritizes actions according to environmental affordance context:
         - If manipulation affordance is present ('CAN_MANIPULATE', 'ADJACENT_OBJECT'), allows manipulation actions.
-        - If targeting affordance is present ('CAN_TARGET', 'CLICKABLE'), allows targeting actions.
+        - If targeting affordance is present ('CAN_TARGET', 'TARGETABLE'), allows targeting actions.
         - Otherwise, prioritizes locomotion to reach intermediate waypoints.
         """
         active_affordances = active_affordances or []
@@ -706,7 +706,7 @@ class CounterfactualPlanner:
             a in active_affordances for a in ("CAN_MANIPULATE", "ADJACENT_OBJECT", "HOLDING_ITEM")
         )
         can_target = any(
-            a in active_affordances for a in ("CAN_TARGET", "CLICKABLE", "REMOTE_TRIGGER")
+            a in active_affordances for a in ("CAN_TARGET", "TARGETABLE", "REMOTE_TRIGGER")
         )
 
         for act in candidate_actions:

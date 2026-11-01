@@ -8,22 +8,28 @@ Track 3: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret-Driven Backtrac
 Track 4: Native Fast 2D Euclidean Distance Transform (EDT) & Obstacle Margins
 """
 
+
 import math
 
 import pytest
 
-from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.spatial_planner import (
+    EntityRole,
+    SpatialEntity,
+)
 from hbllm.hcir.world import (
     AllostaticRegime,
     AutonomousEpistemicEngine,
-    ClaustrumSalienceConductor,
     EuclideanDistanceTransformResult,
-    InteroceptiveAllostasisCortex,
     RecursiveSubgoalTree,
-    SpatialDistanceTransformEngine,
     SubgoalNodeType,
     SubgoalTreeStatus,
     UnifiedPerceptualGestalt,
+)
+from hbllm.hcir.world.experimental import (
+    ClaustrumSalienceConductor,
+    InteroceptiveAllostasisCortex,
+    SpatialDistanceTransformEngine,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,11 +119,6 @@ def test_allostasis_replenishment_and_engine_integration() -> None:
     assert replenished.regime == AllostaticRegime.OPTIMAL
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 2: Claustrum Multimodal Salience Conductor & Perceptual Binding
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_claustrum_multimodal_binding_and_salience_peak() -> None:
     """Claustrum fuses visual, hazard, and goal streams into unified spatial salience."""
     conductor = ClaustrumSalienceConductor(
@@ -185,11 +186,6 @@ def test_claustrum_goal_dominance_and_engine_binding() -> None:
     assert any(
         "claustrum:gestalt_bound" in p.variable for p in engine.symbolic_theory.causal_predicates
     )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 3: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_subgoal_tree_and_satisfaction_propagation() -> None:
@@ -312,11 +308,6 @@ def test_subgoal_tree_lcva_regret_backtracking() -> None:
 
     ops = tree.to_transaction_operations()
     assert len(ops) >= 3
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Track 4: Native Fast 2D Euclidean Distance Transform (EDT) & Obstacle Margins
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_spatial_distance_transform_exact_distances() -> None:

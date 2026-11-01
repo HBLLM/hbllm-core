@@ -6,12 +6,16 @@ from collections import defaultdict, deque
 from typing import Any
 
 from hbllm.hcir.algorithms.paths import dijkstra
+from hbllm.hcir.algorithms.protocol import native_of
 
 
 def betweenness_centrality(
     graph: Any, normalized: bool = True, directed: bool = False
 ) -> dict[str, float]:
     """Compute Brandes' betweenness centrality for all nodes."""
+    native = native_of(graph)
+    if native is not None:
+        return native.betweenness_centrality(normalized=normalized, directed=directed)
     all_nodes: list[str] = []
     if hasattr(graph, "all_nodes"):
         all_nodes = [n.id if hasattr(n, "id") else str(n) for n in graph.all_nodes()]

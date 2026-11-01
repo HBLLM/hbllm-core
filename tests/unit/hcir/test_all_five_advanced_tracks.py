@@ -23,7 +23,9 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.kernel.governance.constitutional_verifier import (
     ConstitutionalTransactionVerifier,
 )
-from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.kernel.transaction_manager import (
+    TransactionManager,
+)
 from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.topological_cut_set import (
     TopologicalCutSetAnalyzer,
@@ -34,11 +36,15 @@ from hbllm.hcir.transactions import (
     TransactionOperation,
     generate_compensating_operations,
 )
-from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.workspace import (
+    HCIRWorkspaceState,
+)
 from hbllm.hcir.world.active_inference import (
     HierarchicalActiveInferenceEngine,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
 from hbllm.hcir.world.cortex_episodic import (
     DistilledSchema,
     EpisodicTransition,
@@ -63,7 +69,7 @@ def test_track1_hippocampal_swr_forward_reverse_replay() -> None:
     t0 = EpisodicTransition(step=0, avatar_pos=(0, 0), action_id=1, reward=0.0)
     t1 = EpisodicTransition(step=1, avatar_pos=(0, 1), action_id=2, reward=0.0)
     t2 = EpisodicTransition(step=2, avatar_pos=(1, 1), action_id=1, reward=0.0)
-    t3 = EpisodicTransition(step=3, avatar_pos=(1, 2), action_id=2, reward=10.0, is_win=True)
+    t3 = EpisodicTransition(step=3, avatar_pos=(1, 2), action_id=2, reward=10.0, is_success=True)
     traj = [t0, t1, t2, t3]
 
     metrics = consolidator.replay_forward_and_reverse(traj, terminal_reward=10.0)
@@ -120,11 +126,6 @@ def test_track1_autonomous_epistemic_engine_consolidation_integration() -> None:
     # Newly inducted schemas should be registered into symbolic world theory
     predicates = engine.symbolic_theory.export_causal_predicates()
     assert any("distilled_schema" in p.variable for p in predicates)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Track 2: Hierarchical Variational Free Energy Minimization
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_track2_hierarchical_active_inference_levels() -> None:
@@ -195,11 +196,6 @@ def test_track2_candidate_ranking_and_transaction_proposal() -> None:
     assert ops[0].node_data is not None and "total_free_energy" in ops[0].node_data
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Track 3: Persistent Homology & Topological Cut-Set Manifold Navigation
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 def test_track3_betti_invariants_and_cavity_detection() -> None:
     """Verify 0-th & 1-st Betti numbers, cycle rank, and cavity cul-de-sac detection."""
     # Construct a 5x5 grid with a single loop (donut / corridor cycle)
@@ -267,11 +263,6 @@ def test_track3_subgoal_stack_bottleneck_relief() -> None:
     assert sg.target_destination == (2, 2)
     assert sg.target_entity_pos == (2, 1)
     assert stack.current_subgoal == sg
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Track 4: Constitutional Kernel Verification & Compensating Rollbacks
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_track4_constitutional_verifier_invariants() -> None:
@@ -349,11 +340,6 @@ def test_track4_compensating_operations_and_two_phase_commit() -> None:
     assert committed_tx.is_committed is True
     assert comp_tx is None
     assert workspace.graph.has_node("test_node_1")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Track 5: Native Rust Acceleration & Parity
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 def test_track5_rust_blake3_and_topological_acceleration() -> None:

@@ -859,6 +859,8 @@ class MentalSimulationPlanner:
         if not engine.is_motor_grounded() or engine.avatar_pos is None:
             return None
 
+        _budget = engine.compute_budget if engine is not None else None
+
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
@@ -1496,10 +1498,23 @@ class MentalSimulationPlanner:
                     int,
                 ]
             ] = set()
+            # WP0: budget-aware search — scale expansions from remaining work
+            # units, charge 1 unit ("cheap" class) per rollout expansion, and
+            # return best-so-far if the budget cuts the loop.
             max_expansions = max_expansions_budget
+            if _budget is not None:
+                max_expansions = min(max_expansions, _budget.remaining_units)
+            best_node_id: int | None = None
+            best_f: float = float("inf")
+            budget_cutoff = False
             had_relaxable_block = False
 
             while open_set and max_expansions > 0:
+                if _budget is not None and not _budget.allows("cheap"):
+                    budget_cutoff = True
+                    break
+                if _budget is not None:
+                    _budget.charge(1)
                 max_expansions -= 1
                 (
                     f_score,
@@ -1527,6 +1542,9 @@ class MentalSimulationPlanner:
                     cur_chasers,
                     time_mod,
                 )
+                if f_score < best_f:
+                    best_f = f_score
+                    best_node_id = node_id
                 if state_key in visited_states:
                     continue
                 visited_states.add(state_key)
@@ -1931,6 +1949,8 @@ class MentalSimulationPlanner:
                         ),
                     )
 
+            if budget_cutoff and best_node_id is not None:
+                return _reconstruct_path(best_node_id), had_relaxable_block
             return None, had_relaxable_block
 
         # Run primary safety-first A* pass
@@ -3110,6 +3130,9 @@ class SimulationStage(CorticalStage):
     name: str = "simulation_stage"
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
+        if ctx.signals.get("_engine") is not None:
+            # folded into DeliberationStage (WP1)
+            return StageResult(author=self.name)
         proposed = None
         if ctx.mental_plan:
             first_step = ctx.mental_plan[0]

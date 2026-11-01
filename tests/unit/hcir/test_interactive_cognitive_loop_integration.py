@@ -78,7 +78,7 @@ def test_autonomous_epistemic_engine_interactive_loop_integration() -> None:
     engine.assimilate_feedback(
         curr_grid=grid_win,
         available_actions=[1, 2, 3, 4],
-        is_win=True,
+        is_success=True,
         action=1,
     )
 

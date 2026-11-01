@@ -29,6 +29,9 @@ from hbllm.drivers.base import (
 
 logger = logging.getLogger(__name__)
 
+# ARC-AGI-3 frames are 64x64 lattices; used only when no frame has arrived yet.
+ARC_FRAME_SHAPE: tuple[int, int] = (64, 64)
+
 # ── ARC-AGI SDK imports (graceful fallback) ───────────────────────────────
 try:
     from arcle import Arcade  # type: ignore
@@ -126,7 +129,7 @@ class ARC3Driver(BaseDriver):
 
     def get_inputs(self) -> DriverInput:
         """Return current grid as raw DriverInput."""
-        grid = np.zeros((16, 16), dtype=int)
+        grid = np.zeros(ARC_FRAME_SHAPE, dtype=int)
         if self._frame_data and hasattr(self._frame_data, "frame") and self._frame_data.frame:
             grid = self._frame_data.frame[-1]
 
@@ -221,7 +224,7 @@ class ARC3Driver(BaseDriver):
         """
         return {
             "grid": inputs.raw_data,
-            "grid_shape": inputs.metadata.get("grid_shape", (16, 16)),
+            "grid_shape": inputs.metadata.get("grid_shape", np.asarray(inputs.raw_data).shape),
             "tags": inputs.metadata.get("tags", []),
             "game_id": inputs.metadata.get("game_id", ""),
         }

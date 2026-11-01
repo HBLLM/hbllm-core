@@ -599,6 +599,18 @@ class InductiveHypothesisEngine:
                 ]
         return retracted_ids
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, retain_confirmed: bool = True) -> None:
         """Reset episodic hypotheses between levels or attempts."""
         if retain_confirmed:

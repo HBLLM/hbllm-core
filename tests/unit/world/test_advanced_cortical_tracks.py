@@ -201,8 +201,8 @@ class TestGNWAndNeuromodulationClosedLoop:
         engine.assimilate_feedback(
             curr_grid=grid1,
             available_actions=[1, 2, 3, 4],
-            is_win=False,
-            is_lost=False,
+            is_success=False,
+            is_failure=False,
         )
 
         assert engine.snn_predictor.step_counter >= 1
@@ -213,8 +213,8 @@ class TestGNWAndNeuromodulationClosedLoop:
         engine.assimilate_feedback(
             curr_grid=grid2,
             available_actions=[1, 2, 3, 4],
-            is_win=True,
-            is_lost=False,
+            is_success=True,
+            is_failure=False,
         )
         assert engine.neuromodulatory_system.current.dopamine > 1.0
 
@@ -224,8 +224,8 @@ class TestGNWAndNeuromodulationClosedLoop:
         engine.assimilate_feedback(
             curr_grid=grid3,
             available_actions=[1, 2, 3, 4],
-            is_win=False,
-            is_lost=True,
+            is_success=False,
+            is_failure=True,
         )
         assert engine.neuromodulatory_system.current.noradrenaline > 1.0
         # GNW broadcast should reset phase on loss

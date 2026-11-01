@@ -13,13 +13,11 @@ from __future__ import annotations
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.compiler import HCIRCompiler, IntentType, SemanticAST
-from hbllm.hcir.compiler_llm import LLMCompilerFrontend, StructuredIntentPayload
 from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
 from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode, HCIRNodeType
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.optimizer import HCIROptimizer
 from hbllm.hcir.replay_debugger import CognitiveBreakpoint, ReplayDebugger
-from hbllm.hcir.skills import GF2LinearSolver
 from hbllm.hcir.spatial_planner import (
     AVATAR,
     BARRIER,
@@ -99,5 +97,15 @@ __all__ = [
     "SWITCH",
     "REFILL",
     "EXIT",
-    "GF2LinearSolver",
 ]
+
+
+def __getattr__(name: str):
+    if name in ("LLMCompilerFrontend", "StructuredIntentPayload"):
+        from hbllm.hcir.compiler_llm import LLMCompilerFrontend, StructuredIntentPayload
+
+        return {
+            "LLMCompilerFrontend": LLMCompilerFrontend,
+            "StructuredIntentPayload": StructuredIntentPayload,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

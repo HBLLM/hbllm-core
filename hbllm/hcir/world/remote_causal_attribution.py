@@ -93,6 +93,18 @@ class RemoteCausalAttributor:
             defaultdict(int)
         )
 
+    def on_boundary(self, boundary) -> None:
+        """Episode lifecycle boundary handler (WP0.5). Delegates to the
+        deprecated reset_episode for backward-compatible semantics."""
+        self.reset_episode()
+
+    @property
+    def boundary_retention(self):
+        """Declared retention policy: default level-local semantics."""
+        from hbllm.hcir.world.percept import RetentionPolicy
+
+        return RetentionPolicy.LEVEL_LOCAL
+
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient episode state while optionally preserving confirmed causal laws."""
         if not retain_long_term:
@@ -122,7 +134,7 @@ class RemoteCausalAttributor:
         Args:
             prev_grid: Visual state before action.
             curr_grid: Visual state after action.
-            action_pos: Position where avatar acted (stepped on or clicked).
+            action_pos: Position where avatar acted (stepped on or remotely actuated).
             background_feature: Empty background index.
             avatar_features: Avatar feature set.
 

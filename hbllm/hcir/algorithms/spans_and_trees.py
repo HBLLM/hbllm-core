@@ -144,3 +144,42 @@ def transitive_closure(graph: Any) -> set[tuple[str, str]]:
                 stack.extend(adj.get(curr, set()))
 
     return closure
+
+
+def minimum_spanning_tree_subgraph(graph: Any, weight_attr: str = "weight") -> tuple[Any, float]:
+    """Compute the MST and return it as a new ``CognitiveGraph`` plus total weight."""
+    import copy
+
+    from hbllm.hcir.graph import CognitiveGraph
+
+    mst_edges, total_weight = minimum_spanning_tree(graph, weight_attr=weight_attr)
+    mst_graph = CognitiveGraph(enable_native_substrate=False)
+    for node in graph.all_nodes():
+        mst_graph.add_node(copy.deepcopy(node))
+    for edge in mst_edges:
+        mst_graph.add_edge(copy.deepcopy(edge))
+    return mst_graph, total_weight
+
+
+def transitive_reduction_subgraph(graph: Any) -> Any:
+    """Compute the transitive reduction and return it as a new ``CognitiveGraph``."""
+    import copy
+
+    from hbllm.hcir.graph import CognitiveGraph
+
+    surviving = transitive_reduction(graph)
+    reduced_graph = CognitiveGraph(enable_native_substrate=False)
+    for node in graph.all_nodes():
+        reduced_graph.add_node(copy.deepcopy(node))
+    for edge in graph.all_edges():
+        keep = False
+        for s in edge.sources:
+            for t in edge.targets:
+                if (s, t) in surviving:
+                    keep = True
+                    break
+            if keep:
+                break
+        if keep:
+            reduced_graph.add_edge(copy.deepcopy(edge))
+    return reduced_graph

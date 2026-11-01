@@ -12,6 +12,7 @@ from hbllm.hcir.kernel.capability_resolver import (
 )
 from hbllm.hcir.kernel.capability_sandboxing import (
     CapabilityPermissions,
+    CapabilityResourceLimits,
     CapabilitySandboxManager,
     SandboxedCapabilityPolicy,
     SandboxedExecutor,
@@ -43,7 +44,6 @@ async def test_least_privilege_downgrade_in_default_services():
     """Verify built-in capabilities in KernelServices are strictly least-privilege."""
     ws = HCIRWorkspaceState()
     services = KernelServices.create_default(ws)
-    resolver = services.capability_resolver
     sandbox_mgr = services.sandbox_manager
     assert sandbox_mgr is not None
 
@@ -61,14 +61,12 @@ async def test_least_privilege_downgrade_in_default_services():
         is False
     )
 
-    # Attempting to request network on world_prediction must fail
-    res = await resolver.resolve_and_execute(
-        "world_prediction",
-        {"code": "import socket"},
-        required_permissions={"network"},
+    # Caller-supplied permission requests are ignored (manifest-only, WP6.2):
+    # check_permission still denies network for the provider.
+    assert (
+        sandbox_mgr.check_permission("world_prediction", "default_world_prediction", "network")
+        is False
     )
-    assert "error" in res
-    assert "Sandbox policy violation" in res["error"]
 
 
 @pytest.mark.asyncio
@@ -80,7 +78,7 @@ async def test_sandboxed_executor_ambient_environment():
     assert os.environ.get("HBLLM_SANDBOX") is None
     res = await executor.execute({"task": "compute"})
     assert res.get("status") == "SUCCESS" or res.get("sandboxed") is True
-    assert dummy.seen_sandbox_env == "1"
+    assert res.get("seen_env") == "1"
     # Ensure environment cleaned up after execution
     assert os.environ.get("HBLLM_SANDBOX") is None
 
@@ -126,3 +124,187 @@ async def test_capability_manifest_static_permissions_enforced():
     res = await resolver.resolve_and_execute("custom_file_writer", {"path": "/tmp/test"})
     assert "error" in res
     assert "permission 'filesystem' denied" in res["error"]
+
+
+# ── WP6.2: real subprocess isolation for non-SYSTEM capabilities ─────────────
+
+
+class SocketOpenExecutor:
+    """Opens a network socket (module-level for spawn pickling)."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict) -> dict:
+        import socket
+
+        socket.socket().connect(("127.0.0.1", 8080))
+        return {"x": 1}
+
+
+class OutsideWriteExecutor:
+    """Writes a file outside its sandbox temp dir."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict) -> dict:
+        import tempfile
+
+        with open(f"{tempfile.gettempdir()}/sandbox_escape_{id(self)}.txt", "w") as f:
+            f.write("escape")
+        return {"x": 1}
+
+
+class InsideWriteExecutor:
+    """Writes a file inside the child's cwd (its temp dir)."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict) -> dict:
+        with open("sandbox_local.txt", "w") as f:
+            f.write("inside")
+        return {"x": 1}
+
+
+class SubprocessExecutor:
+    """Spawns a subprocess."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict) -> dict:
+        import subprocess
+
+        subprocess.run(["echo", "hi"])
+        return {"x": 1}
+
+
+class SleepExecutor:
+    """Sleeps far past the sandbox timeout."""
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict) -> dict:
+        import asyncio
+
+        await asyncio.sleep(120)
+        return {"x": 1}
+
+
+def _sandbox_executor(inner, perms=None, limits=None):
+    return SandboxedExecutor(
+        inner_executor=inner,
+        permissions=perms or CapabilityPermissions(),
+        resource_limits=limits or CapabilityResourceLimits(timeout_seconds=15, max_cpu_seconds=10),
+    )
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denies_network_for_untrusted():
+    with pytest.raises(PermissionError):
+        await _sandbox_executor(SocketOpenExecutor()).execute({})
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denies_write_outside_tempdir():
+    with pytest.raises(PermissionError):
+        await _sandbox_executor(OutsideWriteExecutor()).execute({})
+
+
+@pytest.mark.asyncio
+async def test_sandbox_allows_write_inside_tempdir():
+    res = await _sandbox_executor(InsideWriteExecutor()).execute({})
+    assert res["x"] == 1 and res["sandboxed"] is True
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denies_subprocess_spawn():
+    with pytest.raises(PermissionError):
+        await _sandbox_executor(SubprocessExecutor()).execute({})
+
+
+@pytest.mark.asyncio
+async def test_sandbox_wallclock_timeout():
+    with pytest.raises(TimeoutError):
+        await _sandbox_executor(
+            SleepExecutor(), limits=CapabilityResourceLimits(timeout_seconds=3, max_cpu_seconds=30)
+        ).execute({})
+
+
+@pytest.mark.asyncio
+async def test_sandbox_denies_unpicklable_executor():
+    class Unpicklable:
+        @property
+        def is_available(self) -> bool:
+            return True
+
+        async def execute(self, params: dict) -> dict:
+            return {}
+
+    bad = Unpicklable()
+    bad._fn = lambda: None  # lambdas are not picklable
+    with pytest.raises(PermissionError):
+        await _sandbox_executor(bad).execute({})
+
+
+@pytest.mark.asyncio
+async def test_register_denies_manifest_beyond_policy():
+    """A manifest requiring 'network' against a policy without it fails at register."""
+    from hbllm.hcir.kernel.capability_sandboxing import (
+        SandboxedCapabilityPolicy,
+        TrustLevel,
+    )
+
+    mgr = CapabilitySandboxManager()
+    mgr.register_policy(
+        SandboxedCapabilityPolicy(
+            capability_name="net_capability",
+            provider_id="net_impl",
+            trust_level=TrustLevel.UNTRUSTED,
+            permissions=CapabilityPermissions(allow_network=False),
+        )
+    )
+    resolver = CapabilityResolver(sandbox_manager=mgr)
+    impl = CapabilityImplementation(
+        capability_name="net_capability",
+        implementation_id="net_impl",
+        executor=SocketOpenExecutor(),
+        required_permissions={"network"},
+    )
+    with pytest.raises(PermissionError):
+        resolver.register(impl)
+
+
+@pytest.mark.asyncio
+async def test_system_capability_runs_in_process():
+    """SYSTEM-trusted capabilities bypass subprocess isolation."""
+    from hbllm.hcir.kernel.capability_sandboxing import (
+        SandboxedCapabilityPolicy,
+        TrustLevel,
+    )
+
+    mgr = CapabilitySandboxManager()
+    resolver = CapabilityResolver(sandbox_manager=mgr)
+    impl = CapabilityImplementation(
+        capability_name="sys_cap",
+        implementation_id="sys_impl",
+        executor=InsideWriteExecutor(),
+    )
+    mgr.register_policy(
+        SandboxedCapabilityPolicy(
+            capability_name="sys_cap",
+            provider_id="sys_impl",
+            trust_level=TrustLevel.SYSTEM,
+        )
+    )
+    resolver.register(impl)
+    res = await resolver.resolve_and_execute("sys_cap", {})
+    assert res.get("x") == 1

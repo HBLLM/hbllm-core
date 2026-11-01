@@ -22,6 +22,8 @@ class StageResult:
     signals: dict[str, Any] = field(default_factory=dict)
     proposed_action: Any = None
     annotations: dict[str, Any] = field(default_factory=dict)
+    # WP1: the stage's journaled faculty writes (committed by the pipeline)
+    journal: Any = None
 
 
 @runtime_checkable

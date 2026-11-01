@@ -714,7 +714,6 @@ class GameFeatureSignature:
     action_space: frozenset[int] = field(default_factory=frozenset)
     grid_shape: tuple[int, int] = (0, 0)
     num_distinct_colors: int = 0
-    has_click_action: bool = False  # Backward compatibility alias
     has_spatial_effector_actions: bool = False
     has_special_actions: bool = False
     has_movement_actions: bool = False
@@ -750,7 +749,6 @@ class GameFeatureSignature:
             action_space=frozenset(action_set),
             grid_shape=g_shape,
             num_distinct_colors=distinct,
-            has_click_action=has_effector,
             has_spatial_effector_actions=has_effector,
             has_special_actions=len(action_set) > 4,
             has_movement_actions=has_movement,
@@ -853,7 +851,7 @@ class MetaLearningGovernor:
             loaded = 0
             for r in records:
                 outcome = StrategyOutcome(
-                    context_id=r.get("context_id", r.get("game_" + "id", "")),
+                    context_id=r.get("context_id", ""),
                     features=GameFeatureSignature(action_space=frozenset(), grid_shape=(0, 0)),
                     strategy_name=r["strategy_name"],
                     levels_won=r["levels_won"],
@@ -984,14 +982,11 @@ class PointActuationObservation:
     timestamp: float = field(default_factory=time.time)
 
 
-ClickObservation = PointActuationObservation
-
-
 class PointActuationAffordanceLearner:
     """Empirical affordance learner for coordinate-targeted actuation."""
 
     def __init__(self) -> None:
-        self.click_history: list[PointActuationObservation] = []
+        self.actuation_history: list[PointActuationObservation] = []
         self.interactive_features: set[int] = set()
         self.quiescent_cells: set[tuple[int, int]] = set()
         self.feature_cycle_maps: dict[int, int] = {}
@@ -1027,10 +1022,8 @@ class PointActuationAffordanceLearner:
         obs = PointActuationObservation(
             pos=pos, color_before=c_before, color_after=c_after, effect_type=effect
         )
-        self.click_history.append(obs)
+        self.actuation_history.append(obs)
         return obs
-
-    observe_click = observe_point_actuation
 
     def pick_exploratory_actuation(
         self,
@@ -1052,8 +1045,6 @@ class PointActuationAffordanceLearner:
                 if (r, c) not in attempted and int(grid[r, c]) != bg_feature:
                     return (r, c)
         return None
-
-    pick_exploratory_click = pick_exploratory_actuation
 
 
 @dataclass
@@ -1110,4 +1101,3 @@ class DeliberationEntropyMonitor:
 
 # Backwards compatibility aliases (WP3)
 CrossGameKnowledgeTransfer = CrossContextKnowledgeTransfer
-ClickAffordanceLearner = PointActuationAffordanceLearner

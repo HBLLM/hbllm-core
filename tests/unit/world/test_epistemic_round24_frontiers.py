@@ -135,7 +135,7 @@ def test_hippocampal_relational_distillation_integration() -> None:
         step=1,
         avatar_pos=(5, 5),
         action=4,  # Collect
-        is_win=True,
+        is_success=True,
     )
 
     rules = hippocampus.distill_relational_policy(entities=entities)

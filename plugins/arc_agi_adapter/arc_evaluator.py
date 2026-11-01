@@ -127,7 +127,7 @@ class InteractiveARCEvaluator:
 
         obs = env.reset() if hasattr(env, "reset") else getattr(env, "frame", None)
         curr_grid = np.asarray(
-            obs if isinstance(obs, np.ndarray) else getattr(env, "frame", np.zeros((16, 16))),
+            obs if isinstance(obs, np.ndarray) else getattr(env, "frame", np.zeros((64, 64))),
             dtype=int,
         )
 

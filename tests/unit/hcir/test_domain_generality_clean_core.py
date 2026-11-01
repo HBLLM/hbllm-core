@@ -171,7 +171,10 @@ def test_candidate_generation_and_ranking_path_code_review():
 
 def test_skills_all_has_no_grid_puzzle_solvers():
     """Verify that hbllm.hcir.skills.__all__ contains zero grid-puzzle specific solvers (WP3)."""
+    import hbllm.hcir as hcir_pkg
     import hbllm.hcir.skills as skills
+    import hbllm.hcir.skills.common_subskills as common_subskills
+    import hbllm.hcir.skills.declarative as declarative
 
     forbidden = {
         "BlockPushPlanner",
@@ -184,14 +187,89 @@ def test_skills_all_has_no_grid_puzzle_solvers():
     present = forbidden.intersection(set(skills.__all__))
     assert not present, f"Grid-puzzle specific solvers leaked into core skills __all__: {present}"
 
+    # The solver names must not exist anywhere in the core module namespaces
+    # (not merely absent from __all__) — they live in plugins/arc_agi_adapter.
+    for module in (skills, declarative, common_subskills, hcir_pkg):
+        leaked = forbidden.intersection(vars(module))
+        assert not leaked, (
+            f"Grid-puzzle specific solvers still defined/re-exported in {module.__name__}: {leaked}"
+        )
+
+
+def _fold_string(node: ast.AST) -> str | None:
+    """Statically fold a string-producing AST node.
+
+    Folds ``BinOp(Add)`` concatenations, f-strings (``JoinedStr``) and
+    ``"<sep>".join([...])`` calls whose components are string constants.
+    Returns ``None`` when the node is not statically foldable.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_string(node.left)
+        right = _fold_string(node.right)
+        if left is not None and right is not None:
+            return left + right
+        return None
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            else:
+                # FormattedValue or anything non-constant: unrepresentable.
+                parts.append("\x00")
+        return "".join(parts)
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "join"
+        and isinstance(node.func.value, ast.Constant)
+        and isinstance(node.func.value.value, str)
+        and len(node.args) == 1
+        and isinstance(node.args[0], (ast.List, ast.Tuple))
+    ):
+        elements = [
+            _fold_string(elt)
+            for elt in node.args[0].elts  # type: ignore[union-attr]
+        ]
+        if all(e is not None for e in elements):
+            return node.func.value.value.join(elements)  # type: ignore[arg-type]
+    return None
+
+
+def _docstring_constant_ids(tree: ast.AST) -> set[int]:
+    """Ids of Constant nodes that are docstrings (allow-listed from token checks)."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            if hasattr(node, "body") and node.body:
+                first_expr = node.body[0]
+                if (
+                    isinstance(first_expr, ast.Expr)
+                    and isinstance(first_expr.value, ast.Constant)
+                    and isinstance(first_expr.value.value, str)
+                ):
+                    ids.add(id(first_expr.value))
+    return ids
+
 
 def test_zero_forbidden_domain_tokens_in_cognitive_core():
     """Guard test verifying ZERO forbidden domain-specific tokens exist in core (WP3).
 
     Scans core/hbllm/hcir and core/hbllm/brain for:
         game_id, level_id, is_win, is_lost, click
+
+    Checks (AST-level, so string-split evasion like ``"is_" + "win"`` is caught):
+    - every string constant and every statically foldable concatenation
+      (``BinOp(Add)``, f-string, ``"<sep>".join([...])``) is matched against the
+      forbidden token regex;
+    - every identifier (``Name``, ``Attribute``, ``FunctionDef``, ``ClassDef``,
+      ``arg``, ``keyword``, import ``alias``) is matched against ``(?i)click``;
+    - the original line-level regex scan is kept, with docstrings allow-listed.
     """
     forbidden_pat = re.compile(r"\b(game_id|level_id|is_win|is_lost|click)\b")
+    click_ident_pat = re.compile(r"click", re.IGNORECASE)
     core_dirs = [
         Path(__file__).resolve().parents[3] / "hbllm" / "hcir",
         Path(__file__).resolve().parents[3] / "hbllm" / "brain",
@@ -200,6 +278,7 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
     violations = []
     for d in core_dirs:
         for py_file in d.rglob("*.py"):
+            rel = py_file.relative_to(d.parents[1])
             content = py_file.read_text(encoding="utf-8")
             try:
                 tree = ast.parse(content, filename=str(py_file))
@@ -227,6 +306,7 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
                                 )
                             )
 
+            # ── Line-level scan (original behaviour) ─────────────────────────
             for line_no, line in enumerate(content.splitlines(), start=1):
                 # Ignore docstring lines and pure comments
                 if line_no in docstring_lines:
@@ -236,8 +316,48 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
                     continue
                 match = forbidden_pat.search(code_part)
                 if match:
+                    violations.append(f"{rel}:{line_no}: token '{match.group()}' in '{code_part}'")
+
+            # ── AST-level scan: folded strings and click identifiers ─────────
+            docstring_ids = _docstring_constant_ids(tree)
+            for node in ast.walk(tree):
+                # Folded string tokens (covers "is_" + "win", f-strings, joins)
+                if isinstance(
+                    node,
+                    (ast.Constant, ast.BinOp, ast.JoinedStr),
+                ) or (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "join"
+                ):
+                    if id(node) in docstring_ids:
+                        continue
+                    folded = _fold_string(node)
+                    if folded is not None:
+                        match = forbidden_pat.search(folded)
+                        if match:
+                            violations.append(
+                                f"{rel}:{getattr(node, 'lineno', '?')}: folded string token "
+                                f"'{match.group()}' in {folded!r}"
+                            )
+
+                # Identifiers containing 'click' in any casing
+                ident: str | None = None
+                if isinstance(node, ast.Name):
+                    ident = node.id
+                elif isinstance(node, ast.Attribute):
+                    ident = node.attr
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    ident = node.name
+                elif isinstance(node, ast.arg):
+                    ident = node.arg
+                elif isinstance(node, ast.keyword):
+                    ident = node.arg
+                elif isinstance(node, ast.alias):
+                    ident = node.asname or node.name
+                if ident and click_ident_pat.search(ident):
                     violations.append(
-                        f"{py_file.relative_to(d.parents[1])}:{line_no}: token '{match.group()}' in '{code_part}'"
+                        f"{rel}:{getattr(node, 'lineno', '?')}: forbidden identifier '{ident}'"
                     )
 
     assert not violations, (

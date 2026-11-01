@@ -24,8 +24,12 @@ from hbllm.hcir.world.bilateral_coordination import (
     BilateralCoordinateIntegrator,
     SymmetryAxis,
 )
-from hbllm.hcir.world.cortex_motor import MotorCortexEffector
-from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
+from hbllm.hcir.world.cortex_motor import (
+    MotorCortexEffector,
+)
+from hbllm.hcir.world.frontopolar_subgoal_stack import (
+    SubgoalType,
+)
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
 
@@ -99,7 +103,7 @@ def test_e2e_peripheral_border_filtering_and_quiescent_switching() -> None:
     )
 
     # 2. Suppose all inner candidate clicks proved quiescent
-    engine.quiescent_click_targets.update([(4, 4), (4, 5), (5, 4)])
+    engine.quiescent_actuation_targets.update([(4, 4), (4, 5), (5, 4)])
 
     # 3. Next grounding attempt: With inner candidates quiescent and border cells filtered, effector returns None
     coords2 = engine.ground_effector_action(grid, 6)

@@ -1306,6 +1306,29 @@ class PerceptionStage(CorticalStage):
     name: str = "perception_stage"
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
+        engine = ctx.signals.get("_engine")
+        if engine is not None:
+            # WP1: real perception — warm the memoised entity cache for this
+            # grid so the downstream DeliberationStage call is a cache hit.
+            # Pure cache warm => behaviour-identical.
+            grid = ctx.signals.get("_curr_grid")
+            warmed_entities: list[Any] = []
+            if grid is not None:
+                try:
+                    import numpy as _np
+
+                    g = _np.asarray(grid)
+                    warmed_entities = engine.extract_entities(g, engine.bg_feature)
+                except Exception:
+                    warmed_entities = []
+            avatar_candidate = engine.avatar_pos
+            return StageResult(
+                author=self.name,
+                signals={
+                    "entity_count": len(warmed_entities),
+                    "avatar_candidate": avatar_candidate,
+                },
+            )
         grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.prev_grid
         entities: list[SpatialEntity] = []
         if grid is not None:

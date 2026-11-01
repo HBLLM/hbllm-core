@@ -431,9 +431,9 @@ class EpistemicCuriosityExplorer:
             engine.consecutive_stuck_steps >= 2 and engine.last_action in displacement_actions
         )
         has_effective_target = any(
-            p not in engine.quiescent_click_targets
-            and engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0) < 3
-            for p in engine.effective_click_targets
+            p not in engine.quiescent_actuation_targets
+            and engine.entity_visit_counts.get(f"actuate_{p[0]}_{p[1]}", 0) < 3
+            for p in engine.effective_actuation_targets
         )
         interleaved_reach = engine.level_epistemic_probes % 6 == 0
 
@@ -1316,46 +1316,49 @@ class EpistemicCuriosityExplorer:
     @classmethod
     def apply_proposal_to_engine(
         cls,
-        engine: AutonomousEpistemicEngine,
+        view: Any,
+        delta: Any,
         proposal: EpistemicProbeProposal,
     ) -> None:
-        """Atomically commit EpistemicProbeProposal mutations to the engine."""
-        engine.level_epistemic_probes += 1
-        engine.total_epistemic_probes += 1
+        """Atomically commit EpistemicProbeProposal mutations via StateDelta (WP1)."""
+        delta.set("level_epistemic_probes", view.level_epistemic_probes + 1)
+        delta.set("total_epistemic_probes", view.total_epistemic_probes + 1)
 
-        if engine.avatar_pos is not None:
-            engine.recent_positions.append(engine.avatar_pos)
-            engine.position_visit_counts[engine.avatar_pos] = (
-                engine.position_visit_counts.get(engine.avatar_pos, 0) + 1
-            )
-            if engine.active_probe_target is not None:
-                engine.probe_target_steps += 1
+        if view.avatar_pos is not None:
+            delta.mutate("recent_positions", view.recent_positions).append(view.avatar_pos)
+            pvc = delta.mutate("position_visit_counts", view.position_visit_counts)
+            pvc[view.avatar_pos] = pvc.get(view.avatar_pos, 0) + 1
+            if view.active_probe_target is not None:
+                delta.set("probe_target_steps", view.probe_target_steps + 1)
 
         if proposal.clear_active_probe:
-            engine.active_probe_target = None
-            engine.active_probe_id = None
-            engine.probe_target_steps = 0
+            delta.set("active_probe_target", None)
+            delta.set("active_probe_id", None)
+            delta.set("probe_target_steps", 0)
 
         if proposal.new_probe_target is not None:
-            engine.active_probe_target = proposal.new_probe_target
-            engine.active_probe_id = proposal.new_probe_id
-            engine.probe_target_steps = 0
+            delta.set("active_probe_target", proposal.new_probe_target)
+            delta.set("active_probe_id", proposal.new_probe_id)
+            delta.set("probe_target_steps", 0)
 
         for eid in proposal.probed_entity_ids_to_add:
-            engine.probed_entity_ids.add(eid)
+            delta.mutate("probed_entity_ids", view.probed_entity_ids).add(eid)
 
         for eid in proposal.entity_visit_counts_to_inc:
-            engine.entity_visit_counts[eid] = engine.entity_visit_counts.get(eid, 0) + 1
+            evc = delta.mutate("entity_visit_counts", view.entity_visit_counts)
+            evc[eid] = evc.get(eid, 0) + 1
 
         if proposal.tested_action_position is not None:
-            engine.tested_action_positions.add(proposal.tested_action_position)
+            delta.mutate("tested_action_positions", view.tested_action_positions).add(
+                proposal.tested_action_position
+            )
 
         if proposal.tested_action is not None:
-            engine.tested_actions.add(proposal.tested_action)
+            delta.mutate("tested_actions", view.tested_actions).add(proposal.tested_action)
 
         if proposal.topological_doorway is not None:
             door_coord, target_room = proposal.topological_doorway
-            engine.working_memory.register_topological_doorway(door_coord, target_room)
+            view.working_memory.register_topological_doorway(door_coord, target_room)
 
     @classmethod
     def plan_epistemic_probe(
@@ -1370,7 +1373,13 @@ class EpistemicCuriosityExplorer:
             curr_grid=curr_grid,
             available_actions=available_actions,
         )
-        cls.apply_proposal_to_engine(engine=engine, proposal=proposal)
+        from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
+
+        delta = StateDelta()
+        cls.apply_proposal_to_engine(
+            view=ReadOnlyEngineView(engine), delta=delta, proposal=proposal
+        )
+        engine.apply_delta(delta, author="cortex_motor")
         return proposal.action, proposal.action_data
 
 
@@ -1597,18 +1606,22 @@ class MotorCortexEffector:
             {engine.avatar_feature} if engine.avatar_feature is not None else set()
         )
 
-        click_candidates: list[tuple[int, int, float]] = []
+        actuation_candidates: list[tuple[int, int, float]] = []
 
         # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
         for scorer in cls._registered_target_scorers:
             try:
-                click_candidates.extend(scorer.score_targets(engine, curr_grid, entities, bg, H, W))
+                actuation_candidates.extend(
+                    scorer.score_targets(engine, curr_grid, entities, bg, H, W)
+                )
             except Exception as e:
                 logger.debug("Registered target scorer %s failed: %s", scorer, e)
 
         for scorer in get_engine_state_attr(engine, "target_scorers", []):
             try:
-                click_candidates.extend(scorer.score_targets(engine, curr_grid, entities, bg, H, W))
+                actuation_candidates.extend(
+                    scorer.score_targets(engine, curr_grid, entities, bg, H, W)
+                )
             except Exception as e:
                 logger.debug("Engine-local target scorer %s failed: %s", scorer, e)
 
@@ -1625,12 +1638,12 @@ class MotorCortexEffector:
                 sr, sc = int(pos[0]), int(pos[1])
                 feat = int(curr_grid[sr, sc]) if 0 <= sr < H and 0 <= sc < W else 0
                 if (
-                    (sr, sc) not in engine.quiescent_click_targets
+                    (sr, sc) not in engine.quiescent_actuation_targets
                     and feat not in engine.quiescent_features
                     and not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid)
                 ):
-                    vis = engine.entity_visit_counts.get(f"click_{sr}_{sc}", 0)
-                    click_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
+                    vis = engine.entity_visit_counts.get(f"actuate_{sr}_{sc}", 0)
+                    actuation_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
 
         # 3. Modal Manipulandum Destination Affordances:
         # If an external manipulandum is currently focused, prioritize destination sockets/receptacles
@@ -1640,12 +1653,14 @@ class MotorCortexEffector:
                 for r_feat in engine.symbolic_theory.receptacle_features:
                     cells = np.argwhere(curr_grid == r_feat)
                     for cr, cc in cells[:8]:
-                        if (int(cr), int(cc)) not in engine.quiescent_click_targets:
-                            vis = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                            click_candidates.append((int(cr), int(cc), 220.0 - float(vis) * 10.0))
+                        if (int(cr), int(cc)) not in engine.quiescent_actuation_targets:
+                            vis = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
+                            actuation_candidates.append(
+                                (int(cr), int(cc), 220.0 - float(vis) * 10.0)
+                            )
 
         # 6. Salient entities if no panel candidates exist
-        if not click_candidates:
+        if not actuation_candidates:
             for e in entities:
                 if (
                     e.feature_id == bg
@@ -1656,15 +1671,17 @@ class MotorCortexEffector:
                     continue
                 cr, cc = e.grid_pos
                 if (
-                    cr,
-                    cc,
-                ) in engine.quiescent_click_targets or MotorCortexEffector.is_peripheral_frame_cell(
-                    cr, cc, H, W, curr_grid
+                    (
+                        cr,
+                        cc,
+                    )
+                    in engine.quiescent_actuation_targets
+                    or MotorCortexEffector.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
-                visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+                visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
-                affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
+                affordance_bonus = 60.0 if (cr, cc) in engine.effective_actuation_targets else 0.0
                 feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
                 telic_bonus = (
                     150.0
@@ -1689,33 +1706,33 @@ class MotorCortexEffector:
                 cand_score = (
                     saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
                 )
-                click_candidates.append((cr, cc, cand_score))
+                actuation_candidates.append((cr, cc, cand_score))
 
         # 7. Inferotemporal Affordance Centroid Segmentation
-        if not click_candidates:
+        if not actuation_candidates:
             it_anchors = InferotemporalSegmentationEngine.extract_affordance_anchors(
                 grid=curr_grid,
                 background_feature=bg,
                 avatar_features=av_feats,
-                quiescent_coords=engine.quiescent_click_targets,
-                effective_coords=engine.effective_click_targets,
+                quiescent_coords=engine.quiescent_actuation_targets,
+                effective_coords=engine.effective_actuation_targets,
                 quiescent_features=engine.quiescent_features,
                 effective_features=engine.effective_features,
                 visit_counts=engine.entity_visit_counts,
             )
             for ar, ac, score in it_anchors:
                 if (
-                    (ar, ac) in engine.quiescent_click_targets
+                    (ar, ac) in engine.quiescent_actuation_targets
                     or (ar, ac) == engine.avatar_pos
                     or int(curr_grid[ar, ac]) in av_feats
                     or int(curr_grid[ar, ac]) in engine.quiescent_features
                     or cls.is_peripheral_frame_cell(ar, ac, H, W, curr_grid)
                 ):
                     continue
-                click_candidates.append((ar, ac, score))
+                actuation_candidates.append((ar, ac, score))
 
         # 8. Saccadic Attention Fixations
-        if not click_candidates:
+        if not actuation_candidates:
             fixations = engine.saccadic_attention.extract_fixations(
                 grid=curr_grid,
                 prev_grid=engine.prev_grid,
@@ -1726,7 +1743,7 @@ class MotorCortexEffector:
                 cr, cc = f.r, f.c
                 feat = int(curr_grid[cr, cc])
                 if (
-                    (cr, cc) in engine.quiescent_click_targets
+                    (cr, cc) in engine.quiescent_actuation_targets
                     or feat == bg
                     or feat in av_feats
                     or feat in engine.quiescent_features
@@ -1734,8 +1751,8 @@ class MotorCortexEffector:
                     or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
-                visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
-                affordance_bonus = 60.0 if (cr, cc) in engine.effective_click_targets else 0.0
+                visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
+                affordance_bonus = 60.0 if (cr, cc) in engine.effective_actuation_targets else 0.0
                 feat_bias = 40.0 if feat in engine.effective_features else 0.0
                 cand_score = (
                     f.salience
@@ -1743,10 +1760,10 @@ class MotorCortexEffector:
                     + feat_bias
                     - float(visit_count) * (0.1 if affordance_bonus > 0 else 0.35)
                 )
-                click_candidates.append((cr, cc, cand_score))
+                actuation_candidates.append((cr, cc, cand_score))
 
         # 9. Fallback: unvisited non-background cells
-        if not click_candidates:
+        if not actuation_candidates:
             step_sz = (
                 getattr(
                     get_engine_state_attr(engine, "spatial_tracker", None),
@@ -1773,7 +1790,7 @@ class MotorCortexEffector:
                 seen_cand_cells.add((cr, cc))
                 feat = int(curr_grid[cr, cc])
                 if (
-                    (cr, cc) in engine.quiescent_click_targets
+                    (cr, cc) in engine.quiescent_actuation_targets
                     or feat in av_feats
                     or feat == bg
                     or feat == engine.bg_feature
@@ -1782,29 +1799,31 @@ class MotorCortexEffector:
                     or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
                 ):
                     continue
-                visit_count = engine.entity_visit_counts.get(f"click_{cr}_{cc}", 0)
+                visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
                 feat_bias = 40.0 if feat in engine.effective_features else 0.0
                 cand_score = 20.0 + feat_bias - float(visit_count) * 2.0
-                click_candidates.append((cr, cc, cand_score))
+                actuation_candidates.append((cr, cc, cand_score))
 
         # 10. Fallback: re-probe confirmed effective targets
-        if not click_candidates and engine.effective_click_targets:
+        if not actuation_candidates and engine.effective_actuation_targets:
             eff_sorted = sorted(
-                engine.effective_click_targets,
-                key=lambda p: engine.entity_visit_counts.get(f"click_{p[0]}_{p[1]}", 0),
+                engine.effective_actuation_targets,
+                key=lambda p: engine.entity_visit_counts.get(f"actuate_{p[0]}_{p[1]}", 0),
             )
-            click_candidates.append((eff_sorted[0][0], eff_sorted[0][1], 50.0))
+            actuation_candidates.append((eff_sorted[0][0], eff_sorted[0][1], 50.0))
 
         # Quiescence Gating: Ensure candidates known to have 0 physical effect are excluded
-        click_candidates = [
-            c for c in click_candidates if (c[0], c[1]) not in engine.quiescent_click_targets
+        actuation_candidates = [
+            c
+            for c in actuation_candidates
+            if (c[0], c[1]) not in engine.quiescent_actuation_targets
         ]
 
-        if click_candidates:
-            click_candidates.sort(key=lambda x: x[2], reverse=True)
-            best_r, best_c, _ = click_candidates[0]
-            engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
-                engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
+        if actuation_candidates:
+            actuation_candidates.sort(key=lambda x: x[2], reverse=True)
+            best_r, best_c, _ = actuation_candidates[0]
+            engine.entity_visit_counts[f"actuate_{best_r}_{best_c}"] = (
+                engine.entity_visit_counts.get(f"actuate_{best_r}_{best_c}", 0) + 1
             )
             target_r, target_c = int(best_r), int(best_c)
             engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
@@ -1830,7 +1849,7 @@ class MotorCortexEffector:
                         )
                         vx = int(raw_vx) if raw_vx is not None else 0
                         vy = int(raw_vy) if raw_vy is not None else 0
-                        if (vy, vx) in engine.quiescent_click_targets:
+                        if (vy, vx) in engine.quiescent_actuation_targets:
                             continue
                         if hasattr(engine, "working_memory") and hasattr(
                             engine.working_memory, "habenular_ior"
@@ -1851,7 +1870,7 @@ class MotorCortexEffector:
                             haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
                                 engine.avatar_pos, action, action_data={"x": vx, "y": vy}
                             )
-                        vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                        vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
                         # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
                         d = (
                             float(abs(vx - target_c) + abs(vy - target_r))
@@ -1872,9 +1891,9 @@ class MotorCortexEffector:
                             raw_vy = vt.get("y", vt.get("r", 0))
                             vx = int(raw_vx) if raw_vx is not None else 0
                             vy = int(raw_vy) if raw_vy is not None else 0
-                            if (vy, vx) in engine.quiescent_click_targets:
+                            if (vy, vx) in engine.quiescent_actuation_targets:
                                 continue
-                            vis = engine.entity_visit_counts.get(f"click_{vy}_{vx}", 0)
+                            vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
                             if vis < min_vis:
                                 min_vis = vis
                                 least_visited_vt = vt
@@ -1884,8 +1903,8 @@ class MotorCortexEffector:
                     # Update visit count for snapped coordinate
                     svx = int(snapped_target.get("x", snapped_target.get("c", 0)))
                     svy = int(snapped_target.get("y", snapped_target.get("r", 0)))
-                    engine.entity_visit_counts[f"click_{svy}_{svx}"] = (
-                        engine.entity_visit_counts.get(f"click_{svy}_{svx}", 0) + 1
+                    engine.entity_visit_counts[f"actuate_{svy}_{svx}"] = (
+                        engine.entity_visit_counts.get(f"actuate_{svy}_{svx}", 0) + 1
                     )
                     return dict(snapped_target)
 
@@ -1922,7 +1941,7 @@ class MotorCortexEffector:
             for c in range(1, W - 1, step_stride):
                 if cls.is_peripheral_frame_cell(r, c, H, W, curr_grid):
                     continue
-                v = engine.entity_visit_counts.get(f"click_{r}_{c}", 0)
+                v = engine.entity_visit_counts.get(f"actuate_{r}_{c}", 0)
                 feat = int(curr_grid[r, c])
                 bonus = -20.0 if feat != bg else 0.0
                 score = float(v) + bonus
@@ -1930,8 +1949,8 @@ class MotorCortexEffector:
                     min_v = score
                     best_r, best_c = r, c
 
-        engine.entity_visit_counts[f"click_{best_r}_{best_c}"] = (
-            engine.entity_visit_counts.get(f"click_{best_r}_{best_c}", 0) + 1
+        engine.entity_visit_counts[f"actuate_{best_r}_{best_c}"] = (
+            engine.entity_visit_counts.get(f"actuate_{best_r}_{best_c}", 0) + 1
         )
         engine.last_effector_target_step[(best_r, best_c)] = engine.step_counter
         coords_fallback: dict[str, Any] = {}
@@ -2143,6 +2162,38 @@ class MotorStage:
     name: str = "motor_stage"
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
+        engine = ctx.signals.get("_engine")
+        if engine is not None:
+            # WP1: real motor dispatch — finalise DeliberationStage's
+            # ActionProposal through _finalize_step (grid already normalized).
+            proposal = ctx.signals.get("_proposal")
+            if proposal is None or not hasattr(proposal, "action"):
+                return StageResult(author=self.name)
+            if getattr(proposal, "finalized", False):
+                return StageResult(
+                    author=self.name,
+                    signals={"branch": proposal.branch},
+                    proposed_action=(proposal.action, proposal.action_data),
+                )
+            from hbllm.hcir.world.engine_state import (
+                FacultyWriteJournal,
+                JournaledEngineView,
+            )
+
+            journal = FacultyWriteJournal(author="motor_stage")
+            act, data = engine.deliberation_engine._finalize_step(
+                JournaledEngineView(engine, journal),
+                proposal.grid,
+                proposal.action,
+                proposal.action_data,
+                predicted_pos=proposal.predicted_pos,
+            )
+            return StageResult(
+                author=self.name,
+                journal=journal,
+                signals={"branch": proposal.branch},
+                proposed_action=(act, data),
+            )
         proposed_action = ctx.signals.get("proposed_action")
         ops: list[TransactionOperation] = []
         signals: dict[str, Any] = {}

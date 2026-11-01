@@ -79,8 +79,8 @@ class TestMetacognitiveBudgetAndEntorhinalLoop:
         engine.assimilate_feedback(
             curr_grid=grid,
             available_actions=[1, 2, 3, 4],
-            is_lost=False,
-            is_win=False,
+            is_failure=False,
+            is_success=False,
             action=1,
             action_data={"dr": 0, "dc": 0},
         )

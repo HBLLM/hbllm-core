@@ -146,8 +146,8 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
                 grid = np.asarray(raw_observation, dtype=int)
                 if grid.ndim == 3 and len(grid) > 0:
                     grid = grid[-1]
-            except Exception:
-                grid = np.zeros((16, 16), dtype=int)
+            except Exception as exc:
+                raise ValueError("ARC observation is not a lattice") from exc
 
         H, W = grid.shape
 

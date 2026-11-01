@@ -87,6 +87,12 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > [!IMPORTANT]
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
+> [!NOTE]
+> **Faculty Roster (WP2 measured ablation, `reports/ablation/20261101_211519.json`):**
+> - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
+> - **Kept faculties (Δlevels > sd or load-bearing):** `acc_conflict_monitor`, `collision_cones`, `deformation_tracker`, `dorsal_kinetic_stream`, `hazard_tracker`, `metacognitive_agency_cortex`, `neuromodulatory_system`, `precision_controller`, `prediction_budget`, `predictive_coding_cortex`, `snn_predictor`, `surprise_engine`.
+> - **Experimental/unused (ablated to `AblatedFaculty` nulls; classes importable via `hbllm.hcir.world.experimental`):** 52 faculties — see the report for the measured evidence and the decision rule.
+
 ---
 
 ## 3. Substrate (Code/Rust) vs. Cognitive Programs (HCIR Language)
@@ -213,6 +219,8 @@ HBLLM provides a chunked structural-sharing graph substrate written in native Ru
   maturin develop --release
   ```
 - **Parity Requirement:** The Python `NativeGraphAdapter` must remain functionally identical to the pure Python dictionary implementation for transparent fallback when native binaries are not compiled.
+- **Substrate health:** `CognitiveGraph.native_health()` reports `{enabled, available, divergences, last_error}`; divergences raise `SubstrateDivergenceError` (Python is authoritative).
+- **Fork/diff:** `graph.fork()` is copy-on-write with dirty-set tracking; `workspace.diff_branch()` is O(dirty) for forked branches. See `docs/architecture/graph_substrate.md`.
 
 ---
 

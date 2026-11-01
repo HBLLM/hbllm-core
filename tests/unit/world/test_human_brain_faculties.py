@@ -289,7 +289,7 @@ class TestInferotemporalSegmentation:
         grid[5, 5] = 3
         grid[1, 1] = 6
 
-        visits = {"click_5_5": 5}  # Heavily visited (habituation / IOR)
+        visits = {"actuate_5_5": 5}  # Heavily visited (habituation / IOR)
         anchors = InferotemporalSegmentationEngine.extract_affordance_anchors(
             grid,
             background_feature=0,
@@ -442,16 +442,16 @@ class TestHippocampalEpisodicCortex:
             avatar_pos=(2, 3),
             action=4,
             reward=0.0,
-            is_lost=False,
+            is_failure=False,
         )
         cortex.record_transition(
             step=2,
             avatar_pos=(2, 4),
             action=2,
             reward=-10.0,
-            is_lost=True,
+            is_failure=True,
         )
-        cortex.trigger_sharp_wave_ripple_replay(is_lost=True, is_win=False)
+        cortex.trigger_sharp_wave_ripple_replay(is_failure=True, is_success=False)
 
         assert len(cortex.catastrophic_replays) > 0
         assert len(cortex.grounded_lethal_transitions) > 0
@@ -2211,7 +2211,7 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
             avatar_pos=(1, 2),
             action_id=0,
             reward=1.0,
-            is_win=True,
+            is_success=True,
         )
         t_pred = trans.to_causal_predicate()
         assert "episodic_transition:step_5" in t_pred.variable
@@ -2616,7 +2616,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         engine.assimilate_feedback(
             curr_grid=curr_grid,
             available_actions=[1, 2, 3, 4],
-            is_win=True,
+            is_success=True,
             action=1,
         )
 
@@ -2831,7 +2831,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         engine.assimilate_feedback(
             curr_grid=curr_grid,
             available_actions=[1, 2, 3, 4],
-            is_lost=True,
+            is_failure=True,
             action=1,
         )
         assert engine.working_memory.active_schema is not None
@@ -2842,7 +2842,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         engine.assimilate_feedback(
             curr_grid=curr_grid,
             available_actions=[1, 2, 3, 4],
-            is_lost=True,
+            is_failure=True,
             action=1,
         )
         # Active schema should now be completely invalidated
@@ -3089,7 +3089,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         cortex.record_transition(step=1, avatar_pos=(1, 2), action=2, reward=0.0)
         cortex.record_transition(step=2, avatar_pos=(1, 3), action=3, reward=0.0)
         cortex.record_transition(
-            step=3, avatar_pos=(1, 4), action=4, reward=1.0, is_win=True, is_terminal=True
+            step=3, avatar_pos=(1, 4), action=4, reward=1.0, is_success=True, is_terminal=True
         )
 
         summary = cortex.consolidate_episodic_replay_td(
@@ -3241,18 +3241,23 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         cortex.record_transition(step=0, avatar_pos=(1, 1), action=1, reward=0.0)
         cortex.record_transition(step=1, avatar_pos=(1, 2), action=4, reward=0.0)
         cortex.record_transition(
-            step=2, avatar_pos=(1, 3), action=4, reward=1.0, is_win=True, is_terminal=True
+            step=2, avatar_pos=(1, 3), action=4, reward=1.0, is_success=True, is_terminal=True
         )
 
         assert len(theory.domain_predicates) == 0
 
         # Consolidate and reset on level win
+        from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
+
+        _d = StateDelta()
         cortex.consolidate_schema_and_reset(
-            engine=mock_engine,
+            ReadOnlyEngineView(mock_engine),
+            _d,
             retain_dynamics=True,
             is_new_level=True,
             level=2,
         )
+        mock_engine.apply_delta(_d, author="episodic_cortex")
 
         # Verify Q-values consolidated and predicates transferred to symbolic theory
         assert len(cortex.q_table) > 0
@@ -3323,7 +3328,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         pred = AnteriorCingulateConflictPredicate()
         curr_grid = np.zeros((10, 10), dtype=int)
         res = pred.evaluate(
-            engine=mock_engine,
+            view=mock_engine,
             curr_grid=curr_grid,
             next_step=cand_step,
             future_steps=[cand_step],
@@ -3339,7 +3344,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
             expected_mutation="safe_move",
         )
         res_safe = pred.evaluate(
-            engine=mock_engine,
+            view=mock_engine,
             curr_grid=curr_grid,
             next_step=safe_step,
             future_steps=[safe_step],

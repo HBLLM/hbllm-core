@@ -34,3 +34,12 @@ class GraphView(Protocol):
     def edges_from(self, node_id: str) -> Iterable[Any]: ...
 
     def weight(self, u: str, v: str) -> float: ...
+
+
+def native_of(graph: Any) -> Any | None:
+    """Return the native accelerator attached to a graph object, if any.
+
+    Algorithms dispatch to this adapter first when present; views and
+    plain Python graphs simply do not define ``_native_adapter``.
+    """
+    return getattr(graph, "_native_adapter", None)

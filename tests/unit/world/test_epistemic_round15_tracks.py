@@ -23,7 +23,9 @@ from hbllm.hcir.world.amygdalar_threat_conditioning import (
     DefensiveVigilanceMode,
     DefensiveVigilanceState,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
 from hbllm.hcir.world.entorhinal_border_cell import (
     EntorhinalBorderCellEngine,
     GridModuleRescalingResult,

@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 from hbllm.hcir.world.amygdalar_threat_conditioning import (
-    AmygdalarThreatConditioningEngine,
     ConditionedThreatStimulus,
     DefensiveVigilanceMode,
     DefensiveVigilanceState,
 )
 from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
-    AnteriorCingulateEffortAllocator,
     ConflictProfile,
     EffortAllocationDecision,
 )
 from hbllm.hcir.world.anterior_insular_timing import (
-    AnteriorInsularTimingEngine,
     InteroceptivePacingState,
     PacingMode,
 )
@@ -22,10 +19,8 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
     EpistemicTruthValue,
-    UnifiedActiveInferenceDecision,
 )
 from hbllm.hcir.world.boundary_grid_phase_aligner import (
-    BoundaryGridPhaseAligner,
     BoundaryPhaseAlignmentState,
     PhaseInnovationVector,
 )
@@ -41,17 +36,14 @@ from hbllm.hcir.world.causal_scm import (
     StructuralCausalModel,
 )
 from hbllm.hcir.world.cerebellar_microzone_adaptor import (
-    CerebellarMicrozoneAdaptor,
     ClimbingFiberFeedback,
     MotorPrediction,
 )
 from hbllm.hcir.world.claustrum_interhemispheric import (
-    ClaustrumInterhemisphericIntegrator,
     CrossModalSynchronyPacket,
     InterHemisphericBindingState,
 )
 from hbllm.hcir.world.claustrum_salience_conductor import (
-    ClaustrumSalienceConductor,
     UnifiedPerceptualGestalt,
 )
 from hbllm.hcir.world.cortex_assimilator import (
@@ -73,7 +65,6 @@ from hbllm.hcir.world.disagreement_analyzer import (
 )
 from hbllm.hcir.world.dorsolateral_rule_abstraction import (
     AbstractRuleSchema,
-    DorsolateralRuleAbstractionEngine,
     RuleTransferResult,
 )
 from hbllm.hcir.world.engine_state import (
@@ -82,13 +73,11 @@ from hbllm.hcir.world.engine_state import (
 )
 from hbllm.hcir.world.entorhinal_border_cell import (
     BorderCell,
-    EntorhinalBorderCellEngine,
     GridModuleRescalingResult,
 )
 from hbllm.hcir.world.frontopolar_exploration_horizon import (
     BranchSwitchDecision,
     CounterfactualBranch,
-    FrontopolarExplorationHorizonEngine,
 )
 from hbllm.hcir.world.frontopolar_subgoal_tree import (
     RecursiveSubgoalTree,
@@ -99,53 +88,43 @@ from hbllm.hcir.world.frontopolar_subgoal_tree import (
 from hbllm.hcir.world.global_workspace_ignition import (
     CandidateIgnitionSignal,
     ConsciousIgnitionPacket,
-    GlobalWorkspaceIgnitionEngine,
     GlobalWorkspaceState,
     IgnitionPriority,
 )
 from hbllm.hcir.world.habenula_striatum_opponency import (
-    DualValueOpponencyCortex,
     OpponencyRegime,
     OpponencyValueState,
 )
 from hbllm.hcir.world.hippocampal_phase_precession import (
-    HippocampalPhasePrecessionEngine,
     PhasePrecessionBurst,
     ThetaPhase,
 )
 from hbllm.hcir.world.hippocampal_replay import (
-    HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
     ReplayTransition,
 )
 from hbllm.hcir.world.hippocampal_time_cell import (
-    HippocampalTimeCellEngine,
     TemporalTimeCell,
     TimeIntervalState,
 )
 from hbllm.hcir.world.inferotemporal_shape_hasher import (
-    InferotemporalShapeHasher,
     ShapeArchetypeSignature,
 )
 from hbllm.hcir.world.insula_allostasis import (
     AllostaticRegime,
-    InteroceptiveAllostasisCortex,
     InteroceptiveState,
 )
 from hbllm.hcir.world.lateral_prefrontal_switcher import (
     CognitiveTaskSet,
-    LateralPrefrontalTaskSwitcher,
     TaskArbitrationResult,
     TaskSwitchEvent,
 )
 from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
     ExplorationRegime,
-    LocusCoeruleusNoradrenalineEngine,
     NoradrenergicState,
 )
 from hbllm.hcir.world.medial_prefrontal_schema import (
     GeneralizedTaskSchema,
-    MedialPrefrontalSchemaEngine,
     SchemaGeneralizationReport,
     SchemaMatchResult,
 )
@@ -158,26 +137,21 @@ from hbllm.hcir.world.object_state_graph import (
 from hbllm.hcir.world.orbitofrontal_credit_assignment import (
     CounterfactualCreditReport,
     InferredBranchValue,
-    OrbitofrontalCreditAssignmentEngine,
 )
 from hbllm.hcir.world.parahippocampal_context import (
     ContextTransitionEvent,
-    ParahippocampalContextEngine,
     SpatialContextSchema,
 )
 from hbllm.hcir.world.parietal_foveated_attention import (
     FoveatedSaliencyMap,
     FoveationResolution,
-    ParietalFoveatedAttentionEngine,
 )
 from hbllm.hcir.world.parietal_potential_field import (
-    ParietalPotentialFieldNavigator,
     PotentialFieldVector,
 )
 from hbllm.hcir.world.pedunculopontine_locomotor import (
     LocomotorDriveCommand,
     LocomotorPacingRegime,
-    PedunculopontineLocomotorEngine,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -200,7 +174,6 @@ from hbllm.hcir.world.predictor_weights import (
 )
 from hbllm.hcir.world.prefrontal_blame_attribution import (
     PlanAttributionReport,
-    PrefrontalBlameAttributor,
     SubgoalBlameScore,
 )
 from hbllm.hcir.world.prefrontal_working_memory import (
@@ -208,47 +181,38 @@ from hbllm.hcir.world.prefrontal_working_memory import (
     WorkingMemorySalienceState,
 )
 from hbllm.hcir.world.pulvinar_attention_router import (
-    PulvinarAttentionRouter,
     PulvinarRoutingState,
     TransthalamicRoute,
 )
 from hbllm.hcir.world.retrosplenial_heading import (
     AllocentricHeadingVector,
     HeadDirectionAttractorState,
-    RetrosplenialHeadingEngine,
 )
 from hbllm.hcir.world.retrosplenial_landmark_anchor import (
     AllocentricLandmark,
     LandmarkRecalibrationResult,
-    RetrosplenialLandmarkAnchorEngine,
 )
 from hbllm.hcir.world.somatosensory_haptic import (
     HapticAffordanceFeedback,
-    SomatosensoryHapticEngine,
     SurfaceFrictionProfile,
 )
 from hbllm.hcir.world.spatial_distance_transform import (
     EuclideanDistanceTransformResult,
-    SpatialDistanceTransformEngine,
 )
 from hbllm.hcir.world.subicular_boundary_vector import (
     BoundaryVectorCell,
     BoundaryVectorMap,
-    SubicularBoundaryVectorEngine,
 )
 from hbllm.hcir.world.subthalamic_drift_diffusion import (
     DriftDiffusionDecision,
-    SubthalamicDriftDiffusionEngine,
 )
 from hbllm.hcir.world.subthalamic_threshold_escalator import (
     STNBrakingStatus,
-    SubthalamicThresholdEscalator,
     ThresholdModulationDecision,
 )
 from hbllm.hcir.world.superior_colliculus_arbiter import (
     MultisensoryPriorityMap,
     SaccadeTarget,
-    SuperiorColliculusTargetArbiter,
 )
 from hbllm.hcir.world.surprise_engine import (
     SurpriseEngine,
@@ -256,28 +220,23 @@ from hbllm.hcir.world.surprise_engine import (
 )
 from hbllm.hcir.world.thalamic_reticular_gating import (
     SensoryShieldingState,
-    ThalamicReticularGatingEngine,
     TRNGateChannel,
 )
 from hbllm.hcir.world.ventral_premotor_resonator import (
     AffordanceResonancePattern,
-    VentralPremotorAffordanceResonator,
     VicariousCausalInference,
 )
 from hbllm.hcir.world.ventral_tegmental_curiosity import (
     CuriosityDriveSignal,
     EpistemicInformationGain,
-    VentralTegmentalCuriosityEngine,
 )
 from hbllm.hcir.world.ventrolateral_motor_inhibition import (
     InhibitionRegime,
     ResponseInhibitionCommand,
-    VentrolateralMotorInhibitionEngine,
 )
 from hbllm.hcir.world.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
     SomaticMarker,
-    VentromedialSomaticMarkerEngine,
 )
 from hbllm.hcir.world.visuospatial_working_memory import (
     VisuospatialWorkingMemory,
@@ -304,15 +263,11 @@ __all__ = [
     "AllocentricHeadingVector",
     "AllocentricLandmark",
     "AllostaticRegime",
-    "AmygdalarThreatConditioningEngine",
-    "AnteriorCingulateEffortAllocator",
-    "AnteriorInsularTimingEngine",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
     "BeliefTransitionEvent",
     "BorderCell",
-    "BoundaryGridPhaseAligner",
     "BoundaryPhaseAlignmentState",
     "BoundaryVectorCell",
     "BoundaryVectorMap",
@@ -322,9 +277,6 @@ __all__ = [
     "CausalHypothesis",
     "CausalPredicate",
     "CausalVariable",
-    "CerebellarMicrozoneAdaptor",
-    "ClaustrumInterhemisphericIntegrator",
-    "ClaustrumSalienceConductor",
     "ClimbingFiberFeedback",
     "CognitiveContext",
     "CognitiveTaskSet",
@@ -343,14 +295,11 @@ __all__ = [
     "DefensiveVigilanceMode",
     "DefensiveVigilanceState",
     "DisagreementReport",
-    "DorsolateralRuleAbstractionEngine",
     "DriftDiffusionDecision",
-    "DualValueOpponencyCortex",
     "EffortAllocationDecision",
     "EngineState",
     "EnsemblePrediction",
     "EntityRole",
-    "EntorhinalBorderCellEngine",
     "EpistemicFeedbackAssimilator",
     "EpistemicInformationGain",
     "EpistemicObservation",
@@ -360,31 +309,21 @@ __all__ = [
     "EuclideanDistanceTransformResult",
     "FoveatedSaliencyMap",
     "FoveationResolution",
-    "FrontopolarExplorationHorizonEngine",
     "GeneralizedTaskSchema",
-    "GlobalWorkspaceIgnitionEngine",
     "GlobalWorkspaceState",
     "GridModuleRescalingResult",
     "HapticAffordanceFeedback",
     "HCIRSymbolicWorldTheory",
     "HeadDirectionAttractorState",
-    "HippocampalPhasePrecessionEngine",
-    "HippocampalPrioritizedReplayBuffer",
-    "HippocampalTimeCellEngine",
     "IgnitionPriority",
     "InferredBranchValue",
-    "InferotemporalShapeHasher",
     "InhibitionRegime",
     "InterHemisphericBindingState",
-    "InteroceptiveAllostasisCortex",
     "InteroceptivePacingState",
     "InteroceptiveState",
     "LandmarkRecalibrationResult",
-    "LateralPrefrontalTaskSwitcher",
     "LocomotorDriveCommand",
     "LocomotorPacingRegime",
-    "LocusCoeruleusNoradrenalineEngine",
-    "MedialPrefrontalSchemaEngine",
     "MotorPrediction",
     "MultisensoryPriorityMap",
     "NoradrenergicState",
@@ -392,12 +331,7 @@ __all__ = [
     "ObjectStateGraphPlanner",
     "OpponencyRegime",
     "OpponencyValueState",
-    "OrbitofrontalCreditAssignmentEngine",
     "PacingMode",
-    "ParahippocampalContextEngine",
-    "ParietalFoveatedAttentionEngine",
-    "ParietalPotentialFieldNavigator",
-    "PedunculopontineLocomotorEngine",
     "PerceptionFrame",
     "PerceptionRegistry",
     "PhaseInnovationVector",
@@ -410,17 +344,13 @@ __all__ = [
     "PredictorWeightManager",
     "PredictorWeightState",
     "PredictionProvenance",
-    "PrefrontalBlameAttributor",
     "PrefrontalWorkingMemory",
-    "PulvinarAttentionRouter",
     "PulvinarRoutingState",
     "RecursiveSubgoalTree",
     "RelationalGraphMatcher",
     "ReplayBatch",
     "ReplayTransition",
     "ResponseInhibitionCommand",
-    "RetrosplenialLandmarkAnchorEngine",
-    "RetrosplenialHeadingEngine",
     "ReversibilityEngine",
     "RuleTransferResult",
     "STNBrakingStatus",
@@ -432,9 +362,7 @@ __all__ = [
     "ShapeArchetypeSignature",
     "SomaticAffectiveBias",
     "SomaticMarker",
-    "SomatosensoryHapticEngine",
     "SpatialContextSchema",
-    "SpatialDistanceTransformEngine",
     "SpatialEntity",
     "StageResult",
     "StateDifferenceComputer",
@@ -443,10 +371,6 @@ __all__ = [
     "SubgoalNodeType",
     "SubgoalTreeNode",
     "SubgoalTreeStatus",
-    "SubicularBoundaryVectorEngine",
-    "SubthalamicDriftDiffusionEngine",
-    "SubthalamicThresholdEscalator",
-    "SuperiorColliculusTargetArbiter",
     "SurfaceFrictionProfile",
     "SurpriseEngine",
     "SurpriseEvaluation",
@@ -454,18 +378,12 @@ __all__ = [
     "TaskSwitchEvent",
     "TemporalStateBuffer",
     "TemporalTimeCell",
-    "ThalamicReticularGatingEngine",
     "ThetaPhase",
     "ThresholdModulationDecision",
     "TimeIntervalState",
     "TRNGateChannel",
     "TransthalamicRoute",
-    "UnifiedActiveInferenceDecision",
     "UnifiedPerceptualGestalt",
-    "VentralPremotorAffordanceResonator",
-    "VentralTegmentalCuriosityEngine",
-    "VentrolateralMotorInhibitionEngine",
-    "VentromedialSomaticMarkerEngine",
     "VicariousCausalInference",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",
