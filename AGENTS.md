@@ -37,6 +37,10 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
    > *"The core is general intelligence, never a single-task solver."*  
    The cognitive core (`hbllm.brain`, `hbllm.hcir`, `hbllm.hcir.world`) must always remain strictly task-agnostic and domain-agnostic. No special functions, ad-hoc solvers, or heuristics designed solely for individual tasks or specific benchmarks (such as dedicated ARC-AGI puzzle solvers, hardcoded game mechanics, or competition-only shortcuts) may be included in the core. All capabilities must emerge from universal neuro-symbolic principles, active inference, Pearl's causal calculus, spatial physics, and domain-general reasoning. Single-task adapters or benchmark harnesses belong strictly in external evaluation or plugin modules (`benchmarks/`, `plugins/`, `kaggle_submission/`), never in `core/`.
 
+8. **Internal Memory Governance Invariant (No Ad-Hoc Attribute Sprawl):**
+   > *"Never attach ad-hoc tracking attributes or monkey-patched state to engine instances. Route all learned knowledge and cognitive state through formal internal memory stores."*  
+   Whenever the cognitive system learns something (e.g. what is a goal, barrier, cargo, patroller, or when salience shifts), **do not invent new instance variables** (`engine._last_xxx = ...`, `engine.custom_flag = ...`). Semantic ontology must be stored in `HCIRSymbolicWorldTheory` (`engine.symbolic_theory`) via `CausalPredicate`. Transient working salience and phase triggers must be managed by `PrefrontalWorkingMemory` (`engine.working_memory`). Behavioral programs belong in procedural memory (`DeclarativeNeuroSymbolicSkill`), and long-term concepts belong in `TieredWorkspace` via `TransactionManager`.
+
 ---
 
 ## 2. The Cortical Epistemic Loop (`hbllm.hcir.world`)
@@ -45,14 +49,14 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 
 ```
   ┌───────────────────────────────────────────────────────────────────┐
-  │ 1. SENSORY PERCEPTION & COORDINATE LIFTING                       │
+  │ 1. SENSORY PERCEPTION & COORDINATE LIFTING (PerceptionStage)     │
   │    (cortex_perception.py, parietal_coordinate_transform.py)       │
   │    Transforms raw lattices/sensory data into typed SpatialEntity  │
   │    components and relative coordinate frames.                     │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
-  │ 2. ASSIMILATION & SURPRISE INDUCTION                              │
+  │ 2. ASSIMILATION & SURPRISE INDUCTION (AssimilationStage)          │
   │    (cortex_assimilator.py, surprise_engine.py)                    │
   │    Binds motor diffs to actions; updates EpistemicPhase; detects  │
   │    high surprise to invalidate stale causal hypotheses.           │
@@ -60,21 +64,21 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 3. COUNTERFACTUAL SIMULATION & SUBGOAL SCHEDULING                 │
-  │    (cortex_planner.py, frontopolar_subgoal_stack.py)              │
+  │    (SimulationStage / cortex_planner.py, frontopolar_subgoal)     │
   │    OFC mental simulation rollouts; dead-end pruning (corners/    │
   │    walls); BA10 recursive subgoal decomposition (keys, doors).    │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
-  │ 4. PREFRONTAL DELIBERATION & SAFETY GATING                        │
+  │ 4. PREFRONTAL DELIBERATION & SAFETY GATING (DeliberationStage)   │
   │    (cortex_deliberation.py, anterior_cingulate_conflict.py)       │
   │    Evaluates candidate plans against looming collision cones,     │
   │    dynamic patroller trajectories, and Habenular action inhibition.│
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
-  │ 5. MOTOR DISPATCH & TRANSACTION EXECUTION                         │
-  │    (KernelServices, TransactionManager)                           │
+  │ 5. MOTOR DISPATCH & TRANSACTION EXECUTION (MotorStage)            │
+  │    (cortex_motor.py, KernelServices, TransactionManager)          │
   │    Commits state mutation transactions; dispatches chosen motor   │
   │    action via CapabilityResolver.                                 │
   └───────────────────────────────────────────────────────────────────┘
@@ -193,6 +197,8 @@ await services.event_bus.wait_for(
    Every state change must be verifiable and reversible. Never commit unvalidated state directly to the graph.
 5. **No Monkey-Patching / Band-Aid Fixes:**  
    Always implement the intended target architecture (Rule 1.6).
+6. **No Ad-Hoc Instance Variables or Monkey-Patched State on Engine:**  
+   Never add ad-hoc tracking attributes (e.g. `_last_sim_trajectory_count`, `_last_sim_goal_count`, `_feedback_assimilated`) directly onto `AutonomousEpistemicEngine` or cortical classes to patch edge cases. Always use `PrefrontalWorkingMemory` or `HCIRSymbolicWorldTheory` (Rule 1.8).
 
 ---
 
@@ -309,4 +315,5 @@ Before completing any task, verify:
 4. [ ] **LLM-Free Core:** Does reasoning remain completely independent of external LLM API calls?
 5. [ ] **General Intelligence & Domain Agnostic:** Does the core remain strictly task-agnostic, free of single-task functions, game-specific hacks, or ARC-AGI-specific puzzle solvers?
 6. [ ] **Unit Tests:** Have changes been validated with `pytest`?
-7. [ ] **Knowledge Graph:** Has `graphify update .` been executed after modifying code files?
+7. [ ] **Internal Memory Governance:** Is state and learned ontology stored in `HCIRSymbolicWorldTheory` and `PrefrontalWorkingMemory` rather than ad-hoc class instance variables?
+8. [ ] **Knowledge Graph:** Has `graphify update .` been executed after modifying code files?
