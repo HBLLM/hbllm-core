@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _test_dir = Path(__file__).resolve().parent
 _plugin_dir = _test_dir.parent
 _plugins_root = _plugin_dir.parent
@@ -41,6 +43,7 @@ def test_plugin_manifest() -> None:
 
 
 def test_nethack_environment_lifecycle() -> None:
+    pytest.importorskip("minihack")
     env = make_nethack_env(seed=42, tier=1)
     assert isinstance(env, NativeNetHackWrapper)
     obs, info = env.reset(seed=42)
@@ -57,6 +60,7 @@ def test_nethack_environment_lifecycle() -> None:
 
 
 def test_nethack_perception_adapter() -> None:
+    pytest.importorskip("minihack")
     env = make_nethack_env(seed=101, tier=1)
     obs, _ = env.reset(seed=101)
 
@@ -69,6 +73,7 @@ def test_nethack_perception_adapter() -> None:
 
 
 def test_nethack_stairs_descent_native() -> None:
+    pytest.importorskip("minihack")
     env = make_nethack_env(seed=42, tier=1)
     obs, _ = env.reset(seed=42)
     agent = PureHCIRNetHackAgent()
@@ -86,6 +91,7 @@ def test_nethack_stairs_descent_native() -> None:
 
 
 def test_native_nethack_wrapper() -> None:
+    pytest.importorskip("minihack")
     env = make_nethack_env(seed=42, tier=1)
     assert env.is_native is True
     assert isinstance(env, NativeNetHackWrapper)

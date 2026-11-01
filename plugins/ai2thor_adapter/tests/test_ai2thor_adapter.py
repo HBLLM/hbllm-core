@@ -75,6 +75,7 @@ def test_wilson_score_interval() -> None:
 
 
 def test_ai2thor_environment_lifecycle() -> None:
+    pytest.importorskip("ai2thor")
     env = make_ai2thor_env(seed=42, tier=1)
     try:
         assert isinstance(env, NativeAI2ThorWrapper)
@@ -92,6 +93,7 @@ def test_ai2thor_environment_lifecycle() -> None:
 
 
 def test_ai2thor_perception_adapter() -> None:
+    pytest.importorskip("ai2thor")
     env = make_ai2thor_env(seed=101, tier=1)
     try:
         obs, _ = env.reset(seed=101)
@@ -140,6 +142,7 @@ def test_ai2thor_action_adapter_planning() -> None:
 
 
 def test_native_ai2thor_wrapper_lifecycle() -> None:
+    pytest.importorskip("ai2thor")
     env = make_ai2thor_env(seed=42, tier=1)
     try:
         assert getattr(env, "is_native", False) is True

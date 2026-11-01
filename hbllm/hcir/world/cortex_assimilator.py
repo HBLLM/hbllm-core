@@ -137,7 +137,8 @@ class EpistemicFeedbackAssimilator:
                 comp_pairs.append((pe, ce))
 
         engine.state.avatar_features = {ce.feature_id for _, ce in comp_pairs}
-        engine.state.avatar_feature = next(iter(engine.avatar_features))
+        if engine.state.avatar_features:
+            engine.state.avatar_feature = next(iter(engine.state.avatar_features))
         engine.mobile_threat_features.difference_update(engine.avatar_features)
         engine.hazard_tracker.known_lethal_features.difference_update(engine.avatar_features)
         if hasattr(engine, "episodic_cortex"):
@@ -1179,8 +1180,8 @@ class EpistemicFeedbackAssimilator:
                         for _, ce in comp_pairs
                         if ce.feature_id != bg and ce.feature_id != engine.bg_feature
                     }
-                    if engine.avatar_features:
-                        engine.state.avatar_feature = next(iter(engine.avatar_features))
+                    if engine.state.avatar_features:
+                        engine.state.avatar_feature = next(iter(engine.state.avatar_features))
                     engine.state.avatar_size = sum(ce.area for _, ce in comp_pairs)
                     known_av_feats = engine.avatar_features
                     av_moved = [
@@ -1421,8 +1422,8 @@ class EpistemicFeedbackAssimilator:
                             engine.immobile_entity_actions.add(engine.last_action)
                         prev_inh = engine.inhibited_actions.get(engine.last_action, 0)
                         engine.inhibited_actions[engine.last_action] = max(prev_inh + 2, 3)
-                        engine.state.simulation_cooldown = 0
-                        engine.state.consecutive_simulation_failures = 0
+                        engine.simulation_cooldown = 0
+                        engine.consecutive_simulation_failures = 0
 
             if diff.changed_pixel_count == 0 and not is_success and not is_failure:
                 engine.consecutive_stuck_steps += 1
@@ -1566,11 +1567,11 @@ class EpistemicFeedbackAssimilator:
                     if not did_displace_correctly:
                         engine.consecutive_plan_failures += 1
                         if engine.consecutive_plan_failures >= 2:
-                            engine.state.exploration_cooldown = 2
-                            engine.state.consecutive_plan_failures = 0
+                            engine.exploration_cooldown = 2
+                            engine.consecutive_plan_failures = 0
             else:
                 if avatar_moved or diff.changed_pixel_count > 0:
-                    engine.state.consecutive_plan_failures = 0
+                    engine.consecutive_plan_failures = 0
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
         movable_features = set(engine.symbolic_theory.cargo_features)

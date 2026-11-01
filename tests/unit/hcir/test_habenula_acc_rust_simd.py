@@ -300,7 +300,7 @@ def test_habenular_and_acc_transaction_operations() -> None:
     habenula = HabenularEpisodicIOR()
     habenula.record_step(1, (1, 1), 2)
     habenula.record_step(2, (1, 2), 4)
-    habenula.record_catastrophe(final_step=3, is_lost=True)
+    habenula.record_catastrophe(final_step=3, is_fatal=True)
 
     hab_ops = habenula.to_transaction_operations()
     assert len(hab_ops) >= 2

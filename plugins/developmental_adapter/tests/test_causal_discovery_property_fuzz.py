@@ -12,6 +12,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import pytest
+
+pytest.importorskip("hypothesis")
 from hypothesis import given, settings
 from hypothesis import strategies as st
 

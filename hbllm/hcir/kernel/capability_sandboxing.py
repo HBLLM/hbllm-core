@@ -68,8 +68,9 @@ class CapabilityResourceLimits:
 
 _FS_TERMS = {
     "file",
+    "filepath",
+    "filename",
     "fs",
-    "path",
     "disk",
     "write",
     "read",
@@ -89,7 +90,6 @@ _FS_TERMS = {
     "dump",
     "append",
     "storage",
-    "io",
     "cat",
     "touch",
     "cp",
@@ -139,7 +139,6 @@ _DB_TERMS = {
     "db",
     "database",
     "sql",
-    "query",
     "table",
     "record",
     "insert",
@@ -161,17 +160,17 @@ def infer_capability_permissions(
 ) -> set[str]:
     """Auto-infer required permissions from capability name, tags, and runtime parameters."""
     perms: set[str] = set()
-    cap_lower = capability_name.lower().replace("-", "_")
+    cap_lower = capability_name.lower().replace("-", "_").replace(".", "_")
     cap_tokens = set(cap_lower.split("_"))
 
-    # Name-based matching (exact token or substring)
-    if any(t in cap_tokens or t in cap_lower for t in _FS_TERMS):
+    # Name-based matching (exact token matching to avoid substring false positives e.g. 'io' in 'prediction')
+    if any(t in cap_tokens for t in _FS_TERMS):
         perms.add("filesystem")
-    if any(t in cap_tokens or t in cap_lower for t in _SUBPROCESS_TERMS):
+    if any(t in cap_tokens for t in _SUBPROCESS_TERMS):
         perms.add("subprocess")
-    if any(t in cap_tokens or t in cap_lower for t in _NETWORK_TERMS):
+    if any(t in cap_tokens for t in _NETWORK_TERMS):
         perms.add("network")
-    if any(t in cap_tokens or t in cap_lower for t in _DB_TERMS):
+    if any(t in cap_tokens for t in _DB_TERMS):
         perms.add("db_write")
 
     # Tag-based matching
@@ -227,7 +226,7 @@ class SandboxedCapabilityPolicy:
     def __post_init__(self) -> None:
         if isinstance(self.required_permissions, (list, tuple)):
             self.required_permissions = set(self.required_permissions)
-        if not self.required_permissions:
+        if not self.required_permissions and self.trust_level != TrustLevel.SYSTEM:
             self.required_permissions = infer_capability_permissions(self.capability_name)
 
     def validate_execution(self, requested_permissions: set[str]) -> bool:

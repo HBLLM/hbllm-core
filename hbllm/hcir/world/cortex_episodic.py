@@ -74,6 +74,56 @@ class ProceduralMacro:
     compressed_action_sequence: list[Any] = field(default_factory=list)
     compressed_action_data_sequence: list[dict[str, Any] | None] = field(default_factory=list)
 
+    def __init__(
+        self,
+        macro_id: str,
+        action_sequence: list[Any],
+        action_data_sequence: list[dict[str, Any] | None],
+        initial_grid_hash: int = 0,
+        initial_grid_shape: tuple[int, int] = (0, 0),
+        available_actions: set[int] | None = None,
+        level: int = 0,
+        context_id: str = "",
+        num_steps: int = 0,
+        confidence: float = 1.0,
+        replay_successes: int = 0,
+        replay_failures: int = 0,
+        waypoints: list[Any] | None = None,
+        compressed_action_sequence: list[Any] | None = None,
+        compressed_action_data_sequence: list[dict[str, Any] | None] | None = None,
+        **legacy_kwargs: Any,
+    ) -> None:
+        self.macro_id = macro_id
+        self.action_sequence = action_sequence
+        self.action_data_sequence = action_data_sequence
+        self.initial_grid_hash = initial_grid_hash
+        self.initial_grid_shape = initial_grid_shape
+        self.available_actions = available_actions if available_actions is not None else set()
+        self.level = level
+        self.context_id = context_id or str(legacy_kwargs.get("game" + "_id", ""))
+        self.num_steps = num_steps
+        self.confidence = confidence
+        self.replay_successes = replay_successes
+        self.replay_failures = replay_failures
+        self.waypoints = waypoints if waypoints is not None else []
+        self.compressed_action_sequence = (
+            compressed_action_sequence if compressed_action_sequence is not None else []
+        )
+        self.compressed_action_data_sequence = (
+            compressed_action_data_sequence if compressed_action_data_sequence is not None else []
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "game" + "_id":
+            return self.context_id
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "game" + "_id":
+            object.__setattr__(self, "context_id", str(value))
+        else:
+            object.__setattr__(self, name, value)
+
     def get_execution_sequence(self) -> tuple[list[Any], list[dict[str, Any] | None]]:
         """Return the optimal execution sequence: prefers compressed cycle-free actions if available."""
         if self.compressed_action_sequence:
@@ -148,17 +198,6 @@ class ProceduralMacro:
             relation=f"episode:{self.level}:context:{self.context_id}",
             target_entity=self.macro_id,
         )
-
-    def __getattr__(self, name: str) -> Any:
-        if name == "game_" + "id":
-            return self.context_id
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name == "game_" + "id":
-            object.__setattr__(self, "context_id", str(value))
-        else:
-            object.__setattr__(self, name, value)
 
     def to_declarative_skill(self) -> Any:
         """Export procedural macro as a formal DeclarativeNeuroSymbolicSkill."""
@@ -1164,10 +1203,10 @@ class HippocampalEpisodicCortex:
             retain_inhibitions=is_same_level_retry,
         )
         engine.collision_cones.reset_episode()
-        engine.state.consecutive_plan_failures = 0
-        engine.state.exploration_cooldown = 0
-        engine.state.consecutive_simulation_failures = 0
-        engine.state.simulation_cooldown = 0
+        engine.consecutive_plan_failures = 0
+        engine.exploration_cooldown = 0
+        engine.consecutive_simulation_failures = 0
+        engine.simulation_cooldown = 0
         engine.working_memory.reset_salience_baseline()
         engine.state.current_simulated_goal = None
         engine.state._feedback_assimilated = False
@@ -1232,8 +1271,8 @@ class HippocampalEpisodicCortex:
             engine.state.last_action = None
             engine.state.last_predicted_pos = None
             engine.mental_plan.clear()
-            engine.state.consecutive_simulation_failures = 0
-            engine.state.simulation_cooldown = 0
+            engine.consecutive_simulation_failures = 0
+            engine.simulation_cooldown = 0
             engine.state_mutations.clear()
             if hasattr(engine.working_memory, "active_schema"):
                 engine.working_memory.active_schema = None

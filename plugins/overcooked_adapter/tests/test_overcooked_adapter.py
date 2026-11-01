@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _test_dir = Path(__file__).resolve().parent
 _plugin_dir = _test_dir.parent
 _plugins_root = _plugin_dir.parent
@@ -45,6 +47,7 @@ def test_plugin_manifest() -> None:
 
 
 def test_kitchen_mechanics_solo() -> None:
+    pytest.importorskip("overcooked_ai_py")
     env = make_overcooked_env(tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42)
     obs = env.reset()
     assert obs.agent.held_item == CulinaryItem.NONE
@@ -56,6 +59,7 @@ def test_kitchen_mechanics_solo() -> None:
 
 
 def test_perception_appliance_detection() -> None:
+    pytest.importorskip("overcooked_ai_py")
     perception = OvercookedPerceptionAdapter()
     env = make_overcooked_env(tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42)
     obs = env.reset()
@@ -67,12 +71,14 @@ def test_perception_appliance_detection() -> None:
 
 
 def test_overcooked_tier_completion() -> None:
+    pytest.importorskip("overcooked_ai_py")
     res = run_overcooked_tier(OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, episodes=1, seed=42)
     assert res["success_rate"] == 1.0, f"Tier 1 failed: {res}"
     assert res["mean_soups_delivered"] >= 1.0
 
 
 def test_native_overcooked_wrapper() -> None:
+    pytest.importorskip("overcooked_ai_py")
     env = make_overcooked_env(tier=OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO, seed=42)
     assert getattr(env, "is_native", False) is True
     assert isinstance(env, NativeOvercookedWrapper)

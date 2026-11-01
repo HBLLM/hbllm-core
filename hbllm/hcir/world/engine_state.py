@@ -17,9 +17,22 @@ def get_engine_state_attr(target: Any, attr: str, default: Any = None) -> Any:
     """Safely read attribute from target.state, target, or CognitiveContext."""
     if target is None:
         return default
+    val = getattr(target, attr, None) if not isinstance(target, (dict, list, tuple)) else None
+    if val is not None and (
+        not isinstance(val, (dict, set, list, tuple, MappingProxyType)) or len(val) > 0
+    ):
+        return val
     state = getattr(target, "state", None) if not isinstance(target, (dict, list, tuple)) else None
     if state is not None and hasattr(state, attr):
-        return getattr(state, attr)
+        s_val = getattr(state, attr)
+        if s_val is not None and (
+            not isinstance(s_val, (dict, set, list, tuple, MappingProxyType)) or len(s_val) > 0
+        ):
+            return s_val
+        if val is None and s_val is not None:
+            return s_val
+    if val is not None:
+        return val
     if hasattr(target, attr):
         return getattr(target, attr)
     return default
@@ -475,30 +488,34 @@ class EngineState(BaseModel):
     @classmethod
     def from_engine(cls, engine: Any) -> EngineState:
         """Construct an EngineState snapshot from an AutonomousEpistemicEngine instance."""
-        if hasattr(engine, "state") and isinstance(engine.state, EngineState):
-            return engine.state.model_copy(deep=True)
         attrs: dict[str, Any] = {}
+        if hasattr(engine, "state") and isinstance(engine.state, EngineState):
+            for f_name in cls.model_fields.keys():
+                val = getattr(engine.state, f_name, None)
+                if val is not None:
+                    attrs[f_name] = val
         for f_name, f_info in cls.model_fields.items():
-            val = None
             alias = f_info.alias or f_name
             for candidate in (alias, f"_{f_name}", f_name):
-                val = get_engine_state_attr(engine, candidate)
-                if val is not None:
-                    break
-            if val is not None:
-                # Copy mutable structures so EngineState is decoupled
-                if isinstance(val, (set, frozenset)):
-                    attrs[f_name] = set(val)
-                elif isinstance(val, (list, tuple)):
-                    attrs[f_name] = list(val)
-                elif isinstance(val, dict):
-                    attrs[f_name] = dict(val)
-                elif isinstance(val, np.ndarray):
-                    attrs[f_name] = val.copy()
-                elif isinstance(val, deque):
-                    attrs[f_name] = deque(val, maxlen=val.maxlen)
-                else:
+                val = getattr(engine, candidate, None)
+                if val is not None and (
+                    not isinstance(val, (dict, set, list, tuple, MappingProxyType))
+                    or len(val) > 0
+                    or f_name not in attrs
+                ):
                     attrs[f_name] = val
+                    break
+        for f_name, val in list(attrs.items()):
+            if isinstance(val, (set, frozenset)):
+                attrs[f_name] = set(val)
+            elif isinstance(val, (list, tuple)):
+                attrs[f_name] = list(val)
+            elif isinstance(val, dict):
+                attrs[f_name] = dict(val)
+            elif isinstance(val, np.ndarray):
+                attrs[f_name] = val.copy()
+            elif isinstance(val, deque):
+                attrs[f_name] = deque(val, maxlen=val.maxlen)
         return cls(**attrs)
 
     def freeze(self) -> CognitiveContext:

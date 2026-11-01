@@ -1277,8 +1277,8 @@ class PrefrontalDeliberationEngine:
         # Under acute step countdown / strict budget constraints, suppress exploratory
         # refractory cooldowns to prioritize immediate exploitation toward known goals.
         if engine.is_under_strict_step_budget():
-            engine.state.exploration_cooldown = 0
-            engine.state.simulation_cooldown = 0
+            engine.exploration_cooldown = 0
+            engine.simulation_cooldown = 0
 
         # 1. Update background & assimilate sensory feedback from previous action
         engine.state.bg_feature = engine.estimate_background(curr_grid)
@@ -1502,8 +1502,8 @@ class PrefrontalDeliberationEngine:
         # Phasic Salience Reset: Environmental discovery, dynamic threat emergence, or high surprise
         # Query prefrontal working memory for salience shift to awaken deliberate forward search
         if engine.working_memory.has_salience_shift(engine):
-            engine.state.simulation_cooldown = 0
-            engine.state.consecutive_simulation_failures = 0
+            engine.simulation_cooldown = 0
+            engine.consecutive_simulation_failures = 0
             engine.mental_plan.clear()
             engine.state.phase = (
                 EpistemicPhase.MENTAL_SIMULATION
@@ -1779,8 +1779,8 @@ class PrefrontalDeliberationEngine:
                     engine, curr_grid, available_actions
                 )
                 if macro_plan:
-                    engine.state.phase = EpistemicPhase.EXPLOITATION
-                    engine.state.mental_plan = deque(macro_plan)
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(macro_plan)
                     next_step = engine.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1822,8 +1822,8 @@ class PrefrontalDeliberationEngine:
                     engine, curr_grid, available_actions
                 )
                 if macro_plan:
-                    engine.state.phase = EpistemicPhase.EXPLOITATION
-                    engine.state.mental_plan = deque(macro_plan)
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(macro_plan)
                     next_step = engine.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1838,8 +1838,8 @@ class PrefrontalDeliberationEngine:
                         curr_grid, available_actions, blocked_cells=danger_cells
                     )
                     if simulated_plan:
-                        engine.state.consecutive_simulation_failures = 0
-                        engine.state.simulation_cooldown = 0
+                        engine.consecutive_simulation_failures = 0
+                        engine.simulation_cooldown = 0
                         engine.state.phase = EpistemicPhase.EXPLOITATION
                         engine.state.mental_plan = deque(simulated_plan)
                         next_step = engine.mental_plan.popleft()
@@ -1869,8 +1869,8 @@ class PrefrontalDeliberationEngine:
                     engine, curr_grid, available_actions
                 )
                 if macro_plan:
-                    engine.state.phase = EpistemicPhase.EXPLOITATION
-                    engine.state.mental_plan = deque(macro_plan)
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(macro_plan)
                     next_step = engine.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1891,10 +1891,10 @@ class PrefrontalDeliberationEngine:
             if engine.is_motor_grounded() and engine.simulation_cooldown == 0:
                 simulated_plan = engine.simulate_in_mind(curr_grid, available_actions)
                 if simulated_plan:
-                    engine.state.consecutive_simulation_failures = 0
-                    engine.state.simulation_cooldown = 0
-                    engine.state.phase = EpistemicPhase.EXPLOITATION
-                    engine.state.mental_plan = deque(simulated_plan)
+                    engine.consecutive_simulation_failures = 0
+                    engine.simulation_cooldown = 0
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(simulated_plan)
                     next_step = engine.mental_plan.popleft()
                     plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                         engine, curr_grid, available_actions, next_step
@@ -1923,7 +1923,7 @@ class PrefrontalDeliberationEngine:
 
                 else:
                     engine.consecutive_simulation_failures += 1
-                    engine.state.simulation_cooldown = min(
+                    engine.simulation_cooldown = min(
                         12, 2 ** min(engine.consecutive_simulation_failures, 4)
                     )
                     engine.working_memory.update_salience_baseline(engine)
@@ -2002,8 +2002,8 @@ class PrefrontalDeliberationEngine:
                         engine.avatar_pos, macro_plan[0].action, macro_plan[0].action_data
                     )
                 ):
-                    engine.state.phase = EpistemicPhase.EXPLOITATION
-                    engine.state.mental_plan = deque(macro_plan)
+                    engine.phase = EpistemicPhase.EXPLOITATION
+                    engine.mental_plan = deque(macro_plan)
                     next_step = engine.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data

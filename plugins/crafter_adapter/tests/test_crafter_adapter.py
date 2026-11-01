@@ -18,6 +18,7 @@ for p in [str(_core_root), str(_plugins_root)]:
 
 import json
 
+import pytest
 from crafter_adapter import (
     PLUGIN_NAME,
     PLUGIN_VERSION,
@@ -46,6 +47,7 @@ def test_plugin_manifest() -> None:
 
 
 def test_crafter_environment_lifecycle() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=42)
     assert isinstance(env, NativeCrafterWrapper)
     obs, info = env.reset(seed=42)
@@ -65,6 +67,7 @@ def test_crafter_environment_lifecycle() -> None:
 
 
 def test_crafter_perception_adapter() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=101)
     obs, _ = env.reset(seed=101)
 
@@ -84,6 +87,7 @@ def test_crafter_perception_adapter() -> None:
 
 
 def test_crafter_vital_interrupts() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=77)
     obs, _ = env.reset(seed=77)
 
@@ -96,6 +100,7 @@ def test_crafter_vital_interrupts() -> None:
 
 
 def test_crafter_wood_collection() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=12)
     obs, _ = env.reset(seed=12)
     agent = PureHCIRCrafterAgent()
@@ -113,6 +118,7 @@ def test_crafter_wood_collection() -> None:
 
 
 def test_crafter_benchmark_smoke() -> None:
+    pytest.importorskip("crafter")
     data = run_crafter_benchmark("pure-hcir", episodes_per_target=1, base_seed=500)
     assert data["episodes"] >= 1
     assert data["cohort"] == "pure-hcir"

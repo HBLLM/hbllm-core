@@ -181,7 +181,7 @@ def test_dynamic_macro_skill_compression_loop_elimination() -> None:
         compressed_action_data_sequence=comp_data,
         available_actions={2, 3, 4},
         level=0,
-        game_id="test_game",
+        context_id="test_game",
     )
 
     exec_acts, exec_data = macro.get_execution_sequence()

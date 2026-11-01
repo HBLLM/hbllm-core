@@ -1332,14 +1332,14 @@ class EpistemicCuriosityExplorer:
                 engine.probe_target_steps += 1
 
         if proposal.clear_active_probe:
-            engine.state.active_probe_target = None
-            engine.state.active_probe_id = None
-            engine.state.probe_target_steps = 0
+            engine.active_probe_target = None
+            engine.active_probe_id = None
+            engine.probe_target_steps = 0
 
         if proposal.new_probe_target is not None:
-            engine.state.active_probe_target = proposal.new_probe_target
-            engine.state.active_probe_id = proposal.new_probe_id
-            engine.state.probe_target_steps = 0
+            engine.active_probe_target = proposal.new_probe_target
+            engine.active_probe_id = proposal.new_probe_id
+            engine.probe_target_steps = 0
 
         for eid in proposal.probed_entity_ids_to_add:
             engine.probed_entity_ids.add(eid)

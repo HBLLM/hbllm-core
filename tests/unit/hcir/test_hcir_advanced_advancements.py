@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill, SkillEvaluationContext
@@ -164,7 +165,7 @@ class TestSkillInductionEngine:
             action_data_sequence=[None, None, None],
             available_actions={1, 2},
             level=1,
-            game_id="game_alpha",
+            context_id="game_alpha",
             confidence=0.95,
         )
         skill = macro.to_declarative_skill()
@@ -186,7 +187,7 @@ class TestNativeRustAccelerationIntegration:
         )
 
     def test_native_confidence_loaded(self):
-        import hbllm_confidence
+        hbllm_confidence = pytest.importorskip("hbllm_confidence")
 
         score = hbllm_confidence.quick_score(
             "test query", "test response with detailed explanation"
@@ -194,26 +195,26 @@ class TestNativeRustAccelerationIntegration:
         assert 0.0 <= score <= 1.0
 
     def test_native_semantic_search_loaded(self):
-        import hbllm_semantic_search
+        hbllm_semantic_search = pytest.importorskip("hbllm_semantic_search")
 
         assert hbllm_semantic_search is not None
 
     def test_native_compute_loaded(self):
-        import hbllm_compute
+        hbllm_compute = pytest.importorskip("hbllm_compute")
 
         assert hbllm_compute is not None
 
     def test_native_concept_extract_loaded(self):
-        import hbllm_concept_extract
+        hbllm_concept_extract = pytest.importorskip("hbllm_concept_extract")
 
         assert hbllm_concept_extract is not None
 
     def test_native_knowledge_graph_loaded(self):
-        import hbllm_knowledge_graph
+        hbllm_knowledge_graph = pytest.importorskip("hbllm_knowledge_graph")
 
         assert hbllm_knowledge_graph is not None
 
     def test_native_tokenizer_loaded(self):
-        import hbllm_tokenizer_rs
+        hbllm_tokenizer_rs = pytest.importorskip("hbllm_tokenizer_rs")
 
         assert hbllm_tokenizer_rs is not None

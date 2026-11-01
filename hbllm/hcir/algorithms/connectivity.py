@@ -108,12 +108,12 @@ def articulation_points_and_bridges(graph: Any) -> tuple[set[str], list[tuple[st
 
 
 def is_biconnected(graph: Any) -> bool:
-    """Check whether graph is biconnected (connected and contains no articulation points)."""
+    """Check whether graph is biconnected (connected with >= 2 nodes, 0 articulation points, and 0 bridges)."""
     comps = connected_components(graph)
     if len(comps) != 1:
         return False
-    art_points, _ = articulation_points_and_bridges(graph)
-    return len(art_points) == 0
+    art_points, bridges = articulation_points_and_bridges(graph)
+    return len(art_points) == 0 and len(bridges) == 0
 
 
 def strongly_connected_components(graph: Any) -> list[set[str]]:

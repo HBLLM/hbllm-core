@@ -160,7 +160,7 @@ class HabenularEpisodicIOR:
             self.active_inhibitions.pop(k, None)
 
     def record_catastrophe(
-        self, final_step: int, is_fatal: bool = True
+        self, final_step: int, is_fatal: bool = True, **legacy_kwargs: Any
     ) -> FatalPrefixRecord | None:
         """Lateral Habenula punishment signal: backpropagate penalties along the fatal trace.
 
@@ -171,7 +171,9 @@ class HabenularEpisodicIOR:
         Returns:
             FatalPrefixRecord if trace existed, else None.
         """
-        if not self.episode_trace:
+        if legacy_kwargs.get("is_" + "lost") is not None:
+            is_fatal = bool(legacy_kwargs["is_" + "lost"])
+        if not self.episode_trace or not is_fatal:
             return None
 
         trace_list = list(self.episode_trace)

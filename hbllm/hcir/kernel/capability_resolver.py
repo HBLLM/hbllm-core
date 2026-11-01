@@ -337,8 +337,10 @@ class CapabilityResolver:
                 # 2. Derive from implementation
                 if impl.required_permissions:
                     effective_perms.update(impl.required_permissions)
+                elif "safe" in impl.tags or "internal" in impl.tags:
+                    pass  # Explicitly internal/safe capability, do not infer external permissions
                 # 3. If still empty, infer from capability name, tags, and runtime params
-                if not effective_perms:
+                elif not effective_perms:
                     effective_perms.update(
                         infer_capability_permissions(capability_name, tags=impl.tags, params=params)
                     )

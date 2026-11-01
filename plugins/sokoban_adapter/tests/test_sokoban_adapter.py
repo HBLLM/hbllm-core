@@ -8,6 +8,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _test_dir = Path(__file__).resolve().parent
 _plugin_dir = _test_dir.parent
 _plugins_root = _plugin_dir.parent
@@ -44,6 +46,8 @@ def test_plugin_manifest() -> None:
 
 
 def test_sokoban_environment_mechanics() -> None:
+    pytest.importorskip("gym")
+    pytest.importorskip("gym_sokoban")
     env = make_sokoban_env(tier=SokobanTier.TIER_1_DIRECT_PUSH, seed=42)
     obs = env.reset()
     assert len(obs.boxes) >= 1
@@ -66,6 +70,8 @@ def test_corner_deadlock_detection() -> None:
 
 
 def test_perception_identifies_taboo_cells() -> None:
+    pytest.importorskip("gym")
+    pytest.importorskip("gym_sokoban")
     perception = SokobanPerceptionAdapter()
     env = make_sokoban_env(tier=SokobanTier.TIER_1_DIRECT_PUSH, seed=42)
     obs = env.reset()
@@ -74,17 +80,23 @@ def test_perception_identifies_taboo_cells() -> None:
 
 
 def test_sokoban_tier_completion() -> None:
+    pytest.importorskip("gym")
+    pytest.importorskip("gym_sokoban")
     res = run_sokoban_tier(SokobanTier.TIER_1_DIRECT_PUSH, episodes=1, seed=10)
     assert res["success_rate"] == 1.0, f"Tier 1 failed: {res}"
     assert res["deadlock_count"] == 0
 
 
 def test_sokoban_full_benchmark_smoke() -> None:
+    pytest.importorskip("gym")
+    pytest.importorskip("gym_sokoban")
     res = run_sokoban_tier(SokobanTier.TIER_2_OBSTACLE_NAVIGATION, episodes=1, seed=12)
     assert res["success_rate"] == 1.0, f"Tier 2 failed: {res}"
 
 
 def test_native_sokoban_wrapper() -> None:
+    pytest.importorskip("gym")
+    pytest.importorskip("gym_sokoban")
     env = make_sokoban_env(
         tier=SokobanTier.TIER_1_DIRECT_PUSH,
         seed=42,

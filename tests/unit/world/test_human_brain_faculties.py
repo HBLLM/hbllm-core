@@ -382,7 +382,7 @@ class TestHabenularEpisodicIOR:
         ior.record_step(5, avatar_pos=(0, 4), action=5)
 
         # Fatal event at step 5
-        record = ior.record_catastrophe(final_step=5, is_lost=True)
+        record = ior.record_catastrophe(final_step=5, is_fatal=True)
         assert record is not None
         assert record.fatal_pos == (0, 4)
         assert record.fatal_action == 5
@@ -408,7 +408,7 @@ class TestHabenularEpisodicIOR:
         ior = HabenularEpisodicIOR()
         ior.record_step(1, avatar_pos=(1, 1), action=1)
         ior.record_step(2, avatar_pos=(1, 2), action=2)
-        record = ior.record_catastrophe(final_step=2, is_lost=True)
+        record = ior.record_catastrophe(final_step=2, is_fatal=True)
         assert record is not None
         assert len(ior.repulsion_table) > 0
         assert len(ior.fatal_prefixes) > 0

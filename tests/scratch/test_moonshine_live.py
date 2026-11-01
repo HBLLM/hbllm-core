@@ -11,6 +11,10 @@ sr = 16000
 t = np.linspace(0, 1, sr, dtype=np.float32)
 sine_wave = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
 
+import pytest
+
+pytest.importorskip("moonshine_onnx")
+
 from moonshine_onnx import MoonshineOnnxModel, load_tokenizer
 
 model = MoonshineOnnxModel(model_name="moonshine/base")

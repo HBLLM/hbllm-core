@@ -97,6 +97,8 @@ def test_reproducibility_export_pipeline(tmp_path: Path) -> None:
 
 def test_quick_suite_execution_language(tmp_path: Path) -> None:
     """Execute quick language suite via MasterReproducibilityRunner and verify structure."""
+    pytest.importorskip("gymnasium")
+    pytest.importorskip("minigrid")
     runner = MasterReproducibilityRunner(quick=True, output_dir=tmp_path)
     results = runner.execute_all(suite="language")
 

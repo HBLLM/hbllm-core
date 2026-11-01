@@ -603,23 +603,26 @@ class AutonomousEpistemicEngine:
         self._phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
         self.phase_history: list[tuple[EpistemicPhase, EpistemicPhase, str]] = []
         self.world_id: str = world_id
-        self.step_counter: int = 0
+        self._step_counter: int = 0
         self.environmental_step_limit: int | None = None
         # Discovered lattice quantum (cells per cardinal displacement); 1 until calibrated
-        self.spatial_lattice_stride: int = 1
+        self._spatial_lattice_stride: int = 1
 
         # Memory of frames & actions
-        self.prev_grid: np.ndarray | None = None
-        self.last_action: int | None = None
-        self.last_action_data: dict[str, Any] | None = None
-        self.consecutive_quiescent_actions: int = 0
+        self._prev_grid: np.ndarray | None = None
+        self._last_action: int | None = None
+        self._last_action_data: dict[str, Any] | None = None
+        self._consecutive_quiescent_actions: int = 0
         self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 
         # Avatar self-model (Motor Grounding)
         self._avatar_feature: int | None = None
-        self.avatar_features: set[int] = set()
-        self.avatar_pos: tuple[int, int] | None = None
-        self.avatar_size: int = 1
+        self._avatar_features: set[int] = set()
+        self._avatar_pos: tuple[int, int] | None = None
+        self._avatar_size: int = 1
+        self._effector_kinetics_mode: int | None = None
+        self._latest_lifecycle_result: Any | None = None
+        self._last_surprise: float = 0.0
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
         self.symbolic_theory: HCIRSymbolicWorldTheory = HCIRSymbolicWorldTheory()
@@ -643,9 +646,6 @@ class AutonomousEpistemicEngine:
         self.action_dynamics: dict[int, ActionDynamicsModel] = {}
         self.tested_actions: set[int] = set()
         self.tested_action_positions: set[tuple[int, tuple[int, int] | None]] = set()
-        self.effector_kinetics_mode: int | None = (
-            None  # Active inference: +1 pull/attraction, -1 push/repulsion
-        )
 
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
@@ -668,7 +668,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
         self.bilateral_integrator: BilateralCoordinateIntegrator = BilateralCoordinateIntegrator()
-        self.bilateral_state: BilateralState | None = None
+        self._bilateral_state: BilateralState | None = None
 
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
         self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
@@ -1048,8 +1048,11 @@ class AutonomousEpistemicEngine:
         return self.working_memory.mental_plan
 
     @mental_plan.setter
-    def mental_plan(self, val: deque[MentalSimulationStep]) -> None:
-        self.working_memory.mental_plan = val
+    def mental_plan(self, val: Any) -> None:
+        d = deque(val) if not isinstance(val, deque) else val
+        self.working_memory.mental_plan = d
+        if hasattr(self, "state"):
+            self.state.mental_plan = d
 
     @property
     def active_hypothesis(self) -> Any | None:
@@ -1059,6 +1062,8 @@ class AutonomousEpistemicEngine:
     @active_hypothesis.setter
     def active_hypothesis(self, val: Any | None) -> None:
         self.working_memory.active_hypothesis = val
+        if hasattr(self, "state"):
+            self.state.active_hypothesis = val
 
     @property
     def consecutive_simulation_failures(self) -> int:
@@ -1067,6 +1072,8 @@ class AutonomousEpistemicEngine:
     @consecutive_simulation_failures.setter
     def consecutive_simulation_failures(self, val: int) -> None:
         self.working_memory.consecutive_simulation_failures = val
+        if hasattr(self, "state"):
+            self.state.consecutive_simulation_failures = val
 
     @property
     def simulation_cooldown(self) -> int:
@@ -1075,6 +1082,8 @@ class AutonomousEpistemicEngine:
     @simulation_cooldown.setter
     def simulation_cooldown(self, val: int) -> None:
         self.working_memory.simulation_cooldown = val
+        if hasattr(self, "state"):
+            self.state.simulation_cooldown = val
 
     @property
     def consecutive_plan_failures(self) -> int:
@@ -1083,6 +1092,8 @@ class AutonomousEpistemicEngine:
     @consecutive_plan_failures.setter
     def consecutive_plan_failures(self, val: int) -> None:
         self.working_memory.consecutive_plan_failures = val
+        if hasattr(self, "state"):
+            self.state.consecutive_plan_failures = val
 
     @property
     def exploration_cooldown(self) -> int:
@@ -1091,6 +1102,8 @@ class AutonomousEpistemicEngine:
     @exploration_cooldown.setter
     def exploration_cooldown(self, val: int) -> None:
         self.working_memory.exploration_cooldown = val
+        if hasattr(self, "state"):
+            self.state.exploration_cooldown = val
 
     @property
     def consecutive_stuck_steps(self) -> int:
@@ -1098,6 +1111,9 @@ class AutonomousEpistemicEngine:
 
     @consecutive_stuck_steps.setter
     def consecutive_stuck_steps(self, val: int) -> None:
+        self.working_memory.consecutive_stuck_steps = val
+        if hasattr(self, "state"):
+            self.state.consecutive_stuck_steps = val
         self.working_memory.consecutive_stuck_steps = val
 
     @property
@@ -1217,6 +1233,8 @@ class AutonomousEpistemicEngine:
     @active_probe_target.setter
     def active_probe_target(self, val: tuple[int, int] | None) -> None:
         self.working_memory.active_probe_target = val
+        if hasattr(self, "state"):
+            self.state.active_probe_target = val
 
     @property
     def active_probe_id(self) -> str | None:
@@ -1225,6 +1243,8 @@ class AutonomousEpistemicEngine:
     @active_probe_id.setter
     def active_probe_id(self, val: str | None) -> None:
         self.working_memory.active_probe_id = val
+        if hasattr(self, "state"):
+            self.state.active_probe_id = val
 
     @property
     def probe_target_steps(self) -> int:
@@ -1233,6 +1253,8 @@ class AutonomousEpistemicEngine:
     @probe_target_steps.setter
     def probe_target_steps(self, val: int) -> None:
         self.working_memory.probe_target_steps = val
+        if hasattr(self, "state"):
+            self.state.probe_target_steps = val
 
     @property
     def probed_entity_ids(self) -> set[str]:
@@ -1348,19 +1370,27 @@ class AutonomousEpistemicEngine:
 
     @property
     def active_causal_actuator_coord(self) -> tuple[int, int] | None:
+        if hasattr(self, "state") and self.state.active_causal_actuator_coord is not None:
+            return self.state.active_causal_actuator_coord
         return self.working_memory.active_causal_actuator_coord
 
     @active_causal_actuator_coord.setter
     def active_causal_actuator_coord(self, val: tuple[int, int] | None) -> None:
         self.working_memory.active_causal_actuator_coord = val
+        if hasattr(self, "state"):
+            self.state.active_causal_actuator_coord = val
 
     @property
     def consecutive_causal_probes(self) -> int:
+        if hasattr(self, "state") and self.state.consecutive_causal_probes is not None:
+            return self.state.consecutive_causal_probes
         return self.working_memory.consecutive_causal_probes
 
     @consecutive_causal_probes.setter
     def consecutive_causal_probes(self, val: int) -> None:
         self.working_memory.consecutive_causal_probes = val
+        if hasattr(self, "state"):
+            self.state.consecutive_causal_probes = val
 
     @property
     def causal_actuator_streak_limit(self) -> int:
@@ -1388,19 +1418,27 @@ class AutonomousEpistemicEngine:
 
     @property
     def feature_quiescent_counts(self) -> dict[int, int]:
+        if hasattr(self, "state") and getattr(self.state, "feature_quiescent_counts", None):
+            return self.state.feature_quiescent_counts
         return self.working_memory.feature_quiescent_counts
 
     @feature_quiescent_counts.setter
     def feature_quiescent_counts(self, val: dict[int, int]) -> None:
         self.working_memory.feature_quiescent_counts = val
+        if hasattr(self, "state"):
+            self.state.feature_quiescent_counts = val
 
     @property
     def _feature_quiescent_counts(self) -> dict[int, int]:
+        if hasattr(self, "state") and getattr(self.state, "feature_quiescent_counts", None):
+            return self.state.feature_quiescent_counts
         return self.working_memory.feature_quiescent_counts
 
     @_feature_quiescent_counts.setter
     def _feature_quiescent_counts(self, val: dict[int, int]) -> None:
         self.working_memory.feature_quiescent_counts = val
+        if hasattr(self, "state"):
+            self.state.feature_quiescent_counts = val
 
     @property
     def inhibited_actions(self) -> dict[Any, int]:
@@ -3087,19 +3125,25 @@ class AutonomousEpistemicEngine:
     @property
     def phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase."""
+        if hasattr(self, "state") and getattr(self.state, "phase", None) is not None:
+            return self.state.phase
         return self._phase
 
     @phase.setter
     def phase(self, value: EpistemicPhase) -> None:
+        if hasattr(self, "state"):
+            self.state.phase = value
         self.transition_to_phase(value, reason="state_assignment")
 
     @property
     def current_phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase (alias)."""
-        return self._phase
+        return self.phase
 
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
+        if hasattr(self, "state"):
+            self.state.phase = new_phase
         if self._phase != new_phase:
             old = self._phase
             logger.info(
@@ -3368,6 +3412,10 @@ class AutonomousEpistemicEngine:
 
     @property
     def avatar_feature(self) -> int | None:
+        if hasattr(self, "state") and self.state.avatar_feature is not None:
+            return self.state.avatar_feature
+        if hasattr(self, "state") and self.state.avatar_features:
+            return next(iter(self.state.avatar_features))
         if self._avatar_feature is not None:
             return self._avatar_feature
         if self.avatar_features:
@@ -3377,11 +3425,182 @@ class AutonomousEpistemicEngine:
     @avatar_feature.setter
     def avatar_feature(self, val: int | None) -> None:
         self._avatar_feature = val
+        if hasattr(self, "state"):
+            self.state.avatar_feature = val
         if val is not None:
             if not self.avatar_features or val not in self.avatar_features:
                 self.avatar_features = {val}
         else:
             self.avatar_features.clear()
+
+    @property
+    def avatar_features(self) -> set[int]:
+        if hasattr(self, "state"):
+            return self.state.avatar_features
+        return self._avatar_features
+
+    @avatar_features.setter
+    def avatar_features(self, val: Any) -> None:
+        s = set(val) if val is not None else set()
+        if hasattr(self, "state"):
+            self.state.avatar_features = s
+        self._avatar_features = s
+
+    @property
+    def avatar_pos(self) -> tuple[int, int] | None:
+        if hasattr(self, "state") and self.state.avatar_pos is not None:
+            return self.state.avatar_pos
+        return self._avatar_pos
+
+    @avatar_pos.setter
+    def avatar_pos(self, val: tuple[int, int] | None) -> None:
+        if hasattr(self, "state"):
+            self.state.avatar_pos = val
+        self._avatar_pos = val
+
+    @property
+    def avatar_size(self) -> int:
+        if hasattr(self, "state"):
+            return self.state.avatar_size
+        return self._avatar_size
+
+    @avatar_size.setter
+    def avatar_size(self, val: int) -> None:
+        if hasattr(self, "state"):
+            self.state.avatar_size = val
+        self._avatar_size = val
+
+    @property
+    def prev_grid(self) -> np.ndarray | None:
+        if hasattr(self, "state"):
+            return self.state.prev_grid
+        return self._prev_grid
+
+    @prev_grid.setter
+    def prev_grid(self, val: np.ndarray | None) -> None:
+        if hasattr(self, "state"):
+            self.state.prev_grid = val
+        self._prev_grid = val
+
+    @property
+    def last_action(self) -> int | None:
+        if hasattr(self, "state"):
+            return self.state.last_action
+        return self._last_action
+
+    @last_action.setter
+    def last_action(self, val: int | None) -> None:
+        if hasattr(self, "state"):
+            self.state.last_action = val
+        self._last_action = val
+
+    @property
+    def last_action_data(self) -> dict[str, Any] | None:
+        if hasattr(self, "state"):
+            return self.state.last_action_data
+        return self._last_action_data
+
+    @last_action_data.setter
+    def last_action_data(self, val: dict[str, Any] | None) -> None:
+        if hasattr(self, "state"):
+            self.state.last_action_data = val
+        self._last_action_data = val
+
+    @property
+    def step_counter(self) -> int:
+        if hasattr(self, "state"):
+            return self.state.step_counter
+        return self._step_counter
+
+    @step_counter.setter
+    def step_counter(self, val: int) -> None:
+        if hasattr(self, "state"):
+            self.state.step_counter = val
+        self._step_counter = val
+
+    @property
+    def spatial_lattice_stride(self) -> int:
+        if hasattr(self, "state"):
+            return self.state.spatial_lattice_stride
+        return self._spatial_lattice_stride
+
+    @spatial_lattice_stride.setter
+    def spatial_lattice_stride(self, val: int) -> None:
+        if hasattr(self, "state"):
+            self.state.spatial_lattice_stride = val
+        self._spatial_lattice_stride = val
+
+    @property
+    def effector_kinetics_mode(self) -> int | None:
+        if hasattr(self, "state"):
+            return self.state.effector_kinetics_mode
+        return self._effector_kinetics_mode
+
+    @effector_kinetics_mode.setter
+    def effector_kinetics_mode(self, val: int | None) -> None:
+        if hasattr(self, "state"):
+            self.state.effector_kinetics_mode = val
+        self._effector_kinetics_mode = val
+
+    @property
+    def latest_lifecycle_result(self) -> Any | None:
+        if hasattr(self, "state"):
+            return self.state.latest_lifecycle_result
+        return self._latest_lifecycle_result
+
+    @latest_lifecycle_result.setter
+    def latest_lifecycle_result(self, val: Any | None) -> None:
+        if hasattr(self, "state"):
+            self.state.latest_lifecycle_result = val
+        self._latest_lifecycle_result = val
+
+    @property
+    def last_surprise(self) -> float:
+        if hasattr(self, "state"):
+            return self.state.last_surprise
+        return self._last_surprise
+
+    @last_surprise.setter
+    def last_surprise(self, val: float) -> None:
+        if hasattr(self, "state"):
+            self.state.last_surprise = val
+        self._last_surprise = val
+
+    @property
+    def last_surprise_eval(self) -> Any | None:
+        if hasattr(self, "state"):
+            return self.state.last_surprise_eval
+        return getattr(self, "_last_surprise_eval", None)
+
+    @last_surprise_eval.setter
+    def last_surprise_eval(self, val: Any | None) -> None:
+        if hasattr(self, "state"):
+            self.state.last_surprise_eval = val
+        self._last_surprise_eval = val
+
+    @property
+    def consecutive_quiescent_actions(self) -> int:
+        if hasattr(self, "state"):
+            return self.state.consecutive_quiescent_actions
+        return self._consecutive_quiescent_actions
+
+    @consecutive_quiescent_actions.setter
+    def consecutive_quiescent_actions(self, val: int) -> None:
+        if hasattr(self, "state"):
+            self.state.consecutive_quiescent_actions = val
+        self._consecutive_quiescent_actions = val
+
+    @property
+    def bilateral_state(self) -> Any | None:
+        if hasattr(self, "state") and self.state.bilateral_state is not None:
+            return self.state.bilateral_state
+        return getattr(self, "_bilateral_state", None)
+
+    @bilateral_state.setter
+    def bilateral_state(self, val: Any | None) -> None:
+        if hasattr(self, "state"):
+            self.state.bilateral_state = val
+        self._bilateral_state = val
 
     @property
     def current_actor_pos(self) -> tuple[int, int] | None:
