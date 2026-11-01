@@ -261,6 +261,14 @@ class MyAgent(Agent):
         self._stagnation_steps: int = 0
         self._MAX_STAGNATION_STEPS: int = 20  # 20 steps with identical grid → bail out
 
+    @property
+    def current_level(self) -> int:
+        return self.current_levels_completed
+
+    @current_level.setter
+    def current_level(self, value: int) -> None:
+        self.current_levels_completed = value
+
     def main(self) -> None:
         """Execute agent with concurrency gating and tournament time tracking."""
         if MyAgent._TOURNAMENT_START_TIME is None:
@@ -681,8 +689,10 @@ class MyAgent(Agent):
                     terminal=TerminalSignal.SUCCESS
                     if is_win
                     else (TerminalSignal.FAILURE if is_lost else None),
-                    context_id=self.game_id,
-                    episode_id=str(self.current_level),
+                    context_id=str(
+                        self.game_id or self.current_game_id or raw_gid or "default_context"
+                    ),
+                    episode_id=str(self.current_levels_completed),
                     metadata={"action_schemas": _arc_schema, "micro_actions": _arc_schema},
                 )
                 action_id, action_data = self.internal_engine.step(obs)

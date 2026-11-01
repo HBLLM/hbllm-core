@@ -942,6 +942,14 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
         self._stagnation_steps: int = 0
         self._MAX_STAGNATION_STEPS: int = 20
 
+    @property
+    def current_level(self) -> int:
+        return self.current_levels_completed
+
+    @current_level.setter
+    def current_level(self, value: int) -> None:
+        self.current_levels_completed = value
+
     def is_done(self, frames: Any, latest_frame: Any) -> bool:
         """Stop once all levels are won or budget guards trigger."""
         if getattr(self, "_is_marked_done", False):
@@ -1238,8 +1246,12 @@ class MyAgent(BaseKaggleAgent):  # pyright: ignore[reportGeneralTypeIssues]
                     entities=_objects or [],
                     available_actions=available_actions,
                     terminal=None,
-                    context_id=getattr(self, "game_id", "default"),
-                    episode_id=str(getattr(self, "current_level", 0)),
+                    context_id=str(
+                        getattr(self, "game_id", None)
+                        or getattr(self, "current_game_id", None)
+                        or "default"
+                    ),
+                    episode_id=str(self.current_levels_completed),
                     metadata={"action_schemas": _arc_schema, "micro_actions": _arc_schema},
                 )
                 action_id, action_data = self.internal_agent.step(obs)
