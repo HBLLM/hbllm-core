@@ -35,6 +35,7 @@ from hbllm.hcir.world.experimental import (
     PrefrontalBlameAttributor,
     SubthalamicDriftDiffusionEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Track 1: Subthalamic Nucleus (STN) Drift-Diffusion Decision Dynamics
@@ -94,6 +95,7 @@ def test_stn_drift_diffusion_urgency_collapse_and_accumulation() -> None:
 def test_stn_drift_diffusion_engine_integration() -> None:
     """Autonomous epistemic engine runs drift diffusion accumulation and records predicate."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "drift_diffusion")
 
     rates = {"up": 0.6, "down": 0.2}
@@ -145,6 +147,7 @@ def test_parietal_foveation_multi_scale_resolution() -> None:
 def test_parietal_foveation_engine_integration() -> None:
     """Engine foveates sensory lattice around avatar position and records predicate."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "foveated_attention")
 
     grid = np.zeros((10, 10), dtype=int)
@@ -208,6 +211,7 @@ def test_prefrontal_blame_attribution_culprit_isolation() -> None:
 def test_prefrontal_blame_attribution_engine_integration() -> None:
     """Engine attributes blame to failed trace and registers causal predicates."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "blame_attributor")
 
     trace: list[dict[str, Any]] = [
@@ -288,6 +292,7 @@ def test_cognitive_graph_minimum_spanning_tree() -> None:
 def test_engine_extract_geodesic_spine() -> None:
     """Engine extracts geodesic spine from cognitive graph via Kruskal's MST."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     graph = CognitiveGraph(enable_native_substrate=False)
     for nid in ["X", "Y", "Z"]:

@@ -18,6 +18,7 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
     ExplorationRegime,
     LocusCoeruleusNoradrenalineEngine,
@@ -284,6 +285,8 @@ def test_condense_scc_metagraph_parity() -> None:
 def test_autonomous_epistemic_engine_round14_orchestration() -> None:
     """Test full integration of Round 14 faculties into AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Spatial context classification
     grid = np.zeros((10, 10), dtype=int)

@@ -22,6 +22,7 @@ are automatically dispatched through Tier 2 via ``hbllm.actions.sandbox.run_sand
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -324,14 +325,13 @@ class SandboxedExecutor:
         except Exception as exc:
             raise PermissionError("untrusted capability must be picklable for isolation") from exc
 
-        ctx = multiprocessing.get_context("spawn")
+        ctx: Any = multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn")
         parent_conn, child_conn = ctx.Pipe(duplex=False)
         proc = ctx.Process(
             target=_sandboxed_child_main,
             args=(child_conn, payload, self.permissions, self.resource_limits),
         )
         proc.start()
-        child_conn.close()
         timeout = self.resource_limits.timeout_seconds or 5.0
         loop = asyncio.get_running_loop()
         try:
@@ -339,6 +339,10 @@ class SandboxedExecutor:
                 None, lambda: _await_child(proc, parent_conn, timeout)
             )
         finally:
+            try:
+                child_conn.close()
+            except Exception:
+                pass
             parent_conn.close()
         kind, *rest = result
         if kind == "ok":
@@ -356,17 +360,25 @@ class SandboxedExecutor:
 
 def _await_child(proc: Any, conn: Any, timeout: float) -> tuple:
     """Block for the child's reply; terminate on wall-clock timeout."""
-    proc.join(timeout)
+    import time
+
+    start_time = time.monotonic()
+    if conn.poll(timeout):
+        try:
+            res = conn.recv()
+        except EOFError:
+            res = ("err", "RuntimeError", f"child exited {proc.exitcode} without result")
+        remaining = max(1.0, timeout - (time.monotonic() - start_time))
+        proc.join(remaining)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(1)
+        return res
+
     if proc.is_alive():
         proc.terminate()
         proc.join(1)
-        return ("err", "TimeoutError", "")
-    if conn.poll():
-        try:
-            return conn.recv()
-        except EOFError:
-            pass
-    return ("err", "RuntimeError", f"child exited {proc.exitcode} without result")
+    return ("err", "TimeoutError", "")
 
 
 def _sandboxed_child_main(

@@ -28,6 +28,7 @@ from hbllm.hcir.world.cortex_deliberation import (
 from hbllm.hcir.world.cortex_perception import (
     GibsonianAffordanceExtractor,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 
 
 class TestTrack1BasalGangliaTriPathwayArbitration:
@@ -94,6 +95,8 @@ class TestTrack1BasalGangliaTriPathwayArbitration:
 
     def test_engine_basal_ganglia_integration(self):
         engine = AutonomousEpistemicEngine()
+
+        _restore_all(engine)
         utilities = {1: 0.7, 2: 0.3}
 
         winning, all_dec = engine.arbitrate_basal_ganglia_action(
@@ -165,6 +168,7 @@ class TestTrack2ActiveInferenceExpectedFreeEnergy:
 
     def test_engine_evaluate_policy_expected_free_energy(self):
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         grid = np.zeros((10, 10), dtype=int)
         engine.avatar_pos = (2, 2)
         engine.learned_goal_positions.add((8, 8))
@@ -276,6 +280,7 @@ class TestTrack2ActiveInferenceExpectedFreeEnergy:
 
     def test_engine_affordance_and_contour_integration(self):
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         grid = np.zeros((8, 8), dtype=int)
         grid[0, :] = 1  # Top wall
         grid[5, 5] = 8  # Salient object

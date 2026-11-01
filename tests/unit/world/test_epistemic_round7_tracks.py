@@ -31,6 +31,7 @@ from hbllm.hcir.world.experimental import (
     InteroceptiveAllostasisCortex,
     SpatialDistanceTransformEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Track 1: Anterior Insula Interoceptive Allostasis & Energy Budgeting
@@ -102,6 +103,7 @@ def test_allostasis_fatigue_and_exhaustion_transitions() -> None:
 def test_allostasis_replenishment_and_engine_integration() -> None:
     """Engine correctly updates allostasis and replenishes energetic reserves."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "allostasis_cortex")
 
     # Consume energy via engine delegate
@@ -169,6 +171,7 @@ def test_claustrum_multimodal_binding_and_salience_peak() -> None:
 def test_claustrum_goal_dominance_and_engine_binding() -> None:
     """Engine integrates claustrum multimodal binding and detects goal-directed dominance."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "claustrum_conductor")
 
     # Only goals present
@@ -367,6 +370,7 @@ def test_spatial_distance_transform_gradient_and_repulsive_force() -> None:
 def test_spatial_distance_transform_engine_integration() -> None:
     """Epistemic engine integrates distance transform and computes clearance field."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "distance_transform_engine")
 
     barriers = {(2, 2), (2, 3), (2, 4)}

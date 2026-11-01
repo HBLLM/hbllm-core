@@ -45,6 +45,7 @@ from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDet
 from hbllm.hcir.world.disagreement_analyzer import (
     PredictorDisagreementAnalyzer,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     ComputationBudget,
     ComputationBudgetAllocator,
@@ -185,6 +186,8 @@ def test_suite_12_spatial_attention_and_search_w111_to_w120() -> None:
 def test_suite_13_uncertainty_and_multiple_models_w121_to_w130() -> None:
     """Verify W121-W130: observation uncertainty, unknown vs false, competing models, Bayesian updates, relation confidence, ambiguity, provenance, contradictions, calibration, evidence sufficiency."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     disagreement = PredictorDisagreementAnalyzer()
 
     # W121: Observation uncertainty representation
@@ -698,6 +701,8 @@ def test_phase4_50_row_capability_ledger_reconciliation() -> None:
 def test_phase4_active_runtime_integration() -> None:
     """Verify that Phase 4 generalization, planning, uncertainty, and governance faculties are actively wired in AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
 
     # 1. Attribute presence & correct types
     assert isinstance(engine.subgoal_stack, FrontopolarSubgoalStack)

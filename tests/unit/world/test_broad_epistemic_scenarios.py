@@ -27,6 +27,7 @@ from hbllm.hcir.world.bilateral_coordination import (
 from hbllm.hcir.world.cortex_motor import (
     MotorCortexEffector,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     SubgoalType,
 )
@@ -36,6 +37,8 @@ from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 def test_e2e_lethal_learning_and_evasion_across_lives() -> None:
     """Verify agent registers lethal position upon death and deliberatively paths around it in next life."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.current_level = 1
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
@@ -79,6 +82,8 @@ def test_e2e_lethal_learning_and_evasion_across_lives() -> None:
 def test_e2e_peripheral_border_filtering_and_quiescent_switching() -> None:
     """Verify click effector filters outer grid borders and inhibits clicks when targets are quiescent."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_features = {1}
     engine.avatar_pos = (5, 5)
@@ -122,6 +127,8 @@ def test_e2e_peripheral_border_filtering_and_quiescent_switching() -> None:
 def test_e2e_same_color_bilateral_twins_no_collapse() -> None:
     """Verify identical-color bilateral twins maintain distinct coordinates across multi-turn displacements."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.bg_feature = 0
 
     # 10x12 grid with two identical cyan twins (feature 5) at (4, 2) and (4, 9)
@@ -225,6 +232,8 @@ def test_e2e_frontopolar_subgoal_decomposition_multi_stage_puzzle() -> None:
     from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
 
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -294,6 +303,8 @@ def test_e2e_nested_multi_stage_subgoals_lifo_execution() -> None:
     from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
 
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -385,6 +396,8 @@ def test_e2e_dynamic_threat_pacing_and_looming_cone_avoidance() -> None:
     from hbllm.hcir.world.kinetic_stream import KineticEntity
 
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (3, 3)
 
@@ -495,6 +508,8 @@ def test_e2e_high_surprise_hypothesis_invalidation_and_replanning() -> None:
     from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 

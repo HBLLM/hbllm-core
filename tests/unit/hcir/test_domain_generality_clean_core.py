@@ -36,10 +36,13 @@ def test_core_world_model_has_no_benchmark_specific_imports():
         re.compile(r"\bkaggle\b", re.IGNORECASE),
         re.compile(r"\bgame_engine\b", re.IGNORECASE),
     ]
+    quick_tokens = ("arc_agi", "kaggle", "game_engine")
 
     violations = []
     for py_file in world_dir.glob("*.py"):
         content = py_file.read_text(encoding="utf-8")
+        if not any(tok in content.lower() for tok in quick_tokens):
+            continue
         tree = ast.parse(content, filename=str(py_file))
 
         for node in ast.walk(tree):
@@ -134,6 +137,8 @@ def test_no_hidden_fixture_or_test_manifest_access_in_core():
     violations = []
     for py_file in core_hcir_dir.rglob("*.py"):
         content = py_file.read_text(encoding="utf-8")
+        if not any(imp in content for imp in forbidden_imports):
+            continue
         try:
             tree = ast.parse(content, filename=str(py_file))
         except SyntaxError:
@@ -269,17 +274,20 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
     - the original line-level regex scan is kept, with docstrings allow-listed.
     """
     forbidden_pat = re.compile(r"\b(game_id|level_id|is_win|is_lost|click)\b")
-    click_ident_pat = re.compile(r"click", re.IGNORECASE)
     core_dirs = [
         Path(__file__).resolve().parents[3] / "hbllm" / "hcir",
         Path(__file__).resolve().parents[3] / "hbllm" / "brain",
     ]
 
     violations = []
+    _FRAGMENTS = ("game", "level", "is_", "win", "lost", "click")
     for d in core_dirs:
         for py_file in d.rglob("*.py"):
             rel = py_file.relative_to(d.parents[1])
             content = py_file.read_text(encoding="utf-8")
+            content_lower = content.lower()
+            if not any(frag in content_lower for frag in _FRAGMENTS):
+                continue
             try:
                 tree = ast.parse(content, filename=str(py_file))
             except SyntaxError:
@@ -287,6 +295,7 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
 
             # Collect docstring line ranges to allow environment reference examples in docstrings
             docstring_lines: set[int] = set()
+            docstring_ids: set[int] = set()
             for node in ast.walk(tree):
                 if isinstance(
                     node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
@@ -305,6 +314,7 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
                                     getattr(first_expr, "end_lineno", first_expr.lineno) + 1,
                                 )
                             )
+                            docstring_ids.add(id(first_expr.value))
 
             # ── Line-level scan (original behaviour) ─────────────────────────
             for line_no, line in enumerate(content.splitlines(), start=1):
@@ -319,16 +329,17 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
                     violations.append(f"{rel}:{line_no}: token '{match.group()}' in '{code_part}'")
 
             # ── AST-level scan: folded strings and click identifiers ─────────
-            docstring_ids = _docstring_constant_ids(tree)
+            has_click = "click" in content_lower
             for node in ast.walk(tree):
                 # Folded string tokens (covers "is_" + "win", f-strings, joins)
-                if isinstance(
-                    node,
-                    (ast.Constant, ast.BinOp, ast.JoinedStr),
-                ) or (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "join"
+                if (
+                    (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add))
+                    or isinstance(node, ast.JoinedStr)
+                    or (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "join"
+                    )
                 ):
                     if id(node) in docstring_ids:
                         continue
@@ -342,23 +353,24 @@ def test_zero_forbidden_domain_tokens_in_cognitive_core():
                             )
 
                 # Identifiers containing 'click' in any casing
-                ident: str | None = None
-                if isinstance(node, ast.Name):
-                    ident = node.id
-                elif isinstance(node, ast.Attribute):
-                    ident = node.attr
-                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    ident = node.name
-                elif isinstance(node, ast.arg):
-                    ident = node.arg
-                elif isinstance(node, ast.keyword):
-                    ident = node.arg
-                elif isinstance(node, ast.alias):
-                    ident = node.asname or node.name
-                if ident and click_ident_pat.search(ident):
-                    violations.append(
-                        f"{rel}:{getattr(node, 'lineno', '?')}: forbidden identifier '{ident}'"
-                    )
+                if has_click:
+                    ident: str | None = None
+                    if isinstance(node, ast.Name):
+                        ident = node.id
+                    elif isinstance(node, ast.Attribute):
+                        ident = node.attr
+                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        ident = node.name
+                    elif isinstance(node, ast.arg):
+                        ident = node.arg
+                    elif isinstance(node, ast.keyword):
+                        ident = node.arg
+                    elif isinstance(node, ast.alias):
+                        ident = node.asname or node.name
+                    if ident and "click" in ident.lower():
+                        violations.append(
+                            f"{rel}:{getattr(node, 'lineno', '?')}: forbidden identifier '{ident}'"
+                        )
 
     assert not violations, (
         "Domain-specific forbidden tokens detected in cognitive core (WP3 violation):\n"

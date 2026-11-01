@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel, StateMutationModel
 from hbllm.hcir.world.object_state_graph import ObjectCategory, ObjectStateGraphPlanner
 
@@ -13,6 +14,7 @@ def test_object_extraction_and_categorization() -> None:
     """Verify salient objects are properly extracted, categorized, and given interaction stances."""
     planner = ObjectStateGraphPlanner()
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     grid = np.zeros((10, 10), dtype=int)
     # Walls
@@ -50,6 +52,7 @@ def test_object_extraction_and_categorization() -> None:
 def test_directive_1_and_2_exit_open() -> None:
     """Verify Directive 1 & 2: when exit is open, planner plans directly to exit."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     # Ground motor dynamics: actions 1, 2, 3, 4 = UP, DOWN, LEFT, RIGHT
     engine.action_dynamics[1] = ActionDynamicsModel(
@@ -83,6 +86,7 @@ def test_directive_1_and_2_exit_open() -> None:
 def test_directive_3_and_4_causal_switch_unlocking() -> None:
     """Verify Directive 4: when exit is blocked, planner navigates to known unlocking switch."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     engine.action_dynamics[1] = ActionDynamicsModel(
         action_id=1, delta_r=-1, delta_c=0, confidence=1.0
@@ -134,6 +138,7 @@ def test_directive_3_and_4_causal_switch_unlocking() -> None:
 def test_directive_5_epistemic_probing() -> None:
     """Verify Directive 5: when exit is blocked and no known mutations, probe untouched objects."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     engine.action_dynamics[1] = ActionDynamicsModel(
         action_id=1, delta_r=-1, delta_c=0, confidence=1.0
@@ -171,6 +176,7 @@ def test_directive_5_epistemic_probing() -> None:
 def test_decide_macro_option_execution_and_transition() -> None:
     """Verify engine.decide() executes macro options seamlessly and transitions to exit."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     engine.action_dynamics[1] = ActionDynamicsModel(
         action_id=1, delta_r=-1, delta_c=0, confidence=1.0
@@ -219,6 +225,7 @@ def test_decide_macro_option_execution_and_transition() -> None:
 def test_spatial_effector_macro_option_click() -> None:
     """Verify ObjectStateGraphPlanner generates intentional click macro options for spatial effectors."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [{"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}}]
     )
@@ -239,6 +246,7 @@ def test_spatial_effector_macro_option_click() -> None:
 def test_object_causal_effect_tracking() -> None:
     """Verify ObjectStateLedger records causal mutations and unlocks barriers."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     grid = np.zeros((10, 10), dtype=int)
     grid[2, 2] = 2  # Avatar
@@ -274,6 +282,7 @@ def test_object_causal_effect_tracking() -> None:
 def test_causal_actuator_contingency_pursuit() -> None:
     """Verify that mutating an object triggers PURSUIT_CAUSAL_ACTUATOR options on subsequent steps."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [{"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}}]
     )
@@ -307,6 +316,7 @@ def test_causal_actuator_contingency_pursuit() -> None:
 def test_multi_cell_unprobed_selection_and_quiescence_avoidance() -> None:
     """Verify multi-cell objects cycle to unprobed cells and avoid quiescent coordinates."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [{"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}}]
     )
@@ -317,7 +327,7 @@ def test_multi_cell_unprobed_selection_and_quiescence_avoidance() -> None:
     grid[3, 4] = 8
 
     # Mark anchor (3, 3) as quiescent
-    engine.quiescent_click_targets.add((3, 3))
+    engine.quiescent_actuation_targets.add((3, 3))
 
     plan = engine.object_planner.plan_macro_option(engine, grid, [6])
     assert plan is not None
@@ -327,7 +337,7 @@ def test_multi_cell_unprobed_selection_and_quiescence_avoidance() -> None:
     assert plan[0].action_data == {"x": 4, "y": 3}
 
     # Now mark the second cell as quiescent as well
-    engine.quiescent_click_targets.add((3, 4))
+    engine.quiescent_actuation_targets.add((3, 4))
     plan2 = engine.object_planner.plan_macro_option(engine, grid, [6])
     # When all cells are quiescent and no other objects exist, it must return None instead of looping
     assert plan2 is None
@@ -337,23 +347,25 @@ def test_retry_decay_and_quiescence_preservation() -> None:
     """Verify same-level retry preserves quiescent targets and decays ledger counts,
     while cross-level reset clears them."""
     engine = AutonomousEpistemicEngine()
-    engine.quiescent_click_targets.add((1, 1))
+    _restore_all(engine)
+    engine.quiescent_actuation_targets.add((1, 1))
     engine.object_planner.ledger.interaction_counts["obj_A"] = 4
 
     # 1. Same-level retry (is_new_level=False, retain_dynamics=True)
     engine.reset_episode(retain_dynamics=True, is_new_level=False, level=0)
-    assert (1, 1) in engine.quiescent_click_targets
+    assert (1, 1) in engine.quiescent_actuation_targets
     assert engine.object_planner.ledger.interaction_counts["obj_A"] == 2
 
     # 2. New-level transition (is_new_level=True)
     engine.reset_episode(retain_dynamics=True, is_new_level=True, level=1)
-    assert (1, 1) not in engine.quiescent_click_targets
+    assert (1, 1) not in engine.quiescent_actuation_targets
     assert "obj_A" not in engine.object_planner.ledger.interaction_counts
 
 
 def test_peripheral_frame_avoidance() -> None:
     """Verify interior candidates take priority over peripheral border frame cells."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [{"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}}]
     )
@@ -374,6 +386,7 @@ def test_peripheral_frame_avoidance() -> None:
 def test_macro_option_valid_targets_snapping() -> None:
     """Verify that macro option clicks snap to discrete valid_targets and avoid quiescent ones."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [
             {
@@ -400,14 +413,14 @@ def test_macro_option_valid_targets_snapping() -> None:
     assert plan1[0].action_data == {"x": 0, "y": 10}
 
     # 2. Mark (10, 0) as quiescent: planner should snap to (14, 0)
-    engine.quiescent_click_targets.add((10, 0))
+    engine.quiescent_actuation_targets.add((10, 0))
     plan2 = engine.object_planner.plan_macro_option(engine, grid, [6])
     assert plan2 is not None
     assert plan2[0].action == 6
     assert plan2[0].action_data == {"x": 0, "y": 14}
 
     # 3. Mark all valid targets as quiescent: planner returns None instead of invalid clicks
-    engine.quiescent_click_targets.add((14, 0))
+    engine.quiescent_actuation_targets.add((14, 0))
     plan3 = engine.object_planner.plan_macro_option(engine, grid, [6])
     assert plan3 is None
 
@@ -417,6 +430,7 @@ def test_motor_effector_discrete_valid_targets_quiescence() -> None:
     from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     engine.register_action_space(
         [
             {
@@ -437,13 +451,13 @@ def test_motor_effector_discrete_valid_targets_quiescence() -> None:
     grid[8, 1] = 8
 
     # 1. When (10, 0) is quiescent, fallback should pick (14, 0)
-    engine.quiescent_click_targets.add((10, 0))
+    engine.quiescent_actuation_targets.add((10, 0))
     coords = MotorCortexEffector.ground_effector_action(engine, grid, 6)
     assert coords is not None
     assert coords["x"] == 0 and coords["y"] == 14
 
     # 2. When both are quiescent, fallback returns None and inhibits action 6
-    engine.quiescent_click_targets.add((14, 0))
+    engine.quiescent_actuation_targets.add((14, 0))
     coords2 = MotorCortexEffector.ground_effector_action(engine, grid, 6)
     assert coords2 is None
     assert engine.inhibited_actions.get(6, 0) > 0

@@ -29,6 +29,7 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
 from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.orbitofrontal_credit_assignment import (
     OrbitofrontalCreditAssignmentEngine,
 )
@@ -268,6 +269,8 @@ class TestAutonomousEpistemicEngineRound18Orchestration:
 
     def test_engine_round18_orchestration(self) -> None:
         engine = AutonomousEpistemicEngine()
+
+        _restore_all(engine)
         engine.symbolic_theory = HCIRSymbolicWorldTheory()
 
         # 1. Subjective Time Dilation

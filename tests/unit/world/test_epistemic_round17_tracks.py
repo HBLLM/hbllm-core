@@ -28,6 +28,7 @@ from hbllm.hcir.world.claustrum_interhemispheric import (
 from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.hippocampal_time_cell import (
     HippocampalTimeCellEngine,
 )
@@ -295,6 +296,8 @@ class TestAutonomousEpistemicEngineRound17Orchestration:
 
     def test_engine_round17_orchestration(self) -> None:
         engine = AutonomousEpistemicEngine()
+
+        _restore_all(engine)
         engine.symbolic_theory = HCIRSymbolicWorldTheory()
 
         # 1. Temporal Interval Tracking

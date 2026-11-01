@@ -46,14 +46,20 @@ def test_no_raw_workspace_graph_primitives() -> None:
         for py in (ROOT / d).rglob("*.py"):
             if py in EXEMPT_FILES or "__pycache__" in str(py):
                 continue
+            content = py.read_text()
+            if not any(b in content for b in BANNED):
+                continue
             try:
-                tree = ast.parse(py.read_text(), filename=str(py))
+                tree = ast.parse(content, filename=str(py))
             except SyntaxError:
                 continue
+
             parents: dict[int, ast.AST] = {}
-            for node in ast.walk(tree):
-                for child in ast.iter_child_nodes(node):
-                    parents[id(child)] = node
+            if py.name == "workspace.py":
+                for node in ast.walk(tree):
+                    for child in ast.iter_child_nodes(node):
+                        parents[id(child)] = node
+
             for node in ast.walk(tree):
                 if not (
                     isinstance(node, ast.Call)
@@ -62,16 +68,17 @@ def test_no_raw_workspace_graph_primitives() -> None:
                 ):
                     continue
                 # allow the deprecated wrapper bodies in workspace.py
-                anc = node
-                inside_wrapper = False
-                while id(anc) in parents:
-                    anc = parents[id(anc)]
-                    if isinstance(anc, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if py.name == "workspace.py" and anc.name in EXEMPT_DEFS:
-                            inside_wrapper = True
-                        break
-                if inside_wrapper:
-                    continue
+                if py.name == "workspace.py":
+                    anc = node
+                    inside_wrapper = False
+                    while id(anc) in parents:
+                        anc = parents[id(anc)]
+                        if isinstance(anc, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            if anc.name in EXEMPT_DEFS:
+                                inside_wrapper = True
+                            break
+                    if inside_wrapper:
+                        continue
                 recv = _receiver_name(node)
                 if RECEIVER_PAT.search(recv):
                     violations.append(

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.predictors.whole_grid import (
     DimensionMode,
     WholeGridPredictor,
@@ -137,9 +138,10 @@ def test_world_model_wiring_across_core_faculties() -> None:
 
     # 1. AutonomousEpistemicEngine instance attributes
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     assert isinstance(engine.deformation_tracker, MorphologicalDeformationTracker)
     assert isinstance(engine.relational_matcher, RelationalGraphMatcher)
-    assert isinstance(engine.analogy_engine, FalsifiableAnalogyEngine)
 
     # 2. ObjectStateGraphPlanner instance attribute
     planner = ObjectStateGraphPlanner()

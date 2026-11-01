@@ -26,6 +26,7 @@ from hbllm.hcir.world.cerebellar_microzone_adaptor import (
     ClimbingFiberFeedback,
     MotorPrediction,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.ventral_premotor_resonator import (
     VentralPremotorAffordanceResonator,
 )
@@ -225,6 +226,8 @@ def test_cognitive_graph_max_flow_parity() -> None:
 def test_epistemic_engine_round12_integration() -> None:
     """Test AutonomousEpistemicEngine delegation to Round 12 faculties."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Test cerebellar motor outcome adaptation
     feedback = engine.adapt_cerebellar_motor_outcome(

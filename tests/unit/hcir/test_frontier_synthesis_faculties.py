@@ -29,6 +29,7 @@ from hbllm.hcir.world.entorhinal_grid_cortex import (
     EntorhinalGridCortex,
     PlaceFieldRepresentation,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
     MetacognitiveAssessment,
@@ -84,6 +85,8 @@ def test_predictive_coding_bidirectional_cycle() -> None:
 
 def test_predictive_coding_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     snap = engine.step_predictive_coding(
         sensory_inputs={"target_r": 1.0, "target_c": 1.0},
         abstract_priors={"target_r": 1.0, "target_c": 1.0},
@@ -120,6 +123,8 @@ def test_entorhinal_grid_cells_path_integration() -> None:
 
 def test_entorhinal_grid_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     engine.entorhinal_grid_cortex.reset_anchor((1, 1))
     new_pos = engine.path_integrate_odometry(delta_r=1.0, delta_c=2.0)
     assert new_pos == (2, 3)
@@ -170,6 +175,8 @@ def test_metacognitive_agency_attribution_and_governor() -> None:
 
 def test_metacognitive_agency_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     assess = engine.assess_metacognitive_agency(
         action_id=1,
         raw_confidence=0.88,
@@ -227,6 +234,8 @@ def test_skill_program_synthesizer_induction() -> None:
 
 def test_skill_synthesizer_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     trace = [
         ActionTraceStep(intent=SpatialActionIntent.NAVIGATE_TO),
         ActionTraceStep(intent=SpatialActionIntent.INTERACT),
@@ -243,6 +252,8 @@ def test_active_inference_loop_and_consolidation_pipeline() -> None:
     tiered_ws = TieredWorkspace()
     frame = tiered_ws.create_task_frame("goal_test")
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     engine.attach_tiered_workspace(tiered_ws, frame.frame_id)
 
     grid1 = np.zeros((10, 10), dtype=int)
@@ -285,7 +296,7 @@ def test_active_inference_loop_and_consolidation_pipeline() -> None:
         avatar_pos=(2, 3),
         action=2,
         reward=1.0,
-        is_win=True,
+        is_success=True,
     )
 
     # Repeat once to achieve min_support=2 for trace pattern induction
@@ -302,7 +313,7 @@ def test_active_inference_loop_and_consolidation_pipeline() -> None:
         avatar_pos=(2, 3),
         action=2,
         reward=1.0,
-        is_win=True,
+        is_success=True,
     )
     res = engine.consolidate_episodic_memory(terminal_reward=1.0)
 

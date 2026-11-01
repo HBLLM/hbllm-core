@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.global_neuronal_workspace import (
     GlobalNeuronalWorkspace,
     IgnitionEvent,
@@ -86,6 +87,8 @@ def test_gnw_ignition_and_broadcast() -> None:
 def test_gnw_decay_and_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
 
+    _restore_all(engine)
+
     # Submit candidate to engine GNW
     ign = engine.submit_to_workspace(
         source_cortex="episodic_cortex",
@@ -136,6 +139,8 @@ def test_neuromodulatory_system_dynamics() -> None:
 
 def test_neuromodulatory_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
 
     # Modulate cognition
     levels = engine.modulate_cognition(
@@ -241,6 +246,8 @@ def test_superposition_counterfactual_planning() -> None:
 
 def test_superposition_engine_integration() -> None:
     engine = AutonomousEpistemicEngine(exploration_budget=50)
+
+    _restore_all(engine)
     engine.superposition_planner.add_hypothesis("h1", 0.5, latent_variables={"val": 1})
     engine.superposition_planner.add_hypothesis("h2", 0.5, latent_variables={"val": 2})
 

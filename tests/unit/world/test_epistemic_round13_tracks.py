@@ -20,6 +20,7 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.pulvinar_attention_router import (
     PulvinarAttentionRouter,
     PulvinarRoutingState,
@@ -262,6 +263,8 @@ def test_feedback_arc_set_native_adapter_parity() -> None:
 def test_autonomous_epistemic_engine_round13_orchestration() -> None:
     """Test full integration of Round 13 faculties into AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Subicular BVC map
     grid = np.zeros((8, 8), dtype=int)

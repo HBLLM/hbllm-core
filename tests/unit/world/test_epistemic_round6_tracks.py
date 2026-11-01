@@ -27,6 +27,7 @@ from hbllm.hcir.world.cortex_deliberation import (
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualRegretEvaluator,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.parietal_coordinate_transform import (
     EgocentricCoordinate,
     HeadingOrientation,
@@ -78,6 +79,7 @@ class TestTrack1DualNeuromodulationAdaptiveGain:
 
     def test_engine_neuromodulatory_integration(self):
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.consecutive_stuck_steps = 4
 
         state = engine.step_neuromodulatory_dynamics(
@@ -160,6 +162,7 @@ class TestTrack2RetrosplenialSpatialCoordinateTransform:
 
     def test_engine_retrosplenial_integration(self):
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.prev_avatar_pos = (5, 5)
         engine.avatar_pos = (5, 6)  # Facing East
 
@@ -211,6 +214,7 @@ class TestTrack2RetrosplenialSpatialCoordinateTransform:
 
     def test_engine_counterfactual_regret_integration(self):
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         grid = np.zeros((10, 10), dtype=int)
         engine.avatar_pos = (4, 4)
         engine.learned_goal_positions.add((4, 7))

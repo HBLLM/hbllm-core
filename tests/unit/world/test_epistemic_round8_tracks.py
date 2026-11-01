@@ -16,6 +16,7 @@ from hbllm.hcir.world import (
     PotentialFieldVector,
     ShapeArchetypeSignature,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 
 """Comprehensive Unit Tests for Round 8 Cognitive Architecture Enhancements:
 
@@ -112,6 +113,7 @@ def test_value_opponency_appetitive_and_aversive_learning() -> None:
 def test_value_opponency_engine_integration() -> None:
     """Engine updates value opponency and registers causal predicate."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "value_opponency")
 
     st = engine.update_value_opponency(
@@ -192,6 +194,7 @@ def test_potential_field_obstacle_repulsion_and_minima_escape() -> None:
 def test_potential_field_engine_integration() -> None:
     """Engine synthesizes potential navigation vector and records causal predicate."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "potential_field_navigator")
 
     vec = engine.compute_navigational_force(
@@ -269,6 +272,7 @@ def test_shape_hasher_scale_invariance_and_discrimination() -> None:
 def test_shape_hasher_engine_integration() -> None:
     """Engine computes shape signature and registers causal predicate."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
     assert hasattr(engine, "shape_hasher")
 
     coords = {(3, 3), (3, 4), (4, 3), (4, 4)}
@@ -351,6 +355,7 @@ def test_cognitive_graph_transitive_reduction_diamond() -> None:
 def test_engine_extract_minimal_causal_skeleton() -> None:
     """Engine extracts minimal transitive reduction causal skeleton from graph."""
     engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
 
     graph = CognitiveGraph(enable_native_substrate=False)
     graph.add_node(FactNode(id="X", claim="X"))

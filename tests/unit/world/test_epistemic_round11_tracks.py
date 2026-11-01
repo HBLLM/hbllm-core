@@ -19,6 +19,7 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_exploration_horizon import (
     FrontopolarExplorationHorizonEngine,
 )
@@ -260,6 +261,8 @@ def test_cognitive_graph_biconnectivity_parity() -> None:
 def test_epistemic_engine_round11_integration() -> None:
     """Test AutonomousEpistemicEngine delegation to Round 11 faculties."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Test phase precession trajectory compression
     burst = engine.compress_trajectory_phase_precession(

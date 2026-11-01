@@ -36,6 +36,7 @@ from hbllm.hcir.world.cortex_motor import (
     MotorCortexEffector,
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
@@ -773,6 +774,7 @@ class TestMotorCortexEffector:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.register_action_space(
             [
                 {"action_id": 1, "name": "MOVE_UP"},
@@ -796,6 +798,7 @@ class TestMotorCortexEffector:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.avatar_pos = (2, 2)
         engine.avatar_feature = 1
         grid = np.zeros((10, 10), dtype=int)
@@ -1084,6 +1087,7 @@ class TestPrefrontalDeliberationEngine:
         from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         assert hasattr(engine, "deliberation_engine")
         assert isinstance(engine.deliberation_engine, PrefrontalDeliberationEngine)
 
@@ -1102,6 +1106,7 @@ class TestPrefrontalDeliberationEngine:
 
         delib = PrefrontalDeliberationEngine()
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.avatar_pos = (5, 5)
 
         # Mark feature 9 as lethal
@@ -1130,6 +1135,7 @@ class TestPrefrontalDeliberationEngine:
 
         delib = PrefrontalDeliberationEngine()
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         engine.avatar_pos = (5, 5)
         engine.phase = EpistemicPhase.EXPLOITATION
         engine.working_memory.update_salience_baseline(engine)
@@ -2320,6 +2326,7 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
         assert len(obs_ops) == 1
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         engine.learned_goal_positions.add((7, 7))
         engine.learned_barriers.add((1, 1))
         engine_pred = engine.to_causal_predicate()
@@ -2339,6 +2346,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
 
         # Spelke core knowledge: background 0 is seeded as walkable space by default
         assert engine.symbolic_theory.is_walkable(0)
@@ -2372,6 +2380,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
 
         # Active plan queue resides in working_memory
         step = MentalSimulationStep(
@@ -2411,6 +2420,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
 
         # Level 0 barriers & failed transitions
         engine.learned_barriers.add((3, 3))
@@ -2442,6 +2452,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
 
         engine.symbolic_theory.induce_goal(3)
         engine.symbolic_theory.induce_barrier(9)
@@ -2575,6 +2586,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         tiered = TieredWorkspace()
 
         # Attach workspace and create active task frame
@@ -2637,6 +2649,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         curr_grid = np.zeros((10, 10), dtype=int)
         curr_grid[5, 5] = 2  # Tool
         curr_grid[8, 8] = 3  # Goal
@@ -2751,6 +2764,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
 
         # Initialize a new epistemic engine (tabula rasa)
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         assert 8 not in engine.symbolic_theory.goal_features
         assert (4, 4) not in engine.learned_goal_positions
         assert (6, 6) not in engine.learned_barriers
@@ -2774,6 +2788,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         engine.symbolic_theory.seed_core_knowledge(bg_feature=0)
         engine.avatar_pos = (2, 2)
         engine.avatar_features = {1}
@@ -2814,6 +2829,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         engine._phase = EpistemicPhase.EXPLOITATION
         schema = SubgoalSchema(
             schema_name="FRAGILE_SCHEMA",
@@ -3269,6 +3285,7 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(exploration_budget=50, enable_logging=False)
+        _restore_all(engine)
 
         # Mutate through engine properties
         engine.active_probe_target = (4, 7)
@@ -3476,6 +3493,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
 
         # Engine integration check
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         grid0 = np.zeros((10, 10), dtype=np.int32)
         grid0[5, 5] = 4  # Clickable entity
         engine.prev_grid = grid0.copy()
@@ -3513,6 +3531,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         g0 = np.zeros((6, 6), dtype=np.int32)
         g1 = np.zeros((6, 6), dtype=np.int32)
         g1[2, 2] = 3
@@ -3536,7 +3555,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         safety_eval = PlanSafetyEvaluator([CausalUndoSafetyPredicate()])
         bad_step = MentalSimulationStep(action=7, predicted_avatar_pos=(2, 2))
         res = safety_eval.evaluate(
-            engine=engine,
+            view=engine,
             curr_grid=g0,
             next_step=bad_step,
             available_actions=[1, 2, 6, 7],
@@ -3550,6 +3569,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         g0 = np.zeros((5, 10), dtype=np.int32)
         g0[2, 2] = 8  # 1D cursor indicator
         engine.prev_grid = g0.copy()
@@ -3600,6 +3620,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         blank_grid = np.zeros((15, 15), dtype=np.int32)
 
         coords = MotorCortexEffector.ground_effector_action(engine, blank_grid, action=6)
@@ -3618,6 +3639,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_planner import MentalSimulationPlanner
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
+        _restore_all(engine)
         engine.avatar_pos = None
 
         # Simulate body_schema with has_manipulandum returning True but active_manipulandum is None

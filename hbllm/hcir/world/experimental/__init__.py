@@ -56,14 +56,20 @@ class AblatedFaculty:
     def __init__(self, name: str, cls: type | None = None) -> None:
         object.__setattr__(self, "_name", name)
         object.__setattr__(self, "_cls", cls)
+        object.__setattr__(self, "_cache", {})
 
     def __getattr__(self, name: str) -> Any:
         cls = object.__getattribute__(self, "_cls")
         if cls is not None:
-            member = getattr(cls, name, None)
-            if callable(member):
-                neutral = _neutral(cls, name)
-                return lambda *a, **k: neutral
+            cache = object.__getattribute__(self, "_cache")
+            if name not in cache:
+                member = getattr(cls, name, None)
+                if callable(member):
+                    neutral = _neutral(cls, name)
+                    cache[name] = lambda *a, **k: neutral
+                else:
+                    cache[name] = None
+            return cache[name]
         return None
 
     def __setattr__(self, name: str, val: Any) -> None:
@@ -141,3 +147,36 @@ register("DualValueOpponencyCortex", "hbllm.hcir.world.habenula_striatum_opponen
 register("VentrolateralMotorInhibitionEngine", "hbllm.hcir.world.ventrolateral_motor_inhibition")
 register("VentralTegmentalCuriosityEngine", "hbllm.hcir.world.ventral_tegmental_curiosity")
 register("GlobalWorkspaceIgnitionEngine", "hbllm.hcir.world.global_workspace_ignition")
+
+
+def restore(obj, name: str) -> bool:
+    """Test helper: replace an ablated faculty attr with a fresh real instance."""
+    cur = getattr(obj, name, None)
+    if isinstance(cur, AblatedFaculty) and object.__getattribute__(cur, "_cls") is not None:
+        setattr(obj, name, object.__getattribute__(cur, "_cls")())
+        return True
+    return False
+
+
+def restore_all(engine) -> list[str]:
+    """Test helper: restore every ablated faculty on an engine (no-arg ctors)."""
+    restored = []
+    import inspect as _i
+
+    for name, val in list(vars(engine).items()):
+        if isinstance(val, AblatedFaculty):
+            cls = object.__getattribute__(val, "_cls")
+            if cls is None:
+                continue
+            try:
+                sig = _i.signature(cls)
+                if all(
+                    p.default is not _i.Parameter.empty
+                    or p.kind in (_i.Parameter.VAR_POSITIONAL, _i.Parameter.VAR_KEYWORD)
+                    for p in sig.parameters.values()
+                ):
+                    setattr(engine, name, cls())
+                    restored.append(name)
+            except (TypeError, ValueError):
+                pass
+    return restored

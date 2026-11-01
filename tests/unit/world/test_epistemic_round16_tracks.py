@@ -24,6 +24,7 @@ from hbllm.hcir.world.dorsolateral_rule_abstraction import (
     DorsolateralRuleAbstractionEngine,
     RuleTransferResult,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.retrosplenial_heading import (
     AllocentricHeadingVector,
     HeadDirectionAttractorState,
@@ -264,6 +265,8 @@ def test_dominating_and_independent_set_native_adapter_parity() -> None:
 def test_autonomous_epistemic_engine_round16_orchestration() -> None:
     """Test full integration of Round 16 faculties into AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Retrosplenial heading update
     heading_vec = engine.update_allocentric_heading(omega_rad=math.pi / 4.0, dt=1.0)

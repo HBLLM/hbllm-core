@@ -150,10 +150,10 @@ def test_full_autonomous_loop_unseen_puzzle() -> None:
         if tuple(avatar_pos) == goal_pos:
             won = True
             # Let engine assimilate the win state
-            engine.decide(grid, available_actions, is_win=True)
+            engine.decide(grid, available_actions, is_success=True)
             break
 
-        act, data = engine.decide(grid, available_actions, is_win=False)
+        act, data = engine.decide(grid, available_actions, is_success=False)
         dr, dc = action_effects[act]
         nr, nc = avatar_pos[0] + dr, avatar_pos[1] + dc
 

@@ -14,6 +14,7 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
@@ -286,6 +287,8 @@ def test_cognitive_graph_apsp_parity() -> None:
 def test_epistemic_engine_round10_integration() -> None:
     """Test AutonomousEpistemicEngine delegation to Round 10 faculties."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Test hippocampal replay recording and sampling
     engine.record_replay_transition(

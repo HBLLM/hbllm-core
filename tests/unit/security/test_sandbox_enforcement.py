@@ -284,8 +284,9 @@ async def test_register_denies_manifest_beyond_policy():
 
 
 @pytest.mark.asyncio
-async def test_system_capability_runs_in_process():
+async def test_system_capability_runs_in_process(tmp_path, monkeypatch):
     """SYSTEM-trusted capabilities bypass subprocess isolation."""
+    monkeypatch.chdir(tmp_path)  # in-process writes land in tmp_path, not repo cwd
     from hbllm.hcir.kernel.capability_sandboxing import (
         SandboxedCapabilityPolicy,
         TrustLevel,

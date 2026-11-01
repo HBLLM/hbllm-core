@@ -30,6 +30,7 @@ from hbllm.hcir.world.entorhinal_border_cell import (
     EntorhinalBorderCellEngine,
     GridModuleRescalingResult,
 )
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.ventral_tegmental_curiosity import (
     CuriosityDriveSignal,
     EpistemicInformationGain,
@@ -269,6 +270,8 @@ def test_chinese_postman_tour_native_adapter_parity() -> None:
 def test_autonomous_epistemic_engine_round15_orchestration() -> None:
     """Test full integration of Round 15 faculties into AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine()
+
+    _restore_all(engine)
 
     # 1. Entorhinal border cell rescaling
     grid = np.zeros((10, 10), dtype=int)
