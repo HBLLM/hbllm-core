@@ -187,13 +187,12 @@ class MyAgent(Agent):
     # Prevents 8-9h Kaggle container timeouts by strictly bounding compute:
     # 1. Global Tournament Time Guard (7.5h max, leaves 1.5h margin for scorecard close)
     # 2. Per-Game Time Guard (8 min max per game)
-    # 3. Dynamic Progress-Scaled Action Guard (100 base + 75 per completed level)
+    # 3. Per-Level Action Guard (ACTIONS_PER_LEVEL, reset on each level completion)
     # 4. Consecutive Death Stagnation Guard (max 5 deaths on same level without progress)
     # 5. Worker Concurrency Gating (max 4 concurrent games to eliminate GIL thrashing)
     # ─────────────────────────────────────────────────────────────────────────
     MAX_ACTIONS: int = 800
-    BASE_ACTIONS_PER_LEVEL: int = 100
-    EXTRA_ACTIONS_PER_LEVEL: int = 75
+    ACTIONS_PER_LEVEL: int = 300  # ~2.5x the largest human per-level baseline (123)
     MAX_CONSECUTIVE_DEATHS: int = 5
     PER_GAME_MAX_SECONDS: float = 480.0  # 8 minutes max per game
     TOURNAMENT_MAX_SECONDS: float = (
@@ -274,6 +273,7 @@ class MyAgent(Agent):
         self.consecutive_deaths_this_level: int = 0
         self._is_marked_done: bool = False
         self.action_counter: int = 0
+        self.level_action_counter: int = 0
 
         # Grid stagnation detection: bail out when agent makes no visible progress
         self._stagnation_grid_hash: int | None = None
@@ -398,14 +398,12 @@ class MyAgent(Agent):
             self._yield_reason = "per_game_time"
             return True
 
-        # 3. Dynamic Progress-Scaled Action Budget Guard
-        allowed_actions = self.BASE_ACTIONS_PER_LEVEL + (
-            self.current_levels_completed * self.EXTRA_ACTIONS_PER_LEVEL
-        )
-        act_cnt = getattr(self, "action_counter", 0)
+        # 3. Per-Level Action Budget Guard
+        allowed_actions = self.ACTIONS_PER_LEVEL
+        act_cnt = getattr(self, "level_action_counter", 0)
         if act_cnt >= allowed_actions:
             print(
-                f"[ACTION GUARD] Action budget reached ({act_cnt}/{allowed_actions}) for {self.game_id} "
+                f"[ACTION GUARD] Level action budget reached ({act_cnt}/{allowed_actions}) for {self.game_id} "
                 f"at level {self.current_levels_completed}. Yielding game.",
                 flush=True,
             )
@@ -556,6 +554,7 @@ class MyAgent(Agent):
                 self.current_game_id = base_gid
                 self.current_levels_completed = 0
                 self.action_counter = 0
+                self.level_action_counter = 0
                 self._stagnation_grid_hash = None
                 self._stagnation_steps = 0
                 self.internal_engine = AutonomousEpistemicEngine(
@@ -572,6 +571,7 @@ class MyAgent(Agent):
         if lvl_completed != self.current_levels_completed:
             if lvl_completed > self.current_levels_completed:
                 self.consecutive_deaths_this_level = 0
+                self.level_action_counter = 0
                 print(
                     f"[ARC] Level completed: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,
@@ -652,6 +652,7 @@ class MyAgent(Agent):
 
         # Increment action counter for budget guard
         self.action_counter += 1
+        self.level_action_counter += 1
 
         # Grid stagnation tracking: detect when the observable state is not changing.
         # Hash the interior only — an outermost 1-cell border may be a HUD /

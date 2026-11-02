@@ -327,7 +327,7 @@ def test_runner_honors_agent_yield(tmp_path, monkeypatch):
     from kaggle_submission.my_agent import MyAgent
 
     # Tiny action budget → agent yields via "action_budget" at step 2.
-    monkeypatch.setattr(MyAgent, "BASE_ACTIONS_PER_LEVEL", 2)
+    monkeypatch.setattr(MyAgent, "ACTIONS_PER_LEVEL", 2)
 
     r25.run_all_25_games(
         scorecard_file=str(tmp_path / "sc1.json"),
