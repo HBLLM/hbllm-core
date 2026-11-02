@@ -158,8 +158,9 @@ def topological_sort(graph: Any) -> list[str]:
     if not all_ids:
         return []
 
-    in_degree: dict[str, int] = {nid: 0 for nid in all_ids}
-    adj: dict[str, list[str]] = {nid: [] for nid in all_ids}
+    sorted_ids = sorted(all_ids)
+    in_degree: dict[str, int] = {nid: 0 for nid in sorted_ids}
+    adj: dict[str, list[str]] = {nid: [] for nid in sorted_ids}
 
     all_edges = (
         list(graph.all_edges())
@@ -177,13 +178,13 @@ def topological_sort(graph: Any) -> list[str]:
                         adj[s].append(t)
                         in_degree[t] += 1
 
-    queue: deque[str] = deque([nid for nid, deg in in_degree.items() if deg == 0])
+    queue: deque[str] = deque([nid for nid in sorted_ids if in_degree[nid] == 0])
     order: list[str] = []
 
     while queue:
         curr = queue.popleft()
         order.append(curr)
-        for neighbor in adj[curr]:
+        for neighbor in sorted(adj[curr]):
             in_degree[neighbor] -= 1
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)

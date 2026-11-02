@@ -361,23 +361,24 @@ class NativeGraphAdapter:
         if not all_node_ids:
             return []
 
-        in_degree: dict[str, int] = {nid: 0 for nid in all_node_ids}
-        adj: dict[str, list[str]] = {nid: [] for nid in all_node_ids}
+        sorted_node_ids = sorted(all_node_ids)
+        in_degree: dict[str, int] = {nid: 0 for nid in sorted_node_ids}
+        adj: dict[str, list[str]] = {nid: [] for nid in sorted_node_ids}
 
-        for nid in all_node_ids:
+        for nid in sorted_node_ids:
             for edge in self.edges_from(nid):
                 for tgt in edge.get("targets", []):
                     if tgt in all_node_ids:
                         adj[nid].append(tgt)
                         in_degree[tgt] += 1
 
-        queue: deque[str] = deque([nid for nid, deg in in_degree.items() if deg == 0])
+        queue: deque[str] = deque([nid for nid in sorted_node_ids if in_degree[nid] == 0])
         order: list[str] = []
 
         while queue:
             curr = queue.popleft()
             order.append(curr)
-            for neighbor in adj[curr]:
+            for neighbor in sorted(adj[curr]):
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
