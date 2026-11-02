@@ -51,6 +51,45 @@ class MacroActionStatus(StrEnum):
     BLOCKED = "blocked"
 
 
+def _spatial_effector_payload(
+    engine: Any, eff: Any, target_coord: tuple[int, int]
+) -> dict[str, Any]:
+    """Build a point-actuation payload for ``target_coord`` (row, col).
+
+    When the effector's affordance declares a discrete ``valid_targets``
+    lattice (adapter-enumerated reachable actuation coordinates), the raw
+    intent coordinate is snapped to the nearest declared target so the
+    emitted probe stays on the reachable actuation manifold; coordinates off
+    the lattice are physical no-ops.
+
+    Args:
+        engine: Epistemic engine (or journaled view) exposing
+            ``action_affordances``.
+        eff: The chosen spatial effector action.
+        target_coord: Preferred (row, col) actuation coordinate.
+
+    Returns:
+        The action-data payload for the effector command.
+    """
+    data: dict[str, Any] = {"x": int(target_coord[1]), "y": int(target_coord[0])}
+    affordances = getattr(engine, "action_affordances", None) or {}
+    aff = affordances.get(eff) if hasattr(affordances, "get") else None
+    valid_targets = (
+        aff.metadata.get("valid_targets")
+        if (aff is not None and isinstance(getattr(aff, "metadata", None), dict))
+        else None
+    )
+    if isinstance(valid_targets, (list, tuple)) and valid_targets:
+        from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
+        snapped = MotorCortexEffector.snap_effector_to_valid_targets(
+            engine, eff, valid_targets, target_coord[0], target_coord[1]
+        )
+        if snapped is not None:
+            data = snapped
+    return data
+
+
 @dataclass
 class ObjectSpec:
     """Formal specification of an entity and its properties passed to the cognitive core."""
@@ -428,7 +467,7 @@ class InteractWith(MacroAction):
                 self.status = MacroActionStatus.FAILED
                 return available_actions[0], None
 
-        data = {"x": int(self.target_coord[1]), "y": int(self.target_coord[0])}
+        data = _spatial_effector_payload(engine, eff, self.target_coord)
         self.has_executed = True
         self.status = MacroActionStatus.SATISFIED
         return eff, data
@@ -822,10 +861,9 @@ class ExploreObject(MacroAction):
             if eff_candidates:
                 self.probed = True
                 self.status = MacroActionStatus.SATISFIED
-                return eff_candidates[0], {
-                    "x": int(self.target_pos[1]),
-                    "y": int(self.target_pos[0]),
-                }
+                return eff_candidates[0], _spatial_effector_payload(
+                    engine, eff_candidates[0], self.target_pos
+                )
 
         # Embodied: navigate adjacent to target
         if engine.avatar_pos is not None:
@@ -845,10 +883,7 @@ class ExploreObject(MacroAction):
         if interact_candidates:
             chosen = interact_candidates[0]
             if engine.is_spatial_effector(chosen):
-                return chosen, {
-                    "x": int(self.target_pos[1]),
-                    "y": int(self.target_pos[0]),
-                }
+                return chosen, _spatial_effector_payload(engine, chosen, self.target_pos)
             return chosen, None
 
         if engine.avatar_pos is not None:

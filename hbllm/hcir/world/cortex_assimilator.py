@@ -619,30 +619,39 @@ class EpistemicFeedbackAssimilator:
         unmatched_prev: list[SpatialEntity] = []
         unmatched_curr: dict[int, SpatialEntity] = {id(ce): ce for ce in curr_entities}
 
+        # Per-key buckets preserve dict-order tie-breaking of the original
+        # first-match scan while avoiding the O(prev x curr) pairwise sweep.
+        _static_bucket: dict[tuple[Any, Any, Any], list[int]] = {}
+        for ce_id, ce in unmatched_curr.items():
+            _static_bucket.setdefault((ce.feature_id, ce.area, ce.grid_pos), []).append(ce_id)
+
         for pe in prev_entities:
-            stat_match = None
-            for ce_id, ce in unmatched_curr.items():
-                if (
-                    pe.feature_id == ce.feature_id
-                    and pe.area == ce.area
-                    and pe.grid_pos == ce.grid_pos
-                ):
-                    stat_match = ce_id
-                    break
-            if stat_match is not None:
+            stat_ids = _static_bucket.get((pe.feature_id, pe.area, pe.grid_pos))
+            if stat_ids:
+                stat_match = stat_ids.pop(0)
                 del unmatched_curr[stat_match]
             else:
                 unmatched_prev.append(pe)
 
+        _move_bucket: dict[tuple[Any, Any], list[int]] = {}
+        for ce_id, ce in unmatched_curr.items():
+            _move_bucket.setdefault((ce.feature_id, ce.area), []).append(ce_id)
+
         moved_entities: list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]] = []
         for pe in unmatched_prev:
+            pe_fid = pe.feature_id
+            pe_area = pe.area
             best_ce_id = None
             min_dist = float("inf")
             best_delta = (0, 0)
-            for ce_id, ce in unmatched_curr.items():
-                if pe.feature_id == ce.feature_id and pe.area == ce.area and pe.area <= 144:
-                    dr = int(round(ce.centroid[0] - pe.centroid[0]))
-                    dc = int(round(ce.centroid[1] - pe.centroid[1]))
+            if pe_area <= 144:
+                pe_cr, pe_cc = pe.centroid
+                for ce_id in _move_bucket.get((pe_fid, pe_area), ()):
+                    ce = unmatched_curr.get(ce_id)
+                    if ce is None:
+                        continue
+                    dr = int(round(ce.centroid[0] - pe_cr))
+                    dc = int(round(ce.centroid[1] - pe_cc))
                     dist = abs(dr) + abs(dc)
                     is_valid_displacement = (0 < dist < max(H, W) and (dr == 0 or dc == 0)) or (
                         0 < dist <= 8 and abs(dr) <= 4 and abs(dc) <= 4
@@ -1616,14 +1625,20 @@ class EpistemicFeedbackAssimilator:
                     view.consecutive_plan_failures = 0
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
-        movable_features = set(view.symbolic_theory.cargo_features)
+        # Per-call invariants resolved once: the owned-subsystem reads below are
+        # re-evaluated per mutated pixel otherwise (journaled-view overhead).
+        _sym_theory = view.symbolic_theory
+        _bg_feature = view.bg_feature
+        _prev_grid = view.prev_grid
+        _avatar_pos_now = view.avatar_pos
+        _hazard_tracker = view.hazard_tracker
+
+        movable_features = set(_sym_theory.cargo_features)
         movable_features.update(view.avatar_features)
         if view.avatar_feature is not None:
             movable_features.add(view.avatar_feature)
-        if hasattr(view, "hazard_tracker") and hasattr(
-            view.hazard_tracker, "mobile_threat_features"
-        ):
-            movable_features.update(view.hazard_tracker.mobile_threat_features)
+        if _hazard_tracker is not None and hasattr(_hazard_tracker, "mobile_threat_features"):
+            movable_features.update(_hazard_tracker.mobile_threat_features)
 
         # Divider-line scan is invariant for the whole assimilate call:
         # compute each row's dominant value/count once (lazily), then reuse.
@@ -1631,7 +1646,7 @@ class EpistemicFeedbackAssimilator:
 
         def _hud_dividers() -> np.ndarray:
             nonlocal _divider_rows
-            rows = view.prev_grid
+            rows = _prev_grid
             n_vals = int(rows.max()) + 1
             counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in rows])
             dom_vals = np.argmax(counts, axis=1)
@@ -1639,31 +1654,43 @@ class EpistemicFeedbackAssimilator:
             _divider_rows = (dom_vals != bg) & (dom_counts >= int(rows.shape[1] * 0.85))
             return _divider_rows
 
-        def is_hud_mutation(r: int, c: int) -> bool:
-            """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
-            if view.prev_grid is None:
-                return False
-            pH, pW = view.prev_grid.shape
-            if pH < 24 or pW < 24:
-                return False
+        # The HUD predicate depends only on the mutated row: the divider-slice
+        # test is precomputed once per row instead of per mutated pixel.
+        _hud_row_flags: np.ndarray | None = None
 
+        def _hud_flags() -> np.ndarray:
+            nonlocal _hud_row_flags
+            pH, _ = _prev_grid.shape
             max_hud_depth = max(16, pH // 4)
             div_rows = _divider_rows if _divider_rows is not None else _hud_dividers()
+            flags = np.zeros(pH, dtype=bool)
+            # Top peripheral band partitioned by a solid non-background divider
+            # line spanning >= 85% width.
+            for r in range(min(max_hud_depth + 1, pH)):
+                if div_rows[r + 1 : min(max_hud_depth + 1, pH)].any():
+                    flags[r] = True
+            # Bottom peripheral band, symmetric to the top band.
+            for r in range(max(0, pH - 1 - max_hud_depth), pH):
+                if not flags[r] and div_rows[max(0, pH - 1 - max_hud_depth) : r].any():
+                    flags[r] = True
+            _hud_row_flags = flags
+            return flags
 
-            # Check if (r, c) is in top peripheral band partitioned by a solid non-background divider line spanning >= 85% width
-            if r <= max_hud_depth and div_rows[r + 1 : min(max_hud_depth + 1, pH)].any():
-                return True
-
-            # Check if (r, c) is in bottom peripheral band partitioned by a solid non-background divider line spanning >= 85% width
-            if r >= pH - 1 - max_hud_depth and div_rows[max(0, pH - 1 - max_hud_depth) : r].any():
-                return True
-            return False
+        def is_hud_mutation(r: int, c: int) -> bool:
+            """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
+            if _prev_grid is None:
+                return False
+            pH, pW = _prev_grid.shape
+            if pH < 24 or pW < 24:
+                return False
+            flags = _hud_row_flags if _hud_row_flags is not None else _hud_flags()
+            return bool(flags[r])
 
         av_radius = max(2, int(round(math.sqrt(max(1, view.avatar_size)))))
 
         def is_local_to_avatar(r: int, c: int) -> bool:
-            if view.avatar_pos is not None:
-                if max(abs(r - view.avatar_pos[0]), abs(c - view.avatar_pos[1])) <= av_radius:
+            if _avatar_pos_now is not None:
+                if max(abs(r - _avatar_pos_now[0]), abs(c - _avatar_pos_now[1])) <= av_radius:
                     return True
             if prev_avatar_pos is not None:
                 if max(abs(r - prev_avatar_pos[0]), abs(c - prev_avatar_pos[1])) <= av_radius:
@@ -1677,9 +1704,9 @@ class EpistemicFeedbackAssimilator:
         gained_counts: dict[int, int] = {}
         for r, c, old_v, new_v in diff.mutated_pixels:
             if not is_hud_mutation(r, c) and not is_local_to_avatar(r, c):
-                if old_v != bg and old_v != view.bg_feature:
+                if old_v != bg and old_v != _bg_feature:
                     lost_counts[old_v] = lost_counts.get(old_v, 0) + 1
-                if new_v != bg and new_v != view.bg_feature:
+                if new_v != bg and new_v != _bg_feature:
                     gained_counts[new_v] = gained_counts.get(new_v, 0) + 1
 
         for feat, count in lost_counts.items():
@@ -1687,10 +1714,10 @@ class EpistemicFeedbackAssimilator:
                 2, int(count * 0.25)
             ):
                 movable_features.add(feat)
-                if hasattr(view, "hazard_tracker") and hasattr(
-                    view.hazard_tracker, "mobile_threat_features"
+                if _hazard_tracker is not None and hasattr(
+                    _hazard_tracker, "mobile_threat_features"
                 ):
-                    view.hazard_tracker.mobile_threat_features.add(feat)
+                    _hazard_tracker.mobile_threat_features.add(feat)
 
         distant_mutations = [
             (r, c, old_v, new_v)
@@ -1705,15 +1732,15 @@ class EpistemicFeedbackAssimilator:
             trigger_pos = (
                 (int(action_data["y"]), int(action_data["x"]))
                 if action_data and "x" in action_data
-                else view.avatar_pos
+                else _avatar_pos_now
             )
             trigger_feat = (
-                int(view.prev_grid[trigger_pos[0], trigger_pos[1]])
+                int(_prev_grid[trigger_pos[0], trigger_pos[1]])
                 if trigger_pos and 0 <= trigger_pos[0] < H and 0 <= trigger_pos[1] < W
                 else None
             )
 
-            if trigger_feat is None or trigger_feat == bg or trigger_feat == view.bg_feature:
+            if trigger_feat is None or trigger_feat == bg or trigger_feat == _bg_feature:
                 trigger_feat = None
 
             if trigger_pos is not None or trigger_feat is not None:
@@ -1776,9 +1803,9 @@ class EpistemicFeedbackAssimilator:
                     and old_v != bg
                     and old_v not in av_feats
                     and old_v != view.avatar_feature
-                    and not view.symbolic_theory.is_barrier(old_v)
+                    and not _sym_theory.is_barrier(old_v)
                 ):
-                    view.symbolic_theory.induce_depletion_goal(old_v)
+                    _sym_theory.induce_depletion_goal(old_v)
                     break
 
         if is_success:
@@ -1802,25 +1829,23 @@ class EpistemicFeedbackAssimilator:
 
             if win_target is not None:
                 view.record_learned_goal(win_target)
-                if view.prev_grid is not None and 0 <= win_target[0] < H and 0 <= win_target[1] < W:
-                    goal_feat = int(view.prev_grid[win_target[0], win_target[1]])
+                if _prev_grid is not None and 0 <= win_target[0] < H and 0 <= win_target[1] < W:
+                    goal_feat = int(_prev_grid[win_target[0], win_target[1]])
                     is_distant_target = (
                         prev_avatar_pos is None
                         or abs(win_target[0] - prev_avatar_pos[0]) > 0
                         or abs(win_target[1] - prev_avatar_pos[1]) > 0
                     )
-                    feat_extent = int(np.count_nonzero(view.prev_grid == goal_feat))
-                    is_substrate = (
-                        goal_feat in view.symbolic_theory.walkable_features or feat_extent > 64
-                    )
+                    feat_extent = int(np.count_nonzero(_prev_grid == goal_feat))
+                    is_substrate = goal_feat in _sym_theory.walkable_features or feat_extent > 64
                     if (
                         goal_feat != bg
-                        and goal_feat != view.bg_feature
+                        and goal_feat != _bg_feature
                         and (goal_feat not in av_feats or is_distant_target)
-                        and not view.symbolic_theory.is_barrier(goal_feat)
+                        and not _sym_theory.is_barrier(goal_feat)
                         and not is_substrate
                     ):
-                        view.symbolic_theory.induce_goal(goal_feat)
+                        _sym_theory.induce_goal(goal_feat)
                         logger.info(
                             "AutonomousEpistemicEngine: Grounded invariant WIN GOAL FEATURE %d at %s",
                             goal_feat,
@@ -1837,36 +1862,35 @@ class EpistemicFeedbackAssimilator:
                     if (
                         (pe.feature_id not in av_feats or is_distant_pe)
                         and pe.feature_id != bg
-                        and pe.feature_id != view.bg_feature
-                        and not view.symbolic_theory.is_barrier(pe.feature_id)
+                        and pe.feature_id != _bg_feature
+                        and not _sym_theory.is_barrier(pe.feature_id)
                         and 1 <= pe.area <= max_entity_area
                     ):
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
-                            view.symbolic_theory.induce_goal(pe.feature_id)
+                            _sym_theory.induce_goal(pe.feature_id)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded invariant WIN GOAL ENTITY feature %d (area=%d)",
                                 pe.feature_id,
                                 pe.area,
                             )
 
-            if view.current_simulated_goal is not None and view.prev_grid is not None:
+            if view.current_simulated_goal is not None and _prev_grid is not None:
                 sr, sc = view.current_simulated_goal
                 if 0 <= sr < H and 0 <= sc < W:
-                    sim_feat = int(view.prev_grid[sr, sc])
-                    sim_extent = int(np.count_nonzero(view.prev_grid == sim_feat))
+                    sim_feat = int(_prev_grid[sr, sc])
+                    sim_extent = int(np.count_nonzero(_prev_grid == sim_feat))
                     max_sim_extent = max(64, int(H * W * 0.15))
                     if (
                         sim_feat != bg
-                        and sim_feat != view.bg_feature
+                        and sim_feat != _bg_feature
                         and sim_feat not in av_feats
-                        and not view.symbolic_theory.is_barrier(sim_feat)
+                        and not _sym_theory.is_barrier(sim_feat)
                         and not (
-                            sim_feat in view.symbolic_theory.walkable_features
-                            or sim_extent > max_sim_extent
+                            sim_feat in _sym_theory.walkable_features or sim_extent > max_sim_extent
                         )
                     ):
-                        view.symbolic_theory.induce_goal(sim_feat)
+                        _sym_theory.induce_goal(sim_feat)
 
             if view.active_hypothesis:
                 view.active_hypothesis.confirmed = True
@@ -1943,26 +1967,26 @@ class EpistemicFeedbackAssimilator:
                 target_pos = (int(action_data["y"]), int(action_data["x"]))
 
             if target_pos is not None:
-                if view.prev_grid is not None and 0 <= target_pos[0] < H and 0 <= target_pos[1] < W:
+                if _prev_grid is not None and 0 <= target_pos[0] < H and 0 <= target_pos[1] < W:
                     # Check for lethal hazard features in a 5x5 window around target_pos
                     r0 = max(0, target_pos[0] - 2)
                     r1 = min(H, target_pos[0] + 3)
                     c0 = max(0, target_pos[1] - 2)
                     c1 = min(W, target_pos[1] + 3)
                     candidate_cells = set(np.unique(curr_grid[r0:r1, c0:c1])).union(
-                        set(np.unique(view.prev_grid[r0:r1, c0:c1]))
+                        set(np.unique(_prev_grid[r0:r1, c0:c1]))
                     )
                     # Also inspect unobstructed cardinal line-of-sight rays for remote turrets/projectiles
                     for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                         curr_r, curr_c = target_pos[0] + dr, target_pos[1] + dc
                         while 0 <= curr_r < H and 0 <= curr_c < W:
-                            val = int(view.prev_grid[curr_r, curr_c])
-                            if view.symbolic_theory.is_barrier(val):
+                            val = int(_prev_grid[curr_r, curr_c])
+                            if _sym_theory.is_barrier(val):
                                 break
                             if (
-                                val != view.bg_feature
+                                val != _bg_feature
                                 and val not in av_feats
-                                and not view.symbolic_theory.is_walkable(val)
+                                and not _sym_theory.is_walkable(val)
                             ):
                                 candidate_cells.add(val)
                             curr_r += dr
@@ -1970,18 +1994,18 @@ class EpistemicFeedbackAssimilator:
                     total_cells = H * W
                     for cand_feat in candidate_cells:
                         cand_feat_int = int(cand_feat)
-                        feat_count = int(np.sum(view.prev_grid == cand_feat_int))
+                        feat_count = int(np.sum(_prev_grid == cand_feat_int))
                         if (
-                            cand_feat_int != view.bg_feature
+                            cand_feat_int != _bg_feature
                             and cand_feat_int not in av_feats
-                            and not view.symbolic_theory.is_walkable(cand_feat_int)
+                            and not _sym_theory.is_walkable(cand_feat_int)
                             and feat_count <= max(64, int(total_cells * 0.40))
                         ):
-                            view.hazard_tracker.register_lethal_feature(cand_feat_int)
-                            view.symbolic_theory.induce_barrier(cand_feat_int)
-                            view.symbolic_theory.cargo_features.discard(cand_feat_int)
-                            view.symbolic_theory.goal_features.discard(cand_feat_int)
-                            view.symbolic_theory.candidate_goal_features.discard(cand_feat_int)
+                            _hazard_tracker.register_lethal_feature(cand_feat_int)
+                            _sym_theory.induce_barrier(cand_feat_int)
+                            _sym_theory.cargo_features.discard(cand_feat_int)
+                            _sym_theory.goal_features.discard(cand_feat_int)
+                            _sym_theory.candidate_goal_features.discard(cand_feat_int)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded lethal feature %d at barrier %s",
                                 cand_feat_int,
@@ -1993,7 +2017,7 @@ class EpistemicFeedbackAssimilator:
                     # The destination cell target_pos resulted in catastrophic loss/death.
                     # Ground it as a static lethal position and barrier so neither mental simulation
                     # nor exploratory probes step into this coordinate again!
-                    view.hazard_tracker.register_lethal_position(target_pos)
+                    _hazard_tracker.register_lethal_position(target_pos)
                     view.record_learned_barrier(target_pos)
                     view.level_learned_barriers.setdefault(view.current_level, set()).add(
                         target_pos
@@ -2026,8 +2050,8 @@ class EpistemicFeedbackAssimilator:
                     pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
                     and pe.feature_id not in av_feats
                     and pe.feature_id != bg
-                    and pe.feature_id != view.bg_feature
-                    and not view.symbolic_theory.is_walkable(pe.feature_id)
+                    and pe.feature_id != _bg_feature
+                    and not _sym_theory.is_walkable(pe.feature_id)
                 ):
                     dist_to_av = abs(pe.grid_pos[0] - view.avatar_pos[0]) + abs(
                         pe.grid_pos[1] - view.avatar_pos[1]
@@ -2042,18 +2066,19 @@ class EpistemicFeedbackAssimilator:
 
         # Tool-Barrier Resonance Credit Assignment
         if (
-            view.prev_grid is not None
+            _prev_grid is not None
             and view.working_memory.held_items
             and diff.changed_mask is not None
         ):
             changed_coords = np.argwhere(diff.changed_mask)
+            _barrier_feats = _sym_theory.barrier_features
+            _learned_barriers = view.learned_barriers
             for mr, mc in changed_coords:
-                orig_val = int(view.prev_grid[mr, mc])
+                orig_val = int(_prev_grid[mr, mc])
                 post_val = int(curr_grid[mr, mc])
-                if (
-                    orig_val in view.symbolic_theory.barrier_features
-                    or (int(mr), int(mc)) in view.learned_barriers
-                ) and (post_val == view.bg_feature or view.symbolic_theory.is_walkable(post_val)):
+                if (orig_val in _barrier_feats or (int(mr), int(mc)) in _learned_barriers) and (
+                    post_val == _bg_feature or _sym_theory.is_walkable(post_val)
+                ):
                     for h_item in view.working_memory.held_items:
                         view.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
 

@@ -830,8 +830,19 @@ class PerceptionEngine:
         for val in unique_vals:
             mask = grid == val
             labeled_mask, num_components = label(mask, structure=struct)
+            # Single-pass coordinate lifting: bin all labeled pixels by component
+            # id once instead of rescanning the lattice per component (argwhere
+            # returns row-major coordinates, identical to this ordering).
+            _flat_labels = labeled_mask.ravel()
+            _nz = np.nonzero(_flat_labels)[0]
+            _order = np.argsort(_flat_labels[_nz], kind="stable")
+            _nz = _nz[_order]
+            _nz_labels = _flat_labels[_nz]
+            _splits = np.flatnonzero(np.diff(_nz_labels)) + 1
+            _groups = np.split(_nz, _splits)
             for comp_idx in range(1, num_components + 1):
-                coords = np.argwhere(labeled_mask == comp_idx)
+                flat = _groups[comp_idx - 1]
+                coords = np.stack((flat // W, flat % W), axis=1)
                 area = int(len(coords))
                 if area == 0:
                     continue

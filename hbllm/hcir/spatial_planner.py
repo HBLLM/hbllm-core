@@ -137,7 +137,10 @@ class SpatialEntity:
     @property
     def feature_id(self) -> Any:
         """Generic perceptual feature identifier."""
-        return self.properties.get("feature_id", self.properties.get("visual_id", 0))
+        props = self.properties
+        if "feature_id" in props:
+            return props["feature_id"]
+        return props.get("visual_id", 0)
 
     @feature_id.setter
     def feature_id(self, val: Any) -> None:

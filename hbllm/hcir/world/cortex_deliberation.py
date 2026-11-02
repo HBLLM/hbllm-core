@@ -2144,13 +2144,41 @@ class PrefrontalDeliberationEngine:
                 if actuation_target is not None:
                     chosen_action = eff_act
                     aff = view.action_affordances.get(eff_act)
-                    req_keys = aff.target_param_keys if aff else ("row", "col")
-                    if "row" in req_keys and "col" in req_keys:
-                        chosen_data = {"row": actuation_target[0], "col": actuation_target[1]}
-                    elif "y" in req_keys and "x" in req_keys:
-                        chosen_data = {"y": actuation_target[0], "x": actuation_target[1]}
+                    # Snap the exploratory actuation onto the declared valid-target
+                    # lattice when the affordance enumerates one: off-lattice
+                    # coordinates are physical no-ops.
+                    _valid_targets = (
+                        aff.metadata.get("valid_targets")
+                        if (aff is not None and isinstance(getattr(aff, "metadata", None), dict))
+                        else None
+                    )
+                    _snapped_data: dict[str, Any] | None = None
+                    if isinstance(_valid_targets, (list, tuple)) and _valid_targets:
+                        from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+
+                        _snapped_data = MotorCortexEffector.snap_effector_to_valid_targets(
+                            view,
+                            eff_act,
+                            _valid_targets,
+                            actuation_target[0],
+                            actuation_target[1],
+                        )
+                    if _snapped_data is not None:
+                        chosen_data = _snapped_data
                     else:
-                        chosen_data = view.ground_effector_action(curr_grid, eff_act)
+                        req_keys = aff.target_param_keys if aff else ("row", "col")
+                        if "row" in req_keys and "col" in req_keys:
+                            chosen_data = {
+                                "row": actuation_target[0],
+                                "col": actuation_target[1],
+                            }
+                        elif "y" in req_keys and "x" in req_keys:
+                            chosen_data = {
+                                "y": actuation_target[0],
+                                "x": actuation_target[1],
+                            }
+                        else:
+                            chosen_data = view.ground_effector_action(curr_grid, eff_act)
 
         return ActionProposal(
             chosen_action,

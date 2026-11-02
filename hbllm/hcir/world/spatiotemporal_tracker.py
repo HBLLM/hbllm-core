@@ -655,6 +655,22 @@ class MorphologicalDeformationTracker:
         if not cells:
             return 0
 
+        # Small complexes: count the cubical V - E + F directly over the cell
+        # set (cheaper than rasterising). chi is identical by construction:
+        # F = |cells|, unique unit edges = 4F - (#shared faces), and V is the
+        # distinct corner lattice points touched by any cell.
+        if len(cells) < 2048:
+            corner_pts: set[tuple[int, int]] = set()
+            shared = 0
+            for r, c in cells:
+                corner_pts.update(((r, c), (r + 1, c), (r, c + 1), (r + 1, c + 1)))
+                if (r + 1, c) in cells:
+                    shared += 1
+                if (r, c + 1) in cells:
+                    shared += 1
+            f = len(cells)
+            return len(corner_pts) - (4 * f - shared) + f
+
         # Vectorised cubical complex: rasterise the cells into a local boolean mask and
         # count lattice vertices / unit edges touched by any cell via shifted ORs.
         coords = np.fromiter((v for rc in cells for v in rc), dtype=np.int64, count=2 * len(cells))
@@ -690,7 +706,7 @@ class MorphologicalDeformationTracker:
     ) -> float:
         """Compute Intersection over Union (IoU) between two sets of grid cells."""
         intersection = len(cells_a & cells_b)
-        union = len(cells_a | cells_b)
+        union = len(cells_a) + len(cells_b) - intersection
         return float(intersection / union) if union > 0 else 0.0
 
     @classmethod
@@ -761,15 +777,16 @@ class MorphologicalDeformationTracker:
                     continue
 
                 iou = self.compute_iou(pe.cells, ce.cells)
-                dr = pe.centroid[0] - ce.centroid[0]
-                dc = pe.centroid[1] - ce.centroid[1]
-                dist = math.hypot(dr, dc)
-                score = iou - 0.05 * dist
 
-                if iou >= iou_threshold and score > best_score:
-                    best_score = score
-                    best_curr = ce
-                    best_iou = iou
+                if iou >= iou_threshold:
+                    dr = pe.centroid[0] - ce.centroid[0]
+                    dc = pe.centroid[1] - ce.centroid[1]
+                    dist = math.hypot(dr, dc)
+                    score = iou - 0.05 * dist
+                    if score > best_score:
+                        best_score = score
+                        best_curr = ce
+                        best_iou = iou
 
             if best_curr is not None:
                 mapping[pe.entity_id] = best_curr.entity_id

@@ -272,11 +272,12 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             getattr(context, "verified_safe_features", set()) or set()
         )
         if len(walkable_and_safe) > 0 and bg not in walkable_and_safe:
-            static_barriers.update(
-                (int(r), int(c))
-                for r, c in np.argwhere(grid == bg)
-                if (int(r), int(c)) not in candidate_goals
-            )
+            _bg_cells = set(map(tuple, np.argwhere(grid == bg).tolist()))
+            try:
+                static_barriers.update(_bg_cells - set(candidate_goals))
+            except TypeError:
+                # Unhashable goal entries: fall back to membership filtering.
+                static_barriers.update(c for c in _bg_cells if c not in candidate_goals)
 
         impassable = np.zeros((H, W), dtype=bool)
         for cells in (static_barriers, known_lethals):

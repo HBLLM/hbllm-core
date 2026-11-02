@@ -782,20 +782,27 @@ class _JournaledStateProxy:
 
     def __init__(self, view: JournaledEngineView) -> None:
         object.__setattr__(self, "_view", view)
+        # Names whose first-touch before-image is already in the journal.
+        # ``journal.before``/``journal.touched`` writes are paired at every
+        # site, so once a key is journaled repeat reads need no bookkeeping.
+        object.__setattr__(self, "_seen", set())
 
     def __getattr__(self, name: str) -> Any:
         view = object.__getattribute__(self, "_view")
         val = getattr(view._engine.state, name)
-        journal = object.__getattribute__(view, "_journal")
-        key = f"state.{name}"
-        if key not in journal.before:
-            try:
-                journal.before[key] = (
-                    val.copy() if isinstance(val, (dict, set, list, deque)) else val
-                )
-            except Exception:
-                journal.before[key] = _ABSENT
-        journal.touched.add(key)
+        seen = object.__getattribute__(self, "_seen")
+        if name not in seen:
+            seen.add(name)
+            journal = object.__getattribute__(view, "_journal")
+            key = f"state.{name}"
+            if key not in journal.before:
+                try:
+                    journal.before[key] = (
+                        val.copy() if isinstance(val, (dict, set, list, deque)) else val
+                    )
+                except Exception:
+                    journal.before[key] = _ABSENT
+            journal.touched.add(key)
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -843,20 +850,23 @@ class JournaledEngineView:
             routes[name] = route
         if route == 0:
             return object.__getattribute__(self, "_state_proxy")
-        eng = object.__getattribute__(self, "_engine")
-        val = getattr(eng, name)
-        if route == 1:
+        val = getattr(object.__getattribute__(self, "_engine"), name)
+        if route != 2:
             return val
-        if isinstance(val, (dict, set, list, deque)):
-            journal = object.__getattribute__(self, "_journal")
-            if name not in journal.before:
-                try:
-                    journal.before[name] = (
-                        val.copy() if isinstance(val, (dict, set, list, deque)) else val
-                    )
-                except Exception:
-                    journal.before[name] = _ABSENT
-            journal.touched.add(name)
+        if not isinstance(val, (dict, set, list, deque)):
+            return val
+        journal = object.__getattribute__(self, "_journal")
+        if name in journal.before:
+            # First touch already captured the before-image; ``before``/``touched``
+            # are written in pairs at every site, so this key is also already in
+            # ``touched``. Demote to passthrough: repeat reads need no journal work.
+            routes[name] = 1
+            return val
+        try:
+            journal.before[name] = val.copy()
+        except Exception:
+            journal.before[name] = _ABSENT
+        journal.touched.add(name)
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:

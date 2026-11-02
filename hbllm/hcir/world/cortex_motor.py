@@ -1440,6 +1440,104 @@ class MotorCortexEffector:
         )
 
     @staticmethod
+    def snap_effector_to_valid_targets(
+        engine: AutonomousEpistemicEngine,
+        action: Any,
+        valid_targets: Sequence[Any],
+        target_r: int,
+        target_c: int,
+    ) -> dict[str, Any] | None:
+        """Snap a preferred actuation coordinate onto a declared valid-target lattice.
+
+        When an adapter/affordance enumerates the only reachable actuation
+        coordinates (``valid_targets`` payload dicts), probing must stay on
+        that discrete manifold: arbitrary lattice coordinates are physical
+        no-ops. This enumerates the declared targets and picks the
+        un-quiescent, un-inhibited one nearest to ``(target_r, target_c)``,
+        discounted by inhibition-of-return visit counts and habenular
+        repulsion.
+
+        Args:
+            engine: Epistemic engine or journaled faculty view exposing
+                ``quiescent_actuation_targets``, ``entity_visit_counts``,
+                ``avatar_pos`` and ``working_memory``/``habenular_ior``.
+            action: The spatial effector action being grounded.
+            valid_targets: Declared target payloads (``dict``s carrying
+                ``x``/``y`` or ``c``/``r`` style coordinates).
+            target_r: Preferred target row (intent site / field centre).
+            target_c: Preferred target column.
+
+        Returns:
+            The full declared payload dict for the chosen target (preserving
+            any extra payload keys), or ``None`` when every enumerated target
+            is already proven quiescent or inhibited.
+        """
+        best_score = float("inf")
+        snapped_target: dict[str, Any] | None = None
+        for vt in valid_targets:
+            if isinstance(vt, dict):
+                raw_vx = vt.get("x") if vt.get("x") is not None else vt.get("c", vt.get("col", 0))
+                raw_vy = vt.get("y") if vt.get("y") is not None else vt.get("r", vt.get("row", 0))
+                vx = int(raw_vx) if raw_vx is not None else 0
+                vy = int(raw_vy) if raw_vy is not None else 0
+                if (vy, vx) in engine.quiescent_actuation_targets:
+                    continue
+                if hasattr(engine, "working_memory") and hasattr(
+                    engine.working_memory, "habenular_ior"
+                ):
+                    if engine.working_memory.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                    ):
+                        continue
+                elif hasattr(engine, "habenular_ior"):
+                    if engine.habenular_ior.is_action_inhibited(
+                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                    ):
+                        continue
+                haben_pen = 0.0
+                if hasattr(engine, "working_memory") and hasattr(
+                    engine.working_memory, "habenular_ior"
+                ):
+                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                    )
+                vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
+                # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
+                d = float(abs(vx - target_c) + abs(vy - target_r)) + float(vis) * 25.0 + haben_pen
+                if d < best_score:
+                    best_score = d
+                    snapped_target = vt
+
+        # If all un-quiescent candidates were exhausted, select least-visited un-quiescent valid target
+        if snapped_target is None and valid_targets:
+            least_visited_vt: dict[str, Any] | None = None
+            min_vis = float("inf")
+            for vt in valid_targets:
+                if isinstance(vt, dict):
+                    raw_vx = vt.get("x", vt.get("c", 0))
+                    raw_vy = vt.get("y", vt.get("r", 0))
+                    vx = int(raw_vx) if raw_vx is not None else 0
+                    vy = int(raw_vy) if raw_vy is not None else 0
+                    if (vy, vx) in engine.quiescent_actuation_targets:
+                        continue
+                    vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
+                    if vis < min_vis:
+                        min_vis = vis
+                        least_visited_vt = vt
+            snapped_target = least_visited_vt
+
+        if snapped_target is None:
+            return None
+
+        # Update visit count for snapped coordinate
+        svx = int(snapped_target.get("x", snapped_target.get("c", 0)))
+        svy = int(snapped_target.get("y", snapped_target.get("r", 0)))
+        engine.entity_visit_counts[f"actuate_{svy}_{svx}"] = (
+            engine.entity_visit_counts.get(f"actuate_{svy}_{svx}", 0) + 1
+        )
+        return dict(snapped_target)
+
+    @staticmethod
     def parse_action_spec(spec: Any) -> ActionAffordance:
         """Parse external action specification into an ActionAffordance descriptor."""
         if isinstance(spec, ActionAffordance):
@@ -1821,94 +1919,34 @@ class MotorCortexEffector:
             if (c[0], c[1]) not in engine.quiescent_actuation_targets
         ]
 
-        if actuation_candidates:
-            actuation_candidates.sort(key=lambda x: x[2], reverse=True)
-            best_r, best_c, _ = actuation_candidates[0]
-            engine.entity_visit_counts[f"actuate_{best_r}_{best_c}"] = (
-                engine.entity_visit_counts.get(f"actuate_{best_r}_{best_c}", 0) + 1
-            )
-            target_r, target_c = int(best_r), int(best_c)
-            engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
+        # Parietal Effector Repertoire Grounding:
+        # If the action affordance declares a discrete valid-target lattice, actuation is
+        # restricted to those enumerated coordinates — arbitrary lattice positions are
+        # physical no-ops. The salient candidate site only biases *which* declared target
+        # is attempted first (nearest valid point); when no salient candidate exists the
+        # lattice is enumerated systematically from the field centre, ordered by visit
+        # counts and habenular repulsion inside the snap routine.
+        valid_targets = aff.metadata.get("valid_targets") if aff else None
+        has_valid_targets = isinstance(valid_targets, (list, tuple)) and bool(valid_targets)
 
-            # Parietal Effector Repertoire Grounding:
-            # If the action affordance defines discrete valid targets, snap the chosen target
-            # to the nearest valid physical affordance point that is not known to be quiescent.
-            valid_targets = aff.metadata.get("valid_targets") if aff else None
-            if valid_targets and isinstance(valid_targets, (list, tuple)):
-                best_score = float("inf")
-                snapped_target: dict[str, Any] | None = None
-                for vt in valid_targets:
-                    if isinstance(vt, dict):
-                        raw_vx = (
-                            vt.get("x")
-                            if vt.get("x") is not None
-                            else vt.get("c", vt.get("col", 0))
-                        )
-                        raw_vy = (
-                            vt.get("y")
-                            if vt.get("y") is not None
-                            else vt.get("r", vt.get("row", 0))
-                        )
-                        vx = int(raw_vx) if raw_vx is not None else 0
-                        vy = int(raw_vy) if raw_vy is not None else 0
-                        if (vy, vx) in engine.quiescent_actuation_targets:
-                            continue
-                        if hasattr(engine, "working_memory") and hasattr(
-                            engine.working_memory, "habenular_ior"
-                        ):
-                            if engine.working_memory.habenular_ior.is_action_inhibited(
-                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                            ):
-                                continue
-                        elif hasattr(engine, "habenular_ior"):
-                            if engine.habenular_ior.is_action_inhibited(
-                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                            ):
-                                continue
-                        haben_pen = 0.0
-                        if hasattr(engine, "working_memory") and hasattr(
-                            engine.working_memory, "habenular_ior"
-                        ):
-                            haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                                engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                            )
-                        vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
-                        # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
-                        d = (
-                            float(abs(vx - target_c) + abs(vy - target_r))
-                            + float(vis) * 25.0
-                            + haben_pen
-                        )
-                        if d < best_score:
-                            best_score = d
-                            snapped_target = vt
+        if actuation_candidates or has_valid_targets:
+            if actuation_candidates:
+                actuation_candidates.sort(key=lambda x: x[2], reverse=True)
+                best_r, best_c, _ = actuation_candidates[0]
+                engine.entity_visit_counts[f"actuate_{best_r}_{best_c}"] = (
+                    engine.entity_visit_counts.get(f"actuate_{best_r}_{best_c}", 0) + 1
+                )
+                target_r, target_c = int(best_r), int(best_c)
+                engine.last_effector_target_step[(target_r, target_c)] = engine.step_counter
+            else:
+                target_r, target_c = H // 2, W // 2
 
-                # If all un-quiescent candidates were exhausted, select least-visited un-quiescent valid target
-                if snapped_target is None and valid_targets:
-                    least_visited_vt: dict[str, Any] | None = None
-                    min_vis = float("inf")
-                    for vt in valid_targets:
-                        if isinstance(vt, dict):
-                            raw_vx = vt.get("x", vt.get("c", 0))
-                            raw_vy = vt.get("y", vt.get("r", 0))
-                            vx = int(raw_vx) if raw_vx is not None else 0
-                            vy = int(raw_vy) if raw_vy is not None else 0
-                            if (vy, vx) in engine.quiescent_actuation_targets:
-                                continue
-                            vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
-                            if vis < min_vis:
-                                min_vis = vis
-                                least_visited_vt = vt
-                    snapped_target = least_visited_vt
-
+            if has_valid_targets and isinstance(valid_targets, (list, tuple)):
+                snapped_target = cls.snap_effector_to_valid_targets(
+                    engine, action, valid_targets, target_r, target_c
+                )
                 if snapped_target is not None:
-                    # Update visit count for snapped coordinate
-                    svx = int(snapped_target.get("x", snapped_target.get("c", 0)))
-                    svy = int(snapped_target.get("y", snapped_target.get("r", 0)))
-                    engine.entity_visit_counts[f"actuate_{svy}_{svx}"] = (
-                        engine.entity_visit_counts.get(f"actuate_{svy}_{svx}", 0) + 1
-                    )
-                    return dict(snapped_target)
+                    return snapped_target
 
                 # All discrete valid targets are exhausted and proven quiescent!
                 if action is not None:
