@@ -71,7 +71,7 @@ def _win_factory():
     def on_step(env, aid, data):
         env.calls += 1
         g = _grid()
-        g[0][0] = env.calls  # grid changes every step
+        g[3][3] = env.calls  # interior cell changes every step
         if env.calls >= 3:
             return _FakeFrame(g, GameState.WIN, levels_completed=1, win_levels=1)
         return _FakeFrame(g, GameState.NOT_FINISHED, 0, 1)
@@ -108,6 +108,31 @@ def _boom_factory():
 
     def on_step(env, aid, data):
         raise RuntimeError("boom")
+
+    return _ScriptedEnv(on_step)
+
+
+def _hud_factory():
+    """Only the last (border) row changes each step — a step-counter bar.
+    Interior never changes → every step is a no-op under HUD-aware detection."""
+
+    def on_step(env, aid, data):
+        env.calls += 1
+        g = [row[:] for row in env.grid]
+        g[7][env.calls % 8] = 9  # tick the border row like a HUD counter
+        return _FakeFrame(g, GameState.NOT_FINISHED, 0, 1)
+
+    return _ScriptedEnv(on_step)
+
+
+def _interior_factory():
+    """An interior cell changes each step — genuinely non-noop."""
+
+    def on_step(env, aid, data):
+        env.calls += 1
+        g = [row[:] for row in env.grid]
+        g[3][3] = env.calls
+        return _FakeFrame(g, GameState.NOT_FINISHED, 0, 1)
 
     return _ScriptedEnv(on_step)
 
@@ -242,6 +267,57 @@ def test_runner_records_telemetry_per_game(tmp_path, monkeypatch):
         assert g["decision_exceptions"] == games[gid]["decision_exceptions"], gid
         assert g["levels_completed"] == games[gid]["levels_passed"], gid
     assert report["overall"]["steps"] == sum(g["steps"] for g in games.values())
+
+
+def test_runner_hud_border_noop_detection(tmp_path, monkeypatch):
+    """Steps that only tick a border HUD row are no-ops; interior changes are not."""
+    factories = {"hud01": _hud_factory, "inter01": _interior_factory}
+    r25 = _runner_module(monkeypatch, factories)
+    scorecard_file = tmp_path / "scorecard.json"
+    trace_dir = tmp_path / "traces"
+
+    r25.run_all_25_games(
+        scorecard_file=str(scorecard_file),
+        trace_dir=str(trace_dir),
+        max_steps_per_game=5,
+        retries=0,
+        resume=False,
+        seed=0,
+    )
+
+    sc = json.loads(scorecard_file.read_text())
+    games = sc["games"]
+
+    # HUD game: border row ticks every step (raw change) but interior static.
+    assert games["hud01"]["noop_actions"] == 5
+    assert games["hud01"]["max_stagnation_streak"] == 5
+    # Interior game: real change every step → no no-ops.
+    assert games["inter01"]["noop_actions"] == 0
+    assert games["inter01"]["max_stagnation_streak"] == 0
+
+    hud_steps = [
+        r for r in _read_jsonl(trace_dir / "hud01" / "runner.jsonl") if r["event"] == "step"
+    ]
+    assert len(hud_steps) == 5
+    assert all(r["noop"] is True for r in hud_steps)
+    assert all(r["effective_changed_cells"] == 0 for r in hud_steps)
+    assert all(r["changed_cells"] > 0 for r in hud_steps)  # border ticked raw
+    assert all(r["grid_changed"] is True for r in hud_steps)
+
+    inter_steps = [
+        r for r in _read_jsonl(trace_dir / "inter01" / "runner.jsonl") if r["event"] == "step"
+    ]
+    assert all(r["noop"] is False for r in inter_steps)
+    assert all(r["effective_changed_cells"] > 0 for r in inter_steps)
+
+    from plugins.arc_agi_adapter.trace_analysis import analyze_trace_dir
+
+    report = analyze_trace_dir(trace_dir)
+    assert report["games"]["hud01"]["noop_rate"] == 1.0
+    assert report["games"]["hud01"]["raw_change_rate"] == 1.0
+    assert report["games"]["hud01"]["max_stagnation_streak"] == 5
+    assert report["games"]["inter01"]["noop_rate"] == 0.0
+    assert report["games"]["inter01"]["raw_change_rate"] == 1.0
 
 
 def test_runner_time_limit_stop_reason(tmp_path, monkeypatch):

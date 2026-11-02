@@ -1970,6 +1970,13 @@ class MacroPlanSynthesizer:
             if engine.is_displacement_action(a) and a in engine.action_dynamics
         ]
 
+        # Static reachability inputs are invariant for the whole synthesize_plan
+        # call: curr_grid, learned_barriers and barrier_features are not mutated
+        # between _can_navigate_to calls — compute walls once, lazily, and
+        # memoize reachability per destination.
+        _nav_static: tuple[set[int], set[tuple[int, int]]] | None = None
+        _nav_cache: dict[tuple[int, int], bool] = {}
+
         def _can_navigate_to(dest: tuple[int, int]) -> bool:
             if av_pos is None:
                 return False
@@ -1981,13 +1988,19 @@ class MacroPlanSynthesizer:
                 return True
             if not movable_actions:
                 return False
-            H, W = curr_grid.shape
-            wall_f = set(engine.symbolic_theory.barrier_features)
-            grid_w = set(engine.learned_barriers)
-            for rr in range(H):
-                for cc in range(W):
-                    if int(curr_grid[rr, cc]) in wall_f:
-                        grid_w.add((rr, cc))
+            if dest in _nav_cache:
+                return _nav_cache[dest]
+            nonlocal _nav_static
+            if _nav_static is None:
+                wall_f_new = set(engine.symbolic_theory.barrier_features)
+                grid_w_new = set(engine.learned_barriers)
+                if wall_f_new:
+                    grid_w_new |= {
+                        (int(rr), int(cc))
+                        for rr, cc in np.argwhere(np.isin(curr_grid, list(wall_f_new)))
+                    }
+                _nav_static = (wall_f_new, grid_w_new)
+            wall_f, grid_w = _nav_static
             p = GeodesicManifoldRouter.route_geodesic(
                 curr_grid=curr_grid,
                 start_pos=av_pos,
@@ -2002,7 +2015,9 @@ class MacroPlanSynthesizer:
                 avatar_features=av_feats,
                 max_candidate_goals=1,
             )
-            return p is not None and len(p) > 0
+            reached = p is not None and len(p) > 0
+            _nav_cache[dest] = reached
+            return reached
 
         # Collect candidate switches / buttons / actuators
         switch_objs: list[ObjectSpec] = [
@@ -2158,9 +2173,9 @@ class MacroPlanSynthesizer:
                     abs(s.pos[0] - av_pos[0]) + abs(s.pos[1] - av_pos[1]),
                 ),
             )
-            reachable_switches = [s for s in sorted_switches if _can_navigate_to(s.pos)]
+            reachable_switch = next((s for s in sorted_switches if _can_navigate_to(s.pos)), None)
             if (
-                not reachable_switches
+                reachable_switch is None
                 and sorted_switches
                 and has_multi_agent
                 and focus_switch is not None
@@ -2172,8 +2187,8 @@ class MacroPlanSynthesizer:
                     )
                 )
                 return plan
-            if reachable_switches:
-                best_switch = reachable_switches[0]
+            if reachable_switch is not None:
+                best_switch = reachable_switch
                 if (
                     engine.has_displacement_capabilities(available_actions)
                     and engine.avatar_pos is not None
@@ -2212,9 +2227,9 @@ class MacroPlanSynthesizer:
                 goals,
                 key=lambda g: abs(g[0] - engine.avatar_pos[0]) + abs(g[1] - engine.avatar_pos[1]),
             )
-            reachable_goals = [g for g in sorted_goals if _can_navigate_to(g)]
+            reachable_goal = next((g for g in sorted_goals if _can_navigate_to(g)), None)
             if (
-                not reachable_goals
+                reachable_goal is None
                 and sorted_goals
                 and has_multi_agent
                 and focus_switch is not None
@@ -2226,8 +2241,8 @@ class MacroPlanSynthesizer:
                     )
                 )
                 return plan
-            if reachable_goals:
-                target_goal = reachable_goals[0]
+            if reachable_goal is not None:
+                target_goal = reachable_goal
                 plan.append(NavigateTo(destination=target_goal, description="Reach exit goal"))
                 if has_multi_agent and focus_switch is not None:
                     plan.append(

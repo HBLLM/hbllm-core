@@ -86,6 +86,16 @@ def _extract_grid(raw: Any) -> np.ndarray | None:
         return None
 
 
+# Width of the HUD border to exclude from effective-change no-op detection.
+# Some games render a step-counter bar on the outermost grid edge; those cells
+# change every step and would defeat naive grid-equality no-op detection.
+_HUD_BORDER = 1
+
+# Sentinel for changed-cell counts when grids cannot be compared
+# (missing grid, or pre/post shape mismatch — treated as changed, never a no-op).
+_CHANGED_UNKNOWN = -1
+
+
 def _p95_ms(latencies_ms: list[float]) -> float | None:
     if not latencies_ms:
         return None
@@ -574,12 +584,27 @@ def run_all_25_games(
                 lvl = int(info.get("levels_completed", 0))
                 state_str = str(info.get("state", "RUNNING"))
 
-                # Measurement: grid-diff no-op detection + decide latency + counters
+                # Measurement: grid-diff no-op detection + decide latency + counters.
+                # A step is a no-op when the grid interior (excluding the HUD
+                # border) is unchanged AND levels_completed did not advance.
                 post_grid = _extract_grid(feedback.causal_delta)
                 grid_changed: bool | None = None
+                changed_cells = _CHANGED_UNKNOWN
+                effective_changed_cells = _CHANGED_UNKNOWN
                 if pre_grid is not None and post_grid is not None:
-                    grid_changed = not np.array_equal(pre_grid, post_grid)
-                is_noop = (grid_changed is False) and (lvl == lvl_before)
+                    if pre_grid.shape == post_grid.shape:
+                        diff = np.asarray(pre_grid != post_grid)
+                        changed_cells = int(diff.sum())
+                        grid_changed = changed_cells > 0
+                        interior = diff[_HUD_BORDER:-_HUD_BORDER, _HUD_BORDER:-_HUD_BORDER]
+                        # Degenerate grids (nothing but border) fall back to the
+                        # raw count so changes are never masked.
+                        effective_changed_cells = (
+                            int(interior.sum()) if interior.size > 0 else changed_cells
+                        )
+                    else:
+                        grid_changed = True  # shape mismatch — treat as changed
+                is_noop = (effective_changed_cells == 0) and (lvl == lvl_before)
                 decide_ms = getattr(agent, "_decide_latency_ms", None)
                 violations_now = int(getattr(agent, "_contract_violations", 0) or 0)
                 exceptions_now = int(getattr(agent, "decision_exceptions", 0) or 0)
@@ -619,6 +644,9 @@ def run_all_25_games(
                             if isinstance(decide_ms, (int, float))
                             else None,
                             "grid_changed": grid_changed,
+                            "changed_cells": changed_cells,
+                            "effective_changed_cells": effective_changed_cells,
+                            "noop": is_noop,
                             "state": state_str,
                             "violation": d_violations > 0,
                             "exception": d_exceptions > 0,

@@ -43,10 +43,18 @@ def _analyze_records(step_recs: list[dict], stop_recs: list[dict]) -> dict[str, 
     cycle = [float(r["cycle_ms"]) for r in step_recs if r.get("cycle_ms") is not None]
     decide = [float(r["decide_ms"]) for r in step_recs if r.get("decide_ms") is not None]
 
+    # Prefer the runner's recorded `noop` flag (HUD-border-aware); derive a
+    # fallback from grid_changed + level deltas for traces written before the
+    # field existed.
     noop_flags = [
-        r.get("grid_changed") is False and r.get("level_before") == r.get("level_after")
+        (
+            bool(r["noop"])
+            if "noop" in r
+            else r.get("grid_changed") is False and r.get("level_before") == r.get("level_after")
+        )
         for r in step_recs
     ]
+    raw_change_flags = [r.get("grid_changed") is True for r in step_recs]
     max_streak = 0
     streak = 0
     for flag in noop_flags:
@@ -80,6 +88,9 @@ def _analyze_records(step_recs: list[dict], stop_recs: list[dict]) -> dict[str, 
         },
         "noop_rate": round(sum(noop_flags) / len(noop_flags), 4) if noop_flags else None,
         "noop_actions": sum(noop_flags),
+        "raw_change_rate": round(sum(raw_change_flags) / len(raw_change_flags), 4)
+        if raw_change_flags
+        else None,
         "max_stagnation_streak": max_streak,
         "contract_violations": sum(1 for r in step_recs if r.get("violation")),
         "decision_exceptions": sum(1 for r in step_recs if r.get("exception")),
@@ -145,7 +156,7 @@ def _print_table(report: dict[str, Any]) -> None:
     header = (
         f"{'game':<18} {'steps':>5} {'lvls':>6} {'stop':<18} "
         f"{'cyc_mean':>9} {'cyc_p95':>9} {'dec_mean':>9} {'dec_p95':>9} "
-        f"{'noop%':>7} {'streak':>6} {'viol':>4} {'exc':>4} {'yield':>16}"
+        f"{'noop%':>7} {'rawchg%':>8} {'streak':>6} {'viol':>4} {'exc':>4} {'yield':>16}"
     )
     print(header)
     print("-" * len(header))
@@ -167,6 +178,7 @@ def _print_table(report: dict[str, Any]) -> None:
             f"{_fmt(g.get('decide_ms', {}).get('mean')):>9} "
             f"{_fmt(g.get('decide_ms', {}).get('p95')):>9} "
             f"{_fmt((g.get('noop_rate') or 0) * 100):>7} "
+            f"{_fmt((g.get('raw_change_rate') or 0) * 100):>8} "
             f"{_fmt(g.get('max_stagnation_streak')):>6} "
             f"{_fmt(g.get('contract_violations')):>4} "
             f"{_fmt(g.get('decision_exceptions')):>4} "
