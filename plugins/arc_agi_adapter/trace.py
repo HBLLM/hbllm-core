@@ -16,7 +16,16 @@ class TraceRecorder:
         self.path = Path(path)
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / "frames").mkdir(exist_ok=True)
-        self._fp = open(self.path / "trace.jsonl", "w")
+        # Never overwrite an existing trace: pick the first free trace-N.jsonl.
+        # Frames stay shared (content-addressed) regardless of the file index.
+        idx = 0
+        while True:
+            candidate = self.path / ("trace.jsonl" if idx == 0 else f"trace-{idx}.jsonl")
+            if not candidate.exists():
+                break
+            idx += 1
+        self.trace_file = candidate
+        self._fp = open(self.trace_file, "w")
 
     def record_step(
         self,
@@ -74,6 +83,12 @@ class TraceRecorder:
         self._fp.close()
 
     @staticmethod
-    def from_env(default: str | None = None) -> TraceRecorder | None:
-        d = os.environ.get("HBLLM_TRACE_DIR") or default
-        return TraceRecorder(d) if d else None
+    def from_env(default: str | None = None, subdir: str | None = None) -> TraceRecorder | None:
+        # An explicit base directory wins; HBLLM_TRACE_DIR is the fallback.
+        d = default or os.environ.get("HBLLM_TRACE_DIR")
+        if not d:
+            return None
+        base = Path(d)
+        if subdir:
+            base = base / subdir
+        return TraceRecorder(base)

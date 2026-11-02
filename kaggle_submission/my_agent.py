@@ -251,15 +251,21 @@ class MyAgent(Agent):
         self._step_limit: int | None = None
         self._contract_violations: int = 0
         self._actuation_rejected: bool = False
-        try:
-            from plugins.arc_agi_adapter.trace import TraceRecorder
-
-            self._trace = TraceRecorder.from_env(kwargs.get("trace_dir"))
-        except Exception:
-            self._trace = None
+        self._decide_latency_ms: float | None = None
+        self.decision_exceptions: int = 0
+        self._yield_reason: str | None = None
         self.current_game_id: str | None = (
             game_id.split("-")[0].strip() if game_id not in ("default_game", "", None) else None
         )
+        try:
+            from plugins.arc_agi_adapter.trace import TraceRecorder
+
+            self._trace = TraceRecorder.from_env(
+                kwargs.get("trace_dir"),
+                subdir=None if kwargs.get("trace_dir") else self.current_game_id,
+            )
+        except Exception:
+            self._trace = None
         self.current_levels_completed: int = 0
         self.level_executed_actions: list[tuple[int, dict[str, Any] | None]] = []
 
@@ -361,11 +367,13 @@ class MyAgent(Agent):
         state_obj = getattr(latest_frame, "state", None)
         state_name = getattr(state_obj, "name", str(state_obj))
         if state_name == "WIN" or state_obj is GameState.WIN or state_obj == GameState.WIN:
+            self._yield_reason = "win"
             return True
         win_levels = getattr(latest_frame, "win_levels", None)
         levels_comp = getattr(latest_frame, "levels_completed", None)
         if win_levels is not None and levels_comp is not None and win_levels > 0:
             if levels_comp >= win_levels:
+                self._yield_reason = "win"
                 return True
 
         # 1. Global Tournament Time Guard
@@ -375,6 +383,7 @@ class MyAgent(Agent):
                 flush=True,
             )
             self._is_marked_done = True
+            self._yield_reason = "tournament_time"
             return True
 
         # 2. Per-game Wall-Clock Time Guard
@@ -386,6 +395,7 @@ class MyAgent(Agent):
                 flush=True,
             )
             self._is_marked_done = True
+            self._yield_reason = "per_game_time"
             return True
 
         # 3. Dynamic Progress-Scaled Action Budget Guard
@@ -400,6 +410,7 @@ class MyAgent(Agent):
                 flush=True,
             )
             self._is_marked_done = True
+            self._yield_reason = "action_budget"
             return True
 
         # 4. Consecutive Death Stagnation Guard
@@ -410,6 +421,7 @@ class MyAgent(Agent):
                 flush=True,
             )
             self._is_marked_done = True
+            self._yield_reason = "consecutive_deaths"
             return True
 
         # 5. Grid Stagnation Guard: no observable change for _MAX_STAGNATION_STEPS
@@ -420,6 +432,7 @@ class MyAgent(Agent):
                 flush=True,
             )
             self._is_marked_done = True
+            self._yield_reason = "grid_stagnation"
             return True
 
         return False
@@ -498,6 +511,7 @@ class MyAgent(Agent):
             self.consecutive_deaths_this_level += 1
             if self.consecutive_deaths_this_level >= self.MAX_CONSECUTIVE_DEATHS:
                 self._is_marked_done = True
+                self._yield_reason = "consecutive_deaths"
                 print(
                     f"[STAGNATION GUARD] Game {self.current_game_id} reached {self.consecutive_deaths_this_level} consecutive "
                     f"deaths on level {self.current_levels_completed}. Ending game to conserve tournament time budget.",

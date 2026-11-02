@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -36,6 +38,16 @@ from hbllm.drivers.base import (
     SynapticDeviceDescriptor,
 )
 from hbllm.drivers.manager import DriverManager
+from plugins.arc_agi_adapter.telemetry import (
+    STOP_GAME_OVER,
+    STOP_LEVEL_STEP_LIMIT,
+    STOP_RESET_FAILED,
+    STOP_RUNNER_EXCEPTION,
+    STOP_STEP_BUDGET,
+    STOP_TIME_LIMIT,
+    STOP_WIN,
+    AttemptTelemetry,
+)
 
 try:
     from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
@@ -72,6 +84,23 @@ def _extract_grid(raw: Any) -> np.ndarray | None:
         return arr
     except Exception:
         return None
+
+
+def _p95_ms(latencies_ms: list[float]) -> float | None:
+    if not latencies_ms:
+        return None
+    if len(latencies_ms) == 1:
+        return round(latencies_ms[0], 2)
+    return round(statistics.quantiles(latencies_ms, n=20)[18], 2)
+
+
+def _safe_dirname(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+
+
+def _write_runner_event(fp: Any, rec: dict[str, Any]) -> None:
+    fp.write(json.dumps(rec, default=str) + "\n")
+    fp.flush()
 
 
 # ── 1. Cognitive USB Game Driver ──────────────────────────────────────────────
@@ -255,6 +284,7 @@ class CognitiveAgentAdapter:
         self.agent = agent
         self.history: list[Any] = []
         self.last_frame: Any = None
+        self.last_action: DriverAction | None = None
 
     def reset_episode(
         self,
@@ -306,7 +336,8 @@ class CognitiveAgentAdapter:
         if data is not None and isinstance(data, dict):
             params = data
 
-        return DriverAction(action_id=act_id, parameters=params)
+        self.last_action = DriverAction(action_id=act_id, parameters=params)
+        return self.last_action
 
     def update(self, action: DriverAction, feedback: DriverFeedback, source_id: str = "") -> None:
         if hasattr(self.agent, "internal_engine") and self.agent.internal_engine is not None:
@@ -389,6 +420,7 @@ def run_all_25_games(
 
     scorecard_path = Path(scorecard_file)
     results: dict[str, Any] = {}
+    run_best_telemetries: dict[str, AttemptTelemetry] = {}
 
     total_levels_passed = 0
     total_levels_possible = 0
@@ -435,11 +467,25 @@ def run_all_25_games(
         best_is_win = False
         best_game_steps = 0
         best_elapsed = 0.0
+        best_telemetry: AttemptTelemetry | None = None
         attempts_taken = 0
         total_game_steps_all = 0
 
+        # Per-game trace isolation: each game gets <trace_dir>/<gid>/ containing
+        # the agent's trace.jsonl plus the runner's runner.jsonl.
+        game_trace_dir: Path | None = None
+        runner_fp = None
+        if trace_dir:
+            game_trace_dir = Path(trace_dir) / _safe_dirname(gid)
+            game_trace_dir.mkdir(parents=True, exist_ok=True)
+            runner_fp = open(game_trace_dir / "runner.jsonl", "a")
+
         # Instantiate fresh agent & Cognitive USB Driver for clean inter-game isolation
-        agent = MyAgent(instructions=instructions, seed=seed, trace_dir=trace_dir)
+        agent = MyAgent(
+            instructions=instructions,
+            seed=seed,
+            trace_dir=str(game_trace_dir) if game_trace_dir is not None else None,
+        )
         cognitive_engine = CognitiveAgentAdapter(agent)
 
         # Phase C: Seed engine with cross-game prior knowledge
@@ -501,13 +547,94 @@ def run_all_25_games(
             completed_prev = 0
             game_steps = 0
             current_level_steps = 0
+            telemetry = AttemptTelemetry(attempt=attempt)
+            violations_prev = int(getattr(agent, "_contract_violations", 0) or 0)
+            exceptions_prev = int(getattr(agent, "decision_exceptions", 0) or 0)
 
             for step in range(1, total_game_budget + 1):
-                feedback = manager.execute_cognitive_step()
+                lvl_before = int(getattr(driver.current_frame, "levels_completed", 0) or 0)
+                pre_grid = _extract_grid(getattr(driver.current_frame, "frame", None))
+                agent._decide_latency_ms = None
+                _t_step = time.perf_counter()
+                try:
+                    feedback = manager.execute_cognitive_step()
+                except Exception as e:
+                    logger.exception(
+                        "execute_cognitive_step failed (game=%s attempt=%d step=%d)",
+                        gid,
+                        attempt,
+                        step,
+                    )
+                    telemetry.stop(STOP_RUNNER_EXCEPTION, step, repr(e))
+                    break
+                cycle_ms = (time.perf_counter() - _t_step) * 1000.0
                 game_steps += 1
                 current_level_steps += 1
                 info = feedback.info
                 lvl = int(info.get("levels_completed", 0))
+                state_str = str(info.get("state", "RUNNING"))
+
+                # Measurement: grid-diff no-op detection + decide latency + counters
+                post_grid = _extract_grid(feedback.causal_delta)
+                grid_changed: bool | None = None
+                if pre_grid is not None and post_grid is not None:
+                    grid_changed = not np.array_equal(pre_grid, post_grid)
+                is_noop = (grid_changed is False) and (lvl == lvl_before)
+                decide_ms = getattr(agent, "_decide_latency_ms", None)
+                violations_now = int(getattr(agent, "_contract_violations", 0) or 0)
+                exceptions_now = int(getattr(agent, "decision_exceptions", 0) or 0)
+                d_violations = violations_now - violations_prev
+                d_exceptions = exceptions_now - exceptions_prev
+                violations_prev, exceptions_prev = violations_now, exceptions_now
+                telemetry.contract_violations += d_violations
+                telemetry.decision_exceptions += d_exceptions
+                last_act = getattr(cognitive_engine, "last_action", None)
+                action_id = int(last_act.action_id) if last_act is not None else None
+                action_data = (
+                    dict(last_act.parameters)
+                    if last_act is not None and last_act.parameters
+                    else None
+                )
+                telemetry.record_step(
+                    step=step,
+                    cycle_ms=cycle_ms,
+                    decide_ms=decide_ms,
+                    action_id=action_id,
+                    noop=is_noop,
+                )
+                if runner_fp is not None:
+                    _write_runner_event(
+                        runner_fp,
+                        {
+                            "event": "step",
+                            "game": gid,
+                            "attempt": attempt,
+                            "step": step,
+                            "level_before": lvl_before,
+                            "level_after": lvl,
+                            "action_id": action_id,
+                            "action_data": action_data,
+                            "cycle_ms": round(cycle_ms, 3),
+                            "decide_ms": round(decide_ms, 3)
+                            if isinstance(decide_ms, (int, float))
+                            else None,
+                            "grid_changed": grid_changed,
+                            "state": state_str,
+                            "violation": d_violations > 0,
+                            "exception": d_exceptions > 0,
+                        },
+                    )
+
+                # Measurement: observe when the agent's own guards would yield.
+                # is_done() has side effects (_is_marked_done) but the runner
+                # deliberately ignores them for stopping.
+                if telemetry.agent_yield_step is None:
+                    try:
+                        if agent.is_done([], driver.current_frame):
+                            telemetry.agent_yield_step = step
+                            telemetry.agent_yield_reason = getattr(agent, "_yield_reason", None)
+                    except Exception:
+                        pass
 
                 if lvl > completed_prev:
                     print(
@@ -523,8 +650,10 @@ def run_all_25_games(
                     completed_prev = lvl
                     current_level_steps = 0
 
-                state_str = str(info.get("state", "RUNNING"))
                 if state_str == "WIN" or lvl >= target_levels:
+                    telemetry.stop(
+                        STOP_WIN, step, f"state={state_str} levels={lvl}/{target_levels}"
+                    )
                     break
 
                 # Per-game time guard in benchmark: prevent expensive games from starving the rest
@@ -534,6 +663,11 @@ def run_all_25_games(
                         f"    ⏱️ Per-game time limit ({per_game_time_limit:.0f}s) exceeded at step {step} "
                         f"({completed_prev}/{target_levels} levels). Yielding game."
                     )
+                    telemetry.stop(
+                        STOP_TIME_LIMIT,
+                        step,
+                        f"elapsed_s={game_elapsed:.2f} limit_s={per_game_time_limit}",
+                    )
                     break
 
                 # Optional per-level step limit if explicitly configured by user
@@ -541,6 +675,11 @@ def run_all_25_games(
                     print(
                         f"    ⏱️ Level {lvl + 1}/{target_levels} reached per-level limit "
                         f"({current_level_steps} >= {max_level_steps} steps). Concluding attempt."
+                    )
+                    telemetry.stop(
+                        STOP_LEVEL_STEP_LIMIT,
+                        step,
+                        f"level_steps={current_level_steps} limit={max_level_steps}",
                     )
                     break
                 elif feedback.terminated or state_str == "GAME_OVER":
@@ -554,6 +693,11 @@ def run_all_25_games(
                         try:
                             reset_frame = env.reset()
                         except Exception:
+                            telemetry.stop(
+                                STOP_RESET_FAILED,
+                                step,
+                                "env.step(0) and env.reset() both raised",
+                            )
                             break
                     reset_state = getattr(
                         getattr(reset_frame, "state", None),
@@ -562,11 +706,32 @@ def run_all_25_games(
                     )
                     if reset_state == "GAME_OVER":
                         print(f"    ❌ GAME_OVER terminal at step {step}")
+                        telemetry.stop(STOP_GAME_OVER, step, f"reset_state={reset_state}")
                         break
                     driver.set_frame(reset_frame)
+            else:
+                telemetry.stop(STOP_STEP_BUDGET, game_steps, f"budget={total_game_budget}")
 
             elapsed = time.time() - start_time
             total_game_steps_all += game_steps
+
+            if runner_fp is not None:
+                _write_runner_event(
+                    runner_fp,
+                    {
+                        "event": "stop",
+                        "game": gid,
+                        "attempt": attempt,
+                        "stop_reason": telemetry.stop_reason,
+                        "stop_step": telemetry.stop_step,
+                        "stop_detail": telemetry.stop_detail,
+                        "agent_yield_step": telemetry.agent_yield_step,
+                        "agent_yield_reason": telemetry.agent_yield_reason,
+                        "levels_completed": completed_prev,
+                        "target_levels": target_levels,
+                        "elapsed_s": round(elapsed, 3),
+                    },
+                )
 
             is_win = completed_prev >= target_levels
             if (
@@ -578,6 +743,7 @@ def run_all_25_games(
                 best_is_win = is_win
                 best_game_steps = game_steps
                 best_elapsed = round(elapsed, 2)
+                best_telemetry = telemetry
 
             if is_win:
                 break
@@ -585,6 +751,16 @@ def run_all_25_games(
                 print(
                     f"    ⚠️ Game {gid} incomplete ({completed_prev}/{target_levels} levels, {game_steps} steps). Scheduling retry."
                 )
+
+        # Game finished (win or attempts exhausted): close per-game trace files.
+        if runner_fp is not None:
+            runner_fp.close()
+            runner_fp = None
+        try:
+            if getattr(agent, "_trace", None) is not None:
+                agent._trace.close()
+        except Exception:
+            pass
 
         total_steps_taken += total_game_steps_all
         total_levels_passed += best_completed
@@ -641,56 +817,66 @@ def run_all_25_games(
             f"({best_game_steps} steps in best run, {total_game_steps_all} total steps across {attempts_taken} attempt(s))"
         )
 
-        try:
-            from plugins.arc_agi_adapter.scorecard import compute_game_metrics
+        from plugins.arc_agi_adapter.scorecard import compute_game_metrics
 
-            results[gid] = {
-                "title": title,
-                "levels_passed": best_completed,
-                "target_levels": best_target,
-                "won": best_is_win,
-                "steps": best_game_steps,
-                "total_steps": total_game_steps_all,
-                "attempts": attempts_taken,
-                "elapsed_seconds": best_elapsed,
-                "baseline": baseline,
-                **compute_game_metrics(
-                    steps=best_game_steps,
-                    latencies_ms=getattr(agent, "_step_latencies", []),
-                    stagnant_steps=getattr(agent, "_stagnant_steps", 0),
-                    noop_actions=getattr(agent, "_noop_actions", 0),
-                    contract_violations=getattr(agent, "_contract_violations", 0),
-                    levels_completed=best_completed,
-                    win_levels=best_target,
-                    state="WIN" if best_is_win else "NOT_FINISHED",
-                    stop_reason=(
-                        "win"
-                        if best_is_win
-                        else ("time_limit" if best_elapsed >= per_game_time_limit else "step_limit")
-                    ),
-                    baseline_actions=len(baseline) if baseline else None,
+        results[gid] = {
+            "title": title,
+            "levels_passed": best_completed,
+            "target_levels": best_target,
+            "won": best_is_win,
+            "steps": best_game_steps,
+            "total_steps": total_game_steps_all,
+            "attempts": attempts_taken,
+            "elapsed_seconds": best_elapsed,
+            "baseline": baseline,
+            **compute_game_metrics(
+                steps=best_game_steps,
+                latencies_ms=(best_telemetry.cycle_latencies_ms if best_telemetry else []),
+                stagnant_steps=(best_telemetry.max_stagnation_streak if best_telemetry else 0),
+                noop_actions=(best_telemetry.noop_actions if best_telemetry else 0),
+                contract_violations=(best_telemetry.contract_violations if best_telemetry else 0),
+                decision_exceptions=(best_telemetry.decision_exceptions if best_telemetry else 0),
+                decide_latencies_ms=(
+                    best_telemetry.decide_latencies_ms if best_telemetry else None
                 ),
-            }
-        except Exception:
-            results[gid] = {
-                "title": title,
-                "levels_passed": best_completed,
-                "target_levels": best_target,
-                "won": best_is_win,
-                "steps": best_game_steps,
-                "total_steps": total_game_steps_all,
-                "attempts": attempts_taken,
-                "elapsed_seconds": best_elapsed,
-                "baseline": baseline,
-            }
+                max_stagnation_streak=(
+                    best_telemetry.max_stagnation_streak if best_telemetry else 0
+                ),
+                agent_yield_step=(best_telemetry.agent_yield_step if best_telemetry else None),
+                agent_yield_reason=(best_telemetry.agent_yield_reason if best_telemetry else None),
+                stop_detail=(best_telemetry.stop_detail if best_telemetry else None),
+                levels_completed=best_completed,
+                win_levels=best_target,
+                state="WIN" if best_is_win else "NOT_FINISHED",
+                stop_reason=(
+                    best_telemetry.stop_reason
+                    if best_telemetry and best_telemetry.stop_reason
+                    else "unknown"
+                ),
+                baseline_actions=len(baseline) if baseline else None,
+            ),
+        }
+        if best_telemetry is not None:
+            run_best_telemetries[gid] = best_telemetry
 
         # Save continuous scorecard checkpoint
+        _all_cycle_ms = [ms for t in run_best_telemetries.values() for ms in t.cycle_latencies_ms]
+        _all_decide_ms = [ms for t in run_best_telemetries.values() for ms in t.decide_latencies_ms]
         checkpoint = {
             "timestamp": time.time(),
             "total_games_tested": idx,
             "total_levels_passed": total_levels_passed,
             "total_levels_possible": total_levels_possible,
             "pass_rate_pct": round((total_levels_passed / max(1, total_levels_possible)) * 100, 2),
+            "latency_summary": {
+                "mean_cycle_ms": round(statistics.fmean(_all_cycle_ms), 2)
+                if _all_cycle_ms
+                else None,
+                "p95_cycle_ms": _p95_ms(_all_cycle_ms),
+                "mean_decide_ms": round(statistics.fmean(_all_decide_ms), 2)
+                if _all_decide_ms
+                else None,
+            },
             "games": results,
         }
         scorecard_path.write_text(json.dumps(checkpoint, indent=2))
