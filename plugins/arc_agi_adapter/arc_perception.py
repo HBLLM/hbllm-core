@@ -232,16 +232,19 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
                 context.learned_goal_positions.discard(av_pos)
 
         # 4. Extract segmented spatial entities informed by candidate goals
-        entities = PerceptionEngine.extract_entities(
-            grid=grid,
-            bg=bg,
-            symbolic_theory=symbolic_theory,
-            avatar_features=av_feats,
-            state_mutations=getattr(context, "state_mutations", None),
-            learned_barriers=learned_barriers,
-            learned_goal_positions=candidate_goals,
-            avatar_pos=av_pos,
-        )
+        if hasattr(context, "extract_entities") and callable(context.extract_entities):
+            entities = context.extract_entities(grid, bg)
+        else:
+            entities = PerceptionEngine.extract_entities(
+                grid=grid,
+                bg=bg,
+                symbolic_theory=symbolic_theory,
+                avatar_features=av_feats,
+                state_mutations=getattr(context, "state_mutations", None),
+                learned_barriers=learned_barriers,
+                learned_goal_positions=candidate_goals,
+                avatar_pos=av_pos,
+            )
 
         # 5. Synthesize Passable Topology Map
         # 1 = traversable/walkable, 0 = impassable barrier/lethal
@@ -616,18 +619,23 @@ def extract_arc_objects(
                         role = "barrier"
                     # (e) Interactive Actuators / Switches
                     elif (
-                        _is_truthy_flag(getattr(sp, "clickable", False))
-                        or _is_truthy_flag(getattr(sp, "interactive", False))
-                        or _is_truthy_flag(getattr(sp, "is_button", False))
-                        or (
-                            "sys_click" in getattr(sp, "tags", [])
-                            and (not all_controllable or sp not in all_controllable)
-                        )
-                        or "switch" in s_name.lower()
-                        or "button" in s_name.lower()
-                        or (
-                            symbolic_theory is not None
-                            and s_feat in getattr(symbolic_theory, "actuator_features", set())
+                        1 <= w <= 12
+                        and 1 <= h <= 12
+                        and (w * h) <= 64
+                        and "background" not in s_name.lower()
+                        and (
+                            _is_truthy_flag(getattr(sp, "clickable", False))
+                            or _is_truthy_flag(getattr(sp, "is_button", False))
+                            or (
+                                "sys_click" in getattr(sp, "tags", [])
+                                and (not all_controllable or sp not in all_controllable)
+                            )
+                            or "switch" in s_name.lower()
+                            or "button" in s_name.lower()
+                            or (
+                                symbolic_theory is not None
+                                and s_feat in getattr(symbolic_theory, "actuator_features", set())
+                            )
                         )
                     ) and (
                         engine is None
@@ -655,7 +663,7 @@ def extract_arc_objects(
                         and s_feat in getattr(symbolic_theory, "receptacle_features", set())
                     ):
                         role = "receptacle"
-                    # (h) Unvisited Compact Collidable: ONLY if goal_feats is not yet known or matches!
+                    # (h) Unvisited Compact Collidable: ONLY if goal_feats is already known and matches!
                     elif (
                         getattr(sp, "layer", 0) >= 0
                         and 1 <= w <= 12
@@ -664,7 +672,6 @@ def extract_arc_objects(
                             _is_truthy_flag(getattr(sp, "is_collidable", False))
                             or _is_truthy_flag(getattr(sp, "interactive", False))
                         )
-                        and (not goal_feats or s_feat in goal_feats)
                         and (
                             engine is None
                             or (
@@ -681,7 +688,12 @@ def extract_arc_objects(
                             )
                         )
                     ):
-                        role = "goal"
+                        if goal_feats and s_feat in goal_feats:
+                            role = "goal"
+                        elif not goal_feats and (engine is not None and engine.is_motor_grounded()):
+                            role = "candidate_goal"
+                        else:
+                            role = "entity"
 
                 if role == "avatar":
                     is_active_avatar = True
@@ -742,10 +754,34 @@ def extract_arc_objects(
                     )
                 # 2. Exits, target markers, and goals
                 elif role == "goal":
+                    av_f = (
+                        (getattr(engine, "avatar_features", set()) or set())
+                        | (
+                            {getattr(engine, "avatar_feature", None)}
+                            if getattr(engine, "avatar_feature", None) is not None
+                            else set()
+                        )
+                        if engine is not None
+                        else set()
+                    )
+                    av_p = getattr(engine, "avatar_pos", None) if engine is not None else None
+                    if (s_feat and s_feat in av_f) or (av_p is not None and s_pos == av_p):
+                        continue
                     seen_positions.add(s_pos)
                     g_id = f"goal_sprite_{disp_y}_{disp_x}"
-                    g_props = {"source": "sprite_goal", "sprite_name": s_name, "confirmed": True}
-                    if engine is not None:
+                    is_explicit_goal = bool(
+                        _is_truthy_flag(getattr(sp, "is_goal", False))
+                        or _is_truthy_flag(getattr(sp, "is_target", False))
+                        or "goal" in s_name.lower()
+                        or "exit" in s_name.lower()
+                        or (goal_feats and s_feat in goal_feats)
+                    )
+                    g_props = {
+                        "source": "sprite_goal",
+                        "sprite_name": s_name,
+                        "confirmed": is_explicit_goal,
+                    }
+                    if engine is not None and is_explicit_goal:
                         if hasattr(engine, "record_learned_goal"):
                             engine.record_learned_goal(s_pos)
                         if (
@@ -760,7 +796,7 @@ def extract_arc_objects(
                             id=g_id,
                             pos=s_pos,
                             feature_id=s_feat,
-                            role="goal",
+                            role="goal" if is_explicit_goal else "candidate_goal",
                             properties=g_props,
                             macro_tasks=_attach_object_macro_tasks(
                                 role, s_pos, s_feat, g_id, g_props
@@ -768,6 +804,19 @@ def extract_arc_objects(
                         )
                     )
                 elif role == "candidate_goal":
+                    av_f = (
+                        (getattr(engine, "avatar_features", set()) or set())
+                        | (
+                            {getattr(engine, "avatar_feature", None)}
+                            if getattr(engine, "avatar_feature", None) is not None
+                            else set()
+                        )
+                        if engine is not None
+                        else set()
+                    )
+                    av_p = getattr(engine, "avatar_pos", None) if engine is not None else None
+                    if (s_feat and s_feat in av_f) or (av_p is not None and s_pos == av_p):
+                        continue
                     seen_positions.add(s_pos)
                     cg_id = f"cand_goal_{disp_y}_{disp_x}"
                     cg_props = {
@@ -933,12 +982,17 @@ def extract_arc_objects(
                 role = "receptacle"
             elif feat in actuator_feats:
                 role = "switch"
-            elif feat in candidate_goal_feats or (
+            elif (goal_feats and feat in goal_feats) or (
                 frame is not None
                 and pos in frame.candidate_goals
-                and (not goal_feats or feat in goal_feats)
+                and goal_feats
+                and feat in goal_feats
             ):
                 role = "goal"
+            elif feat in candidate_goal_feats or (
+                frame is not None and pos in frame.candidate_goals
+            ):
+                role = "candidate_goal"
             elif pos in frame.static_barriers or feat in barrier_feats:
                 role = "barrier"
             elif pos in frame.lethal_cells:

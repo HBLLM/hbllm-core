@@ -1446,8 +1446,10 @@ class MotorCortexEffector:
             return spec
         if isinstance(spec, dict):
             aid = spec.get("action_id", spec.get("id", spec.get("name", 0)))
+            if isinstance(aid, str) and aid.isdigit():
+                aid = int(aid)
             name = str(spec.get("name", aid))
-            params = spec.get("parameters") or {}
+            params = spec.get("parameters") or spec.get("params") or {}
             param_keys = tuple(params.keys()) if isinstance(params, dict) else ("x", "y")
             req_spatial = bool(
                 isinstance(params, dict)

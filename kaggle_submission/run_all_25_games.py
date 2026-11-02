@@ -313,25 +313,7 @@ class CognitiveAgentAdapter:
             engine = self.agent.internal_engine
             if "StepCounter" in feedback.info:
                 engine.set_environmental_step_limit(int(feedback.info["StepCounter"]))
-            curr_grid = feedback.causal_delta
-            avail = feedback.info.get("available_actions", [1, 2, 3, 4, 5, 6])
-            st = feedback.info.get("state", "")
             lvl = int(feedback.info.get("levels_completed", 0))
-            is_win = st == "WIN" or lvl > getattr(self, "_last_lvl", 0)
-            is_lost = (
-                st == "GAME_OVER"
-                or bool(feedback.terminated)
-                or bool(feedback.info.get("terminated", False))
-            )
-            if curr_grid is not None:
-                engine.assimilate_feedback(
-                    curr_grid,
-                    avail,
-                    is_success=is_win,
-                    is_failure=is_lost,
-                    action=action.action_id,
-                    action_data=action.parameters,
-                )
             if lvl > getattr(self, "_last_lvl", 0):
                 self.history.clear()
                 self.last_frame = None

@@ -471,11 +471,31 @@ class DorsalKineticStream:
                 if has_feat_match and not (cand.features & known_avatar_features):
                     continue
 
-                err = abs(cand.velocity[0] - exp_dr) + abs(cand.velocity[1] - exp_dc)
+                # Metric error calculation:
+                err_metric = abs(cand.velocity[0] - exp_dr) + abs(cand.velocity[1] - exp_dc)
                 if known_avatar_features and (cand.features & known_avatar_features):
-                    err *= 0.5
+                    err_metric *= 0.5
 
-                if err <= self.velocity_tolerance or has_feat_match:
+                # Directional collinearity for uncalibrated priors or varying stride:
+                # MT visual stream is direction-selective (vector orientation before magnitude).
+                v_mag = (cand.velocity[0] ** 2 + cand.velocity[1] ** 2) ** 0.5
+                exp_mag = (exp_dr**2 + exp_dc**2) ** 0.5
+                is_directional_match = False
+                dir_err = err_metric
+                if v_mag > 1e-4 and exp_mag > 1e-4:
+                    dot = (cand.velocity[0] * exp_dr + cand.velocity[1] * exp_dc) / (
+                        v_mag * exp_mag
+                    )
+                    if dot >= 0.707:  # Collinear within 45 degrees
+                        ortho_err = (
+                            abs(cand.velocity[0] * exp_dc - cand.velocity[1] * exp_dr) / exp_mag
+                        )
+                        if ortho_err <= self.velocity_tolerance:
+                            is_directional_match = True
+                            dir_err = ortho_err
+
+                err = min(err_metric, dir_err)
+                if err <= self.velocity_tolerance or has_feat_match or is_directional_match:
                     if err < min_err:
                         min_err = err
                         best_match_idx = i

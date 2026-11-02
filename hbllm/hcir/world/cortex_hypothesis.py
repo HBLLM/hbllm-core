@@ -194,6 +194,8 @@ class TransitionObservationContext:
     curr_grid: np.ndarray
     prev_avatar_pos: tuple[int, int] | None = None
     curr_avatar_pos: tuple[int, int] | None = None
+    avatar_h: int = 1
+    avatar_w: int = 1
     is_dead: bool = False
     is_won: bool = False
     background_feature: int = 0
@@ -343,7 +345,23 @@ class ActionMutationObserver(HypothesisObserver):
         changed_coords = np.argwhere(context.diff_mask)
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
 
+        radius_r = max(1, context.avatar_h // 2)
+        radius_c = max(1, context.avatar_w // 2)
         for r, c in changed_coords:
+            # Skip cells within avatar bounding areas during movement
+            if context.prev_avatar_pos is not None:
+                if (
+                    abs(r - context.prev_avatar_pos[0]) <= radius_r
+                    and abs(c - context.prev_avatar_pos[1]) <= radius_c
+                ):
+                    continue
+            if context.curr_avatar_pos is not None:
+                if (
+                    abs(r - context.curr_avatar_pos[0]) <= radius_r
+                    and abs(c - context.curr_avatar_pos[1]) <= radius_c
+                ):
+                    continue
+
             old_f = int(context.prev_grid[r, c])
             new_f = int(context.curr_grid[r, c])
             if old_f != new_f:
@@ -462,6 +480,8 @@ class InductiveHypothesisEngine:
         curr_grid: np.ndarray,
         prev_avatar_pos: tuple[int, int] | None = None,
         curr_avatar_pos: tuple[int, int] | None = None,
+        avatar_h: int = 1,
+        avatar_w: int = 1,
         is_dead: bool = False,
         is_won: bool = False,
         background_feature: int = 0,
@@ -480,6 +500,8 @@ class InductiveHypothesisEngine:
             curr_grid=curr_grid,
             prev_avatar_pos=prev_avatar_pos,
             curr_avatar_pos=curr_avatar_pos,
+            avatar_h=avatar_h,
+            avatar_w=avatar_w,
             is_dead=is_dead,
             is_won=is_won,
             background_feature=background_feature,
@@ -545,7 +567,7 @@ class InductiveHypothesisEngine:
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                 if hyp.target_feature is not None:
-                    theory.barrier_features.add(hyp.target_feature)
+                    theory.induce_barrier(hyp.target_feature)
                     theory.barrier_predicates.append(
                         CausalPredicate(
                             variable="feature_id",
@@ -555,15 +577,20 @@ class InductiveHypothesisEngine:
                             target_entity=str(hyp.premise_feature),
                         )
                     )
-                if hyp.premise_feature is not None:
+                if (
+                    hyp.premise_feature is not None
+                    and hyp.premise_feature not in getattr(theory, "avatar_features", set())
+                    and hyp.premise_feature not in getattr(theory, "walkable_features", set())
+                ):
                     theory.actuator_features.add(hyp.premise_feature)
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                 theory.barrier_predicates.append(pred)
                 if hyp.premise_feature is not None:
-                    theory.barrier_features.add(hyp.premise_feature)
+                    theory.induce_barrier(hyp.premise_feature)
             elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
-                if hyp.premise_feature is not None:
-                    theory.actuator_features.add(hyp.premise_feature)
+                # Direct action mutations represent in-place terrain/entity transformations,
+                # NOT distal actuators (switches/buttons). The causal predicate already records this.
+                pass
 
     def retract_refuted_rules(self, theory: HCIRSymbolicWorldTheory) -> list[str]:
         """Remove refuted hypotheses from active symbolic world theory predicates."""
@@ -580,8 +607,7 @@ class InductiveHypothesisEngine:
                     if hyp.premise_feature is not None:
                         theory.actuator_features.discard(hyp.premise_feature)
                 elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
-                    if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
+                    pass
                 else:
                     if hyp.target_feature is not None:
                         theory.barrier_features.discard(hyp.target_feature)

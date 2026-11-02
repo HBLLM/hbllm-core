@@ -377,6 +377,8 @@ class EpistemicGoalScheduler:
             cand_sgs = primary_sgs if primary_sgs else structural_goals
             for sg in cand_sgs:
                 feat = sg.get("feature")
+                if sg.get("is_midpoint") or sg.get("type") == "relational_alignment":
+                    feat = None
                 if feat is not None and (
                     (feat in av_feats and not sg.get("is_midpoint"))
                     or feat in engine.hazard_tracker.known_lethal_features

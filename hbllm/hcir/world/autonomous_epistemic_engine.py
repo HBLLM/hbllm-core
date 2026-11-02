@@ -745,13 +745,17 @@ class AutonomousEpistemicEngine:
         )  # WP2 ablated
 
         # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
-        self.gnw: GlobalNeuronalWorkspace = GlobalNeuronalWorkspace()
+        self.gnw: GlobalNeuronalWorkspace | Any = _ablated(
+            "gnw", GlobalNeuronalWorkspace
+        )  # WP2 ablated
 
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
         self.neuromodulatory_system: NeuromodulatorySystem = NeuromodulatorySystem()
 
         # Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Attentional Gating
-        self.thalamocortical_binding: ThalamocorticalBindingEngine = ThalamocorticalBindingEngine()
+        self.thalamocortical_binding: ThalamocorticalBindingEngine | Any = _ablated(
+            "thalamocortical_binding", ThalamocorticalBindingEngine
+        )  # WP2 ablated
 
         # Track 4: Superposition Counterfactual Tree Search Planner
         self.superposition_planner: SuperpositionPlanner | Any = _ablated(
@@ -764,7 +768,9 @@ class AutonomousEpistemicEngine:
         )
 
         # Faculty: Entorhinal Grid Cells & Hippocampal Path Integration (Moser & O'Keefe)
-        self.entorhinal_grid_cortex: EntorhinalGridCortex = EntorhinalGridCortex()
+        self.entorhinal_grid_cortex: EntorhinalGridCortex | Any = _ablated(
+            "entorhinal_grid_cortex", EntorhinalGridCortex
+        )  # WP2 ablated
 
         # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
         self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
@@ -778,9 +784,9 @@ class AutonomousEpistemicEngine:
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
         # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
-        self.ventral_relational_matcher: VentralRelationalGraphMatcher = (
-            VentralRelationalGraphMatcher()
-        )
+        self.ventral_relational_matcher: VentralRelationalGraphMatcher | Any = _ablated(
+            "ventral_relational_matcher", VentralRelationalGraphMatcher
+        )  # WP2 ablated
 
         # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
         self.allostasis_cortex: InteroceptiveAllostasisCortex | Any = _ablated(
@@ -1198,6 +1204,8 @@ class AutonomousEpistemicEngine:
     @learned_goal_positions.setter
     def learned_goal_positions(self, val: set[tuple[int, int]]) -> None:
         self.working_memory.visuospatial.learned_goal_positions = val
+        if hasattr(self, "_state") and self._state is not None:
+            self._state.learned_goal_positions = set(val)
 
     @property
     def learned_receptacle_positions(self) -> set[tuple[int, int]]:
@@ -1207,6 +1215,8 @@ class AutonomousEpistemicEngine:
     @learned_receptacle_positions.setter
     def learned_receptacle_positions(self, val: set[tuple[int, int]]) -> None:
         self.working_memory.visuospatial.learned_receptacle_positions = val
+        if hasattr(self, "_state") and self._state is not None:
+            self._state.learned_receptacle_positions = set(val)
 
     @property
     def level_failed_transitions(self) -> dict[int, set[tuple[tuple[int, int], int]]]:
@@ -1246,12 +1256,12 @@ class AutonomousEpistemicEngine:
 
     @property
     def _feedback_assimilated(self) -> bool:
-        """Sensory feedback assimilation state in prefrontal working memory."""
-        return self.working_memory.feedback_assimilated
+        """Sensory feedback assimilation state in authoritative engine state."""
+        return self.state.feedback_assimilated
 
     @_feedback_assimilated.setter
     def _feedback_assimilated(self, val: bool) -> None:
-        self.working_memory.feedback_assimilated = val
+        self.state.feedback_assimilated = val
 
     @property
     def _avatar_controllability_evidence(self) -> dict[int, list[tuple[int, tuple[int, int]]]]:
@@ -2278,8 +2288,7 @@ class AutonomousEpistemicEngine:
     ) -> InteroceptiveState:
         """Deduct metabolic energy and update interoceptive allostasis state."""
         state = self.allostasis_cortex.consume_energy(activity_type=activity_type, scale=scale)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def bind_multimodal_percept(
@@ -2306,8 +2315,7 @@ class AutonomousEpistemicEngine:
             affordance_fields=affordance_fields,
             agent_coord=self.avatar_pos,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(gestalt.to_causal_predicate())
+        self._record_predicate(gestalt)
         return gestalt
 
     def compute_spatial_distance_field(
@@ -2327,8 +2335,7 @@ class AutonomousEpistemicEngine:
             grid_shape=(int(shape[0]), int(shape[1])),
             obstacles=obs,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(result.to_causal_predicate())
+        self._record_predicate(result)
         return result
 
     def update_value_opponency(
@@ -2345,8 +2352,7 @@ class AutonomousEpistemicEngine:
             punishment_minus=punishment_minus,
             next_state_key=next_state_key,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def compute_navigational_force(
@@ -2364,8 +2370,7 @@ class AutonomousEpistemicEngine:
             goal_pos=goal_pos,
             edt_result=edt_result,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        self._record_predicate(vec)
         return vec
 
     def hash_entity_shape(
@@ -2373,8 +2378,7 @@ class AutonomousEpistemicEngine:
     ) -> ShapeArchetypeSignature:
         """Compute translation- and scale-invariant Hu moments and canonical archetype hash."""
         sig = self.shape_hasher.compute_signature(coordinates)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(sig.to_causal_predicate())
+        self._record_predicate(sig)
         return sig
 
     def extract_minimal_causal_skeleton(
@@ -2401,8 +2405,7 @@ class AutonomousEpistemicEngine:
             evidence_rates=evidence_rates,
             conflict_level=conflict_level,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        self._record_predicate(decision)
         return decision
 
     def foveate_sensory_lattice(
@@ -2421,8 +2424,7 @@ class AutonomousEpistemicEngine:
             gaze_center=center,
             secondary_anchors=goals,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(foveated.to_causal_predicate())
+        self._record_predicate(foveated)
         return foveated
 
     def attribute_plan_failure(
@@ -2441,8 +2443,7 @@ class AutonomousEpistemicEngine:
             lethal_hazards=hazards,
             blocked_targets=barriers,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(report.to_causal_predicate())
+        self._record_predicate(report)
         return report
 
     def extract_geodesic_spine(
@@ -2578,17 +2579,15 @@ class AutonomousEpistemicEngine:
             actions=actions,
             behavioral_duration_s=duration_s,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(burst.to_causal_predicate())
+        self._record_predicate(burst)
         return burst
 
     def evaluate_counterfactual_branch_switch(self) -> BranchSwitchDecision:
         """Evaluate BA10 counterfactual branches and execute switch if advantageous."""
         decision = self.exploration_horizon.evaluate_branch_switch()
-        if decision.should_switch:
+        if decision is not None and getattr(decision, "should_switch", False):
             self.exploration_horizon.execute_branch_switch(decision)
-            if self.symbolic_theory is not None:
-                self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+            self._record_predicate(decision)
         return decision
 
     def arbitrate_saccadic_target(
@@ -2612,8 +2611,7 @@ class AutonomousEpistemicEngine:
             avatar_pos=self.avatar_pos,
         )
         target = self.superior_colliculus.select_primary_saccade_target(priority_map)
-        if target is not None and self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(target.to_causal_predicate())
+        self._record_predicate(target)
         return target
 
     def find_graph_bottlenecks_and_bridges(
@@ -2657,8 +2655,7 @@ class AutonomousEpistemicEngine:
             actual_latency_ms=actual_latency_ms,
             timestamp=float(self.step_counter),
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(feedback.to_causal_predicate())
+        self._record_predicate(feedback)
         return feedback
 
     def observe_external_affordance_interaction(
@@ -2681,8 +2678,7 @@ class AutonomousEpistemicEngine:
             target_role=target_role,
             state_mutation=state_mutation,
         )
-        if pattern is not None and self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(pattern.to_causal_predicate())
+        self._record_predicate(pattern)
         return pattern
 
     def allocate_cognitive_deliberation_effort(
@@ -2702,8 +2698,7 @@ class AutonomousEpistemicEngine:
             profile=profile,
             energy_reserve=energy_reserve,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(decision.to_causal_predicate())
+        self._record_predicate(decision)
         return decision
 
     def compute_network_max_flow_min_cut(
@@ -2736,8 +2731,7 @@ class AutonomousEpistemicEngine:
             avatar_pos=avatar_pos,
             boundary_grid=boundary_grid,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(bvc_map.to_causal_predicate())
+        self._record_predicate(bvc_map)
         return bvc_map
 
     def evaluate_somatic_marker_bias(
@@ -2750,8 +2744,7 @@ class AutonomousEpistemicEngine:
             candidate_actions=candidate_actions,
             projected_state_hashes=projected_state_hashes,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(bias.to_causal_predicate())
+        self._record_predicate(bias)
         return bias
 
     def update_pulvinar_routing(
@@ -2764,8 +2757,7 @@ class AutonomousEpistemicEngine:
             cognitive_load=cognitive_load,
             threat_urgency=threat_urgency,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(routing_state.to_causal_predicate())
+        self._record_predicate(routing_state)
         return routing_state
 
     def extract_minimal_feedback_arc_set(
@@ -2789,8 +2781,7 @@ class AutonomousEpistemicEngine:
     ) -> SpatialContextSchema:
         """Classify environmental envelope into an archetypal spatial schema (Epstein-Bar)."""
         schema = self.parahippocampal_context.analyze_environmental_envelope(boundary_grid)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(schema.to_causal_predicate())
+        self._record_predicate(schema)
         return schema
 
     def update_noradrenergic_gain(
@@ -2803,8 +2794,7 @@ class AutonomousEpistemicEngine:
             immediate_utility=immediate_utility,
             progress_made=progress_made,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def process_haptic_surface_feedback(
@@ -2819,10 +2809,7 @@ class AutonomousEpistemicEngine:
             expected_displacement=expected_displacement,
             actual_displacement=actual_displacement,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(
-                feedback.inferred_profile.to_causal_predicate()
-            )
+        self._record_predicate(getattr(feedback, "inferred_profile", None))
         return feedback
 
     def condense_graph_scc_metagraph(
@@ -2850,8 +2837,7 @@ class AutonomousEpistemicEngine:
             boundary_grid=boundary_grid,
             avatar_pos=avatar_pos,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(rescaling.to_causal_predicate())
+        self._record_predicate(rescaling)
         return rescaling
 
     def condition_threat_stimulus(
@@ -2872,8 +2858,7 @@ class AutonomousEpistemicEngine:
     ) -> DefensiveVigilanceState:
         """Evaluate amygdalar sensory threat cues and trigger defensive vigilance mode (LeDoux-Phelps)."""
         state = self.amygdala_threat.evaluate_sensory_vigilance(present_stimuli)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def compute_epistemic_curiosity_bonus(
@@ -2882,8 +2867,7 @@ class AutonomousEpistemicEngine:
     ) -> EpistemicInformationGain:
         """Compute VTA dopaminergic epistemic information gain and curiosity bonus (Schultz-Friston)."""
         gain = self.vta_curiosity.record_visit(state_key)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(gain.to_causal_predicate())
+        self._record_predicate(gain)
         return gain
 
     def compute_graph_eulerian_inspection_tour(
@@ -2924,8 +2908,7 @@ class AutonomousEpistemicEngine:
     ) -> AllocentricHeadingVector:
         """Integrate self-motion angular velocity into head direction ring attractor (Taube-Burgess)."""
         vec = self.retrosplenial_heading.integrate_angular_velocity(omega_rad=omega_rad, dt=dt)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        self._record_predicate(vec)
         return vec
 
     def recalibrate_heading_from_landmark(
@@ -2940,8 +2923,7 @@ class AutonomousEpistemicEngine:
             landmark_true_bearing_rad=landmark_true_bearing_rad,
             kalman_gain=kalman_gain,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(vec.to_causal_predicate())
+        self._record_predicate(vec)
         return vec
 
     def apply_trn_sensory_shielding(
@@ -2954,8 +2936,7 @@ class AutonomousEpistemicEngine:
             attended_modality=attended_modality,
             conflict_level=conflict_level,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def induce_and_transfer_abstract_rules(
@@ -2970,8 +2951,7 @@ class AutonomousEpistemicEngine:
                 successful_action=action,
             )
         result = self.rule_abstraction.evaluate_rule_transfer(current_state_features=antecedents)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(result.to_causal_predicate())
+        self._record_predicate(result)
         return result
 
     def compute_graph_dominating_set(
@@ -3020,8 +3000,7 @@ class AutonomousEpistemicEngine:
             state = self.hippocampal_time.get_interval_state(
                 interval_id
             ) or self.hippocampal_time._compute_state(interval_id)
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def evaluate_motor_response_inhibition(
@@ -3040,8 +3019,7 @@ class AutonomousEpistemicEngine:
             time_to_impact=time_to_impact,
             active_conditions=active_conditions,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(cmd.to_causal_predicate())
+        self._record_predicate(cmd)
         return cmd
 
     def bind_cross_modal_gestalt(
@@ -3064,8 +3042,7 @@ class AutonomousEpistemicEngine:
             temporal_progress=temporal_progress,
             rule_active=rule_active,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(packet.to_causal_predicate())
+        self._record_predicate(packet)
         return packet
 
     def compute_graph_vertex_cover(
@@ -3112,8 +3089,7 @@ class AutonomousEpistemicEngine:
             salience_score=salience_score,
             visceral_conflict=visceral_conflict,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(state.to_causal_predicate())
+        self._record_predicate(state)
         return state
 
     def evaluate_counterfactual_credit(
@@ -3135,8 +3111,7 @@ class AutonomousEpistemicEngine:
             available_actions=available_actions,
             relational_similarities=relational_similarities,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(report.to_causal_predicate())
+        self._record_predicate(report)
         return report
 
     def modulate_locomotor_velocity(
@@ -3153,8 +3128,7 @@ class AutonomousEpistemicEngine:
             urgency_score=urgency_score,
             is_narrow_aperture=is_narrow_aperture,
         )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(cmd.to_causal_predicate())
+        self._record_predicate(cmd)
         return cmd
 
     def compute_graph_feedback_vertex_set(
@@ -3293,32 +3267,42 @@ class AutonomousEpistemicEngine:
         for spec in action_specs:
             aff = self._parse_action_spec(spec)
             self.action_affordances[aff.action_id] = aff
+            aid_key = (
+                int(aff.action_id)
+                if isinstance(aff.action_id, str) and aff.action_id.isdigit()
+                else aff.action_id
+            )
+            if aid_key != aff.action_id:
+                self.action_affordances[aid_key] = aff
 
             # Bayesian Directional Prior Initialization
-            if aff.action_id not in self.action_dynamics:
+            if aid_key not in self.action_dynamics and aff.action_id not in self.action_dynamics:
                 name_u = aff.name.upper()
                 prior_delta: tuple[int, int] | None = None
                 for k, d in _dir_priors.items():
                     if k in name_u:
                         prior_delta = d
                         break
-                if prior_delta is None and isinstance(aff.action_id, int):
+                if prior_delta is None and isinstance(aid_key, int):
                     # Standard discrete 2D grid direction convention: 1: UP, 2: DOWN, 3: LEFT, 4: RIGHT
                     _idx_map = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
-                    prior_delta = _idx_map.get(aff.action_id)
+                    prior_delta = _idx_map.get(aid_key)
 
                 if prior_delta is not None:
                     dr, dc = prior_delta
                     aff.is_displacement = True
                     aff.delta = (dr, dc)
-                    self.action_dynamics[aff.action_id] = ActionDynamicsModel(
-                        action_id=aff.action_id,
+                    dyn_model = ActionDynamicsModel(
+                        action_id=aid_key,
                         delta_r=dr,
                         delta_c=dc,
                         confidence=0.75,
                         probes_tested=0,
                         displacement=(float(dr), float(dc)),
                     )
+                    self.action_dynamics[aid_key] = dyn_model
+                    if aid_key != aff.action_id:
+                        self.action_dynamics[aff.action_id] = dyn_model
 
     def _parse_action_spec(self, spec: Any) -> ActionAffordance:
         return MotorCortexEffector.parse_action_spec(spec)
@@ -4340,10 +4324,10 @@ class AutonomousEpistemicEngine:
             )
             for d_rec in delayed_records:
                 if d_rec.observed_lag_steps > 0:
-                    self.symbolic_theory.record_causal_predicate(d_rec.to_causal_predicate())
+                    self._record_predicate(d_rec)
 
         # Biological Faculty: Ventral Stream Relational Scene Graph & Object Mutations (W038)
-        if curr_grid.ndim == 2:
+        if self.ventral_relational_matcher and curr_grid.ndim == 2:
             current_scene_graph = self.ventral_relational_matcher.build_scene_graph(
                 curr_grid, bg_color=self.estimate_background(curr_grid)
             )
@@ -4351,7 +4335,7 @@ class AutonomousEpistemicEngine:
                 mutations = self.ventral_relational_matcher.detect_object_mutations(
                     self.working_memory.last_scene_graph, current_scene_graph
                 )
-                if mutations["moved"]:
+                if mutations and mutations.get("moved"):
                     for m in mutations["moved"]:
                         self.symbolic_theory.record_causal_predicate(
                             CausalPredicate(
@@ -4365,7 +4349,7 @@ class AutonomousEpistemicEngine:
             self.working_memory.last_scene_graph = current_scene_graph
 
         # Biological Faculty: Thalamocortical Gamma-Band Phase Synchronization & TRN Gating (Track 1)
-        if curr_grid.ndim == 2:
+        if self.thalamocortical_binding and curr_grid.ndim == 2:
             ventral_tokens = self.it_segmenter.segment_objects(
                 curr_grid,
                 background_feature=self.bg_feature,
@@ -4404,7 +4388,7 @@ class AutonomousEpistemicEngine:
             self.working_memory.active_bound_bundles = bound_bundles
             for bundle in bound_bundles:
                 if bundle.is_bound:
-                    self.symbolic_theory.record_causal_predicate(bundle.to_causal_predicate())
+                    self._record_predicate(bundle)
 
         # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
         if is_failure:
@@ -4952,9 +4936,14 @@ class AutonomousEpistemicEngine:
             action_schemas=(
                 [
                     {
-                        "action_id": a.actuator_id,
+                        "action_id": (
+                            int(a.actuator_id)
+                            if isinstance(a.actuator_id, str) and a.actuator_id.isdigit()
+                            else a.actuator_id
+                        ),
                         "kind": a.kind,
                         "valid_targets": list(a.valid_targets) if a.valid_targets else None,
+                        **(dict(a.params) if a.params else {}),
                     }
                     for a in obs.actuators
                 ]
@@ -5084,6 +5073,8 @@ class AutonomousEpistemicEngine:
         ).add(goal_pos)
         if goal_pos not in self.learned_goal_positions:
             self.learned_goal_positions.add(goal_pos)
+            if hasattr(self.state, "learned_goal_positions"):
+                self.state.learned_goal_positions.add(goal_pos)
             gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
 
             gnode = GoalNode(
@@ -5101,6 +5092,14 @@ class AutonomousEpistemicEngine:
                 ],
                 author="record_learned_goal",
             )
+
+    def _record_predicate(self, obj: Any) -> None:
+        if (
+            self.symbolic_theory is not None
+            and obj is not None
+            and hasattr(obj, "to_causal_predicate")
+        ):
+            self.symbolic_theory.record_causal_predicate(obj.to_causal_predicate())
 
     def _commit_operations(self, ops: list[TransactionOperation], author: str) -> None:
         """Commit ops to the engine's TM-governed workspace (task-frame fallback)."""

@@ -21,6 +21,7 @@ from hbllm.hcir.world.cortex_hypothesis import (
     InductiveHypothesisEngine,
 )
 from hbllm.hcir.world.elastic_particle_induction import DeflectionMode
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
@@ -64,6 +65,7 @@ class TestTrack1ThalamocorticalBinding:
 
     def test_autonomous_engine_temporal_binding_in_assimilation(self):
         ep_engine = AutonomousEpistemicEngine()
+        _restore_all(ep_engine)
         grid = np.zeros((10, 10), dtype=int)
         # Create a cluster of feature 3 cells (goal)
         grid[2, 2] = 3

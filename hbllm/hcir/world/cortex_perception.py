@@ -434,8 +434,18 @@ class GestaltAffordanceDetector:
                 )
                 target_cells = [(int(r), int(c)) for r, c in pts]
                 if avatar_pos is not None:
-                    target_cells = [c for c in target_cells if c != avatar_pos]
+                    target_cells = [
+                        c
+                        for c in target_cells
+                        if not (abs(c[0] - avatar_pos[0]) <= 1 and abs(c[1] - avatar_pos[1]) <= 1)
+                    ]
                 if not target_cells:
+                    continue
+                if (
+                    avatar_pos is not None
+                    and abs(centroid[0] - avatar_pos[0]) <= 1
+                    and abs(centroid[1] - avatar_pos[1]) <= 1
+                ):
                     continue
                 goals.append(
                     {
@@ -587,11 +597,18 @@ class GestaltAffordanceDetector:
                     continue
                 mask = grid == feat_int
                 labeled_mask, num_clusters = label(mask, structure=struct_4)
+                # Pervasive substrates, lattices, or maze partitions (>4 clusters or >8% screen area)
+                # cannot be isolated salient relational endpoints
+                if num_clusters > 4 or np.sum(mask) > max(48, int(H * W * 0.08)):
+                    continue
                 for c_idx in range(1, num_clusters + 1):
                     c_pts = np.argwhere(labeled_mask == c_idx)
                     if 1 <= len(c_pts) <= 36:
                         min_cr, min_cc = c_pts.min(axis=0)
                         max_cr, max_cc = c_pts.max(axis=0)
+                        # Filter outer frame edges and HUD borders
+                        if min_cr <= 0 or max_cr >= H - 1 or min_cc <= 0 or max_cc >= W - 1:
+                            continue
                         if (max_cr - min_cr >= H - 4) or (max_cc - min_cc >= W - 4):
                             continue
                         c_centroid = (
@@ -637,7 +654,7 @@ class GestaltAffordanceDetector:
                 for j in range(i + 1, len(salient_clusters)):
                     f1, p1, _ = salient_clusters[i]
                     f2, p2, _ = salient_clusters[j]
-                    if f1 == f2:
+                    if f1 == f2 or f1 in av_feats or f2 in av_feats:
                         continue
                     is_collinear_h = (p1[0] == p2[0]) and abs(p1[1] - p2[1]) >= 4
                     is_collinear_v = (p1[1] == p2[1]) and abs(p1[0] - p2[0]) >= 4
@@ -649,7 +666,7 @@ class GestaltAffordanceDetector:
                                 {
                                     "type": "relational_alignment",
                                     "position": (mid_r, mid_c),
-                                    "feature": f1,
+                                    "feature": None,
                                     "confidence": 0.85,
                                     "is_midpoint": True,
                                 }

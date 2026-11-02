@@ -1386,14 +1386,23 @@ def attribute_macro_action_outcome(
                     macro_action.receptacle_pos,
                 )
         elif isinstance(macro_action, NavigateTo):
-            engine.learned_barriers.add(macro_action.destination)
-            if prev_grid is not None:
-                r, c = macro_action.destination
-                if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
-                    feat = int(prev_grid[r, c])
-                    bg = engine.estimate_background(prev_grid)
-                    if feat != bg:
-                        engine.symbolic_theory.barrier_features.add(feat)
+            dest = macro_action.destination
+            is_goal_dest = (
+                dest in engine.learned_goal_positions or getattr(engine, "goal_pos", None) == dest
+            )
+            if not is_goal_dest:
+                engine.learned_barriers.add(dest)
+                if prev_grid is not None:
+                    r, c = dest
+                    if 0 <= r < prev_grid.shape[0] and 0 <= c < prev_grid.shape[1]:
+                        feat = int(prev_grid[r, c])
+                        bg = engine.estimate_background(prev_grid)
+                        if (
+                            feat != bg
+                            and feat not in engine.symbolic_theory.goal_features
+                            and feat not in engine.symbolic_theory.candidate_goal_features
+                        ):
+                            engine.symbolic_theory.induce_barrier(feat)
             if engine.avatar_pos is not None and action_used is not None:
                 engine.failed_transitions.add((engine.avatar_pos, action_used))
 
@@ -1687,18 +1696,20 @@ class MacroPlanSynthesizer:
                                 engine.focus_switch_actions.add(sw_a)
                                 engine.working_memory.focus_switch_actions.add(sw_a)
 
-                    if role == "goal" or "exit" in role:
+                    av_feats = set(get_engine_state_attr(engine, "avatar_features", set()) or set())
+                    if getattr(engine, "avatar_feature", None) is not None:
+                        av_feats.add(engine.avatar_feature)
+
+                    if role == "goal" or "exit" in role or role == "candidate_goal":
                         rec_pos = get_engine_state_attr(engine, "recent_positions", set())
-                        av_f = get_engine_state_attr(engine, "avatar_features", set())
+                        av_f = av_feats
+                        av_p = get_engine_state_attr(engine, "avatar_pos", None)
                         if (
-                            pos != get_engine_state_attr(engine, "avatar_pos", None)
+                            (av_p is None or pos != av_p)
                             and pos not in rec_pos
                             and (not feat or feat not in av_f)
                         ):
-                            is_confirmed = (
-                                props.get("confirmed", False)
-                                or props.get("source") == "sprite_goal"
-                            )
+                            is_confirmed = bool(props.get("confirmed", False))
                             if is_confirmed:
                                 engine.learned_goal_positions.add(pos)
                                 if hasattr(engine, "goals") and pos not in engine.goals:
@@ -1711,8 +1722,6 @@ class MacroPlanSynthesizer:
                             else:
                                 if feat:
                                     engine.symbolic_theory.candidate_goal_features.add(feat)
-                                    engine.symbolic_theory.barrier_features.discard(feat)
-                                engine.learned_barriers.discard(pos)
                     elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
                             engine.symbolic_theory.cargo_features.add(feat)
@@ -1739,9 +1748,17 @@ class MacroPlanSynthesizer:
                         ):
                             engine.learned_barriers.add(pos)
                             if feat:
-                                engine.symbolic_theory.barrier_features.add(feat)
+                                engine.symbolic_theory.induce_barrier(feat)
                     elif "switch" in role or "actuator" in role or "button" in role:
-                        if feat:
+                        if (
+                            feat
+                            and feat not in av_feats
+                            and (not engine.avatar_features or feat not in engine.avatar_features)
+                            and feat != engine.avatar_feature
+                            and feat
+                            not in getattr(engine.symbolic_theory, "walkable_features", set())
+                            and feat not in getattr(engine, "verified_safe_features", set())
+                        ):
                             engine.symbolic_theory.actuator_features.add(feat)
 
     @classmethod
@@ -2124,8 +2141,15 @@ class MacroPlanSynthesizer:
                 trial_counts[best_cargo.id] = trial_counts.get(best_cargo.id, 0) + 1
                 return plan
 
+        # Check if goals are already directly reachable
+        has_directly_reachable_goal = bool(goals and any(_can_navigate_to(g) for g in goals))
+
         # 3. INTERACTIVE SWITCHES / BUTTONS (Distal Actuators):
-        if switch_objs:
+        has_effector = any(
+            engine.is_spatial_effector(a) or not engine.is_displacement_action(a)
+            for a in available_actions
+        )
+        if switch_objs and has_effector and not has_directly_reachable_goal:
             av_pos = engine.avatar_pos or (0, 0)
             sorted_switches = sorted(
                 switch_objs,

@@ -140,10 +140,13 @@ class EpistemicFeedbackAssimilator:
         all_cells = [
             cell for _, ce in comp_pairs for cell in ce.properties.get("cells", [ce.grid_pos])
         ]
-        view.state.avatar_pos = (
-            int(round(sum(c[0] for c in all_cells) / len(all_cells))),
-            int(round(sum(c[1] for c in all_cells) / len(all_cells))),
-        )
+        if all_cells:
+            view.state.avatar_pos = (
+                int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+            )
+            view.state.avatar_h = max(c[0] for c in all_cells) - min(c[0] for c in all_cells) + 1
+            view.state.avatar_w = max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
         # Features the avatar just traversed are verified safe
         EpistemicFeedbackAssimilator._record_safe_traversal(view, all_cells, delta, H, W)
         view.entity_action_failed_positions.clear()
@@ -1113,6 +1116,10 @@ class EpistemicFeedbackAssimilator:
                     int(round(kinetic_res.self_avatar.centroid[0])),
                     int(round(kinetic_res.self_avatar.centroid[1])),
                 )
+                if kinetic_res.self_avatar.cells:
+                    ac = kinetic_res.self_avatar.cells
+                    view.state.avatar_h = max(c[0] for c in ac) - min(c[0] for c in ac) + 1
+                    view.state.avatar_w = max(c[1] for c in ac) - min(c[1] for c in ac) + 1
                 if kinetic_res.raw_delta is not None and action is not None:
                     dr, dc = kinetic_res.raw_delta
                     if abs(dc) >= 2 * abs(dr):
@@ -1234,10 +1241,17 @@ class EpistemicFeedbackAssimilator:
                     for _, ce, _ in av_moved
                     for cell in ce.properties.get("cells", [ce.grid_pos])
                 ]
-                view.state.avatar_pos = (
-                    int(round(sum(c[0] for c in all_cells) / len(all_cells))),
-                    int(round(sum(c[1] for c in all_cells) / len(all_cells))),
-                )
+                if all_cells:
+                    view.state.avatar_pos = (
+                        int(round(sum(c[0] for c in all_cells) / len(all_cells))),
+                        int(round(sum(c[1] for c in all_cells) / len(all_cells))),
+                    )
+                    view.state.avatar_h = (
+                        max(c[0] for c in all_cells) - min(c[0] for c in all_cells) + 1
+                    )
+                    view.state.avatar_w = (
+                        max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
+                    )
                 if not is_success:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         view, all_cells, (dr, dc), H, W
@@ -1330,17 +1344,23 @@ class EpistemicFeedbackAssimilator:
                 view.learned_goal_positions.discard(prev_avatar_pos)
             view.learned_goal_positions.difference_update(view.recent_positions)
             if view.avatar_features:
+                view.symbolic_theory.avatar_features.update(view.avatar_features)
                 view.symbolic_theory.goal_features.difference_update(view.avatar_features)
+                view.symbolic_theory.candidate_goal_features.difference_update(view.avatar_features)
                 view.symbolic_theory.barrier_features.difference_update(view.avatar_features)
                 view.hazard_tracker.known_lethal_features.difference_update(view.avatar_features)
+                view.learned_goal_features.difference_update(view.avatar_features)
                 if hasattr(view, "episodic_cortex"):
                     view.episodic_cortex.discovered_lethal_features.difference_update(
                         view.avatar_features
                     )
             if view.avatar_feature is not None:
+                view.symbolic_theory.avatar_features.add(view.avatar_feature)
                 view.symbolic_theory.goal_features.discard(view.avatar_feature)
+                view.symbolic_theory.candidate_goal_features.discard(view.avatar_feature)
                 view.symbolic_theory.barrier_features.discard(view.avatar_feature)
                 view.hazard_tracker.known_lethal_features.discard(view.avatar_feature)
+                view.learned_goal_features.discard(view.avatar_feature)
                 if hasattr(view, "episodic_cortex"):
                     view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
 
@@ -1359,18 +1379,21 @@ class EpistemicFeedbackAssimilator:
                             {view.avatar_feature} if view.avatar_feature is not None else set()
                         )
                         # HCIR Attractor Invariant: Gather candidate goal features
-                        cand_goals = view.detect_structural_goals(curr_grid)
+                        bg_val = view.bg_feature if view.bg_feature is not None else 0
+                        cand_goals = view.detect_structural_goals(curr_grid, bg=bg_val)
                         cand_goal_feats = {
                             int(g["feature"])
                             for g in cand_goals
-                            if "feature" in g and g["feature"] is not None
+                            if "feature" in g
+                            and g["feature"] is not None
+                            and int(g["feature"]) != bg_val
+                            and int(g["feature"]) not in av_feats
                         }
                         cand_goal_positions = {
                             g["position"]
                             for g in cand_goals
                             if "position" in g and g["position"] is not None
                         }
-                        view.symbolic_theory.candidate_goal_features.update(cand_goal_feats)
 
                         av_rad_r = max(0, (get_engine_state_attr(view, "avatar_h", 1) or 1) // 2)
                         av_rad_c = max(0, (get_engine_state_attr(view, "avatar_w", 1) or 1) // 2)
@@ -1394,6 +1417,8 @@ class EpistemicFeedbackAssimilator:
                                 val not in av_feats
                                 and val not in view.avatar_features
                                 and val != view.avatar_feature
+                                and val != bg
+                                and val != view.bg_feature
                                 and not is_candidate_goal
                             ):
                                 # Multi-cell leading edge recording
@@ -2077,6 +2102,8 @@ class EpistemicFeedbackAssimilator:
                 curr_grid=curr_grid,
                 prev_avatar_pos=prev_avatar_pos,
                 curr_avatar_pos=view.avatar_pos,
+                avatar_h=getattr(view.state, "avatar_h", 1) or 1,
+                avatar_w=getattr(view.state, "avatar_w", 1) or 1,
                 is_dead=is_failure,
                 is_won=is_success,
                 background_feature=view.bg_feature,

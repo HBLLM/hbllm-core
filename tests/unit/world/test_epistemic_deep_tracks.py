@@ -12,6 +12,7 @@ import numpy as np
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.entorhinal_grid_cortex import EntorhinalGridCortex
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.metacognitive_agency_cortex import MetacognitiveAgencyCortex
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.relational_graph_matcher import (
@@ -181,6 +182,7 @@ class TestRelationalGraphAndAnalogyMatching:
 
     def test_engine_transfer_structural_analogies(self) -> None:
         engine = AutonomousEpistemicEngine()
+        _restore_all(engine)
         curr_grid = np.zeros((8, 8), dtype=np.int32)
         curr_grid[2, 2] = 2
         curr_grid[6, 6] = 3

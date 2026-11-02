@@ -460,6 +460,8 @@ class MyAgent(Agent):
             raw = np.zeros((64, 64), dtype=int)
 
         raw_arr = np.asarray(raw)
+        if raw_arr.ndim == 3 and len(raw_arr) > 0:
+            raw_arr = raw_arr[-1]
         if raw_arr.ndim != 2:
             raise ValueError(
                 f"extracted grid is not 2D (shape={raw_arr.shape}) — frame layers must be 2D"
@@ -730,8 +732,16 @@ class MyAgent(Agent):
                     )
                     self._actuation_rejected = _eff.kind == EffectKind.ENV_REJECTED
 
-                is_win = bool(getattr(latest_frame, "is_win", False))
-                is_lost = bool(getattr(latest_frame, "is_lost", False))
+                is_win = bool(
+                    getattr(latest_frame, "is_win", False)
+                    or state_name == "WIN"
+                    or state_obj is GameState.WIN
+                )
+                is_lost = bool(
+                    getattr(latest_frame, "is_lost", False)
+                    or state_name == "GAME_OVER"
+                    or state_obj is GameState.GAME_OVER
+                )
                 _actuators = [
                     ActuatorSchema(
                         actuator_id=str(s.get("action_id", i)),

@@ -21,6 +21,7 @@ from hbllm.hcir.graph import (
 )
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine, EpistemicPhase
+from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
@@ -193,6 +194,8 @@ class TestGNWAndNeuromodulationClosedLoop:
     def test_assimilate_feedback_updates_snn_and_neuromodulators(self) -> None:
         """Verify feedback assimilation steps SNN, tunes neuromodulators, and submits to GNW."""
         engine = AutonomousEpistemicEngine(world_id="test_gnw_world")
+        _restore_all(engine)
+        engine.gnw.register_listener("executive_arbitration", engine._on_conscious_ignition)
 
         grid1 = np.zeros((6, 6), dtype=np.int32)
         grid1[1, 1] = 1  # avatar

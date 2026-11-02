@@ -151,7 +151,10 @@ def test_extract_arc_objects_with_sprite_tags() -> None:
 
 def test_my_agent_choose_action_wires_objects_to_core() -> None:
     """Test MyAgent.choose_action feeds lifted ObjectSpecs into engine.decide and triggers macro execution."""
+    from hbllm.hcir.world.experimental import restore_all as _restore_all
+
     agent = MyAgent(game_id="test_game")
+    _restore_all(agent.internal_engine)
     grid = np.zeros((10, 10), dtype=int)
     grid[2, 2] = 2  # Avatar
     grid[2, 4] = 9  # Switch
