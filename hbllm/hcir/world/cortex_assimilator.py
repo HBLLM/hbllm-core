@@ -1625,6 +1625,20 @@ class EpistemicFeedbackAssimilator:
         ):
             movable_features.update(view.hazard_tracker.mobile_threat_features)
 
+        # Divider-line scan is invariant for the whole assimilate call:
+        # compute each row's dominant value/count once (lazily), then reuse.
+        _divider_rows: np.ndarray | None = None
+
+        def _hud_dividers() -> np.ndarray:
+            nonlocal _divider_rows
+            rows = view.prev_grid
+            n_vals = int(rows.max()) + 1
+            counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in rows])
+            dom_vals = np.argmax(counts, axis=1)
+            dom_counts = counts[np.arange(rows.shape[0]), dom_vals]
+            _divider_rows = (dom_vals != bg) & (dom_counts >= int(rows.shape[1] * 0.85))
+            return _divider_rows
+
         def is_hud_mutation(r: int, c: int) -> bool:
             """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
             if view.prev_grid is None:
@@ -1634,26 +1648,15 @@ class EpistemicFeedbackAssimilator:
                 return False
 
             max_hud_depth = max(16, pH // 4)
+            div_rows = _divider_rows if _divider_rows is not None else _hud_dividers()
 
             # Check if (r, c) is in top peripheral band partitioned by a solid non-background divider line spanning >= 85% width
-            if r <= max_hud_depth:
-                for div_r in range(r + 1, min(max_hud_depth + 1, pH)):
-                    line = view.prev_grid[div_r, :]
-                    vals, counts = np.unique(line, return_counts=True)
-                    dom_idx = int(np.argmax(counts))
-                    div_val = int(vals[dom_idx])
-                    if div_val != bg and counts[dom_idx] >= int(pW * 0.85):
-                        return True
+            if r <= max_hud_depth and div_rows[r + 1 : min(max_hud_depth + 1, pH)].any():
+                return True
 
             # Check if (r, c) is in bottom peripheral band partitioned by a solid non-background divider line spanning >= 85% width
-            if r >= pH - 1 - max_hud_depth:
-                for div_r in range(max(0, pH - 1 - max_hud_depth), r):
-                    line = view.prev_grid[div_r, :]
-                    vals, counts = np.unique(line, return_counts=True)
-                    dom_idx = int(np.argmax(counts))
-                    div_val = int(vals[dom_idx])
-                    if div_val != bg and counts[dom_idx] >= int(pW * 0.85):
-                        return True
+            if r >= pH - 1 - max_hud_depth and div_rows[max(0, pH - 1 - max_hud_depth) : r].any():
+                return True
             return False
 
         av_radius = max(2, int(round(math.sqrt(max(1, view.avatar_size)))))

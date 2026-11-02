@@ -251,12 +251,19 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         passable_topology = np.ones((H, W), dtype=bool)
         static_barriers: set[tuple[int, int]] = set(learned_barriers)
 
-        # Mark static barrier features
-        for r in range(H):
-            for c in range(W):
-                val = int(grid[r, c])
-                if val in barrier_features or (symbolic_theory and symbolic_theory.is_barrier(val)):
-                    static_barriers.add((r, c))
+        # Mark static barrier features (vectorized; is_barrier resolved once
+        # per unique feature value instead of once per cell).
+        barrier_mask = (
+            np.isin(grid, list(barrier_features))
+            if barrier_features
+            else np.zeros((H, W), dtype=bool)
+        )
+        if symbolic_theory is not None:
+            bar_vals = {int(v) for v in np.unique(grid) if symbolic_theory.is_barrier(int(v))}
+            if bar_vals:
+                barrier_mask |= np.isin(grid, list(bar_vals))
+        if barrier_mask.any():
+            static_barriers.update((int(r), int(c)) for r, c in np.argwhere(barrier_mask))
 
         # Corridor Manifold Continuity:
         # If foreground features are explicitly walkable and the background is NOT walkable,
@@ -265,18 +272,19 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             getattr(context, "verified_safe_features", set()) or set()
         )
         if len(walkable_and_safe) > 0 and bg not in walkable_and_safe:
-            for r in range(H):
-                for c in range(W):
-                    if int(grid[r, c]) == bg and (r, c) not in candidate_goals:
-                        static_barriers.add((r, c))
+            static_barriers.update(
+                (int(r), int(c))
+                for r, c in np.argwhere(grid == bg)
+                if (int(r), int(c)) not in candidate_goals
+            )
 
-        for r, c in static_barriers:
-            if 0 <= r < H and 0 <= c < W:
-                passable_topology[r, c] = False
-
-        for r, c in known_lethals:
-            if 0 <= r < H and 0 <= c < W:
-                passable_topology[r, c] = False
+        impassable = np.zeros((H, W), dtype=bool)
+        for cells in (static_barriers, known_lethals):
+            if cells:
+                idx = np.array([(r, c) for r, c in cells if 0 <= r < H and 0 <= c < W])
+                if idx.size:
+                    impassable[idx[:, 0], idx[:, 1]] = True
+        passable_topology &= ~impassable
 
         # Compute observation difference if previous grid is available
         diff = None
@@ -712,15 +720,6 @@ def extract_arc_objects(
                         except Exception:
                             pass
                     if is_active_avatar:
-                        if (
-                            engine is not None
-                            and engine.avatar_pos is not None
-                            and (
-                                s_feat in getattr(engine, "avatar_features", set())
-                                or s_feat == getattr(engine, "avatar_feature", None)
-                            )
-                        ):
-                            engine.avatar_pos = s_pos
                         av_pos = s_pos
                         av_feat = s_feat
                         av_feats.add(s_feat)

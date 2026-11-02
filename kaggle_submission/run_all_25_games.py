@@ -39,6 +39,7 @@ from hbllm.drivers.base import (
 )
 from hbllm.drivers.manager import DriverManager
 from plugins.arc_agi_adapter.telemetry import (
+    STOP_AGENT_YIELD,
     STOP_GAME_OVER,
     STOP_LEVEL_STEP_LIMIT,
     STOP_RESET_FAILED,
@@ -383,6 +384,7 @@ def run_all_25_games(
     per_game_time_limit: float = 600.0,
     trace_dir: str | None = None,
     seed: int | None = None,
+    ignore_agent_yield: bool = False,
 ) -> None:
     if instructions is None:
         instructions = DEFAULT_EXECUTIVE_DIRECTIVES
@@ -661,6 +663,13 @@ def run_all_25_games(
                         if agent.is_done([], driver.current_frame):
                             telemetry.agent_yield_step = step
                             telemetry.agent_yield_reason = getattr(agent, "_yield_reason", None)
+                            if not ignore_agent_yield and telemetry.agent_yield_reason != "win":
+                                telemetry.stop(
+                                    STOP_AGENT_YIELD,
+                                    step,
+                                    telemetry.agent_yield_reason,
+                                )
+                                break
                     except Exception:
                         pass
 
@@ -999,6 +1008,12 @@ if __name__ == "__main__":
         help="Restart entire benchmark from Game 1, backing up any prior scorecard.",
     )
 
+    parser.add_argument(
+        "--ignore-agent-yield",
+        action="store_true",
+        default=False,
+        help="Record agent is_done() yields but do not stop on them (record-only mode).",
+    )
     parser.add_argument("--per-game-time-limit", type=float, default=600.0)
     parser.add_argument("--trace-dir", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -1038,4 +1053,5 @@ if __name__ == "__main__":
         per_game_time_limit=args.per_game_time_limit,
         trace_dir=args.trace_dir,
         seed=args.seed,
+        ignore_agent_yield=args.ignore_agent_yield,
     )

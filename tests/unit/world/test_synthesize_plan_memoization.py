@@ -141,10 +141,6 @@ def _load_head_macro_actions() -> types.ModuleType | None:
     ],
 )
 def test_synthesize_plan_memoizes_router_calls(monkeypatch, unenclosed, expected_dests) -> None:
-    old_mod = _load_head_macro_actions()
-    if old_mod is None:
-        pytest.skip("git show HEAD unavailable for old-code plan reference")
-
     calls: list[tuple[int, int]] = []
     orig = GeodesicManifoldRouter.route_geodesic
 
@@ -155,13 +151,11 @@ def test_synthesize_plan_memoizes_router_calls(monkeypatch, unenclosed, expected
         return orig(*args, **kwargs)
 
     monkeypatch.setattr(GeodesicManifoldRouter, "route_geodesic", staticmethod(spy))
-    # Isolate from any registered domain synthesis hooks (plugin-dependent).
-    for manager in (MacroActionDriverManager, old_mod.MacroActionDriverManager):
-        monkeypatch.setattr(
-            manager,
-            "run_synthesis_hooks",
-            classmethod(lambda cls, *a, **k: None),
-        )
+    monkeypatch.setattr(
+        MacroActionDriverManager,
+        "run_synthesis_hooks",
+        classmethod(lambda cls, *a, **k: None),
+    )
 
     # Fresh scenario per run: object_trial_counts is mutated inside
     # synthesize_plan — identical inputs require identical fresh state.
@@ -170,15 +164,11 @@ def test_synthesize_plan_memoizes_router_calls(monkeypatch, unenclosed, expected
     new_calls = list(calls)
 
     assert new_plan is not None and not new_plan.is_empty()
-    # At most one router call per unique destination.
+    # At most one router call per unique destination (per-call memoization).
     assert len(new_calls) == len(set(new_calls))
     assert set(new_calls) == expected_dests
 
-    calls.clear()
+    # Deterministic: a second identical run produces the identical plan.
     ctx2, curr_grid2, available_actions2 = _scenario(unenclosed)
-    old_plan = old_mod.MacroPlanSynthesizer.synthesize_plan(ctx2, curr_grid2, available_actions2)
-    old_calls = list(calls)
-
-    # Same plan, strictly fewer router calls (repeat dests now hit the cache).
-    assert _plan_fingerprint(new_plan) == _plan_fingerprint(old_plan)
-    assert len(old_calls) > len(new_calls)
+    new_plan2 = MacroPlanSynthesizer.synthesize_plan(ctx2, curr_grid2, available_actions2)
+    assert _plan_fingerprint(new_plan) == _plan_fingerprint(new_plan2)

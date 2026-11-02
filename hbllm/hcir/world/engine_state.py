@@ -786,7 +786,16 @@ class _JournaledStateProxy:
     def __getattr__(self, name: str) -> Any:
         view = object.__getattribute__(self, "_view")
         val = getattr(view._engine.state, name)
-        view._record_touch(f"state.{name}", val)
+        journal = object.__getattribute__(view, "_journal")
+        key = f"state.{name}"
+        if key not in journal.before:
+            try:
+                journal.before[key] = (
+                    val.copy() if isinstance(val, (dict, set, list, deque)) else val
+                )
+            except Exception:
+                journal.before[key] = _ABSENT
+        journal.touched.add(key)
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -803,6 +812,10 @@ class JournaledEngineView:
         object.__setattr__(self, "_engine", engine)
         object.__setattr__(self, "_journal", journal)
         object.__setattr__(self, "_state_proxy", _JournaledStateProxy(self))
+        # name -> routing memo: 0=state proxy, 1=owned subsystem, 2=plain field.
+        # The route depends only on the attribute name, so it is safe to cache
+        # for the lifetime of this view (values themselves are never cached).
+        object.__setattr__(self, "_routes", {})
 
     def _record_touch(self, key: str, current: Any) -> None:
         journal = object.__getattribute__(self, "_journal")
@@ -818,14 +831,32 @@ class JournaledEngineView:
         journal.touched.add(key)
 
     def __getattr__(self, name: str) -> Any:
-        if name == "state":
+        routes = object.__getattribute__(self, "_routes")
+        route = routes.get(name)
+        if route is None:
+            if name == "state":
+                route = 0
+            elif name in _OWNED_SUBSYSTEMS:
+                route = 1
+            else:
+                route = 2
+            routes[name] = route
+        if route == 0:
             return object.__getattribute__(self, "_state_proxy")
         eng = object.__getattribute__(self, "_engine")
         val = getattr(eng, name)
-        if name in _OWNED_SUBSYSTEMS:
+        if route == 1:
             return val
-        if isinstance(val, (dict, set, list)) or type(val).__name__ == "deque":
-            self._record_touch(name, val)
+        if isinstance(val, (dict, set, list, deque)):
+            journal = object.__getattribute__(self, "_journal")
+            if name not in journal.before:
+                try:
+                    journal.before[name] = (
+                        val.copy() if isinstance(val, (dict, set, list, deque)) else val
+                    )
+                except Exception:
+                    journal.before[name] = _ABSENT
+            journal.touched.add(name)
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:

@@ -483,28 +483,38 @@ class EpistemicGoalScheduler:
 
         # Reachability Gating: Discard goals physically disconnected from avatar
         if avatar_pos is not None and goals:
-            from collections import deque
-
             barrier_feats = engine.symbolic_theory.barrier_features
             lethal_feats = engine.hazard_tracker.known_lethal_features
             learned_b = engine.learned_barriers
 
-            reachable_cells: set[tuple[int, int]] = {avatar_pos}
-            q = deque([avatar_pos])
-            while q:
-                cr, cc = q.popleft()
-                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    nr, nc = cr + dr, cc + dc
-                    if (
-                        0 <= nr < H
-                        and 0 <= nc < W
-                        and (nr, nc) not in reachable_cells
-                        and (nr, nc) not in learned_b
-                        and int(curr_grid[nr, nc]) not in barrier_feats
-                        and int(curr_grid[nr, nc]) not in lethal_feats
-                    ):
-                        reachable_cells.add((nr, nc))
-                        q.append((nr, nc))
+            # Vectorized 4-connected flood fill over passable cells —
+            # identical closure to the old per-cell BFS expansion.
+            blocked = np.zeros((H, W), dtype=bool)
+            if learned_b:
+                lb_idx = np.array([(r, c) for r, c in learned_b if 0 <= r < H and 0 <= c < W])
+                if lb_idx.size:
+                    blocked[lb_idx[:, 0], lb_idx[:, 1]] = True
+            bad_feats = set(barrier_feats) | set(lethal_feats)
+            if bad_feats:
+                blocked |= np.isin(curr_grid, list(bad_feats))
+            passable = ~blocked
+            reach = np.zeros((H, W), dtype=bool)
+            reach[avatar_pos[0], avatar_pos[1]] = True
+            prev_count = -1
+            while True:
+                grown = reach.copy()
+                grown[1:, :] |= reach[:-1, :]
+                grown[:-1, :] |= reach[1:, :]
+                grown[:, 1:] |= reach[:, :-1]
+                grown[:, :-1] |= reach[:, 1:]
+                grown &= passable
+                grown[avatar_pos[0], avatar_pos[1]] = True
+                count = int(grown.sum())
+                if count == prev_count:
+                    break
+                reach = grown
+                prev_count = count
+            reachable_cells = {(int(r), int(c)) for r, c in np.argwhere(reach)}
 
             reachable_goals = [
                 g

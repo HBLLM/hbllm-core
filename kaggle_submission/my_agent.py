@@ -653,8 +653,11 @@ class MyAgent(Agent):
         # Increment action counter for budget guard
         self.action_counter += 1
 
-        # Grid stagnation tracking: detect when the observable state is not changing
-        grid_hash = hash(grid.tobytes())
+        # Grid stagnation tracking: detect when the observable state is not changing.
+        # Hash the interior only — an outermost 1-cell border may be a HUD /
+        # step-counter bar that ticks every step and would mask real stagnation.
+        _interior = grid[1:-1, 1:-1] if grid.ndim == 2 else grid
+        grid_hash = hash((_interior if _interior.size > 0 else grid).tobytes())
         if grid_hash == self._stagnation_grid_hash:
             self._stagnation_steps += 1
         else:

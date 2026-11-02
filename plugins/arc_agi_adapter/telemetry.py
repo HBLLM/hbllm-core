@@ -17,6 +17,7 @@ STOP_LEVEL_STEP_LIMIT = "level_step_limit"
 STOP_STEP_BUDGET = "step_budget"
 STOP_RESET_FAILED = "reset_failed"
 STOP_RUNNER_EXCEPTION = "runner_exception"
+STOP_AGENT_YIELD = "agent_yield"
 
 STOP_REASONS = (
     STOP_WIN,
@@ -26,6 +27,7 @@ STOP_REASONS = (
     STOP_STEP_BUDGET,
     STOP_RESET_FAILED,
     STOP_RUNNER_EXCEPTION,
+    STOP_AGENT_YIELD,
 )
 
 

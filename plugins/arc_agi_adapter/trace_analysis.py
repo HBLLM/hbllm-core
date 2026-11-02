@@ -141,6 +141,11 @@ def analyze_trace_dir(path: str | Path) -> dict[str, Any]:
         all_stops.extend(stop_recs)
 
     overall = _analyze_records(all_steps, all_stops) if all_steps or all_stops else {}
+    if overall:
+        # Levels are per-game quantities — the overall row must sum them,
+        # not echo the last game's stop record.
+        overall["levels_completed"] = sum(g.get("levels_completed") or 0 for g in games.values())
+        overall["target_levels"] = sum(g.get("target_levels") or 0 for g in games.values())
     return {"games": games, "overall": overall}
 
 

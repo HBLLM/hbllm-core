@@ -320,6 +320,46 @@ def test_runner_hud_border_noop_detection(tmp_path, monkeypatch):
     assert report["games"]["inter01"]["raw_change_rate"] == 1.0
 
 
+def test_runner_honors_agent_yield(tmp_path, monkeypatch):
+    """Official-loop parity: the runner stops when the agent's own guard yields."""
+    factories = {"yieldy": _budget_factory}
+    r25 = _runner_module(monkeypatch, factories)
+    from kaggle_submission.my_agent import MyAgent
+
+    # Tiny action budget → agent yields via "action_budget" at step 2.
+    monkeypatch.setattr(MyAgent, "BASE_ACTIONS_PER_LEVEL", 2)
+
+    r25.run_all_25_games(
+        scorecard_file=str(tmp_path / "sc1.json"),
+        trace_dir=str(tmp_path / "t1"),
+        max_steps_per_game=5,
+        retries=0,
+        resume=False,
+        seed=0,
+    )
+    g1 = json.loads((tmp_path / "sc1.json").read_text())["games"]["yieldy"]
+    assert g1["stop_reason"] == "agent_yield"
+    assert g1["stop_detail"] == "action_budget"
+    assert g1["steps"] == 2
+    assert g1["agent_yield_step"] == 2
+    assert g1["agent_yield_reason"] == "action_budget"
+
+    # Record-only mode: same game runs to the step budget.
+    r25.run_all_25_games(
+        scorecard_file=str(tmp_path / "sc2.json"),
+        trace_dir=str(tmp_path / "t2"),
+        max_steps_per_game=5,
+        retries=0,
+        resume=False,
+        seed=0,
+        ignore_agent_yield=True,
+    )
+    g2 = json.loads((tmp_path / "sc2.json").read_text())["games"]["yieldy"]
+    assert g2["stop_reason"] == "step_budget"
+    assert g2["steps"] == 5
+    assert g2["agent_yield_step"] == 2  # still recorded
+
+
 def test_runner_time_limit_stop_reason(tmp_path, monkeypatch):
     factories = {"slow01": _budget_factory}
     r25 = _runner_module(monkeypatch, factories)
