@@ -477,7 +477,9 @@ class ReversibilityEngine:
         if transition.delta.changed_cells:
             # Overwriting cells: calculate Shannon entropy loss of overwriting
             n_cells = len(transition.delta.changed_cells)
-            info_loss_bits += n_cells * math.log2(10.0)  # ARC 10-color discrete entropy
+            palette = getattr(transition.delta, "palette", None)
+            n_palette = float(len(palette)) if palette else 16.0
+            info_loss_bits += n_cells * math.log2(max(2.0, n_palette))
 
         if has_destructive_loss:
             return ReversibilityAnalysis(

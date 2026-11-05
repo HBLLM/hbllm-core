@@ -724,7 +724,7 @@ def test_undo_probe_filtering_and_effector_priority() -> None:
 
 def test_peripheral_driver_action_schema_completeness() -> None:
     """Verify ARC_DEFAULT_ACTION_SCHEMAS integrity in the peripheral driver package."""
-    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+    from plugins.arc_agi_adapter.constants import ARC_DEFAULT_ACTION_SCHEMAS
 
     ids = {s["action_id"] for s in ARC_DEFAULT_ACTION_SCHEMAS}
     assert ids == {1, 2, 3, 4, 5, 6, 7}, (

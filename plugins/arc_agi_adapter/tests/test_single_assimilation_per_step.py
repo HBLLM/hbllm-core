@@ -12,9 +12,10 @@ import numpy as np
 
 _ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "kaggle_submission"))
 
+from hbllm.drivers.base import DriverAction, DriverFeedback, DriverInput
 from plugins.arc_agi_adapter.local_env import LocalEnv  # noqa: E402
+from plugins.arc_agi_adapter.my_agent import CognitiveAgentAdapter, MyAgent
 
 
 def _run_steps(n_steps: int = 8) -> list[int]:
@@ -31,8 +32,6 @@ def _run_steps(n_steps: int = 8) -> list[int]:
             stub = types.ModuleType("arc_agi")
             stub.Arcade = object  # type: ignore[attr-defined]
             sys.modules["arc_agi"] = stub
-    from kaggle_submission.my_agent import MyAgent
-    from kaggle_submission.run_all_25_games import CognitiveAgentAdapter
 
     agent = MyAgent()
     adapter = CognitiveAgentAdapter(agent)
@@ -54,7 +53,6 @@ def _run_steps(n_steps: int = 8) -> list[int]:
 
     # Drive the adapter the same way run_all_25_games does: observe -> decide -> step -> update.
     per_step = []
-    from kaggle_submission.run_all_25_games import DriverAction, DriverFeedback, DriverInput
 
     for _ in range(n_steps):
         calls[0] = 0

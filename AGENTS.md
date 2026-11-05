@@ -35,7 +35,7 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 7. **General Intelligence Invariant (Task-Agnostic Core Directive):**
    > *"The core is general intelligence, never a single-task solver."*  
-   The cognitive core (`hbllm.brain`, `hbllm.hcir`, `hbllm.hcir.world`) must always remain strictly task-agnostic and domain-agnostic. No special functions, ad-hoc solvers, or heuristics designed solely for individual tasks or specific benchmarks (such as dedicated ARC-AGI puzzle solvers, hardcoded game mechanics, or competition-only shortcuts) may be included in the core. All capabilities must emerge from universal neuro-symbolic principles, active inference, Pearl's causal calculus, spatial physics, and domain-general reasoning. Single-task adapters or benchmark harnesses belong strictly in external evaluation or plugin modules (`benchmarks/`, `plugins/`, `kaggle_submission/`), never in `core/`.
+   The cognitive core (`hbllm.brain`, `hbllm.hcir`, `hbllm.hcir.world`) must always remain strictly task-agnostic and domain-agnostic. No special functions, ad-hoc solvers, or heuristics designed solely for individual tasks or specific benchmarks (such as dedicated ARC-AGI puzzle solvers, hardcoded game mechanics, or competition-only shortcuts) may be included in the core. All capabilities must emerge from universal neuro-symbolic principles, active inference, Pearl's causal calculus, spatial physics, and domain-general reasoning. Single-task adapters or benchmark harnesses belong strictly in external evaluation or plugin modules (`benchmarks/`, `plugins/`), never in `core/`.
 
 8. **Internal Memory Governance Invariant (No Ad-Hoc Attribute Sprawl):**
    > *"Never attach ad-hoc tracking attributes or monkey-patched state to engine instances. Route all learned knowledge and cognitive state through formal internal memory stores."*  
@@ -189,6 +189,38 @@ await services.event_bus.wait_for(
 )
 ```
 
+### Pattern D: Actuator Features vs In-Place Action Mutations
+
+```python
+# ❌ FORBIDDEN: Treating in-place action diffs or avatar displacement as distal switches
+# Action mutations (e.g. avatar stepping on void, paint actions) must NEVER pollute actuator_features
+theory.actuator_features.add(hyp.premise_feature)
+
+# ✅ CORRECT: Distinguish in-place spatial transforms from distal actuators
+# Only verified remote switches/buttons belong in actuator_features; in-place mutations
+# are recorded strictly as CausalPredicate state transforms.
+if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
+    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(hyp.premise_feature):
+        theory.actuator_features.add(hyp.premise_feature)
+```
+
+### Pattern E: Sandboxed Capability Execution & Subprocess Isolation
+
+```python
+# ❌ FORBIDDEN: Executing untrusted code in-process or blocking parent pipe writers
+proc.start()
+result = await _await_child(proc, parent_conn, timeout)
+child_conn.close() # Bug: writer open in parent leads to EOF hang
+
+# ✅ CORRECT: Two-tier isolation with immediate parent write-end cleanup and responsive polling
+proc.start()
+try:
+    child_conn.close() # Close write-end immediately in parent so pipe EOF signals properly
+except Exception:
+    pass
+result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn, timeout))
+```
+
 ---
 
 ## 5. Agent Anti-Patterns Blacklist (Strictly Forbidden)
@@ -304,7 +336,7 @@ pytest core/tests/unit/ -k "<relevant_component>" -q
 python -m hbllm.cli.diagnostics
 
 # ARC / 25 Games evaluation benchmark
-python core/kaggle_submission/run_all_25_games.py
+python core/plugins/arc_agi_adapter/run_local_suite.py
 ```
 
 ### Ecosystem Context

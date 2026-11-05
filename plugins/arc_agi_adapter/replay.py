@@ -25,8 +25,7 @@ class ReplayReport:
 
 
 def _default_agent_factory(game_id: str, seed: int) -> Any:
-    sys.path.insert(0, "kaggle_submission")
-    from my_agent import MyAgent
+    from plugins.arc_agi_adapter.my_agent import MyAgent
 
     return MyAgent(card_id="replay", game_id=game_id, seed=seed)
 

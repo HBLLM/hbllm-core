@@ -30,28 +30,37 @@ class ColorCluster:
 
 
 class DiscreteVectorTranslator:
-    """Translates continuous or lattice displacements into discrete ARC actions.
+    """Translates continuous or lattice displacements into discrete navigation actions."""
 
-    ARC standard navigation actions:
-    Action 1: UP    (dy < 0)
-    Action 2: DOWN  (dy > 0)
-    Action 3: LEFT  (dx < 0)
-    Action 4: RIGHT (dx > 0)
-    Action 5: NOOP / WAIT
-    Action 6: POINT-ACTUATE / INTERACT
-    """
+    DEFAULT_ACTION_MAP: dict[str, int] = {"up": 1, "down": 2, "left": 3, "right": 4}
 
     @staticmethod
     def delta_to_actions(
-        dx: int, dy: int, step_size: int = 1, horizontal_first: bool = True
+        dx: int,
+        dy: int,
+        step_size: int = 1,
+        horizontal_first: bool = True,
+        action_map: dict[str, int] | None = None,
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Convert a (dx, dy) displacement into discrete movement action tuples."""
+        mapping = action_map or DiscreteVectorTranslator.DEFAULT_ACTION_MAP
+        act_up = mapping.get("up", 1)
+        act_down = mapping.get("down", 2)
+        act_left = mapping.get("left", 3)
+        act_right = mapping.get("right", 4)
+
         actions: list[tuple[int, dict[str, int] | None]] = []
         num_y = abs(dy) // step_size if step_size > 0 else abs(dy)
         num_x = abs(dx) // step_size if step_size > 0 else abs(dx)
 
-        x_moves = [(3, None)] * num_x if dx < 0 else ([(4, None)] * num_x if dx > 0 else [])
-        y_moves = [(1, None)] * num_y if dy < 0 else ([(2, None)] * num_y if dy > 0 else [])
+        x_moves = (
+            [(act_left, None)] * num_x
+            if dx < 0
+            else ([(act_right, None)] * num_x if dx > 0 else [])
+        )
+        y_moves = (
+            [(act_up, None)] * num_y if dy < 0 else ([(act_down, None)] * num_y if dy > 0 else [])
+        )
 
         if horizontal_first:
             actions.extend(x_moves)
@@ -68,22 +77,28 @@ class DiscreteVectorTranslator:
         p1: tuple[int, int],
         p2: tuple[int, int],
         step_size: int = 1,
+        action_map: dict[str, int] | None = None,
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Convert displacement from point p1=(x1, y1) to p2=(x2, y2) into actions."""
         dx = p2[0] - p1[0]
         dy = p2[1] - p1[1]
-        return cls.delta_to_actions(dx, dy, step_size=step_size)
+        return cls.delta_to_actions(dx, dy, step_size=step_size, action_map=action_map)
 
     @classmethod
     def path_to_actions(
         cls,
         path: list[tuple[int, int]],
         step_size: int = 1,
+        action_map: dict[str, int] | None = None,
     ) -> list[tuple[int, dict[str, int] | None]]:
         """Convert a sequence of waypoints into sequential navigation actions."""
         actions: list[tuple[int, dict[str, int] | None]] = []
         for i in range(len(path) - 1):
-            actions.extend(cls.points_to_actions(path[i], path[i + 1], step_size=step_size))
+            actions.extend(
+                cls.points_to_actions(
+                    path[i], path[i + 1], step_size=step_size, action_map=action_map
+                )
+            )
         return actions
 
 

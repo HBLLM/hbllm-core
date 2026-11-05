@@ -1627,59 +1627,57 @@ class MotorCortexEffector:
         if r <= 16 and H >= 24:
             for div_r in range(min(16, H // 3), 2, -1):
                 line = grid[div_r, :]
-                line_counts: np.ndarray = np.bincount(line.astype(int), minlength=16)
-                if len(line_counts) > 0 and np.max(line_counts) >= int(W * 0.85):
-                    line_color = int(np.argmax(line_counts))
-                    banner_region = grid[:div_r, :]
-                    field_region = grid[div_r + 1 :, :]
-                    bc_banner: np.ndarray = np.bincount(
-                        banner_region.flatten().astype(int), minlength=16
-                    )
-                    bc_field: np.ndarray = np.bincount(
-                        field_region.flatten().astype(int), minlength=16
-                    )
-                    if len(bc_banner) > 0 and len(bc_field) > 0:
-                        banner_dom = int(np.argmax(bc_banner))
-                        field_dom = int(np.argmax(bc_field))
-                        has_distinct_bg = (banner_dom != field_dom) and (
-                            (bc_banner[banner_dom] / banner_region.size) >= 0.85
-                        )
-                        has_divider_line = (line_color != field_dom) and (
-                            line_counts[line_color] >= int(W * 0.85)
-                        )
-                        if has_distinct_bg or has_divider_line:
-                            if r <= div_r:
-                                return True
-                            break
+                line_vals, line_counts = np.unique(line, return_counts=True)
+                if len(line_counts) > 0:
+                    max_idx = int(np.argmax(line_counts))
+                    if line_counts[max_idx] >= int(W * 0.85):
+                        line_color = int(line_vals[max_idx])
+                        banner_region = grid[:div_r, :]
+                        field_region = grid[div_r + 1 :, :]
+                        b_vals, b_counts = np.unique(banner_region, return_counts=True)
+                        f_vals, f_counts = np.unique(field_region, return_counts=True)
+                        if len(b_counts) > 0 and len(f_counts) > 0:
+                            banner_dom = int(b_vals[np.argmax(b_counts)])
+                            field_dom = int(f_vals[np.argmax(f_counts)])
+                            banner_dom_count = b_counts[np.argmax(b_counts)]
+                            has_distinct_bg = (banner_dom != field_dom) and (
+                                (banner_dom_count / banner_region.size) >= 0.85
+                            )
+                            has_divider_line = (line_color != field_dom) and (
+                                line_counts[max_idx] >= int(W * 0.85)
+                            )
+                            if has_distinct_bg or has_divider_line:
+                                if r <= div_r:
+                                    return True
+                                break
 
         # 3. Bottom HUD / Status Banner Detection
         if r >= H - 16 and H >= 24:
             for div_r in range(H - 4, max(H - 18, H - H // 3), -1):
                 line = grid[div_r, :]
-                line_counts_bot: np.ndarray = np.bincount(line.astype(int), minlength=16)
-                if len(line_counts_bot) > 0 and np.max(line_counts_bot) >= int(W * 0.85):
-                    line_color = int(np.argmax(line_counts_bot))
-                    banner_region = grid[div_r + 1 :, :]
-                    field_region = grid[:div_r, :]
-                    bc_banner_bot: np.ndarray = np.bincount(
-                        banner_region.flatten().astype(int), minlength=16
-                    )
-                    bc_field_bot: np.ndarray = np.bincount(
-                        field_region.flatten().astype(int), minlength=16
-                    )
-                    if len(bc_banner_bot) > 0 and len(bc_field_bot) > 0:
-                        banner_dom = int(np.argmax(bc_banner_bot))
-                        field_dom = int(np.argmax(bc_field_bot))
-                        has_distinct_bg = (banner_dom != field_dom) and (
-                            (bc_banner_bot[banner_dom] / banner_region.size) >= 0.85
-                        )
-                        has_divider_line = (line_color != field_dom) and (
-                            line_counts_bot[line_color] >= int(W * 0.85)
-                        )
-                        if has_distinct_bg or has_divider_line:
-                            if r >= div_r:
-                                return True
-                            break
+                line_vals_bot, line_counts_bot = np.unique(line, return_counts=True)
+                if len(line_counts_bot) > 0:
+                    max_idx_bot = int(np.argmax(line_counts_bot))
+                    if line_counts_bot[max_idx_bot] >= int(W * 0.85):
+                        line_color = int(line_vals_bot[max_idx_bot])
+                        banner_region = grid[div_r + 1 :, :]
+                        field_region = grid[:div_r, :]
+                        b_vals_bot, b_counts_bot = np.unique(banner_region, return_counts=True)
+                        f_vals_bot, f_counts_bot = np.unique(field_region, return_counts=True)
+                        if len(b_counts_bot) > 0 and len(f_counts_bot) > 0:
+                            banner_dom = int(b_vals_bot[np.argmax(b_counts_bot)])
+                            field_dom = int(f_vals_bot[np.argmax(f_counts_bot)])
+                            banner_dom_count = b_counts_bot[np.argmax(b_counts_bot)]
+                            has_distinct_bg = (banner_dom != field_dom) and (
+                                (banner_dom_count / banner_region.size) >= 0.85
+                            )
+                            has_divider_line = (line_color != field_dom) and (
+                                line_counts_bot[max_idx_bot] >= int(W * 0.85)
+                            )
+                            if has_distinct_bg or has_divider_line:
+                                if r >= div_r:
+                                    return True
+                                break
 
         return False
 

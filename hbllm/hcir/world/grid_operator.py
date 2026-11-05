@@ -1574,8 +1574,8 @@ class TransformationProgramSearch:
         is_ambiguous = metadata.get("is_ambiguous_on_test", False)
 
         if is_ambiguous and len(candidate_preds) > 1:
-            if protocol == "static_arc":
-                # Static ARC protocol: No interactive test coordinate querying is permitted
+            if protocol in ("static", "batch", "static_arc", "offline"):
+                # Static/non-interactive protocol: No interactive test coordinate querying is permitted
                 brier_score = None
                 if ground_truth_test is not None:
                     outcome = 1.0 if np.array_equal(test_pred, ground_truth_test) else 0.0

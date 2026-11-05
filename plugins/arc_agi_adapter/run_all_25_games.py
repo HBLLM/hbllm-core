@@ -51,13 +51,13 @@ from plugins.arc_agi_adapter.telemetry import (
 )
 
 try:
-    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+    from plugins.arc_agi_adapter.constants import ARC_DEFAULT_ACTION_SCHEMAS
 except ImportError:
     from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
 
 # Import competitive agent
 try:
-    from kaggle_submission.my_agent import MyAgent
+    from plugins.arc_agi_adapter.my_agent import MyAgent
 except ImportError:
     from my_agent import MyAgent  # type: ignore[no-redef]
 

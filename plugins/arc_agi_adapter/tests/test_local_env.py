@@ -81,11 +81,9 @@ def test_determinism_same_seed():
 
 def test_frame_layers_match_arc_shape():
     """ARC fidelity: frame[-1] must be the full 2D lattice the agent extracts."""
-    import sys
-
-    sys.path.insert(0, "kaggle_submission")
     import numpy as np
-    from my_agent import MyAgent
+
+    from plugins.arc_agi_adapter.my_agent import MyAgent
 
     env = LocalEnv(0)
     g = env.make("nav_basic")
@@ -100,11 +98,9 @@ def test_frame_layers_match_arc_shape():
 
 
 def test_extract_grid_rejects_1d():
-    import sys
-
-    sys.path.insert(0, "kaggle_submission")
     import pytest
-    from my_agent import MyAgent
+
+    from plugins.arc_agi_adapter.my_agent import MyAgent
 
     agent = MyAgent(card_id="x", game_id="nav_basic", seed=0)
     bad = type("F", (), {"frame": [1, 2, 3]})()  # flat ints -> 1D

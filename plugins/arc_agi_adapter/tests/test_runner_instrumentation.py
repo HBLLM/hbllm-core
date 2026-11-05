@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 _ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_ROOT))
-sys.path.insert(0, str(_ROOT / "kaggle_submission"))
 
 from plugins.arc_agi_adapter.local_env import GameState  # noqa: E402
 
@@ -147,7 +146,7 @@ def _runner_module(monkeypatch, factories):
             stub = types.ModuleType("arc_agi")
             stub.Arcade = object  # type: ignore[attr-defined]
             sys.modules["arc_agi"] = stub
-    import kaggle_submission.run_all_25_games as r25
+    import plugins.arc_agi_adapter.run_all_25_games as r25
 
     class _FakeArcade:
         def get_environments(self):
@@ -324,7 +323,7 @@ def test_runner_honors_agent_yield(tmp_path, monkeypatch):
     """Official-loop parity: the runner stops when the agent's own guard yields."""
     factories = {"yieldy": _budget_factory}
     r25 = _runner_module(monkeypatch, factories)
-    from kaggle_submission.my_agent import MyAgent
+    from plugins.arc_agi_adapter.my_agent import MyAgent
 
     # Tiny action budget → agent yields via "action_budget" at step 2.
     monkeypatch.setattr(MyAgent, "ACTIONS_PER_LEVEL", 2)

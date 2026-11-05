@@ -315,7 +315,7 @@ class SandboxedExecutor:
                 "sandboxed": True,
             }
 
-        # Otherwise execute inner_executor in an isolated spawn child process.
+        # Execute inner_executor in an isolated child process; close writer immediately and poll responsively.
         import asyncio
         import multiprocessing
         import pickle
@@ -325,13 +325,26 @@ class SandboxedExecutor:
         except Exception as exc:
             raise PermissionError("untrusted capability must be picklable for isolation") from exc
 
-        ctx: Any = multiprocessing.get_context("fork" if hasattr(os, "fork") else "spawn")
+        start_method = "fork" if hasattr(os, "fork") else "spawn"
+        ctx: Any = multiprocessing.get_context(start_method)
         parent_conn, child_conn = ctx.Pipe(duplex=False)
         proc = ctx.Process(
             target=_sandboxed_child_main,
             args=(child_conn, payload, self.permissions, self.resource_limits),
         )
-        proc.start()
+        orig_mock_torch = os.environ.get("HBLLM_FORCE_MOCK_TORCH")
+        os.environ["HBLLM_FORCE_MOCK_TORCH"] = "1"
+        try:
+            proc.start()
+        finally:
+            if orig_mock_torch is None:
+                os.environ.pop("HBLLM_FORCE_MOCK_TORCH", None)
+            else:
+                os.environ["HBLLM_FORCE_MOCK_TORCH"] = orig_mock_torch
+        try:
+            child_conn.close()
+        except Exception:
+            pass
         timeout = self.resource_limits.timeout_seconds or 5.0
         loop = asyncio.get_running_loop()
         try:
@@ -339,10 +352,6 @@ class SandboxedExecutor:
                 None, lambda: _await_child(proc, parent_conn, timeout)
             )
         finally:
-            try:
-                child_conn.close()
-            except Exception:
-                pass
             parent_conn.close()
         kind, *rest = result
         if kind == "ok":
@@ -363,17 +372,26 @@ def _await_child(proc: Any, conn: Any, timeout: float) -> tuple:
     import time
 
     start_time = time.monotonic()
-    if conn.poll(timeout):
-        try:
-            res = conn.recv()
-        except EOFError:
-            res = ("err", "RuntimeError", f"child exited {proc.exitcode} without result")
-        remaining = max(1.0, timeout - (time.monotonic() - start_time))
-        proc.join(remaining)
-        if proc.is_alive():
-            proc.terminate()
-            proc.join(1)
-        return res
+    while time.monotonic() - start_time < timeout:
+        if conn.poll(0.1):
+            try:
+                res = conn.recv()
+            except EOFError:
+                res = ("err", "RuntimeError", f"child exited {proc.exitcode} without result")
+            remaining = max(1.0, timeout - (time.monotonic() - start_time))
+            proc.join(remaining)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(1)
+            return res
+        if not proc.is_alive():
+            # Child exited without data on pipe
+            try:
+                if conn.poll(0.01):
+                    return conn.recv()
+            except Exception:
+                pass
+            return ("err", "RuntimeError", f"child exited with code {proc.exitcode} without result")
 
     if proc.is_alive():
         proc.terminate()

@@ -163,7 +163,7 @@ from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngi
 from hbllm.hcir.world.cortex_perception import SensoryThalamus
 
 try:
-    from kaggle_submission.constants import ARC_DEFAULT_ACTION_SCHEMAS
+    from plugins.arc_agi_adapter.constants import ARC_DEFAULT_ACTION_SCHEMAS
 except ImportError:
     try:
         from constants import ARC_DEFAULT_ACTION_SCHEMAS  # type: ignore[no-redef]
@@ -926,3 +926,78 @@ class MyAgent(Agent):
         self.level_executed_actions.append((int(action_id), act_data_rec))
 
         return act_enum
+
+
+class CognitiveAgentAdapter:
+    """Wraps MyAgent into the canonical CognitiveBlackbox / driver interface."""
+
+    def __init__(self, agent: MyAgent) -> None:
+        self.agent = agent
+        self.history: list[Any] = []
+        self.last_frame: Any = None
+        self.last_action: Any = None
+
+    def reset_episode(
+        self,
+        retain_dynamics: bool = False,
+        is_new_level: bool = False,
+        level: int | None = None,
+    ) -> None:
+        self.history.clear()
+        self.last_frame = None
+        try:
+            self.agent.reset_episode(
+                retain_dynamics=retain_dynamics, is_new_level=is_new_level, level=level
+            )
+        except TypeError:
+            try:
+                self.agent.reset_episode(retain_dynamics=retain_dynamics, is_new_level=is_new_level)
+            except TypeError:
+                self.agent.reset_episode(retain_dynamics=retain_dynamics)
+
+    def observe(self, driver_input: Any, perception_data: Any = None) -> None:
+        metadata = getattr(driver_input, "metadata", {}) if driver_input else {}
+        self.last_frame = metadata.get("frame_obj")
+        sc = metadata.get("StepCounter")
+        if sc is not None and hasattr(self.agent, "internal_engine") and self.agent.internal_engine:
+            self.agent.internal_engine.set_environmental_step_limit(int(sc))
+        schemas = metadata.get("action_schemas")
+        if schemas:
+            self.agent.action_schemas = schemas
+
+    def decide(self, available_actions: list[Any], source_id: str = "") -> Any:
+        from hbllm.drivers.base import DriverAction
+
+        game_act = self.agent.choose_action(self.history, self.last_frame)
+        self.history.append(self.last_frame)
+
+        if hasattr(game_act, "value"):
+            act_id = int(game_act.value)
+        else:
+            act_id = int(game_act)
+
+        params: dict[str, Any] = {}
+        data = getattr(game_act, "data", None)
+        if data is None and hasattr(game_act, "is_complex") and game_act.is_complex():
+            if hasattr(game_act, "action_data") and game_act.action_data is not None:
+                ad = game_act.action_data
+                data = {"x": getattr(ad, "x", 0), "y": getattr(ad, "y", 0)}
+            else:
+                data = {"x": 0, "y": 0}
+
+        if data is not None and isinstance(data, dict):
+            params = data
+
+        self.last_action = DriverAction(action_id=act_id, parameters=params)
+        return self.last_action
+
+    def update(self, action: Any, feedback: Any, source_id: str = "") -> None:
+        if hasattr(self.agent, "internal_engine") and self.agent.internal_engine is not None:
+            engine = self.agent.internal_engine
+            info = getattr(feedback, "info", {}) if feedback else {}
+            if "StepCounter" in info:
+                engine.set_environmental_step_limit(int(info["StepCounter"]))
+            lvl = int(info.get("levels_completed", 0))
+            if lvl > getattr(self, "_last_lvl", 0):
+                self.history.clear()
+            self._last_lvl = lvl

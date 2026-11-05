@@ -12,6 +12,8 @@ from .arc_macro_actions import (
     register_arc_macro_actions,
 )
 from .arc_perception import ARCPerceptionAdapter, extract_arc_objects
+from .constants import ARC_DEFAULT_ACTION_SCHEMAS
+from .my_agent import CognitiveAgentAdapter, MyAgent
 
 # Register plugin adapter into core registry
 PerceptionRegistry.register("arc_agi", ARCPerceptionAdapter(), set_default=True)
@@ -29,4 +31,7 @@ __all__ = [
     "ArcPrimitiveAction",
     "ArcClickCell",
     "ToggleSwitch",
+    "MyAgent",
+    "CognitiveAgentAdapter",
+    "ARC_DEFAULT_ACTION_SCHEMAS",
 ]

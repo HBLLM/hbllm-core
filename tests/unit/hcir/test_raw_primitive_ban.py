@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SCAN_DIRS = ["hbllm", "plugins", "kaggle_submission"]
+SCAN_DIRS = ["hbllm", "plugins"]
 BANNED = ("add_node", "upsert_node", "remove_node", "add_edge", "remove_edge")
 EXEMPT_FILES = {
     ROOT / "hbllm/hcir/kernel/transaction_manager.py",

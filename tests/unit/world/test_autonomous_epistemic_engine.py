@@ -267,7 +267,7 @@ def test_hierarchical_subgoal_decomposition_multi_stage_switches() -> None:
 
 def test_inductive_hcir_agent_autonomous_wiring() -> None:
     """Verify MyAgent routes cleanly via AutonomousEpistemicEngine."""
-    from kaggle_submission.my_agent import FrameData, GameAction, MyAgent
+    from plugins.arc_agi_adapter.my_agent import FrameData, GameAction, MyAgent
 
     agent = MyAgent()
     assert hasattr(agent, "internal_engine")

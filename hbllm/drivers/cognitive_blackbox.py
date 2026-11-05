@@ -1518,38 +1518,7 @@ class CognitiveBlackbox:
         if grid is None or not isinstance(grid, np.ndarray) or grid.ndim != 2:
             return click_action
 
-        # Check if environment is a discrete toggle / lights-out puzzle solved algebraically
-        # Strictly for non-avatar abstract grids of size <= 256
-        _perm_skill = next(
-            (s for s in state.skill_registry if s.skill_name == "permutation_algebra"), None
-        )
-        if (
-            _perm_skill
-            and hasattr(_perm_skill, "is_toggle_puzzle")
-            and _perm_skill.is_toggle_puzzle
-            and (eg is None or not eg.avatar)
-            and grid.size <= 256
-        ):
-            sol = _perm_skill.solve_lights_out(grid)
-
-            if sol:
-                next_c = sol[0]
-                state.last_action_parameters = {"x": next_c[1], "y": next_c[0]}
-                logger.info(
-                    "CognitiveBlackbox[%s]: Executing algebraic GF(2) toggle click at (%d, %d)",
-                    source_id,
-                    next_c[0],
-                    next_c[1],
-                )
-                return DriverAction(
-                    action_id=click_action.action_id if click_action.action_id is not None else 6,
-                    semantic_intent=SpatialActionIntent.INTERACT,
-                    parameters={"x": next_c[1], "y": next_c[0]},
-                )
-
-        # Check if alternative non-click action should be executed (e.g. Action 7 commit/submit)
-
-        other_actions = [a for a in available_actions if a.action_id != 6]
+        other_actions = [a for a in available_actions if a.action_id != click_action.action_id]
         if other_actions:
             should_try_other = False
             if state.solver_stagnation_counter >= 4 and state.step_count % 4 == 0:
@@ -1586,7 +1555,7 @@ class CognitiveBlackbox:
                 state.entity_usage[leid] = state.entity_usage.get(leid, 0) + 1
                 state.last_action_parameters = {"x": lc, "y": lr}
                 return DriverAction(
-                    action_id=click_action.action_id if click_action.action_id is not None else 6,
+                    action_id=click_action.action_id,
                     semantic_intent=SpatialActionIntent.INTERACT,
                     parameters={"x": lc, "y": lr},
                 )
@@ -1608,11 +1577,6 @@ class CognitiveBlackbox:
             # Filter full-width / full-height borders
             if (max_r - min_r >= H - 3 and max_c - min_c >= W - 3) or (
                 (min_r <= 1 and max_r <= 1) or (min_r >= H - 2 and max_r >= H - 2)
-            ):
-                continue
-            # Filter 1-pixel thin frame lines
-            if (max_r - min_r == 0 and max_c - min_c > 8) or (
-                max_c - min_c == 0 and max_r - min_r > 8
             ):
                 continue
 
@@ -2862,7 +2826,6 @@ class CognitiveBlackbox:
             saved_laser_routing = getattr(state, "laser_routing_skills", None)
             saved_automaton = getattr(state, "automaton_skills", None)
             saved_canvas = getattr(state, "canvas_skills", None)
-            saved_vortex = getattr(state, "vortex_skills", None)
             saved_program = getattr(state, "program_skills", None)
             saved_mirror = getattr(state, "mirror_skills", None)
             saved_failed_hypotheses = set(getattr(state, "failed_skill_hypotheses", set()))
@@ -2930,7 +2893,6 @@ class CognitiveBlackbox:
                 laser_routing_skills=saved_laser_routing,
                 automaton_skills=saved_automaton,
                 canvas_skills=saved_canvas,
-                vortex_skills=saved_vortex,
                 program_skills=saved_program,
                 mirror_skills=saved_mirror,
                 skill_registry=saved_skill_registry,
@@ -2981,7 +2943,7 @@ class CognitiveBlackbox:
             and not state.learned_obstacle_features
             and state.avatar_feature is None
         ):
-            for fallback_id in ["arc_agi", "default"]:
+            for fallback_id in ["default"]:
                 if fallback_id in self._source_states and fallback_id != source_id:
                     fb_state = self._source_states[fallback_id]
                     if (
@@ -3240,17 +3202,6 @@ class CognitiveBlackbox:
                 m.delta_r = 0
                 m.delta_c = 0
                 m.confidence = 0.3
-
-        # Also sync to arc_agi source_id if active
-        if source_id != "arc_agi":
-            arc_state = self.get_state("arc_agi")
-            arc_state.avatar_feature = state.avatar_feature
-            arc_state.step_size = state.step_size
-            arc_state.learned_obstacle_features.update(state.learned_obstacle_features)
-            arc_state.learned_target_features.update(state.learned_target_features)
-            arc_state.learned_traversable_features.update(state.learned_traversable_features)
-            arc_state.action_models.update(state.action_models)
-            arc_state.learned_affordance_rules.update(state.learned_affordance_rules)
 
         # Sync state to workspace and spatial planner
         self.sync_state_to_workspace(source_id)

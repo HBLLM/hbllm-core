@@ -19,9 +19,9 @@ from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngi
 from hbllm.hcir.world.macro_actions import (
     NavigateTo,
 )
-from kaggle_submission.my_agent import MyAgent
 from plugins.arc_agi_adapter.arc_macro_actions import register_arc_macro_actions
 from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+from plugins.arc_agi_adapter.my_agent import MyAgent
 
 
 @pytest.fixture(autouse=True)

@@ -177,17 +177,6 @@ class CounterfactualPlanner:
                 destructible_colors is None or target_col in destructible_colors
             ):
                 predicted[ty, tx] = bg
-            # Vortex/impulse attraction: pull nearby movable pixels within radius 8 toward actuation point
-            if movable_colors:
-                for r in range(max(0, ty - 8), min(H, ty + 9)):
-                    for c in range(max(0, tx - 8), min(W, tx + 9)):
-                        if int(curr[r, c]) in movable_colors and (r, c) != (ty, tx):
-                            dr = 1 if ty > r else (-1 if ty < r else 0)
-                            dc = 1 if tx > c else (-1 if tx < c else 0)
-                            nr, nc = r + dr, c + dc
-                            if 0 <= nr < H and 0 <= nc < W and predicted[nr, nc] in (bg, 0):
-                                predicted[nr, nc] = curr[r, c]
-                                predicted[r, c] = bg
             return predicted
 
         if action_model is None:

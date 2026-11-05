@@ -15,8 +15,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_core_dir = Path(__file__).resolve().parents[2]
+if str(_core_dir) not in sys.path:
+    sys.path.insert(0, str(_core_dir))
 
 
 def _policy_action(policy: str, step: int, available: list[int]) -> tuple[int, dict]:
@@ -131,7 +132,7 @@ def main() -> int:
     for gid in env.game_ids:
         agent = None
         if args.policy is None:
-            from my_agent import MyAgent  # type: ignore[import-not-found]
+            from plugins.arc_agi_adapter.my_agent import MyAgent
 
             agent = MyAgent(card_id="local_suite", game_id=gid, seed=args.seed)
         g = env.make(gid)
