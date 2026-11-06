@@ -76,6 +76,8 @@ _SUBSCRIBED_TOPICS: list[str] = [
     "perception.audio",
     "perception.video",
     "perception.multimodal",
+    "perception.driver.input",
+    "perception.normalized",
     "decision.made",
     "decision.result",
     "planning.goal_created",
@@ -83,6 +85,8 @@ _SUBSCRIBED_TOPICS: list[str] = [
     "planning.plan_created",
     "action.executed",
     "action.result",
+    "action.driver.dispatch",
+    "action.driver.feedback",
     "governance.evaluation",
     "governance.violation",
     "router.query",
@@ -439,10 +443,10 @@ class HCIRBusBridge:
         event: CognitiveEvent,
         message: Message,
     ) -> None:
-        """Direct write to workspace without transaction manager.
+        """Write to the routed workspace tier through that tier's commit authority.
 
-        Used when no TransactionManager is configured (testing/bootstrap).
-        Routes nodes to the appropriate workspace tier.
+        Used when no kernel TransactionManager is configured (testing/bootstrap);
+        the tier workspace's own commit path keeps the write atomic and event-sourced.
         """
         node = self._build_node(kind, event, message)
         if node is None:
@@ -455,13 +459,21 @@ class HCIRBusBridge:
             frame = self._workspace.working.get_frame_by_goal(goal_id)
             if frame is None:
                 frame = self._workspace.create_task_frame(goal_id)
-            frame.workspace.upsert_node(node, author=f"bus_bridge:{event.author}")
+            target_ws = frame.workspace
         elif tier == WorkspaceTier.META:
-            self._workspace.meta.upsert_node(node, author=f"bus_bridge:{event.author}")
+            target_ws = self._workspace.meta
         elif tier == WorkspaceTier.PERSISTENT:
-            self._workspace.persistent.upsert_node(node, author=f"bus_bridge:{event.author}")
+            target_ws = self._workspace.persistent
         else:
-            self._workspace.brain.upsert_node(node, author=f"bus_bridge:{event.author}")
+            target_ws = self._workspace.brain
+        target_ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
+                )
+            ],
+            author=f"bus_bridge:{event.author}",
+        )
 
     def _route_to_tier(self, kind: CognitiveEventKind) -> WorkspaceTier:
         """Determine which workspace tier a cognitive event belongs to."""

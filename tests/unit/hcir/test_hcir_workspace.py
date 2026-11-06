@@ -166,7 +166,10 @@ class TestWorkspaceSnapshots:
 
     def test_create_snapshot_increments_version(self):
         ws = HCIRWorkspaceState()
+        v0 = ws.current_version
         ws.add_node(GoalNode(id="g1", description="a"))
+        assert ws.current_version >= v0 + 1
+        v1 = ws.current_version
         snap = ws.create_snapshot()
-        assert snap.version == 2
-        assert ws.current_version == 2
+        assert snap.version == v1 + 1
+        assert ws.current_version == v1 + 1

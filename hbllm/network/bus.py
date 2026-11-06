@@ -373,8 +373,12 @@ class InProcessBus:
                     continue
 
                 # Tenant Isolation check
-                if sub.tenant_id and message.tenant_id and sub.tenant_id != message.tenant_id:
-                    continue
+                if sub.tenant_id and sub.tenant_id != "*":
+                    msg_tenant = message.tenant_id or "default"
+                    if msg_tenant not in (sub.tenant_id, "*", "system") and not topic.startswith(
+                        "system."
+                    ):
+                        continue
 
                 async def _run_handler(
                     s: Subscription = sub, t: str = topic, m: Message = message

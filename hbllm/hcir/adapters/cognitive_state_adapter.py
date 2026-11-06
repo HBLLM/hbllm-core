@@ -139,8 +139,17 @@ class CognitiveStateAdapter:
         updates them on subsequent calls.
         """
         nodes = self.snapshot_to_nodes(snapshot, tenant_id, author)
-        for node in nodes:
-            workspace.upsert_node(node, author=author)
+        if nodes:
+            workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE, node_id=n.id, node_data=n.model_dump()
+                    )
+                    for n in nodes
+                ],
+                author=author,
+                metadata={"tenant_id": tenant_id},
+            )
         logger.debug("Synced %d cognitive state variables to workspace", len(nodes))
 
     def delta_to_transaction(

@@ -16,20 +16,40 @@ for p in [str(_core_root), str(_plugins_root)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import json
+
+import pytest
 from crafter_adapter import (
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
     CrafterAchievement,
     CrafterAction,
     CrafterActionAdapter,
     CrafterObject,
     CrafterPerceptionAdapter,
+    NativeCrafterWrapper,
     PureHCIRCrafterAgent,
     make_crafter_env,
     run_crafter_benchmark,
 )
 
 
+def test_plugin_manifest() -> None:
+    manifest_path = Path(__file__).resolve().parent.parent / "plugin.json"
+    assert manifest_path.exists(), "plugin.json must exist"
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["name"] == PLUGIN_NAME
+    assert data["version"] == PLUGIN_VERSION
+    assert "crafter_plan_recipe" in data["capabilities"]
+    assert data.get("supports_native_execution") is True
+    assert "supports_standalone_fallback" not in data
+
+
 def test_crafter_environment_lifecycle() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=42)
+    assert isinstance(env, NativeCrafterWrapper)
     obs, info = env.reset(seed=42)
 
     assert obs.player_pos is not None
@@ -47,6 +67,7 @@ def test_crafter_environment_lifecycle() -> None:
 
 
 def test_crafter_perception_adapter() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=101)
     obs, _ = env.reset(seed=101)
 
@@ -66,6 +87,7 @@ def test_crafter_perception_adapter() -> None:
 
 
 def test_crafter_vital_interrupts() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=77)
     obs, _ = env.reset(seed=77)
 
@@ -78,6 +100,7 @@ def test_crafter_vital_interrupts() -> None:
 
 
 def test_crafter_wood_collection() -> None:
+    pytest.importorskip("crafter")
     env = make_crafter_env(seed=12)
     obs, _ = env.reset(seed=12)
     agent = PureHCIRCrafterAgent()
@@ -95,6 +118,7 @@ def test_crafter_wood_collection() -> None:
 
 
 def test_crafter_benchmark_smoke() -> None:
+    pytest.importorskip("crafter")
     data = run_crafter_benchmark("pure-hcir", episodes_per_target=1, base_seed=500)
     assert data["episodes"] >= 1
     assert data["cohort"] == "pure-hcir"

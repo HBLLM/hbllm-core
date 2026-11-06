@@ -1,0 +1,801 @@
+{
+  "benchmark": "Milestone 3 Phase 3: Elastic Particle Dynamics & Angle-of-Incidence Deflection",
+  "timestamp_iso": "2026-10-10T17:43:50Z",
+  "execution_duration_seconds": 3.44,
+  "system_environment": {
+    "python_version": "3.12.15",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit",
+    "numpy_version": "2.3.5"
+  },
+  "comparative_baselines": {
+    "BASELINE_A_PRIMITIVE_ONLY": {
+      "exact_matches": "0/20",
+      "exact_match_pct": 0.0,
+      "wilson_95_ci": [
+        0.0,
+        0.1611
+      ]
+    },
+    "BASELINE_B_HEURISTIC_GREEDY": {
+      "exact_matches": "0/20",
+      "exact_match_pct": 0.0,
+      "wilson_95_ci": [
+        0.0,
+        0.1611
+      ]
+    },
+    "BASELINE_C_TEMPLATE_MEMORIZATION": {
+      "exact_matches": "1/20",
+      "exact_match_pct": 5.0,
+      "wilson_95_ci": [
+        0.0089,
+        0.2361
+      ]
+    },
+    "BASELINE_D_FULL_INDUCTIVE_HCIR": {
+      "exact_matches": "17/20",
+      "exact_match_pct": 85.0,
+      "wilson_95_ci": [
+        0.6396,
+        0.9476
+      ]
+    }
+  },
+  "hcir_family_breakdown": {
+    "single_deflection_billiard": {
+      "exact_matches": "5/5",
+      "exact_match_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    },
+    "multi_rebound_box_reflection": {
+      "exact_matches": "3/5",
+      "exact_match_pct": 60.0,
+      "wilson_95_ci": [
+        0.2307,
+        0.8824
+      ]
+    },
+    "variable_barrier_elastic_bounce": {
+      "exact_matches": "5/5",
+      "exact_match_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    },
+    "absorbing_target_termination": {
+      "exact_matches": "4/5",
+      "exact_match_pct": 80.0,
+      "wilson_95_ci": [
+        0.3755,
+        0.9638
+      ]
+    }
+  },
+  "trials_log": [
+    {
+      "task_id": "m3_p3_single_deflection_billiard_01",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 9.22,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_01",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_01",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_01",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 108.37,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_02",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 11.94,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_02",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_02",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 1.17,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_02",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 102.09,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_03",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 10.42,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_03",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_03",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_03",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 111.77,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_04",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 8.82,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_04",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.01,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_04",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_04",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 376.66,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_05",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 7.71,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_05",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_05",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_single_deflection_billiard_05",
+      "family": "single_deflection_billiard",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 117.03,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_01",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 10.78,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_01",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_01",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_01",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 106.6,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_02",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 12.4,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_02",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_02",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_02",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 119.67,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_03",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 11.17,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_03",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_03",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_03",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 130.4,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_04",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 19.81,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_04",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_04",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_04",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 56.61,
+      "synthesized_operator_name": "synthesis_failed"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_05",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 21.29,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_05",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_05",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_multi_rebound_box_reflection_05",
+      "family": "multi_rebound_box_reflection",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 230.75,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_01",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 18.76,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_01",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_01",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_01",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 323.39,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_02",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 22.2,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_02",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_02",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_02",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 156.04,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_03",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 15.98,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_03",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_03",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_03",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 132.3,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_04",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 25.46,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_04",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_04",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_04",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 172.87,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_05",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 12.27,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_05",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_05",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_variable_barrier_elastic_bounce_05",
+      "family": "variable_barrier_elastic_bounce",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 98.33,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_01",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.78,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_01",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_01",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_01",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 299.21,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_02",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 15.37,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_02",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_02",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_02",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 105.09,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_03",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 10.12,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_03",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_03",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_03",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 113.7,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_04",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 61.11,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_04",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_04",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_04",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 122.27,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_05",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.9,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_05",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_05",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_trajectory"
+    },
+    {
+      "task_id": "m3_p3_absorbing_target_termination_05",
+      "family": "absorbing_target_termination",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 106.25,
+      "synthesized_operator_name": "synthesized_elastic_particle_deflection"
+    }
+  ],
+  "integrity_sha256": "fbc1ba073e28472fe5de7084b6cc7d6c94a500396b6ba86388f79b595e78c427"
+}

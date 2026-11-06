@@ -115,53 +115,90 @@ class NativeAccelerationRegistry:
         return cls._instance
 
     def _discover_capabilities(self) -> None:
-        # 1. HCIR Graph Substrate
-        hcir_graph_available = False
-        try:
-            import hbllm_hcir_graph  # type: ignore[import-not-found] # noqa: F401
+        crates = [
+            (
+                "hcir_graph",
+                "hbllm_hcir_graph",
+                "Persistent HCIR Graph with chunk-granular structural sharing and canonical BLAKE3 hashing",
+            ),
+            (
+                "simulation",
+                "hbllm_simulation_engine",
+                "Rayon multi-threaded counterfactual mental simulation sandbox with geometric stability",
+            ),
+            (
+                "structure_matcher",
+                "hbllm_structure_matcher",
+                "Bitset-accelerated analogical subgraph isomorphism and systematicity alignment",
+            ),
+            (
+                "tokenizer",
+                "hbllm_tokenizer_rs",
+                "SIMD-accelerated Byte-Pair Encoding (BPE) vocab tokenizer",
+            ),
+            (
+                "compute_kernel",
+                "hbllm_compute_kernel",
+                "Vectorized tensor and matrix arithmetic compute kernels",
+            ),
+            (
+                "semantic_search",
+                "hbllm_semantic_search",
+                "Accelerated vector search and cosine similarity ranking",
+            ),
+            (
+                "perception",
+                "hbllm_perception",
+                "Fast 2D/3D visual and spatial perception rasterization kernels",
+            ),
+            (
+                "confidence",
+                "hbllm_confidence",
+                "Bayesian confidence calibration and distribution estimation",
+            ),
+            (
+                "data_tools",
+                "hbllm_data_tools",
+                "Zero-copy streaming JSON/Arrow serialization and data ingest",
+            ),
+            (
+                "policy_eval",
+                "hbllm_policy_eval",
+                "High-throughput rule matching and safety policy evaluation",
+            ),
+            (
+                "concept_extract",
+                "hbllm_concept_extract",
+                "Fast keyword and n-gram lexical concept extraction",
+            ),
+            (
+                "knowledge_graph",
+                "hbllm_knowledge_graph",
+                "High-performance graph traversal and entity relation queries",
+            ),
+            (
+                "network_utils",
+                "hbllm_network_utils",
+                "Optimized packet serialization and protocol encoding",
+            ),
+        ]
 
-            hcir_graph_available = True
-        except ImportError:
-            pass
+        import importlib
 
-        self._capabilities["hcir_graph"] = NativeCapabilityInfo(
-            name="hcir_graph",
-            available=hcir_graph_available,
-            description="Persistent HCIR Graph with chunk-granular structural sharing and canonical BLAKE3 hashing",
-            native_module="hbllm_hcir_graph" if hcir_graph_available else None,
-        )
+        for cap_name, mod_name, desc in crates:
+            available = False
+            try:
+                importlib.import_module(mod_name)
+                available = True
+            except ImportError:
+                pass
 
-        # 2. Simulation Engine
-        sim_available = False
-        try:
-            import hbllm_simulation_engine  # type: ignore[import-not-found] # noqa: F401
-
-            sim_available = True
-        except ImportError:
-            pass
-
-        self._capabilities["simulation"] = NativeCapabilityInfo(
-            name="simulation",
-            available=sim_available,
-            description="Rayon multi-threaded counterfactual mental simulation sandbox with geometric stability",
-            native_module="hbllm_simulation_engine" if sim_available else None,
-        )
-
-        # 3. Structure Matcher
-        matcher_available = False
-        try:
-            import hbllm_structure_matcher  # type: ignore[import-not-found] # noqa: F401
-
-            matcher_available = True
-        except ImportError:
-            pass
-
-        self._capabilities["structure_matcher"] = NativeCapabilityInfo(
-            name="structure_matcher",
-            available=matcher_available,
-            description="Bitset-accelerated analogical subgraph isomorphism and systematicity alignment",
-            native_module="hbllm_structure_matcher" if matcher_available else None,
-        )
+            self._capabilities[cap_name] = NativeCapabilityInfo(
+                name=cap_name,
+                available=available,
+                description=desc,
+                native_module=mod_name if available else None,
+            )
 
     def available(self, capability: str) -> bool:
         """Check if a native acceleration capability is available."""

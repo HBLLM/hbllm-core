@@ -5,6 +5,7 @@ import pytest
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
+    FactNode,
     GoalNode,
     HCIREdge,
     HCIREdgeType,
@@ -14,17 +15,23 @@ from hbllm.hcir.kernel.capability_resolver import (
     CapabilityImplementation,
     CapabilityResolver,
 )
+from hbllm.hcir.kernel.event_bus import KernelEvent, KernelEventBus
+from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
 from hbllm.hcir.kernel.scheduler import (
     CognitiveProcess,
     CognitiveThread,
     KernelInstructionScheduler,
     ProcessState,
 )
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.kernel.verification import create_default_pipeline
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Scope, SecurityLevel
 from hbllm.hcir.validation import (
     GraphValidator,
     ValidationSeverity,
 )
+from hbllm.hcir.workspace import HCIRWorkspaceState
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Graph Validator Tests
@@ -87,6 +94,24 @@ class TestGraphValidator:
         report = validator.validate(graph)
         warnings = [i for i in report.issues if i.severity == ValidationSeverity.WARNING]
         assert len(warnings) >= 1
+
+    def test_orphan_node_detection(self):
+        graph = CognitiveGraph()
+        graph.add_node(GoalNode(id="g1", description="connected_goal"))
+        graph.add_node(BeliefNode(id="b1", claim="connected_belief"))
+        graph.add_node(FactNode(id="f_orphan", claim="standalone_fact"))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.SUPPORTS, sources=["b1"], targets=["g1"])
+        )
+        validator = GraphValidator()
+        report_default = validator.validate(graph)
+        assert len([i for i in report_default.issues if i.code == "ORPHAN_NODE"]) == 0
+
+        report_with_orphans = validator.validate(graph, check_orphans=True)
+        orphans = [i for i in report_with_orphans.issues if i.code == "ORPHAN_NODE"]
+        assert len(orphans) == 1
+        assert orphans[0].node_id == "f_orphan"
+        assert orphans[0].severity == ValidationSeverity.INFO
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -282,3 +307,138 @@ class TestKernelInstructionScheduler:
         sched.dispatch()
         sched.complete("p1", "t1")
         assert proc.state == ProcessState.COMPLETED
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Architectural Consolidation & Advanced Governance Tests
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class MockCapabilityExecutor:
+    def __init__(self, available: bool = True, result: dict | None = None):
+        self._available = available
+        self._result = result or {"status": "ok"}
+
+    @property
+    def is_available(self) -> bool:
+        return self._available
+
+    async def execute(self, params):
+        return self._result
+
+
+class TestKernelArchitecturalConsolidation:
+    @pytest.mark.asyncio
+    async def test_transaction_manager_begin_transaction_context(self):
+        ws = HCIRWorkspaceState()
+        tx_mgr = TransactionManager(ws)
+
+        new_node = GoalNode(id="g_test_begin", description="Test begin_transaction context")
+        async with tx_mgr.begin_transaction() as tx:
+            tx.add_operation(
+                TransactionOperation(
+                    op=TransactionOp.INSERT_NODE,
+                    node=new_node,
+                )
+            )
+            result = await tx.commit()
+
+        assert result.is_committed
+        assert ws.graph.has_node("g_test_begin")
+
+    @pytest.mark.asyncio
+    async def test_transaction_manager_acid_rollback_before_image(self):
+        ws = HCIRWorkspaceState()
+        tx_mgr = TransactionManager(ws)
+
+        initial_node = GoalNode(id="g_initial", description="Original description")
+        async with tx_mgr.begin_transaction() as tx:
+            tx.add_operation(
+                TransactionOperation(
+                    op=TransactionOp.INSERT_NODE,
+                    node=initial_node,
+                )
+            )
+            await tx.commit()
+
+        # Now mutate the node
+        async with tx_mgr.begin_transaction() as tx:
+            tx.add_operation(
+                TransactionOperation(
+                    op=TransactionOp.MODIFY_NODE,
+                    node_id="g_initial",
+                    node_data={"description": "Mutated description"},
+                )
+            )
+            mutate_res = await tx.commit()
+
+        assert ws.graph.get_node("g_initial").description == "Mutated description"
+
+        # ACID Rollback should restore before-image
+        rollback_res = tx_mgr.rollback(mutate_res.id, reason="test_recovery")
+        assert rollback_res.is_committed
+        assert ws.graph.get_node("g_initial").description == "Original description"
+
+    @pytest.mark.asyncio
+    async def test_event_bus_wait_for(self):
+        bus = KernelEventBus()
+
+        async def trigger_event():
+            import asyncio
+
+            await asyncio.sleep(0.01)
+            bus.publish(KernelEvent(event_type="perception.stabilized", payload={"clarity": 0.99}))
+
+        import asyncio
+
+        asyncio.create_task(trigger_event())
+        evt = await bus.wait_for("perception.stabilized", timeout_ms=500)
+        assert evt.event_type == "perception.stabilized"
+        assert evt.payload.get("clarity") == 0.99
+
+    def test_default_verification_pipeline_includes_constitutional_verifier(self):
+        pipeline = create_default_pipeline()
+        verifier_types = [type(v) for v in pipeline]
+        assert ConstitutionalVerifier in verifier_types
+
+    def test_capability_resolver_find_best_and_health_integration(self):
+        from hbllm.hcir.kernel.capability_health import CapabilityHealth, CapabilityHealthRegistry
+        from hbllm.hcir.kernel.capability_resolver import (
+            CapabilityImplementation,
+            CapabilityResolver,
+            PerformanceProfile,
+        )
+
+        health_reg = CapabilityHealthRegistry()
+        resolver = CapabilityResolver(health_registry=health_reg)
+
+        impl_fast = CapabilityImplementation(
+            capability_name="translate",
+            implementation_id="fast_model",
+            priority=10,
+            executor=MockCapabilityExecutor(available=True),
+            performance=PerformanceProfile(avg_latency_ms=10, cost_per_call=0.05, accuracy=0.8),
+        )
+        impl_cheap = CapabilityImplementation(
+            capability_name="translate",
+            implementation_id="cheap_model",
+            priority=5,
+            executor=MockCapabilityExecutor(available=True),
+            performance=PerformanceProfile(avg_latency_ms=50, cost_per_call=0.01, accuracy=0.85),
+        )
+
+        resolver.register(impl_fast)
+        resolver.register(impl_cheap)
+
+        best_fast = resolver.find_best("translate", strategy="fastest")
+        assert best_fast.implementation_id == "fast_model"
+
+        best_cheap = resolver.find_best("translate", strategy="cheapest")
+        assert best_cheap.implementation_id == "cheap_model"
+
+        # Marking translate UNAVAILABLE in health registry should filter it
+        health_reg.update_health(
+            CapabilityHealth(capability_name="translate", status="UNAVAILABLE")
+        )
+        assert resolver.find_best("translate") is None
+        assert resolver.resolve_implementation("translate") is None

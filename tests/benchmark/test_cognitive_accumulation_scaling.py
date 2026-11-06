@@ -34,18 +34,16 @@ class TestCognitiveAccumulationScaling:
         grid_results = {}
 
         for w_label, entity_count in world_scales:
-            for s_label, depth, branch_count in simulation_depths:
-                # Build world state in Native Graph
-                rust_graph = hbllm_hcir_graph.NativeGraph()
-                for i in range(entity_count):
-                    rust_graph.add_node(
-                        f"ent_{i}", "PhysicalObject", "ACTIVE", {"mass": "2.5"}, 100.0
-                    )
-                for i in range(entity_count - 1):
-                    rust_graph.add_edge(
-                        f"rel_{i}", "ADJACENT", [f"ent_{i}"], [f"ent_{i + 1}"], 1.0, {}, 100.0
-                    )
+            # Build world state in Native Graph once per world scale
+            rust_graph = hbllm_hcir_graph.NativeGraph()
+            for i in range(entity_count):
+                rust_graph.add_node(f"ent_{i}", "PhysicalObject", "ACTIVE", {"mass": "2.5"}, 100.0)
+            for i in range(entity_count - 1):
+                rust_graph.add_edge(
+                    f"rel_{i}", "ADJACENT", [f"ent_{i}"], [f"ent_{i + 1}"], 1.0, {}, 100.0
+                )
 
+            for s_label, depth, branch_count in simulation_depths:
                 # Construct branching counterfactual actions
                 branches = []
                 for b in range(branch_count):

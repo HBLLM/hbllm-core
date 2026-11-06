@@ -1,0 +1,1494 @@
+from __future__ import annotations
+
+import logging
+import time
+import uuid
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
+
+from hbllm.hcir.proposition import (
+    Proposition,
+    SpatialContext,
+    TemporalValidity,
+)
+from hbllm.hcir.types import (
+    Attention,
+    BeliefConfidence,
+    CognitiveMode,
+    Confidence,
+    CostMetric,
+    DiscoveryTrigger,
+    EpistemicLifecycle,
+    EvidenceStrength,
+    ExperimentRealityLevel,
+    ExperimentStatus,
+    FalsificationStatus,
+    KnowledgeValue,
+    PerceptualContradictionLevel,
+    PerceptualEpistemicProfile,
+    Priority,
+    Provenance,
+    ResearchStrategyType,
+    Scope,
+    TimeDuration,
+    Timestamp,
+    UncertaintyVector,
+)
+
+__all__ = [
+    # Enums
+    "ActionModality",
+    "CognitiveCategory",
+    "EntityLifecycle",
+    "GoalLifecycle",
+    "HCIREdgeType",
+    "HCIRNodeType",
+    "HypothesisLifecycle",
+    "NodeLifecycle",
+    # Base classes & mixins
+    "EvidenceIntegrationMixin",
+    "HCIRNode",
+    "has_evidence_integration",
+    # Directive nodes
+    "ConstraintNode",
+    "GoalNode",
+    "IntentNode",
+    # Epistemology & discovery nodes
+    "ClaimNode",
+    "ContradictionNode",
+    "EvidenceNode",
+    "ExperimentNode",
+    "FactNode",
+    "HypothesisNode",
+    "ObservationNode",
+    "PerceptualEvidenceNode",
+    "PredictionErrorNode",
+    "PredictionNode",
+    "ResearchObjectiveNode",
+    "ResearchProgramNode",
+    "UnknownNode",
+    # Belief & reasoning nodes
+    "BeliefNode",
+    "BeliefTransitionNode",
+    # Execution nodes
+    "ActionNode",
+    "CapabilityNode",
+    "EventNode",
+    "ResourceNode",
+    # Memory nodes
+    "ConceptNode",
+    "EpisodeNode",
+    "ExternalKnowledgeNode",
+    "ProcedureNode",
+    "SkillNode",
+    "ValueNode",
+    # Perception nodes
+    "AcousticConceptNode",
+    "AudioObservationNode",
+    "VisualConceptNode",
+    "VisualObservationNode",
+    # Learning & adaptation nodes
+    "AdaptationEventNode",
+    "GroundedConceptNode",
+    "LearnedRuleNode",
+    "PredictiveModelNode",
+    # World model nodes
+    "EnvironmentStateNode",
+    "PhysicalEntityNode",
+    "WorldVariableNode",
+    # Registry & Graph
+    "NODE_TYPE_REGISTRY",
+]
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Enumerations
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class HCIRNodeType(StrEnum):
+    """All valid cognitive node types in HCIR."""
+
+    # --- Directives ---
+    GOAL = "goal"
+    CONSTRAINT = "constraint"
+    INTENT = "intent"
+
+    # --- Epistemology hierarchy ---
+    OBSERVATION = "observation"
+    FACT = "fact"
+    BELIEF = "belief"
+    BELIEF_TRANSITION = "belief_transition"
+    HYPOTHESIS = "hypothesis"
+    PREDICTION = "prediction"
+    PREDICTION_ERROR = "prediction_error"
+
+    # --- Discovery & Epistemic ---
+    EVIDENCE = "evidence"  # Structured evidence unit with provenance
+    CLAIM = "claim"  # A testable assertion from any source
+    EXPERIMENT = "experiment"  # A designed experiment to test hypotheses
+    CONTRADICTION = "contradiction"  # An identified contradiction between claims
+    UNKNOWN = "unknown"  # A knowledge gap — discovery starts here
+    RESEARCH_PROGRAM = "research_program"  # A long-lived research program
+    RESEARCH_OBJECTIVE = "research_objective"  # A measurable objective under a program
+
+    # --- Execution ---
+    ACTION = "action"
+    EVENT = "event"
+    RESOURCE = "resource"
+    CAPABILITY = "capability"
+
+    # --- Memory classes ---
+    EPISODE = "episode"
+    CONCEPT = "concept"
+    SKILL = "skill"
+    PROCEDURE = "procedure"
+    VALUE = "value"
+    EXTERNAL_KNOWLEDGE = "external_knowledge"
+
+    # --- Grounded Perception ---
+    VISUAL_OBSERVATION = "visual_observation"
+    VISUAL_CONCEPT = "visual_concept"
+    AUDIO_OBSERVATION = "audio_observation"
+    ACOUSTIC_CONCEPT = "acoustic_concept"
+    PERCEPTUAL_EVIDENCE = "perceptual_evidence"
+
+    # --- World Model & Predictive Cognitive Runtime ---
+    WORLD_VARIABLE = "world_variable"
+    PHYSICAL_ENTITY = "physical_entity"
+    ENVIRONMENT_STATE = "environment_state"
+
+    # --- A14: Prediction-Error-Centered Learning ---
+    LEARNED_RULE = "learned_rule"
+    PREDICTIVE_MODEL = "predictive_model"
+    ADAPTATION_EVENT = "adaptation_event"
+
+    # --- A15: Grounded Concept Formation ---
+    GROUNDED_CONCEPT = "grounded_concept"
+
+
+class HCIREdgeType(StrEnum):
+    """All valid typed edge relationships in HCIR."""
+
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    DEPENDS_ON = "depends_on"
+    REQUIRES = "requires"
+    CAUSES = "causes"
+    TENANT_SCOPE = "tenant_scope"
+
+    # Temporal relations
+    BEFORE = "before"
+    AFTER = "after"
+    DURING = "during"
+    EXPIRES = "expires"
+    VALID_UNTIL = "valid_until"
+
+    # Structural
+    DERIVED_FROM = "derived_from"
+    SIMILAR_TO = "similar_to"
+    CREATED_BY = "created_by"
+    OWNED_BY = "owned_by"
+    PART_OF = "part_of"
+
+    # Epistemic relations — scientific reasoning edges
+    FALSIFIES = "falsifies"  # Evidence that disproves a hypothesis
+    PREDICTS = "predicts"  # Hypothesis predicts an outcome
+    TESTS = "tests"  # Experiment tests a hypothesis
+    REPLICATES = "replicates"  # Experiment reproduces another
+    ANALOGOUS_TO = "analogous_to"  # Structural similarity across domains
+    STRENGTHENS = "strengthens"  # Evidence that increases confidence
+    WEAKENS = "weakens"  # Evidence that decreases confidence
+    REFINES = "refines"  # Hypothesis refines another
+
+    # Cross-modal perception edges
+    CORRELATES_WITH = "correlates_with"  # Temporal/spatial association only (NOT causal)
+    OBSERVED_AS = "observed_as"  # Classifier relationship (observation → classification)
+
+    # World-model identity edges (A13)
+    IDENTIFIES = "identifies"  # Observation → PhysicalEntity (accepted association)
+    POTENTIAL_SAME_AS = "potential_same_as"  # Candidate identity link (hypothesis)
+    SAME_AS = "same_as"  # Confirmed identity equivalence
+
+    # Spatial edges (A13) — distinct from PART_OF (composition)
+    LOCATED_IN = "located_in"  # Spatial containment (Car LOCATED_IN Garage)
+    ABOVE = "above"  # Directional: A above B
+    BELOW = "below"  # Directional: A below B
+    LEFT_OF = "left_of"  # Directional: A left of B
+    RIGHT_OF = "right_of"  # Directional: A right of B
+    NEAR = "near"  # Metric/approximate: A near B
+    TOUCHING = "touching"  # Topological: A touching B
+    OVERLAPPING = "overlapping"  # Topological: A overlapping B
+
+    # A14: Prediction-error-centered learning edges
+    LEARNED_FROM = "learned_from"  # LearnedRule → PredictionError (source errors)
+    CONTRIBUTED_TO = "contributed_to"  # PredictionError → LearnedRule (provenance)
+    ADAPTS = "adapts"  # AdaptationEvent → PredictiveModel
+    ADAPTED_BY = "adapted_by"  # PredictiveModel → AdaptationEvent
+    APPLIES_TO = "applies_to"  # LearnedRule → entity/domain scope
+
+    # A15: Grounded concept formation edges
+    INSTANCE_OF = "instance_of"  # Entity → GroundedConcept (validated membership)
+    GENERALIZES = "generalizes"  # GroundedConcept (specific) → GroundedConcept (abstract)
+    EXEMPLAR_OF = "exemplar_of"  # Entity → GroundedConcept (candidate, pre-validation)
+
+    # A20: Functional, Spatial & Causal/Transitional Schema Relations
+    # --- Spatial Relations ---
+    LOCATED_AT = "located_at"  # Entity located at discrete coordinate/anchor
+    CONTAINS = "contains"  # Container contains item
+    HAS_CAVITY = "has_cavity"  # Container has interior cavity
+    FITS_INSIDE = "fits_inside"  # Item satisfies geometric fit into container
+
+    # --- Functional & Physical Relations ---
+    STABLE_FOR = "stable_for"  # Base is structurally stable for payload
+    PIVOTS_AROUND = "pivots_around"  # Lever/beam pivots on fulcrum
+    AFFORDS = "affords"  # Object/tool affords specific action
+    TRANSMITS_FORCE_TO = "transmits_force_to"  # Tool transmits kinetic force to target
+
+    # --- Causal, Transitional & Agentive Relations ---
+    TRAVELS_ALONG = "travels_along"  # Agent/navigator traverses path
+    CONNECTS = "connects"  # Path connects start and goal
+    BLOCKED_BY = "blocked_by"  # Path or transition obstructed by obstacle
+    AVOIDS = "avoids"  # Agent detours or prevents collision with obstacle
+    HOLDS = "holds"  # Agent grasps tool/object
+    CHANGES_STATE_OF = "changes_state_of"  # Action produces state mutation in target
+
+
+class CognitiveCategory(StrEnum):
+    """High-level cognitive function classification.
+
+    Enables schedulers and attention engines to prioritize by cognitive
+    function rather than concrete node class.
+    """
+
+    PERCEPTION = "perception"
+    MEMORY = "memory"
+    REASONING = "reasoning"
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    REFLECTION = "reflection"
+    VALUE = "value"
+    COMMUNICATION = "communication"
+    DISCOVERY = "discovery"  # Scientific cognition & hypothesis testing
+
+
+class NodeLifecycle(StrEnum):
+    """Generic lifecycle states for any cognitive node."""
+
+    CREATED = "created"
+    OBSERVED = "observed"
+    VALIDATED = "validated"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    FORGOTTEN = "forgotten"
+
+
+class EntityLifecycle(StrEnum):
+    """Lifecycle states for persistent world-model entities (A13).
+
+    RE_IDENTIFIED is intentionally absent — it is a *transition event*,
+    not a durable state.  When an entity is re-identified, it transitions
+    back to TRACKED and a re-identification EventNode is recorded in the
+    event chronicle.
+
+    Lifecycle::
+
+        DISCOVERED → TRACKED → OCCLUDED → TRACKED (via re-identification)
+                                            │
+                                            └──→ FORGOTTEN
+    """
+
+    DISCOVERED = "discovered"
+    TRACKED = "tracked"
+    OCCLUDED = "occluded"
+    FORGOTTEN = "forgotten"
+
+
+class GoalLifecycle(StrEnum):
+    """Specialized lifecycle states for goal nodes."""
+
+    CREATED = "created"
+    PLANNED = "planned"
+    EXECUTING = "executing"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    CONSOLIDATED = "consolidated"
+
+
+class HypothesisLifecycle(StrEnum):
+    """Lifecycle of a scientific hypothesis.
+
+    Tracks how hypotheses evolve through the discovery process::
+
+        GENERATED → EVALUATED → TESTED → SUPPORTED | FALSIFIED → ARCHIVED
+                                       → STRENGTHENED ↗
+    """
+
+    GENERATED = "generated"  # Just created, not yet evaluated
+    EVALUATED = "evaluated"  # Assessed for plausibility and testability
+    TESTED = "tested"  # At least one experiment has been run
+    SUPPORTED = "supported"  # Evidence supports, not yet conclusive
+    STRENGTHENED = "strengthened"  # Multiple lines of evidence confirm
+    WEAKENED = "weakened"  # Some counter-evidence found
+    FALSIFIED = "falsified"  # Critical prediction failed
+    SUPERSEDED = "superseded"  # Replaced by a better hypothesis
+    ARCHIVED = "archived"  # No longer actively investigated
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Node Base & Typed Subclasses
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _new_id(prefix: str = "n") -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+class HCIRNode(BaseModel):
+    """Base class for all typed cognitive graph nodes.
+
+    Subclasses carry domain-specific typed payload fields.
+    The base provides identity, provenance, uncertainty, attention,
+    scope, and lifecycle — shared by every cognitive entity.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(default_factory=lambda: _new_id("n"))
+    node_type: HCIRNodeType
+    category: CognitiveCategory
+    lifecycle: NodeLifecycle = NodeLifecycle.CREATED
+    provenance: Provenance = Field(default_factory=Provenance)
+    uncertainty: UncertaintyVector = Field(default_factory=UncertaintyVector)
+    attention: Attention = Field(default_factory=Attention)
+    scope: Scope = Field(default_factory=Scope)
+    tags: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(default_factory=dict)
+    confidence: float | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.confidence is not None:
+            self.uncertainty.confidence = self.confidence
+
+
+# ── Directive Nodes ──────────────────────────────────────────────────────
+
+
+class IntentNode(HCIRNode):
+    """A user's high-level intent.  Survives even if plans fail."""
+
+    node_type: HCIRNodeType = HCIRNodeType.INTENT
+    category: CognitiveCategory = CognitiveCategory.PLANNING
+    description: str = ""
+    resolved: bool = False
+
+
+class GoalNode(HCIRNode):
+    """An active objective or target state to achieve."""
+
+    node_type: HCIRNodeType = HCIRNodeType.GOAL
+    category: CognitiveCategory = CognitiveCategory.PLANNING
+    goal_lifecycle: GoalLifecycle = GoalLifecycle.CREATED
+    description: str = ""
+    priority: Priority = 0.5
+    resolved: bool = False
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConstraintNode(HCIRNode):
+    """A rule, boundary, or policy restriction."""
+
+    node_type: HCIRNodeType = HCIRNodeType.CONSTRAINT
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    name: str = ""
+    expression: str = ""
+    description: str = ""
+    constraint_type: str = ""
+    target: str = ""
+    enforcement: str = "HARD"  # "HARD" | "SOFT"
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.description and self.target:
+            self.description = self.target
+        elif not self.target and self.description:
+            self.target = self.description
+        if not self.expression and self.description:
+            self.expression = self.description
+
+
+# ── Epistemology Hierarchy ───────────────────────────────────────────────
+
+
+class ObservationNode(HCIRNode):
+    """Raw grounded telemetry from environment, sensors, or user."""
+
+    node_type: HCIRNodeType = HCIRNodeType.OBSERVATION
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    description: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+    sensor_source: str = ""
+    modality: str = ""  # "audio", "visual", "iot", etc.
+    sensor_modality: str = ""
+    temporal_span: dict[str, float] = Field(
+        default_factory=dict
+    )  # {"start_time": ..., "end_time": ...}
+    spatial_span: dict[str, float] | None = (
+        None  # {"azimuth": ..., "elevation": ..., "distance": ...}
+    )
+    provider_provenance: dict[str, Any] | None = (
+        None  # {"provider": ..., "model": ..., "version": ...}
+    )
+    raw_reference: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.modality and self.sensor_modality:
+            self.modality = self.sensor_modality
+        elif not self.sensor_modality and self.modality:
+            self.sensor_modality = self.modality
+        if not self.payload and self.raw_payload:
+            self.payload = self.raw_payload
+        elif not self.raw_payload and self.payload:
+            self.raw_payload = self.payload
+
+
+class VisualObservationNode(ObservationNode):
+    """A visual observation with embedding reference and provenance.
+
+    The actual embedding vector resides in VisualMemory (vector store).
+    HCIR holds the reference, not the vector — keeping the graph
+    lightweight and transactional.
+
+    Architecture::
+
+        HCIR (cognitive state)
+          └── VisualObservationNode
+                 └── embedding_ref ──────→ VisualMemory (vector store)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.VISUAL_OBSERVATION
+    modality: str = "visual"
+    embedding_ref: str = ""  # ID in vector store
+    embedding_space: str = ""  # e.g. "siglip-base-patch16-224-image"
+    embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
+    image_hash: str = ""  # SHA-256 for dedup
+    caption: str = ""  # Optional text description
+    label: str = ""
+    regions: list[dict[str, Any]] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.caption and self.label:
+            self.caption = self.label
+        elif not self.label and self.caption:
+            self.label = self.caption
+        if not self.description and self.caption:
+            self.description = self.caption
+
+
+class FactNode(HCIRNode):
+    """A sensor-verified, grounded observation."""
+
+    node_type: HCIRNodeType = HCIRNodeType.FACT
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    claim: str = ""
+    statement: str = ""
+    certainty: float | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+        if self.certainty is not None:
+            self.uncertainty.confidence = self.certainty
+
+
+class BeliefNode(HCIRNode):
+    """An integrated assertion held by the system.
+
+    Beliefs are the atomic units of knowledge in HBLLM's epistemic
+    architecture. Unlike raw facts, every belief carries confidence,
+    evidence provenance, falsification status, and revision tracking.
+
+    In the epistemic OS, there are no absolute truths — only beliefs
+    with varying confidence. A ``FactNode`` is simply a ``BeliefNode``
+    with confidence >= threshold and strong evidence.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.BELIEF
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    claim: str = ""
+    statement: str = ""
+    epistemic_confidence: float | None = None
+    belief_type: str = "factual"  # factual, causal, procedural, strategic
+    evidence_sources: list[str] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+        if self.epistemic_confidence is not None:
+            self.uncertainty.confidence = self.epistemic_confidence
+
+    # ── Epistemic extensions ────────────────────────────────────────
+    counter_evidence: list[str] = Field(default_factory=list)
+    falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
+    prediction_score: float = 0.0  # Track record of predictions made from this belief
+    current_revision: int = 1
+    latest_transition_id: str = ""
+    revision_history: list[dict[str, Any]] = Field(default_factory=list)
+    # Lightweight summary entries; detailed transition objects live in BeliefTransitionNode / event log
+
+    # ── Multi-dimensional confidence & value ────────────────────────
+    belief_confidence: BeliefConfidence = Field(default_factory=BeliefConfidence)
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
+
+
+class BeliefTransitionNode(HCIRNode):
+    """An event-sourced record of a Bayesian belief state transition.
+
+    Stored in HCIR as an immutable audit node to preserve historical
+    transparency without ballooning the active BeliefNode payload.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.BELIEF_TRANSITION
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    belief_id: str = ""
+    prior_confidence: float = 0.5
+    posterior_confidence: float = 0.5
+    delta: float = 0.0
+    prior_revision: int = 0
+    posterior_revision: int = 1
+    likelihood_ratio: float = 1.0
+    effective_likelihood_ratio: float = 1.0
+    novelty_score: float = 1.0
+    source_evidence_id: str = ""
+    source_event_ids: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class HypothesisNode(HCIRNode):
+    """A candidate claim under evaluation — first-class cognitive entity.
+
+    Hypotheses are the central objects of scientific reasoning.
+    They generate predictions, are tested by experiments, and evolve
+    through a full lifecycle from generation to falsification.
+
+    Lifecycle::
+
+        GENERATED → EVALUATED → TESTED → SUPPORTED → STRENGTHENED
+                                       → WEAKENED  → FALSIFIED
+                                                   → SUPERSEDED
+                                                   → ARCHIVED
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.HYPOTHESIS
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    claim: str = ""
+    statement: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.claim and self.statement:
+            self.claim = self.statement
+        elif not self.statement and self.claim:
+            self.statement = self.claim
+
+    supporting_evidence: list[str] = Field(default_factory=list)
+    counter_evidence: list[str] = Field(default_factory=list)
+
+    # ── Scientific lifecycle ────────────────────────────────────────
+    hypothesis_lifecycle: HypothesisLifecycle = HypothesisLifecycle.GENERATED
+    epistemic_lifecycle: EpistemicLifecycle = EpistemicLifecycle.HYPOTHESIZED
+    falsification_status: FalsificationStatus = FalsificationStatus.UNTESTED
+    novelty: Confidence = 0.5  # How novel is this hypothesis?
+    plausibility: Confidence = 0.5  # How plausible given current evidence?
+    predicted_impact: Confidence = 0.5  # Expected impact if confirmed
+    testability: Confidence = 0.5  # How easily can this be tested?
+    linked_predictions: list[str] = Field(default_factory=list)  # PredictionNode IDs
+    linked_experiments: list[str] = Field(default_factory=list)  # ExperimentNode IDs
+    origin: str = (
+        ""  # How was this hypothesis generated? (e.g., "analogy", "contradiction", "literature")
+    )
+    trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this investigation?
+    research_program_id: str = ""  # Parent research program, if any
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
+
+
+class PredictionNode(HCIRNode):
+    """A testable prediction derived from a hypothesis.
+
+    Every hypothesis must generate at least one prediction.
+    Predictions are tracked against observations.  Success strengthens
+    the parent hypothesis; failure weakens or falsifies it.
+
+    This is Popperian science: hypotheses that don't predict are unfalsifiable.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PREDICTION
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    claim: str = ""
+    predicted_outcome: str = ""
+    time_horizon_ms: TimeDuration = 0
+
+    # ── Verification ────────────────────────────────────────────────
+    hypothesis_id: str = ""  # Which hypothesis generated this prediction?
+    observed_outcome: str = ""  # What actually happened?
+    verified: bool = False  # Has this prediction been checked?
+    verification_timestamp: Timestamp = 0.0
+    prediction_correct: bool | None = None  # None = unverified, True/False = result
+
+
+class PredictionErrorNode(HCIRNode):
+    """Measures the discrepancy between expected and observed outcomes."""
+
+    node_type: HCIRNodeType = HCIRNodeType.PREDICTION_ERROR
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    prediction_id: str = ""
+    predicted_value: Any = None
+    observed_value: Any = None
+    delta: float = 0.0
+    error_magnitude: float = 0.0
+    suspected_cause: str = ""
+
+
+# ── Execution Nodes ──────────────────────────────────────────────────────
+
+
+class ActionModality(StrEnum):
+    """Effector modality of an action."""
+
+    LOCOMOTION = "locomotion"
+    MANIPULATION = "manipulation"
+    TARGETING = "targeting"
+    COGNITIVE = "cognitive"
+
+
+class ActionNode(HCIRNode):
+    """A declarative action, independent of specific tools/plugins.
+
+    Actions declare *intent* and *requirements*.  The CapabilityResolver
+    binds them to concrete implementations at runtime.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.ACTION
+    category: CognitiveCategory = CognitiveCategory.EXECUTION
+    intent: str = ""
+    action_type: str = ""
+    modality: ActionModality = ActionModality.COGNITIVE
+    requirements: list[str] = Field(default_factory=list)
+    produces: list[str] = Field(default_factory=list)
+    estimated_cost: CostMetric = 0
+    risk_factor: float = 0.0
+    permissions: list[str] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.intent and self.action_type:
+            self.intent = self.action_type
+        elif not self.action_type and self.intent:
+            self.action_type = self.intent
+
+
+class EventNode(HCIRNode):
+    """A first-class chronological event tick.
+
+    Examples: UserSpoke, ToolFailed, GoalCompleted, SimulationFinished.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EVENT
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    event_kind: str = ""
+    event_data: dict[str, Any] = Field(default_factory=dict)
+    event_timestamp: Timestamp = Field(default_factory=time.time)
+
+
+class ResourceNode(HCIRNode):
+    """A budget or resource allocation node (cpu, tokens, time, etc.)."""
+
+    node_type: HCIRNodeType = HCIRNodeType.RESOURCE
+    category: CognitiveCategory = CognitiveCategory.EXECUTION
+    resource_type: str = ""  # "cpu", "tokens", "time", "battery", "attention"
+    allocated: float = 0.0
+    consumed: float = 0.0
+    limit: float = 0.0
+    is_hard: bool = True  # Hard = physical limit; Soft = cognitive budget
+
+
+class CapabilityNode(HCIRNode):
+    """Declares what the system or a plugin can do.
+
+    Declarative metadata enables market-based capability selection:
+    the resolver picks the cheapest available implementation that
+    meets the required constraints.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.CAPABILITY
+    category: CognitiveCategory = CognitiveCategory.EXECUTION
+    capability_name: str = ""
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+
+    # ── Declarative metadata for market-based selection ──
+    estimated_cost: CostMetric = 0  # Token cost estimate
+    latency_ms: TimeDuration = 0  # Expected latency in ms
+    cooldown_seconds: float = 0.0  # Minimum interval between invocations
+    requires_approval: bool = False  # Needs governance approval
+    max_concurrent: int = 0  # 0 = unlimited
+    provider: str = ""  # e.g., "local", "mcp", "api", "docker"
+    version: str = "1.0.0"
+
+
+# ── Memory Class Nodes ───────────────────────────────────────────────────
+
+
+class EpisodeNode(HCIRNode):
+    """A recalled episode from conversation or experience history."""
+
+    node_type: HCIRNodeType = HCIRNodeType.EPISODE
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    summary: str = ""
+    outcome: str = ""
+    reward: float = 0.0
+
+
+class ConceptNode(HCIRNode):
+    """A long-term factual concept in semantic memory."""
+
+    node_type: HCIRNodeType = HCIRNodeType.CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    label: str = ""
+    definition: str = ""
+    domain: str = ""
+
+
+class VisualConceptNode(ConceptNode):
+    """A learned visual concept — extends ConceptNode, single hierarchy.
+
+    Role separation::
+
+        prototype_ref  = retrieval accelerator (centroid in vector store)
+        exemplar_refs  = perceptual evidence (actual observation embeddings)
+        HCIR node      = semantic identity
+        BeliefRecord   = epistemic commitment
+
+    The canonical concept identity is this HCIR node.
+    VisualMemory indexes the prototype and exemplar vectors.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.VISUAL_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    prototype_ref: str = ""  # EmbeddingRef ID for centroid
+    embedding_space: str = ""  # e.g. "siglip-base-patch16-224-image"
+    embedding_model: str = ""  # e.g. "google/siglip-base-patch16-224"
+    observation_count: int = 0
+    exemplar_refs: list[str] = Field(default_factory=list)  # EmbeddingRef IDs
+    aliases: list[str] = Field(default_factory=list)
+    last_seen: Timestamp = 0.0
+    contexts: list[str] = Field(default_factory=list)
+
+
+class AudioObservationNode(ObservationNode):
+    """An audio observation in HCIR — "the microphone received this."
+
+    Stores a reference to the audio embedding, not the vector itself.
+    The vector lives in AudioMemory.
+
+    Architecture::
+
+        HCIR (cognitive state)
+          └── AudioObservationNode
+                 └── embedding_ref ──────→ AudioMemory (vector store)
+
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.AUDIO_OBSERVATION
+    modality: str = "audio"
+    label: str = ""  # Human-readable summary
+    embedding_ref: str = ""  # ID in audio vector store
+    embedding_space: str = ""  # e.g. "yamnet-v1"
+    embedding_model: str = ""  # e.g. "mock-audio-v1"
+    audio_hash: str = ""  # SHA-256 for dedup
+    event_type: str = ""  # e.g. "speech", "doorbell", "silence"
+    event_id: str = ""  # Groups related observations
+    start_time: Timestamp = 0.0
+    end_time: Timestamp = 0.0
+    duration: float = 0.0
+    transcript: str = ""  # If speech
+    speaker_ref: str = ""  # Speaker embedding ref
+
+
+class AcousticConceptNode(ConceptNode):
+    """A learned acoustic concept — extends ConceptNode.
+
+    Represents a learned sound pattern (e.g., "my doorbell",
+    "washing machine cycle"). Created by commit_learning(),
+    which creates a cognitive artifact, NOT model training.
+
+    Architecture::
+
+        HCIR (cognitive state)
+          └── AcousticConceptNode
+                 ├── prototype_ref ─────→ AudioMemory (centroid vector)
+                 └── exemplar_refs ─────→ AudioMemory (cluster vectors)
+
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.ACOUSTIC_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    prototype_ref: str = ""  # EmbeddingRef ID for centroid
+    embedding_space: str = ""
+    embedding_model: str = ""
+    observation_count: int = 0
+    exemplar_refs: list[str] = Field(default_factory=list)
+    last_heard: Timestamp = 0.0
+    sound_type: str = ""  # e.g. "event", "ambient", "speech_pattern"
+    contexts: list[str] = Field(default_factory=list)
+
+
+class SkillNode(HCIRNode):
+    """A reusable procedural skill discovered through experience."""
+
+    node_type: HCIRNodeType = HCIRNodeType.SKILL
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    name: str = ""
+    skill_name: str = ""
+    description: str = ""
+    preconditions: list[str] = Field(default_factory=list)
+    postconditions: list[str] = Field(default_factory=list)
+    success_rate: Confidence = 0.5
+    invocation_count: int = 0
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.skill_name and self.name:
+            self.skill_name = self.name
+        elif not self.name and self.skill_name:
+            self.name = self.skill_name
+
+
+class ProcedureNode(HCIRNode):
+    """A multi-step executable recipe."""
+
+    node_type: HCIRNodeType = HCIRNodeType.PROCEDURE
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    name: str = ""
+    procedure_name: str = ""
+    description: str = ""
+    steps: list[str] = Field(default_factory=list)
+    is_atomic: bool = False
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.name and self.procedure_name:
+            self.name = self.procedure_name
+        elif not self.procedure_name and self.name:
+            self.procedure_name = self.name
+
+
+# ── A14: Prediction-Error-Centered Learning Nodes ────────────────────────
+
+
+class LearnedRuleNode(HCIRNode):
+    """An if→then rule extracted from prediction error patterns.
+
+    Not merely a parameter update — this is explicit knowledge
+    constructed from prediction failures.  Provenance is maintained
+    via LEARNED_FROM edges to source PredictionErrorNodes.
+
+    Example::
+
+        LearnedRuleNode(
+            condition="support_surface = absent",
+            prediction="object_motion = downward",
+            confidence=0.81,
+            source_error_count=14,
+            domain="physics",
+        )
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.LEARNED_RULE
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    condition: str = ""  # If-clause: "support_surface = absent"
+    prediction: str = ""  # Then-clause: "object_motion = downward"
+    confidence: Confidence = 0.5
+    source_error_count: int = 0  # How many errors contributed to this rule
+    domain: str = ""  # "physics", "social", "spatial"
+    applies_to_types: list[str] = Field(default_factory=list)  # Entity types
+
+
+class PredictiveModelNode(HCIRNode):
+    """A registered predictive model with tracked accuracy.
+
+    HCIR-native so A12 operators can reason about model reliability.
+    Adaptation history is tracked via ADAPTED_BY edges.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PREDICTIVE_MODEL
+    category: CognitiveCategory = CognitiveCategory.REASONING
+    model_type: str = ""  # "markov", "permanence", "spatial"
+    domain: str = ""  # "physics", "social", "spatial"
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    accuracy: Confidence = 0.5  # Running accuracy
+    calibration: float = 0.5  # How well-calibrated predictions are
+    error_rate: float = 0.0  # Recent error rate
+    adaptation_count: int = 0
+    learning_rate: float = 0.01
+    prediction_count: int = 0
+    created_at: Timestamp = 0.0
+    last_adapted_at: Timestamp = 0.0
+
+
+class AdaptationEventNode(HCIRNode):
+    """A first-class record of a model adaptation.
+
+    Every model mutation is recorded as an AdaptationEventNode,
+    enabling deterministic replay and provenance queries.
+
+    Linked via:
+    - ADAPTS → PredictiveModelNode (target model)
+    - LEARNED_FROM → PredictionErrorNode(s) (triggering errors)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.ADAPTATION_EVENT
+    category: CognitiveCategory = CognitiveCategory.REFLECTION
+    model_id: str = ""
+    adaptation_type: str = ""  # "parameter_update", "rule_extraction", "model_selection"
+    parameters_before: dict[str, Any] = Field(default_factory=dict)
+    parameters_after: dict[str, Any] = Field(default_factory=dict)
+    learning_rate_used: float = 0.0
+    evidence_count: int = 0
+    trigger_error_ids: list[str] = Field(default_factory=list)
+    outcome: str = ""  # "improved", "degraded", "neutral", "" (not yet evaluated)
+
+
+# ── A15: Grounded Concept Formation Node ────────────────────────────────────
+
+
+class GroundedConceptNode(HCIRNode):
+    """A concept discovered from accumulated grounded experience.
+
+    Not a label — a predictive abstraction that generates expectations
+    about entity behavior.  Validated through A14: similarity proposes
+    a concept; prediction justifies a concept.
+
+    Confidence comes from **recent predictive performance**, not from
+    time or instance count.  Low confidence produces a degradation
+    signal rather than immediate deletion.
+
+    Lifecycle::
+
+        EXEMPLAR_OF (candidate phase)
+               ↓
+        predictive utility test
+               ↓
+        INSTANCE_OF (validated phase)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.GROUNDED_CONCEPT
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    concept_name: str = ""  # Internal ID: "C-00417"
+    feature_prototype: dict[str, Any] = Field(default_factory=dict)
+    behavioral_regularities: list[str] = Field(default_factory=list)
+    causal_rule_ids: list[str] = Field(default_factory=list)
+    prediction_accuracy: Confidence = 0.5
+    confidence: Confidence = 0.5  # From predictive performance
+    formation_score: dict[str, float] = Field(default_factory=dict)
+    exemplar_count: int = 0
+    domain: str = ""
+    formation_source: str = ""  # "feature", "behavioral", "predictive"
+    utility_delta: float = 0.0  # concept_accuracy - baseline_accuracy
+    prediction_count: int = 0
+
+
+class ValueNode(HCIRNode):
+    """A preference or value axiom used in decision ranking."""
+
+    node_type: HCIRNodeType = HCIRNodeType.VALUE
+    category: CognitiveCategory = CognitiveCategory.VALUE
+    dimension: str = ""  # e.g., "brevity", "accuracy", "safety"
+    weight: Priority = 0.5
+
+
+class ExternalKnowledgeNode(HCIRNode):
+    """A reference to knowledge from an external source."""
+
+    node_type: HCIRNodeType = HCIRNodeType.EXTERNAL_KNOWLEDGE
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    source_uri: str = ""
+    content_hash: str = ""
+    summary: str = ""
+
+
+# ── Evidence Integration Mixin ───────────────────────────────────────────
+
+
+class EvidenceIntegrationMixin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    """Shared epistemic integration fields for all evidence types.
+
+    This mixin provides the fields that the belief revision pipeline
+    (BeliefManager, TemporalEvidenceModel, Replay) uses to track
+    evidence incorporation.  Both discovery evidence and perceptual
+    evidence participate in the same Bayesian update pipeline via
+    these shared fields.
+
+    This is deliberately NOT an HCIRNode subclass.  The semantic
+    hierarchy remains flat::
+
+        HCIRNode
+        ├── EvidenceNode              (discovery)
+        └── PerceptualEvidenceNode    (perception/embodiment)
+
+    while the epistemic capability is orthogonal::
+
+                 EvidenceIntegrationMixin
+                    /              \\
+        EvidenceNode     PerceptualEvidenceNode
+
+    Usage::
+
+        # Check if a node participates in evidence integration
+        if has_evidence_integration(node):
+            node.incorporation_status = "incorporated"
+    """
+
+    # Fields declared here are picked up by Pydantic when combined
+    # with HCIRNode via multiple inheritance.  Defaults ensure all
+    # fields are optional.
+    evidence_type: EvidenceStrength = EvidenceStrength.OBSERVATIONAL
+    strength: Confidence = 0.5  # Quantitative strength [0.0, 1.0]
+    modality: str = ""  # "audio", "visual", "multimodal", "sensor", etc.
+    epistemic_profile: PerceptualEpistemicProfile | None = None
+    provider_provenance: dict[str, Any] | None = (
+        None  # {"provider": ..., "model": ..., "version": ...}
+    )
+    candidates: list[dict[str, Any]] = Field(
+        default_factory=list
+    )  # Ranked classification candidates
+    incorporation_status: str = "pending"  # pending | incorporated | stale | redundant
+    incorporated_transitions: dict[str, str] = Field(
+        default_factory=dict,
+        description="Idempotency map: {proposition_id: transition_id}. "
+        "Same evidence may legitimately affect multiple propositions.",
+    )
+    novelty_score: float = 1.0  # Composite multidimensional novelty [0.0, 1.0]
+    temporal_pattern: str = "unknown"  # persistent | transition | transient | periodic | unknown
+    last_incorporated_at: Timestamp = 0.0  # Timestamp of most recent incorporation
+
+
+def has_evidence_integration(node: Any) -> bool:
+    """Check if a node has evidence integration fields.
+
+    Use this instead of ``isinstance(node, EvidenceNode)`` when the
+    code needs to work with both discovery and perceptual evidence.
+    """
+    return hasattr(node, "incorporation_status") and hasattr(node, "incorporated_transitions")
+
+
+# ── Discovery & Epistemic Nodes ──────────────────────────────────────────
+
+
+class EvidenceNode(EvidenceIntegrationMixin, HCIRNode):
+    """A structured unit of evidence with full provenance.
+
+    Discovery-specific evidence — papers, experiments, claims.
+    Carries methodology, sample size, and reproducibility metadata
+    used by the discovery engine for evidence quality scoring.
+
+    Shares epistemic integration fields (incorporation_status,
+    incorporated_transitions, novelty_score, temporal_pattern) with
+    ``PerceptualEvidenceNode`` via ``EvidenceIntegrationMixin``.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EVIDENCE
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    claim_id: str = ""  # Which claim does this evidence support/refute?
+    source_uri: str = ""  # Paper DOI, dataset URL, experiment ID, etc.
+    methodology: str = ""  # How was this evidence produced?
+    limitations: list[str] = Field(default_factory=list)
+    dataset_refs: list[str] = Field(default_factory=list)
+    reproducible: bool = False  # Has this been independently reproduced?
+    sample_size: int | None = None  # Statistical sample size, if applicable
+    effect_size: float | None = None  # Measured effect size, if applicable
+
+
+class PerceptualEvidenceNode(EvidenceIntegrationMixin, HCIRNode):
+    """Modality-neutral evidence from any perception provider.
+
+    The UNIVERSAL CONTRACT between raw world sensing and HCIR.
+    Whisper, YOLO, an IMU, and a LiDAR all produce these.
+    HCIR does not care which provider created it.
+
+    Shares epistemic integration fields (incorporation_status,
+    incorporated_transitions, novelty_score, temporal_pattern) with
+    ``EvidenceNode`` via ``EvidenceIntegrationMixin``, enabling both
+    discovery and perceptual evidence to participate in the same
+    Bayesian belief revision pipeline.
+
+    Invariant:
+        Providers emit ``PerceptualObservation``.
+        The ``EvidenceNormalizer`` converts to ``PerceptualEvidenceNode``.
+        HCIR owns state transitions from evidence → belief.
+
+    Examples::
+
+        # Vision (YOLO)
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="person_17", predicate="located_at",
+                object_value="kitchen"),
+            spatial=SpatialContext(
+                frame_id="camera_0",
+                bounding_box=BoundingBox(x1=0.1, y1=0.2, x2=0.5, y2=0.8)),
+        )
+
+        # Audio (Whisper)
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="utterance_42", predicate="transcribed_as",
+                object_value="turn on the lights"),
+        )
+
+        # IMU
+        PerceptualEvidenceNode(
+            proposition=Proposition(
+                subject="robot", predicate="acceleration",
+                object_value=[0.1, -0.3, 9.8], object_type="vector3"),
+        )
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PERCEPTUAL_EVIDENCE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+
+    # What was observed (modality-neutral semantic triple)
+    proposition: Proposition = Field(default_factory=Proposition)
+
+    # Where in the world
+    spatial: SpatialContext | None = None
+
+    # When — with observation/ingestion distinction
+    temporal_validity: TemporalValidity = Field(default_factory=TemporalValidity)
+
+    # Modality-specific opaque payload (schema varies by provider)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClaimNode(HCIRNode):
+    """A testable assertion extracted from any source.
+
+    Claims are the bridge between unstructured knowledge (papers,
+    observations, conversations) and structured epistemic reasoning.
+    Every claim can be supported or contradicted by evidence.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.CLAIM
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    statement: str = ""  # The claim text
+    source_uri: str = ""  # Where this claim came from
+    source_type: str = ""  # "paper", "observation", "simulation", "expert", "inference"
+    extracted_at: Timestamp = 0.0
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    contradicting_evidence_ids: list[str] = Field(default_factory=list)
+    domain: str = ""  # Knowledge domain
+
+
+class ExperimentNode(HCIRNode):
+    """A designed experiment to test one or more hypotheses.
+
+    Experiments are the mechanism through which hypotheses are tested
+    and beliefs are revised.  Each experiment has a reality level
+    (from simulation to physical) that determines its evidential weight
+    and safety requirements.
+
+    The key capability is **discriminative power**: an experiment should
+    ideally distinguish between competing hypotheses, not just confirm one.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.EXPERIMENT
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    hypothesis_ids: list[str] = Field(default_factory=list)  # Hypotheses being tested
+    design: str = ""  # Experiment protocol description
+    variables: dict[str, Any] = Field(default_factory=dict)  # Independent/dependent vars
+    controls: list[str] = Field(default_factory=list)  # Control conditions
+    expected_outcomes: dict[str, str] = Field(
+        default_factory=dict
+    )  # hypothesis_id → predicted outcome
+    actual_outcome: str = ""  # What actually happened
+    reality_level: ExperimentRealityLevel = ExperimentRealityLevel.SIMULATION
+    experiment_status: ExperimentStatus = ExperimentStatus.DESIGNED
+    discriminating_power: Confidence = 0.5  # How well does this distinguish hypotheses?
+    resource_cost: float = 0.0  # Estimated resource cost
+    research_program_id: str = ""  # Parent research program
+
+
+class ContradictionNode(HCIRNode):
+    """An identified contradiction between claims, evidence, observations, or beliefs.
+
+    Contradictions are not errors — they are **opportunities**.
+    Every contradiction potentially reveals a hidden variable,
+    a context dependency, or a flawed assumption.
+
+    The contradiction engine actively searches for these rather
+    than treating them as problems to resolve.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.CONTRADICTION
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    description: str = ""
+    claim_a_id: str = ""  # First conflicting claim/evidence/observation
+    claim_b_id: str = ""  # Second conflicting claim/evidence/observation
+    contradiction_type: str = ""  # "direct", "statistical", "methodological", "contextual"
+    contradiction_level: PerceptualContradictionLevel = (
+        PerceptualContradictionLevel.LEVEL_1_CLASSIFIER_DISAGREEMENT
+    )
+    observation_ids: list[str] = Field(default_factory=list)
+    conflicting_belief_ids: list[str] = Field(default_factory=list)
+    possible_explanations: list[str] = Field(default_factory=list)
+    resolution_status: str = "unresolved"  # "unresolved", "explained", "resolved", "accepted"
+    investigation_priority: Confidence = 0.5
+    discovered_variables: list[str] = Field(default_factory=list)  # Hidden variables found
+
+
+class UnknownNode(HCIRNode):
+    """A knowledge gap — discovery starts here.
+
+    Discovery does not start from facts.  It starts from gaps.
+    Unknowns represent what the system knows it doesn't know.
+    They drive the research agenda by generating hypotheses
+    and prioritizing experiments.
+
+    Example::
+
+        Observation: Patients with X recover faster.
+        Known: Age, Medication, Genetics
+        Unknown: Why? Missing mechanism.
+
+    The discovery loop::
+
+        Observation → Unknown → Hypothesis → Prediction →
+        Experiment → Knowledge
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.UNKNOWN
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    question: str = ""  # What don't we know?
+    context: str = ""  # What do we know around this gap?
+    domain: str = ""  # Knowledge domain
+    trigger: DiscoveryTrigger = DiscoveryTrigger.KNOWLEDGE_GAP  # What triggered this unknown?
+    related_observations: list[str] = Field(default_factory=list)  # ObservationNode IDs
+    related_hypotheses: list[str] = Field(default_factory=list)  # HypothesisNode IDs
+    importance: Confidence = 0.5  # How important is filling this gap?
+    estimated_difficulty: Confidence = 0.5  # How hard is this to resolve?
+    research_program_id: str = ""  # Parent research program
+    objective_id: str = ""  # Parent research objective, if any
+    knowledge_value: KnowledgeValue = Field(default_factory=KnowledgeValue)
+
+
+class ResearchProgramNode(HCIRNode):
+    """A long-lived research program — the cognitive object for sustained inquiry.
+
+    Unlike a TaskFrame (ephemeral, per-goal), a ResearchProgram may persist
+    for months or years.  It owns the full research lifecycle for a single
+    research question and tracks all hypotheses, evidence, experiments,
+    and findings.
+
+    Example::
+
+        ResearchProgram: "Understanding Alzheimer's progression"
+        Contains:
+            Questions (UnknownNodes)
+            Hypotheses (HypothesisNodes)
+            Evidence (EvidenceNodes)
+            Experiments (ExperimentNodes)
+            Findings (BeliefNodes)
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.RESEARCH_PROGRAM
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    title: str = ""
+    research_question: str = ""  # The central question
+    description: str = ""
+    status: str = "active"  # "active", "paused", "completed", "abandoned"
+    hypothesis_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    experiment_ids: list[str] = Field(default_factory=list)
+    unknown_ids: list[str] = Field(default_factory=list)
+    finding_ids: list[str] = Field(default_factory=list)  # Concluded BeliefNode IDs
+    contradiction_ids: list[str] = Field(default_factory=list)
+    objective_ids: list[str] = Field(default_factory=list)  # Research objectives
+    overall_confidence: Confidence = 0.0  # How confident are we in conclusions?
+    current_strategy: ResearchStrategyType = ResearchStrategyType.EXPLORATION
+    started_at: Timestamp = Field(default_factory=time.time)
+    cognitive_mode: CognitiveMode = CognitiveMode.DISCOVERY
+
+
+class ResearchObjectiveNode(HCIRNode):
+    """A measurable research objective under a research program.
+
+    Research programs decompose into objectives, which decompose into
+    questions, which produce unknowns.  This hierarchy scales much
+    better than flat research questions::
+
+        ResearchProgram: "Reduce battery degradation"
+            │
+            ├── Objective: "Find dominant degradation mechanism"
+            │       ├── Question: "Why does degradation accelerate after 800 cycles?"
+            │       │       └── Unknown: "Electrolyte reaction?"
+            │       └── Question: "What role does temperature play?"
+            │               └── Unknown: "Non-linear thermal effects?"
+            │
+            └── Objective: "Develop mitigation strategy"
+                    └── Question: "Can charging profiles reduce degradation?"
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.RESEARCH_OBJECTIVE
+    category: CognitiveCategory = CognitiveCategory.DISCOVERY
+    objective: str = ""  # The measurable objective statement
+    program_id: str = ""  # Parent research program
+    question_ids: list[str] = Field(default_factory=list)  # Questions under this objective
+    success_criteria: str = ""  # How to determine if objective is met
+    progress: Confidence = 0.0  # [0.0, 1.0] progress toward success criteria
+    priority: Priority = 0.5  # Relative priority within program
+
+
+# ── World Model & Predictive Nodes ───────────────────────────────────────
+
+
+class WorldVariableNode(HCIRNode):
+    """An environmental parameter in the world model (e.g. temperature, humidity, market demand)."""
+
+    node_type: HCIRNodeType = HCIRNodeType.WORLD_VARIABLE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    variable_name: str = ""
+    value: Any = None
+    unit: str = ""
+    min_value: float | None = None
+    max_value: float | None = None
+
+
+class PhysicalEntityNode(HCIRNode):
+    """A persistent world-model entity hypothesis (A13).
+
+    Represents the system's current identity hypothesis for an entity in
+    the external world.  This is NOT "the real entity" — it is the
+    currently maintained hypothesis about a persistent thing.
+
+    Epistemic beliefs (existence_belief, identity_belief, location_belief)
+    are NOT stored here.  They are projections of epistemic state,
+    derived from canonical epistemic nodes/transactions when queried.
+    This prevents the entity registry from owning belief state.
+
+    Multiple observations link to a single entity via ``IDENTIFIES`` edges.
+    Candidate identity associations use ``POTENTIAL_SAME_AS`` edges until
+    epistemic evaluation confirms the association.
+    """
+
+    node_type: HCIRNodeType = HCIRNodeType.PHYSICAL_ENTITY
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    entity_name: str = ""
+    name: str = ""
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.entity_name and self.name:
+            self.entity_name = self.name
+        elif not self.name and self.entity_name:
+            self.name = self.entity_name
+        if not self.properties and self.observed_properties:
+            self.properties = self.observed_properties
+        elif not self.observed_properties and self.properties:
+            self.observed_properties = self.properties
+        if self.mass is not None and "mass" not in self.properties:
+            self.properties["mass"] = self.mass
+
+    entity_type: str = ""
+    status: str = "operational"
+    mass: float | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+    observed_properties: dict[str, Any] = Field(default_factory=dict)
+
+    # A13 extensions — lifecycle and temporal tracking
+    entity_lifecycle: EntityLifecycle = EntityLifecycle.DISCOVERED
+    last_observed_at: Timestamp | None = None  # Timestamp of last confirmed observation
+    first_observed_at: Timestamp | None = None  # Timestamp of first discovery
+
+
+class EnvironmentStateNode(HCIRNode):
+    """A macro snapshot of environmental state."""
+
+    node_type: HCIRNodeType = HCIRNodeType.ENVIRONMENT_STATE
+    category: CognitiveCategory = CognitiveCategory.PERCEPTION
+    environment_name: str = ""
+    active_variables: list[str] = Field(default_factory=list)
+    overall_status: str = "nominal"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Node Type Registry — for deserialization & validation
+# ═══════════════════════════════════════════════════════════════════════════
+
+#: Maps ``HCIRNodeType`` enum values to their typed subclass.
+NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
+    # --- Directives ---
+    HCIRNodeType.INTENT: IntentNode,
+    HCIRNodeType.GOAL: GoalNode,
+    HCIRNodeType.CONSTRAINT: ConstraintNode,
+    # --- Epistemology hierarchy ---
+    HCIRNodeType.OBSERVATION: ObservationNode,
+    HCIRNodeType.FACT: FactNode,
+    HCIRNodeType.BELIEF: BeliefNode,
+    HCIRNodeType.BELIEF_TRANSITION: BeliefTransitionNode,
+    HCIRNodeType.HYPOTHESIS: HypothesisNode,
+    HCIRNodeType.PREDICTION: PredictionNode,
+    HCIRNodeType.PREDICTION_ERROR: PredictionErrorNode,
+    # --- Discovery & Epistemic ---
+    HCIRNodeType.EVIDENCE: EvidenceNode,
+    HCIRNodeType.CLAIM: ClaimNode,
+    HCIRNodeType.EXPERIMENT: ExperimentNode,
+    HCIRNodeType.CONTRADICTION: ContradictionNode,
+    HCIRNodeType.UNKNOWN: UnknownNode,
+    HCIRNodeType.RESEARCH_PROGRAM: ResearchProgramNode,
+    HCIRNodeType.RESEARCH_OBJECTIVE: ResearchObjectiveNode,
+    # --- Execution ---
+    HCIRNodeType.ACTION: ActionNode,
+    HCIRNodeType.EVENT: EventNode,
+    HCIRNodeType.RESOURCE: ResourceNode,
+    HCIRNodeType.CAPABILITY: CapabilityNode,
+    # --- Memory classes ---
+    HCIRNodeType.EPISODE: EpisodeNode,
+    HCIRNodeType.CONCEPT: ConceptNode,
+    HCIRNodeType.SKILL: SkillNode,
+    HCIRNodeType.PROCEDURE: ProcedureNode,
+    HCIRNodeType.VALUE: ValueNode,
+    HCIRNodeType.EXTERNAL_KNOWLEDGE: ExternalKnowledgeNode,
+    # --- Grounded Perception ---
+    HCIRNodeType.VISUAL_OBSERVATION: VisualObservationNode,
+    HCIRNodeType.VISUAL_CONCEPT: VisualConceptNode,
+    HCIRNodeType.AUDIO_OBSERVATION: AudioObservationNode,
+    HCIRNodeType.ACOUSTIC_CONCEPT: AcousticConceptNode,
+    HCIRNodeType.PERCEPTUAL_EVIDENCE: PerceptualEvidenceNode,
+    # --- World Model ---
+    HCIRNodeType.WORLD_VARIABLE: WorldVariableNode,
+    HCIRNodeType.PHYSICAL_ENTITY: PhysicalEntityNode,
+    HCIRNodeType.ENVIRONMENT_STATE: EnvironmentStateNode,
+    # --- A14: Prediction-Error-Centered Learning ---
+    HCIRNodeType.LEARNED_RULE: LearnedRuleNode,
+    HCIRNodeType.PREDICTIVE_MODEL: PredictiveModelNode,
+    HCIRNodeType.ADAPTATION_EVENT: AdaptationEventNode,
+    # --- A15: Grounded Concept Formation ---
+    HCIRNodeType.GROUNDED_CONCEPT: GroundedConceptNode,
+}

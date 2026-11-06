@@ -111,6 +111,8 @@ _DEFAULT_TOPIC_MAP: dict[str, CognitiveEventKind] = {
     "perception.audio": CognitiveEventKind.PERCEPTION_RECEIVED,
     "perception.video": CognitiveEventKind.PERCEPTION_RECEIVED,
     "perception.multimodal": CognitiveEventKind.PERCEPTION_RECEIVED,
+    "perception.driver.input": CognitiveEventKind.PERCEPTION_RECEIVED,
+    "perception.normalized": CognitiveEventKind.PERCEPTION_RECEIVED,
     # Decision
     "decision.made": CognitiveEventKind.DECISION_MADE,
     "decision.result": CognitiveEventKind.ACTION_RESULT,
@@ -121,6 +123,8 @@ _DEFAULT_TOPIC_MAP: dict[str, CognitiveEventKind] = {
     # Actions
     "action.executed": CognitiveEventKind.ACTION_EXECUTED,
     "action.result": CognitiveEventKind.ACTION_RESULT,
+    "action.driver.dispatch": CognitiveEventKind.ACTION_EXECUTED,
+    "action.driver.feedback": CognitiveEventKind.ACTION_RESULT,
     # Governance
     "governance.evaluation": CognitiveEventKind.GOVERNANCE_EVALUATED,
     "governance.violation": CognitiveEventKind.GOVERNANCE_BLOCKED,

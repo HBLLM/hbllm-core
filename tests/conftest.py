@@ -13,12 +13,17 @@ import glob
 import os
 import sys
 
-# Ensure llama_venv site-packages are in sys.path so tests can find dependencies
+# Only append external llama_venv if not running in a virtualenv,
+# and strictly match the current Python version to prevent C-extension ABI corruption.
+current_py = f"python{sys.version_info.major}.{sys.version_info.minor}"
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-llama_venv_libs = glob.glob(os.path.join(base_dir, "llama_venv", "lib", "python*", "site-packages"))
-for lib_path in llama_venv_libs:
-    if lib_path not in sys.path:
-        sys.path.append(lib_path)
+if sys.prefix == sys.base_prefix:
+    llama_venv_libs = glob.glob(
+        os.path.join(base_dir, "llama_venv", "lib", current_py, "site-packages")
+    )
+    for lib_path in llama_venv_libs:
+        if lib_path not in sys.path:
+            sys.path.append(lib_path)
 
 # Conditionally mock torch/onnxruntime ONLY when they aren't genuinely installed.
 # If real packages exist, let them be imported normally so ML tests can run.
@@ -124,6 +129,9 @@ except ImportError:
             return self.name == str(other) or str(self) == str(other)
 
     class _MockDevice:
+        type: str
+        index: int | None
+
         def __init__(self, device: Any = "cpu", *args: Any, **kwargs: Any) -> None:
             if isinstance(device, _MockDevice):
                 self.type = device.type

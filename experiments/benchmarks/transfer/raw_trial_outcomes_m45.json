@@ -1,0 +1,1931 @@
+{
+  "condition_summaries": {
+    "path_a_alone": {
+      "mean_total_steps": 13.53,
+      "mean_nav_steps": 9.53,
+      "mean_prediction_errors": 0.47,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 10.3,
+      "goal_attainment_pct": 100.0
+    },
+    "path_a_with_relational_priors": {
+      "mean_total_steps": 12.8,
+      "mean_nav_steps": 8.8,
+      "mean_prediction_errors": 0.0,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 100.0,
+      "goal_attainment_pct": 100.0
+    },
+    "path_a_with_shuffled_priors": {
+      "mean_total_steps": 14.6,
+      "mean_nav_steps": 10.6,
+      "mean_prediction_errors": 0.73,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 35.8,
+      "goal_attainment_pct": 100.0
+    },
+    "path_a_with_unstructured_noise": {
+      "mean_total_steps": 19.53,
+      "mean_nav_steps": 15.53,
+      "mean_prediction_errors": 1.4,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 41.2,
+      "goal_attainment_pct": 93.3
+    },
+    "path_a_with_corrupted_topology": {
+      "mean_total_steps": 16.47,
+      "mean_nav_steps": 12.47,
+      "mean_prediction_errors": 1.27,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 64.4,
+      "goal_attainment_pct": 100.0
+    },
+    "path_a_transfer_disabled_post_learning": {
+      "mean_total_steps": 12.8,
+      "mean_nav_steps": 8.8,
+      "mean_prediction_errors": 0.0,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 100.0,
+      "goal_attainment_pct": 100.0
+    },
+    "path_a_delayed_retention_intervening_learning": {
+      "mean_total_steps": 12.8,
+      "mean_nav_steps": 8.8,
+      "mean_prediction_errors": 0.0,
+      "mean_probe_steps": 4.0,
+      "mean_barriers_retained_pct": 100.0,
+      "goal_attainment_pct": 100.0
+    }
+  },
+  "statistical_distributions": {
+    "path_a_alone": {
+      "total_steps": {
+        "mean": 13.53,
+        "std": 2.5,
+        "ci_95_low": 12.15,
+        "ci_95_high": 14.92
+      },
+      "nav_steps": {
+        "mean": 9.53,
+        "std": 2.5,
+        "ci_95_low": 8.15,
+        "ci_95_high": 10.92
+      },
+      "prediction_errors": {
+        "mean": 0.47,
+        "std": 0.92,
+        "ci_95_low": 0.0,
+        "ci_95_high": 0.97
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 10.33,
+        "std": 21.42,
+        "ci_95_low": 0.0,
+        "ci_95_high": 22.2
+      }
+    },
+    "path_a_with_relational_priors": {
+      "total_steps": {
+        "mean": 12.8,
+        "std": 1.66,
+        "ci_95_low": 11.88,
+        "ci_95_high": 13.72
+      },
+      "nav_steps": {
+        "mean": 8.8,
+        "std": 1.66,
+        "ci_95_low": 7.88,
+        "ci_95_high": 9.72
+      },
+      "prediction_errors": {
+        "mean": 0.0,
+        "std": 0.0,
+        "ci_95_low": 0.0,
+        "ci_95_high": 0.0
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 100.0,
+        "std": 0.0,
+        "ci_95_low": 100.0,
+        "ci_95_high": 100.0
+      }
+    },
+    "path_a_with_shuffled_priors": {
+      "total_steps": {
+        "mean": 14.6,
+        "std": 3.11,
+        "ci_95_low": 12.88,
+        "ci_95_high": 16.32
+      },
+      "nav_steps": {
+        "mean": 10.6,
+        "std": 3.11,
+        "ci_95_low": 8.88,
+        "ci_95_high": 12.32
+      },
+      "prediction_errors": {
+        "mean": 0.73,
+        "std": 1.1,
+        "ci_95_low": 0.12,
+        "ci_95_high": 1.34
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 35.8,
+        "std": 24.18,
+        "ci_95_low": 22.41,
+        "ci_95_high": 49.19
+      }
+    },
+    "path_a_with_unstructured_noise": {
+      "total_steps": {
+        "mean": 19.53,
+        "std": 13.53,
+        "ci_95_low": 12.04,
+        "ci_95_high": 27.02
+      },
+      "nav_steps": {
+        "mean": 15.53,
+        "std": 13.53,
+        "ci_95_low": 8.04,
+        "ci_95_high": 23.02
+      },
+      "prediction_errors": {
+        "mean": 1.4,
+        "std": 2.13,
+        "ci_95_low": 0.22,
+        "ci_95_high": 2.58
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 41.21,
+        "std": 30.77,
+        "ci_95_low": 24.17,
+        "ci_95_high": 58.25
+      }
+    },
+    "path_a_with_corrupted_topology": {
+      "total_steps": {
+        "mean": 16.47,
+        "std": 7.07,
+        "ci_95_low": 12.55,
+        "ci_95_high": 20.38
+      },
+      "nav_steps": {
+        "mean": 12.47,
+        "std": 7.07,
+        "ci_95_low": 8.55,
+        "ci_95_high": 16.38
+      },
+      "prediction_errors": {
+        "mean": 1.27,
+        "std": 1.49,
+        "ci_95_low": 0.44,
+        "ci_95_high": 2.09
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 64.35,
+        "std": 25.73,
+        "ci_95_low": 50.1,
+        "ci_95_high": 78.6
+      }
+    },
+    "path_a_transfer_disabled_post_learning": {
+      "total_steps": {
+        "mean": 12.8,
+        "std": 1.66,
+        "ci_95_low": 11.88,
+        "ci_95_high": 13.72
+      },
+      "nav_steps": {
+        "mean": 8.8,
+        "std": 1.66,
+        "ci_95_low": 7.88,
+        "ci_95_high": 9.72
+      },
+      "prediction_errors": {
+        "mean": 0.0,
+        "std": 0.0,
+        "ci_95_low": 0.0,
+        "ci_95_high": 0.0
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 100.0,
+        "std": 0.0,
+        "ci_95_low": 100.0,
+        "ci_95_high": 100.0
+      }
+    },
+    "path_a_delayed_retention_intervening_learning": {
+      "total_steps": {
+        "mean": 12.8,
+        "std": 1.66,
+        "ci_95_low": 11.88,
+        "ci_95_high": 13.72
+      },
+      "nav_steps": {
+        "mean": 8.8,
+        "std": 1.66,
+        "ci_95_low": 7.88,
+        "ci_95_high": 9.72
+      },
+      "prediction_errors": {
+        "mean": 0.0,
+        "std": 0.0,
+        "ci_95_low": 0.0,
+        "ci_95_high": 0.0
+      },
+      "probe_steps": {
+        "mean": 4.0,
+        "std": 0.0,
+        "ci_95_low": 4.0,
+        "ci_95_high": 4.0
+      },
+      "retention_pct": {
+        "mean": 100.0,
+        "std": 0.0,
+        "ci_95_low": 100.0,
+        "ci_95_high": 100.0
+      }
+    }
+  },
+  "paired_tests": {
+    "relational_vs_alone_nav": {
+      "condition_a": "path_a_alone",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "navigation_steps",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 0.73,
+      "std_difference": 1.28,
+      "standard_error": 0.33,
+      "t_statistic": 2.22,
+      "p_value": 0.0435,
+      "cohens_d": 0.57,
+      "ci_95_low": 0.02,
+      "ci_95_high": 1.44,
+      "is_statistically_significant": true
+    },
+    "relational_vs_alone_errors": {
+      "condition_a": "path_a_alone",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "prediction_errors",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 0.47,
+      "std_difference": 0.92,
+      "standard_error": 0.236,
+      "t_statistic": 1.97,
+      "p_value": 0.0684,
+      "cohens_d": 0.51,
+      "ci_95_low": -0.04,
+      "ci_95_high": 0.97,
+      "is_statistically_significant": false
+    },
+    "noise_vs_relational_nav": {
+      "condition_a": "path_a_with_unstructured_noise",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "navigation_steps",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 6.73,
+      "std_difference": 13.23,
+      "standard_error": 3.415,
+      "t_statistic": 1.97,
+      "p_value": 0.0687,
+      "cohens_d": 0.51,
+      "ci_95_low": -0.59,
+      "ci_95_high": 14.06,
+      "is_statistically_significant": false
+    },
+    "noise_vs_relational_errors": {
+      "condition_a": "path_a_with_unstructured_noise",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "prediction_errors",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 1.4,
+      "std_difference": 2.13,
+      "standard_error": 0.55,
+      "t_statistic": 2.54,
+      "p_value": 0.0234,
+      "cohens_d": 0.66,
+      "ci_95_low": 0.22,
+      "ci_95_high": 2.58,
+      "is_statistically_significant": true
+    },
+    "shuffled_vs_relational_errors": {
+      "condition_a": "path_a_with_shuffled_priors",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "prediction_errors",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 0.73,
+      "std_difference": 1.1,
+      "standard_error": 0.284,
+      "t_statistic": 2.58,
+      "p_value": 0.0217,
+      "cohens_d": 0.67,
+      "ci_95_low": 0.12,
+      "ci_95_high": 1.34,
+      "is_statistically_significant": true
+    },
+    "disabled_vs_relational_nav": {
+      "condition_a": "path_a_transfer_disabled_post_learning",
+      "condition_b": "path_a_with_relational_priors",
+      "metric_name": "navigation_steps",
+      "sample_count_n": 15,
+      "degrees_of_freedom": 14,
+      "mean_difference": 0.0,
+      "std_difference": 0.0,
+      "standard_error": 0.0,
+      "t_statistic": 0.0,
+      "p_value": 1.0,
+      "cohens_d": 0.0,
+      "ci_95_low": 0.0,
+      "ci_95_high": 0.0,
+      "is_statistically_significant": false
+    }
+  },
+  "per_trial_results": [
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 3
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 1
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_open_field",
+      "seed": 42,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 7
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 3
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_u_maze",
+      "seed": 43,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 15,
+      "total_steps": 19,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 23,
+      "total_steps": 27,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_central_pillar",
+      "seed": 44,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 5,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 60,
+      "total_steps": 64,
+      "prediction_errors": 8,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": false,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 4
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 35,
+      "total_steps": 39,
+      "prediction_errors": 5,
+      "barriers_retained_pct": 75.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_corridor",
+      "seed": 45,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 3,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 14,
+      "total_steps": 18,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 46,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 3,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 66.7,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 3
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 1
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_open_field",
+      "seed": 100,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 7
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 3
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_u_maze",
+      "seed": 101,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 27,
+      "total_steps": 31,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 80.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_central_pillar",
+      "seed": 102,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 2,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 75.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 75.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 75.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 4
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 2,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_corridor",
+      "seed": 103,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 5,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 19,
+      "total_steps": 23,
+      "prediction_errors": 3,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 104,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 3,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 12,
+      "total_steps": 16,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 3
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 33.3,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 1
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_open_field",
+      "seed": 2024,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 28.6,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 7
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 42.9,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 3
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_u_maze",
+      "seed": 2025,
+      "probe_steps": 4,
+      "navigation_steps": 6,
+      "total_steps": 10,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 5,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_central_pillar",
+      "seed": 2026,
+      "probe_steps": 4,
+      "navigation_steps": 8,
+      "total_steps": 12,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 0.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 25.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 4
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 15,
+      "total_steps": 19,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 75.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_corridor",
+      "seed": 2027,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 5,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    },
+    {
+      "condition_name": "path_a_alone",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "none"
+      }
+    },
+    {
+      "condition_name": "path_a_with_relational_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "relational_path_b"
+      }
+    },
+    {
+      "condition_name": "path_a_with_shuffled_priors",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 20.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "shuffled_mismatched"
+      }
+    },
+    {
+      "condition_name": "path_a_with_unstructured_noise",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 13,
+      "total_steps": 17,
+      "prediction_errors": 1,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "unstructured_noise",
+        "noise_volume": 5
+      }
+    },
+    {
+      "condition_name": "path_a_with_corrupted_topology",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 40.0,
+      "goal_attained": true,
+      "details": {
+        "priors": "corrupted_topology",
+        "corrupted_coords": 2
+      }
+    },
+    {
+      "condition_name": "path_a_transfer_disabled_post_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervention": "external_channel_severed_post_grounding",
+        "consolidation_mode": "internal_barrier_memory"
+      }
+    },
+    {
+      "condition_name": "path_a_delayed_retention_intervening_learning",
+      "env_id": "env_asymmetric_room",
+      "seed": 2028,
+      "probe_steps": 4,
+      "navigation_steps": 10,
+      "total_steps": 14,
+      "prediction_errors": 0,
+      "barriers_retained_pct": 100.0,
+      "goal_attained": true,
+      "details": {
+        "intervening_distracter_episodes": 5,
+        "distracter_obstacles_encountered": 4,
+        "consolidation_mode": "long_term_spatial_invariants"
+      }
+    }
+  ]
+}

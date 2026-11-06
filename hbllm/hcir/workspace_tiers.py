@@ -16,7 +16,7 @@ Usage::
 
     tiered = TieredWorkspace()
     frame = tiered.create_task_frame("goal_123")
-    frame.workspace.add_node(GoalNode(...))
+    frame.workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=GoalNode(...))])
     tiered.close_task_frame(frame.frame_id, reason="completed")
     tiered.promote("node_xyz", WorkspaceTier.WORKING, WorkspaceTier.PERSISTENT)
 """
@@ -26,8 +26,9 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 from hbllm.hcir.graph import (
     GoalNode,
@@ -39,6 +40,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.query import GraphQuery, QueryResult
 from hbllm.hcir.snapshot import Snapshot
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import BranchMode
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
@@ -50,13 +52,9 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class WorkspaceTier(StrEnum):
-    """The four tiers of the cognitive workspace hierarchy."""
+from hbllm.hcir.tier_types import WorkspaceTier
 
-    WORKING = "working"  # Task frames — ephemeral scratch per goal
-    BRAIN = "brain"  # Session-level cognitive state
-    PERSISTENT = "persistent"  # Long-term memory graph (forever)
-    META = "meta"  # Cognitive performance & self-model
+__all_tier__ = WorkspaceTier  # re-export (canonical home: hbllm.hcir.tier_types)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -89,6 +87,7 @@ class TaskFrame:
         self.workspace: HCIRWorkspaceState = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name=f"frame_{self.frame_id}",
+            tier=WorkspaceTier.WORKING,
         )
         self.created_at: float = time.time()
         self.closed_at: float | None = None
@@ -119,12 +118,33 @@ class TaskFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Interruption Checkpoint & Goal Stack
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class InterruptionCheckpoint(BaseModel):
+    """Snapshot of a suspended task frame when preempted by an urgent interrupt or higher-priority goal."""
+
+    checkpoint_id: str = Field(default_factory=lambda: f"ckpt_{uuid.uuid4().hex[:8]}")
+    parent_goal_id: str
+    parent_frame_id: str
+    interrupt_goal_id: str
+    interrupt_frame_id: str
+    target_conditions: list[str] = Field(default_factory=list)
+    unsatisfied_conditions: list[str] = Field(default_factory=list)
+    in_flight_action: str | None = None
+    step_index: int = 0
+    timestamp: float = Field(default_factory=time.time)
+    context_data: dict[str, Any] = Field(default_factory=dict)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Working Workspace — manages multiple task frames
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class WorkingWorkspace:
-    """Working tier: manages a collection of active task frames.
+    """Working tier: manages a collection of active task frames and hierarchical goal interruptions.
 
     Each frame scopes scratch reasoning to a specific goal.
     Frames persist across conversational turns and are closed when
@@ -134,6 +154,104 @@ class WorkingWorkspace:
     def __init__(self, max_frames: int = 10) -> None:
         self._frames: dict[str, TaskFrame] = {}
         self._max_frames = max_frames
+        self._interruption_stack: list[InterruptionCheckpoint] = []
+        # Set by TieredWorkspace.attach_authorities (WP6.4) — when present, new
+        # frames get a dedicated TransactionManager sharing these stages/bus.
+        self._tm_stages: list[Any] | None = None
+        self._tm_bus: Any | None = None
+
+    @property
+    def interruption_stack(self) -> list[InterruptionCheckpoint]:
+        """Return the current stack of active interruption checkpoints."""
+        return list(self._interruption_stack)
+
+    @property
+    def has_active_interruptions(self) -> bool:
+        """Check whether there are active interrupted goal checkpoints pending resumption."""
+        return len(self._interruption_stack) > 0
+
+    def push_interruption(
+        self,
+        parent_frame_id: str,
+        interrupt_goal_id: str,
+        target_conditions: list[str] | None = None,
+        unsatisfied_conditions: list[str] | None = None,
+        in_flight_action: str | None = None,
+        step_index: int = 0,
+        context_data: dict[str, Any] | None = None,
+    ) -> tuple[TaskFrame, InterruptionCheckpoint]:
+        """Suspend an active parent frame, spawn an interrupt frame, and push checkpoint to stack."""
+        parent_frame = self._frames.get(parent_frame_id)
+        parent_goal = parent_frame.goal_id if parent_frame else "unknown_goal"
+
+        interrupt_frame = self.create_frame(interrupt_goal_id)
+
+        checkpoint = InterruptionCheckpoint(
+            parent_goal_id=parent_goal,
+            parent_frame_id=parent_frame_id,
+            interrupt_goal_id=interrupt_goal_id,
+            interrupt_frame_id=interrupt_frame.frame_id,
+            target_conditions=target_conditions or [],
+            unsatisfied_conditions=unsatisfied_conditions or [],
+            in_flight_action=in_flight_action,
+            step_index=step_index,
+            context_data=context_data or {},
+        )
+        self._interruption_stack.append(checkpoint)
+        logger.info(
+            "Pushed interruption checkpoint %s: parent_goal=%s -> interrupt_goal=%s (stack depth=%d)",
+            checkpoint.checkpoint_id,
+            parent_goal,
+            interrupt_goal_id,
+            len(self._interruption_stack),
+        )
+        return interrupt_frame, checkpoint
+
+    def pop_interruption(
+        self,
+        interrupt_frame_id: str | None = None,
+        reason: str = "completed",
+    ) -> InterruptionCheckpoint | None:
+        """Close current interrupt frame and restore parent checkpoint from stack."""
+        if not self._interruption_stack:
+            return None
+
+        if interrupt_frame_id is not None:
+            idx = next(
+                (
+                    i
+                    for i, ckpt in enumerate(reversed(self._interruption_stack))
+                    if ckpt.interrupt_frame_id == interrupt_frame_id
+                ),
+                None,
+            )
+            if idx is not None:
+                actual_idx = len(self._interruption_stack) - 1 - idx
+                checkpoint = self._interruption_stack.pop(actual_idx)
+            else:
+                checkpoint = self._interruption_stack.pop()
+        else:
+            checkpoint = self._interruption_stack.pop()
+
+        self.close_frame(checkpoint.interrupt_frame_id, reason=reason)
+        logger.info(
+            "Popped interruption checkpoint %s: resumed parent_goal=%s (remaining depth=%d)",
+            checkpoint.checkpoint_id,
+            checkpoint.parent_goal_id,
+            len(self._interruption_stack),
+        )
+        return checkpoint
+
+    def get_active_checkpoint(self, goal_id: str | None = None) -> InterruptionCheckpoint | None:
+        """Get the topmost active checkpoint, optionally matching goal_id."""
+        if not self._interruption_stack:
+            return None
+        if goal_id is None:
+            return self._interruption_stack[-1]
+        for ckpt in reversed(self._interruption_stack):
+            if ckpt.parent_goal_id == goal_id or ckpt.interrupt_goal_id == goal_id:
+                return ckpt
+        return None
 
     @property
     def active_frames(self) -> list[TaskFrame]:
@@ -162,6 +280,19 @@ class WorkingWorkspace:
 
         frame = TaskFrame(goal_id=goal_id)
         self._frames[frame.frame_id] = frame
+        # Attach a dedicated TM when kernel authorities have been provisioned
+        # (WP6.4) so future frames are governed like the tier workspaces.
+        if self._tm_stages is not None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            frame.workspace.attach_transaction_manager(
+                TransactionManager(
+                    frame.workspace,
+                    verification_stages=list(self._tm_stages),
+                    event_bus=self._tm_bus,
+                ),
+                replace=True,
+            )
         logger.info(
             "Created task frame %s for goal %s (total=%d)",
             frame.frame_id,
@@ -253,7 +384,7 @@ class TieredWorkspace:
 
         tiered = TieredWorkspace()
         frame = tiered.create_task_frame("goal_abc")
-        frame.workspace.add_node(GoalNode(description="Plan dinner"))
+        frame.workspace.commit_operations([TransactionOperation(op=TransactionOp.ADD_NODE, node=GoalNode(description="Plan dinner"))
         tiered.promote("node_xyz", WorkspaceTier.WORKING, WorkspaceTier.PERSISTENT)
     """
 
@@ -266,21 +397,24 @@ class TieredWorkspace:
         self.brain = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="brain",
+            tier=WorkspaceTier.BRAIN,
         )
         self.persistent = HCIRWorkspaceState(
             event_store=persistent_store or InMemoryEventStore(),
             branch_mode=BranchMode.LIVE,
             branch_name="persistent",
+            tier=WorkspaceTier.PERSISTENT,
         )
         self.meta = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="meta",
+            tier=WorkspaceTier.META,
         )
 
         self._snapshot_interval = snapshot_interval
         self._commits_since_snapshot: int = 0
 
-    # ── Task Frame Management ────────────────────────────────────────
+    # ── Task Frame & Interruption Management ─────────────────────────
 
     def create_task_frame(self, goal_id: str) -> TaskFrame:
         """Create a new task frame in the working tier."""
@@ -289,6 +423,49 @@ class TieredWorkspace:
     def close_task_frame(self, frame_id: str, reason: str = "completed") -> bool:
         """Close a task frame in the working tier."""
         return self.working.close_frame(frame_id, reason)
+
+    def push_interruption(
+        self,
+        parent_frame_id: str,
+        interrupt_goal_id: str,
+        target_conditions: list[str] | None = None,
+        unsatisfied_conditions: list[str] | None = None,
+        in_flight_action: str | None = None,
+        step_index: int = 0,
+        context_data: dict[str, Any] | None = None,
+    ) -> tuple[TaskFrame, InterruptionCheckpoint]:
+        """Suspend an active parent frame and push an interrupt checkpoint."""
+        return self.working.push_interruption(
+            parent_frame_id=parent_frame_id,
+            interrupt_goal_id=interrupt_goal_id,
+            target_conditions=target_conditions,
+            unsatisfied_conditions=unsatisfied_conditions,
+            in_flight_action=in_flight_action,
+            step_index=step_index,
+            context_data=context_data,
+        )
+
+    def pop_interruption(
+        self,
+        interrupt_frame_id: str | None = None,
+        reason: str = "completed",
+    ) -> InterruptionCheckpoint | None:
+        """Close interrupt frame and restore parent checkpoint from stack."""
+        return self.working.pop_interruption(interrupt_frame_id=interrupt_frame_id, reason=reason)
+
+    def get_active_checkpoint(self, goal_id: str | None = None) -> InterruptionCheckpoint | None:
+        """Get the topmost active checkpoint, optionally matching goal_id."""
+        return self.working.get_active_checkpoint(goal_id=goal_id)
+
+    @property
+    def interruption_stack(self) -> list[InterruptionCheckpoint]:
+        """Return the current stack of active interruption checkpoints."""
+        return self.working.interruption_stack
+
+    @property
+    def has_active_interruptions(self) -> bool:
+        """Check whether there are active interrupted goal checkpoints pending resumption."""
+        return self.working.has_active_interruptions
 
     # ── Tier Access ──────────────────────────────────────────────────
 
@@ -306,6 +483,46 @@ class TieredWorkspace:
         return None
 
     # ── Node Promotion / Demotion ────────────────────────────────────
+
+    def attach_authorities(
+        self,
+        verification_stages: list[Any],
+        event_bus: Any,
+        registry: Any,
+    ) -> None:
+        """Attach a per-tier TransactionManager and issue the system grant (WP6.4).
+
+        Each tier workspace (brain/persistent/meta) and every task frame —
+        present and future — gets its own TM sharing ``event_bus`` and
+        ``verification_stages``. The kernel-issued system grant authorizes
+        tier-internal moves (promote/demote/archive).
+        """
+        from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+        self._authority_registry = registry
+        self._system_grant = registry.issue(
+            "tiered_workspace",
+            {WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT, WorkspaceTier.META},
+        )
+        self._tm_stages = list(verification_stages)
+        self._tm_bus = event_bus
+        # propagate to WorkingWorkspace so future frames attach TMs too
+        self.working._tm_stages = self._tm_stages
+        self.working._tm_bus = event_bus
+        for ws in (self.brain, self.persistent, self.meta):
+            ws.attach_transaction_manager(
+                TransactionManager(ws, verification_stages=self._tm_stages, event_bus=event_bus),
+                replace=True,
+            )
+        for frame in self.working._frames.values():
+            frame.workspace.attach_transaction_manager(
+                TransactionManager(
+                    frame.workspace,
+                    verification_stages=self._tm_stages,
+                    event_bus=event_bus,
+                ),
+                replace=True,
+            )
 
     def promote(
         self,
@@ -337,7 +554,21 @@ class TieredWorkspace:
 
         # Copy the node to the destination tier
         promoted = source_node.model_copy(deep=True)
-        dest_ws.upsert_node(promoted, author=f"promotion:{from_tier}→{to_tier}")
+        result = dest_ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=promoted.id,
+                    node_data=promoted.model_dump(),
+                )
+            ],
+            author=f"promotion:{from_tier}→{to_tier}",
+            grant=getattr(self, "_system_grant", None),
+            metadata={"tier_transfer": "promote", "from": str(from_tier), "to": str(to_tier)},
+        )
+        if not result.is_committed:
+            logger.warning("promote: transaction rejected for node %s → %s", node_id, to_tier)
+            return False
 
         logger.info(
             "Promoted node %s from %s to %s",
@@ -369,9 +600,26 @@ class TieredWorkspace:
         if dest_ws is None:
             return False
 
-        # Move: add to destination, remove from source
-        dest_ws.upsert_node(node.model_copy(deep=True), author=f"demotion:{from_tier}→{to_tier}")
-        source_ws.remove_node(node_id, author=f"demotion:{from_tier}→{to_tier}")
+        # Move: add to destination first, then remove from source (each atomic per tier)
+        author = f"demotion:{from_tier}→{to_tier}"
+        moved = dest_ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_copy(deep=True).model_dump(),
+                )
+            ],
+            author=author,
+            grant=getattr(self, "_system_grant", None),
+            metadata={"tier_transfer": "demote", "from": str(from_tier), "to": str(to_tier)},
+        )
+        if not moved.is_committed:
+            return False
+        source_ws.commit_operations(
+            [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
+            author=author,
+        )
 
         logger.info("Demoted node %s from %s to %s", node_id, from_tier, to_tier)
         return True
@@ -436,23 +684,31 @@ class TieredWorkspace:
         Returns:
             Number of nodes archived.
         """
-        count = 0
-        for node in self.brain.graph.all_nodes():
-            self.persistent.upsert_node(
-                node.model_copy(deep=True),
-                author="archive:brain→persistent",
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
             )
-            count += 1
-
-        # Copy edges too
+            for node in self.brain.graph.all_nodes()
+        ]
+        count = len(ops)
         for edge in self.brain.graph.all_edges():
-            try:
-                self.persistent.add_edge(
-                    edge.model_copy(deep=True),
-                    author="archive:brain→persistent",
+            if self.persistent.get_edge(edge.id) is None:
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE, edge_id=edge.id, edge_data=edge.model_dump()
+                    )
                 )
-            except Exception:
-                pass  # Edge may reference nodes already present
+        if ops:
+            # One atomic transaction: the archive either lands in full or not at all.
+            result = self.persistent.commit_operations(
+                ops,
+                author="archive:brain→persistent",
+                grant=getattr(self, "_system_grant", None),
+                metadata={"tier_transfer": "archive"},
+            )
+            if not result.is_committed:
+                logger.warning("archive_brain rejected: %s", result.annotations)
+                return 0
 
         logger.info("Archived %d brain nodes to persistent workspace", count)
         return count
@@ -541,7 +797,16 @@ class TieredWorkspace:
             sensor_source="tiered_workspace",
             tags=["meta", "self_model", "performance_stats"],
         )
-        self.meta.upsert_node(meta_node, author="tiered_workspace")
+        self.meta.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=meta_node.id,
+                    node_data=meta_node.model_dump(),
+                )
+            ],
+            author="tiered_workspace",
+        )
 
         logger.debug("Meta workspace stats updated: %s", stats)
         return stats

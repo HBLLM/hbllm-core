@@ -27,16 +27,41 @@ def test_epistemic_state_and_causal_graph():
     )
     assert ep.is_empirically_grounded()
 
+    pred_ep = ep.to_causal_predicate()
+    assert pred_ep.variable == "epistemic:b1"
+    assert pred_ep.value == "observation"
+
+    tx_ep = ep.to_transaction_operations()
+    assert len(tx_ep) == 1
+    assert tx_ep[0].node_id == "b1"
+
     causal = WorldCausalGraph(world_id="factory_1")
     causal.add_causal_relation("cooling_failure", "temp_rise", relationship=CausalEdgeType.CAUSES)
     causes = causal.get_causes_for("temp_rise")
     assert len(causes) == 1
     assert causes[0].source_id == "cooling_failure"
 
+    causal_preds = causal.export_causal_predicates()
+    assert len(causal_preds) == 1
+    assert causal_preds[0].variable == "causal_edge:cooling_failure->temp_rise"
+
+    causal_txs = causal.to_transaction_operations()
+    assert len(causal_txs) == 1
+
+    causal_theory = causal.to_world_theory()
+    assert len(causal_theory.goal_predicates) == 1
+
 
 def test_transaction_lifecycle_and_promotion():
     wtx = WorldKernelTransaction(snapshot_hash="hash123")
     assert wtx.snapshot_hash == "hash123"
+
+    pred_wtx = wtx.to_causal_predicate()
+    assert pred_wtx.value == "hash123"
+
+    tx_wtx = wtx.to_transaction_operations()
+    assert len(tx_wtx) == 1
+    assert tx_wtx[0].node_id == wtx.transaction_id
 
     lifecycle = PredictionLifecycle(prediction_id="pred_1")
     assert lifecycle.state == PredictionState.CREATED
@@ -58,6 +83,30 @@ def test_transaction_lifecycle_and_promotion():
     assert receipt is not None
     assert receipt.promotion_id == "promo_pred_1"
 
+    # Forward architecture exports
+    pred_life = lifecycle.to_causal_predicate()
+    assert pred_life.variable == "lifecycle:pred_1"
+    assert pred_life.value == "verified"
+    tx_life = lifecycle.to_transaction_operations()
+    assert len(tx_life) == 1
+    assert tx_life[0].node_id == "pred_pred_1"
+
+    pred_rcpt = receipt.to_causal_predicate()
+    assert pred_rcpt.variable == "promoted_skill:promo_pred_1"
+    assert pred_rcpt.value == "temp_decreased"
+    tx_rcpt = receipt.to_transaction_operations()
+    assert len(tx_rcpt) == 1
+    assert tx_rcpt[0].node_id == "promoted_skill_promo_pred_1"
+
+    afford_rcpt = receipt.to_affordance()
+    assert afford_rcpt.action_id == "reduce_speed"
+    assert afford_rcpt.confidence == 0.88
+
+    promo_preds = promotion.export_causal_predicates()
+    assert len(promo_preds) == 1
+    promo_txs = promotion.to_transaction_operations()
+    assert len(promo_txs) == 1
+
 
 def test_world_model_registry():
     registry = WorldModelRegistry()
@@ -72,3 +121,52 @@ def test_world_model_registry():
     active = registry.list_active_models_for_domain("robotics")
     assert len(active) == 1
     assert active[0].model_id == "physics_v1"
+
+    pred_desc = desc.to_causal_predicate()
+    assert pred_desc.variable == "model:physics_v1"
+    assert pred_desc.value == "active"
+
+    tx_desc = desc.to_transaction_operations()
+    assert len(tx_desc) == 1
+    assert tx_desc[0].node_id == "model_physics_v1"
+
+    reg_preds = registry.export_causal_predicates()
+    assert len(reg_preds) == 1
+
+    reg_txs = registry.to_transaction_operations()
+    assert len(reg_txs) == 1
+
+
+def test_autonomous_epistemic_engine_kernel_services_wiring():
+    from hbllm.hcir.kernel import KernelServices
+    from hbllm.hcir.workspace import HCIRWorkspaceState
+    from hbllm.hcir.workspace_tiers import TieredWorkspace
+    from hbllm.hcir.world import AutonomousEpistemicEngine, EpistemicPhase
+
+    ws = HCIRWorkspaceState()
+    services = KernelServices.create_default(workspace=ws)
+    tiered = TieredWorkspace()
+    services.tiered_workspace = tiered
+
+    engine = AutonomousEpistemicEngine(services=services)
+    assert engine.services is services
+    assert engine.event_bus is services.event_bus
+    assert engine.capability_resolver is services.capability_resolver
+    assert engine.tiered_workspace is tiered
+    assert engine.transaction_manager is not None
+
+    events_received = []
+    services.event_bus.subscribe(
+        "epistemic.phase_transition",
+        lambda evt: events_received.append(evt),
+    )
+
+    engine.transition_to_phase(EpistemicPhase.MENTAL_SIMULATION, reason="test_reason")
+    assert len(events_received) == 1
+    assert events_received[0].data["new_phase"] == "mental_simulation"
+
+    # Test re-attaching kernel services
+    new_services = KernelServices.create_default(workspace=HCIRWorkspaceState())
+    engine.attach_kernel_services(new_services, goal_id="sub_goal")
+    assert engine.services is new_services
+    assert engine.event_bus is new_services.event_bus

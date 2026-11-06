@@ -17,7 +17,7 @@ test-v: ## Run tests with verbose output
 	$(PYTEST) -v --tb=short
 
 test-fast: ## Run unit tests excluding slow/heavy tests
-	$(PYTEST) tests/unit/ -q --tb=short --timeout=60 \
+	$(PYTEST) tests/unit/ -q --tb=short --timeout=60 -n auto \
 		--ignore=tests/unit/brain/test_cognitive_training.py \
 		--ignore=tests/unit/ml/test_lora_loop.py
 

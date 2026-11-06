@@ -5,6 +5,10 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("cv2")
+
 from plugins.developmental_adapter.types import BabyActionType, BabyObjectType
 from plugins.developmental_adapter.video_curriculum import (
     VideoCurriculumCurator,

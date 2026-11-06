@@ -117,8 +117,68 @@ class CompositionalLanguageEngine:
 
         return goal
 
+    @staticmethod
+    def split_compound_clauses(instruction: str) -> list[str]:
+        """Split a compound instruction into sequential sub-clauses."""
+        import re
+
+        norm = instruction.strip()
+        clauses = re.split(
+            r"\s+(?:and\s+then|then|and)\s+|;\s*|,\s*(?:then\s+)?",
+            norm,
+            flags=re.IGNORECASE,
+        )
+        return [c.strip() for c in clauses if c.strip()]
+
+    def parse_compound_instruction(self, instruction: str) -> list[PredicateGoal]:
+        """Parse compound multi-clause instruction into ordered sequence of PredicateGoals."""
+        clauses = self.split_compound_clauses(instruction)
+        goals: list[PredicateGoal] = []
+        for clause in clauses:
+            g = self.parse_instruction_to_goal(clause)
+            if g is not None:
+                goals.append(g)
+        return goals
+
+    def execute_compound_instruction(self, instruction: str) -> list[PlanExecutionResult]:
+        """Execute each clause sequentially in the active environment."""
+        goals = self.parse_compound_instruction(instruction)
+        results: list[PlanExecutionResult] = []
+        for goal in goals:
+            res = self.planner.execute_with_replanning(goal)
+            results.append(res)
+            if not res.success:
+                logger.info(f"Compound step {goal} failed, stopping execution chain.")
+                break
+        return results
+
     def execute_instruction(self, instruction: str) -> PlanExecutionResult:
         """Parse natural language instruction and execute zero-shot plan."""
+        clauses = self.split_compound_clauses(instruction)
+        if len(clauses) > 1:
+            compound_results = self.execute_compound_instruction(instruction)
+            if not compound_results:
+                return PlanExecutionResult(
+                    goal=PredicateGoal(predicate="UNKNOWN", subject_id=""),
+                    steps=[],
+                    success=False,
+                    replan_count=0,
+                    wasted_actions=0,
+                )
+            all_steps = []
+            total_replans = sum(r.replan_count for r in compound_results)
+            total_wasted = sum(r.wasted_actions for r in compound_results)
+            all_success = all(r.success for r in compound_results)
+            for r in compound_results:
+                all_steps.extend(r.steps)
+            return PlanExecutionResult(
+                goal=compound_results[-1].goal,
+                steps=all_steps,
+                success=all_success,
+                replan_count=total_replans,
+                wasted_actions=total_wasted,
+            )
+
         goal = self.parse_instruction_to_goal(instruction)
         if not goal:
             return PlanExecutionResult(
@@ -138,17 +198,36 @@ class CompositionalLanguageEngine:
         target_noun = nouns[index].grounded_symbol if index < len(nouns) else None
         target_adj = adjectives[index].grounded_symbol if index < len(adjectives) else None
 
+        # Check if target_noun is a container concept via LanguageDictionary
+        is_container_concept = False
+        if target_noun:
+            from .dictionary_store import LanguageDictionary
+
+            dict_entry = LanguageDictionary.get_instance().lookup(target_noun)
+            if dict_entry and dict_entry.is_container:
+                is_container_concept = True
+
+        # Determine dynamic mass thresholds from active objects
+        masses = [o.mass for o in self.env.objects.values() if hasattr(o, "mass")]
+        if len(masses) >= 2 and max(masses) > min(masses):
+            heavy_thresh = sum(masses) / len(masses)
+            light_thresh = (min(masses) + heavy_thresh) / 2.0
+        else:
+            heavy_thresh = 5.0
+            light_thresh = 2.5
+
         for oid, obj in self.env.objects.items():
             type_match = (
                 target_noun is None
                 or obj.object_type.value == target_noun
+                or (is_container_concept and obj.is_container)
                 or (target_noun == "box" and obj.is_container)
             )
             adj_match = (
                 target_adj is None
                 or obj.color == target_adj
-                or (target_adj == "heavy" and obj.mass >= 5.0)
-                or (target_adj == "light" and obj.mass <= 2.5)
+                or (target_adj == "heavy" and (obj.mass >= heavy_thresh or obj.mass >= 5.0))
+                or (target_adj == "light" and (obj.mass <= light_thresh or obj.mass <= 2.5))
             )
             if type_match and adj_match:
                 return oid
@@ -156,7 +235,9 @@ class CompositionalLanguageEngine:
         # Partial match on noun only
         if target_noun:
             for oid, obj in self.env.objects.items():
-                if obj.object_type.value == target_noun:
+                if obj.object_type.value == target_noun or (
+                    is_container_concept and obj.is_container
+                ):
                     return oid
 
         return None

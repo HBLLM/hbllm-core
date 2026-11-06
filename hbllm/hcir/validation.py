@@ -27,6 +27,13 @@ from hbllm.hcir.graph import (
     NodeLifecycle,
 )
 
+__all__ = [
+    "GraphValidator",
+    "ValidationIssue",
+    "ValidationReport",
+    "ValidationSeverity",
+]
+
 
 class ValidationSeverity(StrEnum):
     """Severity level of a validation issue."""
@@ -82,15 +89,35 @@ class GraphValidator:
                 print(f"[{issue.severity}] {issue.code}: {issue.message}")
     """
 
-    def validate(self, graph: CognitiveGraph) -> ValidationReport:
-        """Run all validation checks and return a report."""
+    def validate(self, graph: CognitiveGraph, check_orphans: bool = False) -> ValidationReport:
+        """Run all validation checks and return a report.
+
+        Args:
+            graph: The cognitive graph to validate.
+            check_orphans: If True, check for nodes without any connected edges (INFO severity).
+        """
         report = ValidationReport()
         self._check_dangling_edges(graph, report)
         self._check_lifecycle_consistency(graph, report)
         self._check_scope_isolation(graph, report)
         self._check_dependency_cycles(graph, report)
         self._check_truth_utility_separation(graph, report)
+        if check_orphans:
+            self._check_orphan_nodes(graph, report)
         return report
+
+    def _check_orphan_nodes(self, graph: CognitiveGraph, report: ValidationReport) -> None:
+        """Detect nodes that have zero incoming and zero outgoing edges."""
+        for node in graph.all_nodes():
+            if not graph.edges_from(node.id) and not graph.edges_to(node.id):
+                report.add(
+                    ValidationIssue(
+                        severity=ValidationSeverity.INFO,
+                        code="ORPHAN_NODE",
+                        message=f"Node '{node.id}' (type={node.node_type}) has no connected edges.",
+                        node_id=node.id,
+                    )
+                )
 
     def _check_truth_utility_separation(
         self, graph: CognitiveGraph, report: ValidationReport

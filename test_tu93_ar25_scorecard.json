@@ -1,0 +1,50 @@
+{
+  "timestamp": 1791601942.077871,
+  "total_games_tested": 2,
+  "total_levels_passed": 5,
+  "total_levels_possible": 17,
+  "pass_rate_pct": 29.41,
+  "games": {
+    "tu93-0768757b": {
+      "title": "TU93",
+      "levels_passed": 3,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 204.48,
+      "baseline": [
+        19,
+        16,
+        34,
+        42,
+        123,
+        80,
+        14,
+        23,
+        111
+      ]
+    },
+    "ar25-0c556536": {
+      "title": "AR25",
+      "levels_passed": 2,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 2091.87,
+      "baseline": [
+        32,
+        50,
+        75,
+        37,
+        89,
+        159,
+        233,
+        73
+      ]
+    }
+  }
+}

@@ -19,8 +19,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from hbllm.hcir.kernel.capability_sandboxing import infer_capability_permissions
-
 if TYPE_CHECKING:
     from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
 
@@ -51,6 +49,35 @@ class ICapabilityExecutor(Protocol):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Capability Metadata & Performance Profiles
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class ResourceRequirements:
+    """Hardware/software requirements for a capability provider."""
+
+    gpu: bool = False
+    gpu_memory_gb: float = 0.0
+    cpu_cores: int = 0
+    memory_gb: float = 0.0
+    network: bool = False
+    battery_ok: bool = True
+
+
+@dataclass
+class PerformanceProfile:
+    """Performance characteristics of a capability provider."""
+
+    cost_per_call: float = 0.0
+    avg_latency_ms: int = 0
+    max_latency_ms: int = 0
+    accuracy: float = 0.0
+    reliability: float = 1.0
+    throughput_rps: float = 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Capability Implementation Registration
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -60,7 +87,7 @@ class CapabilityImplementation:
     """A concrete implementation that satisfies a capability.
 
     Multiple implementations can serve the same capability.
-    The resolver selects based on priority and availability.
+    The resolver selects based on priority, availability, and resource constraints.
     """
 
     capability_name: str
@@ -70,8 +97,11 @@ class CapabilityImplementation:
     estimated_cost: int = 0  # Tokens
     estimated_latency_ms: int = 0  # Expected latency
     description: str = ""
+    version: str = "1.0.0"
     tags: list[str] = field(default_factory=list)
     required_permissions: set[str] = field(default_factory=set)
+    requirements: ResourceRequirements = field(default_factory=ResourceRequirements)
+    performance: PerformanceProfile = field(default_factory=PerformanceProfile)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -96,14 +126,34 @@ class CapabilityResolver:
         result = await executor.execute({"code": "print('hello')"})
     """
 
-    def __init__(self, sandbox_manager: CapabilitySandboxManager | None = None) -> None:
+    def __init__(
+        self,
+        sandbox_manager: CapabilitySandboxManager | None = None,
+        health_registry: Any | None = None,
+    ) -> None:
         # capability_name → list of implementations (sorted by priority desc)
         self._registry: dict[str, list[CapabilityImplementation]] = {}
         self._total_cost: int = 0
         self.sandbox_manager = sandbox_manager
+        self.health_registry = health_registry
 
     def register(self, impl: CapabilityImplementation) -> None:
-        """Register a capability implementation."""
+        """Register a capability implementation.
+
+        If a sandbox policy is already bound to this provider, the
+        implementation's manifest permissions must all be granted by it —
+        otherwise the registration is denied (WP6.1 least-privilege).
+        """
+        if self.sandbox_manager is not None and impl.required_permissions:
+            policy = self.sandbox_manager.get_policy(impl.capability_name, impl.implementation_id)
+            if policy is not None:
+                denied = [p for p in impl.required_permissions if not policy.grants(p)]
+                if denied:
+                    raise PermissionError(
+                        f"capability '{impl.capability_name}:{impl.implementation_id}' "
+                        f"requires permissions {sorted(denied)} that its sandbox "
+                        "policy does not grant"
+                    )
         impls = self._registry.setdefault(impl.capability_name, [])
         impls.append(impl)
         # Sort by priority descending (highest first)
@@ -126,11 +176,74 @@ class CapabilityResolver:
 
     def resolve_implementation(self, capability_name: str) -> CapabilityImplementation | None:
         """Resolve a capability to its best available implementation object."""
+        if self.health_registry is not None:
+            health = self.health_registry.get_health(capability_name)
+            if health is not None and getattr(health, "status", "") == "UNAVAILABLE":
+                logger.warning(
+                    "Capability '%s' marked UNAVAILABLE by health registry", capability_name
+                )
+                return None
+
         impls = self._registry.get(capability_name, [])
         for impl in impls:
             if impl.executor.is_available:
                 return impl
         return None
+
+    def find_best(
+        self,
+        capability_name: str,
+        strategy: str = "priority",
+        max_cost: float | None = None,
+        max_latency_ms: int | None = None,
+        min_accuracy: float | None = None,
+        require_gpu: bool | None = None,
+    ) -> CapabilityImplementation | None:
+        """Find the best provider matching constraints.
+
+        Strategies:
+            "priority"  — highest priority (default)
+            "cheapest"  — lowest cost_per_call / estimated_cost
+            "fastest"   — lowest avg_latency_ms / estimated_latency_ms
+            "accurate"  — highest accuracy
+        """
+        if self.health_registry is not None:
+            health = self.health_registry.get_health(capability_name)
+            if health is not None and getattr(health, "status", "") == "UNAVAILABLE":
+                return None
+
+        specs = self._registry.get(capability_name, [])
+        candidates: list[CapabilityImplementation] = []
+        for spec in specs:
+            if not spec.executor.is_available:
+                continue
+            cost = spec.performance.cost_per_call or float(spec.estimated_cost)
+            if max_cost is not None and cost > max_cost:
+                continue
+            lat = spec.performance.avg_latency_ms or spec.estimated_latency_ms
+            if max_latency_ms is not None and lat > max_latency_ms:
+                continue
+            if min_accuracy is not None and spec.performance.accuracy < min_accuracy:
+                continue
+            if require_gpu is not None and spec.requirements.gpu != require_gpu:
+                continue
+            candidates.append(spec)
+
+        if not candidates:
+            return None
+
+        if strategy == "cheapest":
+            return min(
+                candidates, key=lambda s: s.performance.cost_per_call or float(s.estimated_cost)
+            )
+        elif strategy == "fastest":
+            return min(
+                candidates, key=lambda s: s.performance.avg_latency_ms or s.estimated_latency_ms
+            )
+        elif strategy == "accurate":
+            return max(candidates, key=lambda s: s.performance.accuracy)
+        else:
+            return candidates[0]
 
     async def resolve(self, capability_name: str) -> ICapabilityExecutor | None:
         """Resolve a capability to its best available executor.
@@ -223,25 +336,9 @@ class CapabilityResolver:
                         )
                     }
 
-            # Derive effective permissions: caller override > policy > implementation > runtime inference
-            effective_perms: set[str] = set()
-            if required_permissions is not None:
-                if isinstance(required_permissions, (list, set, tuple)):
-                    effective_perms.update(required_permissions)
-                else:
-                    effective_perms.add(str(required_permissions))
-            else:
-                # 1. Derive from policy (which declares required permissions or infers them)
-                if policy is not None and getattr(policy, "required_permissions", None):
-                    effective_perms.update(policy.required_permissions)
-                # 2. Derive from implementation
-                if impl.required_permissions:
-                    effective_perms.update(impl.required_permissions)
-                # 3. If still empty, infer from capability name, tags, and runtime params
-                if not effective_perms:
-                    effective_perms.update(
-                        infer_capability_permissions(capability_name, tags=impl.tags, params=params)
-                    )
+            # Effective permissions come ONLY from the implementation
+            # manifest — never from call arguments (WP6.2).
+            effective_perms: set[str] = set(impl.required_permissions)
 
             for perm in effective_perms:
                 if not self.sandbox_manager.check_permission(
@@ -266,6 +363,25 @@ class CapabilityResolver:
                 timeout = policy.resource_limits.timeout_seconds
 
         try:
+            # Non-SYSTEM capabilities execute through the sandboxed child
+            # process (WP6.2): subprocess isolation, resource limits, audit hooks.
+            if policy is not None and getattr(policy, "trust_level", None) != "system":
+                from hbllm.hcir.kernel.capability_sandboxing import (
+                    SandboxedExecutor,
+                    TrustLevel,
+                )
+
+                if policy.trust_level != TrustLevel.SYSTEM:
+                    sandbox_exec = SandboxedExecutor(
+                        inner_executor=impl.executor,
+                        permissions=policy.permissions,
+                        resource_limits=policy.resource_limits,
+                    )
+                    result = await sandbox_exec.execute(params)
+                    if budget is not None:
+                        self._total_cost += impl.estimated_cost
+                    return result
+
             # Tier 2 physical process isolation enforcement
             if (
                 policy is not None

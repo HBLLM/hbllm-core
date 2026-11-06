@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from hbllm.hcir.transactions import (
     HCIRTransaction,
@@ -30,8 +31,13 @@ from hbllm.hcir.transactions import (
     TransactionOp,
 )
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.workspace_tiers import WorkspaceTier
 
 logger = logging.getLogger(__name__)
+
+
+class ConstitutionalViolationError(RuntimeError):
+    """Raised when an operation or transaction violates constitutional constraints."""
 
 
 class ConstitutionalVerifier:
@@ -62,11 +68,13 @@ class ConstitutionalVerifier:
         forbidden_node_types: list[str] | None = None,
         require_provenance: bool = True,
         enforce_scope_isolation: bool = True,
+        authority_registry: Any | None = None,
     ) -> None:
         self._max_operations = max_operations_per_tx
         self._forbidden_types = set(forbidden_node_types or [])
         self._require_provenance = require_provenance
         self._enforce_scope = enforce_scope_isolation
+        self.authority_registry = authority_registry
         self._evaluations: int = 0
         self._approvals: int = 0
         self._rejections: int = 0
@@ -123,6 +131,16 @@ class ConstitutionalVerifier:
 
         # Check 5: Safety (no destructive operations on protected nodes)
         if not self._check_safety(transaction, workspace):
+            self._rejections += 1
+            return False
+
+        # Check 6: Per-tier commit authority (WP6)
+        if not self._check_tier_commit_authority(transaction, workspace):
+            self._rejections += 1
+            return False
+
+        # Check 6b: Persistent skills are removed only via supersession
+        if not self._check_persistent_supersede(transaction, workspace):
             self._rejections += 1
             return False
 
@@ -204,30 +222,55 @@ class ConstitutionalVerifier:
         if not self._enforce_scope:
             return True
 
+        tx_tenant = self._transaction_tenant(transaction)
+        if not tx_tenant:
+            # System-level / unscoped transactions may operate across scopes
+            return True
+
         for op in transaction.operations:
+            node_tenant: str | None = None
             if op.op in (TransactionOp.MODIFY_NODE, TransactionOp.REMOVE_NODE):
                 if op.node_id:
                     existing = workspace.get_node(op.node_id)
                     if existing is not None:
-                        # Check that the transaction's provenance scope
-                        # matches the existing node's scope
-                        tx_tenant = transaction.provenance.session_id or ""
                         node_tenant = existing.scope.tenant_id
+            elif op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+                scope = (op.node_data or {}).get("scope")
+                if isinstance(scope, dict):
+                    node_tenant = scope.get("tenant_id")
+                else:
+                    node_tenant = getattr(scope, "tenant_id", None)
+                target_id = (op.node_data or {}).get("id") or op.node_id
+                existing = workspace.get_node(target_id) if target_id else None
+                if existing is not None and existing.scope.tenant_id != "default":
+                    # Overwriting an existing node is governed by the node's current owner
+                    node_tenant = existing.scope.tenant_id
 
-                        # Allow system-level transactions to modify any scope
-                        if tx_tenant and node_tenant != "default" and tx_tenant != node_tenant:
-                            transaction.annotations.append(
-                                TransactionAnnotation(
-                                    author="ConstitutionalVerifier",
-                                    assertion=(
-                                        f"Scope isolation violation: tx session={tx_tenant} "
-                                        f"vs node tenant={node_tenant}"
-                                    ),
-                                    severity="error",
-                                )
-                            )
-                            return False
+            if node_tenant and node_tenant != "default" and tx_tenant != node_tenant:
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ConstitutionalVerifier",
+                        assertion=(
+                            f"Scope isolation violation: tx tenant={tx_tenant} "
+                            f"vs node tenant={node_tenant}"
+                        ),
+                        severity="error",
+                    )
+                )
+                return False
         return True
+
+    @staticmethod
+    def _transaction_tenant(transaction: HCIRTransaction) -> str | None:
+        tx_metadata = getattr(transaction, "metadata", None)
+        tx_tenant = tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
+        if not tx_tenant and getattr(transaction, "provenance", None):
+            tx_tenant = (
+                getattr(getattr(transaction.provenance, "scope", None), "tenant_id", None)
+                or transaction.provenance.session_id
+                or None
+            )
+        return tx_tenant
 
     def _check_safety(
         self,
@@ -254,3 +297,76 @@ class ConstitutionalVerifier:
                         )
                         return False
         return True
+
+    def _check_tier_commit_authority(
+        self,
+        transaction: HCIRTransaction,
+        workspace: HCIRWorkspaceState,
+    ) -> bool:
+        """Enforce per-tier commit authority via kernel-issued grants (WP6.4).
+
+        WORKING is always open. Higher tiers require a ``commit_grant``
+        metadata entry naming a live grant issued by the kernel's
+        CommitAuthorityRegistry — self-declared author strings are ignored.
+        Without a configured registry (standalone workspaces) all tiers
+        remain open for backward compatibility.
+        """
+        if self.authority_registry is None:
+            return True
+        target_tier = getattr(workspace, "tier", None)
+        if target_tier is None or target_tier == WorkspaceTier.WORKING:
+            return True
+        grant_id = (
+            transaction.metadata.get("commit_grant")
+            if isinstance(transaction.metadata, dict)
+            else None
+        )
+        if self.authority_registry.authorizes(grant_id, target_tier):
+            return True
+        transaction.annotations.append(
+            TransactionAnnotation(
+                author="ConstitutionalVerifier",
+                assertion=(
+                    f"Commit authority violation: no valid grant for tier "
+                    f"'{target_tier}' (author '{transaction.author}')"
+                ),
+                severity="critical",
+            )
+        )
+        return False
+
+    def _check_persistent_supersede(
+        self,
+        transaction: HCIRTransaction,
+        workspace: HCIRWorkspaceState,
+    ) -> bool:
+        """PERSISTENT: removing a SkillNode requires metadata['supersedes']."""
+        if getattr(workspace, "tier", None) != WorkspaceTier.PERSISTENT:
+            return True
+        from hbllm.hcir.graph import SkillNode
+
+        supersedes = (
+            transaction.metadata.get("supersedes")
+            if isinstance(transaction.metadata, dict)
+            else None
+        )
+        for op in transaction.operations:
+            if op.op == TransactionOp.REMOVE_NODE and op.node_id:
+                node = workspace.get_node(op.node_id)
+                if isinstance(node, SkillNode) and not supersedes:
+                    transaction.annotations.append(
+                        TransactionAnnotation(
+                            author="ConstitutionalVerifier",
+                            assertion=(
+                                f"Persistent skill {op.node_id} may only be removed "
+                                "via supersedes (replacement node id in metadata)"
+                            ),
+                            severity="critical",
+                        )
+                    )
+                    return False
+        return True
+
+
+# Backward and architectural compatibility alias
+ConstitutionalTransactionVerifier = ConstitutionalVerifier

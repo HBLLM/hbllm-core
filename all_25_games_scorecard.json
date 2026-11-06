@@ -1,0 +1,30 @@
+{
+  "timestamp": 1793497377.3166342,
+  "total_games_tested": 1,
+  "total_levels_passed": 2,
+  "total_levels_possible": 9,
+  "pass_rate_pct": 22.22,
+  "games": {
+    "tu93-0768757b": {
+      "title": "TU93",
+      "levels_passed": 2,
+      "target_levels": 9,
+      "won": false,
+      "steps": 566,
+      "total_steps": 566,
+      "attempts": 1,
+      "elapsed_seconds": 600.03,
+      "baseline": [
+        19,
+        16,
+        34,
+        42,
+        123,
+        80,
+        14,
+        23,
+        111
+      ]
+    }
+  }
+}

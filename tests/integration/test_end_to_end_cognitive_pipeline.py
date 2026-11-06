@@ -107,7 +107,7 @@ def setup_governed_sandbox_environment() -> tuple[
         SandboxedCapabilityPolicy(
             capability_name="perimeter_control",
             provider_id="door_hardware_v1",
-            trust_level=TrustLevel.VERIFIED,
+            trust_level=TrustLevel.SYSTEM,
             permissions=CapabilityPermissions(
                 allow_filesystem=False,
                 allow_network=False,
@@ -119,7 +119,7 @@ def setup_governed_sandbox_environment() -> tuple[
         SandboxedCapabilityPolicy(
             capability_name="actuator_control",
             provider_id="robotic_arm_v1",
-            trust_level=TrustLevel.VERIFIED,
+            trust_level=TrustLevel.SYSTEM,
             permissions=CapabilityPermissions(
                 allow_filesystem=False,
                 allow_network=False,

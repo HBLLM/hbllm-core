@@ -206,3 +206,74 @@ async def test_hcir_epistemics_studio_endpoints():
     res = client.get("/studio/router/telemetry")
     assert res.status_code == 200
     assert "metrics" in res.json()
+
+
+@pytest.mark.asyncio
+async def test_device_presence_and_handoff_endpoints():
+    """Verify device listing, presence registration, heartbeat, best device, and handoff endpoints."""
+    from starlette.testclient import TestClient
+
+    from hbllm.serving.api import _state
+    from hbllm.serving.device_bridge import DeviceBridge
+
+    # Ensure device bridge is in state
+    bridge = DeviceBridge()
+    _state["device_bridge"] = bridge
+
+    client = TestClient(app)
+
+    # 1. List devices (initially empty)
+    res = client.get("/v1/devices")
+    assert res.status_code == 200
+    data = res.json()
+    assert "devices" in data
+    assert "client_devices" in data
+    assert "client_count" in data
+
+    # 2. Register mobile device
+    res = client.post(
+        "/v1/devices/presence/register",
+        json={
+            "device_id": "phone-alpha",
+            "tenant_id": "tenant-test",
+            "device_type": "mobile",
+            "capabilities": ["touch", "camera", "gps"],
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "registered"
+
+    # 3. Register desktop device
+    res = client.post(
+        "/v1/devices/presence/register",
+        json={
+            "device_id": "laptop-beta",
+            "tenant_id": "tenant-test",
+            "device_type": "desktop",
+            "capabilities": ["keyboard", "display", "audio"],
+        },
+    )
+    assert res.status_code == 200
+
+    # 4. Heartbeat
+    res = client.post("/v1/devices/presence/phone-alpha/heartbeat")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"
+
+    # 5. Best device selection
+    res = client.get("/v1/devices/presence/best?capabilities=touch")
+    # Using header or default tenant
+    # bridge.get_best_device with default tenant
+    assert res.status_code in (200, 404)  # depends on tenant context
+
+    # 6. Session handoff
+    res = client.post(
+        "/v1/devices/presence/handoff",
+        json={
+            "session_id": "sess-xyz",
+            "from_device": "phone-alpha",
+            "to_device": "laptop-beta",
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "handed_off"

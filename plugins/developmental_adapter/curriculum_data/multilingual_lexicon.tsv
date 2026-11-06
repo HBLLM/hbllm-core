@@ -1,0 +1,182 @@
+token	language	category	semantic_role	canonical_target
+box	en	NOUN	CONTAINER	container
+container	en	NOUN	CONTAINER	container
+vessel	en	NOUN	CONTAINER	container
+crate	en	NOUN	CONTAINER	container
+bin	en	NOUN	CONTAINER	container
+chest	en	NOUN	CONTAINER	container
+crucible	en	NOUN	CONTAINER	container
+boîte	fr	NOUN	CONTAINER	container
+boite	fr	NOUN	CONTAINER	container
+récipient	fr	NOUN	CONTAINER	container
+recipient	fr	NOUN	CONTAINER	container
+vaisseau	fr	NOUN	CONTAINER	container
+caisse	fr	NOUN	CONTAINER	container
+coffre	fr	NOUN	CONTAINER	container
+creuset	fr	NOUN	CONTAINER	container
+caja	es	NOUN	CONTAINER	container
+recipiente	es	NOUN	CONTAINER	container
+vaso	es	NOUN	CONTAINER	container
+arca	es	NOUN	CONTAINER	container
+cofre	es	NOUN	CONTAINER	container
+crisol	es	NOUN	CONTAINER	container
+kasten	de	NOUN	CONTAINER	container
+schachtel	de	NOUN	CONTAINER	container
+behälter	de	NOUN	CONTAINER	container
+behalter	de	NOUN	CONTAINER	container
+gefäß	de	NOUN	CONTAINER	container
+gefaess	de	NOUN	CONTAINER	container
+kiste	de	NOUN	CONTAINER	container
+tiegel	de	NOUN	CONTAINER	container
+stick	en	NOUN	TOOL	tool
+tool	en	NOUN	TOOL	tool
+lever	en	NOUN	TOOL	tool
+rod	en	NOUN	TOOL	tool
+bar	en	NOUN	TOOL	tool
+prybar	en	NOUN	TOOL	tool
+bâton	fr	NOUN	TOOL	tool
+baton	fr	NOUN	TOOL	tool
+outil	fr	NOUN	TOOL	tool
+levier	fr	NOUN	TOOL	tool
+tige	fr	NOUN	TOOL	tool
+barre	fr	NOUN	TOOL	tool
+pince	fr	NOUN	TOOL	tool
+palo	es	NOUN	TOOL	tool
+herramienta	es	NOUN	TOOL	tool
+palanca	es	NOUN	TOOL	tool
+vara	es	NOUN	TOOL	tool
+barra	es	NOUN	TOOL	tool
+pinzas	es	NOUN	TOOL	tool
+stock	de	NOUN	TOOL	tool
+werkzeug	de	NOUN	TOOL	tool
+hebel	de	NOUN	TOOL	tool
+stab	de	NOUN	TOOL	tool
+stange	de	NOUN	TOOL	tool
+zange	de	NOUN	TOOL	tool
+ball	en	NOUN	BALL	ball
+sphere	en	NOUN	BALL	ball
+marble	en	NOUN	BALL	ball
+globe	en	NOUN	BALL	ball
+balle	fr	NOUN	BALL	ball
+sphère	fr	NOUN	BALL	ball
+bille	fr	NOUN	BALL	ball
+pelota	es	NOUN	BALL	ball
+esfera	es	NOUN	BALL	ball
+bola	es	NOUN	BALL	ball
+canica	es	NOUN	BALL	ball
+kugel	de	NOUN	BALL	ball
+sphäre	de	NOUN	BALL	ball
+murmel	de	NOUN	BALL	ball
+block	en	NOUN	BLOCK	block
+cube	en	NOUN	BLOCK	block
+brick	en	NOUN	BLOCK	block
+stone	en	NOUN	BLOCK	block
+bloc	fr	NOUN	BLOCK	block
+brique	fr	NOUN	BLOCK	block
+pierre	fr	NOUN	BLOCK	block
+bloque	es	NOUN	BLOCK	block
+cubo	es	NOUN	BLOCK	block
+ladrillo	es	NOUN	BLOCK	block
+piedra	es	NOUN	BLOCK	block
+klotz	de	NOUN	BLOCK	block
+würfel	de	NOUN	BLOCK	block
+wuerfel	de	NOUN	BLOCK	block
+stein	de	NOUN	BLOCK	block
+pull	en	VERB	PULL	PULL
+drag	en	VERB	PULL	PULL
+haul	en	VERB	PULL	PULL
+tirer	fr	VERB	PULL	PULL
+traîner	fr	VERB	PULL	PULL
+trainer	fr	VERB	PULL	PULL
+tirar	es	VERB	PULL	PULL
+jalar	es	VERB	PULL	PULL
+arrastrar	es	VERB	PULL	PULL
+ziehen	de	VERB	PULL	PULL
+schleppen	de	VERB	PULL	PULL
+push	en	VERB	PUSH	PUSH
+shove	en	VERB	PUSH	PUSH
+press	en	VERB	PUSH	PUSH
+pousser	fr	VERB	PUSH	PUSH
+presser	fr	VERB	PUSH	PUSH
+empujar	es	VERB	PUSH	PUSH
+presionar	es	VERB	PUSH	PUSH
+drücken	de	VERB	PUSH	PUSH
+druecken	de	VERB	PUSH	PUSH
+schieben	de	VERB	PUSH	PUSH
+roll	en	VERB	ROLL	ROLL
+rouler	fr	VERB	ROLL	ROLL
+rodar	es	VERB	ROLL	ROLL
+rollen	de	VERB	ROLL	ROLL
+grasp	en	VERB	GRASP	GRASP
+hold	en	VERB	GRASP	GRASP
+saisir	fr	VERB	GRASP	GRASP
+tenir	fr	VERB	GRASP	GRASP
+agarrar	es	VERB	GRASP	GRASP
+sujetar	es	VERB	GRASP	GRASP
+greifen	de	VERB	GRASP	GRASP
+halten	de	VERB	GRASP	GRASP
+inside	en	PREPOSITION	INSIDE	INSIDE
+in	en	PREPOSITION	INSIDE	INSIDE
+within	en	PREPOSITION	INSIDE	INSIDE
+dans	fr	PREPOSITION	INSIDE	INSIDE
+dedans	fr	PREPOSITION	INSIDE	INSIDE
+en	es	PREPOSITION	INSIDE	INSIDE
+dentro	es	PREPOSITION	INSIDE	INSIDE
+drinnen	de	PREPOSITION	INSIDE	INSIDE
+innerhalb	de	PREPOSITION	INSIDE	INSIDE
+near	en	PREPOSITION	NEAR	NEAR
+beside	en	PREPOSITION	NEAR	NEAR
+près	fr	PREPOSITION	NEAR	NEAR
+pres	fr	PREPOSITION	NEAR	NEAR
+cerca	es	PREPOSITION	NEAR	NEAR
+junto	es	PREPOSITION	NEAR	NEAR
+nah	de	PREPOSITION	NEAR	NEAR
+nahe	de	PREPOSITION	NEAR	NEAR
+neben	de	PREPOSITION	NEAR	NEAR
+red	en	ADJECTIVE		red
+rouge	fr	ADJECTIVE		red
+rouges	fr	ADJECTIVE		red
+rojo	es	ADJECTIVE		red
+roja	es	ADJECTIVE		red
+rojos	es	ADJECTIVE		red
+rojas	es	ADJECTIVE		red
+rot	de	ADJECTIVE		red
+rote	de	ADJECTIVE		red
+roten	de	ADJECTIVE		red
+rotes	de	ADJECTIVE		red
+green	en	ADJECTIVE		green
+vert	fr	ADJECTIVE		green
+verte	fr	ADJECTIVE		green
+verts	fr	ADJECTIVE		green
+vertes	fr	ADJECTIVE		green
+verde	es	ADJECTIVE		green
+verdes	es	ADJECTIVE		green
+grün	de	ADJECTIVE		green
+grüne	de	ADJECTIVE		green
+grünen	de	ADJECTIVE		green
+grünes	de	ADJECTIVE		green
+gruen	de	ADJECTIVE		green
+gruene	de	ADJECTIVE		green
+gruenen	de	ADJECTIVE		green
+blue	en	ADJECTIVE		blue
+bleu	fr	ADJECTIVE		blue
+bleue	fr	ADJECTIVE		blue
+bleus	fr	ADJECTIVE		blue
+bleues	fr	ADJECTIVE		blue
+azul	es	ADJECTIVE		blue
+azules	es	ADJECTIVE		blue
+blau	de	ADJECTIVE		blue
+blaue	de	ADJECTIVE		blue
+blauen	de	ADJECTIVE		blue
+blaues	de	ADJECTIVE		blue
+yellow	en	ADJECTIVE		yellow
+jaune	fr	ADJECTIVE		yellow
+jaunes	fr	ADJECTIVE		yellow
+amarillo	es	ADJECTIVE		yellow
+amarilla	es	ADJECTIVE		yellow
+amarillos	es	ADJECTIVE		yellow
+amarillas	es	ADJECTIVE		yellow
+gelb	de	ADJECTIVE		yellow
+gelbe	de	ADJECTIVE		yellow
+gelben	de	ADJECTIVE		yellow
+gelbes	de	ADJECTIVE		yellow

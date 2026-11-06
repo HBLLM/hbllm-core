@@ -82,10 +82,45 @@ class MetacognitiveEngine:
 
         return max(0.05, min(0.98, confidence))
 
+    def assess_compound_confidence(self, goals: list[PredicateGoal]) -> float:
+        """Estimate prior joint probability for a sequence of compound subgoals."""
+        if not goals:
+            return 1.0
+        joint = 1.0
+        for g in goals:
+            joint *= self.assess_confidence(g)
+        return max(0.01, min(0.98, joint))
+
     def should_abstain_or_explore(self, goal: PredicateGoal) -> bool:
         """Decide whether to execute goal or abstain due to high epistemic uncertainty."""
         conf = self.assess_confidence(goal)
         return conf < self.abstain_threshold
+
+    def generate_clarification_query(self, goal: PredicateGoal) -> str:
+        """Generate an active epistemic question when uncertainty triggers abstention."""
+        subj = self.env.objects.get(goal.subject_id)
+        if not subj:
+            return f"Which object did you mean by '{goal.subject_id}'?"
+
+        dist = self.env.agent_hand_position.distance_to(subj.position)
+        if dist > self.env.REACH_DISTANCE:
+            has_viable_tool = any(
+                obj.tool_length + self.env.REACH_DISTANCE >= dist
+                for obj in self.env.objects.values()
+                if obj.is_tool
+            )
+            if not has_viable_tool:
+                return f"Object '{goal.subject_id}' is out of reach ({dist:.1f}m). Is there a tool I should use?"
+
+        if goal.predicate == "INSIDE" and goal.target_id:
+            target_obj = self.env.objects.get(goal.target_id)
+            if target_obj and target_obj.is_container and not getattr(target_obj, "is_open", True):
+                return f"Is container '{goal.target_id}' open to receive '{goal.subject_id}'?"
+
+        if goal.predicate == "STATE":
+            return f"What action causes '{goal.subject_id}' to change state?"
+
+        return f"How should I achieve {goal.predicate} for '{goal.subject_id}'?"
 
     def record_outcome(self, goal: PredicateGoal, confidence: float, actual_success: bool) -> None:
         """Log predicted confidence vs empirical success for calibration analysis."""

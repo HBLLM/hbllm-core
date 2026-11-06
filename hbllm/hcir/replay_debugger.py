@@ -14,7 +14,7 @@ Features:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream
@@ -24,17 +24,6 @@ from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.types import BranchMode
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ReplayStepResult:
-    """Diagnostic state at a single step in execution replay."""
-
-    step_index: int
-    instruction: Instruction
-    syscall_result: dict[str, Any]
-    snapshot_version: int
-    node_count: int
 
 
 @dataclass
@@ -56,6 +45,18 @@ class CognitiveBreakpoint:
         return True
 
 
+@dataclass
+class ReplayStepResult:
+    """Diagnostic state at a single step in execution replay."""
+
+    step_index: int
+    instruction: Instruction
+    syscall_result: dict[str, Any]
+    snapshot_version: int
+    node_count: int
+    hit_breakpoints: list[CognitiveBreakpoint] = field(default_factory=list)
+
+
 class ReplayDebugger:
     """Deterministic step-by-step debugger for HCIR instruction streams.
 
@@ -75,6 +76,7 @@ class ReplayDebugger:
         stream: InstructionStream,
         expected_receipt: ExecutionReceipt | None = None,
         branch_name: str = "replay_session",
+        stop_on_breakpoint: bool = False,
     ) -> list[ReplayStepResult]:
         """Replay an instruction stream in an isolated REPLAY workspace branch."""
         # Fork an isolated replay workspace branch
@@ -93,6 +95,12 @@ class ReplayDebugger:
         steps: list[ReplayStepResult] = []
 
         for i, instruction in enumerate(stream.instructions):
+            matched_bps: list[CognitiveBreakpoint] = []
+            for bp in self._breakpoints:
+                if bp.matches(instruction):
+                    bp.hit_count += 1
+                    matched_bps.append(bp)
+
             result = await interpreter._dispatcher.dispatch(instruction, replay_ws, replay_services)
             step_res = ReplayStepResult(
                 step_index=i,
@@ -100,14 +108,20 @@ class ReplayDebugger:
                 syscall_result=result,
                 snapshot_version=replay_ws.snapshot_manager.current_version,
                 node_count=replay_ws.graph.node_count,
+                hit_breakpoints=matched_bps,
             )
             steps.append(step_res)
             logger.debug(
-                "Replay step %d (%s) -> version %d",
+                "Replay step %d (%s) -> version %d (breakpoints=%d)",
                 i,
                 instruction.opcode,
                 step_res.snapshot_version,
+                len(matched_bps),
             )
+
+            if stop_on_breakpoint and matched_bps:
+                logger.info("Paused replay on breakpoint at step %d (%s)", i, instruction.opcode)
+                break
 
         # Cleanup replay branch
         self._services.workspace.drop_branch(branch_name)

@@ -148,14 +148,14 @@ class AudioPerceptionRuntime:
         # ── Scene ──
         if self._scene is not None:
             try:
-                result = await self._scene.analyze_scene(audio)
+                scene_result = await self._scene.analyze_scene(audio)
                 scene_evidence = AcousticSceneEvidence(
                     observation=observation,
-                    indoor=result.indoor,
-                    speech_present=result.speech_present,
-                    noise_level=result.noise_level,
-                    estimated_activity=result.estimated_activity,
-                    scene_tags=result.scene_tags,
+                    indoor=scene_result.indoor,
+                    speech_present=scene_result.speech_present,
+                    noise_level=scene_result.noise_level,
+                    estimated_activity=scene_result.estimated_activity,
+                    scene_tags=scene_result.scene_tags,
                     provider_provenance=self._get_provenance(self._scene),
                 )
             except Exception:

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from hbllm.network.clocks import VectorClock
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from hbllm.hcir.types import Provenance, Timestamp
 
@@ -37,6 +37,7 @@ class TransactionOp(StrEnum):
     """Allowed mutation operations within a transaction."""
 
     ADD_NODE = "add_node"
+    INSERT_NODE = "add_node"
     MODIFY_NODE = "modify_node"
     REMOVE_NODE = "remove_node"
     UPSERT_NODE = "upsert_node"
@@ -61,6 +62,33 @@ class TransactionOperation(BaseModel):
     edge_id: str | None = None
     edge_data: dict[str, Any] | None = None
     changes: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_node_or_edge_objects(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        data_copy = dict(data)
+        if "node" in data_copy and "node_data" not in data_copy:
+            node_obj = data_copy.pop("node")
+            if hasattr(node_obj, "model_dump"):
+                data_copy["node_data"] = node_obj.model_dump()
+            elif isinstance(node_obj, dict):
+                data_copy["node_data"] = node_obj
+            if hasattr(node_obj, "id") and "node_id" not in data_copy:
+                data_copy["node_id"] = node_obj.id
+        if "edge" in data_copy and "edge_data" not in data_copy:
+            edge_obj = data_copy.pop("edge")
+            if hasattr(edge_obj, "model_dump"):
+                data_copy["edge_data"] = edge_obj.model_dump()
+            elif isinstance(edge_obj, dict):
+                data_copy["edge_data"] = edge_obj
+            if hasattr(edge_obj, "id") and "edge_id" not in data_copy:
+                data_copy["edge_id"] = edge_obj.id
+        if data_copy.get("op") in (TransactionOp.MODIFY_NODE, "modify_node"):
+            if not data_copy.get("changes") and data_copy.get("node_data"):
+                data_copy["changes"] = data_copy.get("node_data")
+        return data_copy
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -114,6 +142,11 @@ class HCIRTransaction(BaseModel):
     approvals: list[str] = Field(default_factory=list)  # Node IDs that approved
     annotations: list[TransactionAnnotation] = Field(default_factory=list)
     provenance: Provenance = Field(default_factory=Provenance)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def tx_id(self) -> str:
+        return self.id
 
     @property
     def is_committed(self) -> bool:
@@ -328,3 +361,87 @@ class HCIRDelta(BaseModel):
                 )
             )
         return ops
+
+
+def generate_compensating_operations(
+    operations: list[TransactionOperation],
+    workspace_before_image: Any | None = None,
+) -> list[TransactionOperation]:
+    """Generate exact inverse compensating operations to undo a transaction.
+
+    Used by the Constitutional 2-phase commit pipeline to guarantee atomic rollback
+    upon downstream verification failure or execution exceptions.
+    """
+    inverse: list[TransactionOperation] = []
+    for op in reversed(operations):
+        if op.op in (TransactionOp.ADD_NODE, TransactionOp.INSERT_NODE):
+            if op.node_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.REMOVE_NODE,
+                        node_id=op.node_id,
+                    )
+                )
+        elif op.op == TransactionOp.REMOVE_NODE:
+            if op.node_data and op.node_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_NODE,
+                        node_id=op.node_id,
+                        node_data=op.node_data,
+                    )
+                )
+        elif op.op == TransactionOp.MODIFY_NODE:
+            if op.node_id and op.node_data:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=op.node_id,
+                        node_data=op.node_data,
+                    )
+                )
+        elif op.op == TransactionOp.UPSERT_NODE:
+            if op.node_id:
+                if workspace_before_image and hasattr(workspace_before_image, "get_node"):
+                    prev = workspace_before_image.get_node(op.node_id)
+                    if prev:
+                        prev_dict = prev.model_dump() if hasattr(prev, "model_dump") else dict(prev)
+                        inverse.append(
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_NODE,
+                                node_id=op.node_id,
+                                node_data=prev_dict,
+                            )
+                        )
+                    else:
+                        inverse.append(
+                            TransactionOperation(
+                                op=TransactionOp.REMOVE_NODE,
+                                node_id=op.node_id,
+                            )
+                        )
+                else:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.REMOVE_NODE,
+                            node_id=op.node_id,
+                        )
+                    )
+        elif op.op == TransactionOp.ADD_EDGE:
+            if op.edge_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.REMOVE_EDGE,
+                        edge_id=op.edge_id,
+                    )
+                )
+        elif op.op == TransactionOp.REMOVE_EDGE:
+            if op.edge_data and op.edge_id:
+                inverse.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE,
+                        edge_id=op.edge_id,
+                        edge_data=op.edge_data,
+                    )
+                )
+    return inverse

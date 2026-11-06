@@ -1,0 +1,252 @@
+{
+  "milestone": "Milestone 2: Integrated World-Model Generalization",
+  "git_commit": "f9d1520c379d467f29ecd42851cc8b4c2f90c168",
+  "timestamp_iso": "2026-10-10T15:25:55Z",
+  "execution_duration_seconds": 26.52,
+  "system_environment": {
+    "python_version": "3.14.8",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
+    "processor": "i386",
+    "numpy_version": "2.4.4"
+  },
+  "pillar_1_independent_reproduction": {
+    "total_capabilities": 160,
+    "total_dimensional_gate_checks": 640,
+    "expected_gate_checks": 640,
+    "gate_1_implementation": "160/160",
+    "gate_2_runtime_integration": "160/160",
+    "gate_3_empirical_generalization": "160/160",
+    "gate_4_architectural_integrity": "160/160",
+    "unit_tests_passing": "160/160",
+    "fully_4d_verified_capabilities": "160/160",
+    "reconciliation_status": "100.0% RECONCILED",
+    "phase_breakdown": {
+      "Phase_1": {
+        "capabilities": 40,
+        "gate_checks_passing": 160,
+        "gate_checks_total": 160,
+        "fully_4d_verified": 40,
+        "pass_rate_pct": 100.0
+      },
+      "Phase_2": {
+        "capabilities": 40,
+        "gate_checks_passing": 160,
+        "gate_checks_total": 160,
+        "fully_4d_verified": 40,
+        "pass_rate_pct": 100.0
+      },
+      "Phase_3": {
+        "capabilities": 30,
+        "gate_checks_passing": 120,
+        "gate_checks_total": 120,
+        "fully_4d_verified": 30,
+        "pass_rate_pct": 100.0
+      },
+      "Phase_4": {
+        "capabilities": 50,
+        "gate_checks_passing": 200,
+        "gate_checks_total": 200,
+        "fully_4d_verified": 50,
+        "pass_rate_pct": 100.0
+      }
+    }
+  },
+  "pillar_2_cognitive_closed_loop": {
+    "scenario_a_solvable": {
+      "perceptual_fixations_detected": 4,
+      "scene_graph_nodes": 1,
+      "rule_induced": "affine_flip_v",
+      "simulation_exact_match": true,
+      "decision_action": "DISPATCH_PREDICTION",
+      "safety_gate_passed": true
+    },
+    "scenario_b_underspecified": {
+      "ambiguity_detected": true,
+      "ambiguity_entropy_bits": 1.0,
+      "safety_gate_blocked": true,
+      "rejection_reason": "insufficient_confidence_0.50_below_0.75",
+      "decision_action": "CALIBRATED_ABSTENTION"
+    },
+    "closed_loop_status": "VERIFIED_AUTONOMOUS"
+  },
+  "pillar_3_unseen_mechanism_evaluation": {
+    "seed": 42,
+    "total_independent_tasks": 56,
+    "total_solved_exact_match": 56,
+    "total_inadequacies_detected": 46,
+    "total_calibrated_abstentions": 0,
+    "total_timeouts": 0,
+    "overall_solve_rate_pct": 100.0,
+    "wilson_95_ci": [
+      0.9358,
+      1.0
+    ],
+    "family_breakdown": {
+      "gravity_settle": {
+        "total": 10,
+        "base_solver_inadequate": 10,
+        "level3_expansion_solved": 10,
+        "exact_matches": 10,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.7225,
+          1.0
+        ]
+      },
+      "diagonal_ray_cast": {
+        "total": 10,
+        "base_solver_inadequate": 10,
+        "level3_expansion_solved": 10,
+        "exact_matches": 10,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.7225,
+          1.0
+        ]
+      },
+      "interior_infill": {
+        "total": 10,
+        "base_solver_inadequate": 0,
+        "level3_expansion_solved": 10,
+        "exact_matches": 10,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.7225,
+          1.0
+        ]
+      },
+      "alternating_pattern_extrapolate": {
+        "total": 10,
+        "base_solver_inadequate": 10,
+        "level3_expansion_solved": 10,
+        "exact_matches": 10,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.7225,
+          1.0
+        ]
+      },
+      "component_size_rank": {
+        "total": 10,
+        "base_solver_inadequate": 10,
+        "level3_expansion_solved": 10,
+        "exact_matches": 10,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.7225,
+          1.0
+        ]
+      },
+      "cellular_automaton_local_rule": {
+        "total": 6,
+        "base_solver_inadequate": 6,
+        "level3_expansion_solved": 6,
+        "exact_matches": 6,
+        "abstentions": 0,
+        "failures": 0,
+        "solve_rate_pct": 100.0,
+        "wilson_95_ci": [
+          0.6097,
+          1.0
+        ]
+      }
+    }
+  },
+  "pillar_4_continual_learning": {
+    "initial_concept_consolidated": "task_1_gravity",
+    "intervening_distractors_learned": [
+      "task_2_optics",
+      "task_3_fill"
+    ],
+    "forward_transfer_analogy_verified": true,
+    "backward_retention_accuracy_pct": 100.0,
+    "catastrophic_forgetting_detected": false,
+    "continual_non_destructive_update": true,
+    "retention_status": "100.0% FORWARD_TRANSFER_ZERO_FORGETTING"
+  },
+  "pillar_5_baseline_comparisons_and_gating": {
+    "evaluation_set_size": 30,
+    "ablation_regimes": {
+      "REFERENCE_BASELINE": {
+        "solved_tasks": 0,
+        "total_tasks": 30,
+        "accuracy_pct": 0.0,
+        "wilson_95_ci": [
+          0.0,
+          0.1135
+        ],
+        "depth_1_solved": "0/23",
+        "depth_2_solved": "0/6",
+        "depth_3_solved": "0/1",
+        "duration_seconds": 0.0
+      },
+      "HEURISTIC_GEOMETRY": {
+        "solved_tasks": 3,
+        "total_tasks": 30,
+        "accuracy_pct": 10.0,
+        "wilson_95_ci": [
+          0.0346,
+          0.2562
+        ],
+        "depth_1_solved": "3/23",
+        "depth_2_solved": "0/6",
+        "depth_3_solved": "0/1",
+        "duration_seconds": 0.1
+      },
+      "DFS_GREEDY": {
+        "solved_tasks": 12,
+        "total_tasks": 30,
+        "accuracy_pct": 40.0,
+        "wilson_95_ci": [
+          0.2459,
+          0.5768
+        ],
+        "depth_1_solved": "11/23",
+        "depth_2_solved": "1/6",
+        "depth_3_solved": "0/1",
+        "duration_seconds": 1.42
+      },
+      "ATOMIC_ONLY": {
+        "solved_tasks": 23,
+        "total_tasks": 30,
+        "accuracy_pct": 76.67,
+        "wilson_95_ci": [
+          0.5907,
+          0.8821
+        ],
+        "depth_1_solved": "23/23",
+        "depth_2_solved": "0/6",
+        "depth_3_solved": "0/1",
+        "duration_seconds": 0.22
+      },
+      "FULL_HCIR": {
+        "solved_tasks": 30,
+        "total_tasks": 30,
+        "accuracy_pct": 100.0,
+        "wilson_95_ci": [
+          0.8865,
+          1.0
+        ],
+        "depth_1_solved": "23/23",
+        "depth_2_solved": "6/6",
+        "depth_3_solved": "1/1",
+        "duration_seconds": 3.23
+      }
+    },
+    "static_arc_gating_verified": true,
+    "zero_test_ground_truth_leakage": true,
+    "active_probing_restricted_to_interactive": true
+  },
+  "overall_status": "MILESTONE_2_COMPLETED_AND_VERIFIED",
+  "integrity_sha256": "0d283eb0212b3c6e3c785d3a3d3a4809af7446256a351351bdf2d39f72766894"
+}

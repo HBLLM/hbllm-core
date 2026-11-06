@@ -51,6 +51,23 @@ if [ -n "$STAGED_PYTHON" ]; then
         echo -e "${RED}❌ [pre-commit] Ruff format check failed! Run: ruff format <files>${NC}"
         FAILED=1
     fi
+
+    # Run mypy type check
+    echo -e "${BLUE}==> [pre-commit] Running mypy type checker (mypy .)...${NC}"
+    if command -v mypy >/dev/null 2>&1; then
+        MYPY_BIN="mypy"
+    elif [ -x "venv/bin/mypy" ]; then
+        MYPY_BIN="venv/bin/mypy"
+    elif [ -x ".venv/bin/mypy" ]; then
+        MYPY_BIN=".venv/bin/mypy"
+    else
+        MYPY_BIN="python3 -m mypy"
+    fi
+
+    if ! $MYPY_BIN .; then
+        echo -e "${RED}❌ [pre-commit] mypy type check failed! Run: mypy .${NC}"
+        FAILED=1
+    fi
 fi
 
 # ── 2. Rust Quality Gates (Cargo) ────────────────────────────────────────────

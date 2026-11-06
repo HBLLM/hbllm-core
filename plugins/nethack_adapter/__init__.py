@@ -14,7 +14,6 @@ from .action import NetHackActionAdapter
 from .benchmark import PureHCIRNetHackAgent, run_nethack_benchmark
 from .environment import (
     NativeNetHackWrapper,
-    StandaloneNetHackEnv,
     make_nethack_env,
 )
 from .perception import NetHackPerceptionAdapter
@@ -67,7 +66,6 @@ __all__ = [
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRNetHackAgent",
-    "StandaloneNetHackEnv",
     "make_nethack_env",
     "register",
     "run_nethack_benchmark",

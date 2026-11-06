@@ -112,6 +112,7 @@ full = [
 dev = [
     "hbllm[server]",
     "hbllm[storage]",
+    "pytest-xdist>=3.6,<4",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-timeout>=2.2.0",
@@ -124,6 +125,8 @@ dev = [
     "mkdocstrings-python>=1.8.0",
     "tiktoken>=0.6.0",
     "hypothesis>=6.0.0",
+    "gymnasium>=0.28.1",
+    "minigrid>=3.0.0",
 ]
 ros = [
     "rclpy",
@@ -139,6 +142,10 @@ include = ["hbllm*"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+exclude = [
+    "kaggle_submission/environment_files",
+    "*.ipynb",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
@@ -153,6 +160,7 @@ known-first-party = ["hbllm"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "plugins"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 timeout = 300
 timeout_method = "thread"
@@ -162,21 +170,36 @@ markers = [
     "integration: Integration tests (multi-component)",
     "e2e: End-to-end tests (full pipeline)",
     "ml: ML-dependent tests requiring PyTorch",
+    "slow: Tests with long runtimes",
 ]
 filterwarnings = [
     "ignore:The PyTorch API of nested tensors is in prototype stage:UserWarning",
+    "ignore:`np.bool8` is a deprecated alias:DeprecationWarning",
 ]
 
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
 explicit_package_bases = true
-exclude = ["plugins/(?!developmental_adapter)"]
+exclude = [
+    "^plugins/(?!developmental_adapter)",
+    "^experiments/",
+    "^scratch/",
+    "^kaggle_submission/",
+    "^environment_files/",
+    "hbllm/hcir/primitives.py",
+]
+
 disable_error_code = [
     "assignment", "call-arg", "attr-defined", "import-untyped", 
     "misc", "var-annotated", "index", "dict-item", "override", 
     "operator", "valid-type", "union-attr"
 ]
+
+[[tool.mypy.overrides]]
+module = "hbllm.hcir.*"
+enable_error_code = ["attr-defined", "call-arg"]
+
 
 [tool.bandit]
 exclude_dirs = ["tests", "plugins"]

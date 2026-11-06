@@ -299,6 +299,8 @@ class AI2ThorActionAdapter:
 
         if obs.agent_pose.horizon < 30.0 and target_pos.y < obs.agent_pose.position.y - 0.2:
             return AI2ThorActionType.LOOK_DOWN
+        if obs.agent_pose.horizon > 0.0 and target_pos.y > obs.agent_pose.position.y + 0.3:
+            return AI2ThorActionType.LOOK_UP
 
         return action_payload
 

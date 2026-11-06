@@ -286,3 +286,101 @@ class TestCognitiveGraphViews:
         assert "s1" in node_ids  # Skill
         assert "v1" in node_ids  # Value
         assert "f1" not in node_ids
+
+
+class TestCognitiveGraphUtilities:
+    """Test edges_between, neighbors, subgraph, clear, to_dict/from_dict, node_count_by_type."""
+
+    def _build_test_graph(self) -> CognitiveGraph:
+        graph = CognitiveGraph()
+        graph.add_node(GoalNode(id="g1", description="main goal"))
+        graph.add_node(ActionNode(id="a1", intent="first action"))
+        graph.add_node(ActionNode(id="a2", intent="second action"))
+        graph.add_node(FactNode(id="f1", claim="supporting fact"))
+        graph.add_edge(
+            HCIREdge(id="e1", edge_type=HCIREdgeType.DEPENDS_ON, sources=["g1"], targets=["a1"])
+        )
+        graph.add_edge(
+            HCIREdge(id="e2", edge_type=HCIREdgeType.CAUSES, sources=["a1"], targets=["a2"])
+        )
+        graph.add_edge(
+            HCIREdge(id="e3", edge_type=HCIREdgeType.SUPPORTS, sources=["f1"], targets=["g1"])
+        )
+        return graph
+
+    def test_edges_between(self):
+        graph = self._build_test_graph()
+        # Directed search
+        edges_dir = graph.edges_between("g1", "a1", directed=True)
+        assert len(edges_dir) == 1
+        assert edges_dir[0].id == "e1"
+
+        # Reverse directed search should find nothing
+        assert len(graph.edges_between("a1", "g1", directed=True)) == 0
+
+        # Undirected search finds both directions
+        edges_undir = graph.edges_between("a1", "g1", directed=False)
+        assert len(edges_undir) == 1
+        assert edges_undir[0].id == "e1"
+
+    def test_neighbors(self):
+        graph = self._build_test_graph()
+        # a1 has outgoing target a2 and incoming source g1
+        out_neighbors = graph.neighbors("a1", direction="out")
+        assert out_neighbors == ["a2"]
+
+        in_neighbors = graph.neighbors("a1", direction="in")
+        assert in_neighbors == ["g1"]
+
+        both_neighbors = graph.neighbors("a1", direction="both")
+        assert sorted(both_neighbors) == ["a2", "g1"]
+
+    def test_node_count_by_type(self):
+        graph = self._build_test_graph()
+        counts = graph.node_count_by_type()
+        assert counts[HCIRNodeType.GOAL] == 1
+        assert counts[HCIRNodeType.ACTION] == 2
+        assert counts[HCIRNodeType.FACT] == 1
+        assert HCIRNodeType.BELIEF not in counts
+
+        counts_all = graph.node_count_by_type(include_empty=True)
+        assert counts_all[HCIRNodeType.BELIEF] == 0
+
+    def test_clear(self):
+        graph = self._build_test_graph()
+        assert graph.node_count == 4
+        assert graph.edge_count == 3
+        graph.clear()
+        assert graph.node_count == 0
+        assert graph.edge_count == 0
+        assert len(graph.nodes_by_type(HCIRNodeType.GOAL)) == 0
+        assert len(graph.edges_from("g1")) == 0
+
+    def test_subgraph(self):
+        graph = self._build_test_graph()
+        sub = graph.subgraph(["g1", "a1"])
+        assert sub.node_count == 2
+        assert sub.has_node("g1")
+        assert sub.has_node("a1")
+        assert not sub.has_node("a2")
+        # e1 connects g1 and a1, so it should be included
+        assert sub.edge_count == 1
+        assert sub.has_edge("e1")
+        # e2 connects a1 and a2, so excluded
+        assert not sub.has_edge("e2")
+
+    def test_to_dict_and_from_dict_roundtrip(self):
+        graph = self._build_test_graph()
+        data = graph.to_dict()
+        assert "nodes" in data
+        assert "edges" in data
+        assert len(data["nodes"]) == 4
+        assert len(data["edges"]) == 3
+
+        reconstructed = CognitiveGraph.from_dict(data)
+        assert reconstructed.node_count == 4
+        assert reconstructed.edge_count == 3
+        assert isinstance(reconstructed.get_node("g1"), GoalNode)
+        assert isinstance(reconstructed.get_node("a1"), ActionNode)
+        assert isinstance(reconstructed.get_node("f1"), FactNode)
+        assert reconstructed.has_edge("e1")

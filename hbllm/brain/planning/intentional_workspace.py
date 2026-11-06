@@ -16,6 +16,7 @@ from hbllm.hcir.graph import (
     NodeLifecycle,
     UnknownNode,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TieredWorkspace
@@ -100,7 +101,19 @@ class IntentionalWorkspace:
             scope=Scope(tenant_id=goal.tenant_id or "default"),
             tags=["goal", f"status:{goal.status.value}", f"priority:{goal.priority.value}"],
         )
-        self._ws.upsert_node(goal_node)
+        self._commit_upsert(goal_node)
+
+    def _commit_upsert(self, node: Any) -> None:
+        """Propose a node upsert through the workspace commit authority."""
+        self._ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
+                )
+            ],
+            author="intentional_workspace",
+            metadata={"tenant_id": getattr(getattr(node, "scope", None), "tenant_id", None)},
+        )
 
     def get_goals_by_status(self, status: GoalStatus) -> list[Goal]:
         """Fetch all goals of a given status from the HCIR workspace."""
@@ -135,8 +148,9 @@ class IntentionalWorkspace:
             ):
                 self._goals_meta[goal_id]["started_at"] = time.time()
 
-        node = self._ws.get_node(goal_id)
-        if node and isinstance(node, GoalNode):
+        existing = self._ws.get_node(goal_id)
+        if existing and isinstance(existing, GoalNode):
+            node = existing.model_copy(deep=True)
             node.tags = [t for t in node.tags if not t.startswith("status:")]
             node.tags.append(f"status:{new_status.value}")
             if new_status in (GoalStatus.COMPLETED, GoalStatus.FAILED, GoalStatus.CANCELLED):
@@ -149,7 +163,7 @@ class IntentionalWorkspace:
             elif new_status == GoalStatus.ACTIVE:
                 node.lifecycle = NodeLifecycle.ACTIVE
                 node.goal_lifecycle = GoalLifecycle.EXECUTING
-            self._ws.upsert_node(node)
+            self._commit_upsert(node)
 
     def get_active_goals(self) -> list[Goal]:
         return self.get_goals_by_status(GoalStatus.ACTIVE)
@@ -172,7 +186,7 @@ class IntentionalWorkspace:
             tags=["curiosity", "exploration"],
             provenance=Provenance(created_by="intentional_workspace"),
         )
-        self._ws.upsert_node(node)
+        self._commit_upsert(node)
 
     def get_curiosity_goals(self) -> list[str]:
         return [desc for desc, _ in sorted(self._curiosity_goals, key=lambda x: x[1])]
@@ -180,7 +194,11 @@ class IntentionalWorkspace:
     def remove_curiosity_goal(self, goal_description: str) -> None:
         self._curiosity_goals = [(d, t) for d, t in self._curiosity_goals if d != goal_description]
         node_id = f"curiosity_{abs(hash(goal_description))}"
-        self._ws.remove_node(node_id)
+        if self._ws.get_node(node_id) is not None:
+            self._ws.commit_operations(
+                [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
+                author="intentional_workspace",
+            )
 
     # ─── Opportunities & Threats ─────────────────────────────────────
 
@@ -200,7 +218,7 @@ class IntentionalWorkspace:
             tags=["opportunity"],
             provenance=Provenance(created_by="intentional_workspace"),
         )
-        self._ws.upsert_node(node)
+        self._commit_upsert(node)
 
     def get_opportunities(self) -> list[dict[str, Any]]:
         return list(self._opportunities.values())
@@ -227,7 +245,7 @@ class IntentionalWorkspace:
             tags=["threat", f"severity:{severity}"],
             provenance=Provenance(created_by="intentional_workspace"),
         )
-        self._ws.upsert_node(node)
+        self._commit_upsert(node)
 
     def get_threats(self) -> list[dict[str, Any]]:
         return sorted(list(self._threats.values()), key=lambda x: x["severity"], reverse=True)

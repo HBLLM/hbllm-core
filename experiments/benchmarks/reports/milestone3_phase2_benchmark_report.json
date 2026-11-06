@@ -1,0 +1,885 @@
+{
+  "benchmark": "Milestone 3 Phase 2: Topological Graph & Geodesic Maze Induction",
+  "timestamp_iso": "2026-10-10T17:21:45Z",
+  "execution_duration_seconds": 4.32,
+  "system_environment": {
+    "python_version": "3.12.15",
+    "platform": "macOS-15.7.9-x86_64-i386-64bit",
+    "numpy_version": "2.3.5"
+  },
+  "comparative_baselines": {
+    "BASELINE_A_PRIMITIVE_ONLY": {
+      "exact_matches": "0/20",
+      "exact_match_pct": 0.0,
+      "calibrated_abstentions": "0/20",
+      "wilson_95_ci": [
+        0.0,
+        0.1611
+      ]
+    },
+    "BASELINE_B_HEURISTIC_GREEDY": {
+      "exact_matches": "5/20",
+      "exact_match_pct": 25.0,
+      "calibrated_abstentions": "0/20",
+      "wilson_95_ci": [
+        0.1119,
+        0.4687
+      ]
+    },
+    "BASELINE_C_TEMPLATE_MEMORIZATION": {
+      "exact_matches": "0/20",
+      "exact_match_pct": 0.0,
+      "calibrated_abstentions": "0/20",
+      "wilson_95_ci": [
+        0.0,
+        0.1611
+      ]
+    },
+    "BASELINE_D_FULL_INDUCTIVE_HCIR": {
+      "exact_matches": "15/20",
+      "exact_match_pct": 75.0,
+      "calibrated_abstentions": "5/20",
+      "wilson_95_ci": [
+        0.5313,
+        0.8881
+      ]
+    }
+  },
+  "hcir_family_breakdown": {
+    "geodesic_shortest_path_maze": {
+      "exact_matches": "5/5",
+      "exact_match_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    },
+    "variable_corridor_obstacle_avoidance": {
+      "exact_matches": "5/5",
+      "exact_match_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    },
+    "same_color_landmark_connector": {
+      "exact_matches": "5/5",
+      "exact_match_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    },
+    "ambiguous_multi_path_abstention": {
+      "calibrated_abstentions": "5/5",
+      "abstention_pct": 100.0,
+      "wilson_95_ci": [
+        0.5655,
+        1.0
+      ]
+    }
+  },
+  "trials_log": [
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_01",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 37.85,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_01",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_01",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_01",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 463.6,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_02",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 54.47,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_02",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_02",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_02",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 272.07,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_03",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.63,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_03",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_03",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.2,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_03",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 289.59,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_04",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 45.74,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_04",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_04",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_04",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 166.75,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_05",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 24.32,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_05",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_05",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.09,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_geodesic_shortest_path_maze_05",
+      "family": "geodesic_shortest_path_maze",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 209.79,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_01",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 37.78,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_01",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_01",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_01",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 219.79,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_02",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 19.76,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_02",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_02",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.05,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_02",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 143.21,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_03",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 14.64,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_03",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_03",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_03",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 132.17,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_04",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 8.14,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_04",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_04",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_04",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 156.77,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_05",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 11.13,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_05",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_05",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_variable_corridor_obstacle_avoidance_05",
+      "family": "variable_corridor_obstacle_avoidance",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 128.23,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_01",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 13.52,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_01",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_01",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_01",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 323.17,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_02",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 13.79,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_02",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_02",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.04,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_02",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 108.92,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_03",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 12.89,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_03",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.08,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_03",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.09,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_03",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 137.52,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_04",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 21.5,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_04",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_04",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_04",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 140.51,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_05",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 18.5,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_05",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_05",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_same_color_landmark_connector_05",
+      "family": "same_color_landmark_connector",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.0,
+      "duration_ms": 132.2,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_01",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 20.97,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_01",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_01",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_01",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "calibrated_abstention": true,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 167.59,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_02",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 19.55,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_02",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_02",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_02",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "calibrated_abstention": true,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 166.38,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_03",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 17.88,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_03",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_03",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_03",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "calibrated_abstention": true,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 162.85,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_04",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 18.39,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_04",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.02,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_04",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.06,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_04",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "calibrated_abstention": true,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 158.06,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_05",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_A_PRIMITIVE_ONLY",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 18.76,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_05",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_B_HEURISTIC_GREEDY",
+      "exact_match": true,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.03,
+      "synthesized_operator_name": "none"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_05",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_C_TEMPLATE_MEMORIZATION",
+      "exact_match": false,
+      "calibrated_abstention": false,
+      "epistemic_uncertainty": 0.5,
+      "duration_ms": 0.07,
+      "synthesized_operator_name": "memorized_demo_0_path"
+    },
+    {
+      "task_id": "m3_p2_ambiguous_multi_path_abstention_05",
+      "family": "ambiguous_multi_path_abstention",
+      "baseline": "BASELINE_D_FULL_INDUCTIVE_HCIR",
+      "exact_match": false,
+      "calibrated_abstention": true,
+      "epistemic_uncertainty": 1.0,
+      "duration_ms": 177.67,
+      "synthesized_operator_name": "synthesized_geodesic_shortest_path"
+    }
+  ],
+  "integrity_sha256": "912cbe9ed40c38638fb2b12eae74a4ff1991eb7a9fe8ceddd7866f3201ce6d72"
+}

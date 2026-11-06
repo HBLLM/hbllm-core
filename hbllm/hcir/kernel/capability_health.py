@@ -63,3 +63,7 @@ class CapabilityHealthRegistry:
 
     def get_health(self, capability_name: str) -> CapabilityHealth | None:
         return self._health_map.get(capability_name)
+
+    def update_health(self, health: CapabilityHealth) -> None:
+        """Update or register health status from a CapabilityHealth instance."""
+        self._health_map[health.capability_name] = health

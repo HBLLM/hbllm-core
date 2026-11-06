@@ -138,6 +138,8 @@ def wire_expression_stream(
     llm: Any | None = None,
     dual_router: Any | None = None,
     neuromodulator: NeuromodulationEngine | None = None,
+    shallow_mode: bool = False,
+    broca_mode: bool = True,
 ) -> None:
     """Wire the expression-side Cognitive Stream into a DecisionNode.
 
@@ -280,10 +282,10 @@ def wire_expression_stream(
             enable_gating=True,
             trained_prm=trained_prm,
             shallow_renderer=shallow_renderer,
-            shallow_mode=False,  # Opt-in: brain pipeline needs LLM reasoning
+            shallow_mode=shallow_mode,
             content_planner=content_planner,
             broca_encoder=broca_encoder,
-            broca_mode=False,  # Opt-in: full brain pipeline needs LLM reasoning
+            broca_mode=broca_mode and (broca_encoder is not None and content_planner is not None),
             dual_router=dual_router,
         )
 

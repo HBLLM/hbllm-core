@@ -27,6 +27,23 @@ def test_predictor_weight_manager_and_policy():
     updated = mgr.update_weight(scope, "physics", delta, lr=0.05)
     assert updated.accuracy_weight > 0.50
 
+    # Forward architecture exports for weights and policy
+    pred_st = updated.to_causal_predicate()
+    assert pred_st.variable == "weight:physics"
+    assert pred_st.value == updated.accuracy_weight
+
+    tx_st = updated.to_transaction_operation("t1_w1_robotics")
+    assert tx_st.node_id == "weight_t1_w1_robotics_physics"
+
+    preds_mgr = mgr.export_causal_predicates(scope)
+    assert len(preds_mgr) == 1
+    txs_mgr = mgr.to_transaction_operations(scope)
+    assert len(txs_mgr) == 1
+
+    pred_pol = policy.to_causal_predicate()
+    assert pred_pol.variable == "weight_update_policy"
+    assert pred_pol.value == 0.05
+
 
 def test_confidence_calibrator_decay():
     calibrator = ConfidenceCalibrator()
@@ -38,6 +55,10 @@ def test_confidence_calibrator_decay():
     )
     assert vec_decayed.calibrated_confidence < vec_fresh.calibrated_confidence
 
+    pred_vec = vec_fresh.to_causal_predicate()
+    assert pred_vec.variable == "confidence"
+    assert pred_vec.value == vec_fresh.calibrated_confidence
+
 
 def test_prediction_budget():
     budget = PredictionBudget()
@@ -46,3 +67,11 @@ def test_prediction_budget():
 
     full_predictors = budget.select_predictor_tier(horizon_ms=60000, available_cognitive_budget=0.9)
     assert len(full_predictors) == 5
+
+    pred_bgt = budget.to_causal_predicate()
+    assert pred_bgt.variable == "prediction_budget_latency"
+    assert pred_bgt.value == 500
+
+    tx_bgt = budget.to_transaction_operations()
+    assert len(tx_bgt) == 1
+    assert tx_bgt[0].node_id == "prediction_budget_governor"

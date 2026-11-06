@@ -117,13 +117,22 @@ class CausalOperator:
 
         # ── Build causal adjacency from CAUSES edges ─────────────────
         causal_adj: dict[str, list[tuple[str, float]]] = {}
+        composite_factors: dict[tuple[str, str], list[str]] = {}
+
         for eid in view.all_edge_ids():
             edge = view.get_edge(eid)
             if edge is None or edge.edge_type != HCIREdgeType.CAUSES:
                 continue
+            factors = (
+                edge.properties.get("factors", [])
+                if hasattr(edge, "properties") and isinstance(edge.properties, dict)
+                else []
+            )
             for src in edge.sources:
                 for tgt in edge.targets:
                     causal_adj.setdefault(src, []).append((tgt, edge.weight))
+                    if factors:
+                        composite_factors[(src, tgt)] = list(factors)
 
         if not causal_adj:
             return CognitiveResult(
@@ -156,16 +165,24 @@ class CausalOperator:
                 current, path, prob = queue.popleft()
 
                 if len(path) > 1:
-                    # Record this as a chain
-                    all_chains.append(
-                        {
-                            "source": path[0],
-                            "target": current,
-                            "path": list(path),
-                            "depth": len(path) - 1,
-                            "probability": prob,
-                        }
-                    )
+                    # Record this as a chain (including composite factors if present)
+                    chain_factors: list[str] = []
+                    for i in range(len(path) - 1):
+                        pair = (path[i], path[i + 1])
+                        if pair in composite_factors:
+                            chain_factors.extend(composite_factors[pair])
+
+                    chain_entry: dict[str, Any] = {
+                        "source": path[0],
+                        "target": current,
+                        "path": list(path),
+                        "depth": len(path) - 1,
+                        "probability": prob,
+                    }
+                    if chain_factors:
+                        chain_entry["factors"] = list(dict.fromkeys(chain_factors))
+
+                    all_chains.append(chain_entry)
 
                 if len(path) - 1 >= self._max_depth:
                     continue
@@ -210,6 +227,7 @@ class CausalOperator:
                         "origin": "causal_transitivity",
                         "chain_depth": chain["depth"],
                         "path": chain["path"],
+                        **({"factors": chain["factors"]} if "factors" in chain else {}),
                     },
                     provenance=Provenance(
                         created_by=self.operator_id,
@@ -224,16 +242,20 @@ class CausalOperator:
                     )
                 )
 
+            steps = [
+                f"Chain: {' → '.join(chain['path'])}",
+                f"Depth: {chain['depth']}",
+                f"Probability: {chain['probability']:.3f}",
+            ]
+            if "factors" in chain:
+                steps.append(f"Factors: {', '.join(chain['factors'])}")
+
             provenance_chains.append(
                 ProvenanceChain(
                     conclusion=f"{chain['source']} causes {chain['target']}",
                     evidence_node_ids=chain["path"],
                     operator_id=self.operator_id,
-                    reasoning_steps=[
-                        f"Chain: {' → '.join(chain['path'])}",
-                        f"Depth: {chain['depth']}",
-                        f"Probability: {chain['probability']:.3f}",
-                    ],
+                    reasoning_steps=steps,
                     confidence=chain["probability"],
                 )
             )
@@ -253,6 +275,7 @@ class CausalOperator:
                         "depth": c["depth"],
                         "probability": round(c["probability"], 4),
                         "path": c["path"],
+                        **({"factors": c["factors"]} if "factors" in c else {}),
                     }
                     for c in top_chains
                 ],

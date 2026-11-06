@@ -216,6 +216,7 @@ class BootOrchestrator:
             from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
             from hbllm.hcir.kernel.services import KernelServices
             from hbllm.hcir.kernel.transaction_manager import TransactionManager
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
             from hbllm.hcir.workspace import HCIRWorkspaceState
 
             hcir_ws = (
@@ -247,8 +248,19 @@ class BootOrchestrator:
                 )
                 for node_obj in node_list:
                     adapter = NodeAdapter(node_obj)
-                    for cap_node in adapter.export_capabilities(tenant_id="default"):
-                        hcir_ws.upsert_node(cap_node)
+                    cap_nodes = adapter.export_capabilities(tenant_id="default")
+                    if cap_nodes:
+                        hcir_ws.commit_operations(
+                            [
+                                TransactionOperation(
+                                    op=TransactionOp.UPSERT_NODE,
+                                    node_id=c.id,
+                                    node_data=c.model_dump(),
+                                )
+                                for c in cap_nodes
+                            ],
+                            author="boot:capability_export",
+                        )
 
             logger.info("HCIR Kernel & Executive Runtime online (Native Cognitive ISA)")
         except Exception as _ex:

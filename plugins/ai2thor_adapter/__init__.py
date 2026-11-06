@@ -14,7 +14,6 @@ from .action import AI2ThorActionAdapter
 from .benchmark import PureHCIRAI2ThorAgent, run_ai2thor_benchmark
 from .environment import (
     NativeAI2ThorWrapper,
-    StandaloneAI2ThorEnv,
     make_ai2thor_env,
 )
 from .perception import AI2ThorPerceptionAdapter
@@ -57,7 +56,6 @@ __all__ = [
     "PLUGIN_NAME",
     "PLUGIN_VERSION",
     "PureHCIRAI2ThorAgent",
-    "StandaloneAI2ThorEnv",
     "make_ai2thor_env",
     "register",
     "run_ai2thor_benchmark",

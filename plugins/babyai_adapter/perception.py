@@ -105,6 +105,12 @@ class BabyAIPerceptionAdapter:
         if known_carrying is not ...:
             if known_carrying is None:
                 carrying_info = None
+            elif hasattr(known_carrying, "object_type") and hasattr(known_carrying, "color"):
+                car_type = IDX_TO_OBJECT.get(
+                    int(known_carrying.object_type), str(known_carrying.object_type)
+                )
+                car_col = IDX_TO_COLOR.get(int(known_carrying.color), str(known_carrying.color))
+                carrying_info = {"type": car_type, "color": car_col}
             elif hasattr(known_carrying, "type") and hasattr(known_carrying, "color"):
                 carrying_info = {
                     "type": str(known_carrying.type),

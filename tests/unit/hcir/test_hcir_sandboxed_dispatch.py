@@ -75,7 +75,7 @@ async def test_capability_resolver_sandbox_permission_check():
     policy = SandboxedCapabilityPolicy(
         capability_name="file_reader",
         provider_id="provider_local",
-        trust_level=TrustLevel.VERIFIED,
+        trust_level=TrustLevel.SYSTEM,
         isolation_mode=IsolationMode.IN_PROCESS,
         permissions=CapabilityPermissions(
             allow_filesystem=False,  # Disallowed
@@ -83,35 +83,54 @@ async def test_capability_resolver_sandbox_permission_check():
         ),
         resource_limits=CapabilityResourceLimits(timeout_seconds=5.0),
     )
-    sandbox_mgr.register_policy(policy)
-
+    # Manifest permissions live on the implementation; register BEFORE the
+    # policy so the denial surfaces at execute time (register-time denial is
+    # covered in tests/unit/security/test_sandbox_enforcement.py).
     resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
     executor = MockExecutor()
+    resolver.register(
+        CapabilityImplementation(
+            capability_name="file_writer",
+            implementation_id="provider_local",
+            executor=executor,
+            priority=10,
+            required_permissions={"filesystem"},
+        )
+    )
     resolver.register(
         CapabilityImplementation(
             capability_name="file_reader",
             implementation_id="provider_local",
             executor=executor,
             priority=10,
+            required_permissions={"network"},
+        )
+    )
+    sandbox_mgr.register_policy(policy)
+    sandbox_mgr.register_policy(
+        SandboxedCapabilityPolicy(
+            capability_name="file_writer",
+            provider_id="provider_local",
+            trust_level=TrustLevel.SYSTEM,
+            isolation_mode=IsolationMode.IN_PROCESS,
+            permissions=CapabilityPermissions(allow_filesystem=False),
         )
     )
 
-    # 1. Request filesystem permission -> Blocked
+    # 1. Manifest requires filesystem -> Blocked (policy does not grant it)
     result_denied = await resolver.resolve_and_execute(
-        "file_reader",
+        "file_writer",
         {"path": "/etc/passwd"},
-        required_permissions={"filesystem"},
     )
     assert "error" in result_denied
     assert "Sandbox policy violation" in result_denied["error"]
     assert "filesystem" in result_denied["error"]
     assert executor.executed_count == 0  # Not executed!
 
-    # 2. Request network permission -> Permitted
+    # 2. Manifest requires network -> Permitted (policy grants it)
     result_allowed = await resolver.resolve_and_execute(
         "file_reader",
         {"url": "https://example.com"},
-        required_permissions={"network"},
     )
     assert result_allowed["status"] == "ok"
     assert executor.executed_count == 1
@@ -193,7 +212,7 @@ async def test_unregistered_capability_fails_closed_when_sandboxed():
 
 @pytest.mark.asyncio
 async def test_auto_inferred_permissions_when_sandboxed():
-    """Permissions are auto-derived from capability name when omitted by caller."""
+    """Manifest permissions are enforced even when the caller passes none."""
     sandbox_mgr = CapabilitySandboxManager()
     policy = SandboxedCapabilityPolicy(
         capability_name="execute_python",
@@ -203,8 +222,6 @@ async def test_auto_inferred_permissions_when_sandboxed():
             allow_subprocess=False,  # Subprocess denied
         ),
     )
-    sandbox_mgr.register_policy(policy)
-
     resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
     executor = MockExecutor()
     resolver.register(
@@ -212,10 +229,12 @@ async def test_auto_inferred_permissions_when_sandboxed():
             capability_name="execute_python",
             implementation_id="python_worker",
             executor=executor,
+            required_permissions={"subprocess"},
         )
     )
+    sandbox_mgr.register_policy(policy)
 
-    # Caller omits required_permissions, resolver auto-derives 'subprocess' from capability name
+    # The manifest declares 'subprocess'; the policy does not grant it.
     result = await resolver.resolve_and_execute(
         "execute_python",
         {"code": "import os; os.system('echo hi')"},
@@ -228,7 +247,7 @@ async def test_auto_inferred_permissions_when_sandboxed():
 
 @pytest.mark.asyncio
 async def test_write_config_blocked_when_filesystem_denied_without_declared_permissions():
-    """Verify that 'write_config' without declared required_permissions is blocked when allow_filesystem=False."""
+    """Verify 'write_config' is blocked when its manifest filesystem need is ungranted."""
     sandbox_mgr = CapabilitySandboxManager()
     policy = SandboxedCapabilityPolicy(
         capability_name="write_config",
@@ -238,8 +257,6 @@ async def test_write_config_blocked_when_filesystem_denied_without_declared_perm
             allow_filesystem=False,
         ),
     )
-    sandbox_mgr.register_policy(policy)
-
     resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
     executor = MockExecutor(return_data={"status": "file written"})
     resolver.register(
@@ -247,8 +264,10 @@ async def test_write_config_blocked_when_filesystem_denied_without_declared_perm
             capability_name="write_config",
             implementation_id="config_writer",
             executor=executor,
+            required_permissions={"filesystem"},
         )
     )
+    sandbox_mgr.register_policy(policy)
 
     # Caller passes NO required_permissions
     result = await resolver.resolve_and_execute("write_config", {})
@@ -271,8 +290,6 @@ async def test_policy_explicit_required_permissions_derived_automatically():
             allow_network=False,
         ),
     )
-    sandbox_mgr.register_policy(policy)
-
     resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
     executor = MockExecutor()
     resolver.register(
@@ -280,8 +297,10 @@ async def test_policy_explicit_required_permissions_derived_automatically():
             capability_name="custom_action",
             implementation_id="custom_worker",
             executor=executor,
+            required_permissions={"network"},
         )
     )
+    sandbox_mgr.register_policy(policy)
 
     result = await resolver.resolve_and_execute("custom_action", {})
     assert "error" in result

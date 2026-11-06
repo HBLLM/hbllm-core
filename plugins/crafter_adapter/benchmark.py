@@ -146,8 +146,6 @@ def run_crafter_benchmark(
     cohort_name: str,
     episodes_per_target: int = 3,
     base_seed: int = 1000,
-    prefer_native: bool = True,
-    require_native: bool = True,
 ) -> dict[str, Any]:
     """Execute Crafter benchmark across 5 tech tiers."""
     canonical_cohort = resolve_cohort(cohort_name)
@@ -171,11 +169,7 @@ def run_crafter_benchmark(
                 seed = current_seed
                 current_seed += 1
 
-                env = make_crafter_env(seed=seed, prefer_native=prefer_native)
-                if require_native and not getattr(env, "is_native", False):
-                    raise RuntimeError(
-                        "Native 'crafter' upstream package is strictly required; standalone fallback is disabled."
-                    )
+                env = make_crafter_env(seed=seed)
                 obs, _ = env.reset(seed=seed)
 
                 if canonical_cohort == "pure-hcir":
@@ -188,14 +182,22 @@ def run_crafter_benchmark(
                 total_reward = 0.0
 
                 max_steps = (
-                    100
+                    150
                     if target
                     in (
                         CrafterAchievement.MAKE_IRON_PICKAXE,
                         CrafterAchievement.PLACE_FURNACE,
                         CrafterAchievement.COLLECT_IRON,
                     )
-                    else (70 if target == CrafterAchievement.SURVIVE else 50)
+                    else (
+                        100
+                        if target
+                        in (
+                            CrafterAchievement.MAKE_STONE_PICKAXE,
+                            CrafterAchievement.COLLECT_COAL,
+                        )
+                        else (70 if target == CrafterAchievement.SURVIVE else 50)
+                    )
                 )
 
                 while not done and obs.step_count < max_steps:
@@ -276,18 +278,12 @@ def main() -> None:
         default=None,
         help="Cohort to benchmark ('pure-hcir' / 'HBLLM-Core', 'llm-only'). Defaults to running both.",
     )
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        help="Run against upstream native crafter package",
-    )
     args = parser.parse_args()
 
     cohorts_to_run = (resolve_cohort(args.cohort),) if args.cohort else ("pure-hcir", "llm-only")
 
     print(
-        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native={args.prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Crafter Multi-Tier Benchmark (5 Tiers, 11 Milestones, Native Upstream)\n{'=' * 85}"
     )
 
     for cohort in cohorts_to_run:
@@ -295,7 +291,6 @@ def main() -> None:
             cohort,
             episodes_per_target=args.episodes_per_target,
             base_seed=args.seed,
-            prefer_native=args.prefer_native,
         )
         print(
             f"\n--- Cohort: {data['cohort'].upper()} (Crafter Score: {data['crafter_score']}%) ---"

@@ -2,7 +2,7 @@
 System 3 World Model Node (Environment Simulation).
 
 Before the Cognitive Workspace commits to executing physical actions
-(like running Python scripts or clicking links), it asks the World Model
+(like running Python scripts or following links), it asks the World Model
 to predict the outcome. If the simulation predicts failure or a safety
 violation, the World Model rejects the thought back to the Blackboard
 for the Intuition Engine to rewrite.

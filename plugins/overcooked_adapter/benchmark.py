@@ -67,8 +67,6 @@ def run_overcooked_tier(
     tier: OvercookedTier | str,
     episodes: int = 5,
     seed: int = 42,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation on a single Overcooked cooperative tier."""
     agent = PureHCIROvercookedAgent()
@@ -82,11 +80,7 @@ def run_overcooked_tier(
         agent.reset_episode()
         agent1 = PureHCIROvercookedAgent()
         agent1.reset_episode()
-        env = make_overcooked_env(tier=tier_enum, seed=seed + ep, prefer_native=prefer_native)
-        if require_native and not getattr(env, "is_native", False):
-            raise RuntimeError(
-                "Native 'overcooked_ai_py' package is strictly required; standalone fallback is disabled."
-            )
+        env = make_overcooked_env(tier=tier_enum, seed=seed + ep)
         obs = env.reset()
 
         is_solo = tier_enum == OvercookedTier.TIER_1_CRAMPED_ROOM_SOLO
@@ -98,12 +92,12 @@ def run_overcooked_tier(
                 if (obs.partner is not None and not is_solo)
                 else None
             )
-            obs, _reward, done, info = env.step(action, partner_action=partner_action)
+            obs, _reward, done, _info = env.step(action, partner_action=partner_action)
 
         if obs.won:
             successes += 1
-        total_soups += obs.soups_delivered
         total_steps += obs.step_count
+        total_soups += obs.soups_delivered
 
     rate = successes / episodes if episodes > 0 else 0.0
     ci_low, ci_high = compute_wilson_ci(successes, episodes)
@@ -125,8 +119,6 @@ def run_overcooked_benchmark(
     episodes_per_tier: int = 5,
     seed: int = 42,
     episodes: int | None = None,
-    prefer_native: bool = True,
-    require_native: bool = False,
 ) -> dict[str, Any]:
     """Run full 5-tier Overcooked cooperative benchmark."""
     if episodes is not None:
@@ -142,8 +134,6 @@ def run_overcooked_benchmark(
             tier,
             episodes=episodes_per_tier,
             seed=seed,
-            prefer_native=prefer_native,
-            require_native=require_native,
         )
         tiers_results[tier.value] = res
         total_successes += res["successes"]
@@ -173,29 +163,14 @@ def main() -> None:
         "--episodes-per-tier", type=int, default=5, help="Episodes per cooperative kitchen tier"
     )
     parser.add_argument("--seed", type=int, default=42, help="Base random seed")
-    parser.add_argument(
-        "--prefer-native",
-        "--native",
-        action="store_true",
-        default=True,
-        help="Run against upstream native overcooked_ai_py package",
-    )
-    parser.add_argument(
-        "--require-native",
-        action="store_true",
-        default=False,
-        help="Strictly require upstream native package, failing if unavailable",
-    )
     args = parser.parse_args()
 
     print(
-        f"\n{'=' * 85}\nRunning Overcooked-AI Multi-Tier Benchmark (5 Tiers, Native={args.prefer_native})\n{'=' * 85}"
+        f"\n{'=' * 85}\nRunning Overcooked-AI Multi-Tier Benchmark (5 Tiers, Native Upstream)\n{'=' * 85}"
     )
     data = run_overcooked_benchmark(
         episodes_per_tier=args.episodes_per_tier,
         seed=args.seed,
-        prefer_native=args.prefer_native,
-        require_native=args.require_native,
     )
     print(
         f"Overall Success Rate: {data['overall_success_rate'] * 100:.1f}% | 95% Wilson CI: {data['ci_95']} | Total Episodes: {data['total_episodes']}"

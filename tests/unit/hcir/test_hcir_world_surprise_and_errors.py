@@ -20,6 +20,15 @@ def test_world_prediction_error():
     assert err.prediction_id == "p1"
     assert err.typology == PredictionErrorTypology.MODEL_ERROR
 
+    # Forward architecture exports
+    pred_err = err.to_causal_predicate()
+    assert pred_err.variable == f"prediction_error:{err.error_id}"
+    assert pred_err.value == 15.0
+
+    tx_err = err.to_transaction_operations()
+    assert len(tx_err) == 1
+    assert tx_err[0].node_id == f"error_{err.error_id}"
+
 
 def test_surprise_engine_evaluation():
     engine = SurpriseEngine(surprise_threshold=0.15)

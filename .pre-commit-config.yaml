@@ -48,6 +48,16 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # ── 2b. Mypy (Type Checking) ─────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        description: Run mypy type checker across workspace
+        entry: mypy .
+        language: system
+        pass_filenames: false
+
   # ── 3. Cargo (Rust Workspace Checks) ────────────────────────────────
   - repo: local
     hooks:

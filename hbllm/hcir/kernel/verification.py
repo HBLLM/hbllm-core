@@ -276,6 +276,25 @@ class ScopeVerifier:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+NODE_TYPE_ALIASES: dict[str, HCIRNodeType] = {
+    "context": HCIRNodeType.ENVIRONMENT_STATE,
+    "transaction_envelope": HCIRNodeType.EVENT,
+    "epistemic_phase": HCIRNodeType.EVENT,
+    "model": HCIRNodeType.PREDICTIVE_MODEL,
+    "model_version": HCIRNodeType.PREDICTIVE_MODEL,
+    "predictor_weight": HCIRNodeType.PREDICTIVE_MODEL,
+    "capability_evidence": HCIRNodeType.PERCEPTUAL_EVIDENCE,
+    "capability_summary": HCIRNodeType.CAPABILITY,
+    "budget_governor": HCIRNodeType.RESOURCE,
+    "counterfactual_branch": HCIRNodeType.HYPOTHESIS,
+    "disagreement_report": HCIRNodeType.CONTRADICTION,
+    "prediction_receipt": HCIRNodeType.PREDICTION,
+    "precondition": HCIRNodeType.CONSTRAINT,
+    "process": HCIRNodeType.PROCEDURE,
+    "outcome": HCIRNodeType.OBSERVATION,
+}
+
+
 class SchemaVerifier:
     """Verify that operations contain valid, well-formed data.
 
@@ -306,15 +325,24 @@ class SchemaVerifier:
             if op.node_data is None:
                 self._reject(transaction, f"{op.op}: missing node_data")
                 return False
+            if not op.node_data.get("id") and op.node_id:
+                op.node_data["id"] = op.node_id
             node_type_str = op.node_data.get("node_type")
             if not node_type_str:
-                self._reject(transaction, f"{op.op}: missing node_type in node_data")
-                return False
-            try:
-                nt = HCIRNodeType(node_type_str)
-            except ValueError:
-                self._reject(transaction, f"{op.op}: unknown node_type '{node_type_str}'")
-                return False
+                if op.op == TransactionOp.ADD_NODE:
+                    self._reject(transaction, "ADD_NODE: missing node_type")
+                    return False
+                node_type_str = HCIRNodeType.CONCEPT.value
+                op.node_data["node_type"] = node_type_str
+            if node_type_str in NODE_TYPE_ALIASES:
+                nt = NODE_TYPE_ALIASES[node_type_str]
+                op.node_data["node_type"] = nt.value
+            else:
+                try:
+                    nt = HCIRNodeType(node_type_str)
+                except ValueError:
+                    self._reject(transaction, f"{op.op}: unknown node_type '{node_type_str}'")
+                    return False
             if nt not in NODE_TYPE_REGISTRY:
                 self._reject(transaction, f"{op.op}: unregistered node_type '{nt}'")
                 return False
@@ -503,18 +531,23 @@ class BranchModeVerifier:
 def create_default_pipeline(
     default_scope: Scope | None = None,
     check_resources: list[str] | None = None,
+    constitutional_verifier: Any | None = None,
 ) -> list[Any]:
     """Create the default HCIR verification pipeline.
 
-    Order matters: BranchMode → Scope → Schema → Resource → Policy.
+    Order matters: BranchMode → Scope → Schema → Resource → Constitutional → Policy.
 
     Returns:
         Ordered list of verification stages.
     """
+    from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+
+    c_verifier = constitutional_verifier or ConstitutionalVerifier()
     return [
         BranchModeVerifier(),
         ScopeVerifier(default_scope=default_scope),
         SchemaVerifier(),
         ResourceVerifier(check_resources=check_resources),
+        c_verifier,
         PolicyVerifier(),
     ]

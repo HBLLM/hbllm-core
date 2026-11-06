@@ -46,3 +46,26 @@ def test_disagreement_analyzer_and_ensemble_model():
     assert ensemble.calibrated_confidence > 0.0
     assert "physics" in ensemble.component_predictions
     assert "snn" in ensemble.component_predictions
+
+    # Forward architecture neuro-symbolic and transaction exports
+    preds = ensemble.to_causal_predicates()
+    assert len(preds) > 0
+    assert any(p.relation == "reduce_speed" for p in preds)
+
+    txs = ensemble.to_transaction_operations()
+    assert len(txs) == 1
+    assert txs[0].node_id == f"pred_{ensemble.prediction_id}"
+
+    affordance = ensemble.to_affordance()
+    assert affordance.action_id == "reduce_speed"
+    assert affordance.confidence == ensemble.calibrated_confidence
+
+    pred_res, tx_res = reality_model.predict_and_transact(
+        snapshot, "reduce_speed", horizon_ms=10000
+    )
+    assert pred_res.prediction_id.startswith("pred_")
+    assert len(tx_res) == 1
+
+    all_preds = reality_model.export_causal_predicates(ensemble)
+    assert len(all_preds) >= 2
+    assert any(p.variable == "prediction_provenance" for p in all_preds)

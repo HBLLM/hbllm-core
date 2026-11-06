@@ -1,0 +1,492 @@
+{
+  "timestamp": 1791369976.75682,
+  "total_games_tested": 25,
+  "total_levels_passed": 6,
+  "total_levels_possible": 183,
+  "pass_rate_pct": 3.28,
+  "games": {
+    "tu93-0768757b": {
+      "title": "TU93",
+      "levels_passed": 1,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 115.82,
+      "baseline": [
+        19,
+        16,
+        34,
+        42,
+        123,
+        80,
+        14,
+        23,
+        111
+      ]
+    },
+    "ar25-0c556536": {
+      "title": "AR25",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 59.47,
+      "baseline": [
+        32,
+        50,
+        75,
+        37,
+        89,
+        159,
+        233,
+        73
+      ]
+    },
+    "re86-8af5384d": {
+      "title": "RE86",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 207.77,
+      "baseline": [
+        26,
+        42,
+        86,
+        108,
+        189,
+        139,
+        424,
+        241
+      ]
+    },
+    "su15-1944f8ab": {
+      "title": "SU15",
+      "levels_passed": 0,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 64.76,
+      "baseline": [
+        22,
+        42,
+        26,
+        115,
+        36,
+        31,
+        8,
+        40,
+        41
+      ]
+    },
+    "m0r0-492f87ba": {
+      "title": "M0R0",
+      "levels_passed": 1,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 243.37,
+      "baseline": [
+        30,
+        111,
+        203,
+        26,
+        500,
+        237
+      ]
+    },
+    "cn04-2fe56bfb": {
+      "title": "CN04",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 66.83,
+      "baseline": [
+        29,
+        54,
+        85,
+        300,
+        208,
+        113
+      ]
+    },
+    "ft09-0d8bbf25": {
+      "title": "FT09",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 52.93,
+      "baseline": [
+        43,
+        12,
+        23,
+        28,
+        65,
+        37
+      ]
+    },
+    "tr87-cd924810": {
+      "title": "TR87",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 784.25,
+      "baseline": [
+        54,
+        58,
+        40,
+        45,
+        71,
+        146
+      ]
+    },
+    "sc25-635fd71a": {
+      "title": "SC25",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 308.19,
+      "baseline": [
+        36,
+        6,
+        32,
+        83,
+        143,
+        50
+      ]
+    },
+    "lp85-305b61c3": {
+      "title": "LP85",
+      "levels_passed": 1,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 64.72,
+      "baseline": [
+        17,
+        38,
+        31,
+        16,
+        41,
+        60,
+        26,
+        159
+      ]
+    },
+    "dc22-fdcac232": {
+      "title": "DC22",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 149.72,
+      "baseline": [
+        59,
+        102,
+        67,
+        98,
+        324,
+        578
+      ]
+    },
+    "sp80-589a99af": {
+      "title": "SP80",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 72.42,
+      "baseline": [
+        39,
+        58,
+        25,
+        148,
+        96,
+        152
+      ]
+    },
+    "ka59-38d34dbb": {
+      "title": "KA59",
+      "levels_passed": 0,
+      "target_levels": 7,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 56.75,
+      "baseline": [
+        28,
+        109,
+        51,
+        51,
+        33,
+        132,
+        326
+      ]
+    },
+    "g50t-5849a774": {
+      "title": "G50T",
+      "levels_passed": 0,
+      "target_levels": 7,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 71.53,
+      "baseline": [
+        78,
+        175,
+        179,
+        230,
+        96,
+        54,
+        67
+      ]
+    },
+    "sb26-7fbdac44": {
+      "title": "SB26",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 32.7,
+      "baseline": [
+        18,
+        28,
+        18,
+        19,
+        31,
+        23,
+        58,
+        18
+      ]
+    },
+    "lf52-271a04aa": {
+      "title": "LF52",
+      "levels_passed": 1,
+      "target_levels": 10,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 82.53,
+      "baseline": [
+        32,
+        81,
+        60,
+        71,
+        205,
+        148,
+        244,
+        109,
+        164,
+        225
+      ]
+    },
+    "bp35-0a0ad940": {
+      "title": "BP35",
+      "levels_passed": 0,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 950.81,
+      "baseline": [
+        21,
+        48,
+        44,
+        38,
+        33,
+        87,
+        86,
+        131,
+        163
+      ]
+    },
+    "s5i5-18d95033": {
+      "title": "S5I5",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 141.34,
+      "baseline": [
+        20,
+        89,
+        106,
+        54,
+        162,
+        38,
+        86,
+        83
+      ]
+    },
+    "r11l-495a7899": {
+      "title": "R11L",
+      "levels_passed": 1,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 274.49,
+      "baseline": [
+        22,
+        33,
+        51,
+        26,
+        52,
+        49
+      ]
+    },
+    "sk48-d8078629": {
+      "title": "SK48",
+      "levels_passed": 0,
+      "target_levels": 8,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 194.51,
+      "baseline": [
+        61,
+        177,
+        101,
+        103,
+        230,
+        181,
+        125,
+        92
+      ]
+    },
+    "wa30-ee6fef47": {
+      "title": "WA30",
+      "levels_passed": 0,
+      "target_levels": 9,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 60.22,
+      "baseline": [
+        71,
+        119,
+        183,
+        98,
+        368,
+        68,
+        79,
+        442,
+        415
+      ]
+    },
+    "vc33-5430563c": {
+      "title": "VC33",
+      "levels_passed": 1,
+      "target_levels": 7,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 70.37,
+      "baseline": [
+        7,
+        18,
+        44,
+        61,
+        131,
+        34,
+        152
+      ]
+    },
+    "ls20-9607627b": {
+      "title": "LS20",
+      "levels_passed": 0,
+      "target_levels": 7,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 96.97,
+      "baseline": [
+        22,
+        123,
+        73,
+        84,
+        96,
+        192,
+        186
+      ]
+    },
+    "cd82-fb555c5d": {
+      "title": "CD82",
+      "levels_passed": 0,
+      "target_levels": 6,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 34.06,
+      "baseline": [
+        55,
+        8,
+        41,
+        21,
+        23,
+        23
+      ]
+    },
+    "tn36-ef4dde99": {
+      "title": "TN36",
+      "levels_passed": 0,
+      "target_levels": 7,
+      "won": false,
+      "steps": 1000,
+      "total_steps": 1000,
+      "attempts": 1,
+      "elapsed_seconds": 70.36,
+      "baseline": [
+        32,
+        72,
+        26,
+        40,
+        30,
+        55,
+        62
+      ]
+    }
+  }
+}

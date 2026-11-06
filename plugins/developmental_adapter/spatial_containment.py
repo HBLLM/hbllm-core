@@ -11,23 +11,26 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hbllm.hcir.world.spatial_containment import (
+    BaseSpatialContainmentEngine,
+    SpatialRelationFact,
+)
+
 from .blank_brain import BlankBrainSubstrate
 from .environment import BabyWorldEnvironment
 from .perception import DevelopmentalPerceptionAdapter
 from .types import (
     BabyActionType,
     BabyRelationType,
-    BeliefTransitionEvent,
     BeliefTransitionType,
     SensoryObservation,
-    SpatialRelationFact,
     Vector2D,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class SpatialContainmentEngine:
+class SpatialContainmentEngine(BaseSpatialContainmentEngine):
     """Induces spatial relations and containment transport schemas through active physical probes."""
 
     def __init__(
@@ -36,54 +39,19 @@ class SpatialContainmentEngine:
         perception: DevelopmentalPerceptionAdapter,
         env: BabyWorldEnvironment,
     ) -> None:
+        super().__init__()
         self.substrate = substrate
         self.perception = perception
         self.env = env
 
-        self.discovered_spatial_schemas: list[dict[str, Any]] = []
-        self.belief_history: list[BeliefTransitionEvent] = []
-        self.interventions_count: int = 0
-
     def detect_spatial_relations(self, obs: SensoryObservation) -> list[SpatialRelationFact]:
         """Induce relational facts directly from geometric and perceptual observations."""
-        facts: list[SpatialRelationFact] = []
-        percept_map = {p["percept_id"]: p for p in obs.vision}
-
-        # Check containment relations
-        for p in obs.vision:
-            cid = p.get("contained_in")
-            if cid and cid in percept_map:
-                facts.append(
-                    SpatialRelationFact(
-                        relation=BabyRelationType.INSIDE,
-                        subject_id=p["percept_id"],
-                        object_id=cid,
-                        confidence=1.0,
-                        evidence={"source": "direct_percept"},
-                    )
-                )
-
-        # Check proximity / NEAR relations between all pairs
-        ids = list(percept_map.keys())
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                id1, id2 = ids[i], ids[j]
-                p1, p2 = percept_map[id1], percept_map[id2]
-                pos1 = Vector2D(p1["spatial_coordinates"][0], p1["spatial_coordinates"][1])
-                pos2 = Vector2D(p2["spatial_coordinates"][0], p2["spatial_coordinates"][1])
-                dist = pos1.distance_to(pos2)
-                if dist <= 0.5:
-                    facts.append(
-                        SpatialRelationFact(
-                            relation=BabyRelationType.NEAR,
-                            subject_id=id1,
-                            object_id=id2,
-                            confidence=max(0.0, 1.0 - dist / 0.5),
-                            evidence={"distance": dist},
-                        )
-                    )
-
-        return facts
+        return super().detect_spatial_relations(
+            percept_items=obs.vision,
+            near_threshold=0.5,
+            inside_relation=BabyRelationType.INSIDE,
+            near_relation=BabyRelationType.NEAR,
+        )
 
     def discover_containment_transport_schema(
         self,
@@ -132,31 +100,19 @@ class SpatialContainmentEngine:
             dy = post_outside["spatial_coordinates"][1] - pre_outside["spatial_coordinates"][1]
             outside_disp = (dx**2 + dy**2) ** 0.5
 
-        # Invariant check: Inside object moved synchronously (inside_disp ≈ container_disp)
-        # Outside object did NOT move (outside_disp ≈ 0)
-        transport_confirmed = (
-            container_moved and abs(inside_disp - container_disp) < 0.05 and outside_disp < 0.05
+        transport_confirmed, schema = self.evaluate_containment_transport_invariance(
+            container_moved=container_moved,
+            container_disp=container_disp,
+            inside_disp=inside_disp,
+            outside_disp=outside_disp,
         )
 
-        schema = {
-            "schema_id": "schema_containment_transport",
-            "relation": "INSIDE",
-            "action": "PUSH",
-            "invariant": "SYNCHRONOUS_TRANSPORT",
-            "confirmed": transport_confirmed,
-            "container_displacement": container_disp,
-            "contained_displacement": inside_disp,
-            "outside_displacement": outside_disp,
-        }
-
         if transport_confirmed:
-            self.discovered_spatial_schemas.append(schema)
-            self.substrate.spatial_schemas.append(schema)
-            self._record_event(
-                event_type=BeliefTransitionType.SPATIAL_SCHEMA_INDUCED,
-                condition=f"INSIDE(x, {container_id}) ∧ MOVE({container_id}) => MOVE(x)",
-                prior_conf=0.5,
-                post_conf=1.0,
+            self.record_spatial_schema(
+                schema=schema,
+                container_id=container_id,
+                target_store=self.substrate.spatial_schemas,
+                step_index=self.interventions_count,
             )
 
         self.env.restore_state(prior_state)
@@ -194,16 +150,10 @@ class SpatialContainmentEngine:
         self.env.step(BabyActionType.OPEN, target_id=container_id)
         actual_pos = self.env.objects[contained_id].position.to_tuple()
 
-        prediction_error = (
-            (predicted_pos[0] - actual_pos[0]) ** 2 + (predicted_pos[1] - actual_pos[1]) ** 2
-        ) ** 0.5
-
-        result = {
-            "predicted_position": predicted_pos,
-            "actual_position": actual_pos,
-            "prediction_error": prediction_error,
-            "permanence_preserved": prediction_error < 0.05,
-        }
+        result = self.evaluate_object_permanence(
+            predicted_pos=predicted_pos,
+            actual_pos=actual_pos,
+        )
 
         self.env.restore_state(prior_state)
         return result
@@ -215,15 +165,8 @@ class SpatialContainmentEngine:
         prior_conf: float,
         post_conf: float,
     ) -> None:
-        self.belief_history.append(
-            BeliefTransitionEvent(
-                event_type=event_type,
-                step_index=self.interventions_count,
-                hypothesis_id="schema_containment",
-                variable="spatial_containment",
-                condition=condition,
-                prior_confidence=prior_conf,
-                posterior_confidence=post_conf,
-                is_falsified=False,
-            )
+        self.record_spatial_schema(
+            schema={"condition": condition},
+            container_id="schema_containment",
+            step_index=self.interventions_count,
         )

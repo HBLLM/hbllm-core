@@ -120,8 +120,34 @@ class WorkspaceNode(Node, IWorkspace):
         await self.bus.subscribe("workspace.update", self.handle_update)
         await self.bus.subscribe("workspace.thought", self.handle_thought)
         await self.bus.subscribe("brain.proactive.evaluate", self.handle_proactive_evaluate)
+        await self.bus.subscribe("project.reactivated", self.handle_project_reactivated)
+        await self.bus.subscribe("relationship.new", self.handle_relationship_event)
+        await self.bus.subscribe("relationship.updated", self.handle_relationship_event)
         # Start periodic sweeper to clean orphaned blackboards
         self._sweeper_task = asyncio.create_task(self._periodic_sweeper())
+
+    async def handle_project_reactivated(self, message: Message) -> None:
+        """Cache reactivated project metadata onto the shared HCIR workspace."""
+        if hasattr(self, "hcir_workspace") and self.hcir_workspace:
+            if hasattr(self.hcir_workspace, "metadata"):
+                self.hcir_workspace.metadata["active_project"] = message.payload
+        logger.debug(
+            "WorkspaceNode ingested project.reactivated for %s",
+            message.payload.get("project_name"),
+        )
+
+    async def handle_relationship_event(self, message: Message) -> None:
+        """Cache social relationship updates onto the shared HCIR workspace."""
+        if hasattr(self, "hcir_workspace") and self.hcir_workspace:
+            if hasattr(self.hcir_workspace, "metadata"):
+                relationships = self.hcir_workspace.metadata.setdefault("relationships", {})
+                p_name = message.payload.get("person_name")
+                if p_name:
+                    relationships[p_name] = message.payload
+        logger.debug(
+            "WorkspaceNode ingested relationship event for %s",
+            message.payload.get("person_name"),
+        )
 
     async def on_stop(self) -> None:
         """Gracefully shut down: cancel watchers, notify users of active boards, cancel sweeper."""
@@ -245,6 +271,7 @@ class WorkspaceNode(Node, IWorkspace):
         # Sync GoalNode into HCIR hypergraph
         try:
             from hbllm.hcir.graph import GoalNode, Provenance, Scope
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 
             goal_node = GoalNode(
                 id=f"goal_{correlation_id}",
@@ -253,7 +280,16 @@ class WorkspaceNode(Node, IWorkspace):
                 provenance=Provenance(created_by=message.source_node_id or "user"),
                 scope=Scope(tenant_id=message.tenant_id or "default"),
             )
-            self.hcir_workspace.upsert_node(goal_node)
+            self.hcir_workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=goal_node.id,
+                        node_data=goal_node.model_dump(),
+                    )
+                ],
+                author=message.source_node_id or "workspace_node",
+            )
         except Exception as _ex:
             logger.debug("Failed to sync GoalNode to HCIR workspace: %s", _ex)
 
@@ -361,6 +397,7 @@ class WorkspaceNode(Node, IWorkspace):
         # Sync thought into HCIR hypergraph as FactNode or BeliefNode
         try:
             from hbllm.hcir.graph import BeliefNode, FactNode, Provenance, Scope
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 
             content_str = str(proposal.get("content", ""))[:200]
             if thought_type == "symbolic_logic":
@@ -379,7 +416,16 @@ class WorkspaceNode(Node, IWorkspace):
                     provenance=Provenance(created_by=message.source_node_id),
                     scope=Scope(tenant_id=message.tenant_id or "default"),
                 )
-            self.hcir_workspace.upsert_node(node_item)
+            self.hcir_workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node_item.id,
+                        node_data=node_item.model_dump(),
+                    )
+                ],
+                author=message.source_node_id or "workspace_node",
+            )
         except Exception as _ex:
             logger.debug("Failed to sync thought node to HCIR workspace: %s", _ex)
 

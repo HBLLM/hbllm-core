@@ -521,6 +521,10 @@ class BabyAIActionAdapter:
             return False
 
         if subgoal.action == "open":
+            if target is not None:
+                return target.properties.get("state") == "open"
+            if subgoal.relative_loc is not None:
+                return False
             for node in graph.all_nodes():
                 if (
                     isinstance(node, PhysicalEntityNode)
@@ -909,8 +913,13 @@ class BabyAIActionAdapter:
                 if put_traj:
                     return put_traj
 
-            # Both entities (target + fixed landmark) are required.
-            # If either is not yet observed, explore closed doors or frontiers to discover them!
+            # 1. Check for unexplored frontiers or open portals first
+            frontier_traj = self._plan_explore_frontier(graph)
+            if frontier_traj:
+                self.consecutive_rotations = 0
+                return frontier_traj
+
+            # 2. Check for an accessible closed door to explore
             closed_door = self.find_closed_door(graph, only_accessible=True)
             if closed_door:
                 self.active_frontier = None
@@ -925,11 +934,6 @@ class BabyAIActionAdapter:
                     if len(door_traj) >= 2 and door_traj[-2] == MiniGridAction.TOGGLE:
                         return door_traj[:-1] + [MiniGridAction.FORWARD]
                     return door_traj
-
-            frontier_traj = self._plan_explore_frontier(graph)
-            if frontier_traj:
-                self.consecutive_rotations = 0
-                return frontier_traj
 
             self.consecutive_rotations += 1
             if self.consecutive_rotations > 4:
@@ -1007,7 +1011,13 @@ class BabyAIActionAdapter:
 
         target_entity = self.find_target_entity(graph, goal)
         if target_entity is None:
-            # 1. Check for an accessible closed door to explore
+            # 1. Check for unexplored frontiers or open portals first
+            frontier_traj = self._plan_explore_frontier(graph)
+            if frontier_traj:
+                self.consecutive_rotations = 0
+                return frontier_traj
+
+            # 2. Check for an accessible closed door to explore
             closed_door = self.find_closed_door(graph, only_accessible=True)
             if closed_door:
                 self.active_frontier = None
@@ -1023,12 +1033,6 @@ class BabyAIActionAdapter:
                     if len(door_traj) >= 2 and door_traj[-2] == MiniGridAction.TOGGLE:
                         return door_traj[:-1] + [MiniGridAction.FORWARD]
                     return door_traj
-
-            # 2. Check for unexplored frontiers or open portals
-            frontier_traj = self._plan_explore_frontier(graph)
-            if frontier_traj:
-                self.consecutive_rotations = 0
-                return frontier_traj
 
             # 3. Fallback rotation sweep with stuck-prevention
             self.consecutive_rotations += 1
@@ -1245,6 +1249,23 @@ class BabyAIActionAdapter:
             self.action_queue.clear()
 
         self.last_agent_pos = agent_pos
+
+        # Doorway pass-through guarantee: If agent just stepped onto an open door facing into the adjacent room,
+        # complete the traversal off the threshold into the room to prevent 1-tile doorstep reversals.
+        if (
+            self.last_action == MiniGridAction.FORWARD
+            and not self.action_queue
+            and self.last_agent_pos is not None
+        ):
+            grid = EpistemicSpatialGrid(graph, default_bounds=(self.width, self.height))
+            part = grid.partition_cells()
+            if agent_pos in part.open_doors:
+                _, agent_dir, _ = self.get_agent_state(graph)
+                fwd = DIR_TO_VEC[MiniGridDirection(agent_dir)]
+                front = (agent_pos[0] + fwd[0], agent_pos[1] + fwd[1])
+                if front not in part.blocking_cells and front not in part.closed_doors:
+                    self.last_action = MiniGridAction.FORWARD
+                    return MiniGridAction.FORWARD
 
         if self.action_queue:
             act = self.action_queue.pop(0)
