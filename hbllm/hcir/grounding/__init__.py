@@ -44,6 +44,19 @@ from hbllm.hcir.grounding.contracts import (
     TrafficClass,
     UnresolvedRef,
 )
+from hbllm.hcir.grounding.tracking import (
+    CandidateEntityState,
+    CandidateGenerator,
+    EntityAliasOp,
+    EntityAssociationOp,
+    EntityMergeOp,
+    EntityReidentificationOp,
+    EntitySplitOp,
+    IdentityOperation,
+    IdentityOperationType,
+    ThreeTierEntityTracker,
+    TrackletState,
+)
 
 __all__ = [
     # Contracts
@@ -88,4 +101,16 @@ __all__ = [
     "BoundedRingBuffer",
     "BufferOverflowError",
     "SequenceViolationError",
+    # Tracking & Identity
+    "IdentityOperationType",
+    "IdentityOperation",
+    "EntityAssociationOp",
+    "EntityMergeOp",
+    "EntitySplitOp",
+    "EntityReidentificationOp",
+    "EntityAliasOp",
+    "TrackletState",
+    "CandidateEntityState",
+    "ThreeTierEntityTracker",
+    "CandidateGenerator",
 ]
