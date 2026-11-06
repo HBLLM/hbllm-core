@@ -1080,7 +1080,30 @@ class AutonomousEpistemicEngine:
             transaction_manager=self.transaction_manager,
             engine=self,
         )
+        self.grounding_bridge: Any | None = None
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
+
+    def attach_grounding_bridge(
+        self,
+        bridge: Any | None = None,
+    ) -> Any:
+        """Attaches an SGE CorticalGroundingBridge to bind SGE into the active inference cycle."""
+        if bridge is not None:
+            self.grounding_bridge = bridge
+        else:
+            from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
+
+            ws = getattr(self, "workspace", None)
+            if ws is None and hasattr(self, "services") and self.services is not None:
+                ws = getattr(self.services, "workspace", None)
+            self.grounding_bridge = CorticalGroundingBridge(
+                workspace=ws,
+                transaction_manager=self.transaction_manager,
+                symbolic_theory=self.symbolic_theory,
+                surprise_engine=getattr(self, "surprise_engine", None),
+            )
+        self.cortical_pipeline.grounding_bridge = self.grounding_bridge
+        return self.grounding_bridge
 
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)

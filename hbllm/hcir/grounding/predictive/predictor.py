@@ -111,8 +111,9 @@ class ForwardWorldPredictor:
     def _find_matching_schema(
         self, action_type: str, entity_props: dict[str, Any]
     ) -> CausalSchema | None:
-        for s in self._schemas.values():
-            if s.action_type == action_type:
+        schemas = self._schemas.values() if isinstance(self._schemas, dict) else self._schemas
+        for s in schemas:
+            if s.action_type == action_type and s.is_actionable_cause:
                 # Match preconditions
                 match = True
                 for pk, pv in s.precondition.items():
