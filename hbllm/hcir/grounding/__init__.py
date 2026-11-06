@@ -50,6 +50,18 @@ from hbllm.hcir.grounding.contracts import (
     TrafficClass,
     UnresolvedRef,
 )
+from hbllm.hcir.grounding.epistemics import (
+    BeliefRevisionEngine,
+    ContradictionRecord,
+    ContradictionType,
+    DependencyGroupEvidenceFusion,
+    EpistemicEvaluator,
+    EvidenceCalibrator,
+    FusionResult,
+    PlattProfile,
+    RevisionActionType,
+    RevisionResult,
+)
 from hbllm.hcir.grounding.tracking import (
     CandidateEntityState,
     CandidateGenerator,
@@ -124,4 +136,15 @@ __all__ = [
     "ConceptLifecycleManager",
     "ConceptPromotionProposal",
     "WorkingConceptStore",
+    # Epistemic Reasoning & Fusion
+    "PlattProfile",
+    "EvidenceCalibrator",
+    "FusionResult",
+    "DependencyGroupEvidenceFusion",
+    "ContradictionType",
+    "RevisionActionType",
+    "ContradictionRecord",
+    "RevisionResult",
+    "BeliefRevisionEngine",
+    "EpistemicEvaluator",
 ]
