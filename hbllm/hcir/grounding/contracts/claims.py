@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from hbllm.hcir.grounding.contracts.enums import ClaimOrigin, Polarity
 from hbllm.hcir.grounding.contracts.references import (
     GroundedRef,
+    LatentRelationRef,
     LiteralValueRef,
+    PredicateRef,
     UnresolvedRef,
 )
 
@@ -16,14 +18,14 @@ class GroundingClaim:
     """An uncommitted semantic proposition generated from observations.
 
     References multiple evidence IDs rather than collapsing them into a single score.
-    Uses typed reference objects for subject and object, with first-class support
+    Uses typed reference objects for subject, predicate, and object, with first-class support
     for UnresolvedRef.
     """
 
     claim_id: str
     origin: ClaimOrigin
     subject_ref: GroundedRef
-    predicate_ref: str
+    predicate_ref: str | PredicateRef | LatentRelationRef
     object_ref: GroundedRef | LiteralValueRef | UnresolvedRef | None
     polarity: Polarity
     evidence_ids: tuple[str, ...]

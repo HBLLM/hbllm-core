@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from hbllm.hcir.grounding.contracts.enums import EvidenceRelation
 from hbllm.hcir.grounding.contracts.evidence import EvidenceRecord
 
 
@@ -52,8 +53,19 @@ class EvidenceCalibrator:
         return max(0.001, min(0.999, calibrated))
 
     def calibrate_record(self, record: EvidenceRecord) -> EvidenceRecord:
-        """Returns an EvidenceRecord with calibrated likelihood computed from perceptual score."""
+        """Returns an EvidenceRecord with calibrated posterior and likelihood ratio."""
         calibrated_p = self.calibrate(record.perceptual_score, model_name=record.model_name)
+        profile_name = record.model_name if record.model_name in self._profiles else "default"
+
+        clamped_p = max(0.001, min(0.999, calibrated_p))
+        base_lr = clamped_p / (1.0 - clamped_p)
+        if record.relation == EvidenceRelation.REFUTES:
+            lr = 1.0 / base_lr
+        elif record.relation == EvidenceRelation.NEUTRAL:
+            lr = 1.0
+        else:
+            lr = base_lr
+
         return EvidenceRecord(
             evidence_id=record.evidence_id,
             observation_id=record.observation_id,
@@ -64,7 +76,11 @@ class EvidenceCalibrator:
             dependency_group=record.dependency_group,
             perceptual_score=record.perceptual_score,
             calibrated_likelihood=calibrated_p,
+            calibrated_posterior=calibrated_p,
+            likelihood_ratio=lr,
             evidence_strength=record.evidence_strength,
+            relation=record.relation,
+            calibration_profile=profile_name,
             provenance_hash=record.provenance_hash,
             timestamp=record.timestamp,
         )

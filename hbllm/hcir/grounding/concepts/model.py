@@ -140,3 +140,5 @@ class GroundedConcept:
                 "reason": reason or f"Transitioned to {new_state.value}",
             }
         )
+
+    transition_to = transition_lifecycle

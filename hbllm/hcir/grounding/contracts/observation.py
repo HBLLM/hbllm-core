@@ -23,9 +23,12 @@ class ObservationEnvelope:
     sequence_number: int
     wall_timestamp: float
     monotonic_timestamp: float
-    raw_payload_ref: str
+    raw_payload_ref: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     provenance_hash: str = ""
+    clock_domain: str = "host_monotonic"
+    payload_ref: str = ""
+    payload_hash: str = ""
 
     def __post_init__(self) -> None:
         if not self.observation_id:
@@ -39,15 +42,25 @@ class ObservationEnvelope:
                 f"monotonic_timestamp must be non-negative, got {self.monotonic_timestamp}"
             )
 
-        # Compute provenance hash if not provided
-        if not self.provenance_hash:
+        # Synchronize payload_ref and raw_payload_ref
+        effective_payload_ref = self.payload_ref or self.raw_payload_ref
+        if not effective_payload_ref:
+            raise ValueError("ObservationEnvelope payload_ref / raw_payload_ref must be non-empty")
+        object.__setattr__(self, "payload_ref", effective_payload_ref)
+        object.__setattr__(self, "raw_payload_ref", effective_payload_ref)
+
+        # Synchronize payload_hash and provenance_hash
+        effective_hash = self.payload_hash or self.provenance_hash
+        if not effective_hash:
             seed = (
                 f"{self.observation_id}:{self.source_channel_id}:"
-                f"{self.sequence_number}:{self.wall_timestamp}:{self.raw_payload_ref}"
+                f"{self.sequence_number}:{self.wall_timestamp}:{effective_payload_ref}"
             )
-            # Use BLAKE2s / SHA-256 for deterministic provenance
             digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
-            object.__setattr__(self, "provenance_hash", digest)
+            effective_hash = digest
+
+        object.__setattr__(self, "payload_hash", effective_hash)
+        object.__setattr__(self, "provenance_hash", effective_hash)
 
     @classmethod
     def create(
@@ -57,12 +70,17 @@ class ObservationEnvelope:
         source_channel_id: str,
         traffic_class: TrafficClass,
         sequence_number: int,
-        raw_payload_ref: str,
+        raw_payload_ref: str = "",
+        payload_ref: str = "",
         metadata: dict[str, Any] | None = None,
         wall_timestamp: float | None = None,
         monotonic_timestamp: float | None = None,
         provenance_hash: str = "",
+        payload_hash: str = "",
+        clock_domain: str = "host_monotonic",
     ) -> ObservationEnvelope:
+        ref = payload_ref or raw_payload_ref
+        hash_val = payload_hash or provenance_hash
         return cls(
             observation_id=observation_id,
             source_modality=source_modality,
@@ -73,7 +91,10 @@ class ObservationEnvelope:
             monotonic_timestamp=(
                 monotonic_timestamp if monotonic_timestamp is not None else time.monotonic()
             ),
-            raw_payload_ref=raw_payload_ref,
+            raw_payload_ref=ref,
+            payload_ref=ref,
             metadata=metadata or {},
-            provenance_hash=provenance_hash,
+            provenance_hash=hash_val,
+            payload_hash=hash_val,
+            clock_domain=clock_domain,
         )

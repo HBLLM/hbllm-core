@@ -59,15 +59,36 @@ class DependencyGroupEvidenceFusion:
 
         # 2. Intra-group aggregation & inter-group Bayesian multiplication
         for group_id, records in groups.items():
-            # Precision-weighted likelihood average within the correlated group
             total_weight = sum(r.evidence_strength for r in records)
             if total_weight > 0.0:
-                group_likelihood = (
-                    sum(r.calibrated_likelihood * r.evidence_strength for r in records)
+                # Precision-weighted log-likelihood-ratio average
+                weighted_log_lr = (
+                    sum(
+                        math.log(
+                            max(
+                                0.001,
+                                min(
+                                    1000.0,
+                                    r.likelihood_ratio
+                                    if r.likelihood_ratio is not None
+                                    else (
+                                        max(0.001, min(0.999, r.calibrated_likelihood))
+                                        / (1.0 - max(0.001, min(0.999, r.calibrated_likelihood)))
+                                    ),
+                                ),
+                            )
+                        )
+                        * r.evidence_strength
+                        for r in records
+                    )
                     / total_weight
                 )
+                group_lr = math.exp(weighted_log_lr)
+                group_likelihood = group_lr / (1.0 + group_lr)
             else:
                 group_likelihood = sum(r.calibrated_likelihood for r in records) / len(records)
+                p_clamped = max(0.001, min(0.999, group_likelihood))
+                group_lr = p_clamped / (1.0 - p_clamped)
 
             group_strength = max(r.evidence_strength for r in records)
             one_minus_strength_product *= 1.0 - group_strength
@@ -76,14 +97,12 @@ class DependencyGroupEvidenceFusion:
                 "records_count": float(len(records)),
                 "aggregated_likelihood": group_likelihood,
                 "group_strength": group_strength,
+                "group_likelihood_ratio": group_lr,
             }
 
             # 3. Inter-group Bayesian update (with likelihood damping by sensor strength)
-            group_likelihood_clamped = max(0.001, min(0.999, group_likelihood))
-            likelihood_ratio = group_likelihood_clamped / (1.0 - group_likelihood_clamped)
-
             # Dampen likelihood ratio by sensor strength SNR: LR^S
-            damped_ratio = math.pow(likelihood_ratio, group_strength)
+            damped_ratio = math.pow(group_lr, group_strength)
             odds *= damped_ratio
 
         # Convert odds back to posterior probability

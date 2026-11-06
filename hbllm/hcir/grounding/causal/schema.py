@@ -38,16 +38,22 @@ class CausalSchema:
 
     @property
     def is_actionable_cause(self) -> bool:
-        """True if hypothesis has achieved at least Rung 2 interventional support."""
+        """True if hypothesis has achieved at least Rung 2 interventional support or identification."""
         return self.causal_status in (
+            CausalStatus.CAUSAL_EFFECT_IDENTIFIED,
             CausalStatus.INTERVENTIONALLY_SUPPORTED,
+            CausalStatus.COUNTERFACTUAL_MODEL_AVAILABLE,
             CausalStatus.CAUSALLY_IDENTIFIED,
         )
 
 
 @dataclass(frozen=True)
 class InterventionExperimentProposal:
-    """A targeted experimental action proposed to establish P(E | do(A)) on Pearl's Ladder."""
+    """A targeted experimental action proposed to establish P(E | do(A)) on Pearl's Ladder.
+
+    Ensures that intervention experiments are themselves proposed as first-class actions
+    that must pass through planning and the ActionValidationGateway before execution.
+    """
 
     proposal_id: str
     schema_id: str
@@ -58,6 +64,20 @@ class InterventionExperimentProposal:
     expected_outcome: dict[str, Any] = field(default_factory=dict)
     rationale: str = ""
     timestamp: float = field(default_factory=time.time)
+
+    def to_symbolic_intent(self) -> Any:
+        """Translates experimental intervention proposal into a SymbolicActionIntent for planner/gateway."""
+        from hbllm.hcir.grounding.contracts.actions import SymbolicActionIntent
+
+        return SymbolicActionIntent(
+            intent_id=f"intent_exp_{self.proposal_id}",
+            action_type=self.action_intent,
+            target_ref=self.target_entity_ref,
+            parameters=self.action_parameters,
+            preconditions=tuple(f"{k} == {v}" for k, v in self.confounder_controls.items()),
+            expected_outcomes=tuple(f"{k} == {v}" for k, v in self.expected_outcome.items()),
+            context={"schema_id": self.schema_id, "is_intervention_experiment": True},
+        )
 
 
 class SchemaInducer:

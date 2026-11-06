@@ -21,6 +21,7 @@ class SymbolicActionIntent:
     parameters: dict[str, Any] = field(default_factory=dict)
     preconditions: tuple[str, ...] = field(default_factory=tuple)
     expected_outcomes: tuple[str, ...] = field(default_factory=tuple)
+    context: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
 
     def __post_init__(self) -> None:

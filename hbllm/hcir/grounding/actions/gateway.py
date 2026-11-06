@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from hbllm.hcir.grounding.contracts.actions import (
@@ -242,3 +243,54 @@ class ActionValidationGateway:
             if min_x <= coords[0] <= max_x and min_y <= coords[1] <= max_y:
                 return True
         return False
+
+
+@dataclass(frozen=True)
+class CommunicationValidationResult:
+    """Validation result for communicative / linguistic text output."""
+
+    utterance_id: str
+    is_authorized: bool
+    filtered_text: str
+    rejection_reasons: tuple[str, ...] = ()
+    moderation_passed: bool = True
+
+
+class CommunicationValidationGateway:
+    """Validates natural language and speech outputs against conversational safety policies.
+
+    Distinguishes communicative validation from physical robot/GUI actuation.
+    Enforces privacy, politeness, and disclosure rules without blocking real-time speech.
+    """
+
+    def __init__(
+        self,
+        forbidden_phrases: set[str] | None = None,
+        max_utterance_length: int = 1000,
+    ) -> None:
+        self._forbidden_phrases = forbidden_phrases or {"[CONFIDENTIAL]", "SYSTEM_PASSWORD"}
+        self._max_len = max_utterance_length
+
+    def validate_communication(
+        self,
+        intent: SymbolicActionIntent,
+        payload: RenderedActionPayload,
+    ) -> CommunicationValidationResult:
+        reasons: list[str] = []
+        text = str(payload.payload_data.get("utterance_text", ""))
+
+        if len(text) > self._max_len:
+            reasons.append(f"Utterance length {len(text)} exceeds maximum limit {self._max_len}")
+
+        for phrase in self._forbidden_phrases:
+            if phrase in text:
+                reasons.append(f"Utterance contains forbidden token: {phrase}")
+
+        is_auth = len(reasons) == 0
+        return CommunicationValidationResult(
+            utterance_id=payload.payload_id,
+            is_authorized=is_auth,
+            filtered_text=text if is_auth else "",
+            rejection_reasons=tuple(reasons),
+            moderation_passed=is_auth,
+        )

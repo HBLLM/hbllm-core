@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 from hbllm.hcir.grounding.contracts.enums import Polarity
 from hbllm.hcir.grounding.contracts.references import (
     GroundedRef,
+    LatentRelationRef,
     LiteralValueRef,
+    PredicateRef,
     UnresolvedRef,
 )
 
@@ -21,7 +23,7 @@ class BeliefState:
 
     belief_id: str
     subject_ref: GroundedRef
-    predicate_ref: str
+    predicate_ref: str | PredicateRef | LatentRelationRef
     object_ref: GroundedRef | LiteralValueRef | UnresolvedRef | None
     polarity: Polarity
     posterior_probability: float

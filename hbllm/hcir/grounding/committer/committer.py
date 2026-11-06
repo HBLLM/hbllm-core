@@ -9,11 +9,13 @@ from hbllm.hcir.grounding.concepts.model import GroundedConcept
 from hbllm.hcir.grounding.contracts.beliefs import BeliefState
 from hbllm.hcir.grounding.contracts.claims import GroundingClaim
 from hbllm.hcir.grounding.contracts.decisions import GroundingDecision
-from hbllm.hcir.grounding.contracts.enums import DecisionOutcome
+from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle, DecisionOutcome
 from hbllm.hcir.grounding.contracts.references import (
     EntityCandidateRef,
     GroundedEntityRef,
+    LatentRelationRef,
     LiteralValueRef,
+    PredicateRef,
 )
 from hbllm.hcir.grounding.tracking.operations import EntityReidentificationOp
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
@@ -103,7 +105,15 @@ class HCIRCommitter:
                 sources=[subj_id],
                 targets=[target_node_id],
                 properties={
-                    "predicate": claim.predicate_ref,
+                    "predicate": str(
+                        claim.predicate_ref.name
+                        if isinstance(claim.predicate_ref, PredicateRef)
+                        else (
+                            claim.predicate_ref.id
+                            if isinstance(claim.predicate_ref, LatentRelationRef)
+                            else claim.predicate_ref
+                        )
+                    ),
                     "polarity": claim.polarity.value,
                     "confidence": decision.posterior_belief,
                 },
@@ -235,7 +245,13 @@ class HCIRCommitter:
             },
         )
 
-        return self._tx_manager.commit(tx)
+        committed_tx = self._tx_manager.commit(tx)
+        if committed_tx.status == TransactionStatus.COMMITTED:
+            concept.transition_to(
+                ConceptLifecycle.CANONICAL,
+                reason=f"Committed to CognitiveGraph via tx {committed_tx.id}",
+            )
+        return committed_tx
 
     def commit_entity_reidentification(
         self,
@@ -285,9 +301,17 @@ class HCIRCommitter:
         return self._tx_manager.commit(tx)
 
     @staticmethod
-    def _map_predicate_to_edge_type(predicate: str) -> HCIREdgeType:
+    def _map_predicate_to_edge_type(
+        predicate: str | PredicateRef | LatentRelationRef,
+    ) -> HCIREdgeType:
         """Maps semantic relational predicate strings to formal HCIREdgeTypes."""
-        pred = predicate.upper()
+        if isinstance(predicate, PredicateRef):
+            name = predicate.name
+        elif isinstance(predicate, LatentRelationRef):
+            name = predicate.id
+        else:
+            name = str(predicate)
+        pred = name.upper()
         if pred in ("IN", "INSIDE", "CONTAINED_IN", "LOCATED_IN"):
             return HCIREdgeType.LOCATED_IN
         elif pred in ("NEAR", "BESIDE", "CLOSE_TO", "LOCATED_NEAR"):

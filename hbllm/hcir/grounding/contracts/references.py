@@ -60,6 +60,27 @@ class GroundedConceptRef(GroundedRef):
 
 
 @dataclass(frozen=True)
+class PredicateRef:
+    """Canonical or predefined relational predicate reference (e.g. 'NEAR', 'CONTAINS')."""
+
+    name: str
+
+    def __post_init__(self) -> None:
+        if not self.name or not isinstance(self.name, str):
+            raise ValueError(f"PredicateRef name must be a non-empty string, got {self.name!r}")
+
+
+@dataclass(frozen=True)
+class LatentRelationRef(GroundedRef):
+    """Dynamically discovered relational invariant (e.g. 'rel_sync_1', 'rel_dynamic_3')."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if not self.id.startswith("rel_"):
+            raise ValueError(f"LatentRelationRef id must start with 'rel_', got {self.id!r}")
+
+
+@dataclass(frozen=True)
 class LiteralValueRef:
     """Typed primitive literal value (scalar, string, color code, or measurement)."""
 

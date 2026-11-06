@@ -69,13 +69,22 @@ class OverflowPolicy(str, Enum):
     REJECT_WITH_ERROR = "reject_with_error"  # Raise BufferOverflowError
 
 
+class EvidenceRelation(str, Enum):
+    """The relation between a piece of evidence and a proposition / claim."""
+
+    SUPPORTS = "supports"
+    REFUTES = "refutes"
+    NEUTRAL = "neutral"
+
+
 class ConceptLifecycle(str, Enum):
-    """Six-stage lifecycle of grounded concepts in SGE Working Concept Store."""
+    """Lifecycle of grounded concepts across working store and CognitiveGraph."""
 
     EMERGING = "emerging"
     PROVISIONAL = "provisional"
-    GROUNDED = "grounded"
-    CONSOLIDATED = "consolidated"
+    GROUNDED = "grounded"  # Sufficient empirical support in SGE Working Concept Store
+    CONSOLIDATED = "consolidated"  # Sufficient stability & utility for promotion consideration
+    CANONICAL = "canonical"  # Formally committed via TransactionManager into CognitiveGraph
     REVISED = "revised"
     MERGED_SPLIT_DEPRECATED = "merged_split_deprecated"
 
@@ -86,10 +95,16 @@ class CausalStatus(str, Enum):
     OBSERVED_ASSOCIATION = "observed_association"  # P(B | A) correlational
     PREDICTIVE_NON_CAUSAL = "predictive_non_causal"  # Forward predictive, unverified intervention
     CAUSAL_HYPOTHESIS = "causal_hypothesis"  # Structural hypothesis formulated
-    INTERVENTIONALLY_SUPPORTED = (
-        "interventionally_supported"  # P(B | do(A)) experimentally measured
+    CAUSAL_EFFECT_IDENTIFIED = (
+        "causal_effect_identified"  # Identified under observational assumptions (e.g. backdoor)
     )
-    CAUSALLY_IDENTIFIED = "causally_identified"  # SCM counterfactually validated
+    INTERVENTIONALLY_SUPPORTED = (
+        "interventionally_supported"  # P(B | do(A)) experimentally measured via trials
+    )
+    COUNTERFACTUAL_MODEL_AVAILABLE = (
+        "counterfactual_model_available"  # SCM parameterized to support counterfactual queries
+    )
+    CAUSALLY_IDENTIFIED = "causally_identified"  # Compatibility alias for Rung 3 SCM
 
 
 class DecisionOutcome(str, Enum):
