@@ -10,6 +10,14 @@ from hbllm.hcir.grounding.bus import (
     SequenceViolationError,
     SubscriberCallback,
 )
+from hbllm.hcir.grounding.causal import (
+    CausalSchema,
+    EventCandidate,
+    EventDetector,
+    EventType,
+    InterventionExperimentProposal,
+    SchemaInducer,
+)
 from hbllm.hcir.grounding.committer import HCIRCommitter
 from hbllm.hcir.grounding.concepts import (
     ConceptLifecycleManager,
@@ -152,6 +160,13 @@ __all__ = [
     "TopologyClassifier",
     "LearnedRelation",
     "RelationLearner",
+    # Causal & Pearl Hierarchy
+    "EventType",
+    "EventCandidate",
+    "EventDetector",
+    "CausalSchema",
+    "InterventionExperimentProposal",
+    "SchemaInducer",
     # Epistemic Reasoning & Fusion
     "PlattProfile",
     "EvidenceCalibrator",
