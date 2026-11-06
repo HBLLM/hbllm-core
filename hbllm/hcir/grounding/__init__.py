@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from hbllm.hcir.grounding.actions import (
+    ActionRenderer,
+    ActionValidationGateway,
+    DialogueRenderer,
+    GuiRenderer,
+    KinematicRenderer,
+)
 from hbllm.hcir.grounding.bus import (
     BoundedRingBuffer,
     BufferOverflowError,
@@ -180,6 +187,12 @@ __all__ = [
     "GroundingSurpriseAlert",
     "GroundingSurpriseAssimilator",
     "ActiveInferenceFeedback",
+    # Outbound Realization & Gateway
+    "ActionRenderer",
+    "KinematicRenderer",
+    "GuiRenderer",
+    "DialogueRenderer",
+    "ActionValidationGateway",
     # Epistemic Reasoning & Fusion
     "PlattProfile",
     "EvidenceCalibrator",
