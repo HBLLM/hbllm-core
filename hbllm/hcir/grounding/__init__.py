@@ -10,6 +10,7 @@ from hbllm.hcir.grounding.bus import (
     SequenceViolationError,
     SubscriberCallback,
 )
+from hbllm.hcir.grounding.committer import HCIRCommitter
 from hbllm.hcir.grounding.concepts import (
     ConceptLifecycleManager,
     ConceptPromotionProposal,
@@ -147,4 +148,6 @@ __all__ = [
     "RevisionResult",
     "BeliefRevisionEngine",
     "EpistemicEvaluator",
+    # Authoritative Committer
+    "HCIRCommitter",
 ]
