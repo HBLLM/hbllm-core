@@ -10,6 +10,12 @@ from hbllm.hcir.grounding.bus import (
     SequenceViolationError,
     SubscriberCallback,
 )
+from hbllm.hcir.grounding.concepts import (
+    ConceptLifecycleManager,
+    ConceptPromotionProposal,
+    GroundedConcept,
+    WorkingConceptStore,
+)
 from hbllm.hcir.grounding.contracts import (
     ActionExecutionRecord,
     ActionIntentProposal,
@@ -113,4 +119,9 @@ __all__ = [
     "CandidateEntityState",
     "ThreeTierEntityTracker",
     "CandidateGenerator",
+    # Dynamic Concepts & Working Store
+    "GroundedConcept",
+    "ConceptLifecycleManager",
+    "ConceptPromotionProposal",
+    "WorkingConceptStore",
 ]
