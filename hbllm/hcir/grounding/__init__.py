@@ -63,6 +63,14 @@ from hbllm.hcir.grounding.epistemics import (
     RevisionActionType,
     RevisionResult,
 )
+from hbllm.hcir.grounding.relations import (
+    KinematicDyadHistory,
+    LearnedRelation,
+    RelationLearner,
+    SpatialDyad,
+    TopologicalInvariant,
+    TopologyClassifier,
+)
 from hbllm.hcir.grounding.tracking import (
     CandidateEntityState,
     CandidateGenerator,
@@ -137,6 +145,13 @@ __all__ = [
     "ConceptLifecycleManager",
     "ConceptPromotionProposal",
     "WorkingConceptStore",
+    # Dynamic Relations & Topology
+    "SpatialDyad",
+    "KinematicDyadHistory",
+    "TopologicalInvariant",
+    "TopologyClassifier",
+    "LearnedRelation",
+    "RelationLearner",
     # Epistemic Reasoning & Fusion
     "PlattProfile",
     "EvidenceCalibrator",
