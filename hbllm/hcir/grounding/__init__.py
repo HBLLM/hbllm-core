@@ -71,6 +71,13 @@ from hbllm.hcir.grounding.epistemics import (
     RevisionActionType,
     RevisionResult,
 )
+from hbllm.hcir.grounding.predictive import (
+    ActiveInferenceFeedback,
+    ForwardWorldPredictor,
+    GroundingSurpriseAlert,
+    GroundingSurpriseAssimilator,
+    PredictedEntityState,
+)
 from hbllm.hcir.grounding.relations import (
     KinematicDyadHistory,
     LearnedRelation,
@@ -167,6 +174,12 @@ __all__ = [
     "CausalSchema",
     "InterventionExperimentProposal",
     "SchemaInducer",
+    # Active Inference & Predictive Feedback
+    "PredictedEntityState",
+    "ForwardWorldPredictor",
+    "GroundingSurpriseAlert",
+    "GroundingSurpriseAssimilator",
+    "ActiveInferenceFeedback",
     # Epistemic Reasoning & Fusion
     "PlattProfile",
     "EvidenceCalibrator",
