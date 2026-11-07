@@ -2710,55 +2710,47 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
     def test_persistent_workspace_lifelong_memory_hydration(self) -> None:
         """Test Option 2: Lifelong memory hydration from TieredWorkspace persistent tier."""
         from hbllm.hcir.graph import ConceptNode, ConstraintNode, GoalNode, SkillNode
+        from hbllm.hcir.transactions import TransactionOp, TransactionOperation
         from hbllm.hcir.workspace_tiers import TieredWorkspace
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.cortex_causal import SpelkePhysicalAxiom
 
         tiered = TieredWorkspace()
 
-        # Seed persistent tier directly with promoted nodes
-        tiered.persistent.upsert_node(
+        # Seed persistent tier via transactional commit of promoted nodes
+        nodes = [
             SkillNode(
                 id="procedural_skill_PERSISTENT_UNLOCK",
                 name="PERSISTENT_UNLOCK",
                 description="Long-term key-door solver",
                 properties={"schema_name": "PERSISTENT_UNLOCK"},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConceptNode(
                 id="ontology_goal_8",
                 label="goal_feature_8",
                 definition="Known winning entity feature",
                 properties={"feature_id": 8},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             GoalNode(
                 id="learned_goal_4_4",
                 description="Persistent goal coordinate",
                 properties={"position": [4, 4]},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConstraintNode(
                 id="learned_barrier_6_6",
                 name="barrier_6_6",
                 description="Persistent static barrier",
                 properties={"position": [6, 6]},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConceptNode(
                 id="spelke_axiom_solidity_continuity",
                 label="solidity_continuity",
                 definition="Spelke solidity axiom",
                 properties={"axiom_name": "solidity_continuity"},
             ),
+        ]
+        tiered.persistent.commit_operations(
+            [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=n) for n in nodes],
             author="test",
         )
 

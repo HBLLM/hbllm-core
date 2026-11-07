@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import (
     CognitiveGraph,
     FactNode,
@@ -214,7 +215,7 @@ class TestStructuralGraphVertexCoverAndColoring:
             HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["A"], targets=["D"])
         )
 
-        mvc = graph.minimum_vertex_cover()
+        mvc = algorithms.minimum_vertex_cover(graph)
         # In a star graph, the single center vertex covers all 3 edges
         assert mvc == {"A"}
 
@@ -232,7 +233,7 @@ class TestStructuralGraphVertexCoverAndColoring:
             HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"])
         )
 
-        mvc_tri = graph_tri.minimum_vertex_cover()
+        mvc_tri = algorithms.minimum_vertex_cover(graph_tri)
         assert len(mvc_tri) == 2
         # Verify valid cover: every edge has at least one endpoint in mvc_tri
         edges = [("A", "B"), ("B", "C"), ("C", "A")]
@@ -267,7 +268,7 @@ class TestStructuralGraphVertexCoverAndColoring:
             HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["D"])
         )
 
-        coloring = graph.greedy_edge_coloring()
+        coloring = algorithms.greedy_edge_coloring(graph)
         assert len(coloring) == 3
 
         # Edges incident to B: (A, B) and (B, C) must have different colors

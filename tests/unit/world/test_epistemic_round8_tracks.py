@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import (
     CognitiveGraph,
     FactNode,
@@ -343,7 +344,7 @@ def test_cognitive_graph_transitive_reduction_diamond() -> None:
     assert len(list(graph.all_edges())) == 5
 
     # Compute transitive reduction
-    reduced = graph.transitive_reduction()
+    reduced = algorithms.transitive_reduction_subgraph(graph)
 
     # Redundant shortcut e_ad is pruned; the 4 diamond edges remain
     reduced_eids = {e.id for e in reduced.all_edges()}

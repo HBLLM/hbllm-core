@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
@@ -234,13 +235,13 @@ def test_strongly_connected_components_on_dag_and_cycles() -> None:
     graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.CAUSES, sources=["A"], targets=["B"]))
     graph.add_edge(HCIREdge(id="e2", edge_type=HCIREdgeType.CAUSES, sources=["B"], targets=["C"]))
 
-    sccs = graph.strongly_connected_components()
+    sccs = algorithms.strongly_connected_components(graph)
     assert len(sccs) == 3
     assert all(len(c) == 1 for c in sccs)
 
     # 2. Close cycle: C -> A, turning {A, B, C} into a single SCC
     graph.add_edge(HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"]))
-    sccs_cycle = graph.strongly_connected_components()
+    sccs_cycle = algorithms.strongly_connected_components(graph)
     assert len(sccs_cycle) == 1
     assert sccs_cycle[0] == {"A", "B", "C"}
 

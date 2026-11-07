@@ -14,6 +14,7 @@ import math
 
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
@@ -212,10 +213,10 @@ def test_minimum_dominating_set_and_maximum_independent_set() -> None:
         HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["L3"])
     )
 
-    dom_set = graph_star.minimum_dominating_set()
+    dom_set = algorithms.minimum_dominating_set(graph_star)
     assert dom_set == {"C"}
 
-    ind_set = graph_star.maximum_independent_set()
+    ind_set = algorithms.maximum_independent_set(graph_star)
     assert ind_set == {"L1", "L2", "L3"}
 
     # 2. Path Graph: A - B - C - D
@@ -233,10 +234,10 @@ def test_minimum_dominating_set_and_maximum_independent_set() -> None:
         HCIREdge(id="e_cd", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["D"])
     )
 
-    dom_path = graph_path.minimum_dominating_set()
+    dom_path = algorithms.minimum_dominating_set(graph_path)
     assert len(dom_path) == 2  # 2 nodes dominate all 4
 
-    ind_path = graph_path.maximum_independent_set()
+    ind_path = algorithms.maximum_independent_set(graph_path)
     assert len(ind_path) == 2  # Independent set of size 2
 
 

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -145,7 +146,7 @@ def test_transitive_reduction_and_causal_skeleton() -> None:
     graph.add_edge(HCIREdge(sources=["B"], targets=["C"], edge_type=HCIREdgeType.CAUSES))
     graph.add_edge(HCIREdge(sources=["A"], targets=["C"], edge_type=HCIREdgeType.CAUSES))
 
-    graph_skeleton = graph.essential_causal_skeleton()
+    graph_skeleton = algorithms.essential_causal_skeleton(graph)
     assert ("A", "B") in graph_skeleton
     assert ("B", "C") in graph_skeleton
     assert ("A", "C") not in graph_skeleton

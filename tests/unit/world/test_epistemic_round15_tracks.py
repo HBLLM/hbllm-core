@@ -15,6 +15,7 @@ import math
 import numpy as np
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.amygdalar_threat_conditioning import (
@@ -213,7 +214,7 @@ def test_find_eulerian_path_and_circuit() -> None:
         HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"])
     )
 
-    is_eul, path = graph_circuit.find_eulerian_path_or_circuit()
+    is_eul, path = algorithms.find_eulerian_path_or_circuit(graph_circuit)
     assert is_eul is True
     assert len(path) == 3
     # Verifies closed circuit
@@ -231,7 +232,7 @@ def test_find_eulerian_path_and_circuit() -> None:
         HCIREdge(id="e2", edge_type=HCIREdgeType.CAUSES, sources=["B"], targets=["C"])
     )
 
-    is_eul_p, path_p = graph_path.find_eulerian_path_or_circuit()
+    is_eul_p, path_p = algorithms.find_eulerian_path_or_circuit(graph_path)
     assert is_eul_p is True
     assert len(path_p) == 2
     assert path_p == [("A", "B"), ("B", "C")]

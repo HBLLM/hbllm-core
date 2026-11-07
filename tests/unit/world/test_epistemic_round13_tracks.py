@@ -15,6 +15,7 @@ import math
 import numpy as np
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
@@ -207,7 +208,7 @@ def test_feedback_arc_set_on_dag_and_cycle() -> None:
         HCIREdge(id="e2", edge_type=HCIREdgeType.CAUSES, sources=["B"], targets=["C"])
     )
 
-    fas_edges, order = graph_dag.feedback_arc_set()
+    fas_edges, order = algorithms.feedback_arc_set(graph_dag)
     assert len(fas_edges) == 0
     assert order == ["A", "B", "C"]
 
@@ -226,7 +227,7 @@ def test_feedback_arc_set_on_dag_and_cycle() -> None:
         HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"])
     )
 
-    fas_edges, order = graph_cycle.feedback_arc_set()
+    fas_edges, order = algorithms.feedback_arc_set(graph_cycle)
     # Breaking exactly 1 edge severs the 3-cycle
     assert len(fas_edges) == 1
     u, v = fas_edges[0]

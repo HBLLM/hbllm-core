@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import (
     CognitiveGraph,
     FactNode,
@@ -280,7 +281,7 @@ def test_cognitive_graph_minimum_spanning_tree() -> None:
         )
     )
 
-    mst, total_weight = graph.minimum_spanning_tree()
+    mst, total_weight = algorithms.minimum_spanning_tree_subgraph(graph)
 
     assert total_weight == pytest.approx(4.0)
     assert len(list(mst.all_nodes())) == 3
