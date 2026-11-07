@@ -379,6 +379,12 @@ class EpistemicCuriosityExplorer:
             action_data = None
             if engine.is_spatial_effector(chosen):
                 action_data = engine.ground_effector_action(curr_grid, chosen)
+                if action_data is None:
+                    non_effs = [a for a in untested_at_pos if not engine.is_spatial_effector(a)]
+                    if non_effs:
+                        chosen = non_effs[0]
+                    else:
+                        return None
             return EpistemicProbeProposal(
                 action=chosen,
                 action_data=action_data,
@@ -503,13 +509,19 @@ class EpistemicCuriosityExplorer:
             a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
         ]
         if untested_here:
-            act = untested_here[0]
-            return EpistemicProbeProposal(
-                action=act,
-                clear_active_probe=True,
-                tested_action_position=(act, engine.avatar_pos),
-                exploration_mode="attractor_loop_untested",
-            )
+            for act in untested_here:
+                act_data = None
+                if engine.is_spatial_effector(act):
+                    act_data = engine.ground_effector_action(curr_grid, act)
+                    if act_data is None:
+                        continue
+                return EpistemicProbeProposal(
+                    action=act,
+                    action_data=act_data,
+                    clear_active_probe=True,
+                    tested_action_position=(act, engine.avatar_pos),
+                    exploration_mode="attractor_loop_untested",
+                )
 
         if discrete_transform_actions and (is_stuck or is_oscillating):
             disc_act = discrete_transform_actions[
@@ -558,12 +570,14 @@ class EpistemicCuriosityExplorer:
 
         if spatial_effector_actions and min_visits == float("inf"):
             chosen_eff = spatial_effector_actions[0]
-            return EpistemicProbeProposal(
-                action=chosen_eff,
-                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
-                clear_active_probe=True,
-                exploration_mode="attractor_loop_effector",
-            )
+            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if eff_data is not None:
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=eff_data,
+                    clear_active_probe=True,
+                    exploration_mode="attractor_loop_effector",
+                )
 
         undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
         if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
@@ -573,16 +587,24 @@ class EpistemicCuriosityExplorer:
         uninhibited_available = [
             a
             for a in available_actions
-            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+            if engine.inhibited_actions.get(a, 0) == 0
+            and a not in undo_acts
+            and not engine.is_spatial_effector(a)
         ]
-        non_undo_available = [a for a in available_actions if a not in undo_acts]
+        non_undo_available = [
+            a for a in available_actions if a not in undo_acts and not engine.is_spatial_effector(a)
+        ]
         fallback_action = (
             uninhibited_available[0]
             if uninhibited_available
             else (non_undo_available[0] if non_undo_available else available_actions[0])
         )
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_action):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_action)
         return EpistemicProbeProposal(
             action=fallback_action,
+            action_data=fallback_data,
             clear_active_probe=True,
             exploration_mode="attractor_loop_fallback",
         )
@@ -1119,18 +1141,24 @@ class EpistemicCuriosityExplorer:
                 a for a in uncal if (a, engine.avatar_pos) not in engine.tested_action_positions
             ]
             if untested_here:
-                act = untested_here[0]
-                return EpistemicProbeProposal(
-                    action=act,
-                    clear_active_probe=clear_active_probe,
-                    new_probe_target=new_probe_target,
-                    new_probe_id=new_probe_id,
-                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                    tested_action_position=(act, engine.avatar_pos),
-                    topological_doorway=doorway_reg,
-                    exploration_mode="untested_non_displacement",
-                )
+                for act in untested_here:
+                    act_data = None
+                    if engine.is_spatial_effector(act):
+                        act_data = engine.ground_effector_action(curr_grid, act)
+                        if act_data is None:
+                            continue
+                    return EpistemicProbeProposal(
+                        action=act,
+                        action_data=act_data,
+                        clear_active_probe=clear_active_probe,
+                        new_probe_target=new_probe_target,
+                        new_probe_id=new_probe_id,
+                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        tested_action_position=(act, engine.avatar_pos),
+                        topological_doorway=doorway_reg,
+                        exploration_mode="untested_non_displacement",
+                    )
 
             uninhibited_acts = [
                 a
@@ -1267,8 +1295,17 @@ class EpistemicCuriosityExplorer:
             cand.sort(key=_global_key)
             fallback_global = cand[0] if cand else available_actions[0]
 
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_global):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_global)
+            if fallback_data is None:
+                non_effs = [a for a in available_actions if not engine.is_spatial_effector(a)]
+                if non_effs:
+                    fallback_global = non_effs[0]
+
         return EpistemicProbeProposal(
             action=fallback_global,
+            action_data=fallback_data,
             exploration_mode="global_fallback",
         )
 

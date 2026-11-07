@@ -1861,6 +1861,9 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+                    chosen_action, chosen_data = self.ensure_effector_grounded(
+                        view, curr_grid, available_actions, chosen_action, chosen_data
+                    )
                     return ActionProposal(
                         chosen_action,
                         chosen_data,
@@ -1871,6 +1874,9 @@ class PrefrontalDeliberationEngine:
                 else:
                     chosen_action, chosen_data = view.plan_epistemic_probe(
                         curr_grid, available_actions
+                    )
+                    chosen_action, chosen_data = self.ensure_effector_grounded(
+                        view, curr_grid, available_actions, chosen_action, chosen_data
                     )
                     return ActionProposal(
                         chosen_action, chosen_data, branch="epistemic_probe", grid=curr_grid
@@ -2108,26 +2114,9 @@ class PrefrontalDeliberationEngine:
                     )
 
         # Effector Grounding Invariant
-        if view.is_spatial_effector(chosen_action):
-            aff = view.action_affordances.get(chosen_action)
-            req_keys = aff.target_param_keys if aff else ("x", "y")
-            if (
-                chosen_data is None
-                or not isinstance(chosen_data, dict)
-                or not all(k in chosen_data for k in req_keys)
-            ):
-                chosen_data = view.ground_effector_action(curr_grid, chosen_action)
-                if chosen_data is None:
-                    view.inhibited_actions[chosen_action] = max(
-                        view.inhibited_actions.get(chosen_action, 0), 6
-                    )
-                    non_eff = [
-                        a
-                        for a in available_actions
-                        if not view.is_spatial_effector(a) and view.inhibited_actions.get(a, 0) == 0
-                    ]
-                    chosen_action = non_eff[0] if non_eff else available_actions[0]
-                    chosen_data = None
+        chosen_action, chosen_data = self.ensure_effector_grounded(
+            view, curr_grid, available_actions, chosen_action, chosen_data
+        )
 
         # Fallback to exploratory spatial effector affordance if any spatial effector action is available
         if (
@@ -2189,6 +2178,51 @@ class PrefrontalDeliberationEngine:
         )
 
     @classmethod
+    def ensure_effector_grounded(
+        cls,
+        view: Any,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[Any],
+        chosen_action: Any,
+        chosen_data: dict[str, Any] | None,
+    ) -> tuple[Any, dict[str, Any] | None]:
+        """Effector Grounding Invariant: Ensure any spatial effector has valid spatial targets."""
+        if hasattr(view, "is_spatial_effector") and view.is_spatial_effector(chosen_action):
+            aff = getattr(view, "action_affordances", {}).get(chosen_action)
+            req_keys = getattr(aff, "target_param_keys", ("x", "y")) if aff else ("x", "y")
+            if (
+                chosen_data is None
+                or not isinstance(chosen_data, dict)
+                or not all(k in chosen_data for k in req_keys)
+            ):
+                if hasattr(view, "ground_effector_action"):
+                    chosen_data = view.ground_effector_action(curr_grid, chosen_action)
+                if chosen_data is None:
+                    if hasattr(view, "inhibited_actions"):
+                        view.inhibited_actions[chosen_action] = max(
+                            view.inhibited_actions.get(chosen_action, 0), 6
+                        )
+                    non_eff = [
+                        a
+                        for a in available_actions
+                        if (
+                            not hasattr(view, "is_spatial_effector")
+                            or not view.is_spatial_effector(a)
+                        )
+                        and (
+                            not hasattr(view, "inhibited_actions")
+                            or view.inhibited_actions.get(a, 0) == 0
+                        )
+                    ]
+                    chosen_action = (
+                        non_eff[0]
+                        if non_eff
+                        else (available_actions[0] if available_actions else 1)
+                    )
+                    chosen_data = None
+        return chosen_action, chosen_data
+
+    @classmethod
     def _finalize_step(
         cls,
         view: Any,
@@ -2197,6 +2231,13 @@ class PrefrontalDeliberationEngine:
         chosen_data: dict[str, Any] | None,
         predicted_pos: tuple[int, int] | None = None,
     ) -> tuple[Any, dict[str, Any] | None]:
+        chosen_action, chosen_data = cls.ensure_effector_grounded(
+            view,
+            curr_grid,
+            getattr(view, "available_actions", []) or [1, 2, 3, 4],
+            chosen_action,
+            chosen_data,
+        )
         view.state.prev_grid = curr_grid.copy()
         if hasattr(view, "grid_history"):
             view.grid_history.append(curr_grid.copy())

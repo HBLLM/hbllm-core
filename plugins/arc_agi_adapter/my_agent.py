@@ -811,6 +811,20 @@ class MyAgent(Agent):
                     self._last_violation = "pipeline_rejected"
                     action_id = sorted(available_actions)[0] if available_actions else 0
                     action_data = None
+                elif action_id == 6 and (
+                    action_data is None
+                    or not isinstance(action_data, dict)
+                    or "x" not in action_data
+                    or "y" not in action_data
+                ):
+                    H, W = int(grid.shape[0]), int(grid.shape[1])
+                    fallback_x, fallback_y = W // 2, H // 2
+                    if _objects:
+                        for obj in _objects:
+                            if getattr(obj, "role", None) in ("switch", "actuator"):
+                                fallback_x, fallback_y = int(obj.grid_pos[1]), int(obj.grid_pos[0])
+                                break
+                    action_data = {"x": fallback_x, "y": fallback_y}
                 # C3: validate chosen action; repair to nearest legal on violation
                 _res = ActionContract.validate_or_repair(
                     int(action_id),

@@ -1561,7 +1561,16 @@ class MentalSimulationPlanner:
                     continue
                 visited_states.add(state_key)
 
-                if (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
+                if is_block_delivery:
+                    if all(g in cur_blocks for g in goals) and path_len > 0:
+                        path = _reconstruct_path(node_id)
+                        logger.info(
+                            "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
+                            len(path),
+                        )
+                        engine.state.current_simulated_goal = list(goals)[0] if goals else None
+                        return path, had_relaxable_block
+                elif (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
                     path = _reconstruct_path(node_id)
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
@@ -1569,15 +1578,6 @@ class MentalSimulationPlanner:
                         cur_pos,
                     )
                     engine.state.current_simulated_goal = cur_pos
-                    return path, had_relaxable_block
-
-                if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
-                    path = _reconstruct_path(node_id)
-                    logger.info(
-                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
-                        len(path),
-                    )
-                    engine.state.current_simulated_goal = list(goals)[0] if goals else None
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)

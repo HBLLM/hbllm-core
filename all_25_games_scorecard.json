@@ -1,19 +1,24 @@
 {
-  "timestamp": 1793497377.3166342,
+  "timestamp": 1794061408.924824,
   "total_games_tested": 1,
   "total_levels_passed": 2,
   "total_levels_possible": 9,
   "pass_rate_pct": 22.22,
+  "latency_summary": {
+    "mean_cycle_ms": 565.17,
+    "p95_cycle_ms": 1497.45,
+    "mean_decide_ms": 450.09
+  },
   "games": {
     "tu93-0768757b": {
       "title": "TU93",
       "levels_passed": 2,
       "target_levels": 9,
       "won": false,
-      "steps": 566,
-      "total_steps": 566,
+      "steps": 599,
+      "total_steps": 599,
       "attempts": 1,
-      "elapsed_seconds": 600.03,
+      "elapsed_seconds": 350.34,
       "baseline": [
         19,
         16,
@@ -24,7 +29,25 @@
         14,
         23,
         111
-      ]
+      ],
+      "levels_completed": 2,
+      "win_levels": 9,
+      "state": "NOT_FINISHED",
+      "stop_reason": "agent_yield",
+      "stop_detail": "action_budget",
+      "actions_per_level": 199.67,
+      "baseline_actions": 9,
+      "mean_latency_ms": 565.17,
+      "p95_latency_ms": 1497.45,
+      "mean_decide_latency_ms": 450.09,
+      "p95_decide_latency_ms": 1318.83,
+      "stagnant_steps": 8,
+      "max_stagnation_streak": 8,
+      "noop_actions": 114,
+      "contract_violations": 0,
+      "decision_exceptions": 0,
+      "agent_yield_step": 599,
+      "agent_yield_reason": "action_budget"
     }
   }
 }
