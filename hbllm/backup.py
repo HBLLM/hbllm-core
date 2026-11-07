@@ -439,7 +439,7 @@ class BackupManager:
     def _push_via_http(self, backup_path: Path) -> dict[str, Any]:
         """Fallback HTTP upload for environments without boto3."""
         try:
-            import httpx  # type: ignore  # type: ignore
+            import httpx  # type: ignore
 
             endpoint = self._cloud_config["endpoint"]  # type: ignore
             bucket = self._cloud_config["bucket"]  # type: ignore
