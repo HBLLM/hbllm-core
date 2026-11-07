@@ -240,7 +240,10 @@ class MyAgent(Agent):
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
         self._seed = kwargs.get("seed")
+        self.enable_grounding: bool = kwargs.get("enable_grounding", True)
         self.internal_engine = AutonomousEpistemicEngine(instructions=instructions, seed=self._seed)
+        if self.enable_grounding:
+            self.internal_engine.attach_grounding_bridge()
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None
@@ -317,6 +320,11 @@ class MyAgent(Agent):
                     flush=True,
                 )
                 traceback.print_exc(file=sys.stderr)
+
+    @property
+    def grounding_bridge(self) -> Any | None:
+        """SGE CorticalGroundingBridge attached to internal epistemic engine."""
+        return getattr(self.internal_engine, "grounding_bridge", None)
 
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
@@ -560,6 +568,8 @@ class MyAgent(Agent):
                 self.internal_engine = AutonomousEpistemicEngine(
                     instructions=self.instructions, seed=self._seed
                 )
+                if self.enable_grounding:
+                    self.internal_engine.attach_grounding_bridge()
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 

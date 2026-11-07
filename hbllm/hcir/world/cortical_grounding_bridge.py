@@ -229,6 +229,11 @@ class CorticalGroundingBridge:
         active_cands = self.tracker.get_active_candidates()
 
         # 5. Feature Extraction via FeatureExtractorRegistry
+        if entity_states:
+            envelope.metadata["entities"] = [
+                {"id": cand_id, **state} for cand_id, state in entity_states.items()
+            ]
+
         feature_vectors: list[PerceptualFeatureVector] = []
         try:
             extracted = self.feature_registry.extract_all(envelope)
@@ -240,11 +245,9 @@ class CorticalGroundingBridge:
         concept_assignments: list[ConceptAssignment] = []
         for fv in feature_vectors:
             try:
-                entity_id: str | None = None
-                # Associate feature with closest tracked entity by modality index
-                if active_cands:
-                    # Use observation_id suffix or modality to map features to entities
-                    entity_id = active_cands[0].candidate_ref.id if active_cands else None
+                entity_id: str | None = fv.feature_metadata.get("entity_id")
+                if not entity_id and active_cands:
+                    entity_id = active_cands[0].candidate_ref.id
                 assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
                 concept_assignments.append(assignment)
             except Exception as exc:

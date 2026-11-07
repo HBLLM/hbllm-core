@@ -639,7 +639,9 @@ class CognitiveBlackbox:
     def get_epistemic_engine(self, source_id: str = "default") -> AutonomousEpistemicEngine:
         """Get or initialize the AutonomousEpistemicEngine for active curiosity and mental simulation."""
         if source_id not in self._epistemic_engines:
-            self._epistemic_engines[source_id] = AutonomousEpistemicEngine()
+            engine = AutonomousEpistemicEngine()
+            engine.attach_grounding_bridge()
+            self._epistemic_engines[source_id] = engine
         return self._epistemic_engines[source_id]
 
     # ── Driver, Lifter & Resolver Registration ────────────────────────────

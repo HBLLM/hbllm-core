@@ -235,3 +235,62 @@ class CompositeObservationAdapter:
         **kwargs: Any,
     ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
         return self.text_adapter.adapt(text, **kwargs)
+
+    def adapt_driver_input(
+        self,
+        driver_input: Any,
+        **kwargs: Any,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        """Lifts a DriverInput (from any connected device/environment) into an
+        ObservationEnvelope + PerceptualFeatureVector stream.
+        """
+        mod = getattr(driver_input, "modality", None)
+        raw = getattr(driver_input, "raw_data", None)
+        meta = getattr(driver_input, "metadata", {}) or {}
+
+        # 1. 2D Grid / Spatial
+        if (
+            str(mod) in ("grid_2d", "DriverModality.GRID_2D")
+            or isinstance(raw, np.ndarray)
+            and raw.ndim == 2
+        ):
+            grid = raw if isinstance(raw, np.ndarray) else np.array(raw)
+            return self.adapt_grid(
+                grid,
+                entities=meta.get("entities"),
+                step=meta.get("step") or meta.get("StepCounter"),
+                **kwargs,
+            )
+
+        # 2. Proprioception / Kinematic / Robotics joint states
+        if (
+            str(mod) in ("proprioception", "DriverModality.PROPRIOCEPTION")
+            or isinstance(raw, (tuple, list))
+            and len(raw) in (2, 3)
+            and all(isinstance(x, (int, float)) for x in raw)
+        ):
+            pos = tuple(float(x) for x in raw)
+            return self.adapt_robotics(
+                position=pos,
+                joint_angles=meta.get("joint_angles"),
+                velocities=meta.get("velocities"),
+                forces=meta.get("forces"),
+                gripper_state=float(meta.get("gripper_state", 0.0)),
+                **kwargs,
+            )
+
+        # 3. Text / Language
+        if str(mod) in ("text", "DriverModality.TEXT") or isinstance(raw, str):
+            return self.adapt_text(
+                str(raw),
+                named_entities=meta.get("named_entities"),
+                embeddings=meta.get("embeddings"),
+                **kwargs,
+            )
+
+        # 4. Fallback: structured observation
+        return self.adapt_text(
+            str(raw) if raw is not None else "",
+            named_entities=meta.get("named_entities"),
+            **kwargs,
+        )
