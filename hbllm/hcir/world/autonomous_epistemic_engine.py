@@ -21,6 +21,199 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from hbllm.hcir.world.active_inference import HierarchicalActiveInferenceEngine
+    from hbllm.hcir.world.active_inference_efe import (
+        ExpectedFreeEnergyEvaluator,
+        ExpectedFreeEnergyScore,
+    )
+    from hbllm.hcir.world.amygdalar_threat_conditioning import (
+        AmygdalarThreatConditioningEngine,
+        ConditionedThreatStimulus,
+        DefensiveVigilanceState,
+    )
+    from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
+        AnteriorCingulateEffortAllocator,
+        EffortAllocationDecision,
+    )
+    from hbllm.hcir.world.anterior_insular_timing import (
+        AnteriorInsularTimingEngine,
+        InteroceptivePacingState,
+    )
+    from hbllm.hcir.world.autonomous_learning import PointActuationAffordanceLearner
+    from hbllm.hcir.world.bilateral_coordination import (
+        BilateralCoordinateIntegrator,
+        BilateralState,
+    )
+    from hbllm.hcir.world.boundary_grid_phase_aligner import BoundaryGridPhaseAligner
+    from hbllm.hcir.world.cerebellar_microzone_adaptor import (
+        CerebellarMicrozoneAdaptor,
+        ClimbingFiberFeedback,
+    )
+    from hbllm.hcir.world.claustrum_interhemispheric import (
+        ClaustrumInterhemisphericIntegrator,
+        CrossModalSynchronyPacket,
+    )
+    from hbllm.hcir.world.claustrum_salience_conductor import (
+        ClaustrumSalienceConductor,
+        UnifiedPerceptualGestalt,
+    )
+    from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
+    from hbllm.hcir.world.cortex_episodic import FalsifiableAnalogyEngine
+    from hbllm.hcir.world.cortex_perception import GibsonianAffordanceExtractor
+    from hbllm.hcir.world.counterfactual_simulation import (
+        CounterfactualComparison,
+        CounterfactualRegretEvaluator,
+    )
+    from hbllm.hcir.world.dorsolateral_rule_abstraction import (
+        DorsolateralRuleAbstractionEngine,
+        RuleTransferResult,
+    )
+    from hbllm.hcir.world.entorhinal_border_cell import (
+        EntorhinalBorderCellEngine,
+        GridModuleRescalingResult,
+    )
+    from hbllm.hcir.world.entorhinal_grid_cortex import EntorhinalGridCortex
+    from hbllm.hcir.world.frontopolar_exploration_horizon import (
+        BranchSwitchDecision,
+        FrontopolarExplorationHorizonEngine,
+    )
+    from hbllm.hcir.world.global_neuronal_workspace import (
+        GlobalNeuronalWorkspace,
+        IgnitionEvent,
+    )
+    from hbllm.hcir.world.global_workspace_ignition import GlobalWorkspaceIgnitionEngine
+    from hbllm.hcir.world.habenula_striatum_opponency import (
+        DualValueOpponencyCortex,
+        OpponencyValueState,
+    )
+    from hbllm.hcir.world.hippocampal_phase_precession import (
+        HippocampalPhasePrecessionEngine,
+        PhasePrecessionBurst,
+    )
+    from hbllm.hcir.world.hippocampal_replay import (
+        HippocampalPrioritizedReplayBuffer,
+        ReplayBatch,
+        ReplayTransition,
+    )
+    from hbllm.hcir.world.hippocampal_time_cell import (
+        HippocampalTimeCellEngine,
+        TimeIntervalState,
+    )
+    from hbllm.hcir.world.inferotemporal_shape_hasher import (
+        InferotemporalShapeHasher,
+        ShapeArchetypeSignature,
+    )
+    from hbllm.hcir.world.insula_allostasis import (
+        InteroceptiveAllostasisCortex,
+        InteroceptiveState,
+    )
+    from hbllm.hcir.world.lateral_prefrontal_switcher import (
+        LateralPrefrontalTaskSwitcher,
+        TaskArbitrationResult,
+    )
+    from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
+        LocusCoeruleusNoradrenalineEngine,
+        NoradrenergicState,
+    )
+    from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
+    from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
+    from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+        CounterfactualCreditReport,
+        OrbitofrontalCreditAssignmentEngine,
+    )
+    from hbllm.hcir.world.parahippocampal_context import (
+        ParahippocampalContextEngine,
+        SpatialContextSchema,
+    )
+    from hbllm.hcir.world.parietal_coordinate_transform import (
+        RetrosplenialCoordinateTransformer,
+    )
+    from hbllm.hcir.world.parietal_foveated_attention import (
+        FoveatedSaliencyMap,
+        ParietalFoveatedAttentionEngine,
+    )
+    from hbllm.hcir.world.parietal_potential_field import (
+        ParietalPotentialFieldNavigator,
+        PotentialFieldVector,
+    )
+    from hbllm.hcir.world.pedunculopontine_locomotor import (
+        LocomotorDriveCommand,
+        PedunculopontineLocomotorEngine,
+    )
+    from hbllm.hcir.world.prefrontal_blame_attribution import (
+        PlanAttributionReport,
+        PrefrontalBlameAttributor,
+    )
+    from hbllm.hcir.world.pulvinar_attention_router import (
+        PulvinarAttentionRouter,
+        PulvinarRoutingState,
+    )
+    from hbllm.hcir.world.relational_graph_matcher import (
+        ObjectCorrespondence,
+    )
+    from hbllm.hcir.world.relational_graph_matcher import (
+        RelationalGraphMatcher as VentralRelationalGraphMatcher,
+    )
+    from hbllm.hcir.world.retrosplenial_heading import (
+        AllocentricHeadingVector,
+        RetrosplenialHeadingEngine,
+    )
+    from hbllm.hcir.world.retrosplenial_landmark_anchor import (
+        LandmarkRecalibrationResult,
+        RetrosplenialLandmarkAnchorEngine,
+    )
+    from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
+    from hbllm.hcir.world.somatosensory_haptic import (
+        HapticAffordanceFeedback,
+        SomatosensoryHapticEngine,
+    )
+    from hbllm.hcir.world.spatial_distance_transform import (
+        EuclideanDistanceTransformResult,
+        SpatialDistanceTransformEngine,
+    )
+    from hbllm.hcir.world.subicular_boundary_vector import (
+        BoundaryVectorMap,
+        SubicularBoundaryVectorEngine,
+    )
+    from hbllm.hcir.world.subthalamic_drift_diffusion import (
+        DriftDiffusionDecision,
+        SubthalamicDriftDiffusionEngine,
+    )
+    from hbllm.hcir.world.subthalamic_threshold_escalator import (
+        SubthalamicThresholdEscalator,
+    )
+    from hbllm.hcir.world.superior_colliculus_arbiter import (
+        SaccadeTarget,
+        SuperiorColliculusTargetArbiter,
+    )
+    from hbllm.hcir.world.superposition_planner import (
+        SuperpositionEvaluationResult,
+        SuperpositionPlanner,
+    )
+    from hbllm.hcir.world.thalamic_reticular_gating import (
+        SensoryShieldingState,
+        ThalamicReticularGatingEngine,
+    )
+    from hbllm.hcir.world.thalamocortical_binding import (
+        BoundFeatureBundle,
+        ThalamocorticalBindingEngine,
+    )
+    from hbllm.hcir.world.ventral_premotor_resonator import (
+        AffordanceResonancePattern,
+        VentralPremotorAffordanceResonator,
+    )
+    from hbllm.hcir.world.ventral_tegmental_curiosity import (
+        EpistemicInformationGain,
+        VentralTegmentalCuriosityEngine,
+    )
+    from hbllm.hcir.world.ventrolateral_motor_inhibition import (
+        ResponseInhibitionCommand,
+        VentrolateralMotorInhibitionEngine,
+    )
+    from hbllm.hcir.world.ventromedial_somatic_marker import (
+        SomaticAffectiveBias,
+        VentromedialSomaticMarkerEngine,
+    )
     from hbllm.hcir.world_kernel import WorldKernel
 
 import uuid
@@ -49,79 +242,26 @@ from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
-from hbllm.hcir.world.active_inference import (
-    ActiveInferenceEngine,
-    HierarchicalActiveInferenceEngine,
-)
-from hbllm.hcir.world.active_inference_efe import (
-    ExpectedFreeEnergyEvaluator,
-    ExpectedFreeEnergyScore,
-)
-from hbllm.hcir.world.amygdalar_threat_conditioning import (
-    AmygdalarThreatConditioningEngine,
-    ConditionedThreatStimulus,
-    DefensiveVigilanceState,
-)
+from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
-from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
-    AnteriorCingulateEffortAllocator,
-    EffortAllocationDecision,
-)
-from hbllm.hcir.world.anterior_insular_timing import (
-    AnteriorInsularTimingEngine,
-    InteroceptivePacingState,
-)
-from hbllm.hcir.world.bilateral_coordination import (
-    BilateralCoordinateIntegrator,
-    BilateralState,
-)
-from hbllm.hcir.world.boundary_grid_phase_aligner import (
-    BoundaryGridPhaseAligner,
-)
 from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
     CausalHypothesis,
     CausalPredicate,
 )
-from hbllm.hcir.world.cerebellar_microzone_adaptor import (
-    CerebellarMicrozoneAdaptor,
-    ClimbingFiberFeedback,
-)
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
     CerebellarSmithPredictor,
     PhaseGateDecision,
 )
-from hbllm.hcir.world.claustrum_interhemispheric import (
-    ClaustrumInterhemisphericIntegrator,
-    CrossModalSynchronyPacket,
-)
-from hbllm.hcir.world.claustrum_salience_conductor import (
-    ClaustrumSalienceConductor,
-    UnifiedPerceptualGestalt,
-)
-from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualComparison,
     CounterfactualDeadlockDetector,
-    CounterfactualRegretEvaluator,
-)
-from hbllm.hcir.world.dorsolateral_rule_abstraction import (
-    DorsolateralRuleAbstractionEngine,
-    RuleTransferResult,
-)
-from hbllm.hcir.world.entorhinal_border_cell import (
-    EntorhinalBorderCellEngine,
-    GridModuleRescalingResult,
 )
 from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
-)
-from hbllm.hcir.world.frontopolar_exploration_horizon import (
-    BranchSwitchDecision,
-    FrontopolarExplorationHorizonEngine,
 )
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
@@ -131,37 +271,12 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.frontopolar_subgoal_tree import (
     RecursiveSubgoalTree,
 )
-from hbllm.hcir.world.habenula_striatum_opponency import (
-    DualValueOpponencyCortex,
-    OpponencyValueState,
-)
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.hierarchical_precision_control import (
     HierarchicalPrecisionController,
 )
-from hbllm.hcir.world.hippocampal_phase_precession import (
-    HippocampalPhasePrecessionEngine,
-    PhasePrecessionBurst,
-)
-from hbllm.hcir.world.hippocampal_replay import (
-    HippocampalPrioritizedReplayBuffer,
-    ReplayBatch,
-    ReplayTransition,
-)
-from hbllm.hcir.world.hippocampal_time_cell import (
-    HippocampalTimeCellEngine,
-    TimeIntervalState,
-)
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
-)
-from hbllm.hcir.world.inferotemporal_shape_hasher import (
-    InferotemporalShapeHasher,
-    ShapeArchetypeSignature,
-)
-from hbllm.hcir.world.insula_allostasis import (
-    InteroceptiveAllostasisCortex,
-    InteroceptiveState,
 )
 from hbllm.hcir.world.interactive_action_discovery import (
     ActionBudgetGovernor,
@@ -180,17 +295,6 @@ from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
 )
-from hbllm.hcir.world.lateral_prefrontal_switcher import (
-    LateralPrefrontalTaskSwitcher,
-    TaskArbitrationResult,
-)
-from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
-    LocusCoeruleusNoradrenalineEngine,
-    NoradrenergicState,
-)
-from hbllm.hcir.world.medial_prefrontal_schema import (
-    MedialPrefrontalSchemaEngine,
-)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -199,35 +303,11 @@ from hbllm.hcir.world.object_state_graph import (
     ObjectStateGraphPlanner,
     RelationalGraphMatcher,
 )
-from hbllm.hcir.world.optical_ray_projection import (
-    OpticalRayProjector,
-)
-from hbllm.hcir.world.orbitofrontal_credit_assignment import (
-    CounterfactualCreditReport,
-    OrbitofrontalCreditAssignmentEngine,
-)
-from hbllm.hcir.world.parahippocampal_context import (
-    ParahippocampalContextEngine,
-    SpatialContextSchema,
-)
 from hbllm.hcir.world.parietal_coordinate_transform import (
     EgocentricCoordinate,
     GeometricModelSelector,
     HeadingOrientation,
     ParietalCoordinateTransformer,
-    RetrosplenialCoordinateTransformer,
-)
-from hbllm.hcir.world.parietal_foveated_attention import (
-    FoveatedSaliencyMap,
-    ParietalFoveatedAttentionEngine,
-)
-from hbllm.hcir.world.parietal_potential_field import (
-    ParietalPotentialFieldNavigator,
-    PotentialFieldVector,
-)
-from hbllm.hcir.world.pedunculopontine_locomotor import (
-    LocomotorDriveCommand,
-    PedunculopontineLocomotorEngine,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -239,33 +319,13 @@ from hbllm.hcir.world.percept import (
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
-from hbllm.hcir.world.prefrontal_blame_attribution import (
-    PlanAttributionReport,
-    PrefrontalBlameAttributor,
-)
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
-from hbllm.hcir.world.pulvinar_attention_router import (
-    PulvinarAttentionRouter,
-    PulvinarRoutingState,
-)
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
 from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
-from hbllm.hcir.world.retrosplenial_heading import (
-    AllocentricHeadingVector,
-    RetrosplenialHeadingEngine,
-)
-from hbllm.hcir.world.retrosplenial_landmark_anchor import (
-    LandmarkRecalibrationResult,
-    RetrosplenialLandmarkAnchorEngine,
-)
 from hbllm.hcir.world.rule_induction import (
     RuleInductionEngine,
-)
-from hbllm.hcir.world.somatosensory_haptic import (
-    HapticAffordanceFeedback,
-    SomatosensoryHapticEngine,
 )
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
@@ -275,21 +335,6 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
     MorphologicalDeformationTracker,
     SpatiotemporalHazardTracker,
 )
-from hbllm.hcir.world.subicular_boundary_vector import (
-    BoundaryVectorMap,
-    SubicularBoundaryVectorEngine,
-)
-from hbllm.hcir.world.subthalamic_drift_diffusion import (
-    DriftDiffusionDecision,
-    SubthalamicDriftDiffusionEngine,
-)
-from hbllm.hcir.world.subthalamic_threshold_escalator import (
-    SubthalamicThresholdEscalator,
-)
-from hbllm.hcir.world.superior_colliculus_arbiter import (
-    SaccadeTarget,
-    SuperiorColliculusTargetArbiter,
-)
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
 from hbllm.hcir.world.temporal_dependency_tracker import (
     DelayedEffectModeler,
@@ -297,26 +342,6 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     EnvironmentChangeDetector,
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
-)
-from hbllm.hcir.world.thalamic_reticular_gating import (
-    SensoryShieldingState,
-    ThalamicReticularGatingEngine,
-)
-from hbllm.hcir.world.ventral_premotor_resonator import (
-    AffordanceResonancePattern,
-    VentralPremotorAffordanceResonator,
-)
-from hbllm.hcir.world.ventral_tegmental_curiosity import (
-    EpistemicInformationGain,
-    VentralTegmentalCuriosityEngine,
-)
-from hbllm.hcir.world.ventrolateral_motor_inhibition import (
-    ResponseInhibitionCommand,
-    VentrolateralMotorInhibitionEngine,
-)
-from hbllm.hcir.world.ventromedial_somatic_marker import (
-    SomaticAffectiveBias,
-    VentromedialSomaticMarkerEngine,
 )
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.world_state_snapshot import (
@@ -404,7 +429,6 @@ from hbllm.hcir.world.cortex_deliberation import (
     PrefrontalDeliberationEngine,
 )
 from hbllm.hcir.world.cortex_episodic import (
-    FalsifiableAnalogyEngine,
     HippocampalEpisodicCortex,
 )
 from hbllm.hcir.world.cortex_motor import (
@@ -414,7 +438,6 @@ from hbllm.hcir.world.cortex_motor import (
 )
 from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
-    GibsonianAffordanceExtractor,
     OrientedThreat,
     PerceptionEngine,
     TopologicalContour,
@@ -424,16 +447,6 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationStep,
 )
 from hbllm.hcir.world.engine_state import CognitiveContext, EngineState
-from hbllm.hcir.world.entorhinal_grid_cortex import (
-    EntorhinalGridCortex,
-)
-from hbllm.hcir.world.global_neuronal_workspace import (
-    GlobalNeuronalWorkspace,
-    IgnitionEvent,
-)
-from hbllm.hcir.world.global_workspace_ignition import (
-    GlobalWorkspaceIgnitionEngine,
-)
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
     MetacognitiveAssessment,
@@ -445,31 +458,6 @@ from hbllm.hcir.world.neuromodulatory_system import (
 from hbllm.hcir.world.predictive_coding_cortex import (
     HierarchicalPredictiveCodingCortex,
     PredictiveCodingSnapshot,
-)
-from hbllm.hcir.world.relational_graph_matcher import (
-    ObjectCorrespondence,
-)
-from hbllm.hcir.world.relational_graph_matcher import (
-    RelationalGraphMatcher as VentralRelationalGraphMatcher,
-)
-from hbllm.hcir.world.skill_program_synthesizer import (
-    SkillProgramSynthesizer,
-)
-from hbllm.hcir.world.spatial_distance_transform import (
-    EuclideanDistanceTransformResult,
-    SpatialDistanceTransformEngine,
-)
-from hbllm.hcir.world.superposition_planner import (
-    SuperpositionEvaluationResult,
-    SuperpositionPlanner,
-)
-from hbllm.hcir.world.temporal_dependency_tracker import (
-    DelayedEffectModeler,
-    LongHorizonDependencyGraph,
-)
-from hbllm.hcir.world.thalamocortical_binding import (
-    BoundFeatureBundle,
-    ThalamocorticalBindingEngine,
 )
 
 
@@ -618,7 +606,7 @@ class AutonomousEpistemicEngine:
         self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
         self.optical_projector: OpticalRayProjector | Any = _ablated(
-            "optical_projector", OpticalRayProjector
+            "optical_projector", "OpticalRayProjector"
         )  # WP2 ablated
         self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
         self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
@@ -649,7 +637,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
         self.bilateral_integrator: BilateralCoordinateIntegrator | Any = _ablated(
-            "bilateral_integrator", BilateralCoordinateIntegrator
+            "bilateral_integrator", "BilateralCoordinateIntegrator"
         )  # WP2 ablated
         self._bilateral_state: BilateralState | None = None
 
@@ -706,7 +694,7 @@ class AutonomousEpistemicEngine:
             w_cost=0.10,
         )
         self.hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any = _ablated(
-            "hierarchical_active_inference", HierarchicalActiveInferenceEngine
+            "hierarchical_active_inference", "HierarchicalActiveInferenceEngine"
         )  # WP2 ablated
         self.precision_controller: HierarchicalPrecisionController = (
             HierarchicalPrecisionController()
@@ -716,10 +704,10 @@ class AutonomousEpistemicEngine:
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
         self.efe_evaluator: ExpectedFreeEnergyEvaluator | Any = _ablated(
-            "efe_evaluator", ExpectedFreeEnergyEvaluator
+            "efe_evaluator", "ExpectedFreeEnergyEvaluator"
         )  # WP2 ablated
         self.affordance_extractor: GibsonianAffordanceExtractor | Any = _ablated(
-            "affordance_extractor", GibsonianAffordanceExtractor
+            "affordance_extractor", "GibsonianAffordanceExtractor"
         )  # WP2 ablated
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
@@ -731,22 +719,22 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
         self.retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any = _ablated(
-            "retrosplenial_transformer", RetrosplenialCoordinateTransformer
+            "retrosplenial_transformer", "RetrosplenialCoordinateTransformer"
         )  # WP2 ablated
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine | Any = _ablated(
-            "analogy_engine", FalsifiableAnalogyEngine
+            "analogy_engine", "FalsifiableAnalogyEngine"
         )  # WP2 ablated
         self.counterfactual_regret: CounterfactualRegretEvaluator | Any = _ablated(
-            "counterfactual_regret", CounterfactualRegretEvaluator
+            "counterfactual_regret", "CounterfactualRegretEvaluator"
         )  # WP2 ablated
 
         # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
         self.gnw: GlobalNeuronalWorkspace | Any = _ablated(
-            "gnw", GlobalNeuronalWorkspace
+            "gnw", "GlobalNeuronalWorkspace"
         )  # WP2 ablated
 
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
@@ -754,12 +742,12 @@ class AutonomousEpistemicEngine:
 
         # Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Attentional Gating
         self.thalamocortical_binding: ThalamocorticalBindingEngine | Any = _ablated(
-            "thalamocortical_binding", ThalamocorticalBindingEngine
+            "thalamocortical_binding", "ThalamocorticalBindingEngine"
         )  # WP2 ablated
 
         # Track 4: Superposition Counterfactual Tree Search Planner
         self.superposition_planner: SuperpositionPlanner | Any = _ablated(
-            "superposition_planner", SuperpositionPlanner
+            "superposition_planner", "SuperpositionPlanner"
         )  # WP2 ablated
 
         # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
@@ -769,7 +757,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Entorhinal Grid Cells & Hippocampal Path Integration (Moser & O'Keefe)
         self.entorhinal_grid_cortex: EntorhinalGridCortex | Any = _ablated(
-            "entorhinal_grid_cortex", EntorhinalGridCortex
+            "entorhinal_grid_cortex", "EntorhinalGridCortex"
         )  # WP2 ablated
 
         # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
@@ -777,7 +765,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
         self.skill_synthesizer: SkillProgramSynthesizer | Any = _ablated(
-            "skill_synthesizer", SkillProgramSynthesizer
+            "skill_synthesizer", "SkillProgramSynthesizer"
         )  # WP2 ablated
 
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
@@ -785,209 +773,209 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
         self.ventral_relational_matcher: VentralRelationalGraphMatcher | Any = _ablated(
-            "ventral_relational_matcher", VentralRelationalGraphMatcher
+            "ventral_relational_matcher", "VentralRelationalGraphMatcher"
         )  # WP2 ablated
 
         # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
         self.allostasis_cortex: InteroceptiveAllostasisCortex | Any = _ablated(
-            "allostasis_cortex", InteroceptiveAllostasisCortex
+            "allostasis_cortex", "InteroceptiveAllostasisCortex"
         )  # WP2 ablated
 
         # Round 7 Faculty: Claustrum Multimodal Salience Conductor & Perceptual Binding (Crick & Koch / Smith)
         self.claustrum_conductor: ClaustrumSalienceConductor | Any = _ablated(
-            "claustrum_conductor", ClaustrumSalienceConductor
+            "claustrum_conductor", "ClaustrumSalienceConductor"
         )  # WP2 ablated
 
         # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
 
         # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
         self.distance_transform_engine: SpatialDistanceTransformEngine | Any = _ablated(
-            "distance_transform_engine", SpatialDistanceTransformEngine
+            "distance_transform_engine", "SpatialDistanceTransformEngine"
         )  # WP2 ablated
 
         # Round 8 Faculty: Ventral Striatum & Lateral Habenula Dual Value Opponency (Matsumoto & Hikosaka / Cools)
         self.value_opponency: DualValueOpponencyCortex | Any = _ablated(
-            "value_opponency", DualValueOpponencyCortex
+            "value_opponency", "DualValueOpponencyCortex"
         )  # WP2 ablated
 
         # Round 8 Faculty: Posterior Parietal Cortex (PPC) Potential Field Navigation (Andersen & Buneo / Khatib)
         self.potential_field_navigator: ParietalPotentialFieldNavigator | Any = _ablated(
-            "potential_field_navigator", ParietalPotentialFieldNavigator
+            "potential_field_navigator", "ParietalPotentialFieldNavigator"
         )  # WP2 ablated
 
         # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
         self.shape_hasher: InferotemporalShapeHasher | Any = _ablated(
-            "shape_hasher", InferotemporalShapeHasher
+            "shape_hasher", "InferotemporalShapeHasher"
         )  # WP2 ablated
 
         # Round 9 Faculty: Subthalamic Nucleus (STN) Drift-Diffusion Threshold Modulation (Ratcliff / Frank)
         self.drift_diffusion: SubthalamicDriftDiffusionEngine | Any = _ablated(
-            "drift_diffusion", SubthalamicDriftDiffusionEngine
+            "drift_diffusion", "SubthalamicDriftDiffusionEngine"
         )  # WP2 ablated
 
         # Round 9 Faculty: Parietal Egocentric Multi-Scale Foveation (Itti & Koch / Schwartz)
         self.foveated_attention: ParietalFoveatedAttentionEngine | Any = _ablated(
-            "foveated_attention", ParietalFoveatedAttentionEngine
+            "foveated_attention", "ParietalFoveatedAttentionEngine"
         )  # WP2 ablated
 
         # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
         self.blame_attributor: PrefrontalBlameAttributor | Any = _ablated(
-            "blame_attributor", PrefrontalBlameAttributor
+            "blame_attributor", "PrefrontalBlameAttributor"
         )  # WP2 ablated
 
         # Round 10 Faculty: Hippocampal-Entorhinal Prioritized Experience Replay (Foster & Wilson / Schaul)
         self.hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any = _ablated(
-            "hippocampal_replay", HippocampalPrioritizedReplayBuffer
+            "hippocampal_replay", "HippocampalPrioritizedReplayBuffer"
         )  # WP2 ablated
 
         # Round 10 Faculty: Lateral Prefrontal Cortex (LPFC) Dual Task Switcher (Monsell / Koechlin)
         self.task_switcher: LateralPrefrontalTaskSwitcher | Any = _ablated(
-            "task_switcher", LateralPrefrontalTaskSwitcher
+            "task_switcher", "LateralPrefrontalTaskSwitcher"
         )  # WP2 ablated
 
         # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
         self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any = _ablated(
-            "retrosplenial_anchor", RetrosplenialLandmarkAnchorEngine
+            "retrosplenial_anchor", "RetrosplenialLandmarkAnchorEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Hippocampal Theta-Gamma Phase Precession & Macro Chunking (O'Keefe / Lisman)
         self.phase_precession: HippocampalPhasePrecessionEngine | Any = _ablated(
-            "phase_precession", HippocampalPhasePrecessionEngine
+            "phase_precession", "HippocampalPhasePrecessionEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Frontopolar BA10 Counterfactual Exploration Horizon Engine (Koechlin / Rushworth)
         self.exploration_horizon: FrontopolarExplorationHorizonEngine | Any = _ablated(
-            "exploration_horizon", FrontopolarExplorationHorizonEngine
+            "exploration_horizon", "FrontopolarExplorationHorizonEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Superior Colliculus Multisensory Alignment & Saccadic Arbiter (Stein & Meredith)
         self.superior_colliculus: SuperiorColliculusTargetArbiter | Any = _ablated(
-            "superior_colliculus", SuperiorColliculusTargetArbiter
+            "superior_colliculus", "SuperiorColliculusTargetArbiter"
         )  # WP2 ablated
 
         # Round 12 Faculty: Cerebellar Microzone Granule-Purkinje Forward Adaptation (Marr-Albus-Ito)
         self.cerebellar_microzone: CerebellarMicrozoneAdaptor | Any = _ablated(
-            "cerebellar_microzone", CerebellarMicrozoneAdaptor
+            "cerebellar_microzone", "CerebellarMicrozoneAdaptor"
         )  # WP2 ablated
 
         # Round 12 Faculty: Ventral Premotor (F5 / Mirror Neuron) Affordance Resonator (Rizzolatti)
         self.premotor_resonator: VentralPremotorAffordanceResonator | Any = _ablated(
-            "premotor_resonator", VentralPremotorAffordanceResonator
+            "premotor_resonator", "VentralPremotorAffordanceResonator"
         )  # WP2 ablated
 
         # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
         self.effort_allocator: AnteriorCingulateEffortAllocator | Any = _ablated(
-            "effort_allocator", AnteriorCingulateEffortAllocator
+            "effort_allocator", "AnteriorCingulateEffortAllocator"
         )  # WP2 ablated
 
         # Round 13 Faculty: Subicular Egocentric-to-Allocentric Boundary Vector Cell (BVC) Map (Hartley-Burgess)
         self.subicular_bvc: SubicularBoundaryVectorEngine | Any = _ablated(
-            "subicular_bvc", SubicularBoundaryVectorEngine
+            "subicular_bvc", "SubicularBoundaryVectorEngine"
         )  # WP2 ablated
 
         # Round 13 Faculty: Ventromedial Prefrontal Cortex (vmPFC) Somatic Marker Engine (Damasio-Bechara)
         self.somatic_marker: VentromedialSomaticMarkerEngine | Any = _ablated(
-            "somatic_marker", VentromedialSomaticMarkerEngine
+            "somatic_marker", "VentromedialSomaticMarkerEngine"
         )  # WP2 ablated
 
         # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
         self.pulvinar_router: PulvinarAttentionRouter | Any = _ablated(
-            "pulvinar_router", PulvinarAttentionRouter
+            "pulvinar_router", "PulvinarAttentionRouter"
         )  # WP2 ablated
 
         # Round 14 Faculty: Parahippocampal Scene Schemas & Topological Recognition (Epstein / Bar)
         self.parahippocampal_context: ParahippocampalContextEngine | Any = _ablated(
-            "parahippocampal_context", ParahippocampalContextEngine
+            "parahippocampal_context", "ParahippocampalContextEngine"
         )  # WP2 ablated
 
         # Round 14 Faculty: Locus Coeruleus Noradrenergic Exploration-Exploitation Switch (Aston-Jones / Cohen)
         self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any = _ablated(
-            "locus_coeruleus", LocusCoeruleusNoradrenalineEngine
+            "locus_coeruleus", "LocusCoeruleusNoradrenalineEngine"
         )  # WP2 ablated
 
         # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
         self.somatosensory_haptic: SomatosensoryHapticEngine | Any = _ablated(
-            "somatosensory_haptic", SomatosensoryHapticEngine
+            "somatosensory_haptic", "SomatosensoryHapticEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Entorhinal Border Cells & Grid Module Rescaling (Solstad / Barry)
         self.entorhinal_border: EntorhinalBorderCellEngine | Any = _ablated(
-            "entorhinal_border", EntorhinalBorderCellEngine
+            "entorhinal_border", "EntorhinalBorderCellEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Amygdalar Pavlovian Threat Conditioning & Defensive Cascades (LeDoux / Phelps)
         self.amygdala_threat: AmygdalarThreatConditioningEngine | Any = _ablated(
-            "amygdala_threat", AmygdalarThreatConditioningEngine
+            "amygdala_threat", "AmygdalarThreatConditioningEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
         self.vta_curiosity: VentralTegmentalCuriosityEngine | Any = _ablated(
-            "vta_curiosity", VentralTegmentalCuriosityEngine
+            "vta_curiosity", "VentralTegmentalCuriosityEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Retrosplenial Heading Integration & Ring Attractors (Taube / Burgess)
         self.retrosplenial_heading: RetrosplenialHeadingEngine | Any = _ablated(
-            "retrosplenial_heading", RetrosplenialHeadingEngine
+            "retrosplenial_heading", "RetrosplenialHeadingEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Thalamic Reticular Nucleus (TRN) Sensory Gating & Shielding (Crick / Halassa)
         self.trn_gating: ThalamicReticularGatingEngine | Any = _ablated(
-            "trn_gating", ThalamicReticularGatingEngine
+            "trn_gating", "ThalamicReticularGatingEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
         self.rule_abstraction: DorsolateralRuleAbstractionEngine | Any = _ablated(
-            "rule_abstraction", DorsolateralRuleAbstractionEngine
+            "rule_abstraction", "DorsolateralRuleAbstractionEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Hippocampal CA1 Temporal Distance Cells & Relative Interval Timing (MacDonald / Eichenbaum)
         self.hippocampal_time: HippocampalTimeCellEngine | Any = _ablated(
-            "hippocampal_time", HippocampalTimeCellEngine
+            "hippocampal_time", "HippocampalTimeCellEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Ventrolateral Prefrontal Cortex (vlPFC / rIFG) Motor Rule Retrieval & Response Inhibition (Aron / Wiecki)
         self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any = _ablated(
-            "vl_motor_inhibition", VentrolateralMotorInhibitionEngine
+            "vl_motor_inhibition", "VentrolateralMotorInhibitionEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Claustrum Dynamic Inter-Hemispheric Synchrony & Cross-Modal Gestalt Binding (Crick & Koch / Smythies)
         self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any = _ablated(
-            "claustrum_interhemispheric", ClaustrumInterhemisphericIntegrator
+            "claustrum_interhemispheric", "ClaustrumInterhemisphericIntegrator"
         )  # WP2 ablated
 
         # Round 18 Faculty: Anterior Insular Cortex (AIC) Subjective Time Dilation & Interoceptive Pacing (Craig / Wittmann)
         self.anterior_insula_timing: AnteriorInsularTimingEngine | Any = _ablated(
-            "anterior_insula_timing", AnteriorInsularTimingEngine
+            "anterior_insula_timing", "AnteriorInsularTimingEngine"
         )  # WP2 ablated
 
         # Round 18 Faculty: Orbitofrontal Cortex (OFC) Counterfactual Credit Assignment & Contingent Updating (Walton / Rushworth)
         self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any = _ablated(
-            "ofc_counterfactual", OrbitofrontalCreditAssignmentEngine
+            "ofc_counterfactual", "OrbitofrontalCreditAssignmentEngine"
         )  # WP2 ablated
 
         # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
         self.ppn_locomotor: PedunculopontineLocomotorEngine | Any = _ablated(
-            "ppn_locomotor", PedunculopontineLocomotorEngine
+            "ppn_locomotor", "PedunculopontineLocomotorEngine"
         )  # WP2 ablated
 
         # Round 19 Faculty: Hippocampal-Entorhinal Boundary-to-Grid Phase Alignment (Bush / Giocomo)
         self.boundary_grid_aligner: BoundaryGridPhaseAligner | Any = _ablated(
-            "boundary_grid_aligner", BoundaryGridPhaseAligner
+            "boundary_grid_aligner", "BoundaryGridPhaseAligner"
         )  # WP2 ablated
 
         # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
         self.mpfc_schema_engine: MedialPrefrontalSchemaEngine | Any = _ablated(
-            "mpfc_schema_engine", MedialPrefrontalSchemaEngine
+            "mpfc_schema_engine", "MedialPrefrontalSchemaEngine"
         )  # WP2 ablated
 
         # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
         self.stn_escalator: SubthalamicThresholdEscalator | Any = _ablated(
-            "stn_escalator", SubthalamicThresholdEscalator
+            "stn_escalator", "SubthalamicThresholdEscalator"
         )  # WP2 ablated
 
         # Round 20 Capstone Faculty: Global Neuronal Workspace Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
         self.workspace_ignition: GlobalWorkspaceIgnitionEngine | Any = _ablated(
-            "workspace_ignition", GlobalWorkspaceIgnitionEngine
+            "workspace_ignition", "GlobalWorkspaceIgnitionEngine"
         )  # WP2 ablated
 
         # Connect GNW conscious broadcast listener for executive arbitration
@@ -1007,7 +995,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Predictive Confidence Calibrator (W090)
         self.confidence_calibrator: ConfidenceCalibrator | Any = _ablated(
-            "confidence_calibrator", ConfidenceCalibrator
+            "confidence_calibrator", "ConfidenceCalibrator"
         )  # WP2 ablated
 
         # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
@@ -1065,11 +1053,10 @@ class AutonomousEpistemicEngine:
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
         from hbllm.hcir.world.autonomous_learning import (
             DeliberationEntropyMonitor,
-            PointActuationAffordanceLearner,
         )
 
         self.point_actuation_learner: PointActuationAffordanceLearner | Any = _ablated(
-            "point_actuation_learner", PointActuationAffordanceLearner
+            "point_actuation_learner", "PointActuationAffordanceLearner"
         )  # WP2 ablated
         self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
 

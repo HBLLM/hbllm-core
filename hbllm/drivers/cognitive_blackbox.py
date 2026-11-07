@@ -800,6 +800,17 @@ class CognitiveBlackbox:
         # Delivered positions
         self._upsert_var("var_delivered_positions", [list(p) for p in state.delivered_positions])
 
+        # Sync with epistemic engine symbolic world theory (single source of truth)
+        if source_id in self._epistemic_engines:
+            ee = self._epistemic_engines[source_id]
+            if hasattr(ee, "symbolic_theory"):
+                state.learned_target_features.update(ee.symbolic_theory.target_features)
+                state.learned_obstacle_features.update(ee.symbolic_theory.barrier_features)
+                state.learned_traversable_features.update(ee.symbolic_theory.walkable_features)
+                ee.symbolic_theory.target_features.update(state.learned_target_features)
+                ee.symbolic_theory.barrier_features.update(state.learned_obstacle_features)
+                ee.symbolic_theory.walkable_features.update(state.learned_traversable_features)
+
         # Learned target features
         if state.learned_target_features:
             self._upsert_var("var_target_features", list(state.learned_target_features))

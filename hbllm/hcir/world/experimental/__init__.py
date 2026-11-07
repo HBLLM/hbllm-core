@@ -53,23 +53,67 @@ class AblatedFaculty:
     values; attribute reads return neutral/None. Exactly the object the WP2
     ablation measured (behaviour == measured ablation)."""
 
-    def __init__(self, name: str, cls: type | None = None) -> None:
+    def __init__(self, name: str, cls: type | str | None = None) -> None:
         object.__setattr__(self, "_name", name)
-        object.__setattr__(self, "_cls", cls)
+        if isinstance(cls, str):
+            object.__setattr__(self, "_cls_name", cls)
+            object.__setattr__(self, "_cls", None)
+        else:
+            object.__setattr__(self, "_cls_name", cls.__name__ if cls is not None else None)
+            object.__setattr__(self, "_cls", cls)
         object.__setattr__(self, "_cache", {})
 
-    def __getattr__(self, name: str) -> Any:
+    def _get_cls(self) -> type | None:
         cls = object.__getattribute__(self, "_cls")
         if cls is not None:
-            cache = object.__getattribute__(self, "_cache")
-            if name not in cache:
-                member = getattr(cls, name, None)
-                if callable(member):
-                    neutral = _neutral(cls, name)
-                    cache[name] = lambda *a, **k: neutral
-                else:
-                    cache[name] = None
+            return cls
+        cls_name = object.__getattribute__(self, "_cls_name")
+        target_name = None
+        if cls_name and cls_name in _MODULES:
+            target_name = cls_name
+        elif cls_name:
+            for k in _MODULES:
+                if k.lower() == cls_name.lower():
+                    target_name = k
+                    break
+        if not target_name:
+            name = object.__getattribute__(self, "_name")
+            if name in _MODULES:
+                target_name = name
+            else:
+                name_clean = name.replace("_", "").lower()
+                for k in _MODULES:
+                    if k.lower() == name_clean or k.lower() == name.lower():
+                        target_name = k
+                        break
+        if target_name:
+            try:
+                mod = importlib.import_module(_MODULES[target_name])
+                cls = getattr(mod, target_name, None)
+                if cls is None and target_name == "VentralRelationalGraphMatcher":
+                    cls = getattr(mod, "RelationalGraphMatcher", None)
+                object.__setattr__(self, "_cls", cls)
+            except Exception:
+                pass
+        return cls
+
+    def __getattr__(self, name: str) -> Any:
+        cache = object.__getattribute__(self, "_cache")
+        if name in cache:
             return cache[name]
+        cls = self._get_cls()
+        if cls is not None:
+            member = getattr(cls, name, None)
+            if callable(member):
+                neutral = _neutral(cls, name)
+                cache[name] = lambda *a, **k: neutral
+            else:
+                cache[name] = None
+            return cache[name]
+        cache[name] = lambda *a, **k: None
+        return cache[name]
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return None
 
     def __setattr__(self, name: str, val: Any) -> None:
@@ -91,7 +135,7 @@ class AblatedFaculty:
         return f"<AblatedFaculty {object.__getattribute__(self, '_name')}>"
 
 
-def ablated(name: str, cls: type | None = None) -> AblatedFaculty:
+def ablated(name: str, cls: type | str | None = None) -> AblatedFaculty:
     return AblatedFaculty(name, cls)
 
 
@@ -147,14 +191,21 @@ register("DualValueOpponencyCortex", "hbllm.hcir.world.habenula_striatum_opponen
 register("VentrolateralMotorInhibitionEngine", "hbllm.hcir.world.ventrolateral_motor_inhibition")
 register("VentralTegmentalCuriosityEngine", "hbllm.hcir.world.ventral_tegmental_curiosity")
 register("GlobalWorkspaceIgnitionEngine", "hbllm.hcir.world.global_workspace_ignition")
+register("GlobalNeuronalWorkspace", "hbllm.hcir.world.global_neuronal_workspace")
+register("ThalamocorticalBindingEngine", "hbllm.hcir.world.thalamocortical_binding")
+register("EntorhinalGridCortex", "hbllm.hcir.world.entorhinal_grid_cortex")
+register("VentralRelationalGraphMatcher", "hbllm.hcir.world.relational_graph_matcher")
+register("RelationalGraphMatcher", "hbllm.hcir.world.relational_graph_matcher")
 
 
 def restore(obj, name: str) -> bool:
     """Test helper: replace an ablated faculty attr with a fresh real instance."""
     cur = getattr(obj, name, None)
-    if isinstance(cur, AblatedFaculty) and object.__getattribute__(cur, "_cls") is not None:
-        setattr(obj, name, object.__getattribute__(cur, "_cls")())
-        return True
+    if isinstance(cur, AblatedFaculty):
+        cls = cur._get_cls()
+        if cls is not None:
+            setattr(obj, name, cls())
+            return True
     return False
 
 
@@ -165,7 +216,7 @@ def restore_all(engine) -> list[str]:
 
     for name, val in list(vars(engine).items()):
         if isinstance(val, AblatedFaculty):
-            cls = object.__getattribute__(val, "_cls")
+            cls = val._get_cls()
             if cls is None:
                 continue
             try:

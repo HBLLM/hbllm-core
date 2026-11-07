@@ -16,7 +16,10 @@ import logging
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
 
 from hbllm.hcir.graph import ConceptNode, FactNode, ProcedureNode, SkillNode
 from hbllm.hcir.skills.declarative import (
@@ -33,12 +36,12 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
 from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
 from hbllm.hcir.world.engine_state import get_engine_state_attr
+from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.macro_actions import MacroActionPlan
-from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
@@ -359,7 +362,9 @@ class PrefrontalWorkingMemory:
         self.macro_plan: MacroActionPlan = MacroActionPlan()
         self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
-        self.optical_projector: OpticalRayProjector = OpticalRayProjector()
+        self.optical_projector: OpticalRayProjector | Any = _ablated(
+            "optical_projector", "OpticalRayProjector"
+        )
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
         self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
         self.hypothesis_engine: InductiveHypothesisEngine = InductiveHypothesisEngine()
