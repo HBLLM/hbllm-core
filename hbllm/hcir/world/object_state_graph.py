@@ -323,15 +323,24 @@ class ObjectStateGraphPlanner:
                 or e.feature_id in known_goal_features
                 or any(cp in known_goal_positions for cp in entity_cells)
             )
-            is_switch = any(
-                m.trigger_pos in entity_cells
-                or (m.trigger_feature is not None and m.trigger_feature == e.feature_id)
-                for m in engine.state_mutations
+            is_switch = (
+                (
+                    bool(engine.symbolic_theory)
+                    and e.feature_id in engine.symbolic_theory.actuator_features
+                )
+                or e.role == EntityRole.ACTUATOR
+                or any(
+                    m.trigger_pos in entity_cells
+                    or (m.trigger_feature is not None and m.trigger_feature == e.feature_id)
+                    for m in engine.state_mutations
+                )
             )
-            is_cargo = (
-                e.role == EntityRole.MANIPULABLE
-                or engine.symbolic_theory.is_cargo(e)
-                or e.feature_id in engine.symbolic_theory.cargo_features
+            is_cargo = e.role == EntityRole.MANIPULABLE or (
+                bool(engine.symbolic_theory)
+                and (
+                    e.feature_id in engine.symbolic_theory.cargo_features
+                    or engine.symbolic_theory.is_cargo(e.feature_id)
+                )
             )
 
             if is_goal:
@@ -340,15 +349,15 @@ class ObjectStateGraphPlanner:
             elif is_switch:
                 category = ObjectCategory.SWITCH
                 is_solid = is_barrier
+            elif is_barrier:
+                category = ObjectCategory.BARRIER
+                is_solid = True
             elif is_cargo:
                 category = ObjectCategory.MANIPULABLE
                 is_solid = True
             elif e.area <= 16:
                 category = ObjectCategory.KEY
                 is_solid = is_barrier
-            elif is_barrier:
-                category = ObjectCategory.BARRIER
-                is_solid = True
             else:
                 category = ObjectCategory.UNKNOWN
                 is_solid = e.role == EntityRole.OBSTACLE

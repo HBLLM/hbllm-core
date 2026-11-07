@@ -316,11 +316,12 @@ class SpatialRoleClassifier:
         )
 
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
+        is_theory_actuator = val in symbolic_theory.actuator_features if symbolic_theory else False
         is_theory_cargo = (
             symbolic_theory.is_cargo(
                 SpatialEntity(
                     id="",
-                    role=EntityRole.MANIPULABLE,
+                    role=EntityRole.UNKNOWN,
                     centroid=(float(grid_pos[0]), float(grid_pos[1])),
                     grid_pos=grid_pos,
                     area=area,
@@ -359,17 +360,20 @@ class SpatialRoleClassifier:
             return EntityRole.GOAL
         elif is_border or is_theory_barrier:
             return EntityRole.OBSTACLE
-        elif not is_theory_walkable and any(
-            (
-                getattr(m, "trigger_feature", None) is not None
-                and getattr(m, "trigger_feature", None) == val
+        elif is_theory_actuator or (
+            not is_theory_walkable
+            and any(
+                (
+                    getattr(m, "trigger_feature", None) is not None
+                    and getattr(m, "trigger_feature", None) == val
+                )
+                or (
+                    getattr(m, "trigger_pos", None) == grid_pos
+                    and getattr(m, "occurrences", 0) >= 2
+                    and getattr(m, "confidence", 0.0) >= 0.75
+                )
+                for m in mutation_list
             )
-            or (
-                getattr(m, "trigger_pos", None) == grid_pos
-                and getattr(m, "occurrences", 0) >= 2
-                and getattr(m, "confidence", 0.0) >= 0.75
-            )
-            for m in mutation_list
         ):
             return EntityRole.ACTUATOR
         elif is_theory_cargo and not is_theory_walkable:

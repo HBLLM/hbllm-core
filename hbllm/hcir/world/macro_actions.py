@@ -1829,7 +1829,7 @@ class MacroPlanSynthesizer:
         # Embodied Grounding Invariant:
         # If the domain possesses physical displacement capabilities, an embodied agent
         # cannot plan macroscopic bodily actions (navigating to switches, moving cargo, reaching goals)
-        # before discovering and localizing its avatar body via motor calibration.
+        # before discovering its avatar body.
         if engine.has_displacement_capabilities(available_actions) and engine.avatar_pos is None:
             return None
 
@@ -1898,32 +1898,84 @@ class MacroPlanSynthesizer:
         if engine.avatar_feature is not None:
             av_feats.add(engine.avatar_feature)
 
-        goals: list[tuple[int, int]] = []
+        # Collect confirmed goals and candidate goals separately
+        confirmed_goals: list[tuple[int, int]] = []
+        candidate_goals: list[tuple[int, int]] = []
+        cand_feature_map: dict[tuple[int, int], int] = {}
+        cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
+
         for obj in known_objs:
-            if "goal" in obj.role or "exit" in obj.role:
-                if (
-                    obj.pos not in goals
-                    and obj.pos != av_pos
-                    and obj.pos not in recent_pos
-                    and obj.feature_id not in av_feats
-                ):
-                    goals.append(obj.pos)
+            if (
+                obj.pos == av_pos
+                or obj.pos in recent_pos
+                or obj.feature_id in av_feats
+                or obj.feature_id in cargo_feats
+            ):
+                continue
+            is_conf = (
+                bool(obj.properties.get("confirmed", False))
+                or obj.role in ("goal", "exit")
+                or "exit" in obj.role
+            )
+            if is_conf and obj.role != "candidate_goal":
+                if obj.pos not in confirmed_goals:
+                    confirmed_goals.append(obj.pos)
+            elif obj.role == "candidate_goal" or "goal" in obj.role:
+                if obj.pos not in candidate_goals:
+                    candidate_goals.append(obj.pos)
+                    cand_feature_map[obj.pos] = obj.feature_id
+
         for e in entities:
+            if (
+                e.grid_pos == av_pos
+                or e.grid_pos in recent_pos
+                or e.feature_id in av_feats
+                or e.feature_id in cargo_feats
+            ):
+                continue
             if (
                 e.role == EntityRole.GOAL
                 or e.feature_id in engine.learned_goal_features
                 or e.grid_pos in engine.learned_goal_positions
             ):
-                if (
-                    e.grid_pos not in goals
-                    and e.grid_pos != av_pos
-                    and e.grid_pos not in recent_pos
-                    and e.feature_id not in av_feats
-                ):
-                    goals.append(e.grid_pos)
+                if e.grid_pos not in confirmed_goals:
+                    confirmed_goals.append(e.grid_pos)
+            elif (
+                bool(engine.symbolic_theory)
+                and e.feature_id in engine.symbolic_theory.candidate_goal_features
+            ):
+                if e.grid_pos not in candidate_goals:
+                    candidate_goals.append(e.grid_pos)
+                    cand_feature_map[e.grid_pos] = e.feature_id
+
         for g_pos in engine.learned_goal_positions:
-            if g_pos not in goals and g_pos != av_pos and g_pos not in recent_pos:
-                goals.append(g_pos)
+            if g_pos not in confirmed_goals and g_pos != av_pos and g_pos not in recent_pos:
+                confirmed_goals.append(g_pos)
+
+        if confirmed_goals:
+            goals = confirmed_goals
+        else:
+            # When only candidate goals exist:
+            # Check how many distinct non-background, non-avatar candidate goal features exist.
+            cand_feats = (
+                {
+                    cand_feature_map.get(pos, int(curr_grid[pos[0], pos[1]]))
+                    for pos in candidate_goals
+                    if 0 <= pos[0] < curr_grid.shape[0] and 0 <= pos[1] < curr_grid.shape[1]
+                }
+                - {0, bg}
+                - av_feats
+            )
+            if len(cand_feats) <= 1:
+                # Unambiguous: exactly one candidate goal feature exists (e.g. death_reset, stride2, blocked_first)
+                goals = candidate_goals
+            else:
+                # Ambiguous: multiple candidate features (e.g. push block vs target in push_block).
+                # Defer terminal navigation to mental simulation / epistemic probing to avoid
+                # prematurely walking to the target and bypassing intermediate object manipulation.
+                goals = []
 
         # Multi-Agent focus switch verification
         has_multi_agent = (

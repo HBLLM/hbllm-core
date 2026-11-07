@@ -393,6 +393,8 @@ class HCIRSymbolicWorldTheory:
         if feature_id in self.barrier_features:
             return
         self.walkable_features.discard(feature_id)
+        self.goal_features.discard(feature_id)
+        self.candidate_goal_features.discard(feature_id)
         if feature_id not in self.cargo_features:
             self.cargo_features.add(feature_id)
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
