@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+"""Composite Observation Adapter — bridges domain-specific observations to SGE.
+
+Converts various domain-specific observation formats (numpy grids, robotics
+joint states, text/NER payloads) into standardised ``ObservationEnvelope`` +
+``PerceptualFeatureVector`` streams.  The ``CompositeObservationAdapter``
+dispatches to the correct sub-adapter based on the detected modality.
+
+All operations are deterministic and LLM-free.
+"""
+
+import hashlib
+import time
+import uuid
+from typing import Any
+
+import numpy as np
+
+from hbllm.hcir.grounding.contracts.enums import ModalitySource, TrafficClass
+from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+from hbllm.hcir.grounding.features.feature_extractor import (
+    FeatureExtractorRegistry,
+    PerceptualFeatureVector,
+)
+
+
+class GridObservationAdapter:
+    """Converts numpy grid arrays (e.g. ARC-AGI, Sokoban) into observation
+    envelopes and perceptual feature vectors via spatial grid extraction."""
+
+    def __init__(
+        self,
+        channel_id: str = "grid_perception",
+        feature_registry: FeatureExtractorRegistry | None = None,
+    ) -> None:
+        self._channel_id = channel_id
+        self._registry = feature_registry or FeatureExtractorRegistry.default()
+        self._seq = 0
+
+    def adapt(
+        self,
+        grid: np.ndarray,
+        *,
+        entities: list[dict[str, Any]] | None = None,
+        step: int | None = None,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        """Converts a grid observation into an envelope + feature vectors."""
+        self._seq += 1
+        now = time.time()
+        obs_id = f"obs_grid_s{step or self._seq}_{uuid.uuid4().hex[:6]}"
+
+        # Build payload hash from grid content
+        grid_bytes = grid.tobytes() if hasattr(grid, "tobytes") else bytes(str(grid), "utf-8")
+        payload_hash = hashlib.sha256(grid_bytes).hexdigest()[:16]
+
+        # Extract unique non-zero entity features from grid
+        entity_colors: set[int] = set()
+        if grid.ndim == 2:
+            unique_vals = set(int(v) for v in np.unique(grid) if v != 0)
+            entity_colors = unique_vals
+
+        envelope = ObservationEnvelope(
+            observation_id=obs_id,
+            source_modality=ModalitySource.VISION,
+            source_channel_id=self._channel_id,
+            traffic_class=TrafficClass.CLASS_HIGH_FREQ,
+            sequence_number=self._seq,
+            wall_timestamp=now,
+            monotonic_timestamp=time.monotonic(),
+            payload_ref=f"hcir://grid/{obs_id}",
+            clock_domain="grid_clock",
+            payload_hash=payload_hash,
+            metadata={
+                "grid_shape": list(grid.shape),
+                "entity_count": len(entities or []),
+                "unique_colors": sorted(entity_colors),
+            },
+        )
+
+        # Build grid-shaped payload for feature extraction
+        envelope.metadata["grid_data"] = grid.tolist() if hasattr(grid, "tolist") else grid
+        if entities:
+            envelope.metadata["entities"] = entities
+
+        features = self._registry.extract_all(envelope)
+        return envelope, features
+
+
+class RoboticsObservationAdapter:
+    """Converts robotics state (position, joint angles, velocities, forces)
+    into observation envelopes and kinematic feature vectors."""
+
+    def __init__(
+        self,
+        channel_id: str = "robotics_perception",
+        feature_registry: FeatureExtractorRegistry | None = None,
+    ) -> None:
+        self._channel_id = channel_id
+        self._registry = feature_registry or FeatureExtractorRegistry.default()
+        self._seq = 0
+
+    def adapt(
+        self,
+        position: tuple[float, ...],
+        *,
+        joint_angles: tuple[float, ...] | None = None,
+        velocities: tuple[float, ...] | None = None,
+        forces: tuple[float, ...] | None = None,
+        gripper_state: float = 0.0,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        """Converts robotics state into envelope + kinematic feature vectors."""
+        self._seq += 1
+        now = time.time()
+        obs_id = f"obs_robot_s{self._seq}_{uuid.uuid4().hex[:6]}"
+
+        envelope = ObservationEnvelope(
+            observation_id=obs_id,
+            source_modality=ModalitySource.PROPRIOCEPTIVE,
+            source_channel_id=self._channel_id,
+            traffic_class=TrafficClass.CLASS_HIGH_FREQ,
+            sequence_number=self._seq,
+            wall_timestamp=now,
+            monotonic_timestamp=time.monotonic(),
+            payload_ref=f"hcir://robot/{obs_id}",
+            clock_domain="robot_clock",
+            metadata={
+                "position": list(position),
+                "joint_angles": list(joint_angles or []),
+                "velocities": list(velocities or []),
+                "forces": list(forces or []),
+                "gripper_state": gripper_state,
+            },
+        )
+
+        features = self._registry.extract_all(envelope)
+        return envelope, features
+
+
+class TextObservationAdapter:
+    """Converts text/NER payloads into observation envelopes and
+    semantic text feature vectors."""
+
+    def __init__(
+        self,
+        channel_id: str = "text_perception",
+        feature_registry: FeatureExtractorRegistry | None = None,
+    ) -> None:
+        self._channel_id = channel_id
+        self._registry = feature_registry or FeatureExtractorRegistry.default()
+        self._seq = 0
+
+    def adapt(
+        self,
+        text: str,
+        *,
+        named_entities: dict[str, list[str]] | None = None,
+        embeddings: list[float] | None = None,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        """Converts text input into envelope + semantic feature vectors."""
+        self._seq += 1
+        now = time.time()
+        obs_id = f"obs_text_s{self._seq}_{uuid.uuid4().hex[:6]}"
+
+        payload_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+        # Convert dict-style NER {"OBJECT": ["red cube"]} → list-of-dicts
+        # [{"text": "red cube", "type": "OBJECT"}] expected by SemanticTextFeatureExtractor
+        ne_list: list[dict[str, Any]] = []
+        for label, texts in (named_entities or {}).items():
+            for t in texts:
+                ne_list.append({"text": t, "type": label, "confidence": 1.0})
+
+        envelope = ObservationEnvelope(
+            observation_id=obs_id,
+            source_modality=ModalitySource.TEXT,
+            source_channel_id=self._channel_id,
+            traffic_class=TrafficClass.CLASS_DISCRETE,
+            sequence_number=self._seq,
+            wall_timestamp=now,
+            monotonic_timestamp=time.monotonic(),
+            payload_ref=f"hcir://text/{obs_id}",
+            clock_domain="text_clock",
+            payload_hash=payload_hash,
+            metadata={
+                "text": text,
+                "text_length": len(text),
+                "named_entities": ne_list,
+                "pre_extracted_embeddings": embeddings or [],
+            },
+        )
+
+        features = self._registry.extract_all(envelope)
+        return envelope, features
+
+
+class CompositeObservationAdapter:
+    """Dispatches to the correct domain adapter based on input type.
+
+    Usage::
+
+        adapter = CompositeObservationAdapter()
+        envelope, features = adapter.adapt_grid(grid_array)
+        envelope, features = adapter.adapt_robotics(position=(1.0, 2.0, 3.0))
+        envelope, features = adapter.adapt_text("The red cube is on the table.")
+    """
+
+    def __init__(
+        self,
+        feature_registry: FeatureExtractorRegistry | None = None,
+    ) -> None:
+        registry = feature_registry or FeatureExtractorRegistry.default()
+        self.grid_adapter = GridObservationAdapter(feature_registry=registry)
+        self.robotics_adapter = RoboticsObservationAdapter(feature_registry=registry)
+        self.text_adapter = TextObservationAdapter(feature_registry=registry)
+        self._registry = registry
+
+    def adapt_grid(
+        self,
+        grid: np.ndarray,
+        **kwargs: Any,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        return self.grid_adapter.adapt(grid, **kwargs)
+
+    def adapt_robotics(
+        self,
+        position: tuple[float, ...],
+        **kwargs: Any,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        return self.robotics_adapter.adapt(position, **kwargs)
+
+    def adapt_text(
+        self,
+        text: str,
+        **kwargs: Any,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        return self.text_adapter.adapt(text, **kwargs)

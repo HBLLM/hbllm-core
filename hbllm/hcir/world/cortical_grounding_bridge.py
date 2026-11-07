@@ -12,6 +12,7 @@ from hbllm.hcir.grounding.bus.observation_bus import ObservationBus
 from hbllm.hcir.grounding.bus.policies import ChannelPolicy
 from hbllm.hcir.grounding.causal.schema import SchemaInducer
 from hbllm.hcir.grounding.committer.committer import HCIRCommitter
+from hbllm.hcir.grounding.concepts.concept_learner import ConceptAssignment, ConceptLearner
 from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
 from hbllm.hcir.grounding.contracts.actions import (
     ActionExecutionRecord,
@@ -32,6 +33,10 @@ from hbllm.hcir.grounding.contracts.references import (
     TrackletRef,
 )
 from hbllm.hcir.grounding.epistemics.evaluator import EpistemicEvaluator
+from hbllm.hcir.grounding.features.feature_extractor import (
+    FeatureExtractorRegistry,
+    PerceptualFeatureVector,
+)
 from hbllm.hcir.grounding.predictive.assimilator import (
     GroundingSurpriseAlert,
     GroundingSurpriseAssimilator,
@@ -64,6 +69,8 @@ class CorticalGroundingState:
     last_execution_record: ActionExecutionRecord | None = None
     last_surprise_alerts: list[GroundingSurpriseAlert] = field(default_factory=list)
     pending_epistemic_goals: list[GoalProposal] = field(default_factory=list)
+    last_feature_vectors: list[PerceptualFeatureVector] = field(default_factory=list)
+    last_concept_assignments: list[ConceptAssignment] = field(default_factory=list)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0
 
@@ -104,6 +111,8 @@ class CorticalGroundingBridge:
         )
         self.tracker = ThreeTierEntityTracker(spatial_distance_threshold=1.5)
         self.concept_store = WorkingConceptStore()
+        self.concept_learner = ConceptLearner(concept_store=self.concept_store)
+        self.feature_registry = FeatureExtractorRegistry.default()
         self.relation_learner = RelationLearner(proximity_threshold=3.0)
         self.evaluator = EpistemicEvaluator(acceptance_threshold=acceptance_threshold)
         self.committer = HCIRCommitter(self.tx_manager)
@@ -219,12 +228,71 @@ class CorticalGroundingBridge:
 
         active_cands = self.tracker.get_active_candidates()
 
+        # 5. Feature Extraction via FeatureExtractorRegistry
+        feature_vectors: list[PerceptualFeatureVector] = []
+        try:
+            extracted = self.feature_registry.extract_all(envelope)
+            feature_vectors.extend(extracted)
+        except Exception as exc:
+            logger.debug("FeatureExtractorRegistry.extract_all failed: %s", exc)
+
+        # 6. Concept Learning via ConceptLearner
+        concept_assignments: list[ConceptAssignment] = []
+        for fv in feature_vectors:
+            try:
+                entity_id: str | None = None
+                # Associate feature with closest tracked entity by modality index
+                if active_cands:
+                    # Use observation_id suffix or modality to map features to entities
+                    entity_id = active_cands[0].candidate_ref.id if active_cands else None
+                assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
+                concept_assignments.append(assignment)
+            except Exception as exc:
+                logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
+
+        # Run concept maintenance (split/merge detection) periodically
+        split_count = 0
+        merge_count = 0
+        if self.state.step_counter % 5 == 0 and self.state.step_counter > 0:
+            try:
+                splits, merges = self.concept_learner.maintain()
+                split_count = len(splits)
+                merge_count = len(merges)
+            except Exception as exc:
+                logger.debug("ConceptLearner.maintain failed: %s", exc)
+
+        self.state.last_feature_vectors = feature_vectors
+        self.state.last_concept_assignments = concept_assignments
+
+        # 7. Post-Action Outcome Verification (from previous cycle)
+        outcome_verified = False
+        if self.state.last_execution_record is not None and entity_states:
+            try:
+                verified = self.verify_post_action_outcome(entity_states)
+                outcome_verified = verified is not None and getattr(
+                    verified, "outcome_verified", False
+                )
+            except Exception as exc:
+                logger.debug("Post-action outcome verification failed: %s", exc)
+
         return {
             "sge_observation_id": obs_id,
             "sge_active_candidates": [c.candidate_ref.id for c in active_cands],
             "sge_entity_states": entity_states,
             "sge_proposed_claims_count": len(claims),
             "sge_committed_claims_count": len(committed_claims),
+            "sge_feature_vectors_count": len(feature_vectors),
+            "sge_concept_assignments": [
+                {
+                    "concept_id": a.concept_ref.id,
+                    "distance": a.distance,
+                    "is_new": a.is_new_concept,
+                }
+                for a in concept_assignments
+            ],
+            "sge_concept_splits": split_count,
+            "sge_concept_merges": merge_count,
+            "sge_outcome_verified": outcome_verified,
         }
 
     # ─────────────────────────────────────────────────────────────────────────
