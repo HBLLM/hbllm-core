@@ -125,6 +125,15 @@ class HCIRSymbolicWorldTheory:
         """Declarative causal predicates recorded in the symbolic world theory."""
         return self.domain_predicates
 
+    @property
+    def target_features(self) -> set[int]:
+        """Empirically verified target / goal features in symbolic world theory."""
+        return self.goal_features
+
+    @target_features.setter
+    def target_features(self, val: set[int]) -> None:
+        self.goal_features = val
+
     def record_causal_predicate(self, predicate: CausalPredicate) -> None:
         """Record an empirical causal predicate into the symbolic world theory."""
         self.domain_predicates.append(predicate)

@@ -177,6 +177,75 @@ class TestCognitiveBlackboxGrounding:
         assert engine.grounding_bridge is not None
         assert engine.cortical_pipeline.grounding_bridge is engine.grounding_bridge
 
+    def test_observe_grounds_driver_input_into_sge(self) -> None:
+        cb = CognitiveBlackbox()
+        grid = np.zeros((4, 4), dtype=int)
+        grid[1, 2] = 3
+        inp = DriverInput(
+            raw_data=grid,
+            modality=DriverModality.GRID_2D,
+            source_id="camera_sensor",
+            metadata={"entities": [{"id": "target_box", "position": (1.0, 2.0), "color": 3.0}]},
+        )
+        cb.observe(inp, perception_data={"grid": grid})
+
+        engine = cb.get_epistemic_engine("camera_sensor")
+        assert engine.grounding_bridge is not None
+        # Verify SGE entity tracker ingested the observation
+        candidates = engine.grounding_bridge.tracker.get_active_candidates()
+        assert len(candidates) >= 1
+
+    def test_decide_and_update_through_sge_motor_gateway(self) -> None:
+        from hbllm.hcir.grounding.contracts.actions import ActionLifecycleState
+
+        cb = CognitiveBlackbox()
+        grid = np.zeros((4, 4), dtype=int)
+        inp = DriverInput(
+            raw_data=grid,
+            modality=DriverModality.GRID_2D,
+            source_id="robot_source",
+            metadata={"entities": [{"id": "obj", "position": (2.0, 2.0), "color": 1.0}]},
+        )
+        cb.observe(inp, perception_data={"grid": grid})
+
+        avail = [DriverAction(action_id=1, parameters={"speed": 0.5})]
+        chosen = cb.decide(avail, source_id="robot_source")
+        assert chosen.action_id == 1
+
+        bridge = cb.get_epistemic_engine("robot_source").grounding_bridge
+        assert bridge is not None
+        assert bridge.state.last_execution_record is not None
+        assert bridge.state.last_execution_record.state == ActionLifecycleState.DISPATCHED
+
+        # Update with feedback
+        cb.update(chosen, DriverFeedback(success=True), source_id="robot_source")
+        assert bridge.state.last_execution_record.state == ActionLifecycleState.EXECUTION_REPORTED
+
+    def test_driver_manager_cognitive_step_full_sge_grounding_cycle(self) -> None:
+        from hbllm.hcir.grounding.contracts.actions import ActionLifecycleState
+
+        dm = DriverManager()
+        cb = CognitiveBlackbox()
+        dm.set_cognitive_engine(cb)
+
+        cam = MockSpatialDriver(name="cam_primary")
+        dm.register(cam)
+        dm.bind(cam.name, target="world")
+
+        # Execute single cognitive step
+        feedback = dm.execute_cognitive_step()
+        assert feedback.success is True
+
+        engine = cb.get_epistemic_engine("cam_primary")
+        assert engine.grounding_bridge is not None
+        candidates = engine.grounding_bridge.tracker.get_active_candidates()
+        assert len(candidates) >= 1
+        assert engine.grounding_bridge.state.last_execution_record is not None
+        assert (
+            engine.grounding_bridge.state.last_execution_record.state
+            == ActionLifecycleState.EXECUTION_REPORTED
+        )
+
 
 class TestDeviceBridgeModalities:
     """Tests DeviceBridge modality inference for SGE."""

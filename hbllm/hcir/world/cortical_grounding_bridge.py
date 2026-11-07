@@ -131,7 +131,7 @@ class CorticalGroundingBridge:
 
     def process_perception(
         self,
-        ctx: CognitiveContext,
+        ctx: CognitiveContext | None = None,
         extracted_entities: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Stage 1: Converts incoming observation into SGE envelope and updates entity tracking."""
@@ -304,8 +304,8 @@ class CorticalGroundingBridge:
 
     def process_assimilation(
         self,
-        ctx: CognitiveContext,
-        current_entity_states: dict[str, dict[str, Any]],
+        ctx: CognitiveContext | None = None,
+        current_entity_states: dict[str, dict[str, Any]] | None = None,
         terminal: Any = None,
     ) -> dict[str, Any]:
         """Stage 2: Compares forward predictions with actual observations to detect surprise."""
@@ -313,11 +313,12 @@ class CorticalGroundingBridge:
         epistemic_goals: list[GoalProposal] = []
         surprise_score = 0.0
 
+        entity_states = current_entity_states or {}
         # If previous predictions exist, assimilate surprise
         if self.state.active_predictions:
             alerts = self.assimilator.evaluate_observation(
                 predicted_states=self.state.active_predictions,
-                observed_entities=current_entity_states,
+                observed_entities=entity_states,
             )
             self.state.last_surprise_alerts = alerts
 
@@ -357,8 +358,8 @@ class CorticalGroundingBridge:
 
     def process_motor(
         self,
-        ctx: CognitiveContext,
-        proposed_action: Any,
+        ctx: CognitiveContext | None = None,
+        proposed_action: Any = None,
         action_data: dict[str, Any] | None = None,
         world_state: dict[str, Any] | None = None,
     ) -> tuple[Any, dict[str, Any] | None]:
