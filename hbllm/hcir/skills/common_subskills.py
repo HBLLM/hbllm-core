@@ -32,7 +32,7 @@ class ColorCluster:
 class DiscreteVectorTranslator:
     """Translates continuous or lattice displacements into discrete navigation actions."""
 
-    DEFAULT_ACTION_MAP: dict[str, int] = {"up": 1, "down": 2, "left": 3, "right": 4}
+    DEFAULT_ACTION_MAP: dict[str, Any] = {"up": 1, "down": 2, "left": 3, "right": 4}
 
     @staticmethod
     def delta_to_actions(
@@ -40,8 +40,8 @@ class DiscreteVectorTranslator:
         dy: int,
         step_size: int = 1,
         horizontal_first: bool = True,
-        action_map: dict[str, int] | None = None,
-    ) -> list[tuple[int, dict[str, int] | None]]:
+        action_map: dict[str, Any] | None = None,
+    ) -> list[tuple[Any, dict[str, Any] | None]]:
         """Convert a (dx, dy) displacement into discrete movement action tuples."""
         mapping = action_map or DiscreteVectorTranslator.DEFAULT_ACTION_MAP
         act_up = mapping.get("up", 1)
@@ -49,7 +49,7 @@ class DiscreteVectorTranslator:
         act_left = mapping.get("left", 3)
         act_right = mapping.get("right", 4)
 
-        actions: list[tuple[int, dict[str, int] | None]] = []
+        actions: list[tuple[Any, dict[str, Any] | None]] = []
         num_y = abs(dy) // step_size if step_size > 0 else abs(dy)
         num_x = abs(dx) // step_size if step_size > 0 else abs(dx)
 
@@ -77,8 +77,8 @@ class DiscreteVectorTranslator:
         p1: tuple[int, int],
         p2: tuple[int, int],
         step_size: int = 1,
-        action_map: dict[str, int] | None = None,
-    ) -> list[tuple[int, dict[str, int] | None]]:
+        action_map: dict[str, Any] | None = None,
+    ) -> list[tuple[Any, dict[str, Any] | None]]:
         """Convert displacement from point p1=(x1, y1) to p2=(x2, y2) into actions."""
         dx = p2[0] - p1[0]
         dy = p2[1] - p1[1]
@@ -89,8 +89,8 @@ class DiscreteVectorTranslator:
         cls,
         path: list[tuple[int, int]],
         step_size: int = 1,
-        action_map: dict[str, int] | None = None,
-    ) -> list[tuple[int, dict[str, int] | None]]:
+        action_map: dict[str, Any] | None = None,
+    ) -> list[tuple[Any, dict[str, Any] | None]]:
         """Convert a sequence of waypoints into sequential navigation actions."""
         actions: list[tuple[int, dict[str, int] | None]] = []
         for i in range(len(path) - 1):

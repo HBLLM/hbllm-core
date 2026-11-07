@@ -113,21 +113,21 @@ class CognitiveContext:
     curr_grid: np.ndarray | None = None
     prev_grid: np.ndarray | None = None
     grid_history: tuple[np.ndarray, ...] = ()
-    last_action: int | None = None
+    last_action: Any | None = None
     last_action_data: MappingProxyType[str, Any] | None = None
     avatar_pos: tuple[int, int] | None = None
-    avatar_feature: int | None = None
-    avatar_features: frozenset[int] = frozenset()
+    avatar_feature: Any | None = None
+    avatar_features: frozenset[Any] = frozenset()
     avatar_size: int = 1
     avatar_w: int | None = None
     avatar_h: int | None = None
-    prior_avatar_feature: int | None = None
+    prior_avatar_feature: Any | None = None
     avatar_controllability_evidence: MappingProxyType[str, Any] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    bg_feature: int = 0
+    bg_feature: Any = 0
     recent_positions: tuple[tuple[int, int], ...] = ()
-    recent_actions: tuple[int, ...] = ()
+    recent_actions: tuple[Any, ...] = ()
     step_counter: int = 0
     step_count: int = 0
     consecutive_stuck_steps: int = 0
@@ -371,21 +371,21 @@ class EngineState(BaseModel):
     curr_grid: np.ndarray | None = None
     prev_grid: np.ndarray | None = None
     grid_history: deque[np.ndarray] = Field(default_factory=lambda: deque(maxlen=6))
-    last_action: int | None = None
+    last_action: Any | None = None
     last_action_data: dict[str, Any] | None = None
     avatar_pos: tuple[int, int] | None = None
-    avatar_feature: int | None = None
-    avatar_features: set[int] = Field(default_factory=set)
+    avatar_feature: Any | None = None
+    avatar_features: set[Any] = Field(default_factory=set)
     avatar_size: int = 1
     avatar_w: int | None = None
     avatar_h: int | None = None
-    prior_avatar_feature: int | None = None
+    prior_avatar_feature: Any | None = None
     avatar_controllability_evidence: dict[str, Any] = Field(
         default_factory=dict, alias="_avatar_controllability_evidence"
     )
-    bg_feature: int = 0
+    bg_feature: Any = 0
     recent_positions: list[tuple[int, int]] = Field(default_factory=list)
-    recent_actions: list[int] = Field(default_factory=list)
+    recent_actions: list[Any] = Field(default_factory=list)
     step_counter: int = 0
     step_count: int = 0
     consecutive_stuck_steps: int = 0

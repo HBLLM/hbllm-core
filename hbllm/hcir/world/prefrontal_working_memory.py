@@ -396,13 +396,13 @@ class PrefrontalWorkingMemory:
         self.causal_actuator_streak_limit: int = 4
 
         # Feature-level interventional causal falsification
-        self.quiescent_features: set[int] = set()
-        self.effective_features: set[int] = set()
-        self.feature_quiescent_counts: dict[int, int] = {}
+        self.quiescent_features: set[Any] = set()
+        self.effective_features: set[Any] = set()
+        self.feature_quiescent_counts: dict[Any, int] = {}
 
         # Metacognitive Refractory Action Inhibition
         self.inhibited_actions: dict[Any, int] = {}
-        self.prior_avatar_feature: int | None = None
+        self.prior_avatar_feature: Any | None = None
         self.entity_action_failed_positions: dict[Any, set[tuple[int, int]]] = {}
         self.immobile_entity_actions: set[Any] = set()
 

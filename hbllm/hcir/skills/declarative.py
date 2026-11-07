@@ -191,16 +191,24 @@ class ActionAffordancePredicate(SymbolicPredicate):
 
     def __init__(
         self,
-        required: set[int] | Sequence[int] | None = None,
-        forbidden: set[int] | Sequence[int] | None = None,
-        exact: set[int] | Sequence[int] | None = None,
+        required: set[Any] | Sequence[Any] | None = None,
+        forbidden: set[Any] | Sequence[Any] | None = None,
+        exact: set[Any] | Sequence[Any] | None = None,
     ) -> None:
-        self.required: set[int] = set(required) if required is not None else set()
-        self.forbidden: set[int] = set(forbidden) if forbidden is not None else set()
-        self.exact: set[int] | None = set(exact) if exact is not None else None
+        self.required: set[Any] = set(required) if required is not None else set()
+        self.forbidden: set[Any] = set(forbidden) if forbidden is not None else set()
+        self.exact: set[Any] | None = set(exact) if exact is not None else None
 
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        acts = ctx.available_actions_set
+    def evaluate(self, ctx: SkillEvaluationContext | Any) -> bool:
+        if hasattr(ctx, "available_actions_set"):
+            acts = ctx.available_actions_set
+        elif isinstance(ctx, dict):
+            acts = set(ctx.get("available_actions", []))
+        elif hasattr(ctx, "available_actions"):
+            acts = set(getattr(ctx, "available_actions"))
+        else:
+            acts = set()
+
         if self.exact is not None and acts != self.exact:
             return False
         if self.required and not self.required.issubset(acts):

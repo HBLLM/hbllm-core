@@ -159,7 +159,7 @@ class SkillProgramSynthesizer:
         self,
         pattern: tuple[SpatialActionIntent, ...],
         skill_name: str | None = None,
-        required_actions: set[int] | None = None,
+        required_actions: set[Any] | None = None,
     ) -> DeclarativeNeuroSymbolicSkill:
         """Induce a first-class DeclarativeNeuroSymbolicSkill from a frequent pattern."""
         name = skill_name or f"synthesized_skill_{'_'.join(i.value.lower() for i in pattern)}"
@@ -174,7 +174,7 @@ class SkillProgramSynthesizer:
         if required_actions:
             sig_pred = ActionAffordancePredicate(required=required_actions)
         else:
-            sig_pred = ActionAffordancePredicate(required={1, 2, 3, 4})
+            sig_pred = ActionAffordancePredicate(required=set())
 
         # Dynamically define new DeclarativeNeuroSymbolicSkill subclass
         class InducedSkill(DeclarativeNeuroSymbolicSkill):

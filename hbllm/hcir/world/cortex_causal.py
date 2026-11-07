@@ -88,16 +88,16 @@ class HCIRSymbolicWorldTheory:
     domain_predicates: list[CausalPredicate] = field(default_factory=list)
 
     # Fast-lookup cached sets
-    goal_features: set[int] = field(default_factory=set)
-    candidate_goal_features: set[int] = field(default_factory=set)
-    barrier_features: set[int] = field(default_factory=set)
-    walkable_features: set[int] = field(default_factory=set)
-    cargo_features: set[int] = field(default_factory=set)
-    receptacle_features: set[int] = field(default_factory=set)
-    actuator_features: set[int] = field(default_factory=set)
-    avatar_features: set[int] = field(default_factory=set)
-    _barrier_eval_cache: dict[int, bool] = field(default_factory=dict, repr=False)
-    _walkable_eval_cache: dict[int, bool] = field(default_factory=dict, repr=False)
+    goal_features: set[Any] = field(default_factory=set)
+    candidate_goal_features: set[Any] = field(default_factory=set)
+    barrier_features: set[Any] = field(default_factory=set)
+    walkable_features: set[Any] = field(default_factory=set)
+    cargo_features: set[Any] = field(default_factory=set)
+    receptacle_features: set[Any] = field(default_factory=set)
+    actuator_features: set[Any] = field(default_factory=set)
+    avatar_features: set[Any] = field(default_factory=set)
+    _barrier_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
+    _walkable_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
 
     # Functional action categorization
     undo_actions: set[Any] = field(default_factory=set)
@@ -110,14 +110,14 @@ class HCIRSymbolicWorldTheory:
 
     # Telic global board goal induction
     telic_goal_type: str = ""  # e.g. "deplete", "navigate", "cargo"
-    telic_target_feature: int | None = None
+    telic_target_feature: Any | None = None
 
     # Elizabeth Spelke's Core Knowledge physical axioms
     spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
 
     # Tool-barrier empirical affinities and distal actuation ledger
-    tool_barrier_affinities: dict[int, set[int]] = field(default_factory=dict)
-    tool_barrier_incompatibilities: dict[int, set[int]] = field(default_factory=dict)
+    tool_barrier_affinities: dict[Any, set[Any]] = field(default_factory=dict)
+    tool_barrier_incompatibilities: dict[Any, set[Any]] = field(default_factory=dict)
     distal_actuations: list[dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -126,28 +126,28 @@ class HCIRSymbolicWorldTheory:
         return self.domain_predicates
 
     @property
-    def target_features(self) -> set[int]:
+    def target_features(self) -> set[Any]:
         """Empirically verified target / goal features in symbolic world theory."""
         return self.goal_features
 
     @target_features.setter
-    def target_features(self, val: set[int]) -> None:
-        self.goal_features = val
+    def target_features(self, val: set[Any]) -> None:
+        self.goal_features = set(val)
 
     def record_causal_predicate(self, predicate: CausalPredicate) -> None:
         """Record an empirical causal predicate into the symbolic world theory."""
         self.domain_predicates.append(predicate)
 
-    def record_tool_barrier_affinity(self, tool_feat: int, barrier_feat: int) -> None:
+    def record_tool_barrier_affinity(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal resonance where tool_feat cleared barrier_feat."""
         self.tool_barrier_affinities.setdefault(tool_feat, set()).add(barrier_feat)
 
-    def record_tool_barrier_incompatibility(self, tool_feat: int, barrier_feat: int) -> None:
+    def record_tool_barrier_incompatibility(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal failure where tool_feat failed to clear barrier_feat."""
         self.tool_barrier_incompatibilities.setdefault(tool_feat, set()).add(barrier_feat)
 
     def has_tool_barrier_affinity(
-        self, tool_feat: int | None, barrier_feat: int | None = None
+        self, tool_feat: Any | None, barrier_feat: Any | None = None
     ) -> bool:
         """Check if tool_feat has empirical resonance with barrier_feat (or any barrier if barrier_feat is None)."""
         if tool_feat is None:
@@ -160,7 +160,7 @@ class HCIRSymbolicWorldTheory:
         return barrier_feat in affinities
 
     def is_tool_barrier_incompatible(
-        self, tool_feat: int | None, barrier_feat: int | None = None
+        self, tool_feat: Any | None, barrier_feat: Any | None = None
     ) -> bool:
         """Check if tool_feat has confirmed incompatibility with barrier_feat."""
         if tool_feat is None:
@@ -197,41 +197,49 @@ class HCIRSymbolicWorldTheory:
             }
         )
 
-    def is_goal(self, entity: SpatialEntity | int) -> bool:
+    def is_avatar_feature(self, feature_id: Any) -> bool:
+        """True if feature_id matches any registered avatar feature."""
+        return feature_id in self.avatar_features
+
+    def is_goal(self, entity: SpatialEntity | int | str | Any) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
-        if isinstance(entity, (int, np.integer)):
-            feat = int(entity)
+        if isinstance(entity, (int, np.integer, str)):
+            feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
             if feat in self.avatar_features:
                 return False
             if feat in self.goal_features:
                 return True
             if not self.goal_features and feat in self.candidate_goal_features:
                 return True
-            props = {"feature_id": feat, "visual_id": feat}
+            props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.goal_predicates)
 
-        if entity.feature_id in self.avatar_features:
+        feat = getattr(entity, "feature_id", getattr(entity, "id", getattr(entity, "name", None)))
+        role = getattr(entity, "role", None)
+        if feat in self.avatar_features:
             return False
-        if entity.role == EntityRole.GOAL:
+        if role == EntityRole.GOAL or str(role).lower() in ("goal", "entityrole.goal", "target"):
             return True
-        if entity.feature_id in self.goal_features:
+        if feat in self.goal_features:
             return True
-        if not self.goal_features and entity.feature_id in self.candidate_goal_features:
+        if not self.goal_features and feat in self.candidate_goal_features:
             return True
         props = {
-            "feature_id": entity.feature_id,
-            "visual_id": entity.feature_id,
+            "feature_id": feat,
+            "visual_id": feat,
+            "id": feat,
+            "name": str(getattr(entity, "name", feat)),
             "area": getattr(entity, "area", 1),
-            "role": str(entity.role),
+            "role": str(role),
             **getattr(entity, "properties", {}),
         }
         return any(pred.evaluate(props) for pred in self.goal_predicates)
 
-    def is_goal_feature(self, feature_id: int) -> bool:
+    def is_goal_feature(self, feature_id: Any) -> bool:
         """True if feature satisfies any induced goal predicate or confirmed goal feature."""
         return self.is_goal(feature_id)
 
-    def is_barrier(self, feature_id: int) -> bool:
+    def is_barrier(self, feature_id: Any) -> bool:
         """True if feature satisfies any induced barrier predicate (enforcing HCIR Attractor Invariant)."""
         if feature_id in self.avatar_features:
             return False
@@ -244,64 +252,80 @@ class HCIRSymbolicWorldTheory:
         cached = self._barrier_eval_cache.get(feature_id)
         if cached is not None:
             return cached
-        props = {"feature_id": feature_id, "visual_id": feature_id}
+        props = {"feature_id": feature_id, "visual_id": feature_id, "id": feature_id}
         res = any(pred.evaluate(props) for pred in self.barrier_predicates)
         self._barrier_eval_cache[feature_id] = res
         return res
 
-    def is_walkable(self, feature_id: int) -> bool:
+    def is_walkable(self, feature_id: Any) -> bool:
         """True if feature satisfies any induced walkable space predicate."""
         if feature_id in self.walkable_features:
             return True
         cached = self._walkable_eval_cache.get(feature_id)
         if cached is not None:
             return cached
-        props = {"feature_id": feature_id, "visual_id": feature_id}
+        props = {"feature_id": feature_id, "visual_id": feature_id, "id": feature_id}
         res = any(pred.evaluate(props) for pred in self.walkable_predicates)
         self._walkable_eval_cache[feature_id] = res
         return res
 
-    def is_cargo(self, entity: SpatialEntity | int) -> bool:
+    def is_cargo(self, entity: SpatialEntity | int | str | Any) -> bool:
         """True if entity or feature satisfies any pushable cargo predicate."""
-        if isinstance(entity, (int, np.integer)):
-            feat = int(entity)
+        if isinstance(entity, (int, np.integer, str)):
+            feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
             if feat in self.cargo_features:
                 return True
-            props = {"feature_id": feat, "visual_id": feat}
+            props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.cargo_predicates)
 
-        if entity.feature_id in self.cargo_features:
+        feat = getattr(entity, "feature_id", getattr(entity, "id", None))
+        if feat in self.cargo_features:
+            return True
+        role = getattr(entity, "role", None)
+        if role in (EntityRole.MANIPULABLE, getattr(EntityRole, "CARGO", None)) or str(
+            role
+        ).lower() in ("cargo", "manipulable", "pushable"):
             return True
         props = {
-            "feature_id": entity.feature_id,
-            "visual_id": entity.feature_id,
+            "feature_id": feat,
+            "visual_id": feat,
+            "id": feat,
             "area": getattr(entity, "area", 1),
-            "role": str(entity.role),
+            "role": str(role),
             **getattr(entity, "properties", {}),
         }
         return any(pred.evaluate(props) for pred in self.cargo_predicates)
 
-    def is_receptacle(self, entity: SpatialEntity | int) -> bool:
+    def is_receptacle(self, entity: SpatialEntity | int | str | Any) -> bool:
         """True if entity or feature satisfies any receptacle predicate."""
-        if isinstance(entity, (int, np.integer)):
-            feat = int(entity)
+        if isinstance(entity, (int, np.integer, str)):
+            feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
             if feat in self.receptacle_features:
                 return True
-            props = {"feature_id": feat, "visual_id": feat}
+            props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.receptacle_predicates)
 
-        if entity.feature_id in self.receptacle_features:
+        feat = getattr(entity, "feature_id", getattr(entity, "id", None))
+        if feat in self.receptacle_features:
+            return True
+        role = getattr(entity, "role", None)
+        if role == EntityRole.RECEPTACLE or str(role).lower() in (
+            "receptacle",
+            "entityrole.receptacle",
+            "dock",
+        ):
             return True
         props = {
-            "feature_id": entity.feature_id,
-            "visual_id": entity.feature_id,
+            "feature_id": feat,
+            "visual_id": feat,
+            "id": feat,
             "area": getattr(entity, "area", 1),
-            "role": str(entity.role),
+            "role": str(role),
             **getattr(entity, "properties", {}),
         }
         return any(pred.evaluate(props) for pred in self.receptacle_predicates)
 
-    def induce_receptacle(self, feature_id: int) -> None:
+    def induce_receptacle(self, feature_id: Any) -> None:
         """Induce universal receptacle predicate."""
         if feature_id not in self.receptacle_features:
             self.receptacle_features.add(feature_id)
@@ -309,7 +333,7 @@ class HCIRSymbolicWorldTheory:
             self.receptacle_predicates.append(pred)
             logger.info("HCIRSymbolicWorldTheory: Induced Receptacle Rule: %s", pred.describe())
 
-    def induce_goal(self, feature_id: int) -> None:
+    def induce_goal(self, feature_id: Any) -> None:
         """Induce universal goal predicate with minimum description length."""
         if feature_id in self.avatar_features:
             return
@@ -329,7 +353,7 @@ class HCIRSymbolicWorldTheory:
             logger.info("HCIRSymbolicWorldTheory: Induced Goal Rule: %s", pred.describe())
         self.walkable_features.add(feature_id)
 
-    def induce_barrier(self, feature_id: int) -> None:
+    def induce_barrier(self, feature_id: Any) -> None:
         """Induce universal barrier predicate (enforcing HCIR Attractor Invariant)."""
         if feature_id in self.avatar_features:
             return
@@ -346,7 +370,7 @@ class HCIRSymbolicWorldTheory:
             self.walkable_features.discard(feature_id)
             logger.info("HCIRSymbolicWorldTheory: Induced Barrier Rule: %s", pred.describe())
 
-    def induce_walkable(self, feature_id: int) -> None:
+    def induce_walkable(self, feature_id: Any) -> None:
         """Induce universal walkable space predicate with self-correcting belief revision."""
         if feature_id in self.barrier_features:
             self.barrier_features.discard(feature_id)
@@ -364,7 +388,7 @@ class HCIRSymbolicWorldTheory:
             pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
             self.walkable_predicates.append(pred)
 
-    def induce_cargo(self, feature_id: int) -> None:
+    def induce_cargo(self, feature_id: Any) -> None:
         """Induce pushable cargo predicate."""
         if feature_id in self.barrier_features:
             return
@@ -375,13 +399,13 @@ class HCIRSymbolicWorldTheory:
             self.cargo_predicates.append(pred)
             logger.info("HCIRSymbolicWorldTheory: Induced Cargo Rule: %s", pred.describe())
 
-    def induce_depletion_goal(self, feature_id: int) -> None:
+    def induce_depletion_goal(self, feature_id: Any) -> None:
         """Induce a global board depletion goal (clear board of this feature)."""
         self.telic_goal_type = "deplete"
         self.telic_target_feature = feature_id
         self.induce_goal(feature_id)
         logger.info(
-            "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %d", feature_id
+            "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %s", feature_id
         )
 
     def induce_undo_action(self, action: Any) -> None:
@@ -446,7 +470,7 @@ class HCIRSymbolicWorldTheory:
         all_preds.extend(self.spelke_axioms.values())
         return all_preds
 
-    def seed_core_knowledge(self, bg_feature: int = 0) -> None:
+    def seed_core_knowledge(self, bg_feature: Any = 0) -> None:
         """Seed domain-general Spelke core cognitive knowledge (Physics & Free Space axioms).
 
         Grounds infant/primate Core Knowledge systems (Spelke 1990, Carey 2009):
@@ -766,9 +790,9 @@ class CausalInductionCortex:
         obs_diff: EpistemicObservationDiff,
         prev_grid: np.ndarray,
         curr_grid: np.ndarray,
-        bg_feature: int = 0,
+        bg_feature: Any = 0,
         action_locus: tuple[int, int] | None = None,
-        avatar_features: set[int] | None = None,
+        avatar_features: set[Any] | None = None,
     ) -> None:
         """Bind intentional do(a) action to local and distal environmental mutations."""
         if origin_pos is not None:
@@ -796,8 +820,8 @@ class CausalInductionCortex:
     def query_barrier_clearance(
         self,
         barrier_pos: tuple[int, int],
-        barrier_feature: int,
-    ) -> tuple[tuple[int, int] | None, int | None]:
+        barrier_feature: Any,
+    ) -> tuple[tuple[int, int] | None, Any | None]:
         """Query if a barrier can be cleared by a remote trigger or held tool.
 
         Returns:
@@ -830,8 +854,8 @@ class CausalInductionCortex:
         self,
         intent: Any,
         target_pos: tuple[int, int] | None,
-        tool_feat: int | None = None,
-        barrier_feat: int | None = None,
+        tool_feat: Any | None = None,
+        barrier_feat: Any | None = None,
         is_success: bool = True,
     ) -> None:
         """Record high-level causal attribution of macro-action outcome."""
@@ -841,7 +865,7 @@ class CausalInductionCortex:
             else:
                 self.symbolic_theory.record_tool_barrier_incompatibility(tool_feat, barrier_feat)
 
-    def is_passable(self, feature_id: int, pos: tuple[int, int] | None = None) -> bool:
+    def is_passable(self, feature_id: Any, pos: tuple[int, int] | None = None) -> bool:
         """Determine if a grid tile is passable considering symbolic theory and tools."""
         if self.symbolic_theory.is_walkable(feature_id):
             return True
@@ -885,7 +909,7 @@ class CausalInductionCortex:
         avatar_pos: tuple[int, int] | None,
         candidate_entities: Sequence[SpatialEntity],
         available_actions: Sequence[Any],
-        bg_feature: int = 0,
+        bg_feature: Any = 0,
     ) -> EpistemicInterventionProposal | None:
         """Pearl's do(a) active causal calculus:
         Computes expected information gain of targeted interventions to disambiguate unknown entities.
@@ -944,7 +968,7 @@ class EpistemicInterventionProposal:
 
     action: Any
     target_coord: tuple[int, int] | None = None
-    target_feature: int | None = None
+    target_feature: Any | None = None
     expected_information_gain: float = 0.0
     hypothesis: str = ""
 

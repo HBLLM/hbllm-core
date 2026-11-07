@@ -2236,8 +2236,12 @@ class MotorStage:
         ops: list[TransactionOperation] = []
         signals: dict[str, Any] = {}
         if proposed_action is None:
-            actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
-            proposed_action = actions[0] if actions else 1
+            actions = (
+                list(ctx.action_dynamics.keys())
+                or list(ctx.signals.get("available_actions", []))
+                or [1, 2, 3, 4]
+            )
+            proposed_action = actions[0] if actions else None
         return StageResult(
             author=self.name,
             operations=ops,

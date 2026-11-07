@@ -2396,5 +2396,9 @@ class MacroActionStage:
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
         grid = ctx.prev_grid if ctx.prev_grid is not None else np.zeros((1, 1), dtype=np.int32)
-        actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
+        actions = (
+            list(ctx.action_dynamics.keys())
+            or list(ctx.signals.get("available_actions", []))
+            or [1, 2, 3, 4]
+        )
         return MacroPlanSynthesizer.synthesize_stage_result(ctx, grid, actions)

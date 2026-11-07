@@ -577,14 +577,14 @@ class AutonomousEpistemicEngine:
 
         # Memory of frames & actions
         self._prev_grid: np.ndarray | None = None
-        self._last_action: int | None = None
+        self._last_action: Any | None = None
         self._last_action_data: dict[str, Any] | None = None
         self._consecutive_quiescent_actions: int = 0
         self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 
         # Avatar self-model (Motor Grounding)
-        self._avatar_feature: int | None = None
-        self._avatar_features: set[int] = set()
+        self._avatar_feature: Any | None = None
+        self._avatar_features: set[Any] = set()
         self._avatar_pos: tuple[int, int] | None = None
         self._avatar_size: int = 1
         self._effector_kinetics_mode: int | None = None
@@ -592,8 +592,9 @@ class AutonomousEpistemicEngine:
         self._last_surprise: float = 0.0
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
+        self.default_bg_feature: Any = getattr(self, "default_bg_feature", 0)
         self.symbolic_theory: HCIRSymbolicWorldTheory = HCIRSymbolicWorldTheory()
-        self.symbolic_theory.seed_core_knowledge(bg_feature=0)
+        self.symbolic_theory.seed_core_knowledge(bg_feature=self.default_bg_feature)
 
         # Prefrontal Working Memory & Executive Faculties (SSOT for cognitive state)
         self.working_memory: PrefrontalWorkingMemory = PrefrontalWorkingMemory()
@@ -1516,11 +1517,11 @@ class AutonomousEpistemicEngine:
         self.working_memory.inhibited_actions = val
 
     @property
-    def prior_avatar_feature(self) -> int | None:
+    def prior_avatar_feature(self) -> Any | None:
         return self.working_memory.prior_avatar_feature
 
     @prior_avatar_feature.setter
-    def prior_avatar_feature(self, val: int | None) -> None:
+    def prior_avatar_feature(self, val: Any | None) -> None:
         self.working_memory.prior_avatar_feature = val
 
     @property
@@ -3455,7 +3456,7 @@ class AutonomousEpistemicEngine:
     # ── Property Pass-Throughs to HCIRSymbolicWorldTheory ─────────────────────
 
     @property
-    def avatar_feature(self) -> int | None:
+    def avatar_feature(self) -> Any | None:
         if hasattr(self, "state") and self.state.avatar_feature is not None:
             return self.state.avatar_feature
         if hasattr(self, "state") and self.state.avatar_features:
@@ -3467,7 +3468,7 @@ class AutonomousEpistemicEngine:
         return None
 
     @avatar_feature.setter
-    def avatar_feature(self, val: int | None) -> None:
+    def avatar_feature(self, val: Any | None) -> None:
         self._avatar_feature = val
         if hasattr(self, "state"):
             self.state.avatar_feature = val
@@ -3478,7 +3479,7 @@ class AutonomousEpistemicEngine:
             self.avatar_features.clear()
 
     @property
-    def avatar_features(self) -> set[int]:
+    def avatar_features(self) -> set[Any]:
         if hasattr(self, "state"):
             return self.state.avatar_features
         return self._avatar_features
@@ -4035,7 +4036,7 @@ class AutonomousEpistemicEngine:
         H, W = raw_observation.shape[0], raw_observation.shape[1]
         return PerceptionFrame(shape=(H, W))
 
-    def estimate_background(self, grid: np.ndarray) -> int:
+    def estimate_background(self, grid: np.ndarray) -> Any:
         bg = PerceptionEngine.estimate_background(
             grid,
             barrier_features=self.symbolic_theory.barrier_features,
@@ -4047,17 +4048,19 @@ class AutonomousEpistemicEngine:
             self.bg_feature = bg
             if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
                 if (
-                    old_bg is None
-                    and bg != 0
-                    and 0 not in getattr(self, "verified_safe_features", set())
-                ):
-                    self.symbolic_theory.walkable_features.discard(0)
-                elif (
                     old_bg is not None
                     and old_bg != bg
                     and old_bg not in getattr(self, "verified_safe_features", set())
                 ):
                     self.symbolic_theory.walkable_features.discard(old_bg)
+                elif (
+                    old_bg is None
+                    and hasattr(self, "default_bg_feature")
+                    and self.default_bg_feature != bg
+                    and self.default_bg_feature
+                    not in getattr(self, "verified_safe_features", set())
+                ):
+                    self.symbolic_theory.walkable_features.discard(self.default_bg_feature)
                 if bg in getattr(self, "verified_safe_features", set()):
                     self.symbolic_theory.induce_walkable(bg)
         return bg
