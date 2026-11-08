@@ -156,7 +156,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
 
       - name: Configure PyO3
         run: echo "PYO3_PYTHON=$(which python)" >> $GITHUB_ENV
