@@ -338,10 +338,15 @@ pytest core/tests/unit/ -k "epistemic or cortex or hcir" -q
 pytest core/tests/unit/ -k "<relevant_component>" -q
 
 # Full system runtime diagnostics
-python -m hbllm.cli.diagnostics
+python -m hbllm diagnostics
 
-# ARC / 25 Games evaluation benchmark
-python core/plugins/arc_agi_adapter/run_local_suite.py
+# Benchmark evaluation harness
+python -m hbllm bench dev
+python -m hbllm bench local-suite
+
+# Kernel status and cognitive mind single step
+python -m hbllm kernel status
+python -m hbllm mind step --obs tests/fixtures/obs_minimal.json
 ```
 
 ### Ecosystem Context
