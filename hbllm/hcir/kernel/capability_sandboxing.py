@@ -459,7 +459,7 @@ def _sandboxed_child_main(
     sys.addaudithook(_audit)
 
     try:
-        executor, params = pickle.loads(payload)  # noqa: S301 — payload built in-process
+        executor, params = pickle.loads(payload)  # noqa: S301 # nosec B301
         result = asyncio.run(executor.execute(params))
         conn.send(("ok", result))
     except BaseException as exc:  # relay the failure to the parent

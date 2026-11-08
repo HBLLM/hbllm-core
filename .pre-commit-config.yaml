@@ -58,6 +58,16 @@ repos:
         language: system
         pass_filenames: false
 
+  # ── 2c. Bandit (Security Analysis) ──────────────────────────────────
+  - repo: local
+    hooks:
+      - id: bandit
+        name: bandit
+        description: Run Bandit security analysis on Python files
+        entry: bandit -c pyproject.toml --severity-level medium -q
+        language: system
+        types: [python]
+
   # ── 3. Cargo (Rust Workspace Checks) ────────────────────────────────
   - repo: local
     hooks:

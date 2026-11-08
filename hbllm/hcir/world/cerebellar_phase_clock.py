@@ -162,7 +162,7 @@ class CerebellarPhaseClock:
 
         # Compute lightweight perceptual hash of grid state
         # Downsample or hash non-background features
-        sig = hashlib.md5(grid.tobytes()).hexdigest()[:12]
+        sig = hashlib.md5(grid.tobytes(), usedforsecurity=False).hexdigest()[:12]
         self.frame_signatures.append(sig)
         self.step_history.append(step)
 
