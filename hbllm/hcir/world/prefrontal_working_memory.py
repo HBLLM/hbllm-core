@@ -42,6 +42,7 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.macro_actions import MacroActionPlan
+from hbllm.hcir.world.percept import EpistemicPhase
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
@@ -321,7 +322,32 @@ class PBWMWorkingMemoryBuffer:
 class PrefrontalWorkingMemory:
     """Biologically-modeled Prefrontal Working Memory (dlPFC) for latent state and subgoal reasoning."""
 
+    @classmethod
+    def get_mirrored_fields(cls) -> frozenset[str]:
+        """Set of prefrontal fields mirrored to authoritative HCIR transactions."""
+        return frozenset(
+            {
+                "phase",
+                "step_counter",
+                "avatar_pos",
+                "avatar_feature",
+                "avatar_features",
+                "tested_actions",
+                "exploration_budget",
+                "consecutive_plan_failures",
+                "consecutive_simulation_failures",
+                "simulation_cooldown",
+                "exploration_cooldown",
+                "pipeline_runs",
+            }
+        )
+
     def __init__(self) -> None:
+        self.phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
+        self.pipeline_runs: int = 0
+        self.last_decision_branch: str | None = None
+        self.evidence_provenance_log: list[dict[str, Any]] = []
+
         self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None

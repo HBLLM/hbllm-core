@@ -24,7 +24,7 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import FrameDiffType, PerceptionEngine
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult, WorkingMemoryDelta
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
@@ -219,7 +219,7 @@ class EpistemicFeedbackAssimilator:
         if view.prev_grid is not None and view.prev_grid.shape != curr_grid.shape:
             # Lattice extent changed (new level/episode): prior-lattice
             # diffs are incomparable — start the episode's diff chain fresh.
-            view.prev_grid = None
+            view.apply_wm_delta(WorkingMemoryDelta("prev_grid", None))
             return
         H, W = curr_grid.shape
 
@@ -1478,8 +1478,10 @@ class EpistemicFeedbackAssimilator:
                             view.immobile_entity_actions.add(view.last_action)
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
                         view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
-                        view.simulation_cooldown = 0
-                        view.consecutive_simulation_failures = 0
+                        view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("consecutive_simulation_failures", 0)
+                        )
 
             if diff.changed_pixel_count == 0 and not is_success and not is_failure:
                 view.consecutive_stuck_steps += 1
@@ -1623,11 +1625,11 @@ class EpistemicFeedbackAssimilator:
                     if not did_displace_correctly:
                         view.consecutive_plan_failures += 1
                         if view.consecutive_plan_failures >= 2:
-                            view.exploration_cooldown = 2
-                            view.consecutive_plan_failures = 0
+                            view.apply_wm_delta(WorkingMemoryDelta("exploration_cooldown", 2))
+                            view.apply_wm_delta(WorkingMemoryDelta("consecutive_plan_failures", 0))
             else:
                 if avatar_moved or diff.changed_pixel_count > 0:
-                    view.consecutive_plan_failures = 0
+                    view.apply_wm_delta(WorkingMemoryDelta("consecutive_plan_failures", 0))
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
         # Per-call invariants resolved once: the owned-subsystem reads below are
@@ -2175,7 +2177,7 @@ class EpistemicFeedbackAssimilator:
 
 
 @dataclass
-class AssimilationStage(CorticalStage):
+class AssimilationStage:
     """Cortical Stage 2: Assimilation & Surprise Induction.
 
     Binds motor diffs to actions; updates EpistemicPhase; detects high surprise
@@ -2184,9 +2186,14 @@ class AssimilationStage(CorticalStage):
     """
 
     name: str = "assimilation_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: real assimilation — the full prepare() preamble (terminal
             # resolution, step_counter, normalize, strict-budget, bg estimate,
@@ -2198,20 +2205,28 @@ class AssimilationStage(CorticalStage):
             )
 
             journal = FacultyWriteJournal(author="assimilation_stage")
+            self._current_journal = journal
             view = JournaledEngineView(engine, journal)
-            g, term = engine.deliberation_engine.prepare(
-                view,
-                ctx.signals.get("_curr_grid"),
-                ctx.signals.get("_available_actions", []),
-                terminal=ctx.signals.get("_terminal"),
-                is_success=ctx.signals.get("_is_success", False),
-                is_failure=ctx.signals.get("_is_failure", False),
-                action_schemas=ctx.signals.get("_action_schemas"),
-                **ctx.signals.get("_kwargs", {}),
-            )
+            try:
+                g, term = engine.deliberation_engine.prepare(
+                    view,
+                    ctx.signals.get("_curr_grid"),
+                    ctx.signals.get("_available_actions", []),
+                    terminal=ctx.signals.get("_terminal"),
+                    is_success=ctx.signals.get("_is_success", False),
+                    is_failure=ctx.signals.get("_is_failure", False),
+                    action_schemas=ctx.signals.get("_action_schemas"),
+                    **ctx.signals.get("_kwargs", {}),
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
             return StageResult(
                 author=self.name,
                 journal=journal,
+                wm_deltas=list(journal.deltas),
                 signals={"_curr_grid": g, "_terminal": term},
             )
         ops: list[TransactionOperation] = [

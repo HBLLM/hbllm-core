@@ -62,6 +62,12 @@ class CorticalPipeline:
         self.transaction_manager = transaction_manager
         self.engine = engine
         self.grounding_bridge = grounding_bridge
+        if self.engine is not None:
+            for stage in self.stages:
+                if hasattr(stage, "bind_engine"):
+                    stage.bind_engine(self.engine)
+                elif hasattr(stage, "engine"):
+                    stage.engine = self.engine
 
     def run(self, ctx: CognitiveContext) -> PipelineResult:
         """Run the active inference cycle across all stages.
@@ -75,7 +81,13 @@ class CorticalPipeline:
         final_action: Any = None
 
         for stage in self.stages:
-            result = stage.observe(current_ctx)
+            try:
+                result = stage.observe(current_ctx)
+            except Exception:
+                cur_journal = getattr(stage, "_current_journal", None)
+                if self.engine is not None and cur_journal is not None:
+                    self.engine.rollback_faculty_journal(cur_journal)
+                raise
             stage_results.append(result)
             all_ops.extend(result.operations)
             if result.signals:

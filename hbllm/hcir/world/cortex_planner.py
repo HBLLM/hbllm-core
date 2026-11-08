@@ -33,7 +33,7 @@ from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
@@ -3133,16 +3133,20 @@ class FrontopolarSubgoalMCTSPlanner:
 
 
 @dataclass
-class SimulationStage(CorticalStage):
+class SimulationStage:
     """Cortical Stage 3: Counterfactual Simulation & Subgoal Scheduling.
 
     OFC mental simulation rollouts; dead-end pruning; BA10 recursive subgoal decomposition.
     """
 
     name: str = "simulation_stage"
+    engine: Any | None = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        if ctx.signals.get("_engine") is not None:
+        if getattr(self, "engine", None) is not None or ctx.signals.get("_unified_deliberation"):
             # folded into DeliberationStage (WP1)
             return StageResult(author=self.name)
         proposed = None

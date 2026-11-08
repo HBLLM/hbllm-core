@@ -39,7 +39,7 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler, MentalSimulationStep
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult, WorkingMemoryDelta
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import CognitiveContext
 
@@ -1282,8 +1282,8 @@ class PrefrontalDeliberationEngine:
 
         # Metacognitive Urgency Modulation:
         if view.is_under_strict_step_budget():
-            view.exploration_cooldown = 0
-            view.simulation_cooldown = 0
+            view.apply_wm_delta(WorkingMemoryDelta("exploration_cooldown", 0))
+            view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
 
         # 1. Update background & assimilate sensory feedback from previous action
         view.state.bg_feature = view.estimate_background(curr_grid)
@@ -1579,8 +1579,8 @@ class PrefrontalDeliberationEngine:
         # Phasic Salience Reset: Environmental discovery, dynamic threat emergence, or high surprise
         # Query prefrontal working memory for salience shift to awaken deliberate forward search
         if view.working_memory.has_salience_shift(view):
-            view.simulation_cooldown = 0
-            view.consecutive_simulation_failures = 0
+            view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
+            view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
             view.mental_plan.clear()
             view.state.phase = (
                 EpistemicPhase.MENTAL_SIMULATION
@@ -1855,8 +1855,8 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.phase = EpistemicPhase.EXPLOITATION
-                    view.mental_plan = deque(macro_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1910,8 +1910,8 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.phase = EpistemicPhase.EXPLOITATION
-                    view.mental_plan = deque(macro_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1926,10 +1926,16 @@ class PrefrontalDeliberationEngine:
                         curr_grid, available_actions, blocked_cells=danger_cells
                     )
                     if simulated_plan:
-                        view.consecutive_simulation_failures = 0
-                        view.simulation_cooldown = 0
-                        view.state.phase = EpistemicPhase.EXPLOITATION
-                        view.state.mental_plan = deque(simulated_plan)
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("consecutive_simulation_failures", 0)
+                        )
+                        view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION)
+                        )
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("mental_plan", deque(simulated_plan))
+                        )
                     if view.mental_plan:
                         next_step = view.mental_plan.popleft()
                         chosen_action = next_step.action
@@ -1958,8 +1964,8 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.phase = EpistemicPhase.EXPLOITATION
-                    view.mental_plan = deque(macro_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -1980,10 +1986,10 @@ class PrefrontalDeliberationEngine:
             if view.is_motor_grounded() and view.simulation_cooldown == 0:
                 simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
                 if simulated_plan:
-                    view.consecutive_simulation_failures = 0
-                    view.simulation_cooldown = 0
-                    view.phase = EpistemicPhase.EXPLOITATION
-                    view.mental_plan = deque(simulated_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
+                    view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(simulated_plan)))
                     next_step = view.mental_plan.popleft()
                     plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                         view, curr_grid, available_actions, next_step
@@ -2012,8 +2018,11 @@ class PrefrontalDeliberationEngine:
 
                 else:
                     view.consecutive_simulation_failures += 1
-                    view.simulation_cooldown = min(
-                        12, 2 ** min(view.consecutive_simulation_failures, 4)
+                    view.apply_wm_delta(
+                        WorkingMemoryDelta(
+                            "simulation_cooldown",
+                            min(12, 2 ** min(view.consecutive_simulation_failures, 4)),
+                        )
                     )
                     view.working_memory.update_salience_baseline(view)
 
@@ -2091,8 +2100,8 @@ class PrefrontalDeliberationEngine:
                         view.avatar_pos, macro_plan[0].action, macro_plan[0].action_data
                     )
                 ):
-                    view.phase = EpistemicPhase.EXPLOITATION
-                    view.mental_plan = deque(macro_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
@@ -2285,7 +2294,8 @@ class ActionProposal:
     finalized: bool = False
 
 
-class DeliberationStage(CorticalStage):
+@dataclass
+class DeliberationStage:
     """Cortical Stage 4: Prefrontal Deliberation & Arbitration.
 
     Receives CognitiveContext containing candidate proposals from upstream stages
@@ -2294,9 +2304,14 @@ class DeliberationStage(CorticalStage):
     """
 
     name: str = "deliberation_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: the real faculty — runs the full PrefrontalDeliberationEngine.decide
             # via a journaled view. NOTE: Perception/Assimilation/Simulation/Motor are
@@ -2309,21 +2324,29 @@ class DeliberationStage(CorticalStage):
             )
 
             journal = FacultyWriteJournal(author="deliberation")
-            proposal = engine.deliberation_engine.deliberate(
-                JournaledEngineView(engine, journal),
-                curr_grid=ctx.signals.get("_curr_grid"),
-                available_actions=ctx.signals.get("_available_actions", []),
-                terminal=ctx.signals.get("_terminal"),
-                is_success=ctx.signals.get("_is_success", False),
-                is_failure=ctx.signals.get("_is_failure", False),
-                action_schemas=ctx.signals.get("_action_schemas"),
-                objects=ctx.signals.get("_objects"),
-                micro_actions=ctx.signals.get("_micro_actions"),
-                **ctx.signals.get("_kwargs", {}),
-            )
+            self._current_journal = journal
+            try:
+                proposal = engine.deliberation_engine.deliberate(
+                    JournaledEngineView(engine, journal),
+                    curr_grid=ctx.signals.get("_curr_grid"),
+                    available_actions=ctx.signals.get("_available_actions", []),
+                    terminal=ctx.signals.get("_terminal"),
+                    is_success=ctx.signals.get("_is_success", False),
+                    is_failure=ctx.signals.get("_is_failure", False),
+                    action_schemas=ctx.signals.get("_action_schemas"),
+                    objects=ctx.signals.get("_objects"),
+                    micro_actions=ctx.signals.get("_micro_actions"),
+                    **ctx.signals.get("_kwargs", {}),
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
             return StageResult(
                 author=self.name,
                 journal=journal,
+                wm_deltas=list(journal.deltas),
                 signals={"_proposal": proposal},
             )
         act = ctx.signals.get("mental_plan_action")

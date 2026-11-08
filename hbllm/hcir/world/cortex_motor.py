@@ -2235,9 +2235,14 @@ class MotorStage:
     """
 
     name: str = "motor_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: real motor dispatch — finalise DeliberationStage's
             # ActionProposal through _finalize_step (grid already normalized).
@@ -2256,13 +2261,20 @@ class MotorStage:
             )
 
             journal = FacultyWriteJournal(author="motor_stage")
-            act, data = engine.deliberation_engine._finalize_step(
-                JournaledEngineView(engine, journal),
-                proposal.grid,
-                proposal.action,
-                proposal.action_data,
-                predicted_pos=proposal.predicted_pos,
-            )
+            self._current_journal = journal
+            try:
+                act, data = engine.deliberation_engine._finalize_step(
+                    JournaledEngineView(engine, journal),
+                    proposal.grid,
+                    proposal.action,
+                    proposal.action_data,
+                    predicted_pos=proposal.predicted_pos,
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
             return StageResult(
                 author=self.name,
                 journal=journal,

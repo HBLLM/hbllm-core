@@ -448,6 +448,7 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
+from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
 from hbllm.hcir.world.engine_state import CognitiveContext, EngineState
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
@@ -1035,8 +1036,7 @@ class AutonomousEpistemicEngine:
         # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
 
         # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
-        self.relational_confidence_map: dict[str, float] = {}
-        self.evidence_provenance_log: list[dict[str, Any]] = []
+        # Delegated to formal internal memory stores (symbolic_theory and working_memory)
 
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
@@ -3192,12 +3192,19 @@ class AutonomousEpistemicEngine:
     @property
     def phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase."""
+        if (
+            hasattr(self, "working_memory")
+            and getattr(self.working_memory, "phase", None) is not None
+        ):
+            return self.working_memory.phase
         if hasattr(self, "state") and getattr(self.state, "phase", None) is not None:
             return self.state.phase
         return self._phase
 
     @phase.setter
     def phase(self, value: EpistemicPhase) -> None:
+        if hasattr(self, "working_memory"):
+            self.working_memory.phase = value
         if hasattr(self, "state"):
             self.state.phase = value
         self.transition_to_phase(value, reason="state_assignment")
@@ -3207,8 +3214,60 @@ class AutonomousEpistemicEngine:
         """Active cognitive lifecycle phase (alias)."""
         return self.phase
 
+    @property
+    def relational_confidence_map(self) -> dict[str, float]:
+        """Relational confidence map managed in symbolic world theory (Invariant 8)."""
+        return self.symbolic_theory.relational_confidence_map
+
+    @relational_confidence_map.setter
+    def relational_confidence_map(self, val: dict[str, float]) -> None:
+        self.symbolic_theory.relational_confidence_map = val
+
+    @property
+    def evidence_provenance_log(self) -> list[dict[str, Any]]:
+        """Evidence provenance log managed in prefrontal working memory (Invariant 8)."""
+        return self.working_memory.evidence_provenance_log
+
+    @evidence_provenance_log.setter
+    def evidence_provenance_log(self, val: list[dict[str, Any]]) -> None:
+        self.working_memory.evidence_provenance_log = val
+
+    @property
+    def _pipeline_runs(self) -> int:
+        return self.working_memory.pipeline_runs
+
+    @_pipeline_runs.setter
+    def _pipeline_runs(self, val: int) -> None:
+        self.working_memory.pipeline_runs = val
+
+    @property
+    def pipeline_runs(self) -> int:
+        return self.working_memory.pipeline_runs
+
+    @pipeline_runs.setter
+    def pipeline_runs(self, val: int) -> None:
+        self.working_memory.pipeline_runs = val
+
+    @property
+    def _last_decision_branch(self) -> str | None:
+        return self.working_memory.last_decision_branch
+
+    @_last_decision_branch.setter
+    def _last_decision_branch(self, val: str | None) -> None:
+        self.working_memory.last_decision_branch = val
+
+    @property
+    def last_decision_branch(self) -> str | None:
+        return self.working_memory.last_decision_branch
+
+    @last_decision_branch.setter
+    def last_decision_branch(self, val: str | None) -> None:
+        self.working_memory.last_decision_branch = val
+
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
+        if hasattr(self, "working_memory"):
+            self.working_memory.phase = new_phase
         if hasattr(self, "state"):
             self.state.phase = new_phase
         if self._phase != new_phase:
@@ -5044,7 +5103,6 @@ class AutonomousEpistemicEngine:
             step_counter=self.step_counter,
             signals=MappingProxyType(
                 {
-                    "_engine": self,
                     "_curr_grid": curr_grid,
                     "_available_actions": list(available_actions),
                     "_terminal": terminal,
@@ -5261,17 +5319,8 @@ class AutonomousEpistemicEngine:
                 setattr(self, field, value)
         # HCIR emission: fields mirrored into the world-theory snapshot get a
         # single transaction commit; unmapped fields are engine-transient.
-        _MIRRORED = {
-            "phase",
-            "step_counter",
-            "avatar_pos",
-            "avatar_feature",
-            "avatar_features",
-            "tested_actions",
-            "exploration_budget",
-            "consecutive_plan_failures",
-        }
-        if _MIRRORED & set(delta.items()):
+        mirrored = self.working_memory.get_mirrored_fields()
+        if mirrored & set(delta.items()):
             try:
                 ops = [self._telemetry_operation()]
                 ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
@@ -5282,6 +5331,83 @@ class AutonomousEpistemicEngine:
             except Exception as exc:
                 self.rejected_delta_commits = getattr(self, "rejected_delta_commits", 0) + 1
                 logger.error("apply_delta commit rejected (author=%s): %s", author, exc)
+
+    def apply_wm_delta(self, delta: WorkingMemoryDelta) -> None:
+        """Apply a declarative WorkingMemoryDelta to working memory and engine state."""
+        field = delta.field
+        val = delta.value
+        op = delta.op
+
+        if hasattr(self, field):
+            if op == "set":
+                setattr(self, field, val)
+            elif op == "append":
+                cur = getattr(self, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(self, "working_memory") and hasattr(self.working_memory, field):
+            if op == "set":
+                setattr(self.working_memory, field, val)
+            elif op == "append":
+                cur = getattr(self.working_memory, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self.working_memory, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(self, "state") and hasattr(self.state, field):
+            if op == "set":
+                setattr(self.state, field, val)
+            elif op == "append":
+                cur = getattr(self.state, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self.state, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+
+    def rollback_faculty_journal(self, journal: Any) -> None:
+        """Roll back all mutations recorded in a FacultyWriteJournal."""
+        if journal is None or not getattr(journal, "touched", None):
+            return
+        for key in journal.touched:
+            before = journal.before.get(key)
+            if repr(before) == "<object object>":
+                continue
+            if key.startswith("working_memory."):
+                target = getattr(self, "working_memory", None)
+                fname = key[15:]
+            elif key.startswith("state."):
+                target = getattr(self, "state", None)
+                fname = key[6:]
+            else:
+                target = self
+                fname = key
+            if target is None:
+                continue
+            live = getattr(target, fname, None)
+            if isinstance(live, dict) and isinstance(before, dict):
+                live.clear()
+                live.update(before)
+            elif isinstance(live, (set, frozenset)) and isinstance(before, (set, frozenset, list)):
+                live.clear()
+                live.update(before)
+            elif isinstance(live, list) and isinstance(before, list):
+                live[:] = before
+            elif hasattr(live, "clear") and hasattr(live, "extend") and hasattr(before, "__iter__"):
+                live.clear()
+                live.extend(before)
+            else:
+                try:
+                    setattr(target, fname, before)
+                except Exception:
+                    pass
 
     def commit_faculty_journal(self, journal: Any) -> bool:
         """Commit a journaled faculty write set as one HCIR transaction (WP1).
@@ -5294,7 +5420,9 @@ class AutonomousEpistemicEngine:
         changed: dict[str, Any] = {}
         for key in journal.touched:
             before = journal.before.get(key)
-            if key.startswith("state."):
+            if key.startswith("working_memory."):
+                current = getattr(self.working_memory, key[15:], None)
+            elif key.startswith("state."):
                 current = getattr(self.state, key[6:], None)
             else:
                 current = getattr(self, key, None)
@@ -5303,17 +5431,9 @@ class AutonomousEpistemicEngine:
         if not changed:
             return True
         try:
-            _MIRRORED = {
-                "phase",
-                "step_counter",
-                "avatar_pos",
-                "avatar_feature",
-                "avatar_features",
-                "tested_actions",
-                "exploration_budget",
-                "consecutive_plan_failures",
-            }
-            if _MIRRORED & {k.removeprefix("state.") for k in changed}:
+            mirrored = self.working_memory.get_mirrored_fields()
+            raw_fields = {k.removeprefix("state.").removeprefix("working_memory.") for k in changed}
+            if mirrored & raw_fields:
                 ops = [self._telemetry_operation()]
                 ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
                 if ws is None and getattr(self, "active_task_frame", None) is not None:
@@ -5324,24 +5444,5 @@ class AutonomousEpistemicEngine:
         except Exception as exc:
             self.rejected_faculty_commits = getattr(self, "rejected_faculty_commits", 0) + 1
             logger.error("faculty journal commit rejected (author=%s): %s", journal.author, exc)
-            for key in journal.touched:
-                before = journal.before.get(key)
-                target = self.state if key.startswith("state.") else self
-                fname = key[6:] if key.startswith("state.") else key
-                live = getattr(target, fname, None)
-                if isinstance(live, dict) and isinstance(before, dict):
-                    live.clear()
-                    live.update(before)
-                elif isinstance(live, (set, frozenset)) and isinstance(
-                    before, (set, frozenset, list)
-                ):
-                    live.clear()
-                    live.update(before)
-                elif isinstance(live, list) and isinstance(before, list):
-                    live[:] = before
-                elif before is not None and repr(before) != "<object object>":
-                    try:
-                        setattr(target, fname, before)
-                    except Exception:
-                        pass
+            self.rollback_faculty_journal(journal)
             return False

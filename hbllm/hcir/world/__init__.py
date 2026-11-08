@@ -298,7 +298,15 @@ _LAZY_EXPORTS: dict[str, str] = {
 
 def __getattr__(name: str) -> Any:
     if name in _LAZY_EXPORTS:
-        mod = importlib.import_module(_LAZY_EXPORTS[name])
+        mod_path = _LAZY_EXPORTS[name]
+        try:
+            mod = importlib.import_module(mod_path)
+        except ModuleNotFoundError:
+            if not mod_path.startswith("hbllm.hcir.world.experimental."):
+                exp_path = mod_path.replace("hbllm.hcir.world.", "hbllm.hcir.world.experimental.")
+                mod = importlib.import_module(exp_path)
+            else:
+                raise
         val = getattr(mod, name)
         globals()[name] = val
         return val

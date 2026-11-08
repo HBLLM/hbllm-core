@@ -119,6 +119,7 @@ class HCIRSymbolicWorldTheory:
     tool_barrier_affinities: dict[Any, set[Any]] = field(default_factory=dict)
     tool_barrier_incompatibilities: dict[Any, set[Any]] = field(default_factory=dict)
     distal_actuations: list[dict[str, Any]] = field(default_factory=list)
+    relational_confidence_map: dict[str, float] = field(default_factory=dict)
 
     @property
     def causal_predicates(self) -> list[CausalPredicate]:

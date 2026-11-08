@@ -97,3 +97,4 @@ Suite configuration: 3 families (`grid` with barrier cut-sets, `continuous` obst
    - **Default Mode for Production:** Maintain `handcrafted` as the default in `CognitiveKernelConfig` for deterministic zero-dependency startup.
    - **Full First-Class Support:** Provide full runtime support for `snn` and `learned` via `--perception {handcrafted,snn,learned}` in CLI and configuration options in `CognitiveKernelConfig(perception_mode=...)`.
    - **Phase 2 Path:** Enable Phase 2 continual learning (WP13 & WP14) to dynamically train the contrastive projection weights on unstructured observation streams without altering the downstream neuro-symbolic grammar.
+

@@ -27,7 +27,7 @@ from scipy.ndimage import label
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 
 if TYPE_CHECKING:
@@ -1329,42 +1329,32 @@ class GibsonianAffordanceExtractor:
 
 
 @dataclass
-class PerceptionStage(CorticalStage):
+class PerceptionStage:
     """Cortical Stage 1: Sensory Perception & Coordinate Lifting.
 
     Transforms raw sensory arrays into SpatialEntity objects and coordinate frames.
     """
 
     name: str = "perception_stage"
+    engine: Any | None = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
-        if engine is not None:
-            # WP1: real perception — warm the memoised entity cache for this
-            # grid so the downstream DeliberationStage call is a cache hit.
-            # Pure cache warm => behaviour-identical.
-            grid = ctx.signals.get("_curr_grid")
-            warmed_entities: list[Any] = []
-            if grid is not None:
-                try:
-                    import numpy as _np
-
-                    g = _np.asarray(grid)
-                    warmed_entities = engine.extract_entities(g, engine.bg_feature)
-                except Exception:
-                    warmed_entities = []
-            avatar_candidate = engine.avatar_pos
-            return StageResult(
-                author=self.name,
-                signals={
-                    "entity_count": len(warmed_entities),
-                    "avatar_candidate": avatar_candidate,
-                },
-            )
-        grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.prev_grid
+        grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.signals.get("_curr_grid")
+        if grid is None:
+            grid = ctx.prev_grid
         entities: list[SpatialEntity] = []
         if grid is not None:
-            entities = ctx.extract_entities(grid)
+            try:
+                import numpy as _np
+
+                g = _np.asarray(grid)
+                entities = ctx.extract_entities(g, ctx.bg_feature)
+            except Exception:
+                entities = []
+        avatar_candidate = ctx.avatar_pos
         ops: list[TransactionOperation] = [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
@@ -1379,6 +1369,11 @@ class PerceptionStage(CorticalStage):
         return StageResult(
             author=self.name,
             operations=ops,
-            signals={"extracted_entities": entities, "step": ctx.step_counter},
+            signals={
+                "extracted_entities": entities,
+                "entity_count": len(entities),
+                "avatar_candidate": avatar_candidate,
+                "step": ctx.step_counter,
+            },
             proposed_action=None,
         )

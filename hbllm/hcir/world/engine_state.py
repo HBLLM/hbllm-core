@@ -10,6 +10,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
 from hbllm.hcir.world.percept import EpistemicPhase
 
 
@@ -718,14 +719,14 @@ class ReadOnlyEngineView:
     )
 
     def __init__(self, engine: Any) -> None:
-        object.__setattr__(self, "_engine", engine)
+        object.__setattr__(self, "_wrapped_engine", engine)
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._engine, name)
+        return getattr(self._wrapped_engine, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name in self._ALLOWED_MUTATORS or name.startswith("_"):
-            object.__setattr__(self._engine, name, value)
+            object.__setattr__(self._wrapped_engine, name, value)
             return
         raise AttributeError("faculties emit intent via StateDelta")
 
@@ -772,6 +773,7 @@ class FacultyWriteJournal:
         self.author = author
         self.before: dict[str, Any] = {}
         self.touched: set[str] = set()
+        self.deltas: list[WorkingMemoryDelta] = []
 
 
 _ABSENT = object()
@@ -789,7 +791,8 @@ class _JournaledStateProxy:
 
     def __getattr__(self, name: str) -> Any:
         view = object.__getattribute__(self, "_view")
-        val = getattr(view._engine.state, name)
+        wrapped = object.__getattribute__(view, "_wrapped_engine")
+        val = getattr(wrapped.state, name)
         seen = object.__getattribute__(self, "_seen")
         if name not in seen:
             seen.add(name)
@@ -807,8 +810,9 @@ class _JournaledStateProxy:
 
     def __setattr__(self, name: str, value: Any) -> None:
         view = object.__getattribute__(self, "_view")
-        view._record_touch(f"state.{name}", getattr(view._engine.state, name, _ABSENT))
-        setattr(view._engine.state, name, value)
+        wrapped = object.__getattribute__(view, "_wrapped_engine")
+        view._record_touch(f"state.{name}", getattr(wrapped.state, name, _ABSENT))
+        setattr(wrapped.state, name, value)
 
 
 class JournaledEngineView:
@@ -816,7 +820,7 @@ class JournaledEngineView:
     journaled for undo on rejected commit (WP1 design v2)."""
 
     def __init__(self, engine: Any, journal: FacultyWriteJournal) -> None:
-        object.__setattr__(self, "_engine", engine)
+        object.__setattr__(self, "_wrapped_engine", engine)
         object.__setattr__(self, "_journal", journal)
         object.__setattr__(self, "_state_proxy", _JournaledStateProxy(self))
         # name -> routing memo: 0=state proxy, 1=owned subsystem, 2=plain field.
@@ -837,6 +841,55 @@ class JournaledEngineView:
                 journal.before[key] = _ABSENT
         journal.touched.add(key)
 
+    def apply_wm_delta(self, delta: WorkingMemoryDelta) -> None:
+        """Apply a declarative WorkingMemoryDelta, recording it in journal for undo and verification."""
+        journal = object.__getattribute__(self, "_journal")
+        journal.deltas.append(delta)
+        eng = object.__getattribute__(self, "_wrapped_engine")
+        field = delta.field
+        val = delta.value
+        op = delta.op
+
+        # Engine-first if exposed on engine (properties sync backing stores cleanly)
+        if hasattr(eng, field):
+            self._record_touch(field, getattr(eng, field, _ABSENT))
+            if op == "set":
+                setattr(eng, field, val)
+            elif op == "append":
+                cur = getattr(eng, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(eng, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(eng, "working_memory") and hasattr(eng.working_memory, field):
+            self._record_touch(
+                f"working_memory.{field}", getattr(eng.working_memory, field, _ABSENT)
+            )
+            if op == "set":
+                setattr(eng.working_memory, field, val)
+            elif op == "append":
+                cur = getattr(eng.working_memory, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(eng.working_memory, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(eng, "state") and hasattr(eng.state, field):
+            self._record_touch(f"state.{field}", getattr(eng.state, field, _ABSENT))
+            if op == "set":
+                setattr(eng.state, field, val)
+            elif op == "append":
+                cur = getattr(eng.state, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(eng.state, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+
     def __getattr__(self, name: str) -> Any:
         routes = object.__getattribute__(self, "_routes")
         route = routes.get(name)
@@ -850,7 +903,7 @@ class JournaledEngineView:
             routes[name] = route
         if route == 0:
             return object.__getattribute__(self, "_state_proxy")
-        val = getattr(object.__getattribute__(self, "_engine"), name)
+        val = getattr(object.__getattribute__(self, "_wrapped_engine"), name)
         if route != 2:
             return val
         if not isinstance(val, (dict, set, list, deque)):
@@ -870,6 +923,6 @@ class JournaledEngineView:
         return val
 
     def __setattr__(self, name: str, value: Any) -> None:
-        eng = object.__getattribute__(self, "_engine")
+        eng = object.__getattribute__(self, "_wrapped_engine")
         self._record_touch(name, getattr(eng, name, _ABSENT))
         setattr(eng, name, value)
