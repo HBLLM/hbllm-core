@@ -43,6 +43,7 @@ class TransactionOp(StrEnum):
     UPSERT_NODE = "upsert_node"
     ADD_EDGE = "add_edge"
     REMOVE_EDGE = "remove_edge"
+    UPSERT_EDGE = "upsert_edge"
 
 
 class TransactionOperation(BaseModel):

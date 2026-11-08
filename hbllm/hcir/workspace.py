@@ -234,6 +234,14 @@ class HCIRWorkspaceState:
         self._graph.add_edge(edge)
         self._snapshot_manager.record_edge_added(edge, author)
 
+    def _upsert_edge(self, edge: HCIREdge, author: str = "system") -> None:
+        """Add or update an edge and record the event (kernel-internal)."""
+        if self._graph.has_edge(edge.id):
+            self._graph.remove_edge(edge.id)
+            self._snapshot_manager.record_edge_removed(edge.id, author)
+        self._graph.add_edge(edge)
+        self._snapshot_manager.record_edge_added(edge, author)
+
     def _remove_edge(self, edge_id: str, author: str = "system") -> HCIREdge | None:
         """Remove an edge and record the event (kernel-internal)."""
         edge = self._graph.remove_edge(edge_id)

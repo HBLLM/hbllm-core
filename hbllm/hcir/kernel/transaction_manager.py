@@ -640,6 +640,15 @@ class TransactionManager:
             elif op == TransactionOp.ADD_EDGE:
                 if eid:
                     inverse.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
+            elif op == TransactionOp.UPSERT_EDGE:
+                if prev_edge:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.UPSERT_EDGE, edge_id=eid, edge_data=prev_edge
+                        )
+                    )
+                elif eid:
+                    inverse.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
             elif op == TransactionOp.REMOVE_EDGE:
                 if prev_edge:
                     inverse.append(
@@ -785,6 +794,15 @@ class TransactionManager:
             edge = HCIREdge.model_validate(raw_edge)
             ws._add_edge(edge, author=author)
             undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": None})
+
+        elif op.op == TransactionOp.UPSERT_EDGE:
+            raw_edge = dict(op.edge_data or {})
+            if "id" not in raw_edge and op.edge_id:
+                raw_edge["id"] = op.edge_id
+            edge = HCIREdge.model_validate(raw_edge)
+            prev_edge = self._edge_snapshot(edge.id)
+            ws._upsert_edge(edge, author=author)
+            undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": prev_edge})
 
         elif op.op == TransactionOp.REMOVE_EDGE:
             if op.edge_id:

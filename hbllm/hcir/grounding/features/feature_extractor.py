@@ -131,12 +131,18 @@ class SpatialGridFeatureExtractor:
             size = float(ent.get("size", 1))
             bbox = ent.get("bbox")
 
-            # Normalised embedding: (norm_row, norm_col, norm_color, norm_size)
+            # Invariant shape and morphology features (translation-invariant Level 1 embedding)
+            h = float(bbox[2]) if bbox and len(bbox) == 4 and float(bbox[2]) > 0 else 1.0
+            w = float(bbox[3]) if bbox and len(bbox) == 4 and float(bbox[3]) > 0 else 1.0
+            aspect_ratio = w / max(1.0, h)
+            fill_density = min(1.0, max(0.0, size / max(1.0, w * h)))
+            norm_color = (color / 10.0) if color < 10.0 else math.tanh(color / 10.0)
+            norm_size = math.log1p(size)
             embedding = (
-                float(pos[0]) / max(1.0, float(ent.get("grid_h", 30))),
-                float(pos[1]) / max(1.0, float(ent.get("grid_w", 30))),
-                color / 10.0,  # ARC uses 0-9 colour palette
-                math.log1p(size),
+                aspect_ratio,
+                fill_density,
+                norm_color,
+                norm_size,
             )
 
             spatial = tuple(float(x) for x in bbox) if bbox else (float(pos[0]), float(pos[1]))

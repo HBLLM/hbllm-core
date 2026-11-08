@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.grounding.actions.gateway import ActionValidationGateway
-from hbllm.hcir.grounding.actions.renderers import KinematicRenderer
+from hbllm.hcir.grounding.actions.renderers import (
+    ActionRenderer,
+    DialogueRenderer,
+    GuiRenderer,
+    KinematicRenderer,
+)
 from hbllm.hcir.grounding.bus.observation_bus import ObservationBus
 from hbllm.hcir.grounding.bus.policies import ChannelPolicy
 from hbllm.hcir.grounding.causal.schema import SchemaInducer
@@ -50,6 +56,7 @@ from hbllm.hcir.grounding.relations.relation_learner import RelationLearner
 from hbllm.hcir.grounding.tracking.tracker import ThreeTierEntityTracker
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.hcir.world.percept import RetentionPolicy, apply_boundary_retention
 
 if TYPE_CHECKING:
     from hbllm.hcir.kernel.services import KernelServices
@@ -60,9 +67,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _gen_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+
 @dataclass
 class CorticalGroundingState:
     """Working state maintained by the CorticalGroundingBridge across cognitive cycles."""
+
+    FIELD_RETENTION = {
+        "active_predictions": RetentionPolicy.LEVEL_LOCAL,
+        "last_surprise_alerts": RetentionPolicy.LEVEL_LOCAL,
+        "pending_epistemic_goals": RetentionPolicy.LEVEL_LOCAL,
+    }
 
     step_counter: int = 0
     active_predictions: dict[str, PredictedEntityState] = field(default_factory=dict)
@@ -88,6 +105,12 @@ class CorticalGroundingBridge:
        precondition & safety authorization, dispatches, and verifies real environmental outcomes.
     4. General Intelligence: Task-agnostic, LLM-independent, and transactionally governed.
     """
+
+    FIELD_RETENTION = {
+        "active_predictions": RetentionPolicy.LEVEL_LOCAL,
+        "last_surprise_alerts": RetentionPolicy.LEVEL_LOCAL,
+        "pending_epistemic_goals": RetentionPolicy.LEVEL_LOCAL,
+    }
 
     def __init__(
         self,
@@ -132,9 +155,16 @@ class CorticalGroundingBridge:
         self.assimilator = GroundingSurpriseAssimilator(surprise_threshold=surprise_threshold)
         self.feedback = ActiveInferenceFeedback(schema_inducer=self.schema_inducer)
         self.gateway = ActionValidationGateway()
-        self.renderer = KinematicRenderer()
+        self.renderer: ActionRenderer = KinematicRenderer()
+        self.gui_renderer = GuiRenderer()
+        self.dialogue_renderer = DialogueRenderer()
 
         self.state = CorticalGroundingState()
+        self._committed_beliefs: dict[str, tuple[str, float]] = {}
+
+    def boundary_retention(self, boundary: Any) -> None:
+        """Apply boundary retention to grounding state on episode transitions."""
+        apply_boundary_retention(self.state, boundary)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 1: SGE -> Cortical Perception
@@ -170,12 +200,22 @@ class CorticalGroundingBridge:
         entity_states: dict[str, dict[str, Any]] = {}
         entities = extracted_entities or []
 
+        # Find existing active candidates to enable permutation-invariant tracking
+        active_cands = self.tracker.get_active_candidates()
+        matched_cand_ids: set[str] = set()
+
         for idx, ent in enumerate(entities):
-            # Extract coordinates and role from SpatialEntity or dict
+            # Extract coordinates, role, and identity from SpatialEntity or dict
             pos: tuple[float, ...] = (0.0, 0.0)
             color: int = 1
             bbox: tuple[float, float, float, float] | None = None
             role: str = "entity"
+            ent_id: str | None = None
+
+            if hasattr(ent, "id"):
+                ent_id = str(ent.id)
+            elif hasattr(ent, "entity_id"):
+                ent_id = str(ent.entity_id)
 
             if hasattr(ent, "coords"):
                 coords = list(ent.coords)
@@ -194,6 +234,7 @@ class CorticalGroundingBridge:
                 color = getattr(ent, "color", 1)
                 role = str(getattr(ent, "role", "entity"))
             elif isinstance(ent, dict):
+                ent_id = ent.get("id") or ent_id
                 pos = tuple(float(x) for x in ent.get("position", (0.0, 0.0)))
                 color = int(ent.get("color", 1))
                 role = str(ent.get("role", "entity"))
@@ -201,7 +242,30 @@ class CorticalGroundingBridge:
                 if b and len(b) == 4:
                     bbox = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
-            tracklet_id = TrackletRef(f"trk_cortex_{color}_{idx}")
+            # Determine stable tracklet ID (WP3: permutation-invariant association)
+            if ent_id:
+                tracklet_id = TrackletRef(f"trk_{ent_id}")
+            else:
+                best_trk_id: str | None = None
+                best_dist = float("inf")
+                for c in active_cands:
+                    cid = c.candidate_ref.id
+                    if cid in matched_cand_ids:
+                        continue
+                    if c.spatial_trajectory:
+                        last_p = c.spatial_trajectory[-1]
+                        dist = math.sqrt((pos[0] - last_p[0]) ** 2 + (pos[1] - last_p[1]) ** 2)
+                        if dist < best_dist and dist <= self.tracker._spatial_distance_threshold:
+                            best_dist = dist
+                            if c.associated_tracklet_ids:
+                                best_trk_id = next(iter(c.associated_tracklet_ids))
+                                matched_cand_ids.add(cid)
+
+                if best_trk_id is not None:
+                    tracklet_id = TrackletRef(best_trk_id)
+                else:
+                    tracklet_id = TrackletRef(_gen_id(f"trk_{color}"))
+
             self.tracker.update_tracklet(
                 tracklet_id,
                 channel_id="cortical_perception",
@@ -209,6 +273,7 @@ class CorticalGroundingBridge:
                 metadata={"color": color, "role": role, "bbox": bbox},
             )
             cand = self.tracker.auto_associate(tracklet_id, spatial_coords=pos)
+            matched_cand_ids.add(cand.id)
             entity_states[cand.id] = {
                 "position": pos,
                 "bbox": bbox,
@@ -224,15 +289,27 @@ class CorticalGroundingBridge:
             dependency_group=f"dep_cortex_s{step}",
         )
 
-        # 4. Epistemic Evaluation & Commit of Accepted Relations
+        # 4. Epistemic Evaluation & Commit of Accepted Relations (bounded growth check)
         committed_claims: list[str] = []
         for claim in claims:
             # Match supporting evidence
             claim_ev = [e for e in ev_records if e.evidence_id in claim.evidence_ids]
             decision, belief = self.evaluator.evaluate_claim(claim, claim_ev)
             if decision.outcome == DecisionOutcome.ACCEPT:
+                b_key = f"{claim.subject_ref.id}:{claim.predicate_ref}:{claim.object_ref}"
+                prev = self._committed_beliefs.get(b_key)
+                if (
+                    prev is not None
+                    and prev[0] == claim.polarity.value
+                    and abs(decision.posterior_belief - prev[1]) < 0.05
+                ):
+                    continue  # Bounded state growth: skip redundant transaction
                 try:
                     self.committer.commit_decision(decision, claim, belief)
+                    self._committed_beliefs[b_key] = (
+                        claim.polarity.value,
+                        decision.posterior_belief,
+                    )
                     committed_claims.append(claim.claim_id)
                 except Exception as exc:
                     logger.debug("Failed to commit claim %s: %s", claim.claim_id, exc)
@@ -274,6 +351,23 @@ class CorticalGroundingBridge:
                 merge_count = len(merges)
             except Exception as exc:
                 logger.debug("ConceptLearner.maintain failed: %s", exc)
+
+        # Promote eligible concepts to authoritative HCIR state (WP3: grounded concept promotion)
+        promoted_concepts: list[str] = []
+        for concept in self.concept_store.get_all():
+            if self.concept_store.lifecycle_manager.should_propose_promotion(concept):
+                cid = concept.concept_ref.id
+                if not self.workspace.graph.has_node(cid):
+                    prop_id = f"prop_{cid}_{uuid.uuid4().hex[:6]}"
+                    proposal = self.concept_store.lifecycle_manager.create_promotion_proposal(
+                        concept=concept,
+                        proposal_id=prop_id,
+                    )
+                    try:
+                        self.committer.commit_concept_promotion(proposal, concept)
+                        promoted_concepts.append(cid)
+                    except Exception as exc:
+                        logger.debug("Failed to commit concept promotion for %s: %s", cid, exc)
 
         self.state.last_feature_vectors = feature_vectors
         self.state.last_concept_assignments = concept_assignments
@@ -341,18 +435,25 @@ class CorticalGroundingBridge:
                     epistemic_goals.append(goal)
                     self.state.pending_epistemic_goals.append(goal)
 
-                # Feed surprise into cortical SurpriseEngine if available
-                if self.surprise_engine is not None and hasattr(
-                    self.surprise_engine, "record_surprise"
-                ):
+                # Feed surprise into cortical SurpriseEngine unconditionally (WP3: connected surprise path)
+                if self.surprise_engine is not None:
                     try:
-                        self.surprise_engine.record_surprise(
-                            surprise_score=alert.surprise_score,
+                        self.surprise_engine.ingest_external_prediction_error(
+                            score=alert.surprise_score,
+                            source="grounding",
                             is_surprising=alert.surprise_score
                             >= self.assimilator._surprise_threshold,
                         )
                     except Exception as exc:
-                        logger.debug("SurpriseEngine record_surprise failed: %s", exc)
+                        logger.debug(
+                            "SurpriseEngine ingest_external_prediction_error failed: %s", exc
+                        )
+
+        # Route epistemic curiosity goals into PrefrontalWorkingMemory if available
+        if epistemic_goals and self.services is not None:
+            wm = getattr(self.services, "working_memory", None)
+            if wm is not None and hasattr(wm, "pending_epistemic_goals"):
+                wm.pending_epistemic_goals.extend(epistemic_goals)
 
         # Clear predictions once assimilated
         self.state.active_predictions.clear()
@@ -382,16 +483,46 @@ class CorticalGroundingBridge:
         params = dict(action_data or {})
         target_id = params.get("target_id")
 
+        effective_world_state = world_state or {}
+        if "tracked_entities" not in effective_world_state:
+            active_cands = self.tracker.get_active_candidates()
+            tracked: dict[str, Any] = {}
+            for c in active_cands:
+                pos = c.spatial_trajectory[-1] if c.spatial_trajectory else (0.0, 0.0)
+                info = {"confidence": 0.95, "position": pos}
+                tracked[c.candidate_ref.id] = info
+                if c.grounded_entity_ref:
+                    tracked[c.grounded_entity_ref.id] = info
+                for trk_id in c.associated_tracklet_ids:
+                    tracked[trk_id] = info
+                    if trk_id.startswith("trk_"):
+                        raw_id = trk_id[4:]
+                        tracked[raw_id] = info
+                        if not raw_id.startswith("e_"):
+                            tracked[f"e_{raw_id}"] = info
+            if "e_avatar" not in tracked:
+                tracked["e_avatar"] = {"confidence": 1.0, "position": (0.0, 0.0)}
+            effective_world_state["tracked_entities"] = tracked
+
         if not target_id:
             # Fallback to first tracked entity or default self-avatar
             active = self.tracker.get_active_candidates()
             target_id = active[0].candidate_ref.id if active else "e_avatar"
 
-        target_ref = (
-            GroundedEntityRef(target_id)
-            if target_id.startswith("e_")
-            else EntityCandidateRef(target_id)
-        )
+        if target_id.startswith("ecand_"):
+            target_ref = EntityCandidateRef(target_id)
+        elif target_id.startswith("e_"):
+            target_ref = GroundedEntityRef(target_id)
+        else:
+            target_ref = GroundedEntityRef(f"e_{target_id}")
+
+        # Ensure target_ref is present in tracked_entities for gateway verification
+        if target_ref.id not in effective_world_state["tracked_entities"]:
+            # Check if underlying id is present
+            if target_id in effective_world_state["tracked_entities"]:
+                effective_world_state["tracked_entities"][target_ref.id] = effective_world_state[
+                    "tracked_entities"
+                ][target_id]
 
         intent = SymbolicActionIntent(
             intent_id=f"intent_act_{self.state.step_counter}_{uuid.uuid4().hex[:4]}",
@@ -403,29 +534,19 @@ class CorticalGroundingBridge:
             context={"step": self.state.step_counter},
         )
 
-        payload = self.renderer.render(
+        renderer: ActionRenderer = self.renderer
+        if self.gui_renderer.can_render(intent):
+            renderer = self.gui_renderer
+        elif self.dialogue_renderer.can_render(intent):
+            renderer = self.dialogue_renderer
+
+        payload = renderer.render(
             intent,
             context={
                 "speed": params.get("speed", 1.0),
                 "target_coordinates": params.get("target_coordinates"),
             },
         )
-
-        effective_world_state = world_state or {}
-        if "tracked_entities" not in effective_world_state:
-            active_cands = self.tracker.get_active_candidates()
-            effective_world_state["tracked_entities"] = {
-                c.candidate_ref.id: {
-                    "confidence": 0.95,
-                    "position": c.spatial_trajectory[-1] if c.spatial_trajectory else (0.0, 0.0),
-                }
-                for c in active_cands
-            }
-            if "e_avatar" not in effective_world_state["tracked_entities"]:
-                effective_world_state["tracked_entities"]["e_avatar"] = {
-                    "confidence": 1.0,
-                    "position": (0.0, 0.0),
-                }
 
         # Execute Gateway Authorization
         val_result: ActionValidationResult = self.gateway.validate_action(
@@ -451,14 +572,20 @@ class CorticalGroundingBridge:
         self.state.last_dispatched_intent = intent
         self.state.last_execution_record = exec_record
 
-        # Generate forward predictions for next cycle assimilation
-        active_entities = {
-            c.candidate_ref.id: {
+        # Generate forward predictions for next cycle assimilation (WP3: velocity-aware kinematic simulation)
+        active_entities = {}
+        for c in self.tracker.get_active_candidates():
+            traj = c.spatial_trajectory
+            pos = traj[-1] if traj else (0.0, 0.0)
+            if len(traj) >= 2:
+                vel = (traj[-1][0] - traj[-2][0], traj[-1][1] - traj[-2][1])
+            else:
+                vel = (0.0, 0.0)
+            active_entities[c.candidate_ref.id] = {
                 "ref": c.candidate_ref,
-                "position": c.spatial_trajectory[-1] if c.spatial_trajectory else (0.0, 0.0),
+                "position": pos,
+                "velocity": vel,
             }
-            for c in self.tracker.get_active_candidates()
-        }
         self.state.active_predictions = self.predictor.predict_next_state(
             current_entities=active_entities,
             action_type=act_type,
@@ -474,13 +601,20 @@ class CorticalGroundingBridge:
     def verify_post_action_outcome(
         self,
         post_observation: dict[str, Any],
+        driver_feedback: Any | None = None,
     ) -> ActionExecutionRecord | None:
         """Verifies whether the dispatched action actually produced the expected real-world outcome."""
         if not self.state.last_execution_record or not self.state.last_dispatched_intent:
             return None
 
-        # Report execution completed
-        reported = self.gateway.report_execution(self.state.last_execution_record, success=True)
+        success = True
+        if driver_feedback is not None:
+            success = bool(getattr(driver_feedback, "success", True))
+        elif isinstance(post_observation, dict) and "success" in post_observation:
+            success = bool(post_observation["success"])
+
+        # Report execution completed with actual feedback
+        reported = self.gateway.report_execution(self.state.last_execution_record, success=success)
         # Verify post-observation against expectations
         verified = self.gateway.verify_outcome(
             record=reported,

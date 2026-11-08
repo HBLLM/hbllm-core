@@ -116,6 +116,8 @@ class ThreeTierEntityTracker:
                 cand.is_active = is_active
                 if spatial_coords:
                     cand.spatial_trajectory.append(spatial_coords)
+                    if len(cand.spatial_trajectory) > 50:
+                        cand.spatial_trajectory = cand.spatial_trajectory[-50:]
 
             return state
 
@@ -195,6 +197,10 @@ class ThreeTierEntityTracker:
                 coords = self._tracklets[trk_id].last_spatial_coords
                 if coords:
                     self._candidates[cand_id].spatial_trajectory.append(coords)
+                    if len(self._candidates[cand_id].spatial_trajectory) > 50:
+                        self._candidates[cand_id].spatial_trajectory = self._candidates[
+                            cand_id
+                        ].spatial_trajectory[-50:]
 
             op = EntityAssociationOp(
                 operation_id=_gen_id("op_assoc"),
@@ -204,8 +210,14 @@ class ThreeTierEntityTracker:
                 rationale=rationale or "Explicit tracklet-to-candidate association",
                 evidence_ids=evidence_ids,
             )
-            self._audit_log.append(op)
+            self._record_op(op)
             return op
+
+    def _record_op(self, op: IdentityOperation) -> None:
+        """Appends an identity operation to audit log with bounded retention."""
+        self._audit_log.append(op)
+        if len(self._audit_log) > 200:
+            self._audit_log = self._audit_log[-200:]
 
     def merge_candidates(
         self,
@@ -273,7 +285,7 @@ class ThreeTierEntityTracker:
                 rationale=rationale or "Provisional candidate entity merge",
                 evidence_ids=evidence_ids,
             )
-            self._audit_log.append(op)
+            self._record_op(op)
             return op
 
     def split_candidate(
@@ -347,7 +359,7 @@ class ThreeTierEntityTracker:
                 confidence=confidence,
                 rationale=rationale or "Reversible entity split executed",
             )
-            self._audit_log.append(split_op)
+            self._record_op(split_op)
             return split_op
 
     def reidentify_entity(
@@ -376,7 +388,7 @@ class ThreeTierEntityTracker:
                 evidence_ids=evidence_ids,
                 similarity_metrics=similarity_metrics or {},
             )
-            self._audit_log.append(op)
+            self._record_op(op)
             return op
 
     def add_alias(
@@ -400,7 +412,7 @@ class ThreeTierEntityTracker:
                 confidence=confidence,
                 rationale=f"Bound alias '{alias_label}' to {target_id}",
             )
-            self._audit_log.append(op)
+            self._record_op(op)
             return op
 
     def get_candidate(self, candidate_id: str) -> CandidateEntityState | None:

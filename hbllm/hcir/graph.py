@@ -433,6 +433,12 @@ class CognitiveGraph:
                     f"Native substrate diverged on add_edge for {edge.id}: {e}"
                 ) from e
 
+    def upsert_edge(self, edge: HCIREdge) -> None:
+        """Add an edge or update it if an edge with the same ID exists."""
+        if edge.id in self._edges:
+            self.remove_edge(edge.id)
+        self.add_edge(edge)
+
     def remove_edge(self, edge_id: str) -> HCIREdge | None:
         """Remove an edge by ID."""
         self._materialize_indexes()

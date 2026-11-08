@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 
@@ -97,23 +98,25 @@ class HCIRCommitter:
                 )
             )
 
-            # Create typed relational edge
+            # Create typed relational edge with deterministic ID
             edge_type = self._map_predicate_to_edge_type(claim.predicate_ref)
+            pred_str = str(
+                claim.predicate_ref.name
+                if isinstance(claim.predicate_ref, PredicateRef)
+                else (
+                    claim.predicate_ref.id
+                    if isinstance(claim.predicate_ref, LatentRelationRef)
+                    else claim.predicate_ref
+                )
+            )
+            rel_edge_id = f"edge_rel_{hashlib.blake2b(f'{subj_id}:{pred_str}:{target_node_id}'.encode(), digest_size=8).hexdigest()}"
             rel_edge = HCIREdge(
-                id=_gen_id("edge_rel"),
+                id=rel_edge_id,
                 edge_type=edge_type,
                 sources=[subj_id],
                 targets=[target_node_id],
                 properties={
-                    "predicate": str(
-                        claim.predicate_ref.name
-                        if isinstance(claim.predicate_ref, PredicateRef)
-                        else (
-                            claim.predicate_ref.id
-                            if isinstance(claim.predicate_ref, LatentRelationRef)
-                            else claim.predicate_ref
-                        )
-                    ),
+                    "predicate": pred_str,
                     "polarity": claim.polarity.value,
                     "confidence": decision.posterior_belief,
                 },
@@ -121,7 +124,7 @@ class HCIRCommitter:
             )
             operations.append(
                 TransactionOperation(
-                    op=TransactionOp.ADD_EDGE,
+                    op=TransactionOp.UPSERT_EDGE,
                     edge_id=rel_edge.id,
                     edge_data=rel_edge.model_dump(),
                 )
@@ -131,8 +134,12 @@ class HCIRCommitter:
             # Property assertion stored on subject entity or belief
             statement = f"{claim.predicate_ref}({subj_id}) = {obj_ref.value} {obj_ref.unit}".strip()
 
-        # 3. Create BeliefNode for epistemic auditability
-        belief_id = belief.belief_id if belief else _gen_id("belief")
+        # 3. Create BeliefNode with deterministic ID for epistemic auditability
+        belief_id = (
+            belief.belief_id
+            if (belief and belief.belief_id)
+            else f"belief_{hashlib.blake2b(f'{subj_id}:{claim.predicate_ref}:{obj_ref}:{claim.polarity.value}'.encode(), digest_size=8).hexdigest()}"
+        )
         belief_node = BeliefNode(
             id=belief_id,
             statement=statement,
@@ -148,9 +155,11 @@ class HCIRCommitter:
             )
         )
 
-        # Edge from Belief to Subject
+        # Edge from Belief to Subject with deterministic ID
+        target_str = target_node_id or ""
+        support_edge_id = f"edge_sup_{hashlib.blake2b(f'{belief_id}:{subj_id}:{target_str}'.encode(), digest_size=8).hexdigest()}"
         support_edge = HCIREdge(
-            id=_gen_id("edge_sup"),
+            id=support_edge_id,
             edge_type=HCIREdgeType.SUPPORTS,
             sources=[belief_id],
             targets=[subj_id] if not target_node_id else [subj_id, target_node_id],
@@ -159,7 +168,7 @@ class HCIRCommitter:
         )
         operations.append(
             TransactionOperation(
-                op=TransactionOp.ADD_EDGE,
+                op=TransactionOp.UPSERT_EDGE,
                 edge_id=support_edge.id,
                 edge_data=support_edge.model_dump(),
             )
@@ -167,7 +176,8 @@ class HCIRCommitter:
 
         # 4. Assemble and commit transaction
         tx = HCIRTransaction(
-            id=decision.transaction_proposal_id or _gen_id("tx_grounding"),
+            id=decision.transaction_proposal_id
+            or f"tx_grounding_{hashlib.blake2b(f'{belief_id}:{decision.timestamp or 0}'.encode(), digest_size=8).hexdigest()}",
             author=author,
             operations=operations,
             metadata={"description": f"Grounded state assertion: {statement}"},
@@ -220,8 +230,9 @@ class HCIRCommitter:
                 )
             )
 
+            inst_edge_id = f"edge_inst_{hashlib.blake2b(f'{exemplar_id}:{concept_id}'.encode(), digest_size=8).hexdigest()}"
             inst_edge = HCIREdge(
-                id=_gen_id("edge_inst"),
+                id=inst_edge_id,
                 edge_type=HCIREdgeType.INSTANCE_OF,
                 sources=[exemplar_id],
                 targets=[concept_id],
@@ -230,7 +241,7 @@ class HCIRCommitter:
             )
             operations.append(
                 TransactionOperation(
-                    op=TransactionOp.ADD_EDGE,
+                    op=TransactionOp.UPSERT_EDGE,
                     edge_id=inst_edge.id,
                     edge_data=inst_edge.model_dump(),
                 )
@@ -264,8 +275,9 @@ class HCIRCommitter:
 
         cand_node = PhysicalEntityNode(id=cand_id, entity_name=cand_id)
         grounded_node = PhysicalEntityNode(id=grounded_id, entity_name=grounded_id)
+        same_as_edge_id = f"edge_same_as_{hashlib.blake2b(f'{cand_id}:{grounded_id}'.encode(), digest_size=8).hexdigest()}"
         same_as_edge = HCIREdge(
-            id=_gen_id("edge_same_as"),
+            id=same_as_edge_id,
             edge_type=HCIREdgeType.SAME_AS,
             sources=[cand_id],
             targets=[grounded_id],
@@ -285,7 +297,7 @@ class HCIRCommitter:
                 node_data=grounded_node.model_dump(),
             ),
             TransactionOperation(
-                op=TransactionOp.ADD_EDGE,
+                op=TransactionOp.UPSERT_EDGE,
                 edge_id=same_as_edge.id,
                 edge_data=same_as_edge.model_dump(),
             ),

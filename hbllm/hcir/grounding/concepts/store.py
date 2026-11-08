@@ -39,6 +39,10 @@ class WorkingConceptStore:
         self._promotion_proposals: dict[str, ConceptPromotionProposal] = {}
         self._lock = threading.RLock()
 
+    @property
+    def lifecycle_manager(self) -> ConceptLifecycleManager:
+        return self._lifecycle_manager
+
     def get_concept(self, concept_id: str) -> GroundedConcept | None:
         with self._lock:
             return self._concepts.get(concept_id)
@@ -50,6 +54,10 @@ class WorkingConceptStore:
     def get_all_concepts(self) -> list[GroundedConcept]:
         with self._lock:
             return list(self._concepts.values())
+
+    def get_all(self) -> list[GroundedConcept]:
+        """Alias for get_all_concepts."""
+        return self.get_all_concepts()
 
     def get_concepts_by_state(self, state: ConceptLifecycle) -> list[GroundedConcept]:
         with self._lock:
