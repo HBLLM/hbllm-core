@@ -136,8 +136,9 @@ async with tx_mgr.begin_transaction() as tx:
 
 # ✅ ALSO CORRECT: subsystems holding only a workspace reference (adapters, tier
 # promotion, world kernel) use the workspace's attached commit authority
-workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)],
-                            author="memory_adapter")
+workspace.commit_operations(
+    [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)], author="memory_adapter"
+)
 
 # ❌ FORBIDDEN: the raw primitives `workspace.add_node/upsert_node/remove_node/add_edge/
 # remove_edge` are kernel-internal (used only by TransactionManager._apply_one).
@@ -157,12 +158,10 @@ def solve_puzzle(grid, actions):
         return [1, 1, 3]
     ...
 
+
 # ✅ CORRECT: Declarative Neuro-Symbolic Skill with composable predicates
 class KeyDoorSkill(DeclarativeNeuroSymbolicSkill):
-    signature = (
-        ActionAffordancePredicate(required={1, 2, 3, 4})
-        & CutSetPredicate(min_partitions=2)
-    )
+    signature = ActionAffordancePredicate(required={1, 2, 3, 4}) & CutSetPredicate(min_partitions=2)
     program = SubgoalSequence(
         SymbolicSubgoal(
             intent=SpatialActionIntent.NAVIGATE_TO,
@@ -200,7 +199,9 @@ theory.actuator_features.add(hyp.premise_feature)
 # Only verified remote switches/buttons belong in actuator_features; in-place mutations
 # are recorded strictly as CausalPredicate state transforms.
 if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
-    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(hyp.premise_feature):
+    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(
+        hyp.premise_feature
+    ):
         theory.actuator_features.add(hyp.premise_feature)
 ```
 
@@ -210,12 +211,12 @@ if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
 # ❌ FORBIDDEN: Executing untrusted code in-process or blocking parent pipe writers
 proc.start()
 result = await _await_child(proc, parent_conn, timeout)
-child_conn.close() # Bug: writer open in parent leads to EOF hang
+child_conn.close()  # Bug: writer open in parent leads to EOF hang
 
 # ✅ CORRECT: Two-tier isolation with immediate parent write-end cleanup and responsive polling
 proc.start()
 try:
-    child_conn.close() # Close write-end immediately in parent so pipe EOF signals properly
+    child_conn.close()  # Close write-end immediately in parent so pipe EOF signals properly
 except Exception:
     pass
 result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn, timeout))
