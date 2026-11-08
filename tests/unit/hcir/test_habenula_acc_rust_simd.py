@@ -161,7 +161,8 @@ def test_engine_acc_habenula_ensemble_integration() -> None:
                 positions=[(3, 3), (3, 4)],
                 velocity=(0, 1),
             )
-            # Evaluate transit safety towards (3, 5)
+            # Evaluate transit safety from (3, 4) towards (3, 5)
+            engine.avatar_pos = (3, 4)
             engine.action_dynamics = {
                 1: ActionDynamicsModel(action_id=1, delta_r=-1, delta_c=0, confidence=0.8),
                 2: ActionDynamicsModel(action_id=2, delta_r=1, delta_c=0, confidence=0.8),
@@ -174,7 +175,7 @@ def test_engine_acc_habenula_ensemble_integration() -> None:
             )
             assert decision is not None
             # Action 4 (RIGHT) is pre-emptively inhibited into the patroller path
-            assert engine.habenular_ior.is_action_inhibited((3, 3), 4)
+            assert engine.habenular_ior.is_action_inhibited((3, 4), 4)
 
 
 def test_rust_simd_snn_lif_parity() -> None:

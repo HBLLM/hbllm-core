@@ -180,6 +180,11 @@ class TransactionManager:
     ) -> None:
         self._workspace = workspace
         self._verification_stages = verification_stages or []
+        if not self._verification_stages:
+            logger.warning("TransactionManager created without verification pipeline")
+            self.unverified = True
+        else:
+            self.unverified = False
         self._validator = validator or GraphValidator()
         self._event_bus = event_bus
         self._max_log_size = max(1, max_log_size)

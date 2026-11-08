@@ -157,6 +157,17 @@ class HCIRTransaction(BaseModel):
         return self.status == TransactionStatus.REJECTED
 
     @property
+    def rejection_reason(self) -> str | None:
+        if not self.is_rejected:
+            return None
+        error_annotations = [a.assertion for a in self.annotations if a.severity == "error"]
+        return (
+            "; ".join(error_annotations)
+            if error_annotations
+            else "Transaction rejected by verification"
+        )
+
+    @property
     def operation_count(self) -> int:
         return len(self.operations)
 

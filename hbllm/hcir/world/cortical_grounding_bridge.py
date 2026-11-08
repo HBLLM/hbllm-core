@@ -52,6 +52,7 @@ from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 if TYPE_CHECKING:
+    from hbllm.hcir.kernel.services import KernelServices
     from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
     from hbllm.hcir.world.engine_state import CognitiveContext
     from hbllm.hcir.world.surprise_engine import SurpriseEngine
@@ -96,9 +97,19 @@ class CorticalGroundingBridge:
         surprise_engine: SurpriseEngine | None = None,
         acceptance_threshold: float = 0.65,
         surprise_threshold: float = 0.35,
+        services: KernelServices | None = None,
     ) -> None:
-        self.workspace = workspace or HCIRWorkspaceState()
-        self.tx_manager = transaction_manager or TransactionManager(self.workspace)
+        self.services = services
+        self.workspace = (
+            workspace
+            or (services.workspace if services is not None else None)
+            or HCIRWorkspaceState()
+        )
+        self.tx_manager = (
+            transaction_manager
+            or (services.transaction_manager if services is not None else None)
+            or TransactionManager(self.workspace)
+        )
         self.symbolic_theory = symbolic_theory
         self.surprise_engine = surprise_engine
 

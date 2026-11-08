@@ -210,31 +210,21 @@ class BootOrchestrator:
         # ── 2.5 Initialize HCIR Kernel & Executive Runtime ───────────
         try:
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
-            from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-            from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
             from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
             from hbllm.hcir.kernel.services import KernelServices
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
             from hbllm.hcir.workspace import HCIRWorkspaceState
+            from hbllm.hcir.workspace_tiers import TieredWorkspace
 
             hcir_ws = (
                 ctx.brain.workspace_node.hcir_workspace
                 if hasattr(ctx.brain, "workspace_node") and ctx.brain.workspace_node
                 else HCIRWorkspaceState()
             )
-            tx_mgr = TransactionManager(hcir_ws)
-            sandbox_mgr = CapabilitySandboxManager()
-            resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
-            hcir_sched = KernelInstructionScheduler()
-
-            ctx.kernel_services = KernelServices(
+            # Create canonical verified kernel services with constitutional verifier
+            ctx.kernel_services = KernelServices.create_default(
                 workspace=hcir_ws,
-                transaction_manager=tx_mgr,
-                capability_resolver=resolver,
-                scheduler=hcir_sched,
-                sandbox_manager=sandbox_mgr,
+                tiered_workspace=TieredWorkspace(),
             )
             ctx.executive_runtime = ExecutiveRuntime(ctx.kernel_services)
             await ctx.executive_runtime.start()

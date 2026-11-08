@@ -542,6 +542,29 @@ class AutonomousEpistemicEngine:
     MIN_PROBES_PER_ACTION: int = 3
     consecutive_pacing_steps: int = 0
 
+    @classmethod
+    def for_tests(
+        cls,
+        exploration_budget: int = 150,
+        enable_logging: bool = True,
+        instructions: Sequence[str] | str | None = None,
+        world_id: str = "default",
+        seed: int | None = None,
+    ) -> AutonomousEpistemicEngine:
+        """Construct an engine with default verified kernel services for tests."""
+        from hbllm.hcir.kernel.services import KernelServices
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+
+        services = KernelServices.create_default(HCIRWorkspaceState())
+        return cls(
+            exploration_budget=exploration_budget,
+            enable_logging=enable_logging,
+            instructions=instructions,
+            services=services,
+            world_id=world_id,
+            seed=seed,
+        )
+
     def __init__(
         self,
         exploration_budget: int = 150,
@@ -551,6 +574,12 @@ class AutonomousEpistemicEngine:
         world_id: str = "default",
         seed: int | None = None,
     ) -> None:
+        if services is None:
+            from hbllm.hcir.kernel.services import KernelServices
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            services = KernelServices.create_default(HCIRWorkspaceState())
+
         self.exploration_budget = exploration_budget
         # Deterministic decide-path RNG (WP0.1 replay determinism)
         self._rng = __import__("numpy").random.default_rng(seed)
@@ -1086,6 +1115,7 @@ class AutonomousEpistemicEngine:
                 ws = getattr(self.services, "workspace", None)
             self.grounding_bridge = CorticalGroundingBridge(
                 workspace=ws,
+                services=self.services,
                 transaction_manager=self.transaction_manager,
                 symbolic_theory=self.symbolic_theory,
                 surprise_engine=getattr(self, "surprise_engine", None),

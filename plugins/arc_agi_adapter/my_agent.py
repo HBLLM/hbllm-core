@@ -241,9 +241,18 @@ class MyAgent(Agent):
         self.instructions = instructions
         self._seed = kwargs.get("seed")
         self.enable_grounding: bool = kwargs.get("enable_grounding", True)
-        self.internal_engine = AutonomousEpistemicEngine(instructions=instructions, seed=self._seed)
-        if self.enable_grounding:
-            self.internal_engine.attach_grounding_bridge()
+        from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+        self.system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id=game_id or "default",
+                seed=self._seed,
+                instructions=instructions,
+                enable_grounding=self.enable_grounding,
+            )
+        )
+        self.internal_engine = self.system.engine
+        self.services = self.system.services
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None

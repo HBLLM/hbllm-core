@@ -454,6 +454,17 @@ class Brain:
             if self.token_optimizer:
                 self.token_optimizer.optimize(text)
 
+            # ── HCIR cognitive cycle (pre-decisional candidate generation) ──
+            if self.hcir_runtime is not None:
+                try:
+                    # Ensure session is started
+                    if self.hcir_runtime.session_id != session_id:
+                        await self.hcir_runtime.start_session(session_id)
+                    # Run a workspace-driven cognitive cycle
+                    await self.hcir_runtime.run_cycle()
+                except Exception as _hcir_ex:
+                    logger.warning("[Brain] HCIR cycle error: %s", _hcir_ex)
+
             result = await self.pipeline.process(
                 text=text,
                 tenant_id=tenant_id,
@@ -463,17 +474,6 @@ class Brain:
             )
 
             _elapsed = (_time.monotonic() - _start) * 1000
-
-            # ── HCIR cognitive cycle ──────────────────────────────────
-            if self.hcir_runtime is not None:
-                try:
-                    # Ensure session is started
-                    if self.hcir_runtime.session_id != session_id:
-                        await self.hcir_runtime.start_session(session_id)
-                    # Run a workspace-driven cognitive cycle
-                    await self.hcir_runtime.run_cycle()
-                except Exception as _hcir_ex:
-                    logger.debug("[Brain] HCIR cycle error: %s", _hcir_ex)
 
             # Post-process: record cognitive metrics
             if self.cognitive_metrics:
@@ -1210,9 +1210,8 @@ class BrainFactory:
             )
 
             # 2. Transaction manager + constitutional governance
-            tx_mgr = TransactionManager(hcir_ws)
             verifier = ConstitutionalVerifier()
-            tx_mgr.add_verification_stage(verifier)
+            tx_mgr = TransactionManager(hcir_ws, verification_stages=[verifier])
 
             # 3. Capability resolver + budget-aware scheduler
             resolver = CapabilityResolver()

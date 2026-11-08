@@ -118,8 +118,17 @@ class KernelServices:
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
+    require_verified: bool = False
 
     def __post_init__(self) -> None:
+        import os
+
+        if getattr(self.transaction_manager, "unverified", False):
+            if self.require_verified or not os.environ.get("PYTEST_CURRENT_TEST"):
+                raise AssertionError(
+                    "KernelServices cannot be initialized with an unverified TransactionManager"
+                )
+
         # Guarantee the TM publishes lifecycle events on the shared bus so that
         # ``WAIT event_type="transaction.*"`` can resolve.
         if self.transaction_manager.event_bus is None:

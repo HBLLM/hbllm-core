@@ -651,9 +651,10 @@ class CognitiveBlackbox:
     def get_epistemic_engine(self, source_id: str = "default") -> AutonomousEpistemicEngine:
         """Get or initialize the AutonomousEpistemicEngine for active curiosity and mental simulation."""
         if source_id not in self._epistemic_engines:
-            engine = AutonomousEpistemicEngine()
-            engine.attach_grounding_bridge()
-            self._epistemic_engines[source_id] = engine
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+            system = build_cognitive_system(CognitiveSystemConfig(world_id=source_id))
+            self._epistemic_engines[source_id] = system.engine
         return self._epistemic_engines[source_id]
 
     # ── Driver, Lifter & Resolver Registration ────────────────────────────
