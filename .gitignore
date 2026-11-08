@@ -12,6 +12,7 @@ build/
 # Virtual environments
 .venv/
 venv/
+llama_venv/
 env/
 
 # IDE

@@ -3,6 +3,10 @@
 > **Primary Directive for AI Agents:**  
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
+> [!WARNING]
+> **Current project phase: Phase 1 — Scope Freeze (since 2026-11-08).**  
+> Read `reports/audit/2026-11-08_project_audit.md` §0b before any change. Until Phase 1 exits, **no new faculty, module, benchmark scenario or cognitive capability may be added to `hbllm/`**. Allowed work is exactly WP0 (held-out evaluation harness), WP1 (single composition root + governance), WP2 (entry points), WP3 (grounding connected), WP5-D (deletion list, LOC ≤ 250k), WP15 (learned-perception decision). The companion `reports/audit/2026-11-08_agi_gap_analysis.md` explains *why*. The codebase must get smaller and truer, not larger.
+
 ---
 
 ## 1. Project Vision & Core Invariants
