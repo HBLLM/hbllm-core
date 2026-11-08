@@ -64,13 +64,19 @@ class EvaluationProtocol:
         reports_dir: Path | str = "reports",
         git_sha: str | None = None,
         config: dict[str, Any] | None = None,
+        perception_mode: str = "handcrafted",
     ) -> None:
         self.reports_dir = Path(reports_dir)
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.heldout_dir = self.reports_dir / "heldout"
         self.heldout_dir.mkdir(parents=True, exist_ok=True)
         self.git_sha = git_sha or self._get_current_git_sha()
-        self.config = config or {"model": "deterministic_hcir", "version": "1.0.0"}
+        self.perception_mode = perception_mode
+        self.config = config or {
+            "model": "deterministic_hcir",
+            "version": "1.0.0",
+            "perception_mode": perception_mode,
+        }
         self.config_hash = self._compute_config_hash(self.config)
 
     @staticmethod
@@ -94,16 +100,21 @@ class EvaluationProtocol:
         return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:16]
 
     def verify_heldout_gate(self) -> None:
-        """Anti-tamper rule: Refuse to execute held-out evaluation twice on the same Git commit SHA."""
+        """Anti-tamper rule: Refuse to execute held-out evaluation twice on the same Git commit SHA and perception mode."""
         if not self.heldout_dir.exists():
             return
 
-        # Check for existing report for this exact git sha
-        pattern = f"{self.git_sha}_*.json"
+        # Check for existing report for this git sha and perception mode
+        pattern = f"{self.git_sha}_{self.perception_mode}_*.json"
         existing = list(self.heldout_dir.glob(pattern))
+        if not existing:
+            # Also check legacy pattern without perception mode
+            legacy = list(self.heldout_dir.glob(f"{self.git_sha}_*.json"))
+            if legacy and self.perception_mode == "handcrafted":
+                existing = legacy
         if existing:
             raise RuntimeError(
-                f"Held-out evaluation already exists for git commit {self.git_sha}: {existing[0].name}. "
+                f"Held-out evaluation already exists for git commit {self.git_sha} [{self.perception_mode}]: {existing[0].name}. "
                 "Held-out tasks cannot be re-evaluated on the same commit to prevent overfitting."
             )
 
@@ -191,11 +202,11 @@ class EvaluationProtocol:
 
         # Write output file
         if split == "heldout":
-            out_file = self.heldout_dir / f"{self.git_sha}_{ts}.json"
+            out_file = self.heldout_dir / f"{self.git_sha}_{self.perception_mode}_{ts}.json"
         else:
             dev_dir = self.reports_dir / "dev"
             dev_dir.mkdir(parents=True, exist_ok=True)
-            out_file = dev_dir / f"dev_{ts}.json"
+            out_file = dev_dir / f"dev_{self.perception_mode}_{ts}.json"
 
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2)

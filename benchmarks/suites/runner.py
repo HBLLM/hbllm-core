@@ -14,9 +14,13 @@ from benchmarks.suites.symbolic.heldout import run_symbolic_heldout_task
 from hbllm.benchmarks.protocol import EvaluationProtocol, TaskResult
 
 
-def run_suite(split: str = "dev", reports_dir: str = "reports") -> int:
+def run_suite(
+    split: str = "dev",
+    reports_dir: str = "reports",
+    perception_mode: str = "handcrafted",
+) -> int:
     """Executes the benchmark evaluation for the given split (dev or heldout)."""
-    protocol = EvaluationProtocol(reports_dir=reports_dir)
+    protocol = EvaluationProtocol(reports_dir=reports_dir, perception_mode=perception_mode)
 
     if split == "heldout":
         # Enforce anti-tamper check before running any tasks
@@ -24,17 +28,21 @@ def run_suite(split: str = "dev", reports_dir: str = "reports") -> int:
 
     tasks: list[TaskResult] = []
 
-    print(f"=== Running HBLLM Generality Suite [{split.upper()}] ===")
+    print(
+        f"=== Running HBLLM Generality Suite [{split.upper()}] (perception={perception_mode}) ==="
+    )
     print(f"Git SHA: {protocol.git_sha} | Config Hash: {protocol.config_hash}")
 
     if split == "dev":
         # Grid dev
-        print("-> Running grid dev task...")
+        print(f"-> Running grid dev task (perception={perception_mode})...")
         t_grid = protocol.evaluate_task(
-            task_id="grid_dev_nav",
+            task_id=f"grid_dev_nav_{perception_mode}",
             family="grid",
             split=split,
-            run_fn=run_grid_dev_task,
+            run_fn=lambda: run_grid_dev_task(
+                task_name=f"grid_dev_nav_{perception_mode}", perception_mode=perception_mode
+            ),
             max_budget=50,
         )
         tasks.append(t_grid)
@@ -63,12 +71,15 @@ def run_suite(split: str = "dev", reports_dir: str = "reports") -> int:
 
     elif split == "heldout":
         # Grid heldout
-        print("-> Running grid heldout task...")
+        print(f"-> Running grid heldout task (perception={perception_mode})...")
         t_grid = protocol.evaluate_task(
-            task_id="heldout_dual_barrier_nav",
+            task_id=f"heldout_dual_barrier_nav_{perception_mode}",
             family="grid",
             split=split,
-            run_fn=run_grid_heldout_task,
+            run_fn=lambda: run_grid_heldout_task(
+                task_name=f"heldout_dual_barrier_nav_{perception_mode}",
+                perception_mode=perception_mode,
+            ),
             max_budget=100,
         )
         tasks.append(t_grid)

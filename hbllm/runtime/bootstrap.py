@@ -102,6 +102,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
             workspace=workspace,
             services=services,
             transaction_manager=services.transaction_manager,
+            perception_mode=cfg.perception_mode,
         )
         engine.attach_grounding_bridge(bridge)
 

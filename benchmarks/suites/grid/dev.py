@@ -11,10 +11,12 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
 from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
 
 
-def run_grid_dev_task(task_name: str = "grid_dev_nav") -> tuple[bool, int, list[float], list[str]]:
+def run_grid_dev_task(
+    task_name: str = "grid_dev_nav", perception_mode: str = "handcrafted"
+) -> tuple[bool, int, list[float], list[str]]:
     """Runs a development grid navigation and interaction task."""
     engine = AutonomousEpistemicEngine()
-    engine.attach_grounding_bridge(CorticalGroundingBridge())
+    engine.attach_grounding_bridge(CorticalGroundingBridge(perception_mode=perception_mode))
 
     latencies: list[float] = []
     errors: list[str] = []

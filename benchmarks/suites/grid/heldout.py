@@ -13,10 +13,11 @@ from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
 
 def run_grid_heldout_task(
     task_name: str = "heldout_dual_barrier_nav",
+    perception_mode: str = "handcrafted",
 ) -> tuple[bool, int, list[float], list[str]]:
     """Runs a held-out grid task with barriers and dynamic obstacles."""
     engine = AutonomousEpistemicEngine()
-    engine.attach_grounding_bridge(CorticalGroundingBridge())
+    engine.attach_grounding_bridge(CorticalGroundingBridge(perception_mode=perception_mode))
 
     latencies: list[float] = []
     errors: list[str] = []

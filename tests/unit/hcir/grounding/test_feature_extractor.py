@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from hbllm.hcir.grounding.contracts.enums import ModalitySource, TrafficClass
@@ -10,8 +12,10 @@ from hbllm.hcir.grounding.features.feature_extractor import (
     FeatureExtractor,
     FeatureExtractorRegistry,
     KinematicFeatureExtractor,
+    LearnedPerceptualFeatureExtractor,
     PerceptualFeatureVector,
     SemanticTextFeatureExtractor,
+    SNNPerceptualFeatureExtractor,
     SpatialGridFeatureExtractor,
 )
 
@@ -337,3 +341,61 @@ class TestFeatureExtractorRegistry:
         )
         results = reg.extract_all(env)
         assert len(results) >= 1
+
+    def test_perception_modes_selection(self) -> None:
+        reg_hc = FeatureExtractorRegistry.default(perception_mode="handcrafted")
+        reg_snn = FeatureExtractorRegistry.default(perception_mode="snn")
+        reg_learned = FeatureExtractorRegistry.default(perception_mode="learned")
+
+        names_hc = [e.extractor_name for e in reg_hc.extractors]
+        names_snn = [e.extractor_name for e in reg_snn.extractors]
+        names_learned = [e.extractor_name for e in reg_learned.extractors]
+
+        assert "SpatialGridFeatureExtractor" in names_hc
+        assert "SNNPerceptualFeatureExtractor" in names_snn
+        assert "LearnedPerceptualFeatureExtractor" in names_learned
+
+    def test_invalid_perception_mode_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown perception_mode"):
+            FeatureExtractorRegistry.default(perception_mode="unsupported_mode")
+
+
+class TestSNNPerceptualFeatureExtractor:
+    def test_extraction_and_invariants(self) -> None:
+        extractor = SNNPerceptualFeatureExtractor()
+        assert extractor.extractor_name == "SNNPerceptualFeatureExtractor"
+
+        env = _make_envelope(
+            modality=ModalitySource.VISION,
+            metadata={"entities": [{"id": "e1", "position": (1.0, 1.0), "color": 2, "size": 4}]},
+        )
+        assert extractor.can_extract(env) is True
+        fvs = extractor.extract(env)
+        assert len(fvs) == 1
+        fv = fvs[0]
+        assert fv.dimensionality == 8
+        # SNN unit normalisation produces finite non-zero values
+        assert all(math.isfinite(val) for val in fv.embedding)
+
+        # Non-matching envelope
+        kin_env = _make_envelope(modality=ModalitySource.KINESTHETIC, metadata={})
+        assert extractor.can_extract(kin_env) is False
+
+
+class TestLearnedPerceptualFeatureExtractor:
+    def test_extraction_and_invariants(self) -> None:
+        extractor = LearnedPerceptualFeatureExtractor()
+        assert extractor.extractor_name == "LearnedPerceptualFeatureExtractor"
+
+        env = _make_envelope(
+            modality=ModalitySource.VISION,
+            metadata={"entities": [{"id": "e1", "position": (1.0, 1.0), "color": 2, "size": 4}]},
+        )
+        assert extractor.can_extract(env) is True
+        fvs = extractor.extract(env)
+        assert len(fvs) == 1
+        fv = fvs[0]
+        assert fv.dimensionality == 8
+        # Layer-normed output is bounded and finite
+        assert any(val != 0.0 for val in fv.embedding)
+        assert all(math.isfinite(val) for val in fv.embedding)

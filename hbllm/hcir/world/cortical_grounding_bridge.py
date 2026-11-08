@@ -121,8 +121,10 @@ class CorticalGroundingBridge:
         acceptance_threshold: float = 0.65,
         surprise_threshold: float = 0.35,
         services: KernelServices | None = None,
+        perception_mode: str = "handcrafted",
     ) -> None:
         self.services = services
+        self.perception_mode = perception_mode
         self.workspace = (
             workspace
             or (services.workspace if services is not None else None)
@@ -146,7 +148,7 @@ class CorticalGroundingBridge:
         self.tracker = ThreeTierEntityTracker(spatial_distance_threshold=1.5)
         self.concept_store = WorkingConceptStore()
         self.concept_learner = ConceptLearner(concept_store=self.concept_store)
-        self.feature_registry = FeatureExtractorRegistry.default()
+        self.feature_registry = FeatureExtractorRegistry.default(perception_mode=perception_mode)
         self.relation_learner = RelationLearner(proximity_threshold=3.0)
         self.evaluator = EpistemicEvaluator(acceptance_threshold=acceptance_threshold)
         self.committer = HCIRCommitter(self.tx_manager)

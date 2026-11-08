@@ -25,7 +25,8 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 3. **Zero LLM Dependency in Cognitive Core:**
    > The core reasoning runtime (`hbllm.brain.reasoning`, `hbllm.hcir.world`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.  
+   *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**
    > Every state mutation passes through `ConstitutionalVerifier` before commit. Violations (e.g., budget breach, policy failure, safety conflict) trigger compensating rollbacks.

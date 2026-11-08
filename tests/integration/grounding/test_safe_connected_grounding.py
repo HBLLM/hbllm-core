@@ -34,8 +34,8 @@ def _build_test_bridge() -> tuple[CorticalGroundingBridge, HCIRWorkspaceState, S
     return bridge, workspace, surprise_eng
 
 
-class TestWP3SafeConnectedGrounding:
-    """WP3 Acceptance Test Suite: Safe, Bounded, and Connected Grounding."""
+class TestSafeConnectedGrounding:
+    """Safe, Bounded, and Connected Grounding Integration Suite."""
 
     def test_a_200_step_synthetic_loop_bounded_growth(self) -> None:
         """(a) 200-step synthetic loop: graph nodes and edges plateau (no unbounded sprawl)."""

@@ -25,7 +25,7 @@ from experiments.benchmarks.evaluation.run_generalization_evaluation import (
 )
 
 
-def test_milestone2_pillar1_independent_reproduction():
+def test_generalization_pillar1_independent_reproduction():
     """Verify Pillar 1: 160 capabilities and 640 dimensional gate outcomes are fully reconciled."""
     evaluator = Milestone2Evaluator()
     res = evaluator.execute_pillar_1_reproduction()
@@ -45,7 +45,7 @@ def test_milestone2_pillar1_independent_reproduction():
         assert p_data["pass_rate_pct"] == 100.0
 
 
-def test_milestone2_pillar2_end_to_end_cognitive_closed_loop():
+def test_generalization_pillar2_end_to_end_cognitive_closed_loop():
     """Verify Pillar 2: Raw visual grid flows through segmentation, graph, induction, rollout, and safety gate."""
     evaluator = Milestone2Evaluator()
     res = evaluator.execute_pillar_2_closed_loop()
@@ -66,7 +66,7 @@ def test_milestone2_pillar2_end_to_end_cognitive_closed_loop():
     assert underspec["decision_action"] == "CALIBRATED_ABSTENTION"
 
 
-def test_milestone2_pillar3_unseen_mechanism_family_evaluation():
+def test_generalization_pillar3_unseen_mechanism_family_evaluation():
     """Verify Pillar 3: Disjoint independent task families tested with Level 3 representation expansion."""
     evaluator = Milestone2Evaluator()
     res = evaluator.execute_pillar_3_unseen_mechanisms(seed=42)
@@ -90,7 +90,7 @@ def test_milestone2_pillar3_unseen_mechanism_family_evaluation():
         assert 0.0 <= ci_low <= ci_high <= 1.0
 
 
-def test_milestone2_pillar4_continual_learning_and_zero_forgetting():
+def test_generalization_pillar4_continual_learning_and_zero_forgetting():
     """Verify Pillar 4: Forward transfer speedup and zero catastrophic forgetting across sequential tasks."""
     evaluator = Milestone2Evaluator()
     res = evaluator.execute_pillar_4_continual_learning()
@@ -101,7 +101,7 @@ def test_milestone2_pillar4_continual_learning_and_zero_forgetting():
     assert res["continual_non_destructive_update"] is True
 
 
-def test_milestone2_pillar5_baseline_comparisons_and_arc_gating():
+def test_generalization_pillar5_baseline_comparisons_and_arc_gating():
     """Verify Pillar 5: Full HCIR outperforms baselines, and test ground truth is strictly isolated."""
     evaluator = Milestone2Evaluator()
     res = evaluator.execute_pillar_5_baseline_comparisons()
@@ -137,7 +137,7 @@ def test_milestone2_pillar5_baseline_comparisons_and_arc_gating():
     assert res["active_probing_restricted_to_interactive"] is True
 
 
-def test_milestone2_full_pipeline_evidence_generation(tmp_path: Path):
+def test_generalization_full_pipeline_evidence_generation(tmp_path: Path):
     """Verify full Milestone 2 end-to-end execution and machine-readable report generation."""
     evaluator = Milestone2Evaluator(output_dir=tmp_path)
     report = evaluator.run_all_pillars()

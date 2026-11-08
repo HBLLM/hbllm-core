@@ -183,11 +183,14 @@ def bench_dev(
     reports_dir: str = typer.Option(
         "reports", "--reports-dir", help="Directory for evaluation reports"
     ),
+    perception: str = typer.Option(
+        "handcrafted", "--perception", help="Perception extractor: handcrafted, snn, or learned"
+    ),
 ) -> None:
     """Run the frozen dev evaluation suite."""
     from benchmarks.suites.runner import run_suite
 
-    code = run_suite("dev", reports_dir=reports_dir)
+    code = run_suite("dev", reports_dir=reports_dir, perception_mode=perception)
     if code != 0:
         raise typer.Exit(code=code)
 
@@ -197,11 +200,14 @@ def bench_heldout(
     reports_dir: str = typer.Option(
         "reports", "--reports-dir", help="Directory for evaluation reports"
     ),
+    perception: str = typer.Option(
+        "handcrafted", "--perception", help="Perception extractor: handcrafted, snn, or learned"
+    ),
 ) -> None:
     """Run the frozen heldout evaluation suite (anti-tamper: once per git sha)."""
     from benchmarks.suites.runner import run_suite
 
-    code = run_suite("heldout", reports_dir=reports_dir)
+    code = run_suite("heldout", reports_dir=reports_dir, perception_mode=perception)
     if code != 0:
         raise typer.Exit(code=code)
 

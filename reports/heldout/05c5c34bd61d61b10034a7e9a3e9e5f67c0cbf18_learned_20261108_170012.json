@@ -1,0 +1,55 @@
+{
+  "git_sha": "05c5c34bd61d61b10034a7e9a3e9e5f67c0cbf18",
+  "config_hash": "2e7e3d871be77ba3",
+  "timestamp": "20261108_170012",
+  "split": "heldout",
+  "tasks": [
+    {
+      "task_id": "heldout_dual_barrier_nav_learned",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 18,
+      "max_budget": 100,
+      "steps_to_first_success": 18,
+      "steps_to_stable_policy": 18,
+      "success_at_budget": true,
+      "p50_latency_ms": 40.43,
+      "p95_latency_ms": 168.06,
+      "errors": []
+    },
+    {
+      "task_id": "continuous_obstacle_avoidance_heldout",
+      "family": "continuous",
+      "split": "heldout",
+      "steps": 12,
+      "max_budget": 100,
+      "steps_to_first_success": 12,
+      "steps_to_stable_policy": 12,
+      "success_at_budget": true,
+      "p50_latency_ms": 31.25,
+      "p95_latency_ms": 97.96,
+      "errors": []
+    },
+    {
+      "task_id": "symbolic_rule_induction_heldout",
+      "family": "symbolic",
+      "split": "heldout",
+      "steps": 8,
+      "max_budget": 100,
+      "steps_to_first_success": 8,
+      "steps_to_stable_policy": 8,
+      "success_at_budget": true,
+      "p50_latency_ms": 12.07,
+      "p95_latency_ms": 16.21,
+      "errors": []
+    }
+  ],
+  "family_scores": {
+    "grid": 0.91,
+    "continuous": 0.94,
+    "symbolic": 0.96
+  },
+  "generality_score": 0.9367,
+  "mean_p50_latency_ms": 27.92,
+  "mean_p95_latency_ms": 94.08
+}
