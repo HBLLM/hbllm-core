@@ -18,21 +18,21 @@ import pytest
 from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.amygdalar_threat_conditioning import (
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
+from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.amygdalar_threat_conditioning import (
     AmygdalarThreatConditioningEngine,
     ConditionedThreatStimulus,
     DefensiveVigilanceMode,
     DefensiveVigilanceState,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import (
-    AutonomousEpistemicEngine,
-)
-from hbllm.hcir.world.entorhinal_border_cell import (
+from hbllm.hcir.world.experimental.entorhinal_border_cell import (
     EntorhinalBorderCellEngine,
     GridModuleRescalingResult,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.ventral_tegmental_curiosity import (
+from hbllm.hcir.world.experimental.ventral_tegmental_curiosity import (
     CuriosityDriveSignal,
     EpistemicInformationGain,
     VentralTegmentalCuriosityEngine,

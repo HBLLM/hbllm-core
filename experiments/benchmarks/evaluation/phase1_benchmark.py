@@ -1,10 +1,10 @@
-"""Milestone 3 Phase 2 Evaluation Benchmark: Topological Graph & Geodesic Maze Induction.
+"""Milestone 3 Phase 1 Evaluation Benchmark: Global Modular Invariant Induction.
 
 Evaluates 4 comparative baselines across 20 challenge tasks:
 1. BASELINE_A: Primitive-Only (Affine & Crop vocabulary).
 2. BASELINE_B: Unguided Heuristic Search.
-3. BASELINE_C: Template Memorization (Replays Demo 0 coordinate path onto test query).
-4. BASELINE_D: Full Inductive HCIR (Discovers shortest geodesic path via dynamic graph induction).
+3. BASELINE_C: Template Memorization (Replays Demo 1 rule unconditionally).
+4. BASELINE_D: Full Inductive HCIR (Discovers modular scalar invariant from residuals).
 
 Enforces dynamic runtime airgap and emits machine-readable evidence artifact with SHA-256.
 """
@@ -30,14 +30,14 @@ if str(_CORE_ROOT) not in sys.path:
 import numpy as np
 
 from experiments.benchmarks.manifests.transformation_task_manifest import ManifestTask
-from experiments.benchmarks.task_generators.topological_maze_generator import (
-    TopologicalMazeTaskGenerator,
+from experiments.benchmarks.task_generators.global_invariant_generator import (
+    GlobalInvariantTaskGenerator,
 )
 from hbllm.hcir.world.grid_operator import TransformationProgramSearch
 from hbllm.hcir.world.representation_expansion import RepresentationExpansionEngine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger("M3P2Benchmark")
+logger = logging.getLogger("M3P1Benchmark")
 
 
 @dataclass(frozen=True)
@@ -48,14 +48,13 @@ class BaselineTrialResult:
     family: str
     baseline: str
     exact_match: bool
-    calibrated_abstention: bool
     epistemic_uncertainty: float
     duration_ms: float
     synthesized_operator_name: str
 
 
-class Milestone3Phase2Evaluator:
-    """Executes the 4-baseline comparative challenge for Milestone 3 Phase 2."""
+class Milestone3Phase1Evaluator:
+    """Executes the 4-baseline comparative challenge for Milestone 3 Phase 1."""
 
     def __init__(self, output_dir: Path | None = None) -> None:
         self.output_dir = output_dir or (_CORE_ROOT / "experiments" / "benchmarks" / "reports")
@@ -83,15 +82,15 @@ class Milestone3Phase2Evaluator:
             family=task.family,
             baseline="BASELINE_A_PRIMITIVE_ONLY",
             exact_match=exact,
-            calibrated_abstention=False,
             epistemic_uncertainty=float(meta.get("epistemic_uncertainty", 1.0)),
             duration_ms=round(dur, 2),
             synthesized_operator_name="none",
         )
 
     def evaluate_baseline_b_heuristic(self, task: ManifestTask) -> BaselineTrialResult:
-        """Baseline B: Heuristic unguided greedy identity."""
+        """Baseline B: Heuristic unguided greedy identity/crop."""
         t0 = time.perf_counter()
+        # Heuristic simply mirrors test_input
         pred = np.copy(task.test_input)
         exact = bool(np.array_equal(pred, task.test_output))
         dur = (time.perf_counter() - t0) * 1000.0
@@ -100,27 +99,26 @@ class Milestone3Phase2Evaluator:
             family=task.family,
             baseline="BASELINE_B_HEURISTIC_GREEDY",
             exact_match=exact,
-            calibrated_abstention=False,
             epistemic_uncertainty=0.5,
             duration_ms=round(dur, 2),
             synthesized_operator_name="none",
         )
 
     def evaluate_baseline_c_template(self, task: ManifestTask) -> BaselineTrialResult:
-        """Baseline C: Template memorization (unconditionally replays Demo 0 coordinate path)."""
+        """Baseline C: Template memorization (unconditionally replays Demo 1 effect)."""
         t0 = time.perf_counter()
         x0, y0 = task.train_pairs[0]
-        diff_mask = x0 != y0
+        # Infer demo 0 effect
         pred = np.copy(task.test_input)
-
-        if np.any(diff_mask):
-            path_col = y0[diff_mask][0]
-            # Overlay Demo 0 coordinate path onto test query if within bounds
-            H0, W0 = x0.shape
-            Ht, Wt = task.test_input.shape
-            min_h = min(H0, Ht)
-            min_w = min(W0, Wt)
-            pred[:min_h, :min_w][diff_mask[:min_h, :min_w]] = path_col
+        if not np.array_equal(x0, y0):
+            # Check recolor
+            diff = x0 != y0
+            src = x0[diff][0] if np.any(diff) else 0
+            dst = y0[diff][0] if np.any(diff) else 0
+            if src != 0 and dst != 0:
+                pred[task.test_input == src] = dst
+            elif np.array_equal(np.fliplr(x0), y0):
+                pred = np.fliplr(task.test_input).copy()
 
         exact = bool(np.array_equal(pred, task.test_output))
         dur = (time.perf_counter() - t0) * 1000.0
@@ -129,15 +127,15 @@ class Milestone3Phase2Evaluator:
             family=task.family,
             baseline="BASELINE_C_TEMPLATE_MEMORIZATION",
             exact_match=exact,
-            calibrated_abstention=False,
             epistemic_uncertainty=0.5,
             duration_ms=round(dur, 2),
-            synthesized_operator_name="memorized_demo_0_path",
+            synthesized_operator_name="memorized_demo_0",
         )
 
     def evaluate_baseline_d_inductive_hcir(self, task: ManifestTask) -> BaselineTrialResult:
         """Baseline D: Full Inductive HCIR under dynamic runtime airgap."""
         t0 = time.perf_counter()
+        # Strictly pass train_pairs and test_input
         train_pairs = [(np.copy(x), np.copy(y)) for x, y in task.train_pairs]
         test_in = np.copy(task.test_input)
 
@@ -149,15 +147,8 @@ class Milestone3Phase2Evaluator:
         )
 
         exact = False
-        calibrated_abstention = False
-
-        if task.family == "ambiguous_multi_path_abstention":
-            # On ambiguous tasks, correct behavior is calibrated uncertainty = 1.0 and abstention
-            if trace.phase2_epistemic_uncertainty == 1.0 and trace.phase2_predicted_test is None:
-                calibrated_abstention = True
-        else:
-            if trace.phase2_predicted_test is not None:
-                exact = bool(np.array_equal(trace.phase2_predicted_test, task.test_output))
+        if trace.phase2_predicted_test is not None:
+            exact = bool(np.array_equal(trace.phase2_predicted_test, task.test_output))
 
         dur = (time.perf_counter() - t0) * 1000.0
         return BaselineTrialResult(
@@ -165,7 +156,6 @@ class Milestone3Phase2Evaluator:
             family=task.family,
             baseline="BASELINE_D_FULL_INDUCTIVE_HCIR",
             exact_match=exact,
-            calibrated_abstention=calibrated_abstention,
             epistemic_uncertainty=trace.phase2_epistemic_uncertainty,
             duration_ms=round(dur, 2),
             synthesized_operator_name=trace.synthesized_operator_name,
@@ -173,43 +163,27 @@ class Milestone3Phase2Evaluator:
 
     def run_benchmark(self, seed: int = 42) -> dict[str, Any]:
         """Execute all 4 baselines over the 20-task challenge suite."""
-        logger.info("Initializing Milestone 3 Phase 2 Benchmark (Seed %d)...", seed)
-        suite = TopologicalMazeTaskGenerator.generate_benchmark_suite(seed=seed)
+        logger.info("Initializing Milestone 3 Phase 1 Benchmark (Seed %d)...", seed)
+        suite = GlobalInvariantTaskGenerator.generate_benchmark_suite(seed=seed)
         t_global = time.perf_counter()
 
         trials: list[BaselineTrialResult] = []
 
         baseline_scores: dict[str, dict[str, Any]] = {
-            "BASELINE_A_PRIMITIVE_ONLY": {
-                "exact_matches": 0,
-                "abstentions": 0,
-                "total": len(suite),
-            },
-            "BASELINE_B_HEURISTIC_GREEDY": {
-                "exact_matches": 0,
-                "abstentions": 0,
-                "total": len(suite),
-            },
-            "BASELINE_C_TEMPLATE_MEMORIZATION": {
-                "exact_matches": 0,
-                "abstentions": 0,
-                "total": len(suite),
-            },
-            "BASELINE_D_FULL_INDUCTIVE_HCIR": {
-                "exact_matches": 0,
-                "abstentions": 0,
-                "total": len(suite),
-            },
+            "BASELINE_A_PRIMITIVE_ONLY": {"exact_matches": 0, "total": len(suite)},
+            "BASELINE_B_HEURISTIC_GREEDY": {"exact_matches": 0, "total": len(suite)},
+            "BASELINE_C_TEMPLATE_MEMORIZATION": {"exact_matches": 0, "total": len(suite)},
+            "BASELINE_D_FULL_INDUCTIVE_HCIR": {"exact_matches": 0, "total": len(suite)},
         }
 
         family_scores: dict[str, dict[str, int]] = {
-            fam: {"exact_matches": 0, "abstentions": 0, "total": 0}
-            for fam in TopologicalMazeTaskGenerator.FAMILIES
+            fam: {"exact_matches": 0, "total": 0} for fam in GlobalInvariantTaskGenerator.FAMILIES
         }
 
         for idx, task in enumerate(suite, start=1):
             logger.info("[%d/%d] Evaluating %s (%s)...", idx, len(suite), task.task_id, task.family)
 
+            # Evaluate each baseline
             res_a = self.evaluate_baseline_a_primitives(task)
             res_b = self.evaluate_baseline_b_heuristic(task)
             res_c = self.evaluate_baseline_c_template(task)
@@ -223,13 +197,9 @@ class Milestone3Phase2Evaluator:
                 baseline_scores["BASELINE_B_HEURISTIC_GREEDY"]["exact_matches"] += 1
             if res_c.exact_match:
                 baseline_scores["BASELINE_C_TEMPLATE_MEMORIZATION"]["exact_matches"] += 1
-
             if res_d.exact_match:
                 baseline_scores["BASELINE_D_FULL_INDUCTIVE_HCIR"]["exact_matches"] += 1
                 family_scores[task.family]["exact_matches"] += 1
-            if res_d.calibrated_abstention:
-                baseline_scores["BASELINE_D_FULL_INDUCTIVE_HCIR"]["abstentions"] += 1
-                family_scores[task.family]["abstentions"] += 1
 
             family_scores[task.family]["total"] += 1
 
@@ -239,37 +209,27 @@ class Milestone3Phase2Evaluator:
         comparative_summary: dict[str, Any] = {}
         for b_name, sc in baseline_scores.items():
             exact = sc["exact_matches"]
-            abst = sc["abstentions"]
             total = sc["total"]
             pct = round(exact / total * 100.0, 2)
             ci = self._wilson_interval(exact, total)
             comparative_summary[b_name] = {
                 "exact_matches": f"{exact}/{total}",
                 "exact_match_pct": pct,
-                "calibrated_abstentions": f"{abst}/{total}",
                 "wilson_95_ci": ci,
             }
 
         family_breakdown: dict[str, Any] = {}
         for fam, sc in family_scores.items():
             exact = sc["exact_matches"]
-            abst = sc["abstentions"]
             total = sc["total"]
-            if fam == "ambiguous_multi_path_abstention":
-                family_breakdown[fam] = {
-                    "calibrated_abstentions": f"{abst}/{total}",
-                    "abstention_pct": round(abst / total * 100.0, 2),
-                    "wilson_95_ci": self._wilson_interval(abst, total),
-                }
-            else:
-                family_breakdown[fam] = {
-                    "exact_matches": f"{exact}/{total}",
-                    "exact_match_pct": round(exact / total * 100.0, 2),
-                    "wilson_95_ci": self._wilson_interval(exact, total),
-                }
+            family_breakdown[fam] = {
+                "exact_matches": f"{exact}/{total}",
+                "exact_match_pct": round(exact / total * 100.0, 2),
+                "wilson_95_ci": self._wilson_interval(exact, total),
+            }
 
         report: dict[str, Any] = {
-            "benchmark": "Milestone 3 Phase 2: Topological Graph & Geodesic Maze Induction",
+            "benchmark": "Milestone 3 Phase 1: Inductive Global Invariant Discovery",
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "execution_duration_seconds": elapsed,
             "system_environment": {
@@ -285,12 +245,12 @@ class Milestone3Phase2Evaluator:
         report_bytes = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
         report["integrity_sha256"] = hashlib.sha256(report_bytes).hexdigest()
 
-        out_file = self.output_dir / "milestone3_phase2_benchmark_report.json"
+        out_file = self.output_dir / "phase1_benchmark_report.json"
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
 
         logger.info(
-            "Saved Milestone 3 Phase 2 Report to %s (SHA-256: %s)",
+            "Saved Milestone 3 Phase 1 Report to %s (SHA-256: %s)",
             out_file,
             report["integrity_sha256"][:12],
         )
@@ -298,9 +258,9 @@ class Milestone3Phase2Evaluator:
 
 
 if __name__ == "__main__":
-    evaluator = Milestone3Phase2Evaluator()
+    evaluator = Milestone3Phase1Evaluator()
     rep = evaluator.run_benchmark(seed=42)
-    print("\n================ MILESTONE 3 PHASE 2 BENCHMARK RESULTS ================")
+    print("\n================ MILESTONE 3 PHASE 1 BENCHMARK RESULTS ================")
     print(json.dumps(rep["comparative_baselines"], indent=2))
     print("\nHCIR Family Breakdown:")
     print(json.dumps(rep["hcir_family_breakdown"], indent=2))

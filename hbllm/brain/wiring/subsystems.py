@@ -105,11 +105,9 @@ async def wire_optional_subsystems(
     if cfg.inject_autonomy_watchers:
         await _wire_autonomy_watchers(brain, cfg)
 
-    # Causal Graph
+    # Causal Graph (Superseded by HCIRSymbolicWorldTheory)
     if cfg.inject_causal_graph:
-        from hbllm.brain.causality.causal_graph import CausalGraph
-
-        brain.causal_graph = CausalGraph(data_dir=cfg.data_dir)
+        brain.causal_graph = None
 
     # Cognitive Compaction
     if cfg.inject_compaction:

@@ -140,62 +140,100 @@ def ablated(name: str, cls: type | str | None = None) -> AblatedFaculty:
 
 
 register("GibsonianAffordanceExtractor", "hbllm.hcir.world.cortex_perception")
-register("InteroceptiveAllostasisCortex", "hbllm.hcir.world.insula_allostasis")
-register("AmygdalarThreatConditioningEngine", "hbllm.hcir.world.amygdalar_threat_conditioning")
+register(
+    "AmygdalarThreatConditioningEngine",
+    "hbllm.hcir.world.experimental.amygdalar_threat_conditioning",
+)
 register("FalsifiableAnalogyEngine", "hbllm.hcir.world.cortex_episodic")
-register("AnteriorInsularTimingEngine", "hbllm.hcir.world.anterior_insular_timing")
-register("BilateralCoordinateIntegrator", "hbllm.hcir.world.bilateral_coordination")
-register("PrefrontalBlameAttributor", "hbllm.hcir.world.prefrontal_blame_attribution")
-register("BoundaryGridPhaseAligner", "hbllm.hcir.world.boundary_grid_phase_aligner")
-register("CerebellarMicrozoneAdaptor", "hbllm.hcir.world.cerebellar_microzone_adaptor")
-register("ClaustrumSalienceConductor", "hbllm.hcir.world.claustrum_salience_conductor")
-register("ClaustrumInterhemisphericIntegrator", "hbllm.hcir.world.claustrum_interhemispheric")
-register("ConfidenceCalibrator", "hbllm.hcir.world.confidence_calibrator")
+register("AnteriorInsularTimingEngine", "hbllm.hcir.world.experimental.anterior_insular_timing")
+register("BilateralCoordinateIntegrator", "hbllm.hcir.world.experimental.bilateral_coordination")
+register("PrefrontalBlameAttributor", "hbllm.hcir.world.experimental.prefrontal_blame_attribution")
+register("BoundaryGridPhaseAligner", "hbllm.hcir.world.experimental.boundary_grid_phase_aligner")
+register("CerebellarMicrozoneAdaptor", "hbllm.hcir.world.experimental.cerebellar_microzone_adaptor")
+register(
+    "ClaustrumInterhemisphericIntegrator",
+    "hbllm.hcir.world.experimental.claustrum_interhemispheric",
+)
+register("ConfidenceCalibrator", "hbllm.hcir.world.experimental.confidence_calibrator")
 register("CounterfactualRegretEvaluator", "hbllm.hcir.world.counterfactual_simulation")
-register("SpatialDistanceTransformEngine", "hbllm.hcir.world.spatial_distance_transform")
-register("SubthalamicDriftDiffusionEngine", "hbllm.hcir.world.subthalamic_drift_diffusion")
-register("ExpectedFreeEnergyEvaluator", "hbllm.hcir.world.active_inference_efe")
-register("AnteriorCingulateEffortAllocator", "hbllm.hcir.world.anterior_cingulate_effort_allocator")
-register("EntorhinalBorderCellEngine", "hbllm.hcir.world.entorhinal_border_cell")
-register("FrontopolarExplorationHorizonEngine", "hbllm.hcir.world.frontopolar_exploration_horizon")
-register("ParietalFoveatedAttentionEngine", "hbllm.hcir.world.parietal_foveated_attention")
+register(
+    "SpatialDistanceTransformEngine", "hbllm.hcir.world.experimental.spatial_distance_transform"
+)
+register("ExpectedFreeEnergyEvaluator", "hbllm.hcir.world.experimental.active_inference_efe")
+register(
+    "AnteriorCingulateEffortAllocator",
+    "hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator",
+)
+register("EntorhinalBorderCellEngine", "hbllm.hcir.world.experimental.entorhinal_border_cell")
+register(
+    "FrontopolarExplorationHorizonEngine",
+    "hbllm.hcir.world.experimental.frontopolar_exploration_horizon",
+)
 register("HierarchicalActiveInferenceEngine", "hbllm.hcir.world.active_inference")
-register("HippocampalPrioritizedReplayBuffer", "hbllm.hcir.world.hippocampal_replay")
-register("HippocampalTimeCellEngine", "hbllm.hcir.world.hippocampal_time_cell")
-register("LocusCoeruleusNoradrenalineEngine", "hbllm.hcir.world.locus_coeruleus_noradrenaline")
-register("MedialPrefrontalSchemaEngine", "hbllm.hcir.world.medial_prefrontal_schema")
-register("OrbitofrontalCreditAssignmentEngine", "hbllm.hcir.world.orbitofrontal_credit_assignment")
-register("OpticalRayProjector", "hbllm.hcir.world.optical_ray_projection")
-register("ParahippocampalContextEngine", "hbllm.hcir.world.parahippocampal_context")
-register("HippocampalPhasePrecessionEngine", "hbllm.hcir.world.hippocampal_phase_precession")
+register("HippocampalPrioritizedReplayBuffer", "hbllm.hcir.world.experimental.hippocampal_replay")
+register("HippocampalTimeCellEngine", "hbllm.hcir.world.experimental.hippocampal_time_cell")
+register(
+    "LocusCoeruleusNoradrenalineEngine",
+    "hbllm.hcir.world.experimental.locus_coeruleus_noradrenaline",
+)
+register("MedialPrefrontalSchemaEngine", "hbllm.hcir.world.experimental.medial_prefrontal_schema")
+register(
+    "OrbitofrontalCreditAssignmentEngine",
+    "hbllm.hcir.world.experimental.orbitofrontal_credit_assignment",
+)
+register("OpticalRayProjector", "hbllm.hcir.world.experimental.optical_ray_projection")
+register("ParahippocampalContextEngine", "hbllm.hcir.world.experimental.parahippocampal_context")
+register(
+    "HippocampalPhasePrecessionEngine", "hbllm.hcir.world.experimental.hippocampal_phase_precession"
+)
 register("PointActuationAffordanceLearner", "hbllm.hcir.world.autonomous_learning")
-register("ParietalPotentialFieldNavigator", "hbllm.hcir.world.parietal_potential_field")
-register("PedunculopontineLocomotorEngine", "hbllm.hcir.world.pedunculopontine_locomotor")
-register("VentralPremotorAffordanceResonator", "hbllm.hcir.world.ventral_premotor_resonator")
-register("PulvinarAttentionRouter", "hbllm.hcir.world.pulvinar_attention_router")
-register("RetrosplenialLandmarkAnchorEngine", "hbllm.hcir.world.retrosplenial_landmark_anchor")
-register("RetrosplenialHeadingEngine", "hbllm.hcir.world.retrosplenial_heading")
+register(
+    "PedunculopontineLocomotorEngine", "hbllm.hcir.world.experimental.pedunculopontine_locomotor"
+)
+register(
+    "VentralPremotorAffordanceResonator", "hbllm.hcir.world.experimental.ventral_premotor_resonator"
+)
+register("PulvinarAttentionRouter", "hbllm.hcir.world.experimental.pulvinar_attention_router")
+register(
+    "RetrosplenialLandmarkAnchorEngine",
+    "hbllm.hcir.world.experimental.retrosplenial_landmark_anchor",
+)
+register("RetrosplenialHeadingEngine", "hbllm.hcir.world.experimental.retrosplenial_heading")
 register("RetrosplenialCoordinateTransformer", "hbllm.hcir.world.parietal_coordinate_transform")
-register("DorsolateralRuleAbstractionEngine", "hbllm.hcir.world.dorsolateral_rule_abstraction")
-register("InferotemporalShapeHasher", "hbllm.hcir.world.inferotemporal_shape_hasher")
+register(
+    "DorsolateralRuleAbstractionEngine",
+    "hbllm.hcir.world.experimental.dorsolateral_rule_abstraction",
+)
 register("SkillProgramSynthesizer", "hbllm.hcir.world.skill_program_synthesizer")
-register("VentromedialSomaticMarkerEngine", "hbllm.hcir.world.ventromedial_somatic_marker")
-register("SomatosensoryHapticEngine", "hbllm.hcir.world.somatosensory_haptic")
-register("SubthalamicThresholdEscalator", "hbllm.hcir.world.subthalamic_threshold_escalator")
-register("SubicularBoundaryVectorEngine", "hbllm.hcir.world.subicular_boundary_vector")
-register("SuperiorColliculusTargetArbiter", "hbllm.hcir.world.superior_colliculus_arbiter")
-register("SuperpositionPlanner", "hbllm.hcir.world.superposition_planner")
-register("LateralPrefrontalTaskSwitcher", "hbllm.hcir.world.lateral_prefrontal_switcher")
-register("ThalamicReticularGatingEngine", "hbllm.hcir.world.thalamic_reticular_gating")
-register("DualValueOpponencyCortex", "hbllm.hcir.world.habenula_striatum_opponency")
-register("VentrolateralMotorInhibitionEngine", "hbllm.hcir.world.ventrolateral_motor_inhibition")
-register("VentralTegmentalCuriosityEngine", "hbllm.hcir.world.ventral_tegmental_curiosity")
-register("GlobalWorkspaceIgnitionEngine", "hbllm.hcir.world.global_workspace_ignition")
-register("GlobalNeuronalWorkspace", "hbllm.hcir.world.global_neuronal_workspace")
-register("ThalamocorticalBindingEngine", "hbllm.hcir.world.thalamocortical_binding")
-register("EntorhinalGridCortex", "hbllm.hcir.world.entorhinal_grid_cortex")
-register("VentralRelationalGraphMatcher", "hbllm.hcir.world.relational_graph_matcher")
-register("RelationalGraphMatcher", "hbllm.hcir.world.relational_graph_matcher")
+register(
+    "VentromedialSomaticMarkerEngine", "hbllm.hcir.world.experimental.ventromedial_somatic_marker"
+)
+register("SomatosensoryHapticEngine", "hbllm.hcir.world.experimental.somatosensory_haptic")
+register(
+    "SubthalamicThresholdEscalator", "hbllm.hcir.world.experimental.subthalamic_threshold_escalator"
+)
+register("SubicularBoundaryVectorEngine", "hbllm.hcir.world.experimental.subicular_boundary_vector")
+register(
+    "SuperiorColliculusTargetArbiter", "hbllm.hcir.world.experimental.superior_colliculus_arbiter"
+)
+register("SuperpositionPlanner", "hbllm.hcir.world.experimental.superposition_planner")
+register(
+    "LateralPrefrontalTaskSwitcher", "hbllm.hcir.world.experimental.lateral_prefrontal_switcher"
+)
+register("ThalamicReticularGatingEngine", "hbllm.hcir.world.experimental.thalamic_reticular_gating")
+register(
+    "VentrolateralMotorInhibitionEngine",
+    "hbllm.hcir.world.experimental.ventrolateral_motor_inhibition",
+)
+register(
+    "VentralTegmentalCuriosityEngine", "hbllm.hcir.world.experimental.ventral_tegmental_curiosity"
+)
+register("GlobalWorkspaceIgnitionEngine", "hbllm.hcir.world.experimental.global_workspace_ignition")
+register("GlobalNeuronalWorkspace", "hbllm.hcir.world.experimental.global_neuronal_workspace")
+register("ThalamocorticalBindingEngine", "hbllm.hcir.world.experimental.thalamocortical_binding")
+register("EntorhinalGridCortex", "hbllm.hcir.world.experimental.entorhinal_grid_cortex")
+register("VentralRelationalGraphMatcher", "hbllm.hcir.world.experimental.relational_graph_matcher")
+register("RelationalGraphMatcher", "hbllm.hcir.world.experimental.relational_graph_matcher")
 
 
 def restore(obj, name: str) -> bool:

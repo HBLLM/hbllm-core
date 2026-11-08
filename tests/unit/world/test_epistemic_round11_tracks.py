@@ -21,13 +21,13 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.frontopolar_exploration_horizon import (
+from hbllm.hcir.world.experimental.frontopolar_exploration_horizon import (
     FrontopolarExplorationHorizonEngine,
 )
-from hbllm.hcir.world.hippocampal_phase_precession import (
+from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
     HippocampalPhasePrecessionEngine,
 )
-from hbllm.hcir.world.superior_colliculus_arbiter import (
+from hbllm.hcir.world.experimental.superior_colliculus_arbiter import (
     MultisensoryPriorityMap,
     SaccadeTarget,
     SuperiorColliculusTargetArbiter,

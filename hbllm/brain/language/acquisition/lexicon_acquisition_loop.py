@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from hbllm.brain.concepts.grounded_concept_registry import GroundedConceptRegistry
 from hbllm.brain.language.acquisition.contrastive_learner import ContrastiveLearner
 from hbllm.brain.language.acquisition.cross_situational_learner import CrossSituationalLearner
 from hbllm.brain.language.acquisition.grounded_lexicon import (
@@ -25,6 +24,7 @@ from hbllm.brain.language.acquisition.lexical_hypothesis import (
 )
 from hbllm.brain.language.acquisition.ostensive_teacher import OstensiveTeacher
 from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
 
 logger = logging.getLogger(__name__)
 

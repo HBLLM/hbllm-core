@@ -20,16 +20,16 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
+from hbllm.hcir.world.experimental.locus_coeruleus_noradrenaline import (
     ExplorationRegime,
     LocusCoeruleusNoradrenalineEngine,
 )
-from hbllm.hcir.world.parahippocampal_context import (
+from hbllm.hcir.world.experimental.parahippocampal_context import (
     ContextTransitionEvent,
     ParahippocampalContextEngine,
     SpatialContextSchema,
 )
-from hbllm.hcir.world.somatosensory_haptic import (
+from hbllm.hcir.world.experimental.somatosensory_haptic import (
     HapticAffordanceFeedback,
     SomatosensoryHapticEngine,
 )

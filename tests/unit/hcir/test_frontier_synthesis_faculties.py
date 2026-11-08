@@ -25,11 +25,11 @@ from hbllm.hcir.workspace_tiers import (
     TieredWorkspace,
 )
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.entorhinal_grid_cortex import (
+from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.entorhinal_grid_cortex import (
     EntorhinalGridCortex,
     PlaceFieldRepresentation,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
     MetacognitiveAssessment,

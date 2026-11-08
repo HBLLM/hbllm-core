@@ -303,27 +303,34 @@ async def get_epistemics_status(request: Request) -> dict[str, Any]:
 
 @router.get("/studio/epistemics/contradictions")
 async def get_contradictions(request: Request) -> dict[str, Any]:
-    """Return recent contradiction reports detected by ContradictionEngine."""
+    """Return recent contradiction reports from the HCIR Cognitive Graph."""
     workspace = _get_tiered_workspace()
     reports = []
 
     if workspace is not None and hasattr(workspace, "brain"):
         try:
-            from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
+            from hbllm.hcir.graph import HCIREdgeType
 
-            engine = ContradictionEngine(graph=workspace.brain)
-            detected = await engine.scan_for_contradictions()
-            for r in detected[:20]:
-                reports.append(
-                    {
-                        "claim_a_id": r.claim_a_id,
-                        "claim_b_id": r.claim_b_id,
-                        "contradiction_type": r.contradiction_type,
-                        "investigation_priority": r.investigation_priority,
-                        "context": r.context,
-                        "timestamp": getattr(r, "timestamp", time.time()),
-                    }
-                )
+            graph = workspace.brain
+            edges = getattr(graph, "edges", {})
+            if isinstance(edges, dict):
+                for e in list(edges.values())[:50]:
+                    edge_type = getattr(e, "edge_type", None)
+                    if edge_type == HCIREdgeType.CONTRADICTS or str(edge_type) == "contradicts":
+                        reports.append(
+                            {
+                                "claim_a_id": e.source_id,
+                                "claim_b_id": e.target_id,
+                                "contradiction_type": e.metadata.get(
+                                    "contradiction_type", "belief_conflict"
+                                ),
+                                "investigation_priority": e.metadata.get("priority", 1.0),
+                                "context": e.metadata.get("context", ""),
+                                "timestamp": e.metadata.get("timestamp", time.time()),
+                            }
+                        )
+                        if len(reports) >= 20:
+                            break
         except Exception as e:
             logger.debug("[Studio] Live contradiction scan failed: %s", e)
 
@@ -342,11 +349,17 @@ async def trigger_contradiction_scan(request: Request) -> dict[str, Any]:
 
     if workspace is not None and hasattr(workspace, "brain"):
         try:
-            from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
+            from hbllm.hcir.graph import HCIREdgeType
 
-            engine = ContradictionEngine(graph=workspace.brain)
-            detected = await engine.scan_for_contradictions()
-            count = len(detected)
+            graph = workspace.brain
+            edges = getattr(graph, "edges", {})
+            if isinstance(edges, dict):
+                count = sum(
+                    1
+                    for e in edges.values()
+                    if getattr(e, "edge_type", None) == HCIREdgeType.CONTRADICTS
+                    or str(getattr(e, "edge_type", "")) == "contradicts"
+                )
         except Exception as e:
             logger.warning("[Studio] On-demand contradiction scan failed: %s", e)
 

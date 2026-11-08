@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
 from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
 from hbllm.brain.epistemics.workspace import DiscoveryWorkspace
@@ -48,12 +47,6 @@ def memory(tmp_dir: str) -> Generator[EpistemicMemory, None, None]:
     mem = EpistemicMemory(data_dir=tmp_dir)
     yield mem
     mem.close()
-
-
-@pytest.fixture
-def calibrator(memory: EpistemicMemory) -> EpistemicCalibrationEngine:
-    """Calibration engine wired to memory."""
-    return EpistemicCalibrationEngine(memory=memory)
 
 
 @pytest.fixture

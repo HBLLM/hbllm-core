@@ -13,7 +13,7 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
-from hbllm.hcir.world.global_workspace_ignition import (
+from hbllm.hcir.world.experimental.global_workspace_ignition import (
     CandidateIgnitionSignal,
     GlobalWorkspaceIgnitionEngine,
 )

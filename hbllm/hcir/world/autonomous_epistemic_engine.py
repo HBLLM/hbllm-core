@@ -22,198 +22,200 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.active_inference import HierarchicalActiveInferenceEngine
-    from hbllm.hcir.world.active_inference_efe import (
-        ExpectedFreeEnergyEvaluator,
-        ExpectedFreeEnergyScore,
-    )
-    from hbllm.hcir.world.amygdalar_threat_conditioning import (
-        AmygdalarThreatConditioningEngine,
-        ConditionedThreatStimulus,
-        DefensiveVigilanceState,
-    )
-    from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
-        AnteriorCingulateEffortAllocator,
-        EffortAllocationDecision,
-    )
-    from hbllm.hcir.world.anterior_insular_timing import (
-        AnteriorInsularTimingEngine,
-        InteroceptivePacingState,
-    )
     from hbllm.hcir.world.autonomous_learning import PointActuationAffordanceLearner
-    from hbllm.hcir.world.bilateral_coordination import (
-        BilateralCoordinateIntegrator,
-        BilateralState,
-    )
-    from hbllm.hcir.world.boundary_grid_phase_aligner import BoundaryGridPhaseAligner
-    from hbllm.hcir.world.cerebellar_microzone_adaptor import (
-        CerebellarMicrozoneAdaptor,
-        ClimbingFiberFeedback,
-    )
-    from hbllm.hcir.world.claustrum_interhemispheric import (
-        ClaustrumInterhemisphericIntegrator,
-        CrossModalSynchronyPacket,
-    )
-    from hbllm.hcir.world.claustrum_salience_conductor import (
-        ClaustrumSalienceConductor,
-        UnifiedPerceptualGestalt,
-    )
-    from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
     from hbllm.hcir.world.cortex_episodic import FalsifiableAnalogyEngine
     from hbllm.hcir.world.cortex_perception import GibsonianAffordanceExtractor
     from hbllm.hcir.world.counterfactual_simulation import (
         CounterfactualComparison,
         CounterfactualRegretEvaluator,
     )
-    from hbllm.hcir.world.dorsolateral_rule_abstraction import (
+    from hbllm.hcir.world.experimental.active_inference_efe import (
+        ExpectedFreeEnergyEvaluator,
+        ExpectedFreeEnergyScore,
+    )
+    from hbllm.hcir.world.experimental.amygdalar_threat_conditioning import (
+        AmygdalarThreatConditioningEngine,
+        ConditionedThreatStimulus,
+        DefensiveVigilanceState,
+    )
+    from hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator import (
+        AnteriorCingulateEffortAllocator,
+        EffortAllocationDecision,
+    )
+    from hbllm.hcir.world.experimental.anterior_insular_timing import (
+        AnteriorInsularTimingEngine,
+        InteroceptivePacingState,
+    )
+    from hbllm.hcir.world.experimental.bilateral_coordination import (
+        BilateralCoordinateIntegrator,
+        BilateralState,
+    )
+    from hbllm.hcir.world.experimental.boundary_grid_phase_aligner import BoundaryGridPhaseAligner
+    from hbllm.hcir.world.experimental.cerebellar_microzone_adaptor import (
+        CerebellarMicrozoneAdaptor,
+        ClimbingFiberFeedback,
+    )
+    from hbllm.hcir.world.experimental.claustrum_interhemispheric import (
+        ClaustrumInterhemisphericIntegrator,
+        CrossModalSynchronyPacket,
+    )
+    from hbllm.hcir.world.experimental.claustrum_salience_conductor import (
+        ClaustrumSalienceConductor,
+        UnifiedPerceptualGestalt,
+    )
+    from hbllm.hcir.world.experimental.confidence_calibrator import ConfidenceCalibrator
+    from hbllm.hcir.world.experimental.dorsolateral_rule_abstraction import (
         DorsolateralRuleAbstractionEngine,
         RuleTransferResult,
     )
-    from hbllm.hcir.world.entorhinal_border_cell import (
+    from hbllm.hcir.world.experimental.entorhinal_border_cell import (
         EntorhinalBorderCellEngine,
         GridModuleRescalingResult,
     )
-    from hbllm.hcir.world.entorhinal_grid_cortex import EntorhinalGridCortex
-    from hbllm.hcir.world.frontopolar_exploration_horizon import (
+    from hbllm.hcir.world.experimental.entorhinal_grid_cortex import EntorhinalGridCortex
+    from hbllm.hcir.world.experimental.frontopolar_exploration_horizon import (
         BranchSwitchDecision,
         FrontopolarExplorationHorizonEngine,
     )
-    from hbllm.hcir.world.global_neuronal_workspace import (
+    from hbllm.hcir.world.experimental.global_neuronal_workspace import (
         GlobalNeuronalWorkspace,
         IgnitionEvent,
     )
-    from hbllm.hcir.world.global_workspace_ignition import GlobalWorkspaceIgnitionEngine
-    from hbllm.hcir.world.habenula_striatum_opponency import (
+    from hbllm.hcir.world.experimental.global_workspace_ignition import (
+        GlobalWorkspaceIgnitionEngine,
+    )
+    from hbllm.hcir.world.experimental.habenula_striatum_opponency import (
         DualValueOpponencyCortex,
         OpponencyValueState,
     )
-    from hbllm.hcir.world.hippocampal_phase_precession import (
+    from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
         HippocampalPhasePrecessionEngine,
         PhasePrecessionBurst,
     )
-    from hbllm.hcir.world.hippocampal_replay import (
+    from hbllm.hcir.world.experimental.hippocampal_replay import (
         HippocampalPrioritizedReplayBuffer,
         ReplayBatch,
         ReplayTransition,
     )
-    from hbllm.hcir.world.hippocampal_time_cell import (
+    from hbllm.hcir.world.experimental.hippocampal_time_cell import (
         HippocampalTimeCellEngine,
         TimeIntervalState,
     )
-    from hbllm.hcir.world.inferotemporal_shape_hasher import (
+    from hbllm.hcir.world.experimental.inferotemporal_shape_hasher import (
         InferotemporalShapeHasher,
         ShapeArchetypeSignature,
     )
-    from hbllm.hcir.world.insula_allostasis import (
+    from hbllm.hcir.world.experimental.insula_allostasis import (
         InteroceptiveAllostasisCortex,
         InteroceptiveState,
     )
-    from hbllm.hcir.world.lateral_prefrontal_switcher import (
+    from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
         LateralPrefrontalTaskSwitcher,
         TaskArbitrationResult,
     )
-    from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
+    from hbllm.hcir.world.experimental.locus_coeruleus_noradrenaline import (
         LocusCoeruleusNoradrenalineEngine,
         NoradrenergicState,
     )
-    from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
-    from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
-    from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+    from hbllm.hcir.world.experimental.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
+    from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
+    from hbllm.hcir.world.experimental.orbitofrontal_credit_assignment import (
         CounterfactualCreditReport,
         OrbitofrontalCreditAssignmentEngine,
     )
-    from hbllm.hcir.world.parahippocampal_context import (
+    from hbllm.hcir.world.experimental.parahippocampal_context import (
         ParahippocampalContextEngine,
         SpatialContextSchema,
+    )
+    from hbllm.hcir.world.experimental.parietal_foveated_attention import (
+        FoveatedSaliencyMap,
+        ParietalFoveatedAttentionEngine,
+    )
+    from hbllm.hcir.world.experimental.parietal_potential_field import (
+        ParietalPotentialFieldNavigator,
+        PotentialFieldVector,
+    )
+    from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
+        LocomotorDriveCommand,
+        PedunculopontineLocomotorEngine,
+    )
+    from hbllm.hcir.world.experimental.prefrontal_blame_attribution import (
+        PlanAttributionReport,
+        PrefrontalBlameAttributor,
+    )
+    from hbllm.hcir.world.experimental.pulvinar_attention_router import (
+        PulvinarAttentionRouter,
+        PulvinarRoutingState,
+    )
+    from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        ObjectCorrespondence,
+    )
+    from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        RelationalGraphMatcher as VentralRelationalGraphMatcher,
+    )
+    from hbllm.hcir.world.experimental.retrosplenial_heading import (
+        AllocentricHeadingVector,
+        RetrosplenialHeadingEngine,
+    )
+    from hbllm.hcir.world.experimental.retrosplenial_landmark_anchor import (
+        LandmarkRecalibrationResult,
+        RetrosplenialLandmarkAnchorEngine,
+    )
+    from hbllm.hcir.world.experimental.somatosensory_haptic import (
+        HapticAffordanceFeedback,
+        SomatosensoryHapticEngine,
+    )
+    from hbllm.hcir.world.experimental.spatial_distance_transform import (
+        EuclideanDistanceTransformResult,
+        SpatialDistanceTransformEngine,
+    )
+    from hbllm.hcir.world.experimental.subicular_boundary_vector import (
+        BoundaryVectorMap,
+        SubicularBoundaryVectorEngine,
+    )
+    from hbllm.hcir.world.experimental.subthalamic_drift_diffusion import (
+        DriftDiffusionDecision,
+        SubthalamicDriftDiffusionEngine,
+    )
+    from hbllm.hcir.world.experimental.subthalamic_threshold_escalator import (
+        SubthalamicThresholdEscalator,
+    )
+    from hbllm.hcir.world.experimental.superior_colliculus_arbiter import (
+        SaccadeTarget,
+        SuperiorColliculusTargetArbiter,
+    )
+    from hbllm.hcir.world.experimental.superposition_planner import (
+        SuperpositionEvaluationResult,
+        SuperpositionPlanner,
+    )
+    from hbllm.hcir.world.experimental.thalamic_reticular_gating import (
+        SensoryShieldingState,
+        ThalamicReticularGatingEngine,
+    )
+    from hbllm.hcir.world.experimental.thalamocortical_binding import (
+        BoundFeatureBundle,
+        ThalamocorticalBindingEngine,
+    )
+    from hbllm.hcir.world.experimental.ventral_premotor_resonator import (
+        AffordanceResonancePattern,
+        VentralPremotorAffordanceResonator,
+    )
+    from hbllm.hcir.world.experimental.ventral_tegmental_curiosity import (
+        EpistemicInformationGain,
+        VentralTegmentalCuriosityEngine,
+    )
+    from hbllm.hcir.world.experimental.ventrolateral_motor_inhibition import (
+        ResponseInhibitionCommand,
+        VentrolateralMotorInhibitionEngine,
+    )
+    from hbllm.hcir.world.experimental.ventromedial_somatic_marker import (
+        SomaticAffectiveBias,
+        VentromedialSomaticMarkerEngine,
     )
     from hbllm.hcir.world.parietal_coordinate_transform import (
         RetrosplenialCoordinateTransformer,
     )
-    from hbllm.hcir.world.parietal_foveated_attention import (
-        FoveatedSaliencyMap,
-        ParietalFoveatedAttentionEngine,
-    )
-    from hbllm.hcir.world.parietal_potential_field import (
-        ParietalPotentialFieldNavigator,
-        PotentialFieldVector,
-    )
-    from hbllm.hcir.world.pedunculopontine_locomotor import (
-        LocomotorDriveCommand,
-        PedunculopontineLocomotorEngine,
-    )
-    from hbllm.hcir.world.prefrontal_blame_attribution import (
-        PlanAttributionReport,
-        PrefrontalBlameAttributor,
-    )
-    from hbllm.hcir.world.pulvinar_attention_router import (
-        PulvinarAttentionRouter,
-        PulvinarRoutingState,
-    )
-    from hbllm.hcir.world.relational_graph_matcher import (
-        ObjectCorrespondence,
-    )
-    from hbllm.hcir.world.relational_graph_matcher import (
-        RelationalGraphMatcher as VentralRelationalGraphMatcher,
-    )
-    from hbllm.hcir.world.retrosplenial_heading import (
-        AllocentricHeadingVector,
-        RetrosplenialHeadingEngine,
-    )
-    from hbllm.hcir.world.retrosplenial_landmark_anchor import (
-        LandmarkRecalibrationResult,
-        RetrosplenialLandmarkAnchorEngine,
-    )
     from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
-    from hbllm.hcir.world.somatosensory_haptic import (
-        HapticAffordanceFeedback,
-        SomatosensoryHapticEngine,
-    )
-    from hbllm.hcir.world.spatial_distance_transform import (
-        EuclideanDistanceTransformResult,
-        SpatialDistanceTransformEngine,
-    )
-    from hbllm.hcir.world.subicular_boundary_vector import (
-        BoundaryVectorMap,
-        SubicularBoundaryVectorEngine,
-    )
-    from hbllm.hcir.world.subthalamic_drift_diffusion import (
-        DriftDiffusionDecision,
-        SubthalamicDriftDiffusionEngine,
-    )
-    from hbllm.hcir.world.subthalamic_threshold_escalator import (
-        SubthalamicThresholdEscalator,
-    )
-    from hbllm.hcir.world.superior_colliculus_arbiter import (
-        SaccadeTarget,
-        SuperiorColliculusTargetArbiter,
-    )
-    from hbllm.hcir.world.superposition_planner import (
-        SuperpositionEvaluationResult,
-        SuperpositionPlanner,
-    )
-    from hbllm.hcir.world.thalamic_reticular_gating import (
-        SensoryShieldingState,
-        ThalamicReticularGatingEngine,
-    )
-    from hbllm.hcir.world.thalamocortical_binding import (
-        BoundFeatureBundle,
-        ThalamocorticalBindingEngine,
-    )
-    from hbllm.hcir.world.ventral_premotor_resonator import (
-        AffordanceResonancePattern,
-        VentralPremotorAffordanceResonator,
-    )
-    from hbllm.hcir.world.ventral_tegmental_curiosity import (
-        EpistemicInformationGain,
-        VentralTegmentalCuriosityEngine,
-    )
-    from hbllm.hcir.world.ventrolateral_motor_inhibition import (
-        ResponseInhibitionCommand,
-        VentrolateralMotorInhibitionEngine,
-    )
-    from hbllm.hcir.world.ventromedial_somatic_marker import (
-        SomaticAffectiveBias,
-        VentromedialSomaticMarkerEngine,
-    )
     from hbllm.hcir.world_kernel import WorldKernel
 
 import uuid

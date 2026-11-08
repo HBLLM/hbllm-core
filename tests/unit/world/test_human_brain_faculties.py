@@ -37,6 +37,10 @@ from hbllm.hcir.world.cortex_motor import (
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.optical_ray_projection import (
+    MirrorOrientation,
+    OpticalRayProjector,
+)
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
@@ -46,10 +50,6 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.kinetic_stream import KineticEntity
-from hbllm.hcir.world.optical_ray_projection import (
-    MirrorOrientation,
-    OpticalRayProjector,
-)
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 from hbllm.hcir.world.spatiotemporal_tracker import DynamicCellPhase, SpatiotemporalHazardTracker
@@ -1275,7 +1275,7 @@ class TestPhase25CognitiveBridgeCausalAndTransactions:
         assert len(acc_ops) == 2
 
     def test_bilateral_coordination_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.bilateral_coordination import (
+        from hbllm.hcir.world.experimental.bilateral_coordination import (
             BilateralCoordinateIntegrator,
             BilateralState,
             SymmetryAxis,
@@ -1591,13 +1591,13 @@ class TestPhase27CognitiveBridgeCausalAndTransactions:
         assert pop_ops[0].node_id == "op_geodesic_test_op"
 
     def test_relational_graph_matcher_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.inferotemporal_segmentation import VentralObjectToken
-        from hbllm.hcir.world.relational_graph_matcher import (
+        from hbllm.hcir.world.experimental.relational_graph_matcher import (
             ObjectCorrespondence,
             ObjectGraph,
             RelationalEdge,
             SpatialRelation,
         )
+        from hbllm.hcir.world.inferotemporal_segmentation import VentralObjectToken
 
         edge = RelationalEdge(
             source_id=1,

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from hbllm.brain.concepts.grounded_concept_registry import GroundedConceptRegistry
 from hbllm.brain.language.acquisition.lexical_hypothesis import (
     EvidenceSourceType,
     LexicalEvidence,
@@ -17,6 +16,7 @@ from hbllm.brain.language.acquisition.lexical_hypothesis import (
 )
 from hbllm.brain.language.acquisition.scoring import apply_evidence_to_candidate
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
+from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
 
 
 class CrossSituationalLearner:

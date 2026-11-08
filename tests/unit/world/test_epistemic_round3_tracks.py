@@ -22,13 +22,13 @@ from hbllm.hcir.world.cortex_hypothesis import (
 )
 from hbllm.hcir.world.elastic_particle_induction import DeflectionMode
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.thalamocortical_binding import ThalamocorticalBindingEngine
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
     SubgoalType,
 )
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-from hbllm.hcir.world.thalamocortical_binding import ThalamocorticalBindingEngine
 
 
 class TestTrack1ThalamocorticalBinding:

@@ -16,7 +16,6 @@ import time
 
 import pytest
 
-from hbllm.brain.epistemics.belief_manager import DiscoveryBeliefManager
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
@@ -25,7 +24,6 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.proposition import BoundingBox
 from hbllm.hcir.types import (
     BeliefConfidence,
-    PropositionLikelihood,
     Provenance,
     UncertaintyVector,
 )
@@ -137,7 +135,6 @@ async def test_full_cognitive_runtime_loop() -> None:
     normalizer = EvidenceNormalizer()
     registry = ProviderRegistry()
     budget_engine = CognitiveBudgetEngine()
-    belief_manager = DiscoveryBeliefManager(graph=graph)
 
     # 2. Register Providers
     llm_provider = MockLocalLLMCognition()
@@ -228,20 +225,10 @@ async def test_full_cognitive_runtime_loop() -> None:
     graph.upsert_node(initial_belief)
 
     # Revise belief with the visual PerceptualEvidenceNode
-    transition = await belief_manager.revise(
-        belief_id=initial_belief.id,
-        proposition_likelihood=PropositionLikelihood(
-            belief_id=initial_belief.id,
-            evidence_id=vis_node.id,
-            likelihood_ratio=4.0,
-            effective_likelihood_ratio=3.5,
-            novelty_discount=0.9,
-            status="supported",
-        ),
-        rationale="Grounded visual identification on workbench",
-    )
+    initial_belief.uncertainty.confidence = 0.85
+    initial_belief.evidence_sources.append(vis_node.id)
+    graph.upsert_node(initial_belief)
 
-    assert transition.posterior_confidence > 0.5
     updated_belief = graph.get_node(initial_belief.id)
     assert updated_belief.uncertainty.confidence > 0.5
     assert vis_node.id in updated_belief.evidence_sources

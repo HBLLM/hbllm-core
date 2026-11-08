@@ -20,18 +20,18 @@ from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
-from hbllm.hcir.world.dorsolateral_rule_abstraction import (
+from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.dorsolateral_rule_abstraction import (
     AbstractRuleSchema,
     DorsolateralRuleAbstractionEngine,
     RuleTransferResult,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.retrosplenial_heading import (
+from hbllm.hcir.world.experimental.retrosplenial_heading import (
     AllocentricHeadingVector,
     HeadDirectionAttractorState,
     RetrosplenialHeadingEngine,
 )
-from hbllm.hcir.world.thalamic_reticular_gating import (
+from hbllm.hcir.world.experimental.thalamic_reticular_gating import (
     SensoryShieldingState,
     ThalamicReticularGatingEngine,
 )

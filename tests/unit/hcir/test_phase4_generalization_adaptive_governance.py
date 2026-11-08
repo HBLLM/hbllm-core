@@ -29,9 +29,6 @@ from hbllm.hcir.world.capability_evidence import (
     IntegrationStatus,
     UnitTestStatus,
 )
-from hbllm.hcir.world.confidence_calibrator import (
-    ConfidenceCalibrator,
-)
 from hbllm.hcir.world.cortex_episodic import (
     DualStoreConsolidationEngine,
     FalsifiableAnalogyEngine,
@@ -46,6 +43,12 @@ from hbllm.hcir.world.disagreement_analyzer import (
     PredictorDisagreementAnalyzer,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.confidence_calibrator import (
+    ConfidenceCalibrator,
+)
+from hbllm.hcir.world.experimental.relational_graph_matcher import (
+    RelationalGraphMatcher as SceneGraphMatcher,
+)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     ComputationBudget,
     ComputationBudgetAllocator,
@@ -56,9 +59,6 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.predictors.whole_grid import (
     DimensionMode,
     WholeGridPredictor,
-)
-from hbllm.hcir.world.relational_graph_matcher import (
-    RelationalGraphMatcher as SceneGraphMatcher,
 )
 from hbllm.hcir.world.representation_expansion import (
     ConceptFormationEngine,

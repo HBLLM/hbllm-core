@@ -22,16 +22,16 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.pulvinar_attention_router import (
+from hbllm.hcir.world.experimental.pulvinar_attention_router import (
     PulvinarAttentionRouter,
     PulvinarRoutingState,
 )
-from hbllm.hcir.world.subicular_boundary_vector import (
+from hbllm.hcir.world.experimental.subicular_boundary_vector import (
     BoundaryVectorCell,
     BoundaryVectorMap,
     SubicularBoundaryVectorEngine,
 )
-from hbllm.hcir.world.ventromedial_somatic_marker import (
+from hbllm.hcir.world.experimental.ventromedial_somatic_marker import (
     SomaticAffectiveBias,
     VentromedialSomaticMarkerEngine,
 )

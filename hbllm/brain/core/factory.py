@@ -1501,14 +1501,12 @@ class BrainFactory:
         _autonomous_learner_ref = None  # Will be wired to GoalManager later
         if cfg.inject_autonomous_learning:
             try:
-                from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
                 from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer
                 from hbllm.brain.learning.autonomous_learner import AutonomousLearner
                 from hbllm.brain.learning.experiment_engine import ExperimentEngine
                 from hbllm.brain.learning.learning_subsystem import CognitiveGraph
                 from hbllm.brain.learning.meta_learner import MetaLearner
                 from hbllm.brain.reasoning.belief_store import BeliefStore
-                from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
                 from hbllm.brain.reasoning.contradiction_detector import (
                     BeliefRevisionEngine,
                     ContradictionDetector,
@@ -1520,11 +1518,7 @@ class BrainFactory:
                 mechanism_store = skills.mechanism_store if skills is not None else None
 
                 # Build learning subsystems
-                causal_builder = CausalModelBuilder(
-                    llm=llm,
-                    mechanism_store=mechanism_store,
-                    data_dir=learning_data_dir,
-                )
+                causal_builder = None
                 experiment_engine = ExperimentEngine(
                     llm=llm,
                     data_dir=learning_data_dir,
@@ -1532,16 +1526,10 @@ class BrainFactory:
                 contradiction_detector = ContradictionDetector(llm=llm)
                 belief_engine = BeliefRevisionEngine(data_dir=learning_data_dir)
                 meta_learner = MetaLearner(data_dir=learning_data_dir)
-                concept_engine = ConceptFormationEngine(
-                    llm=llm,
-                    causal_model_builder=causal_builder,
-                    mechanism_store=mechanism_store,
-                    belief_store=BeliefStore(data_dir=learning_data_dir),
-                    data_dir=learning_data_dir,
-                )
+                concept_engine = None
 
-                # Persistent belief storage (Phase 3) — use same instance
-                belief_store = concept_engine.belief_store
+                # Persistent belief storage (Phase 3)
+                belief_store = BeliefStore(data_dir=learning_data_dir)
 
                 # Build shared CognitiveGraph (was LearningSubsystem)
                 learning_subsystem = CognitiveGraph(

@@ -20,10 +20,6 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
 )
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.anterior_insular_timing import (
-    AnteriorInsularTimingEngine,
-    PacingMode,
-)
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
@@ -31,10 +27,14 @@ from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+from hbllm.hcir.world.experimental.anterior_insular_timing import (
+    AnteriorInsularTimingEngine,
+    PacingMode,
+)
+from hbllm.hcir.world.experimental.orbitofrontal_credit_assignment import (
     OrbitofrontalCreditAssignmentEngine,
 )
-from hbllm.hcir.world.pedunculopontine_locomotor import (
+from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
     LocomotorPacingRegime,
     PedunculopontineLocomotorEngine,
 )

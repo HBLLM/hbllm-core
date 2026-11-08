@@ -426,15 +426,3 @@ class TestRiskSimulation:
         from hbllm.brain.simulation.risk import RiskProfile
 
         assert RiskProfile is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# brain/causality/causal_memory.py
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestCausalMemory:
-    def test_import(self):
-        from hbllm.brain.causality import causal_memory
-
-        assert causal_memory is not None

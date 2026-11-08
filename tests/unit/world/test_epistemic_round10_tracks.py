@@ -16,16 +16,16 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.hippocampal_replay import (
+from hbllm.hcir.world.experimental.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
     ReplayTransition,
 )
-from hbllm.hcir.world.lateral_prefrontal_switcher import (
+from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
     CognitiveTaskSet,
     LateralPrefrontalTaskSwitcher,
 )
-from hbllm.hcir.world.retrosplenial_landmark_anchor import (
+from hbllm.hcir.world.experimental.retrosplenial_landmark_anchor import (
     LandmarkRecalibrationResult,
     RetrosplenialLandmarkAnchorEngine,
 )

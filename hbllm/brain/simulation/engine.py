@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from hbllm.brain.autonomy.task_graph import Goal, TaskNode
-from hbllm.brain.causality.causal_graph import CausalGraph
 from hbllm.brain.core.cognitive_state import CognitiveState
 from hbllm.brain.simulation.models import CounterfactualScenario, PredictionOrigin
 from hbllm.brain.simulation.projector import ProjectedState
@@ -185,7 +184,7 @@ class LayeredSimulationEngine:
 class ConsequenceEstimator:
     """Estimates consequences of an action via rules, empirical data, or speculation."""
 
-    def __init__(self, causal_graph: CausalGraph) -> None:
+    def __init__(self, causal_graph: Any = None) -> None:
         self.causal_graph = causal_graph
         self.speculative_calls_this_hour = 0
 
@@ -235,7 +234,10 @@ class PredictiveSimulationEngine:
     """Core engine for tiered future simulation."""
 
     def __init__(
-        self, world_state: WorldStateEngine, causal_graph: CausalGraph, risk_engine: RiskEngine
+        self,
+        world_state: WorldStateEngine,
+        causal_graph: Any = None,
+        risk_engine: RiskEngine | None = None,
     ) -> None:
         self.world_state = world_state
         self.estimator = ConsequenceEstimator(causal_graph)

@@ -44,26 +44,14 @@ Design principles:
     6. The system reasons about how it reasons (meta-cognition).
 """
 
-# ── Wave 1: Epistemic Foundations ──────────────────────────────────────
-from hbllm.brain.epistemics.belief_manager import DiscoveryBeliefManager
-
-# ── Wave 3: Meta-Cognition ────────────────────────────────────────────
-from hbllm.brain.epistemics.calibration import EpistemicCalibrationEngine
-
 # ── Wave 2: Epistemic Engines ─────────────────────────────────────────
-from hbllm.brain.epistemics.contradiction_engine import ContradictionEngine
 from hbllm.brain.epistemics.counterfactual import CounterfactualReasoner
 from hbllm.brain.epistemics.curiosity_engine import CuriosityEngine
-from hbllm.brain.epistemics.epistemic_loop import EpistemicLoop
 from hbllm.brain.epistemics.epistemic_memory import EpistemicMemory
-from hbllm.brain.epistemics.evidence_evaluator import EvidenceEvaluator
 from hbllm.brain.epistemics.experiment_planner import ExperimentPlanner
 from hbllm.brain.epistemics.explanation import ExplanationEngine
 from hbllm.brain.epistemics.hypothesis_builder import HypothesisBuilder
 from hbllm.brain.epistemics.idea_generator import IdeaGenerator
-
-# ── Wave 4: Integration ──────────────────────────────────────────
-from hbllm.brain.epistemics.integration import wire_epistemics
 
 # ── Protocols ──────────────────────────────────────────────────────────
 from hbllm.brain.epistemics.interfaces import (
@@ -118,8 +106,6 @@ __all__ = [
     # ── Wave 2: Engines ────────────────────────────────────────────
     "ContradictionEngine",
     "CuriosityEngine",
-    "EpistemicLoop",
-    "EvidenceEvaluator",
     "ExperimentPlanner",
     "ExplanationEngine",
     "HypothesisBuilder",
@@ -128,11 +114,8 @@ __all__ = [
     "ResearchStrategyManager",
     "StrategyConfig",
     # ── Wave 3: Meta-Cognition ─────────────────────────────────────
-    "EpistemicCalibrationEngine",
     "CounterfactualReasoner",
     "EpistemicMemory",
-    # ── Wave 4: Integration ──────────────────────────────────────
-    "wire_epistemics",
     # ── Protocols ──────────────────────────────────────────────────
     "IBeliefReviser",
     "IContradictionSeeker",

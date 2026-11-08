@@ -14,7 +14,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.concepts.grounded_concept_registry import GroundedConceptRegistry
 from hbllm.brain.continual.consolidation_engine import SleepConsolidationEngine
 from hbllm.brain.continual.store import DualStoreMemory, EpisodicTrace
 from hbllm.brain.decision.policy import (
@@ -48,6 +47,7 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.workspace import HCIRWorkspaceState
 

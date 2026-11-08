@@ -20,7 +20,7 @@ pytestmark = pytest.mark.slow
 from experiments.benchmarks.evaluation.generalization_harness import (
     AblationRegime,
 )
-from experiments.benchmarks.evaluation.run_milestone2_evaluation import (
+from experiments.benchmarks.evaluation.run_generalization_evaluation import (
     Milestone2Evaluator,
 )
 

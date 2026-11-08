@@ -34,17 +34,17 @@ from hbllm.hcir.world.capability_evidence import (
 )
 from hbllm.hcir.world.cortex_assimilator import EpistemicFeedbackAssimilator
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
+from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
+from hbllm.hcir.world.experimental.relational_graph_matcher import RelationalGraphMatcher
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
 )
-from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
 from hbllm.hcir.world.parietal_coordinate_transform import (
     AffineTransform2D,
     GeometricModelSelector,
     ParietalCoordinateTransformer,
 )
-from hbllm.hcir.world.relational_graph_matcher import RelationalGraphMatcher
 from hbllm.hcir.world.spatial_containment import RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_tracker import (
     MorphologicalDeformationTracker,

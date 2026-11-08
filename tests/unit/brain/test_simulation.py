@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from hbllm.brain.autonomy.task_graph import Goal, TaskNode
-from hbllm.brain.causality.causal_graph import CausalGraph
 from hbllm.brain.simulation.engine import PredictiveSimulationEngine
 from hbllm.brain.simulation.models import PredictionOrigin
 from hbllm.brain.simulation.risk import RiskEngine
@@ -15,9 +14,8 @@ from hbllm.brain.world.world_state import WorldStateEngine
 @pytest.fixture
 def sim_engine(tmp_path):
     world_state = WorldStateEngine()
-    causal_graph = CausalGraph(data_dir=tmp_path)
     risk_engine = RiskEngine()
-    return PredictiveSimulationEngine(world_state, causal_graph, risk_engine)
+    return PredictiveSimulationEngine(world_state, causal_graph=None, risk_engine=risk_engine)
 
 
 def test_tier0_heuristic_simulation(sim_engine):

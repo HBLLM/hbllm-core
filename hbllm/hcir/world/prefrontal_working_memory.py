@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
+    from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
 
 from hbllm.hcir.graph import ConceptNode, FactNode, ProcedureNode, SkillNode
 from hbllm.hcir.skills.declarative import (

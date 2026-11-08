@@ -17,21 +17,21 @@ import pytest
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.global_neuronal_workspace import (
+from hbllm.hcir.world.experimental.global_neuronal_workspace import (
     GlobalNeuronalWorkspace,
     IgnitionEvent,
+)
+from hbllm.hcir.world.experimental.superposition_planner import (
+    SuperpositionEvaluationResult,
+    SuperpositionPlanner,
+)
+from hbllm.hcir.world.experimental.thalamocortical_binding import (
+    BoundFeatureBundle,
+    ThalamocorticalBindingEngine,
 )
 from hbllm.hcir.world.neuromodulatory_system import (
     NeuromodulatorLevels,
     NeuromodulatorySystem,
-)
-from hbllm.hcir.world.superposition_planner import (
-    SuperpositionEvaluationResult,
-    SuperpositionPlanner,
-)
-from hbllm.hcir.world.thalamocortical_binding import (
-    BoundFeatureBundle,
-    ThalamocorticalBindingEngine,
 )
 
 try:

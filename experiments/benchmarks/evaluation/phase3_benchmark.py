@@ -241,7 +241,7 @@ class Milestone3Phase3Evaluator:
         report_bytes = json.dumps(report, indent=2, sort_keys=True).encode("utf-8")
         report["integrity_sha256"] = hashlib.sha256(report_bytes).hexdigest()
 
-        out_file = self.output_dir / "milestone3_phase3_benchmark_report.json"
+        out_file = self.output_dir / "phase3_benchmark_report.json"
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
 

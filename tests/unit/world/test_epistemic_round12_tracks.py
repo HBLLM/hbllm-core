@@ -14,21 +14,21 @@ import pytest
 from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
+from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator import (
     AnteriorCingulateEffortAllocator,
     ConflictProfile,
     EffortAllocationDecision,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import (
-    AutonomousEpistemicEngine,
-)
-from hbllm.hcir.world.cerebellar_microzone_adaptor import (
+from hbllm.hcir.world.experimental.cerebellar_microzone_adaptor import (
     CerebellarMicrozoneAdaptor,
     ClimbingFiberFeedback,
     MotorPrediction,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.ventral_premotor_resonator import (
+from hbllm.hcir.world.experimental.ventral_premotor_resonator import (
     VentralPremotorAffordanceResonator,
 )
 

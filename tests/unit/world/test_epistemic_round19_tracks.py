@@ -12,15 +12,15 @@ from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.boundary_grid_phase_aligner import (
+from hbllm.hcir.world.experimental.boundary_grid_phase_aligner import (
     BoundaryGridPhaseAligner,
     BoundaryPhaseAlignmentState,
 )
-from hbllm.hcir.world.medial_prefrontal_schema import (
+from hbllm.hcir.world.experimental.medial_prefrontal_schema import (
     MedialPrefrontalSchemaEngine,
     SchemaGeneralizationReport,
 )
-from hbllm.hcir.world.subthalamic_threshold_escalator import (
+from hbllm.hcir.world.experimental.subthalamic_threshold_escalator import (
     STNBrakingStatus,
     SubthalamicThresholdEscalator,
 )

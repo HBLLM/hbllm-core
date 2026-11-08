@@ -20,14 +20,14 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicPhase,
 )
-from hbllm.hcir.world.bilateral_coordination import (
-    BilateralCoordinateIntegrator,
-    SymmetryAxis,
-)
 from hbllm.hcir.world.cortex_motor import (
     MotorCortexEffector,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.bilateral_coordination import (
+    BilateralCoordinateIntegrator,
+    SymmetryAxis,
+)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     SubgoalType,
 )
