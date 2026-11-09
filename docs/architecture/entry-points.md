@@ -88,3 +88,4 @@ All entry points adhere to strict AST-level dependency boundaries validated in `
 - `hbllm.hcir` never imports from `hbllm.brain`.
 - Core OS never imports from `plugins`.
 - Direct `sqlite3.connect` and `aiosqlite.connect` calls are confined strictly to infrastructure persistence modules (`hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`).
+

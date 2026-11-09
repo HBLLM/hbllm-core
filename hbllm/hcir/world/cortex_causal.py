@@ -741,7 +741,106 @@ class HCIRSymbolicWorldTheory:
                     node_data=node.model_dump(),
                 )
             )
+
+        for feat in self.actuator_features:
+            node_id = f"ontology_actuator_{feat}"
+            node = ConceptNode(
+                id=node_id,
+                label=f"actuator_{feat}",
+                definition=f"Learned actuator feature {feat}",
+                domain="spatial_ontology",
+                properties={"role": "actuator", "feature_id": feat, "is_intensional": True},
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_dump(),
+                )
+            )
+
+        for i, pred in enumerate(self.domain_predicates):
+            node_id = f"causal_predicate_{i}_{pred.variable}"
+            node = ConceptNode(
+                id=node_id,
+                label=f"pred_{pred.variable}",
+                definition=pred.describe(),
+                domain="causal_predicate",
+                properties={
+                    "variable": pred.variable,
+                    "operator": pred.operator,
+                    "value": str(pred.value) if pred.value is not None else "",
+                    "relation": pred.relation,
+                    "target_entity": pred.target_entity,
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=node.model_dump(),
+                )
+            )
+
         return ops
+
+    def hydrate_from_nodes(self, nodes: Sequence[Any]) -> None:
+        """Reconstruct symbolic world theory from stored HCIR ConceptNodes."""
+        for node in nodes:
+            if not isinstance(node, ConceptNode):
+                continue
+            props = node.properties or {}
+            domain = node.domain
+
+            if domain == "spatial_ontology":
+                role = props.get("role")
+                feat = props.get("feature_id")
+                if role and feat is not None:
+                    try:
+                        feat_val = int(feat)
+                    except (ValueError, TypeError):
+                        feat_val = feat
+
+                    if role == "goal":
+                        self.goal_features.add(feat_val)
+                        self.candidate_goal_features.add(feat_val)
+                    elif role == "barrier":
+                        self.barrier_features.add(feat_val)
+                    elif role == "walkable":
+                        self.walkable_features.add(feat_val)
+                    elif role == "cargo":
+                        self.cargo_features.add(feat_val)
+                    elif role == "receptacle":
+                        self.receptacle_features.add(feat_val)
+                    elif role == "actuator":
+                        self.actuator_features.add(feat_val)
+
+                if "telic_goal_type" in props:
+                    self.telic_goal_type = str(props["telic_goal_type"])
+                    self.telic_target_feature = props.get("telic_target_feature")
+
+            elif domain == "spelke_core_knowledge":
+                axiom_str = props.get("axiom")
+                if axiom_str:
+                    try:
+                        axiom_enum = SpelkePhysicalAxiom(axiom_str)
+                        self.spelke_axioms[axiom_enum] = CausalPredicate(
+                            variable=str(props.get("variable", "")),
+                            operator=str(props.get("operator", "==")),
+                            value=props.get("value", True),
+                        )
+                    except ValueError:
+                        pass
+
+            elif domain == "causal_predicate":
+                pred = CausalPredicate(
+                    variable=str(props.get("variable", "")),
+                    operator=str(props.get("operator", "==")),
+                    value=props.get("value"),
+                    relation=str(props.get("relation", "")),
+                    target_entity=str(props.get("target_entity", "")),
+                )
+                self.record_causal_predicate(pred)
 
     def clear(self) -> None:
         """Clear all intensional predicates when resetting across distinct games."""

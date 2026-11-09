@@ -107,3 +107,4 @@ await bridge.process_observation(raw_observation, step=step_counter)
 ```
 
 The bridge extracts entities, updates tracking histories, proposes state mutations via `kernel_services.transaction_manager`, and injects stabilized spatial entities into the perception stage of the cortical loop.
+

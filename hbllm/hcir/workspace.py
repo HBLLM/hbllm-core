@@ -98,9 +98,14 @@ class HCIRWorkspaceState:
         tier: WorkspaceTier = WorkspaceTier.WORKING,
     ) -> None:
         self._tier = tier
-        self._graph = graph if graph is not None else CognitiveGraph()
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
+        if graph is not None:
+            self._graph = graph
+        elif self._event_store.latest_sequence() > 0:
+            self._graph = self._snapshot_manager.replay(self._event_store)
+        else:
+            self._graph = CognitiveGraph()
         self._query_engine = InMemoryQueryEngine(self._graph)
         self._branch_mode = branch_mode
         self._branch_name = branch_name
@@ -115,8 +120,9 @@ class HCIRWorkspaceState:
         # Single commit authority bound to this workspace (attached by the kernel)
         self._transaction_manager: Any | None = None
 
-        # Bootstrap: create initial snapshot
-        self._snapshot_manager.create_snapshot(self._graph)
+        # Bootstrap: create initial snapshot if empty
+        if self._event_store.latest_sequence() == 0:
+            self._snapshot_manager.create_snapshot(self._graph)
 
     # ── Properties ───────────────────────────────────────────────────
 

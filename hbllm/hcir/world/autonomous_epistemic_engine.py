@@ -5297,6 +5297,98 @@ class AutonomousEpistemicEngine:
             )
         return ops
 
+    def persist_to_workspace(
+        self,
+        target: Any = None,
+        author: str = "epistemic_engine",
+    ) -> list[TransactionOperation]:
+        """Propose and commit all world theory, concepts, and internal memory to persistent workspace."""
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+        ops = self.to_transaction_operations()
+        dest_ws: HCIRWorkspaceState | None = None
+        grant: Any = None
+
+        if target is not None:
+            if isinstance(target, TieredWorkspace):
+                dest_ws = target.persistent
+                grant = getattr(target, "_system_grant", None)
+            elif isinstance(target, HCIRWorkspaceState):
+                dest_ws = target
+        elif hasattr(self, "services") and self.services is not None:
+            if self.services.tiered_workspace is not None:
+                dest_ws = self.services.tiered_workspace.persistent
+                grant = getattr(self.services.tiered_workspace, "_system_grant", None)
+            else:
+                dest_ws = self.services.workspace
+
+        if grant is None and hasattr(self, "services") and self.services is not None:
+            reg = getattr(self.services, "commit_authority_registry", None)
+            if reg is not None and dest_ws is not None:
+                grant = reg.issue(author, {dest_ws.tier})
+
+        if dest_ws is not None and ops:
+            dest_ws.commit_operations(ops, author=author, grant=grant)
+        return ops
+
+    def hydrate_from_workspace(
+        self,
+        source: Any = None,
+    ) -> int:
+        """Hydrate world theory, concepts, and internal memory from workspace nodes.
+
+        Returns the count of nodes hydrated.
+        """
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+        src_ws: HCIRWorkspaceState | None = None
+
+        if source is not None:
+            if isinstance(source, TieredWorkspace):
+                src_ws = source.persistent
+            elif isinstance(source, HCIRWorkspaceState):
+                src_ws = source
+        elif hasattr(self, "services") and self.services is not None:
+            if self.services.tiered_workspace is not None:
+                src_ws = self.services.tiered_workspace.persistent
+            else:
+                src_ws = self.services.workspace
+
+        if src_ws is None:
+            return 0
+
+        nodes = list(src_ws.graph.all_nodes())
+        if not nodes:
+            return 0
+
+        # Hydrate symbolic theory
+        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
+            self.symbolic_theory.hydrate_from_nodes(nodes)
+
+        # Hydrate goal positions, barriers, and telemetry if present
+        for node in nodes:
+            props = node.properties or {}
+            if node.id.startswith("learned_goal_"):
+                pos = props.get("position")
+                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
+                    self.learned_goal_positions.add((int(pos[0]), int(pos[1])))
+            elif node.id.startswith("learned_barrier_"):
+                pos = props.get("position")
+                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
+                    self.learned_barriers.add((int(pos[0]), int(pos[1])))
+            elif node.id == "engine_telemetry":
+                avatar_feat = props.get("avatar_feature")
+                if avatar_feat is not None:
+                    self._avatar_feature = avatar_feat
+                for af in props.get("avatar_features") or []:
+                    self.avatar_features.add(af)
+                for ta in props.get("tested_actions") or []:
+                    self.tested_actions.add(ta)
+
+        return len(nodes)
+
     def freeze(self) -> CognitiveContext:
         """Capture an immutable CognitiveContext snapshot of engine state for pure cortical stages.
 

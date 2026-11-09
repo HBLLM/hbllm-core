@@ -66,9 +66,17 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
 
     cfg = config or CognitiveSystemConfig()
 
-    # 1. State hierarchy & storage
+    # 1. State hierarchy & storage (Persistent Tier binding)
+    persistent_store = None
+    if cfg.memory_dir:
+        from hbllm.hcir.stores.sqlite_event_store import SQLiteEventStore
+
+        mem_dir = Path(cfg.memory_dir)
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        persistent_store = SQLiteEventStore(mem_dir / "persistent.db")
+
     workspace = HCIRWorkspaceState()
-    tiered_workspace = TieredWorkspace()
+    tiered_workspace = TieredWorkspace(persistent_store=persistent_store)
 
     # 2. Constitutional verification pipeline
     authority_registry = CommitAuthorityRegistry()
@@ -82,6 +90,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         workspace=workspace,
         verification_pipeline=pipeline,
         tiered_workspace=tiered_workspace,
+        commit_authority_registry=authority_registry,
     )
     services.commit_authority_registry = authority_registry
 
@@ -94,6 +103,15 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         world_id=cfg.world_id,
         seed=cfg.seed,
     )
+
+    # Auto-hydrate world model & lifelong memory if persistent state exists
+    if persistent_store is not None or tiered_workspace.persistent.graph.node_count > 0:
+        hydrated_count = engine.hydrate_from_workspace(tiered_workspace)
+        if hydrated_count > 0:
+            logger.info(
+                "Hydrated %d nodes into epistemic engine from persistent tier",
+                hydrated_count,
+            )
 
     # 5. Wire Grounding Bridge with the exact same KernelServices
     bridge: CorticalGroundingBridge | None = None

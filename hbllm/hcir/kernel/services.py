@@ -146,7 +146,7 @@ class KernelServices:
                 self.commit_authority_registry = CommitAuthorityRegistry()
             stages = list(getattr(self.transaction_manager, "_verification_stages", []))
             for stage in stages:
-                if isinstance(stage, ConstitutionalVerifier) and stage.authority_registry is None:
+                if isinstance(stage, ConstitutionalVerifier):
                     stage.authority_registry = self.commit_authority_registry
             self.tiered_workspace.attach_authorities(
                 stages, self.event_bus, self.commit_authority_registry
@@ -165,6 +165,7 @@ class KernelServices:
         workspace: HCIRWorkspaceState,
         verification_pipeline: list[Any] | None = None,
         tiered_workspace: TieredWorkspace | None = None,
+        commit_authority_registry: CommitAuthorityRegistry | None = None,
     ) -> KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
@@ -184,7 +185,15 @@ class KernelServices:
         from hbllm.hcir.kernel.verification import create_default_pipeline
         from hbllm.hcir.world_kernel import WorldKernel
 
-        registry = CommitAuthorityRegistry()
+        registry = commit_authority_registry
+        if registry is None and verification_pipeline:
+            for s in verification_pipeline:
+                if isinstance(s, ConstitutionalVerifier) and s.authority_registry:
+                    registry = s.authority_registry
+                    break
+        if registry is None:
+            registry = CommitAuthorityRegistry()
+
         pipeline = verification_pipeline or create_default_pipeline(
             constitutional_verifier=ConstitutionalVerifier(authority_registry=registry)
         )
