@@ -22,9 +22,16 @@ Key Cognitive Capabilities:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
+import numpy as np
+
+from hbllm.hcir.skills.declarative import (
+    DeclarativeNeuroSymbolicSkill,
+    SkillEvaluationContext,
+)
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 
@@ -233,3 +240,103 @@ class MedialPrefrontalSchemaEngine:
             total_stored_schemas=len(self._schemas),
             abstraction_depth=abstraction_depth,
         )
+
+    def register_skill_schema(
+        self,
+        skill: DeclarativeNeuroSymbolicSkill,
+        schema_id: str | None = None,
+        archetype_name: str | None = None,
+    ) -> GeneralizedTaskSchema:
+        """Register a procedural skill as an abstract task schema template."""
+        s_name = getattr(skill, "skill_name", "skill")
+        sid = schema_id or f"schema_{s_name}"
+        arch = archetype_name or f"archetype_{s_name}"
+
+        # Extract roles and subgoals from skill program
+        subgoals: tuple[str, ...] = ()
+        canonical_roles_list: list[str] = ["actor"]
+        relations: list[tuple[str, str, str]] = []
+
+        prog = getattr(skill, "program", None)
+        if prog is not None and hasattr(prog, "subgoals"):
+            subgoal_hints: list[str] = []
+            for i, sg in enumerate(prog.subgoals):
+                intent_str = sg.intent.value if hasattr(sg.intent, "value") else str(sg.intent)
+                target_role = sg.target_query.get("role", f"target_{i}")
+                if target_role not in canonical_roles_list:
+                    canonical_roles_list.append(target_role)
+                subgoal_hints.append(f"{intent_str.lower()}_{target_role}")
+                relations.append(("actor", intent_str.lower(), target_role))
+            subgoals = tuple(subgoal_hints)
+
+        schema = GeneralizedTaskSchema(
+            schema_id=sid,
+            archetype_name=arch,
+            canonical_roles=tuple(canonical_roles_list),
+            invariant_relations=tuple(relations),
+            subgoal_sequence_hints=subgoals,
+            activation_count=1,
+            generalization_score=0.85,
+        )
+        self.register_schema(schema)
+        return schema
+
+    def match_skill_signature(
+        self,
+        skill: DeclarativeNeuroSymbolicSkill,
+        context: SkillEvaluationContext | dict[str, Any],
+    ) -> float:
+        """Evaluate match confidence between a skill's predicate signature and current context."""
+        ctx: SkillEvaluationContext
+        if isinstance(context, SkillEvaluationContext):
+            ctx = context
+        elif isinstance(context, dict):
+            grid = context.get("grid")
+            if grid is None:
+                grid = np.zeros((1, 1), dtype=np.int32)
+            acts = context.get("available_actions", [1, 2, 3, 4, 5, 6, 7])
+            meta = context.get("metadata", {})
+            ctx = SkillEvaluationContext(grid=grid, available_actions=acts, metadata=meta)
+        else:
+            return 0.0
+
+        try:
+            signature_matches = skill.can_handle(
+                ctx.grid,
+                ctx.available_actions,
+                metadata=ctx.metadata,
+            )
+        except Exception:
+            signature_matches = False
+
+        if not signature_matches:
+            return 0.0
+
+        # Base confidence for signature match
+        confidence = 0.80
+
+        # Subgoal alignment bonus if program subgoals align with available actions
+        prog = getattr(skill, "program", None)
+        if prog is not None and hasattr(prog, "subgoals") and prog.subgoals:
+            confidence = min(1.0, confidence + 0.15)
+
+        return float(confidence)
+
+    def query_transferable_skills(
+        self,
+        context: SkillEvaluationContext | dict[str, Any],
+        candidate_skills: Sequence[DeclarativeNeuroSymbolicSkill],
+        min_confidence: float = 0.40,
+    ) -> list[tuple[DeclarativeNeuroSymbolicSkill, float, str]]:
+        """Query stored or candidate procedural skills for zero-shot transfer matches."""
+        matches: list[tuple[DeclarativeNeuroSymbolicSkill, float, str]] = []
+
+        for skill in candidate_skills:
+            conf = self.match_skill_signature(skill, context)
+            if conf >= min_confidence:
+                reason = f"predicate_signature_match(conf={conf:.2f})"
+                matches.append((skill, conf, reason))
+
+        # Sort descending by match confidence
+        matches.sort(key=lambda item: item[1], reverse=True)
+        return matches

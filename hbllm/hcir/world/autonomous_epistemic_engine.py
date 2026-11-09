@@ -230,7 +230,6 @@ from hbllm.hcir.graph import (
     EventNode,
     GoalNode,
     ObservationNode,
-    SkillNode,
 )
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
@@ -239,6 +238,7 @@ from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
+from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
@@ -553,6 +553,7 @@ class AutonomousEpistemicEngine:
         instructions: Sequence[str] | str | None = None,
         world_id: str = "default",
         seed: int | None = None,
+        tiered_workspace: TieredWorkspace | None = None,
     ) -> AutonomousEpistemicEngine:
         """Construct an engine with default verified kernel services for tests."""
         from hbllm.hcir.kernel.services import KernelServices
@@ -566,6 +567,7 @@ class AutonomousEpistemicEngine:
             services=services,
             world_id=world_id,
             seed=seed,
+            tiered_workspace=tiered_workspace,
         )
 
     def __init__(
@@ -576,6 +578,7 @@ class AutonomousEpistemicEngine:
         services: KernelServices | None = None,
         world_id: str = "default",
         seed: int | None = None,
+        tiered_workspace: TieredWorkspace | None = None,
     ) -> None:
         if services is None:
             from hbllm.hcir.kernel.services import KernelServices
@@ -798,9 +801,11 @@ class AutonomousEpistemicEngine:
         self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
 
         # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
-        self.skill_synthesizer: SkillProgramSynthesizer | Any = _ablated(
-            "skill_synthesizer", "SkillProgramSynthesizer"
-        )  # WP2 ablated
+        from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
+
+        self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer(
+            min_support_traces=1
+        )
 
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
@@ -998,9 +1003,11 @@ class AutonomousEpistemicEngine:
         )  # WP2 ablated
 
         # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
-        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine | Any = _ablated(
-            "mpfc_schema_engine", "MedialPrefrontalSchemaEngine"
-        )  # WP2 ablated
+        from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
+
+        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine(
+            match_threshold=0.35
+        )
 
         # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
         self.stn_escalator: SubthalamicThresholdEscalator | Any = _ablated(
@@ -1071,7 +1078,9 @@ class AutonomousEpistemicEngine:
             getattr(services, "capability_resolver", None) if services is not None else None
         )
         self.tiered_workspace: TieredWorkspace | None = (
-            getattr(services, "tiered_workspace", None) if services is not None else None
+            tiered_workspace
+            if tiered_workspace is not None
+            else (getattr(services, "tiered_workspace", None) if services is not None else None)
         )
         self.transaction_manager: TransactionManager | None = (
             getattr(services, "transaction_manager", None) if services is not None else None
@@ -1080,7 +1089,7 @@ class AutonomousEpistemicEngine:
             getattr(services, "world_kernel", None) if services is not None else None
         )
         self.active_task_frame: TaskFrame | None = None
-        if services is not None and self.tiered_workspace is not None:
+        if self.tiered_workspace is not None:
             self.attach_tiered_workspace(self.tiered_workspace)
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
@@ -4023,33 +4032,13 @@ class AutonomousEpistemicEngine:
         newly_induced = self.skill_synthesizer.induce_all_recurrent_skills()
         res["induced_skills"] = newly_induced
 
-        # Promote newly induced skills to TieredWorkspace.persistent if attached
-        if self.tiered_workspace is not None:
+        # Promote newly induced skills to TieredWorkspace.persistent and register schemas in mPFC
+        if newly_induced:
             for skill in newly_induced:
-                skill_name = getattr(skill, "name", "skill")
-                subgoals = getattr(skill, "program", [])
-                subgoal_count = (
-                    len(getattr(subgoals, "subgoals", []))
-                    if hasattr(subgoals, "subgoals")
-                    else len(subgoals)
-                )
-                skill_node = SkillNode(
-                    id=f"synthesized_skill_{skill_name}",
-                    name=skill_name,
-                    skill_name=skill_name,
-                    description=f"Synthesized neuro-symbolic DSL skill with {subgoal_count} subgoals",
-                    preconditions=[str(getattr(skill, "signature", ""))],
-                    success_rate=0.9,
-                )
-                self.tiered_workspace.persistent.commit_operations(
-                    [
-                        TransactionOperation(
-                            op=TransactionOp.UPSERT_NODE,
-                            node_id=skill_node.id,
-                            node_data=skill_node.model_dump(),
-                        )
-                    ],
-                    author="SkillProgramSynthesizer",
+                self.mpfc_schema_engine.register_skill_schema(skill)
+            if self.tiered_workspace is not None:
+                self.skill_synthesizer.persist_to_workspace(
+                    self.tiered_workspace, tenant_id=self.world_id
                 )
 
         # Propose state mutations through TransactionManager if present
@@ -4067,6 +4056,35 @@ class AutonomousEpistemicEngine:
             self.transaction_manager.commit(tx)
 
         return res
+
+    def query_transferable_skills(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+        min_confidence: float = 0.40,
+    ) -> list[tuple[DeclarativeNeuroSymbolicSkill, float, str]]:
+        """Query mPFC schema engine for transferable procedural skills matching current environmental context."""
+        candidates = list(self.skill_synthesizer.synthesized_skills.values())
+        if not candidates and self.tiered_workspace is not None:
+            self.skill_synthesizer.load_from_workspace(
+                self.tiered_workspace, tenant_id=self.world_id
+            )
+            candidates = list(self.skill_synthesizer.synthesized_skills.values())
+
+        if not candidates:
+            return []
+
+        from hbllm.hcir.skills.declarative import SkillEvaluationContext
+
+        ctx = SkillEvaluationContext(
+            grid=grid,
+            available_actions=available_actions,
+            metadata=metadata,
+        )
+        return self.mpfc_schema_engine.query_transferable_skills(
+            ctx, candidates, min_confidence=min_confidence
+        )
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""

@@ -388,6 +388,16 @@ class CognitiveGraph:
     def node_count(self) -> int:
         return len(self._nodes)
 
+    @property
+    def nodes(self) -> dict[str, HCIRNode]:
+        """Dictionary access to nodes."""
+        return self._nodes
+
+    @property
+    def edges(self) -> dict[str, HCIREdge]:
+        """Dictionary access to edges."""
+        return self._edges
+
     def all_nodes(self) -> Iterator[HCIRNode]:
         """Iterate over all nodes."""
         yield from self._nodes.values()

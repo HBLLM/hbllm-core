@@ -60,8 +60,10 @@ class TransactionOperation(BaseModel):
     op: TransactionOp
     node_id: str | None = None
     node_data: dict[str, Any] | None = None
+    node: Any = None
     edge_id: str | None = None
     edge_data: dict[str, Any] | None = None
+    edge: Any = None
     changes: dict[str, Any] | None = None
 
     @model_validator(mode="before")
