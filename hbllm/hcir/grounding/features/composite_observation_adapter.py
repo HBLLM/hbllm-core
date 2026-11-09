@@ -18,11 +18,16 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.grounding.contracts.enums import DialogueAct, ModalitySource, TrafficClass
-from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+from hbllm.hcir.grounding.contracts.observation import (
+    CoordinateType,
+    ObservationEnvelope,
+    ReferenceFrame,
+)
 from hbllm.hcir.grounding.features.feature_extractor import (
     FeatureExtractorRegistry,
     PerceptualFeatureVector,
 )
+from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
 
 class GridObservationAdapter:
@@ -60,6 +65,10 @@ class GridObservationAdapter:
             unique_vals = set(int(v) for v in np.unique(grid) if v != 0)
             entity_colors = unique_vals
 
+        ref_frame = ReferenceFrame.grid_2d(
+            shape=(grid.shape[0], grid.shape[1]) if grid.ndim == 2 else None,
+        )
+
         envelope = ObservationEnvelope(
             observation_id=obs_id,
             source_modality=ModalitySource.VISION,
@@ -71,6 +80,7 @@ class GridObservationAdapter:
             payload_ref=f"hcir://grid/{obs_id}",
             clock_domain="grid_clock",
             payload_hash=payload_hash,
+            reference_frame=ref_frame,
             metadata={
                 "grid_shape": list(grid.shape),
                 "entity_count": len(entities or []),
@@ -108,11 +118,25 @@ class RoboticsObservationAdapter:
         velocities: tuple[float, ...] | None = None,
         forces: tuple[float, ...] | None = None,
         gripper_state: float = 0.0,
+        reference_frame: ReferenceFrame | None = None,
     ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
         """Converts robotics state into envelope + kinematic feature vectors."""
         self._seq += 1
         now = time.time()
         obs_id = f"obs_robot_s{self._seq}_{uuid.uuid4().hex[:6]}"
+
+        if reference_frame is not None:
+            ref_frame = reference_frame
+        elif len(position) == 3:
+            ref_frame = ReferenceFrame.cartesian_3d()
+        elif len(position) == 2:
+            ref_frame = ReferenceFrame.generic_nd(
+                2, coordinate_type=CoordinateType.CONTINUOUS, axes=("x", "y"), unit="meter"
+            )
+        else:
+            ref_frame = ReferenceFrame.generic_nd(
+                len(position), coordinate_type=CoordinateType.CONTINUOUS, unit="meter"
+            )
 
         envelope = ObservationEnvelope(
             observation_id=obs_id,
@@ -124,6 +148,7 @@ class RoboticsObservationAdapter:
             monotonic_timestamp=time.monotonic(),
             payload_ref=f"hcir://robot/{obs_id}",
             clock_domain="robot_clock",
+            reference_frame=ref_frame,
             metadata={
                 "position": list(position),
                 "joint_angles": list(joint_angles or []),
@@ -135,6 +160,66 @@ class RoboticsObservationAdapter:
 
         features = self._registry.extract_all(envelope)
         return envelope, features
+
+    def lift_spatial_entities(
+        self,
+        position: tuple[float, ...],
+        *,
+        joint_angles: tuple[float, ...] | None = None,
+        velocities: tuple[float, ...] | None = None,
+        gripper_state: float = 0.0,
+        objects: list[dict[str, Any]] | None = None,
+        reference_frame: ReferenceFrame | None = None,
+    ) -> list[SpatialEntity]:
+        """Lift continuous robotics states and perceived scene objects into typed SpatialEntity components."""
+        if reference_frame is not None:
+            ref_frame = reference_frame
+        elif len(position) == 3:
+            ref_frame = ReferenceFrame.cartesian_3d()
+        elif len(position) == 2:
+            ref_frame = ReferenceFrame.generic_nd(
+                2, coordinate_type=CoordinateType.CONTINUOUS, axes=("x", "y"), unit="meter"
+            )
+        else:
+            ref_frame = ReferenceFrame.generic_nd(
+                len(position), coordinate_type=CoordinateType.CONTINUOUS, unit="meter"
+            )
+
+        entities: list[SpatialEntity] = []
+
+        # 1. Controllable agent / avatar
+        avatar_ent = SpatialEntity(
+            id="robot_avatar",
+            role=EntityRole.AGENT,
+            centroid=position,
+            position=position,
+            reference_frame=ref_frame,
+            properties={
+                "joint_angles": list(joint_angles or []),
+                "velocities": list(velocities or []),
+                "gripper_state": gripper_state,
+            },
+        )
+        entities.append(avatar_ent)
+
+        # 2. Perceived objects in scene
+        for i, obj in enumerate(objects or []):
+            raw_pos = obj.get("position", (0.0,) * len(position))
+            obj_pos = tuple(float(x) for x in raw_pos)
+            role = obj.get("role", EntityRole.UNKNOWN)
+            if isinstance(role, str) and not isinstance(role, EntityRole):
+                role = EntityRole(role)
+            ent = SpatialEntity(
+                id=str(obj.get("id", f"robot_obj_{i}")),
+                role=role,
+                centroid=obj_pos,
+                position=obj_pos,
+                reference_frame=ref_frame,
+                properties=dict(obj.get("properties", {})),
+            )
+            entities.append(ent)
+
+        return entities
 
 
 class TextObservationAdapter:
@@ -308,6 +393,14 @@ class CompositeObservationAdapter:
     ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
         return self.robotics_adapter.adapt(position, **kwargs)
 
+    def lift_robotics_entities(
+        self,
+        position: tuple[float, ...],
+        **kwargs: Any,
+    ) -> list[SpatialEntity]:
+        """Lift continuous robotics positions and scene objects into typed SpatialEntity components."""
+        return self.robotics_adapter.lift_spatial_entities(position, **kwargs)
+
     def adapt_text(
         self,
         text: str,
@@ -349,11 +442,17 @@ class CompositeObservationAdapter:
             )
 
         # 2. Proprioception / Kinematic / Robotics joint states
-        if (
-            str(mod) in ("proprioception", "DriverModality.PROPRIOCEPTION")
-            or isinstance(raw, (tuple, list))
-            and len(raw) in (2, 3)
+        if str(mod) in (
+            "proprioception",
+            "DriverModality.PROPRIOCEPTION",
+            "kinematic",
+            "robotics",
+            "continuous",
+        ) or (
+            isinstance(raw, (tuple, list))
+            and len(raw) >= 1
             and all(isinstance(x, (int, float)) for x in raw)
+            and not isinstance(raw, str)
         ):
             pos = tuple(float(x) for x in raw)
             return self.adapt_robotics(

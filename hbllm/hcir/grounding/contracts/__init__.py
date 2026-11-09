@@ -29,7 +29,11 @@ from hbllm.hcir.grounding.contracts.enums import (
     TrafficClass,
 )
 from hbllm.hcir.grounding.contracts.evidence import EvidenceRecord
-from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+from hbllm.hcir.grounding.contracts.observation import (
+    CoordinateType,
+    ObservationEnvelope,
+    ReferenceFrame,
+)
 from hbllm.hcir.grounding.contracts.quality import GroundingQuality
 from hbllm.hcir.grounding.contracts.references import (
     EntityCandidateRef,
@@ -63,6 +67,8 @@ __all__ = [
     "UnresolvedRef",
     # Observations & Evidence
     "ObservationEnvelope",
+    "ReferenceFrame",
+    "CoordinateType",
     "EvidenceRecord",
     # Claims & Beliefs
     "GroundingClaim",
