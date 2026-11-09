@@ -1,0 +1,19 @@
+split: dev
+seed_range: [0, 999]
+eval_seeds_per_family: 20
+tasks:
+  - id: grid_nav_dev
+    family: grid
+    env_class: benchmarks.envs.grid_nav.GridNavEnvironment
+    seeds: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+    max_budget: 100
+  - id: grid_push_dev
+    family: grid
+    env_class: benchmarks.envs.grid_push.GridPushEnvironment
+    seeds: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49]
+    max_budget: 100
+  - id: continuous_reach_dev
+    family: continuous
+    env_class: benchmarks.envs.continuous_reach.ContinuousReachEnvironment
+    seeds: [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69]
+    max_budget: 60

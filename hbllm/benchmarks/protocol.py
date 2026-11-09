@@ -1,4 +1,4 @@
-"""WP0: Evaluation Protocol and Generality Harness.
+"""Evaluation Protocol and Generality Harness.
 
 Enforces strict evaluation discipline:
 1. Frozen agent build with config hashing and Git SHA recording.
@@ -95,12 +95,60 @@ class EvaluationProtocol:
 
     @staticmethod
     def _compute_config_hash(cfg: dict[str, Any]) -> str:
-        """Deterministic sha256 hash of agent configuration."""
+        """Deterministic sha256 hash of agent configuration and benchmark definition files."""
+        hasher = hashlib.sha256()
         dumped = json.dumps(cfg, sort_keys=True)
-        return hashlib.sha256(dumped.encode("utf-8")).hexdigest()[:16]
+        hasher.update(dumped.encode("utf-8"))
+
+        # Include SHA-256 of benchmarks/envs/*.py
+        envs_dir = Path("benchmarks/envs")
+        if envs_dir.exists():
+            for p in sorted(envs_dir.glob("*.py")):
+                try:
+                    hasher.update(p.name.encode("utf-8"))
+                    hasher.update(p.read_bytes())
+                except Exception:
+                    pass
+
+        # Include SHA-256 of benchmarks/suites/heldout.yaml
+        heldout_yaml = Path("benchmarks/suites/heldout.yaml")
+        if heldout_yaml.exists():
+            try:
+                hasher.update(heldout_yaml.read_bytes())
+            except Exception:
+                pass
+
+        return hasher.hexdigest()[:16]
 
     def verify_heldout_gate(self) -> None:
-        """Anti-tamper rule: Refuse to execute held-out evaluation twice on the same Git commit SHA and perception mode."""
+        """Anti-tamper rule: Refuse to execute held-out evaluation twice on the same Git commit SHA and perception mode.
+        Also verifies integrity of benchmark environments and held-out suite definition.
+        """
+        # Verify no uncommitted modifications to benchmark definition files
+        try:
+            res = subprocess.run(
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "HEAD",
+                    "--",
+                    "benchmarks/envs/",
+                    "benchmarks/suites/heldout.yaml",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            modified = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+            if modified:
+                raise RuntimeError(
+                    f"Held-out anti-tamper violation: uncommitted changes detected in benchmark definition files: {modified}"
+                )
+        except Exception as e:
+            if isinstance(e, RuntimeError):
+                raise
+
         if not self.heldout_dir.exists():
             return
 
