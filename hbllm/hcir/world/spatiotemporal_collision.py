@@ -27,6 +27,11 @@ from hbllm.hcir.world.elastic_particle_induction import (
     ParticleKinematicsSimulator,
 )
 
+try:
+    import hbllm_hcir_graph as _rust_graph  # type: ignore[import-not-found]
+except ImportError:
+    _rust_graph = None
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -503,6 +508,33 @@ class SpatiotemporalCollisionCones:
         clearance: int = 0,
     ) -> int | None:
         """Find the earliest step index when a projected hazard occupies target_pos."""
+        if (
+            _rust_graph is not None
+            and hasattr(_rust_graph, "fast_collision_cone_sweep")
+            and self.projected_trajectories
+        ):
+            try:
+                trajectories = [
+                    (
+                        int(proj.initial_pos[0]),
+                        int(proj.initial_pos[1]),
+                        int(proj.velocity[0]),
+                        int(proj.velocity[1]),
+                        len(proj.positions),
+                    )
+                    for proj in self.projected_trajectories
+                ]
+                res = _rust_graph.fast_collision_cone_sweep(
+                    trajectories,
+                    (int(target_pos[0]), int(target_pos[1])),
+                    int(max_horizon),
+                    int(clearance),
+                )
+                if res is not None:
+                    return res
+            except Exception:
+                pass
+
         for step in range(1, max_horizon + 1):
             if self.is_collision_hazard(
                 target_pos[0], target_pos[1], time_step=step, clearance=clearance

@@ -250,6 +250,20 @@ def bench_ablation() -> None:
         raise typer.Exit(code=res.returncode)
 
 
+@bench_app.command("profile")
+def bench_profile() -> None:
+    """Profile decide() hot paths across Python and native Rust substrates (sub-10ms budget)."""
+    from hbllm.benchmarks.substrate_profiler import (
+        print_substrate_profile_report,
+        run_substrate_profile,
+    )
+
+    report = run_substrate_profile()
+    print_substrate_profile_report(report)
+    if not report.budget_met:
+        raise typer.Exit(code=1)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Top-level Diagnostics & Info
 # ═══════════════════════════════════════════════════════════════════════════

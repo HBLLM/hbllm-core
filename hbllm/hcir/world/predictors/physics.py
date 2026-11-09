@@ -18,6 +18,11 @@ from typing import Any
 
 import numpy as np
 
+try:
+    import hbllm_hcir_graph as _rust_graph  # type: ignore[import-not-found]
+except ImportError:
+    _rust_graph = None
+
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
@@ -616,6 +621,29 @@ class PhysicsPredictor:
         effective_barriers.discard((goal_r, goal_c))
         for off_r, off_c in offsets:
             effective_barriers.discard((goal_r + off_r, goal_c + off_c))
+
+        if (
+            offsets == [(0, 0)]
+            and _rust_graph is not None
+            and hasattr(_rust_graph, "fast_geodesic_astar")
+        ):
+            try:
+                rust_barriers = [
+                    (int(r), int(c)) for r, c in effective_barriers if 0 <= r < H and 0 <= c < W
+                ]
+                rust_path = _rust_graph.fast_geodesic_astar(
+                    H,
+                    W,
+                    (int(start_r), int(start_c)),
+                    (int(goal_r), int(goal_c)),
+                    rust_barriers,
+                    max(1, int(step_size)),
+                    3500,
+                )
+                if rust_path:
+                    return [(int(r), int(c)) for r, c in rust_path]
+            except Exception:
+                pass
 
         def is_footprint_valid(r: int, c: int) -> bool:
             for off_r, off_c in offsets:

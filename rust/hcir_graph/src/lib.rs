@@ -310,10 +310,205 @@ pub fn topological_connected_components(
     components
 }
 
+/// Sweeps forward space-time collision cones against a target position over a time horizon.
+/// Returns the earliest time_step (1-indexed) where an intercept occurs within clearance distance,
+/// or None if no collision occurs within max_horizon.
+///
+/// trajectories: Vec<(init_r, init_c, vel_r, vel_c, max_steps)>
+#[pyfunction]
+pub fn fast_collision_cone_sweep(
+    trajectories: Vec<(i32, i32, i32, i32, usize)>,
+    target_pos: (i32, i32),
+    max_horizon: usize,
+    clearance: i32,
+) -> Option<usize> {
+    let (tr, tc) = target_pos;
+    for step in 1..=max_horizon {
+        let step_i32 = step as i32;
+        for &(r0, c0, vr, vc, max_s) in &trajectories {
+            if max_s > 0 && step > max_s {
+                continue;
+            }
+            let pos_r = r0 + vr * step_i32;
+            let pos_c = c0 + vc * step_i32;
+            let dr = (pos_r - tr).abs();
+            let dc = (pos_c - tc).abs();
+            if dr <= clearance && dc <= clearance {
+                return Some(step);
+            }
+        }
+    }
+    None
+}
+
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+
+#[derive(Copy, Clone, PartialEq)]
+struct AStarNode {
+    cost: f64,
+    f_score: f64,
+    r: usize,
+    c: usize,
+}
+
+impl Eq for AStarNode {}
+
+impl Ord for AStarNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .f_score
+            .partial_cmp(&self.f_score)
+            .unwrap_or(Ordering::Equal)
+    }
+}
+
+impl PartialOrd for AStarNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Computes the optimal geodesic collision-free path on a 2D grid via accelerated A*.
+#[pyfunction]
+pub fn fast_geodesic_astar(
+    height: usize,
+    width: usize,
+    start: (usize, usize),
+    goal: (usize, usize),
+    barriers: Vec<(usize, usize)>,
+    step_size: Option<usize>,
+    max_iterations: Option<usize>,
+) -> Vec<(usize, usize)> {
+    if height == 0 || width == 0 {
+        return Vec::new();
+    }
+    let (sr, sc) = start;
+    let (gr, gc) = goal;
+    if sr >= height || sc >= width || gr >= height || gc >= width {
+        return Vec::new();
+    }
+    if start == goal {
+        return vec![start];
+    }
+
+    let mut is_barrier = vec![false; height * width];
+    for (r, c) in barriers {
+        if r < height && c < width && (r, c) != goal {
+            is_barrier[r * width + c] = true;
+        }
+    }
+
+    let step = step_size.unwrap_or(1).max(1);
+    let max_iter = max_iterations.unwrap_or(3500);
+
+    let heuristic = |r: usize, c: usize| -> f64 {
+        let dr = (gr as f64) - (r as f64);
+        let dc = (gc as f64) - (c as f64);
+        (dr * dr + dc * dc).sqrt()
+    };
+
+    let mut g_score = vec![f64::INFINITY; height * width];
+    let mut came_from = vec![usize::MAX; height * width];
+    let mut heap = BinaryHeap::new();
+
+    let start_idx = sr * width + sc;
+    g_score[start_idx] = 0.0;
+    heap.push(AStarNode {
+        cost: 0.0,
+        f_score: heuristic(sr, sc),
+        r: sr,
+        c: sc,
+    });
+
+    let mut best_r = sr;
+    let mut best_c = sc;
+    let mut min_h = heuristic(sr, sc);
+    let mut iters = 0;
+
+    let deltas: [(i32, i32); 4] = [
+        (-(step as i32), 0),
+        (step as i32, 0),
+        (0, -(step as i32)),
+        (0, step as i32),
+    ];
+
+    while let Some(current) = heap.pop() {
+        iters += 1;
+        if iters > max_iter {
+            break;
+        }
+
+        let curr_idx = current.r * width + current.c;
+        if (current.r, current.c) == goal {
+            let mut path = Vec::new();
+            let mut curr = curr_idx;
+            path.push((curr / width, curr % width));
+            while came_from[curr] != usize::MAX {
+                curr = came_from[curr];
+                path.push((curr / width, curr % width));
+            }
+            path.reverse();
+            return path;
+        }
+
+        let h_curr = heuristic(current.r, current.c);
+        if h_curr < min_h {
+            min_h = h_curr;
+            best_r = current.r;
+            best_c = current.c;
+        }
+
+        if current.cost > g_score[curr_idx] {
+            continue;
+        }
+
+        for &(dr, dc) in &deltas {
+            let nr_i = (current.r as i32) + dr;
+            let nc_i = (current.c as i32) + dc;
+            if nr_i < 0 || nr_i >= (height as i32) || nc_i < 0 || nc_i >= (width as i32) {
+                continue;
+            }
+            let nr = nr_i as usize;
+            let nc = nc_i as usize;
+            let nidx = nr * width + nc;
+
+            if is_barrier[nidx] {
+                continue;
+            }
+
+            let tentative_g = current.cost + (step as f64);
+            if tentative_g < g_score[nidx] {
+                g_score[nidx] = tentative_g;
+                came_from[nidx] = curr_idx;
+                let f = tentative_g + heuristic(nr, nc);
+                heap.push(AStarNode {
+                    cost: tentative_g,
+                    f_score: f,
+                    r: nr,
+                    c: nc,
+                });
+            }
+        }
+    }
+
+    let mut path = Vec::new();
+    let mut curr = best_r * width + best_c;
+    path.push((best_r, best_c));
+    while came_from[curr] != usize::MAX {
+        curr = came_from[curr];
+        path.push((curr / width, curr % width));
+    }
+    path.reverse();
+    path
+}
+
 #[pymodule]
 fn hbllm_hcir_graph(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyNativeGraph>()?;
     m.add_function(wrap_pyfunction!(blake3_hash, m)?)?;
     m.add_function(wrap_pyfunction!(topological_connected_components, m)?)?;
+    m.add_function(wrap_pyfunction!(fast_collision_cone_sweep, m)?)?;
+    m.add_function(wrap_pyfunction!(fast_geodesic_astar, m)?)?;
     Ok(())
 }
