@@ -11,21 +11,22 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.governance.owner_rules import OwnerRuleStore
-from hbllm.brain.governance.policy_engine import (
+from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+from hbllm.hcir.kernel.governance.epistemic_gate import EpistemicSafetyGate
+from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationMode, MigrationPolicy
+from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore
+from hbllm.hcir.kernel.governance.policies.policy_engine import (
     Policy,
     PolicyAction,
     PolicyCondition,
     PolicyEngine,
     PolicyType,
 )
-from hbllm.hcir.graph import CognitiveGraph
-from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
-from hbllm.hcir.kernel.governance.epistemic_gate import EpistemicSafetyGate
-from hbllm.hcir.kernel.governance.policies.migration_policy import MigrationMode, MigrationPolicy
 from hbllm.security.audit_trail import AuditTrail
 
 logger = logging.getLogger(__name__)
@@ -264,32 +265,17 @@ _SAFE_ACTUATOR_QUERIES = {
     "read",
 }
 
-_sinhala_lexicon_cache: Any = None
-_tamil_lexicon_cache: Any = None
+_LEXICON_PROVIDERS: dict[str, Callable[[], Any]] = {}
 
 
-def _get_sinhala_lexicon() -> Any:
-    global _sinhala_lexicon_cache
-    if _sinhala_lexicon_cache is None:
-        try:
-            from hbllm.brain.language.sinhala.lexicon import SinhalaLexicon
-
-            _sinhala_lexicon_cache = SinhalaLexicon()
-        except ImportError:
-            _sinhala_lexicon_cache = False
-    return _sinhala_lexicon_cache if _sinhala_lexicon_cache is not False else None
+def register_lexicon_provider(lang: str, provider: Callable[[], Any]) -> None:
+    """Register a pluggable lexicon provider callable for multilingual governance normalization."""
+    _LEXICON_PROVIDERS[lang.lower()] = provider
 
 
-def _get_tamil_lexicon() -> Any:
-    global _tamil_lexicon_cache
-    if _tamil_lexicon_cache is None:
-        try:
-            from hbllm.brain.language.tamil.lexicon import TamilLexicon
-
-            _tamil_lexicon_cache = TamilLexicon()
-        except ImportError:
-            _tamil_lexicon_cache = False
-    return _tamil_lexicon_cache if _tamil_lexicon_cache is not False else None
+def clear_lexicon_providers() -> None:
+    """Clear all registered lexicon providers."""
+    _LEXICON_PROVIDERS.clear()
 
 
 def _normalize_multilingual_term(term: str) -> str:
@@ -299,18 +285,15 @@ def _normalize_multilingual_term(term: str) -> str:
     # Check if term contains non-ASCII characters (e.g. Sinhala or Tamil Unicode blocks)
     if any(ord(c) > 127 for c in term):
         clean_t = term.strip()
-        # 1. Try Sinhala
-        si_lex = _get_sinhala_lexicon()
-        if si_lex is not None:
-            si_entries = si_lex.lookup(clean_t)
-            if si_entries and si_entries[0].semantic_predicate:
-                return si_entries[0].semantic_predicate
-        # 2. Try Tamil
-        ta_lex = _get_tamil_lexicon()
-        if ta_lex is not None:
-            ta_entries = ta_lex.lookup(clean_t)
-            if ta_entries and ta_entries[0].semantic_predicate:
-                return ta_entries[0].semantic_predicate
+        for lang, provider in list(_LEXICON_PROVIDERS.items()):
+            try:
+                lex = provider()
+                if lex is not None and hasattr(lex, "lookup"):
+                    entries = lex.lookup(clean_t)
+                    if entries and getattr(entries[0], "semantic_predicate", None):
+                        return str(entries[0].semantic_predicate)
+            except Exception as e:
+                logger.debug("Failed looking up term in %s lexicon: %s", lang, e)
     return term
 
 

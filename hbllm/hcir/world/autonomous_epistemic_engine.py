@@ -652,7 +652,8 @@ class AutonomousEpistemicEngine:
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
 
-        # Episodic Ground Facts (Layout coordinates, preserved per-level across attempts)
+        # Episodic Ground Facts (Layout coordinates, preserved per-context across attempts)
+        self._current_context_id: str = "default"
         self._current_level: int = 0
         self.working_memory.visuospatial.current_level = 0
         self.habenular_ior.current_level = 0
@@ -3841,6 +3842,18 @@ class AutonomousEpistemicEngine:
         self.working_memory.load_instructions(instructions)
 
     @property
+    def current_context_id(self) -> str:
+        return getattr(self, "_current_context_id", str(self._current_level))
+
+    @current_context_id.setter
+    def current_context_id(self, val: str) -> None:
+        self._current_context_id = str(val)
+        try:
+            self.set_current_level(int(val))
+        except (ValueError, TypeError):
+            pass
+
+    @property
     def current_level(self) -> int:
         return self._current_level
 
@@ -3871,7 +3884,12 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.world.percept import EpisodeBoundaryKind
 
         kind = getattr(boundary, "kind", boundary)
-        if kind == EpisodeBoundaryKind.LEVEL_COMPLETE or kind == "level_complete":
+        if kind in (
+            EpisodeBoundaryKind.GOAL_REACHED,
+            EpisodeBoundaryKind.LEVEL_COMPLETE,
+            "goal_reached",
+            "level_complete",
+        ):
             self.reset_episode(retain_dynamics=True, is_new_level=True)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             self.reset_episode(retain_dynamics=True, is_new_level=False)
