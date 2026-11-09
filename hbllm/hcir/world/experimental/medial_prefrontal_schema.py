@@ -145,6 +145,10 @@ class MedialPrefrontalSchemaEngine:
         """Register or update a generalized schema template."""
         self._schemas[schema.schema_id] = schema
 
+    def get_schema(self, schema_id: str) -> GeneralizedTaskSchema | None:
+        """Retrieve a registered schema template by ID."""
+        return self._schemas.get(schema_id)
+
     def match_schema_context(
         self,
         entity_roles: Mapping[str, str],
@@ -340,3 +344,77 @@ class MedialPrefrontalSchemaEngine:
         # Sort descending by match confidence
         matches.sort(key=lambda item: item[1], reverse=True)
         return matches
+
+    def consolidate_replayed_trajectory(
+        self,
+        trajectory: Sequence[Any],
+        terminal_reward: float = 1.0,
+    ) -> GeneralizedTaskSchema | None:
+        """Consolidate replayed episodic trajectory into generalized relational schema (CLS).
+
+        Biologically models hippocampal-neocortical transfer during sleep replay:
+        - Extracts the action sequence motif and involved entity roles.
+        - Identifies matching schema templates.
+        - Updates generalization score and activation counts of existing schemas.
+        - Induces new task schema if novel relational pattern is recognized.
+        """
+        if not trajectory or terminal_reward <= 0:
+            return None
+
+        action_names: list[str] = []
+        for step in trajectory:
+            act = getattr(step, "action_id", None)
+            if act is not None:
+                action_names.append(str(act))
+
+        if len(action_names) < 2:
+            return None
+
+        motif_key = "-".join(action_names)
+
+        # Check existing schemas for matching hints
+        best_match: GeneralizedTaskSchema | None = None
+        for schema in self._schemas.values():
+            if any(hint in motif_key for hint in schema.subgoal_sequence_hints):
+                best_match = schema
+                break
+
+        if best_match is not None:
+            updated = GeneralizedTaskSchema(
+                schema_id=best_match.schema_id,
+                archetype_name=best_match.archetype_name,
+                canonical_roles=best_match.canonical_roles,
+                invariant_relations=best_match.invariant_relations,
+                subgoal_sequence_hints=best_match.subgoal_sequence_hints,
+                activation_count=best_match.activation_count + 1,
+                generalization_score=min(
+                    1.0, best_match.generalization_score + 0.05 * terminal_reward
+                ),
+            )
+            self._schemas[best_match.schema_id] = updated
+            return updated
+        else:
+            new_schema_id = f"schema_replay_{len(self._schemas) + 1}"
+            new_schema = GeneralizedTaskSchema(
+                schema_id=new_schema_id,
+                archetype_name=f"archetype_{new_schema_id}",
+                canonical_roles=("agent", "replayed_target"),
+                invariant_relations=(("agent", "transits_to", "replayed_target"),),
+                subgoal_sequence_hints=tuple(action_names[:3]),
+                activation_count=1,
+                generalization_score=0.60,
+            )
+            self.register_schema(new_schema)
+            return new_schema
+
+    def prime_hippocampal_retrieval(
+        self,
+        current_roles: Sequence[str],
+    ) -> list[GeneralizedTaskSchema]:
+        """Top-down mPFC retrieval priming of hippocampal episodic memory."""
+        roles_set = set(current_roles)
+        primed = [
+            s for s in self._schemas.values() if not roles_set.isdisjoint(set(s.canonical_roles))
+        ]
+        primed.sort(key=lambda s: (s.generalization_score, s.activation_count), reverse=True)
+        return primed

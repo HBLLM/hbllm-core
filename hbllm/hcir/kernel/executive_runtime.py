@@ -290,7 +290,7 @@ class ExecutiveRuntime:
         3. Schema and hypothesis pruning in HCIRSymbolicWorldTheory
         4. State snapshotting and persistent tier commit under author='offline_consolidation'
         """
-        # 1. Hippocampal replay
+        # 1. Hippocampal replay & mPFC schema consolidation (CLS)
         if self._episodic_cortex is not None:
             try:
                 trajectories = getattr(self._episodic_cortex, "successful_trajectories", [])
@@ -299,6 +299,10 @@ class ExecutiveRuntime:
                 for traj in trajectories[-3:]:
                     if traj and hasattr(self._episodic_cortex, "replay_forward_and_reverse"):
                         self._episodic_cortex.replay_forward_and_reverse(traj, terminal_reward=1.0)
+                        if self._engine is not None and hasattr(self._engine, "mpfc_schema_engine"):
+                            self._engine.mpfc_schema_engine.consolidate_replayed_trajectory(
+                                traj, terminal_reward=1.0
+                            )
             except Exception as exc:
                 logger.debug("Hippocampal replay error during offline consolidation: %s", exc)
 
@@ -331,7 +335,14 @@ class ExecutiveRuntime:
             except Exception as exc:
                 logger.debug("Library learning sleep consolidation error: %s", exc)
 
-        # 5. Propose and commit consolidation state
+        # 5. Memory hygiene & principled forgetting (decay and interference pruning)
+        if self._services.tiered_workspace is not None:
+            try:
+                self._services.tiered_workspace.run_memory_hygiene_cycle()
+            except Exception as exc:
+                logger.debug("Memory hygiene error during offline consolidation: %s", exc)
+
+        # 6. Propose and commit consolidation state
         dest_ws = None
         grant = None
         tiered = self._services.tiered_workspace
