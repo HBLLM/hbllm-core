@@ -113,6 +113,8 @@ class ConceptLearner:
             best_concept.add_prototype(features_dict)
             if exemplar_entity_id:
                 best_concept.add_exemplar(exemplar_entity_id)
+            for label, conf in feature.semantic_labels.items():
+                best_concept.add_linguistic_alias(label, confidence=conf)
             self._update_quality_from_assignment(best_concept, best_dist)
             self._total_assignments += 1
 
@@ -145,6 +147,8 @@ class ConceptLearner:
             new_concept.add_prototype(features_dict)
             if exemplar_entity_id:
                 new_concept.add_exemplar(exemplar_entity_id)
+            for label, conf in feature.semantic_labels.items():
+                new_concept.add_linguistic_alias(label, confidence=conf)
             self._store.register_concept(new_concept)
             self._total_assignments += 1
 
@@ -289,6 +293,34 @@ class ConceptLearner:
         unavailable.
         """
         if not concept.feature_distributions:
+            return float("inf")
+
+        # Mutually exclusive categorical label conflict gate (e.g. distinct colors)
+        color_names = {
+            "black",
+            "blue",
+            "red",
+            "green",
+            "yellow",
+            "grey",
+            "magenta",
+            "orange",
+            "cyan",
+            "brown",
+        }
+        color_labels_new = {
+            k for k in features if k.startswith("label_") and any(c in k for c in color_names)
+        }
+        color_labels_concept = {
+            k
+            for k in concept.feature_distributions
+            if k.startswith("label_") and any(c in k for c in color_names)
+        }
+        if (
+            color_labels_new
+            and color_labels_concept
+            and not (color_labels_new & color_labels_concept)
+        ):
             return float("inf")
 
         shared = set(features.keys()) & set(concept.feature_distributions.keys())

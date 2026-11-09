@@ -25,7 +25,7 @@ from hbllm.hcir.grounding.contracts.actions import (
     ActionValidationResult,
     SymbolicActionIntent,
 )
-from hbllm.hcir.grounding.contracts.dialogue import GoalProposal
+from hbllm.hcir.grounding.contracts.dialogue import DialogueInterpretationResult, GoalProposal
 from hbllm.hcir.grounding.contracts.enums import (
     ActionLifecycleState,
     DecisionOutcome,
@@ -655,3 +655,35 @@ class CorticalGroundingBridge:
 
         self.state.last_execution_record = verified
         return verified
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Stage 5: Dialogue & Grounded Language Interaction
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def process_dialogue(
+        self,
+        dialogue: ObservationEnvelope | str,
+        speaker_id: str = "user",
+    ) -> DialogueInterpretationResult:
+        """Processes a natural language dialogue utterance or envelope, resolving grounded entities
+
+        against the active ConceptStore without requiring hand-seeded aliases.
+        """
+        from hbllm.hcir.compiler import HCIRCompiler
+
+        if isinstance(dialogue, ObservationEnvelope):
+            text = str(dialogue.metadata.get("text", ""))
+            speaker = str(dialogue.metadata.get("speaker_id", speaker_id))
+        else:
+            text = str(dialogue)
+            speaker = speaker_id
+
+        compiler = HCIRCompiler(concept_store=self.concept_store)
+        res = compiler.interpret_dialogue(
+            text, speaker_id=speaker, concept_store=self.concept_store
+        )
+
+        for goal in res.goal_proposals:
+            self.state.pending_epistemic_goals.append(goal)
+
+        return res

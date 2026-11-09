@@ -56,6 +56,10 @@ class CandidateEntityState:
     aliases: set[str] = field(default_factory=set)
     is_active: bool = True
 
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self.properties
+
 
 class ThreeTierEntityTracker:
     """Manages the lifecycle of Tracklets, Entity Candidates, and Grounded Entities.
@@ -118,6 +122,8 @@ class ThreeTierEntityTracker:
                     cand.spatial_trajectory.append(spatial_coords)
                     if len(cand.spatial_trajectory) > 50:
                         cand.spatial_trajectory = cand.spatial_trajectory[-50:]
+                if metadata:
+                    cand.properties.update(metadata)
 
             return state
 
@@ -194,13 +200,16 @@ class ThreeTierEntityTracker:
 
             # Sync spatial trajectory if tracklet has coordinates
             if trk_id in self._tracklets:
-                coords = self._tracklets[trk_id].last_spatial_coords
+                t_state = self._tracklets[trk_id]
+                coords = t_state.last_spatial_coords
                 if coords:
                     self._candidates[cand_id].spatial_trajectory.append(coords)
                     if len(self._candidates[cand_id].spatial_trajectory) > 50:
                         self._candidates[cand_id].spatial_trajectory = self._candidates[
                             cand_id
                         ].spatial_trajectory[-50:]
+                if t_state.metadata:
+                    self._candidates[cand_id].properties.update(t_state.metadata)
 
             op = EntityAssociationOp(
                 operation_id=_gen_id("op_assoc"),

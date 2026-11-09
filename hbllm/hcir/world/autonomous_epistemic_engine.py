@@ -1873,7 +1873,7 @@ class AutonomousEpistemicEngine:
             # 3. Restore Learned Spatial Goals
             elif nid.startswith("learned_goal_") or ntype == "goal":
                 pos = props.get("position")
-                if pos and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     gp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_goal_").split("_")
@@ -1888,7 +1888,7 @@ class AutonomousEpistemicEngine:
             # 4. Restore Learned Barriers
             elif nid.startswith("learned_barrier_") or ntype == "constraint":
                 pos = props.get("position")
-                if pos and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     bp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_barrier_").split("_")

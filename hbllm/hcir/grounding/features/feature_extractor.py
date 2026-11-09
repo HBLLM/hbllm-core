@@ -86,6 +86,64 @@ class FeatureExtractor(Protocol):
 #  Concrete extractors: domain-agnostic defaults
 # ---------------------------------------------------------------------------
 
+COLOR_NAMES: dict[int, str] = {
+    0: "black",
+    1: "blue",
+    2: "red",
+    3: "green",
+    4: "yellow",
+    5: "grey",
+    6: "magenta",
+    7: "orange",
+    8: "cyan",
+    9: "brown",
+}
+
+
+def _extract_palette_scale(envelope: ObservationEnvelope, entities: list[dict[str, Any]]) -> float:
+    """Extracts normalization scale for color features from envelope or reference frame metadata.
+
+    Supports declared palette sizes, explicit [min, max] ranges, discrete color sets,
+    or dynamically bounds based on observed entity features instead of a rigid constant.
+    """
+    meta = envelope.metadata or {}
+    if "palette_size" in meta and float(meta["palette_size"]) > 0:
+        return float(meta["palette_size"])
+    if "color_range" in meta:
+        cr = meta["color_range"]
+        if isinstance(cr, (list, tuple)) and len(cr) == 2 and cr[1] > cr[0]:
+            return float(cr[1] - cr[0])
+    if (
+        "palette" in meta
+        and isinstance(meta["palette"], (list, tuple, set))
+        and len(meta["palette"]) > 0
+    ):
+        return float(len(meta["palette"]))
+
+    if envelope.reference_frame and envelope.reference_frame.metadata:
+        rf_meta = envelope.reference_frame.metadata
+        if "palette_size" in rf_meta and float(rf_meta["palette_size"]) > 0:
+            return float(rf_meta["palette_size"])
+        if "color_range" in rf_meta:
+            cr = rf_meta["color_range"]
+            if isinstance(cr, (list, tuple)) and len(cr) == 2 and cr[1] > cr[0]:
+                return float(cr[1] - cr[0])
+        if (
+            "palette" in rf_meta
+            and isinstance(rf_meta["palette"], (list, tuple, set))
+            and len(rf_meta["palette"]) > 0
+        ):
+            return float(len(rf_meta["palette"]))
+
+    # Dynamic fallback: check observed colors in entities
+    colors = [float(e.get("color", 0)) for e in entities if "color" in e]
+    if colors:
+        max_c = max(colors)
+        if max_c > 0:
+            return max(10.0, max_c)
+
+    return 10.0
+
 
 class SpatialGridFeatureExtractor:
     """Extracts normalised feature vectors from 2-D grid spatial observations.
@@ -123,6 +181,7 @@ class SpatialGridFeatureExtractor:
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
+        palette_scale = _extract_palette_scale(envelope, entities)
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("seg")))
@@ -136,7 +195,11 @@ class SpatialGridFeatureExtractor:
             w = float(bbox[3]) if bbox and len(bbox) == 4 and float(bbox[3]) > 0 else 1.0
             aspect_ratio = w / max(1.0, h)
             fill_density = min(1.0, max(0.0, size / max(1.0, w * h)))
-            norm_color = (color / 10.0) if color < 10.0 else math.tanh(color / 10.0)
+            norm_color = (
+                (color / palette_scale)
+                if color <= palette_scale
+                else math.tanh(color / palette_scale)
+            )
             norm_size = math.log1p(size)
             embedding = (
                 aspect_ratio,
@@ -150,6 +213,11 @@ class SpatialGridFeatureExtractor:
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
+            if int(color) in COLOR_NAMES:
+                cname = COLOR_NAMES[int(color)]
+                labels.setdefault(cname, 1.0)
+                labels.setdefault(f"{cname} block", 0.9)
+                labels.setdefault(f"{cname} component", 0.9)
 
             features.append(
                 PerceptualFeatureVector(
@@ -373,6 +441,7 @@ class SNNPerceptualFeatureExtractor:
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
+        palette_scale = _extract_palette_scale(envelope, entities)
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("snn_seg")))
@@ -385,7 +454,11 @@ class SNNPerceptualFeatureExtractor:
             w = float(bbox[3]) if bbox and len(bbox) == 4 and float(bbox[3]) > 0 else 1.0
             aspect_ratio = w / max(1.0, h)
             fill_density = min(1.0, max(0.0, size / max(1.0, w * h)))
-            norm_color = (color / 10.0) if color < 10.0 else math.tanh(color / 10.0)
+            norm_color = (
+                (color / palette_scale)
+                if color <= palette_scale
+                else math.tanh(color / palette_scale)
+            )
             norm_size = math.log1p(size)
 
             x = (aspect_ratio, fill_density, norm_color, norm_size)
@@ -404,6 +477,11 @@ class SNNPerceptualFeatureExtractor:
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
+            if int(color) in COLOR_NAMES:
+                cname = COLOR_NAMES[int(color)]
+                labels.setdefault(cname, 1.0)
+                labels.setdefault(f"{cname} block", 0.9)
+                labels.setdefault(f"{cname} component", 0.9)
 
             features.append(
                 PerceptualFeatureVector(
@@ -456,6 +534,7 @@ class LearnedPerceptualFeatureExtractor:
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
+        palette_scale = _extract_palette_scale(envelope, entities)
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("lrn_seg")))
@@ -468,7 +547,11 @@ class LearnedPerceptualFeatureExtractor:
             w = float(bbox[3]) if bbox and len(bbox) == 4 and float(bbox[3]) > 0 else 1.0
             aspect_ratio = w / max(1.0, h)
             fill_density = min(1.0, max(0.0, size / max(1.0, w * h)))
-            norm_color = (color / 10.0) if color < 10.0 else math.tanh(color / 10.0)
+            norm_color = (
+                (color / palette_scale)
+                if color <= palette_scale
+                else math.tanh(color / palette_scale)
+            )
             norm_size = math.log1p(size)
 
             x = (aspect_ratio, fill_density, norm_color, norm_size)
@@ -489,6 +572,11 @@ class LearnedPerceptualFeatureExtractor:
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
+            if int(color) in COLOR_NAMES:
+                cname = COLOR_NAMES[int(color)]
+                labels.setdefault(cname, 1.0)
+                labels.setdefault(f"{cname} block", 0.9)
+                labels.setdefault(f"{cname} component", 0.9)
 
             features.append(
                 PerceptualFeatureVector(

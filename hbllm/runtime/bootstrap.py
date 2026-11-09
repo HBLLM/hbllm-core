@@ -55,6 +55,20 @@ class CognitiveSystem:
     brain: Any | None = None
     hydrated_count: int = 0
 
+    def process_dialogue(self, dialogue: Any, speaker_id: str = "user") -> Any:
+        """Processes a natural language dialogue command or request through the grounded cognitive bridge."""
+        if self.bridge is not None and hasattr(self.bridge, "process_dialogue"):
+            return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
+        from hbllm.hcir.compiler import HCIRCompiler
+
+        compiler = HCIRCompiler()
+        text = (
+            str(dialogue.metadata.get("text", ""))
+            if hasattr(dialogue, "metadata")
+            else str(dialogue)
+        )
+        return compiler.interpret_dialogue(text, speaker_id=speaker_id)
+
 
 def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> CognitiveSystem:
     """Build and wire the single, canonical cognitive runtime.

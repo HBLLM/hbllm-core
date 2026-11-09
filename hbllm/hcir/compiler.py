@@ -38,6 +38,7 @@ from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
 from hbllm.hcir.grounding.contracts.dialogue import (
     ActionIntentProposal,
     DialogueInterpretationResult,
+    GoalProposal,
 )
 from hbllm.hcir.grounding.contracts.enums import (
     DecisionOutcome,
@@ -218,6 +219,17 @@ class HCIRCompiler:
                 concept = store.find_concept_by_alias(norm)
                 if concept is None:
                     concept = store.find_concept_by_alias(clean.lower())
+                if concept is None:
+                    # Fallback: attempt color feature resolution across concept prototypes
+                    color_code = self._resolve_feature_for_label(norm, None)
+                    if color_code is not None:
+                        for c in store._concepts.values():
+                            for p in c.prototypes:
+                                if p.get("raw_color") == color_code or p.get("color") == color_code:
+                                    concept = c
+                                    break
+                            if concept is not None:
+                                break
 
             if concept is not None:
                 # Resolved grounded concept
@@ -369,14 +381,26 @@ class HCIRCompiler:
                 if target.startswith(prefix):
                     target = target[len(prefix) :].strip()
                     break
+
+            direction: str | None = None
+            for dir_word in ("left", "right", "up", "down", "north", "south", "east", "west"):
+                if target.endswith(f" {dir_word}"):
+                    direction = dir_word
+                    target = target[: -len(f" {dir_word}")].strip()
+                    break
+
+            slots = [
+                SemanticSlot(name="action", value=action_match),
+                SemanticSlot(name="target", value=target),
+            ]
+            if direction:
+                slots.append(SemanticSlot(name="direction", value=direction))
+
             return SemanticAST(
                 intent=intent,
                 subject=target,
                 action=action_match,
-                slots=[
-                    SemanticSlot(name="action", value=action_match),
-                    SemanticSlot(name="target", value=target),
-                ],
+                slots=slots,
                 raw_text=text,
             )
         elif any(
@@ -442,17 +466,38 @@ class HCIRCompiler:
             dialogue_act = DialogueAct.INFORM
 
         action_proposals: list[ActionIntentProposal] = []
+        goal_proposals: list[GoalProposal] = []
         if ast.action or ast.intent == IntentType.ACT:
             target_ref = None
             for ref in ast.grounded_entities.values():
                 target_ref = ref
                 break
+
+            direction = None
+            for slot in ast.slots:
+                if slot.name == "direction" and isinstance(slot.value, str):
+                    direction = slot.value
+                    break
+
+            params: dict[str, Any] = {"subject": ast.subject, "raw_text": ast.raw_text}
+            if direction:
+                params["direction"] = direction
+
             action_proposals.append(
                 ActionIntentProposal(
                     intent_id=f"act_prop_{uuid.uuid4().hex[:8]}",
                     action_type=ast.action or "execute",
                     target_ref=target_ref,
-                    parameters={"subject": ast.subject, "raw_text": ast.raw_text},
+                    parameters=params,
+                )
+            )
+            goal_proposals.append(
+                GoalProposal(
+                    proposal_id=f"goal_prop_{uuid.uuid4().hex[:8]}",
+                    goal_intent=ast.action or "act",
+                    target_entity=target_ref,
+                    parameters=params,
+                    priority=0.8,
                 )
             )
 
@@ -460,6 +505,7 @@ class HCIRCompiler:
         return DialogueInterpretationResult(
             utterance_id=f"utt_{uuid.uuid4().hex[:8]}",
             dialogue_act=dialogue_act,
+            goal_proposals=tuple(goal_proposals),
             action_proposals=tuple(action_proposals),
             confidence=0.5 if has_unresolved else 1.0,
         )

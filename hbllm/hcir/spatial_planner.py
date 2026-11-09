@@ -1534,7 +1534,7 @@ class HCIRSpatialEntityPlanner:
         for node in workspace.graph.nodes_by_type(HCIRNodeType.BELIEF):
             if isinstance(node, BeliefNode) and node.properties.get("negative_constraint"):
                 pos = node.properties.get("position")
-                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     impassable_cells.add((int(pos[0]), int(pos[1])))
 
         for node in workspace.graph.nodes_by_type(HCIRNodeType.EPISODE):
