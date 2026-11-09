@@ -822,6 +822,11 @@ class AutonomousEpistemicEngine:
 
         self.working_concept_store: WorkingConceptStore = WorkingConceptStore()
 
+        # Faculty: Causal Schema Inducer & Latent Variable Discovery (AGI Gap 7)
+        from hbllm.hcir.grounding.causal.schema import SchemaInducer
+
+        self.schema_inducer: SchemaInducer = SchemaInducer()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4150,6 +4155,19 @@ class AutonomousEpistemicEngine:
         return self.working_concept_store.retrieve_analogous_concepts(
             query_graph=query_graph,
             min_match_score=min_match_score,
+        )
+
+    def query_latent_counterfactual(
+        self,
+        action_type: str,
+        target_role: str,
+        hypothetical_latent_state: bool,
+    ) -> dict[str, Any] | None:
+        """Evaluate Pearl Level 3 counterfactual prediction over hypothetical latent state (G7)."""
+        return self.schema_inducer.evaluate_latent_counterfactual(
+            action_type=action_type,
+            target_role=target_role,
+            hypothetical_latent_state=hypothetical_latent_state,
         )
 
     def record_action_effect(self, action: Any, kind: str) -> None:
