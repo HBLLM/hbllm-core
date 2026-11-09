@@ -2130,31 +2130,6 @@ class BrainFactory:
         brain.autonomy_core = autonomy
         logger.info("AutonomyCore started — cognitive heartbeat active")
 
-        # ── Epistemic Runtime (hypothesis, discovery, calibration) ──
-        try:
-            from hbllm.brain.epistemics.integration import wire_epistemics
-            from hbllm.hcir.graph import CognitiveGraph as HCIRCognitiveGraph
-
-            hcir_graph: HCIRCognitiveGraph | None = None
-            if brain.hcir_services and hasattr(brain.hcir_services, "workspace"):
-                candidate = getattr(brain.hcir_services.workspace, "graph", None)
-                if isinstance(candidate, HCIRCognitiveGraph):
-                    hcir_graph = candidate
-
-            if hcir_graph is None:
-                hcir_graph = HCIRCognitiveGraph()
-
-            data_dir = getattr(cfg, "data_dir", "data")
-            brain.epistemic_loop = wire_epistemics(
-                autonomy_core=autonomy,
-                graph=hcir_graph,
-                data_dir=data_dir,
-                llm=getattr(brain, "llm", None),
-            )
-            logger.info("Epistemic runtime wired into AutonomyCore")
-        except Exception as e:
-            logger.warning("Epistemic runtime failed to wire: %s", e)
-
         # ── Unified Reasoning Runtime (A12) ───────────────────────
         try:
             from hbllm.brain.reasoning.operators.registry import (

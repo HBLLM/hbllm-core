@@ -70,7 +70,7 @@ def test_single_canonical_surprise_engine() -> None:
 
 
 def test_no_dead_epistemics_or_control_stacks() -> None:
-    """Duplicate and unused epistemics and control loop modules are deleted."""
+    """Duplicate and unused epistemics, control, attention, compaction, mesh, and embodiment modules are deleted."""
     with pytest.raises(ImportError):
         import hbllm.brain.epistemics.contradiction_engine  # noqa: F401
     with pytest.raises(ImportError):
@@ -78,6 +78,20 @@ def test_no_dead_epistemics_or_control_stacks() -> None:
     with pytest.raises(ImportError):
         import hbllm.brain.epistemics.epistemic_loop  # noqa: F401
     with pytest.raises(ImportError):
+        import hbllm.brain.epistemics.hypothesis_builder  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.epistemics.curiosity_engine  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.epistemics.epistemic_memory  # noqa: F401
+    with pytest.raises(ImportError):
         import hbllm.brain.control.executive_controller  # noqa: F401
     with pytest.raises(ImportError):
         import hbllm.brain.reasoning.concept_formation  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.attention.cognitive_budget  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.compaction.engine  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.mesh.router  # noqa: F401
+    with pytest.raises(ImportError):
+        import hbllm.brain.embodiment.os_adapter  # noqa: F401

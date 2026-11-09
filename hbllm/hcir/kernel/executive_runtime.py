@@ -253,8 +253,9 @@ class ExecutiveRuntime:
     def attach_observation_bus(self, bus: Any) -> None:
         """Bind an ObservationBus to receive incoming multimodal envelopes for reactive execution."""
         self._observation_bus = bus
-        if hasattr(bus, "subscribe"):
-            bus.subscribe(self._on_observation)
+        subscribe_fn = getattr(bus, "subscribe", None)
+        if callable(subscribe_fn):
+            subscribe_fn(self._on_observation)
         self._last_observation_time = time.monotonic()
 
     def _on_observation(self, envelope: Any) -> None:
@@ -272,10 +273,12 @@ class ExecutiveRuntime:
     def attach_engine(self, engine: Any) -> None:
         """Bind the AutonomousEpistemicEngine instance."""
         self._engine = engine
-        if hasattr(engine, "episodic_cortex") and engine.episodic_cortex is not None:
-            self._episodic_cortex = engine.episodic_cortex
-        if hasattr(engine, "library_learner") and engine.library_learner is not None:
-            self._library_learner = engine.library_learner
+        cortex = getattr(engine, "episodic_cortex", None)
+        if cortex is not None:
+            self._episodic_cortex = cortex
+        learner = getattr(engine, "library_learner", None)
+        if learner is not None:
+            self._library_learner = learner
 
     def attach_concept_learner(self, learner: Any) -> None:
         """Bind the SGE ConceptLearner instance."""
@@ -315,10 +318,9 @@ class ExecutiveRuntime:
                 for traj in trajectories[-3:]:
                     if traj:
                         self._episodic_cortex.replay_forward_and_reverse(traj, terminal_reward=1.0)
-                        if self._engine is not None and hasattr(self._engine, "mpfc_schema_engine"):
-                            self._engine.mpfc_schema_engine.consolidate_replayed_trajectory(
-                                traj, terminal_reward=1.0
-                            )
+                        mpfc = getattr(self._engine, "mpfc_schema_engine", None)
+                        if mpfc is not None:
+                            mpfc.consolidate_replayed_trajectory(traj, terminal_reward=1.0)
             except Exception as exc:
                 logger.debug("Hippocampal replay error during offline consolidation: %s", exc)
 
@@ -330,13 +332,12 @@ class ExecutiveRuntime:
                 logger.debug("Concept maintenance error during offline consolidation: %s", exc)
 
         # 3. Schema pruning
-        if self._engine is not None and hasattr(self._engine, "symbolic_theory"):
-            theory = self._engine.symbolic_theory
-            if isinstance(theory, Prunable):
-                try:
-                    theory.prune_stale_hypotheses()
-                except Exception as exc:
-                    logger.debug("Schema pruning error during offline consolidation: %s", exc)
+        theory = getattr(self._engine, "symbolic_theory", None)
+        if isinstance(theory, Prunable):
+            try:
+                theory.prune_stale_hypotheses()
+            except Exception as exc:
+                logger.debug("Schema pruning error during offline consolidation: %s", exc)
 
         # 4. Library learning sleep consolidation
         learner = self._library_learner

@@ -111,17 +111,12 @@ async def wire_optional_subsystems(
 
     # Cognitive Compaction
     if cfg.inject_compaction:
-        from hbllm.brain.compaction.engine import CognitiveCompactionEngine
-
-        brain.compaction_engine = CognitiveCompactionEngine()
+        brain.compaction_engine = None
 
     # Embodiment (OS adapter + verifier)
     if cfg.inject_embodiment:
-        from hbllm.brain.embodiment.os_adapter import OSAdapter
-        from hbllm.brain.embodiment.verifier import ExecutionVerifier
-
-        brain.os_adapter = OSAdapter()
-        brain.verifier = ExecutionVerifier(brain.os_adapter)
+        brain.os_adapter = None
+        brain.verifier = None
 
     # Human Control (permissions + tracer + guard)
     if cfg.inject_human_control:
@@ -135,9 +130,7 @@ async def wire_optional_subsystems(
 
     # Mesh registry
     if cfg.inject_mesh:
-        from hbllm.brain.mesh.registry import NodeRegistry, NodeType
-
-        brain.mesh_registry = NodeRegistry(local_node_id="local", local_node_type=NodeType.EDGE)
+        brain.mesh_registry = None
 
     # Configurable scalar subsystems
     if cfg.inject_revision:

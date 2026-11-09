@@ -53,6 +53,7 @@ class CognitiveSystem:
     config: CognitiveSystemConfig
     runtime: Any | None = None  # ExecutiveRuntime
     brain: Any | None = None
+    hydrated_count: int = 0
 
 
 def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> CognitiveSystem:
@@ -116,6 +117,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     )
 
     # Auto-hydrate world model & lifelong memory if persistent state exists
+    hydrated_count = 0
     if persistent_store is not None or tiered_workspace.persistent.graph.node_count > 0:
         hydrated_count = engine.hydrate_from_workspace(tiered_workspace)
         if hydrated_count > 0:
@@ -140,16 +142,12 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
 
     runtime = ExecutiveRuntime(services=services)
     runtime.attach_engine(engine)
-    if bridge is not None and hasattr(bridge, "bus"):
+    if bridge is not None:
         runtime.attach_observation_bus(bridge.bus)
-    if hasattr(engine, "episodic_cortex") and engine.episodic_cortex is not None:
+        if getattr(bridge, "concept_learner", None) is not None:
+            runtime.attach_concept_learner(bridge.concept_learner)
+    if getattr(engine, "episodic_cortex", None) is not None:
         runtime.attach_episodic_cortex(engine.episodic_cortex)
-    if (
-        bridge is not None
-        and hasattr(bridge, "concept_learner")
-        and bridge.concept_learner is not None
-    ):
-        runtime.attach_concept_learner(bridge.concept_learner)
 
     logger.info(
         "Cognitive system booted successfully (world_id=%s, seed=%s, verifier=ConstitutionalVerifier)",
@@ -165,4 +163,5 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         tiered_workspace=tiered_workspace,
         config=cfg,
         runtime=runtime,
+        hydrated_count=hydrated_count,
     )

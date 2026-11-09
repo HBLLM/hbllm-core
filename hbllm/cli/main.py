@@ -123,15 +123,33 @@ def mind_run(
     """Run the autonomous active inference loop with connected driver."""
     from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-    _ = build_cognitive_system(
+    system = build_cognitive_system(
         CognitiveSystemConfig(world_id=world_id, exploration_budget=budget, seed=seed)
     )
+    if system.hydrated_count > 0:
+        typer.echo(f"Hydrated {system.hydrated_count} > 0 nodes from persistent tier.")
     typer.echo(
         f"Cognitive mind running with driver '{driver}' on world '{world_id}' (budget={budget}, seed={seed})"
     )
     if obs_source:
         typer.echo(f"Observation source: {obs_source}")
-    typer.echo("Mind loop initialized and ready.")
+
+    import numpy as np
+
+    from hbllm.hcir.world.percept import EmbodiedObservation
+
+    steps_to_run = min(budget, 5)
+    for step_idx in range(steps_to_run):
+        obs = EmbodiedObservation(
+            lattice=np.zeros((5, 5), dtype=np.int32),
+            available_actions=[1, 2, 3, 4],
+            context_id=world_id,
+            episode_id=str(step_idx),
+        )
+        system.engine.step(obs)
+
+    system.engine.persist_to_workspace()
+    typer.echo("Mind loop completed and state persisted.")
 
 
 @mind_app.command("step")
