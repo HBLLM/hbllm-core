@@ -464,6 +464,195 @@ class HCIRCompiler:
             confidence=0.5 if has_unresolved else 1.0,
         )
 
+    def evaluate_grounded_expression(
+        self,
+        ast: SemanticAST,
+        theory: Any,
+        grid: Any | None = None,
+    ) -> list[Any]:
+        """Evaluate compositional natural language expression against HCIRSymbolicWorldTheory and scene grid (G8).
+
+        Resolves expressions such as:
+        - "the block left of the key"
+        - "the barrier above the switch"
+        - "the green key"
+        """
+        import numpy as np
+
+        text = (ast.raw_text or ast.subject).lower()
+
+        rel_map = {
+            "left of": "LEFT_OF",
+            "right of": "RIGHT_OF",
+            "above": "ABOVE",
+            "below": "BELOW",
+            "inside": "INSIDE",
+            "contains": "CONTAINS",
+            "adjacent to": "ADJACENT",
+        }
+        detected_rel: str | None = None
+        subj_name = ""
+        ref_name = ""
+
+        for phrase, rel in rel_map.items():
+            if phrase in text:
+                detected_rel = rel
+                parts = text.split(phrase, 1)
+                subj_name = parts[0].strip()
+                ref_name = parts[1].strip()
+                break
+
+        if not detected_rel:
+            subj_name = text
+            ref_name = ""
+
+        for prefix in ("the ", "a ", "an ", "this ", "that "):
+            if subj_name.startswith(prefix):
+                subj_name = subj_name[len(prefix) :].strip()
+            if ref_name.startswith(prefix):
+                ref_name = ref_name[len(prefix) :].strip()
+
+        # If grid is provided, evaluate spatial coordinates of matching entities
+        if grid is not None and isinstance(grid, np.ndarray) and detected_rel and ref_name:
+            subj_feat = self._resolve_feature_for_label(subj_name, theory)
+            ref_feat = self._resolve_feature_for_label(ref_name, theory)
+
+            if subj_feat is not None and ref_feat is not None:
+                subj_coords = list(zip(*((grid == subj_feat).nonzero())))
+                ref_coords = list(zip(*((grid == ref_feat).nonzero())))
+
+                matching_coords: list[tuple[int, int]] = []
+                for sr, sc in subj_coords:
+                    for rr, rc in ref_coords:
+                        if detected_rel == "LEFT_OF" and sc < rc and abs(sr - rr) <= 2:
+                            matching_coords.append((int(sr), int(sc)))
+                        elif detected_rel == "RIGHT_OF" and sc > rc and abs(sr - rr) <= 2:
+                            matching_coords.append((int(sr), int(sc)))
+                        elif detected_rel == "ABOVE" and sr < rr and abs(sc - rc) <= 2:
+                            matching_coords.append((int(sr), int(sc)))
+                        elif detected_rel == "BELOW" and sr > rr and abs(sc - rc) <= 2:
+                            matching_coords.append((int(sr), int(sc)))
+                        elif detected_rel == "ADJACENT" and abs(sr - rr) + abs(sc - rc) <= 1:
+                            matching_coords.append((int(sr), int(sc)))
+
+                if matching_coords:
+                    return matching_coords
+
+        return [subj_name] if subj_name else []
+
+    def _resolve_feature_for_label(self, label: str, theory: Any) -> Any | None:
+        """Resolve a textual entity label to a physical feature ID via theory or concept store."""
+        lbl = label.lower().strip()
+        color_map = {
+            "black": 0,
+            "blue": 1,
+            "red": 2,
+            "green": 3,
+            "yellow": 4,
+            "grey": 5,
+            "gray": 5,
+            "magenta": 6,
+            "orange": 7,
+            "cyan": 8,
+            "brown": 9,
+        }
+        for cname, ccode in color_map.items():
+            if cname in lbl:
+                return ccode
+
+        if theory is not None:
+            if "key" in lbl and hasattr(theory, "tool_barrier_affinities"):
+                for tool in theory.tool_barrier_affinities:
+                    return tool
+            if "door" in lbl or "barrier" in lbl:
+                if hasattr(theory, "barrier_features") and theory.barrier_features:
+                    return next(iter(theory.barrier_features))
+            if "goal" in lbl and hasattr(theory, "goal_features") and theory.goal_features:
+                return next(iter(theory.goal_features))
+
+        return None
+
+    def compile_utterance_to_causal_hypothesis(
+        self,
+        utterance: str,
+        theory: Any | None = None,
+    ) -> Any:
+        """Parse natural language rule into a testable CausalPredicate hypothesis (G8).
+
+        Examples:
+        - "red doors need red keys"
+        - "switches unlock gates"
+        - "touching fire causes reset"
+        - "pushing block clears path"
+        """
+        from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+        text = utterance.lower().strip()
+        premise = ""
+        relation = "causes"
+        effect = ""
+
+        keywords = [
+            (" need ", "requires"),
+            (" needs ", "requires"),
+            (" require ", "requires"),
+            (" requires ", "requires"),
+            (" unlock ", "unlocks"),
+            (" unlocks ", "unlocks"),
+            (" clear ", "clears"),
+            (" clears ", "clears"),
+            (" cause ", "causes"),
+            (" causes ", "causes"),
+            (" enable ", "enables"),
+            (" enables ", "enables"),
+        ]
+
+        for kw, rel in keywords:
+            if kw in text:
+                parts = text.split(kw, 1)
+                premise = parts[0].strip()
+                relation = rel
+                effect = parts[1].strip()
+                break
+
+        if not premise and "if " in text and " then " in text:
+            after_if = text.split("if ", 1)[1]
+            parts = after_if.split(" then ", 1)
+            premise = parts[0].strip()
+            relation = "implies"
+            effect = parts[1].strip()
+
+        if not premise:
+            premise = text
+            relation = "asserted_rule"
+            effect = "true"
+
+        for prefix in ("the ", "a ", "an ", "all "):
+            if premise.startswith(prefix):
+                premise = premise[len(prefix) :].strip()
+            if effect.startswith(prefix):
+                effect = effect[len(prefix) :].strip()
+
+        var_name = f"rule:{premise.replace(' ', '_')}->{effect.replace(' ', '_')}"
+        pred = CausalPredicate(
+            variable=var_name,
+            operator="==",
+            value=effect,
+            relation=relation,
+            target_entity=premise,
+        )
+        pred.causal_status = "HYPOTHESISED"
+
+        if theory is not None and hasattr(theory, "record_causal_predicate"):
+            theory.record_causal_predicate(pred)
+            if relation in ("requires", "unlocks", "clears"):
+                prem_feat = self._resolve_feature_for_label(premise, theory)
+                eff_feat = self._resolve_feature_for_label(effect, theory)
+                if prem_feat is not None and eff_feat is not None:
+                    theory.record_tool_barrier_affinity(eff_feat, prem_feat)
+
+        return pred
+
     # ── Compilation Strategies ───────────────────────────────────────
 
     def _compile_act(self, ast: SemanticAST, author: str) -> InstructionStream:

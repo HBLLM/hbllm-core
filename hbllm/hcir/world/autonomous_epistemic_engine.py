@@ -4170,6 +4170,41 @@ class AutonomousEpistemicEngine:
             hypothetical_latent_state=hypothetical_latent_state,
         )
 
+    def explain_last_decision(self) -> str:
+        """Generate human-interpretable natural language explanation of the last decision (G8 / §15)."""
+        act = self.last_action
+        if act is None:
+            return "No decision has been made yet: agent is in an uninitialized idle state."
+
+        phase = getattr(self, "epistemic_phase", "Active Deliberation")
+        target = getattr(self, "active_subgoal", None) or getattr(self, "current_target", None)
+
+        pc = getattr(self, "hierarchical_precision_controller", None) or getattr(
+            self, "precision_controller", None
+        )
+        lp_str = ""
+        if pc is not None and hasattr(pc, "current_state"):
+            lp = getattr(pc.current_state, "learning_progress", 0.0)
+            gain = getattr(pc.current_state, "epistemic_exploration_gain", 1.0)
+            lp_str = f" [Learning progress: {lp:+.2f}, Exploration gain: {gain:.2f}]"
+
+        parts = [f"Chose motor action {act} during epistemic phase '{phase}'.{lp_str}"]
+        if target is not None:
+            parts.append(f"Pursuing target/subgoal at {target}.")
+
+        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
+            active_causes = [
+                p
+                for p in getattr(self.symbolic_theory, "causal_predicates", [])
+                if getattr(p, "is_active", True)
+            ]
+            if active_causes:
+                parts.append(
+                    f"Conditioned on active causal hypothesis '{active_causes[-1].variable} {active_causes[-1].operator} {active_causes[-1].value}'."
+                )
+
+        return " ".join(parts)
+
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
         counts = self.action_effect_counts.setdefault(action, {})

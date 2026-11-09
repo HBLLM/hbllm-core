@@ -72,6 +72,10 @@ class CausalPredicate:
     logic_op: LogicOperator | None = None
     children: list[CausalPredicate] = field(default_factory=list)
 
+    # Causal lifecycle & confidence tracking (G8)
+    causal_status: str = "HYPOTHESISED"
+    confidence: float = 1.0
+
     def is_composite(self) -> bool:
         """True if predicate represents a compound boolean expression."""
         return self.logic_op is not None and bool(self.children)
