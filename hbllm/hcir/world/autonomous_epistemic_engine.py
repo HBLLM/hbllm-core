@@ -812,6 +812,11 @@ class AutonomousEpistemicEngine:
 
         self.library_learner: LibraryLearner = LibraryLearner()
 
+        # Faculty: Recursive Value Induction & Backward Causal Credit Propagation (AGI Gap 5)
+        from hbllm.hcir.world.recursive_value_induction import RecursiveValueInducer
+
+        self.recursive_value_inducer: RecursiveValueInducer = RecursiveValueInducer()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 

@@ -38,6 +38,7 @@ class PrecisionState:
     mean_prediction_error: float
     timestamp_step: int
     is_volatile_regime: bool = False
+    learning_progress: float = 0.0  # -d(PE)/dt in [-1.0, 1.0] (Oudeyer / Schmidhuber)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export precision state as a formal causal predicate."""
@@ -45,7 +46,7 @@ class PrecisionState:
         return CausalPredicate(
             variable=f"precision_state:step_{self.timestamp_step}",
             operator="==",
-            value=f"lr:{self.adaptive_learning_rate:.3f}:gain:{self.epistemic_exploration_gain:.2f}:{regime}",
+            value=f"lr:{self.adaptive_learning_rate:.3f}:gain:{self.epistemic_exploration_gain:.2f}:lp:{self.learning_progress:.3f}:{regime}",
             relation=f"volatility:{self.environmental_volatility:.3f}",
             target_entity=f"step_{self.timestamp_step}",
         )
@@ -63,6 +64,7 @@ class PrecisionState:
                     "environmental_volatility": self.environmental_volatility,
                     "adaptive_learning_rate": self.adaptive_learning_rate,
                     "epistemic_exploration_gain": self.epistemic_exploration_gain,
+                    "learning_progress": self.learning_progress,
                     "is_volatile_regime": self.is_volatile_regime,
                 },
             )
@@ -86,6 +88,8 @@ class HierarchicalPrecisionController:
 
         # Error tracking buffers
         self.error_history: deque[float] = deque(maxlen=64)
+        self.short_error_window: deque[float] = deque(maxlen=6)
+        self.long_error_window: deque[float] = deque(maxlen=24)
         self.running_mean_error: float = 0.0
         self.running_variance_error: float = 0.0
 
@@ -100,6 +104,7 @@ class HierarchicalPrecisionController:
             mean_prediction_error=0.0,
             timestamp_step=0,
             is_volatile_regime=False,
+            learning_progress=0.0,
         )
 
     def update_with_prediction_error(
@@ -116,6 +121,8 @@ class HierarchicalPrecisionController:
             clamped_error = max(clamped_error, 0.85)
 
         self.error_history.append(clamped_error)
+        self.short_error_window.append(clamped_error)
+        self.long_error_window.append(clamped_error)
 
         # Exponential moving average update
         alpha = 1.0 - math.exp(-math.log(2.0) / max(1, self.volatility_half_life))
@@ -128,6 +135,13 @@ class HierarchicalPrecisionController:
         volatility = max(0.0, min(1.0, math.sqrt(self.running_variance_error)))
         is_volatile = volatility >= self.volatility_threshold
 
+        # Compute Oudeyer / Schmidhuber Learning Progress (-dPE / dt)
+        learning_progress = 0.0
+        if len(self.long_error_window) >= 8 and len(self.short_error_window) >= 4:
+            short_mean = float(np.mean(list(self.short_error_window)))
+            long_mean = float(np.mean(list(self.long_error_window)))
+            learning_progress = max(-1.0, min(1.0, long_mean - short_mean))
+
         # Variational precision weights:
         # High error & volatility suppresses sensory precision to prevent thrashing
         sensory_precision = 1.0 / max(0.10, volatility + clamped_error * 0.5 + 0.10)
@@ -139,9 +153,13 @@ class HierarchicalPrecisionController:
         adaptive_lr = max(0.02, min(1.0, self.base_learning_rate * precision_ratio * 2.0))
 
         # Epistemic gain:
-        # When volatility is high, active inference drives targeted epistemic probes
-        # to disambiguate hidden states.
-        epistemic_gain = 1.0 + 2.0 * volatility if is_volatile else max(0.5, 1.0 - volatility)
+        # Base active inference probes modulated by learning progress:
+        # High positive learning progress boosts exploration in the zone of proximal development.
+        base_gain = 1.0 + 2.0 * volatility if is_volatile else max(0.5, 1.0 - volatility)
+        if learning_progress > 0.0:
+            epistemic_gain = base_gain * (1.0 + 1.5 * learning_progress)
+        else:
+            epistemic_gain = base_gain
 
         self.current_state = PrecisionState(
             sensory_precision=float(sensory_precision),
@@ -152,6 +170,7 @@ class HierarchicalPrecisionController:
             mean_prediction_error=float(self.running_mean_error),
             timestamp_step=step,
             is_volatile_regime=is_volatile,
+            learning_progress=float(learning_progress),
         )
         return self.current_state
 

@@ -110,8 +110,9 @@ class GoalArbiter:
         self,
         homeostatic_state: HomeostaticState | None = None,
         neuromodulator_system: Any | None = None,
+        precision_state: Any | None = None,
     ) -> dict[str, float]:
-        """Compute dynamic weights (w_extrinsic, w_epistemic, w_cost) from biological states."""
+        """Compute dynamic weights (w_extrinsic, w_epistemic, w_cost) from biological states and learning progress."""
         da = 1.0
         ne = 1.0
         serotonin = 1.0
@@ -129,6 +130,13 @@ class GoalArbiter:
         w_epi = self.base_epistemic_weight * max(0.1, min(4.0, ne))
         # 3. Serotonin scales patience (inversely scaling cost penalty)
         w_cost = self.base_cost_weight * (1.0 / max(0.25, min(4.0, serotonin)))
+
+        # Learning-progress modulation (Oudeyer / Schmidhuber):
+        # Positive learning progress indicates zone of proximal development -> boost epistemic exploration
+        if precision_state is not None:
+            lp = float(getattr(precision_state, "learning_progress", 0.0))
+            if lp > 0.0:
+                w_epi *= 1.0 + 1.5 * lp
 
         # Homeostatic state modulation:
         if homeostatic_state is not None:
@@ -262,6 +270,38 @@ class GoalArbiter:
                                 metadata={"feature_id": feat},
                             )
                         )
+
+        # 3b. Recursively Induced Intermediate Subgoals (keys, switches with backed-up value)
+        rvi = getattr(engine, "recursive_value_inducer", None)
+        if rvi is not None and hasattr(rvi, "induced_values"):
+            terminals = set(getattr(rvi, "terminal_values", {}).keys())
+            for ent_key, val in rvi.induced_values.items():
+                if val >= 0.2 and ent_key not in terminals and not ent_key.startswith("goal"):
+                    if ent_key.startswith("pos_"):
+                        parts = ent_key.split("_")
+                        if len(parts) == 3:
+                            try:
+                                r, c = int(parts[1]), int(parts[2])
+                                if (r, c) in goals:
+                                    continue
+                                cost = (
+                                    max(1.0, float(abs(avatar_pos[0] - r) + abs(avatar_pos[1] - c)))
+                                    if avatar_pos
+                                    else 1.0
+                                )
+                                candidates.append(
+                                    CandidateGoal(
+                                        goal_id=f"subgoal_induced_{r}_{c}",
+                                        target=(r, c),
+                                        goal_type="recursively_induced",
+                                        extrinsic_utility=float(val * 35.0),
+                                        epistemic_utility=5.0,
+                                        estimated_cost=cost,
+                                        hazard_risk=0.0,
+                                    )
+                                )
+                            except ValueError:
+                                pass
 
         # 4. Safety Preservation Attractors (when energy is critical)
         if homeostatic is not None and homeostatic.is_critical_energy and avatar_pos is not None:
