@@ -832,6 +832,11 @@ class AutonomousEpistemicEngine:
 
         self.social_cognition: SocialCognitionEngine = SocialCognitionEngine()
 
+        # Faculty: Temporal Option Discovery & Bottleneck Cuts (AGI Gap 11)
+        from hbllm.hcir.world.option_discovery import OptionDiscoveryEngine
+
+        self.option_discovery: OptionDiscoveryEngine = OptionDiscoveryEngine()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4250,6 +4255,29 @@ class AutonomousEpistemicEngine:
             avatar_pos=avatar_pos or getattr(self, "avatar_pos", None),
             candidate_goals=candidate_goals or getattr(self, "goals", []),
         )
+
+    def discover_and_induce_options(self, grid: Any | None = None) -> list[Any]:
+        """Discover topological bottleneck states and induce temporal options (G11)."""
+        current_grid = grid if grid is not None else getattr(self, "grid", None)
+        if current_grid is None or not isinstance(current_grid, np.ndarray):
+            return []
+
+        bottlenecks = self.option_discovery.discover_bottlenecks_from_grid(current_grid)
+        options = []
+        for b in bottlenecks:
+            opt = self.option_discovery.induce_option(bottleneck=b)
+            options.append(opt)
+        return options
+
+    def record_option_usage(self, option_id: str, steps: int, success: bool = True) -> None:
+        """Record option execution steps and success to track reuse rate (G11)."""
+        self.option_discovery.record_option_execution(
+            option_id=option_id, steps=steps, success=success
+        )
+
+    def get_option_reuse_rate(self) -> float:
+        """Get the current option reuse rate across episodes (G11)."""
+        return self.option_discovery.get_option_reuse_rate()
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
