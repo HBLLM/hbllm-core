@@ -177,6 +177,74 @@ class ConceptLearner:
         merges = self._detect_and_merge()
         return splits, merges
 
+    def bind_linguistic_alias(
+        self,
+        concept_ref_or_id: str | GroundedConceptRef,
+        alias: str,
+        confidence: float = 1.0,
+    ) -> GroundedConcept:
+        """Binds a linguistic alias directly to a concept in the working store."""
+        return self._store.bind_linguistic_alias(
+            concept_ref_or_id,
+            alias=alias,
+            confidence=confidence,
+        )
+
+    def bind_text_feature(
+        self,
+        text_feature: PerceptualFeatureVector,
+        target_concept_id_or_ref: str | GroundedConceptRef | None = None,
+        target_entity_id: str | None = None,
+        confidence: float = 1.0,
+    ) -> GroundedConcept | None:
+        """Extracts text or label from a text feature vector and binds it to a target concept,
+        either by concept ID or by matching an exemplar entity ID.
+        """
+        raw_alias = text_feature.feature_metadata.get("text")
+        if not raw_alias and text_feature.semantic_labels:
+            raw_alias = next(iter(text_feature.semantic_labels.keys()))
+        if not raw_alias:
+            return None
+
+        alias_str = str(raw_alias).strip()
+        if not alias_str:
+            return None
+
+        # 1. Direct concept targeting
+        if target_concept_id_or_ref is not None:
+            return self.bind_linguistic_alias(
+                target_concept_id_or_ref,
+                alias=alias_str,
+                confidence=confidence,
+            )
+
+        # 2. Match via exemplar entity ID
+        if target_entity_id is not None:
+            for concept in self._store.get_all_concepts():
+                if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                    continue
+                if target_entity_id in concept.exemplar_entity_ids:
+                    return self.bind_linguistic_alias(
+                        concept.concept_ref,
+                        alias=alias_str,
+                        confidence=confidence,
+                    )
+
+        # 3. Fallback: match via metadata entity_id
+        meta_eid = text_feature.feature_metadata.get("entity_id")
+        if meta_eid:
+            for concept in self._store.get_all_concepts():
+                if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                    continue
+                if meta_eid in concept.exemplar_entity_ids:
+                    return self.bind_linguistic_alias(
+                        concept.concept_ref,
+                        alias=alias_str,
+                        confidence=confidence,
+                    )
+
+        return None
+
     def get_split_log(self) -> list[ConceptSplitResult]:
         return list(self._split_log)
 
@@ -288,6 +356,7 @@ class ConceptLearner:
                 grounding_quality=GroundingQuality.balanced(0.3),
                 affordances=set(concept.affordances),
                 relational_patterns=list(concept.relational_patterns),
+                linguistic_aliases=dict(concept.linguistic_aliases),
             )
             child_b = GroundedConcept(
                 concept_ref=child_b_ref,
@@ -295,6 +364,7 @@ class ConceptLearner:
                 grounding_quality=GroundingQuality.balanced(0.3),
                 affordances=set(concept.affordances),
                 relational_patterns=list(concept.relational_patterns),
+                linguistic_aliases=dict(concept.linguistic_aliases),
             )
 
             for proto in child_a_protos:

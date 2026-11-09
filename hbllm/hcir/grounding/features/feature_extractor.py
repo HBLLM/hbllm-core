@@ -264,6 +264,7 @@ class SemanticTextFeatureExtractor:
             "sentence_embedding" in envelope.metadata
             or "named_entities" in envelope.metadata
             or "tokens" in envelope.metadata
+            or "text" in envelope.metadata
         )
 
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
@@ -286,27 +287,50 @@ class SemanticTextFeatureExtractor:
             )
 
         # Named entity features (one per entity)
-        for ne in envelope.metadata.get("named_entities", []):
-            text = str(ne.get("text", ""))
-            ne_type = str(ne.get("type", "UNKNOWN"))
-            conf = float(ne.get("confidence", 1.0))
+        nes = envelope.metadata.get("named_entities", [])
+        if nes:
+            for ne in nes:
+                text = str(ne.get("text", ""))
+                ne_type = str(ne.get("type", "UNKNOWN"))
+                conf = float(ne.get("confidence", 1.0))
 
-            # Simple bag-of-characters hash for a deterministic embedding stub
-            char_hash = tuple(float(ord(c) % 100) / 100.0 for c in text[:8].ljust(8))
+                # Simple bag-of-characters hash for a deterministic embedding stub
+                char_hash = tuple(float(ord(c) % 100) / 100.0 for c in text[:8].ljust(8))
 
-            features.append(
-                PerceptualFeatureVector(
-                    feature_id=_gen_id("feat_txt_ne"),
-                    observation_id=envelope.observation_id,
-                    modality=envelope.source_modality,
-                    channel_id=envelope.source_channel_id,
-                    embedding=char_hash,
-                    semantic_labels={ne_type: conf},
-                    feature_metadata={"text": text, "ne_type": ne_type},
-                    provenance_hash=envelope.payload_hash,
-                    timestamp=envelope.wall_timestamp,
+                features.append(
+                    PerceptualFeatureVector(
+                        feature_id=_gen_id("feat_txt_ne"),
+                        observation_id=envelope.observation_id,
+                        modality=envelope.source_modality,
+                        channel_id=envelope.source_channel_id,
+                        embedding=char_hash,
+                        semantic_labels={ne_type: conf},
+                        feature_metadata={"text": text, "ne_type": ne_type},
+                        provenance_hash=envelope.payload_hash,
+                        timestamp=envelope.wall_timestamp,
+                    )
                 )
-            )
+        elif "tokens" in envelope.metadata or "text" in envelope.metadata:
+            tokens = envelope.metadata.get("tokens") or [
+                w.strip(".,!?:;\"'()[]{}")
+                for w in str(envelope.metadata.get("text", "")).lower().split()
+                if w.strip(".,!?:;\"'()[]{}")
+            ]
+            for token in tokens:
+                char_hash = tuple(float(ord(c) % 100) / 100.0 for c in token[:8].ljust(8))
+                features.append(
+                    PerceptualFeatureVector(
+                        feature_id=_gen_id("feat_txt_tok"),
+                        observation_id=envelope.observation_id,
+                        modality=envelope.source_modality,
+                        channel_id=envelope.source_channel_id,
+                        embedding=char_hash,
+                        semantic_labels={token: 1.0},
+                        feature_metadata={"text": token, "type": "token"},
+                        provenance_hash=envelope.payload_hash,
+                        timestamp=envelope.wall_timestamp,
+                    )
+                )
 
         return features
 

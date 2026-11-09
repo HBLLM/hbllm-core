@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.grounding.contracts.enums import ModalitySource, TrafficClass
+from hbllm.hcir.grounding.contracts.enums import DialogueAct, ModalitySource, TrafficClass
 from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
 from hbllm.hcir.grounding.features.feature_extractor import (
     FeatureExtractorRegistry,
@@ -194,6 +194,83 @@ class TextObservationAdapter:
         return envelope, features
 
 
+class SemanticLLMObservationAdapter:
+    """Converts natural language utterances and semantic LLM dialogue payloads into
+    standardized ObservationEnvelope(source_modality=ModalitySource.SEMANTIC_LLM_ADAPTER)
+    packets and semantic feature vectors.
+    """
+
+    def __init__(
+        self,
+        channel_id: str = "dialogue_channel",
+        feature_registry: FeatureExtractorRegistry | None = None,
+    ) -> None:
+        self._channel_id = channel_id
+        self._registry = feature_registry or FeatureExtractorRegistry.default()
+        self._seq = 0
+
+    def adapt(
+        self,
+        text: str,
+        *,
+        speaker_id: str = "user",
+        dialogue_act: DialogueAct | str = DialogueAct.COMMAND,
+        named_entities: dict[str, list[str]] | list[dict[str, Any]] | None = None,
+        embeddings: list[float] | None = None,
+        metadata: dict[str, Any] | None = None,
+        step: int | None = None,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        """Converts dialogue input into an envelope + semantic feature vectors."""
+        self._seq += 1
+        now = time.time()
+        obs_id = f"obs_dialogue_s{step or self._seq}_{uuid.uuid4().hex[:6]}"
+        payload_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+        # Normalize named_entities to list[dict[str, Any]]
+        ne_list: list[dict[str, Any]] = []
+        if isinstance(named_entities, dict):
+            for label, items in named_entities.items():
+                for item in items:
+                    ne_list.append({"text": str(item), "type": label, "confidence": 1.0})
+        elif isinstance(named_entities, list):
+            ne_list = list(named_entities)
+
+        tokens = [
+            w.strip(".,!?:;\"'()[]{}") for w in text.lower().split() if w.strip(".,!?:;\"'()[]{}")
+        ]
+
+        meta: dict[str, Any] = {
+            "text": text,
+            "speaker_id": speaker_id,
+            "dialogue_act": (
+                dialogue_act.value if isinstance(dialogue_act, DialogueAct) else str(dialogue_act)
+            ),
+            "tokens": tokens,
+            "named_entities": ne_list,
+        }
+        if embeddings:
+            meta["sentence_embedding"] = embeddings
+        if metadata:
+            meta.update(metadata)
+
+        envelope = ObservationEnvelope(
+            observation_id=obs_id,
+            source_modality=ModalitySource.SEMANTIC_LLM_ADAPTER,
+            source_channel_id=self._channel_id,
+            traffic_class=TrafficClass.CLASS_DISCRETE,
+            sequence_number=self._seq,
+            wall_timestamp=now,
+            monotonic_timestamp=time.monotonic(),
+            payload_ref=f"hcir://dialogue/{obs_id}",
+            clock_domain="dialogue_clock",
+            payload_hash=payload_hash,
+            metadata=meta,
+        )
+
+        features = self._registry.extract_all(envelope)
+        return envelope, features
+
+
 class CompositeObservationAdapter:
     """Dispatches to the correct domain adapter based on input type.
 
@@ -203,6 +280,7 @@ class CompositeObservationAdapter:
         envelope, features = adapter.adapt_grid(grid_array)
         envelope, features = adapter.adapt_robotics(position=(1.0, 2.0, 3.0))
         envelope, features = adapter.adapt_text("The red cube is on the table.")
+        envelope, features = adapter.adapt_dialogue("push the red block")
     """
 
     def __init__(
@@ -213,6 +291,7 @@ class CompositeObservationAdapter:
         self.grid_adapter = GridObservationAdapter(feature_registry=registry)
         self.robotics_adapter = RoboticsObservationAdapter(feature_registry=registry)
         self.text_adapter = TextObservationAdapter(feature_registry=registry)
+        self.semantic_adapter = SemanticLLMObservationAdapter(feature_registry=registry)
         self._registry = registry
 
     def adapt_grid(
@@ -235,6 +314,13 @@ class CompositeObservationAdapter:
         **kwargs: Any,
     ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
         return self.text_adapter.adapt(text, **kwargs)
+
+    def adapt_dialogue(
+        self,
+        text: str,
+        **kwargs: Any,
+    ) -> tuple[ObservationEnvelope, list[PerceptualFeatureVector]]:
+        return self.semantic_adapter.adapt(text, **kwargs)
 
     def adapt_driver_input(
         self,
@@ -279,7 +365,24 @@ class CompositeObservationAdapter:
                 **kwargs,
             )
 
-        # 3. Text / Language
+        # 3. Dialogue / Semantic LLM Adapter
+        if str(mod) in (
+            "semantic_llm_adapter",
+            "dialogue",
+            "DriverModality.SEMANTIC_LLM_ADAPTER",
+            "DriverModality.DIALOGUE",
+        ):
+            return self.adapt_dialogue(
+                str(raw),
+                speaker_id=meta.get("speaker_id", "user"),
+                dialogue_act=meta.get("dialogue_act", DialogueAct.COMMAND),
+                named_entities=meta.get("named_entities"),
+                embeddings=meta.get("embeddings"),
+                metadata=meta,
+                **kwargs,
+            )
+
+        # 4. Text / Language
         if str(mod) in ("text", "DriverModality.TEXT") or isinstance(raw, str):
             return self.adapt_text(
                 str(raw),
@@ -288,7 +391,7 @@ class CompositeObservationAdapter:
                 **kwargs,
             )
 
-        # 4. Fallback: structured observation
+        # 5. Fallback: structured observation
         return self.adapt_text(
             str(raw) if raw is not None else "",
             named_entities=meta.get("named_entities"),

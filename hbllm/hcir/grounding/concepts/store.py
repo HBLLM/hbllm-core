@@ -11,7 +11,7 @@ from hbllm.hcir.grounding.concepts.lifecycle import (
 )
 from hbllm.hcir.grounding.concepts.model import GroundedConcept
 from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle
-from hbllm.hcir.grounding.contracts.quality import GroundingQuality
+from hbllm.hcir.grounding.contracts.quality import GroundingQuality, QualityMeasurement
 from hbllm.hcir.grounding.contracts.references import GroundedConceptRef
 
 
@@ -116,17 +116,73 @@ class WorkingConceptStore:
             self._evaluate_and_update_lifecycle(concept, prediction_error=prediction_error)
             return concept
 
+    def bind_linguistic_alias(
+        self,
+        concept_ref_or_id: str | GroundedConceptRef,
+        alias: str,
+        confidence: float = 1.0,
+    ) -> GroundedConcept:
+        """Binds a linguistic alias to a concept, boosting cross-modal support and evaluating lifecycle."""
+        cid = (
+            concept_ref_or_id.id
+            if isinstance(concept_ref_or_id, GroundedConceptRef)
+            else concept_ref_or_id
+        )
+        with self._lock:
+            concept = self._concepts.get(cid)
+            if concept is None:
+                raise KeyError(f"Concept {cid} not found in Working Concept Store")
+
+            concept.add_linguistic_alias(alias, confidence=confidence)
+
+            # Elevate cross-modal support in 7D grounding quality
+            q = concept.grounding_quality
+            new_cross_modal = min(1.0, max(q.cross_modal_support, confidence * 0.8))
+            new_meas = dict(q.measurements)
+            new_meas["cross_modal_support"] = QualityMeasurement.measured(new_cross_modal)
+            new_quality = GroundingQuality(
+                perceptual_stability=q.perceptual_stability,
+                temporal_persistence=q.temporal_persistence,
+                relational_consistency=q.relational_consistency,
+                cross_modal_support=new_cross_modal,
+                predictive_utility=q.predictive_utility,
+                interaction_support=q.interaction_support,
+                boundary_stability=q.boundary_stability,
+                measurements=new_meas,
+            )
+            concept.update_grounding_quality(new_quality)
+            self._evaluate_and_update_lifecycle(concept)
+            return concept
+
     def find_concept_by_alias(self, alias: str) -> GroundedConcept | None:
         """Finds the highest-confidence concept associated with a linguistic label."""
         alias_norm = alias.strip().lower()
+        candidates = [alias_norm]
+        for prefix in ("the ", "a ", "an ", "this ", "that "):
+            if alias_norm.startswith(prefix):
+                candidates.append(alias_norm[len(prefix) :].strip())
+
         with self._lock:
             best_concept: GroundedConcept | None = None
             best_conf = -1.0
+            for cand in candidates:
+                for concept in self._concepts.values():
+                    conf = concept.linguistic_aliases.get(cand)
+                    if conf is not None and conf > best_conf:
+                        best_conf = conf
+                        best_concept = concept
+                if best_concept is not None:
+                    return best_concept
+
+            # Fallback: substring matching
             for concept in self._concepts.values():
-                conf = concept.linguistic_aliases.get(alias_norm)
-                if conf is not None and conf > best_conf:
-                    best_conf = conf
-                    best_concept = concept
+                for a_key, conf in concept.linguistic_aliases.items():
+                    if (
+                        a_key in alias_norm or any(cand in a_key for cand in candidates)
+                    ) and conf > best_conf:
+                        best_conf = conf
+                        best_concept = concept
+
             return best_concept
 
     def get_pending_promotion_proposals(self) -> list[ConceptPromotionProposal]:

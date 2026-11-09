@@ -97,6 +97,34 @@ class ObservationBus:
 
         return True
 
+    def publish_dialogue(
+        self,
+        text: str,
+        speaker_id: str = "user",
+        channel_id: str = "user_dialogue",
+        dialogue_act: str = "command",
+        named_entities: dict[str, list[str]] | list[dict[str, Any]] | None = None,
+        embeddings: list[float] | None = None,
+        metadata: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> ObservationEnvelope:
+        """Publishes a natural language dialogue utterance as an SEMANTIC_LLM_ADAPTER envelope."""
+        from hbllm.hcir.grounding.features.composite_observation_adapter import (
+            SemanticLLMObservationAdapter,
+        )
+
+        adapter = SemanticLLMObservationAdapter(channel_id=channel_id)
+        envelope, _ = adapter.adapt(
+            text=text,
+            speaker_id=speaker_id,
+            dialogue_act=dialogue_act,
+            named_entities=named_entities,
+            embeddings=embeddings,
+            metadata=metadata,
+        )
+        self.publish(envelope, timeout=timeout)
+        return envelope
+
     def subscribe(
         self,
         callback: SubscriberCallback,
