@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ class ExperimentEngine:
         self._total_cost = 0.0
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS experiments (
                     experiment_id TEXT PRIMARY KEY,
@@ -268,7 +269,7 @@ class ExperimentEngine:
 
     def _persist(self, experiment: Experiment) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO experiments
                        (experiment_id, concept, data, reality_level,

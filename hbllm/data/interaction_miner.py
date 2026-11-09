@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.persistence.db_pool import DBPool
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class InteractionMiner:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,7 +113,7 @@ class InteractionMiner:
         model: str = "",
     ) -> None:
         """Record a user interaction for future mining."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO interactions "
                 "(tenant_id, user_id, device_id, query, response, reward, regenerated, follow_up, "
@@ -145,7 +146,7 @@ class InteractionMiner:
 
         Criteria: high reward + sufficient length + not regenerated.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT query, response, reward FROM interactions
@@ -175,7 +176,7 @@ class InteractionMiner:
 
         When a user regenerates, the original = rejected, the follow-up = chosen.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             # Find queries that were regenerated (same query, different responses)
             rows = conn.execute(
                 """
@@ -200,7 +201,7 @@ class InteractionMiner:
 
         These become negative examples in contrastive learning.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT query, response, reward FROM interactions
@@ -227,7 +228,7 @@ class InteractionMiner:
 
         High-reward, non-regenerated Q&A pairs are likely factually accurate.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT query, response FROM interactions
@@ -266,7 +267,7 @@ class InteractionMiner:
 
     def stats(self) -> dict[str, Any]:
         """Return mining statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM interactions").fetchone()[0]
             avg_reward = conn.execute("SELECT AVG(reward) FROM interactions").fetchone()[0]
             regen = conn.execute(

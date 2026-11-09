@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class UtilityCalibrator:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS calibration_traces (
                     trace_id TEXT PRIMARY KEY,
@@ -72,7 +74,7 @@ class UtilityCalibrator:
         now = time.time()
         meta_str = json.dumps(metadata or {})
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO calibration_traces "
                 "(trace_id, decision_point, predicted_utility, actual_outcome, prediction_error, timestamp, metadata_json) "
@@ -115,7 +117,7 @@ class UtilityCalibrator:
         args.append(limit)
 
         traces = []
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(query, args).fetchall()
             for r in rows:
@@ -146,7 +148,7 @@ class UtilityCalibrator:
             query += " WHERE decision_point = ?"
             args.append(decision_point)
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(query, args).fetchone()
             return float(row[0]) if row and row[0] is not None else 0.0
 
@@ -154,7 +156,7 @@ class UtilityCalibrator:
         """
         Return statistical parameters to determine bootstrap status.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT predicted_utility, actual_outcome, prediction_error, decision_point FROM calibration_traces LIMIT 50"
             ).fetchall()
@@ -192,7 +194,7 @@ class UtilityCalibrator:
         live_percentile is mixed 50/50 short (last 20) / long (last 100).
         anchor_percentile is frozen at (0.7, 0.3, 0.0).
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             st_rows = conn.execute(
                 "SELECT predicted_utility FROM calibration_traces ORDER BY timestamp DESC LIMIT 20"
             ).fetchall()
@@ -230,7 +232,7 @@ class UtilityCalibrator:
         """
         import math
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             st_rows = conn.execute(
                 "SELECT predicted_utility FROM calibration_traces ORDER BY timestamp DESC LIMIT 20"
             ).fetchall()

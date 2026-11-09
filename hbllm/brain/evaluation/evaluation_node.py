@@ -32,6 +32,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.security import SystemContext, TenantSQLiteRepository
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
         if not self._db_path:
             return
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             # Check if evaluations table exists
             cur = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='evaluations'"
@@ -203,7 +204,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
             return
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 if tenant_id:
                     rows = self.execute_tenant(
@@ -286,7 +287,7 @@ class EvaluationNode(Node, TenantSQLiteRepository):
             return
         tenant_id = self.current_tenant() or "default"
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 self.execute_tenant(
                     conn,
                     "INSERT OR REPLACE INTO evaluations ("

@@ -11,13 +11,14 @@ from __future__ import annotations
 import collections
 import json
 import logging
-import sqlite3
 import time
 import uuid
 import zlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, cast
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class DecisionTraceLedger:
 
     def _init_db(self) -> None:
         """Initialize the SQLite schema for Tier B logs."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS compressed_traces (

@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class RewardModel:
         }
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS rewards (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +98,7 @@ class RewardModel:
 
     def record_reward(self, signal: RewardSignal) -> None:
         """Record explicit or implicit reward signal."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO rewards (query, response, reward, source, metadata, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -114,7 +115,7 @@ class RewardModel:
 
     def record_preference(self, pair: PreferencePair) -> None:
         """Record a preference pair for RLHF training."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO preferences (query, chosen, rejected, margin, source, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -209,7 +210,7 @@ class RewardModel:
         if not keywords:
             return None
         pattern = f"%{keywords[0]}%"
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT AVG(reward) FROM rewards WHERE query LIKE ? "
                 "ORDER BY created_at DESC LIMIT 100",
@@ -226,7 +227,7 @@ class RewardModel:
         self, min_margin: float = 0.5, limit: int = 10000
     ) -> list[dict[str, Any]]:
         """Export preference pairs for DPO/RLHF training."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT query, chosen, rejected, margin FROM preferences "
                 "WHERE margin >= ? ORDER BY created_at DESC LIMIT ?",
@@ -236,7 +237,7 @@ class RewardModel:
 
     def export_rewards(self, min_reward: float = 0.0, limit: int = 10000) -> list[dict[str, Any]]:
         """Export high-reward interactions for SFT training."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT query, response, reward FROM rewards "
                 "WHERE reward >= ? ORDER BY reward DESC LIMIT ?",
@@ -246,7 +247,7 @@ class RewardModel:
 
     def stats(self) -> dict[str, Any]:
         """Return reward model statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             reward_count: int = conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0]
             pref_count: int = conn.execute("SELECT COUNT(*) FROM preferences").fetchone()[0]
             avg_reward_row = conn.execute("SELECT AVG(reward) FROM rewards").fetchone()

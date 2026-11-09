@@ -17,6 +17,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class IdentityStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS identities (
                     tenant_id TEXT PRIMARY KEY,
@@ -108,7 +109,7 @@ class IdentityStore:
     def upsert(self, profile: IdentityProfile) -> None:
         """Insert or update a tenant's identity profile."""
         now = datetime.now(timezone.utc).isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO identities
@@ -137,7 +138,7 @@ class IdentityStore:
 
     def get(self, tenant_id: str) -> IdentityProfile | None:
         """Retrieve a tenant's identity profile."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM identities WHERE tenant_id = ?",
@@ -159,7 +160,7 @@ class IdentityStore:
             )
 
     def delete(self, tenant_id: str) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM identities WHERE tenant_id = ?",
                 (tenant_id,),

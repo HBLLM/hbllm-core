@@ -29,6 +29,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -239,7 +241,7 @@ class TaskGraphRuntime:
     # ── Schema ────────────────────────────────────────────────────────
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS goals (
                     goal_id TEXT PRIMARY KEY,
@@ -287,7 +289,7 @@ class TaskGraphRuntime:
 
     def create_goal(self, goal: Goal, tasks: list[TaskNode]) -> str:
         """Create a new goal with its task DAG. Returns the goal_id."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """INSERT INTO goals
                    (goal_id, tenant_id, name, description, status, priority,
@@ -336,7 +338,7 @@ class TaskGraphRuntime:
 
     def cancel_goal(self, goal_id: str) -> bool:
         """Cancel a goal and all its pending/ready tasks."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 "UPDATE goals SET status = ? WHERE goal_id = ?",
                 (GoalStatus.CANCELLED.value, goal_id),
@@ -356,7 +358,7 @@ class TaskGraphRuntime:
 
     def get_goal(self, goal_id: str) -> Goal | None:
         """Retrieve a goal by ID."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM goals WHERE goal_id = ?", (goal_id,)).fetchone()
             if not row:
@@ -376,7 +378,7 @@ class TaskGraphRuntime:
 
     def get_active_goals(self, tenant_id: str | None = None) -> list[Goal]:
         """Retrieve all active goals, optionally filtered by tenant."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if tenant_id:
                 rows = conn.execute(
@@ -405,7 +407,7 @@ class TaskGraphRuntime:
 
     def get_ready_tasks(self, limit: int = 10) -> list[TaskNode]:
         """Get tasks that are READY to execute (all deps completed)."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """SELECT t.* FROM task_nodes t
@@ -426,7 +428,7 @@ class TaskGraphRuntime:
 
     def get_tasks_for_goal(self, goal_id: str) -> list[TaskNode]:
         """Get all tasks for a given goal."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM task_nodes WHERE goal_id = ? ORDER BY created_at",
@@ -436,7 +438,7 @@ class TaskGraphRuntime:
 
     def mark_task_running(self, task_id: str) -> bool:
         """Mark a task as RUNNING."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE task_nodes SET status = ?, started_at = ? WHERE task_id = ? AND status = ?",
                 (TaskStatus.RUNNING.value, time.time(), task_id, TaskStatus.READY.value),
@@ -451,7 +453,7 @@ class TaskGraphRuntime:
         now = time.time()
         goal_id: str | None = None
         has_rule = False
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT verification_rule, goal_id FROM task_nodes WHERE task_id = ?", (task_id,)
@@ -488,7 +490,7 @@ class TaskGraphRuntime:
     def verify_pending_tasks(self, world_state: Any) -> None:
         """Evaluate tasks in VERIFYING state against the WorldStateEngine."""
         now = time.time()
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM task_nodes WHERE status = ?", (TaskStatus.VERIFYING.value,)
@@ -561,7 +563,7 @@ class TaskGraphRuntime:
         """
         self._running_tasks.discard(task_id)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM task_nodes WHERE task_id = ?", (task_id,)).fetchone()
             if not row:
@@ -605,7 +607,7 @@ class TaskGraphRuntime:
     def add_task_to_goal(self, goal_id: str, task: TaskNode) -> str:
         """Dynamically add a new task to an existing goal."""
         task.goal_id = goal_id
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             self._insert_task(conn, task)
         self._update_ready_tasks(goal_id)
         return task.task_id
@@ -618,7 +620,7 @@ class TaskGraphRuntime:
         Tasks left in RUNNING state are reset to READY for re-execution.
         Returns the count of recovered tasks.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE task_nodes SET status = ?, started_at = 0 WHERE status = ?",
                 (TaskStatus.READY.value, TaskStatus.RUNNING.value),
@@ -655,7 +657,7 @@ class TaskGraphRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         """Telemetry snapshot."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             goal_counts = {}
             for row in conn.execute(
                 "SELECT status, COUNT(*) FROM goals GROUP BY status"
@@ -747,7 +749,7 @@ class TaskGraphRuntime:
     def _update_goal_status(
         self, goal_id: str, from_status: GoalStatus, to_status: GoalStatus
     ) -> bool:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             now = time.time()
             extra = ""
             params: list[Any] = [to_status.value]
@@ -766,7 +768,7 @@ class TaskGraphRuntime:
 
     def _update_ready_tasks(self, goal_id: str) -> None:
         """Mark PENDING tasks as READY if all their dependencies are completed."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             pending = conn.execute(
                 "SELECT * FROM task_nodes WHERE goal_id = ? AND status = ?",
@@ -798,7 +800,7 @@ class TaskGraphRuntime:
 
     def _check_goal_completion(self, goal_id: str) -> None:
         """Check if all tasks in a goal are done; if so, complete the goal."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             total = conn.execute(
                 "SELECT COUNT(*) FROM task_nodes WHERE goal_id = ?",
                 (goal_id,),
@@ -872,7 +874,7 @@ class TaskGraphRuntime:
             )
 
     def _get_task_goal_id(self, task_id: str) -> str | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             row = conn.execute(
                 "SELECT goal_id FROM task_nodes WHERE task_id = ?", (task_id,)
             ).fetchone()

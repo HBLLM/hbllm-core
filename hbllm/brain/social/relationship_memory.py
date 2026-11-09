@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -218,7 +220,7 @@ class RelationshipMemory:
 
     def _init_db(self) -> None:
         """Initialize SQLite for temporal event history."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS relationship_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -401,7 +403,7 @@ class RelationshipMemory:
                 return person
 
         # Try loading from DB
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM persons WHERE LOWER(name) = LOWER(?) AND tenant_id = ?",
@@ -416,7 +418,7 @@ class RelationshipMemory:
 
     def get_network(self, tenant_id: str = "default") -> list[Person]:
         """Get the full relationship graph for a user."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM persons WHERE tenant_id = ? ORDER BY importance DESC",
@@ -448,7 +450,7 @@ class RelationshipMemory:
         if not person:
             return RelationshipHistory(person_id="", person_name=person_name)
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM relationship_events WHERE person_id = ? "
@@ -568,7 +570,7 @@ class RelationshipMemory:
         tenant_id: str,
     ) -> None:
         """Record a temporal event."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO relationship_events "
                 "(person_id, timestamp, event_type, context, sentiment_delta, tenant_id) "
@@ -578,7 +580,7 @@ class RelationshipMemory:
 
     def _save_person(self, person: Person) -> None:
         """Persist person to SQLite."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO persons "
                 "(person_id, name, role, organization, trust_level, trust_confidence, "
@@ -650,7 +652,7 @@ class RelationshipMemory:
 
     def stats(self) -> dict[str, Any]:
         """Summary statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total_persons = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
             total_events = conn.execute("SELECT COUNT(*) FROM relationship_events").fetchone()[0]
         return {

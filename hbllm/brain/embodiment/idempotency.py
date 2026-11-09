@@ -14,10 +14,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class IdempotencyEngine:
     def _init_db(self) -> None:
         """Create the idempotency table if it doesn't exist."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS idempotency_keys (
                     key TEXT PRIMARY KEY,
@@ -71,7 +72,7 @@ class IdempotencyEngine:
         """
         now = time.time()
 
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             # Check if key already exists and is not expired
             row = conn.execute(
                 "SELECT created_at, status FROM idempotency_keys WHERE key = ?",
@@ -111,7 +112,7 @@ class IdempotencyEngine:
 
     def mark_completed(self, idempotency_key: str) -> None:
         """Mark an action as successfully completed."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 "UPDATE idempotency_keys SET status = 'completed' WHERE key = ?",
                 (idempotency_key,),
@@ -120,7 +121,7 @@ class IdempotencyEngine:
 
     def clear_lock(self, idempotency_key: str) -> None:
         """Clear a lock if an action failed and needs to be legally retried."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 "DELETE FROM idempotency_keys WHERE key = ?",
                 (idempotency_key,),
@@ -131,7 +132,7 @@ class IdempotencyEngine:
     def prune_expired(self) -> int:
         """Remove expired keys. Returns count of pruned keys."""
         cutoff = time.time() - self.key_ttl_s
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM idempotency_keys WHERE created_at < ?",
                 (cutoff,),
@@ -145,7 +146,7 @@ class IdempotencyEngine:
 
     def stats(self) -> dict[str, Any]:
         """Get idempotency engine statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             total = conn.execute("SELECT COUNT(*) FROM idempotency_keys").fetchone()[0]
             locked = conn.execute(
                 "SELECT COUNT(*) FROM idempotency_keys WHERE status = 'locked'"

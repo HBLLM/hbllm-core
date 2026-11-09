@@ -24,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 # Default cosine similarity threshold for speaker identification
@@ -57,7 +59,7 @@ class VoiceProfileStore:
     def __init__(self, path: str = "./data/voice_profiles.db") -> None:
         self.path = os.path.expanduser(path)
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        self._conn = sqlite3.connect(self.path, timeout=5.0)
+        self._conn = open_connection(self.path, timeout=5.0)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")

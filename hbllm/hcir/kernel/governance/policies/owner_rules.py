@@ -30,6 +30,7 @@ from hbllm.hcir.kernel.governance.policies.policy_engine import (
     PolicyEngine,
     PolicyType,
 )
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ class OwnerRuleStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS owner_rules (
                     id TEXT PRIMARY KEY,
@@ -306,7 +307,7 @@ class OwnerRuleStore:
 
         conditions_json = json.dumps([c.to_dict() for c in parsed.conditions])
 
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO owner_rules
@@ -346,7 +347,7 @@ class OwnerRuleStore:
 
     def list_rules(self, tenant_id: str) -> list[dict[str, Any]]:
         """List all rules for a tenant."""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM owner_rules WHERE tenant_id = ? ORDER BY created_at DESC",
@@ -372,7 +373,7 @@ class OwnerRuleStore:
 
     def remove_rule(self, rule_id: str) -> bool:
         """Remove a rule by ID."""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM owner_rules WHERE id = ?",
                 (rule_id,),
@@ -381,7 +382,7 @@ class OwnerRuleStore:
 
     def toggle_rule(self, rule_id: str, enabled: bool) -> bool:
         """Enable or disable a rule."""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE owner_rules SET enabled = ?, updated_at = ? WHERE id = ?",
                 (int(enabled), datetime.now(timezone.utc).isoformat(), rule_id),
@@ -394,7 +395,7 @@ class OwnerRuleStore:
 
         Returns the number of policies loaded.
         """
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM owner_rules WHERE tenant_id = ? AND enabled = 1",
@@ -424,7 +425,7 @@ class OwnerRuleStore:
 
     def clear_tenant(self, tenant_id: str) -> int:
         """Remove all rules for a tenant."""
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM owner_rules WHERE tenant_id = ?",
                 (tenant_id,),

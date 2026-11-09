@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import time
 from typing import Any
 
 from hbllm.network.messages import Message, MessageType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +110,10 @@ class ActionVerificationBridge:
 
     async def _handle_correcting_tasks(self) -> None:
         """Re-execute tasks that failed verification and entered CORRECTING state."""
-        import sqlite3
-
         try:
             from hbllm.brain.autonomy.task_graph import TaskStatus
 
-            with sqlite3.connect(self.task_graph.db_path) as conn:
+            with open_connection(self.task_graph.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT * FROM task_nodes WHERE status = ?",

@@ -46,6 +46,7 @@ from hbllm.brain.epistemics.interfaces import (
     ConfidenceSnapshot,
     PredictionOutcome,
 )
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +163,7 @@ class EpistemicMemory:
         self._data_dir = Path(data_dir)
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._db_path = self._data_dir / "epistemic_memory.db"
-        self._conn = sqlite3.connect(str(self._db_path))
+        self._conn = open_connection(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()

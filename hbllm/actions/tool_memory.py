@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class ToolMemory:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tool_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +81,7 @@ class ToolMemory:
 
     def record(self, record: ToolUsageRecord) -> None:
         """Record a tool usage event."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO tool_usage "
                 "(tool_name, query_type, success, latency_ms, result_quality, context, created_at) "
@@ -104,7 +105,7 @@ class ToolMemory:
         total_ms: float,
     ) -> None:
         """Record a multi-tool sequence execution."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO tool_sequences (task_type, sequence, success, total_latency_ms, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -130,7 +131,7 @@ class ToolMemory:
 
         Returns tools ranked by a composite score of success rate + quality - latency.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT tool_name,
@@ -179,7 +180,7 @@ class ToolMemory:
             available_tools: If provided, skip sequences that require
                 tools not in this list.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 """
                 SELECT sequence FROM tool_sequences
@@ -208,7 +209,7 @@ class ToolMemory:
 
         Returns strong associations between query types and tools.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute("""
                 SELECT query_type, tool_name,
                        COUNT(*) as uses,
@@ -233,7 +234,7 @@ class ToolMemory:
 
     def stats(self) -> dict[str, Any]:
         """Return tool memory statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM tool_usage").fetchone()[0]
             tools = conn.execute("SELECT COUNT(DISTINCT tool_name) FROM tool_usage").fetchone()[0]
             types = conn.execute("SELECT COUNT(DISTINCT query_type) FROM tool_usage").fetchone()[0]

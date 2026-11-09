@@ -131,3 +131,53 @@ def test_vocabulary_domain_agnostic_boundaries() -> None:
     engine.current_context_id = "42"
     assert engine.current_context_id == "42"
     assert engine.current_level == 42
+
+
+def test_sqlite_connections_confined_to_infrastructure() -> None:
+    """Invariant: sqlite3.connect and aiosqlite.connect are strictly confined to infrastructure.
+
+    Permitted directories:
+    - hbllm/hcir/stores/
+    - hbllm/persistence/
+    - hbllm/security/
+    All other cognitive and operational modules must route through persistence infrastructure.
+    """
+    root = Path(__file__).resolve().parents[3]
+    hbllm_dir = root / "hbllm"
+    assert hbllm_dir.is_dir()
+
+    allowed_prefixes = (
+        str((hbllm_dir / "hcir" / "stores").resolve()),
+        str((hbllm_dir / "persistence").resolve()),
+        str((hbllm_dir / "security").resolve()),
+    )
+
+    violations: list[str] = []
+    for py_file in hbllm_dir.rglob("*.py"):
+        if "__pycache__" in str(py_file):
+            continue
+        file_resolved = str(py_file.resolve())
+        if any(file_resolved.startswith(p) for p in allowed_prefixes):
+            continue
+
+        try:
+            content = py_file.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=str(py_file))
+        except Exception:
+            continue
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if node.func.attr == "connect":
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id in (
+                        "sqlite3",
+                        "aiosqlite",
+                    ):
+                        violations.append(
+                            f"{py_file.relative_to(hbllm_dir.parent)}:{node.lineno} calls {node.func.value.id}.connect"
+                        )
+
+    assert not violations, (
+        "Direct SQLite connections detected outside infrastructure boundaries:\n"
+        + "\n".join(violations)
+    )

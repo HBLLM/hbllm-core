@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -28,6 +27,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.security import TenantSQLiteRepository
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups = 0
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             # Check if beliefs table exists
             cur = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='beliefs'"
@@ -303,7 +303,7 @@ class BeliefStore(TenantSQLiteRepository):
             return self._cache[cache_key]
 
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     row = self.execute_tenant(
                         conn,
@@ -331,7 +331,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups += 1
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -357,7 +357,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups += 1
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -387,7 +387,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups += 1
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -427,7 +427,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups += 1
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -451,7 +451,7 @@ class BeliefStore(TenantSQLiteRepository):
         self._lookups += 1
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -480,7 +480,7 @@ class BeliefStore(TenantSQLiteRepository):
         decayed = 0
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -532,7 +532,7 @@ class BeliefStore(TenantSQLiteRepository):
             "detected_at": now,
         }
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 self.execute_tenant(
                     conn,
                     """INSERT INTO persistent_contradictions
@@ -560,7 +560,7 @@ class BeliefStore(TenantSQLiteRepository):
         """Mark a contradiction as resolved."""
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     self.execute_tenant(
                         conn,
@@ -583,7 +583,7 @@ class BeliefStore(TenantSQLiteRepository):
         """Get all unresolved contradictions."""
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     rows = self.execute_tenant(
                         conn,
@@ -618,7 +618,7 @@ class BeliefStore(TenantSQLiteRepository):
     def stats(self) -> dict[str, Any]:
         tenant_id = self.current_tenant()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 if tenant_id:
                     total_beliefs = self.execute_tenant(
                         conn, "SELECT COUNT(*) FROM beliefs WHERE tenant_id = ?", (tenant_id,)
@@ -689,7 +689,7 @@ class BeliefStore(TenantSQLiteRepository):
     def _persist_belief(self, belief: Belief) -> None:
         tenant_id = self.current_tenant() or "default"
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 self.execute_tenant(
                     conn,
                     """INSERT OR REPLACE INTO beliefs

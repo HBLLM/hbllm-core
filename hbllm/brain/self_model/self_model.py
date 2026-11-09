@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,7 +70,7 @@ class SelfModel:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS capabilities (
                     domain TEXT PRIMARY KEY,
@@ -132,7 +134,7 @@ class SelfModel:
     ) -> None:
         """Record an outcome to update capability scores."""
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             # Log event
             conn.execute(
                 "INSERT INTO performance_log (domain, success, confidence, latency_ms, created_at) "
@@ -230,7 +232,7 @@ class SelfModel:
         best_strategy = "CoT"
         max_rate = -1.0
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT strategy, successes, failures FROM policy_performance WHERE domain = ?",
                 (domain,),
@@ -256,7 +258,7 @@ class SelfModel:
         strategy = getattr(policy, "reasoning_strategy", "direct")
         latency = cost_metrics.get("latency_ms", 0.0)
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT successes, failures, avg_latency_ms FROM policy_performance WHERE strategy = ? AND domain = ?",
                 (strategy, domain),
@@ -281,7 +283,7 @@ class SelfModel:
 
     def get_capability(self, domain: str) -> CapabilityScore | None:
         """Get capability score for a domain."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT domain, score, sample_count, updated_at FROM capabilities WHERE domain = ?",
                 (domain,),
@@ -300,7 +302,7 @@ class SelfModel:
 
     def get_all_capabilities(self) -> list[CapabilityScore]:
         """Get all capability scores sorted by score."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT domain, score, sample_count, updated_at FROM capabilities ORDER BY score DESC"
             ).fetchall()
@@ -317,7 +319,7 @@ class SelfModel:
 
     def get_strengths(self, min_score: float = 0.8, min_samples: int = 5) -> list[str]:
         """Get domains where the system excels."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT domain FROM capabilities WHERE score >= ? AND sample_count >= ? ORDER BY score DESC",
                 (min_score, min_samples),
@@ -326,7 +328,7 @@ class SelfModel:
 
     def get_weaknesses(self, max_score: float = 0.5, min_samples: int = 5) -> list[str]:
         """Get domains where the system is weak."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT domain FROM capabilities WHERE score <= ? AND sample_count >= ? ORDER BY score ASC",
                 (max_score, min_samples),
@@ -353,7 +355,7 @@ class SelfModel:
 
     def _compute_trend(self, domain: str) -> str:
         """Compute performance trend for a domain."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT success FROM performance_log WHERE domain = ? "
                 "ORDER BY created_at DESC LIMIT 20",
@@ -393,7 +395,7 @@ class SelfModel:
 
     def get_capability_profile(self, capability: str) -> CapabilityProfile | None:
         """Get capability profile."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM capability_profiles WHERE capability = ?",
@@ -414,7 +416,7 @@ class SelfModel:
 
     def get_experience_record(self, capability: str) -> ExperienceRecord | None:
         """Get experience record."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM experience_records WHERE capability = ?",
@@ -450,7 +452,7 @@ class SelfModel:
             count = 1
             runs = [validation_info] if validation_info else []
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO experience_records (capability, executions_count, validation_runs) VALUES (?, ?, ?)",
                 (capability, count, json.dumps(runs)),
@@ -471,7 +473,7 @@ class SelfModel:
             new_latency = latency_ms
             new_confidence = 0.8  # initial baseline confidence
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO capability_profiles (capability, confidence, success_rate, avg_tokens, avg_latency_ms, last_validated) VALUES (?, ?, ?, ?, ?, ?)",
                 (capability, new_confidence, new_success_rate, new_tokens, new_latency, now),

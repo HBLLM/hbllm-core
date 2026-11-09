@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.security import TenantSQLiteRepository
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class GoalManager(TenantSQLiteRepository):
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             # Check if goals table exists
             cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='goals'")
             table_exists = cur.fetchone() is not None
@@ -180,7 +180,7 @@ class GoalManager(TenantSQLiteRepository):
     def _save(self, goal: Goal) -> None:
         now = time.time()
         tenant_id = self.current_tenant() or "default"
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             self.execute_tenant(
                 conn,
                 """
@@ -216,7 +216,7 @@ class GoalManager(TenantSQLiteRepository):
     def update_progress(self, goal_id: str, progress: float, action: str = "") -> None:
         """Update goal progress and optionally record an action."""
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 row = self.execute_tenant(
                     conn,
@@ -266,7 +266,7 @@ class GoalManager(TenantSQLiteRepository):
     def update_goal_status(self, goal_id: str, status: GoalStatus, block_reason: str = "") -> None:
         """Update goal status and block reason."""
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 self.execute_tenant(
                     conn,
@@ -298,7 +298,7 @@ class GoalManager(TenantSQLiteRepository):
             "next_action": next_action,
         }
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 self.execute_tenant(
                     conn,
@@ -318,7 +318,7 @@ class GoalManager(TenantSQLiteRepository):
 
     def fail_goal(self, goal_id: str, reason: str = "") -> None:
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 self.execute_tenant(
                     conn,
@@ -337,7 +337,7 @@ class GoalManager(TenantSQLiteRepository):
     def _resolve_dag_states(self) -> None:
         """Resolve blocked/pending states based on goal dependency DAG."""
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 rows = self.execute_tenant(
                     conn,
@@ -383,7 +383,7 @@ class GoalManager(TenantSQLiteRepository):
             GoalPriority.BACKGROUND.value: 4,
         }
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 rows = self.execute_tenant(
                     conn,
@@ -644,7 +644,7 @@ class GoalManager(TenantSQLiteRepository):
     def get_active_goals(self) -> list[Goal]:
         self._resolve_dag_states()
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 rows = self.execute_tenant(
                     conn,
@@ -819,7 +819,7 @@ class GoalManager(TenantSQLiteRepository):
     def get_learning_goals(self) -> list[Goal]:
         """Get all active learning-type goals."""
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 rows = self.execute_tenant(
                     conn,
@@ -841,7 +841,7 @@ class GoalManager(TenantSQLiteRepository):
     def subordinate_to(self, child_goal_id: str, parent_goal_id: str) -> None:
         """Link a child goal to a parent goal."""
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 row = self.execute_tenant(
                     conn,
@@ -956,7 +956,7 @@ class GoalManager(TenantSQLiteRepository):
 
     def stats(self) -> dict[str, Any]:
         tenant_id = self.current_tenant()
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             if tenant_id:
                 total = self.execute_tenant(
                     conn, "SELECT COUNT(*) FROM goals WHERE tenant_id = ?", (tenant_id,)

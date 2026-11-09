@@ -47,7 +47,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -69,6 +68,7 @@ from hbllm.hcir.graph import (
     UnknownNode,
 )
 from hbllm.hcir.types import CognitiveMode, FalsificationStatus, ResearchStrategyType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -828,7 +828,7 @@ class DiscoveryWorkspace:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS research_programs (
                     program_id TEXT PRIMARY KEY,
@@ -844,7 +844,7 @@ class DiscoveryWorkspace:
 
     def _persist_program(self, program: ResearchProgram) -> None:
         data = json.dumps(program.to_dict())
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO research_programs
                    (program_id, data, created_at, updated_at)
@@ -854,7 +854,7 @@ class DiscoveryWorkspace:
 
     def _load_programs(self) -> None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 rows = conn.execute("SELECT data FROM research_programs").fetchall()
             for (data_json,) in rows:
                 d = json.loads(data_json)

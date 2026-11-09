@@ -79,6 +79,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,7 +176,7 @@ class IdentityStateManager:
 
     async def init_db(self) -> None:
         """Create identity tables."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS core_identity (
                     agent_id TEXT PRIMARY KEY,
@@ -213,7 +215,7 @@ class IdentityStateManager:
             conn.commit()
 
         # Load known users for dedup
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute("SELECT user_id FROM known_users").fetchall()
             self._known_users = {r[0] for r in rows}
 
@@ -223,7 +225,7 @@ class IdentityStateManager:
 
     async def restore(self) -> CoreIdentity:
         """Restore identity state from persistence, or create a new one."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM core_identity ORDER BY created_at ASC LIMIT 1"
@@ -295,7 +297,7 @@ class IdentityStateManager:
         if user_id not in self._known_users:
             self._known_users.add(user_id)
             self.identity.total_users_served += 1
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with open_connection(str(self._db_path)) as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO known_users (user_id, first_seen_at) VALUES (?, ?)",
                     (user_id, time.time()),
@@ -326,7 +328,7 @@ class IdentityStateManager:
         limit: int = 5,
     ) -> list[SessionNarrative]:
         """Get recent session narratives for a user."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
@@ -467,7 +469,7 @@ class IdentityStateManager:
     async def _persist_identity(self) -> None:
         """Write core identity to database."""
         identity = self.identity
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO core_identity
@@ -491,7 +493,7 @@ class IdentityStateManager:
 
     async def _persist_narrative(self, narrative: SessionNarrative) -> None:
         """Write session narrative to database."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 INSERT INTO session_narratives

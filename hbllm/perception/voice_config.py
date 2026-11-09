@@ -14,6 +14,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +110,7 @@ class VoiceRegistry:
         self._cache: dict[str, VoiceConfig] = {}
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS voice_preferences (
@@ -131,7 +133,7 @@ class VoiceRegistry:
             return self._cache[tenant_id]
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 row = conn.execute(
                     "SELECT * FROM voice_preferences WHERE tenant_id = ?",
@@ -164,7 +166,7 @@ class VoiceRegistry:
         import json
         import time
 
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO voice_preferences

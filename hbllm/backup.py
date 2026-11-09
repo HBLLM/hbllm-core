@@ -38,12 +38,13 @@ import hashlib
 import json
 import logging
 import shutil
-import sqlite3
 import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +477,7 @@ class BackupManager:
         for path in file_paths:
             if path.suffix == ".db":
                 try:
-                    conn = sqlite3.connect(str(path))
+                    conn = open_connection(str(path))
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     conn.close()
                 except Exception as e:

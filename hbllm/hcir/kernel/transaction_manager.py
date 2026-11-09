@@ -846,4 +846,14 @@ class TransactionManager:
         if cls is None:
             raise ValueError(f"No registered class for node type: {node_type}")
 
+        model_fields = set(cls.model_fields.keys())
+        extra = {k: v for k, v in data.items() if k not in model_fields}
+        if extra:
+            cleaned = {k: v for k, v in data.items() if k in model_fields}
+            if "properties" in model_fields:
+                existing_props = dict(cleaned.get("properties") or {})
+                existing_props.update(extra)
+                cleaned["properties"] = existing_props
+            return cls.model_validate(cleaned)
+
         return cls.model_validate(data)

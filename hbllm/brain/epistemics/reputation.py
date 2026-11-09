@@ -51,11 +51,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -481,7 +482,7 @@ class SourceReputationTracker:
     # ── Persistence ───────────────────────────────────────────────────
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS source_reputations (
                     source_id TEXT PRIMARY KEY,
@@ -503,7 +504,7 @@ class SourceReputationTracker:
 
     def _persist(self, rep: SourceReputation) -> None:
         data = json.dumps(rep.to_dict())
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO source_reputations
                    (source_id, domain, reputation_score, total_claims, data, updated_at)
@@ -520,7 +521,7 @@ class SourceReputationTracker:
 
     def _load(self, source_id: str) -> SourceReputation | None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 row = conn.execute(
                     "SELECT data FROM source_reputations WHERE source_id = ?",
                     (source_id,),
@@ -535,7 +536,7 @@ class SourceReputationTracker:
 
     def _load_all(self) -> list[SourceReputation]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 rows = conn.execute("SELECT data FROM source_reputations").fetchall()
             return [SourceReputation.from_dict(json.loads(r[0])) for r in rows]
         except Exception as e:

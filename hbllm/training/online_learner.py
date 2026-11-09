@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ class OnlineLearner:
     async def init_db(self) -> None:
         """Create the learning database tables."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS learnings (
@@ -171,7 +172,7 @@ class OnlineLearner:
         error_type: str | None = None,
     ) -> None:
         """Record the outcome of a tool invocation."""
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "INSERT INTO tool_outcomes "
@@ -206,7 +207,7 @@ class OnlineLearner:
         Returns a concise text block summarizing what we've learned
         about this user's preferences and corrections.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             lines: list[str] = []
 
@@ -262,7 +263,7 @@ class OnlineLearner:
         tool_name: str,
     ) -> float | None:
         """Get the success rate for a specific tool (0.0-1.0)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             row = conn.execute(
                 "SELECT SUM(success), COUNT(*) FROM tool_outcomes "
@@ -285,7 +286,7 @@ class OnlineLearner:
     ) -> None:
         """Insert or update a learning entry (reinforcing on conflict)."""
         now = time.time()
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "INSERT INTO learnings "
@@ -313,7 +314,7 @@ class OnlineLearner:
 
     def stats(self, tenant_id: str = "default") -> dict[str, Any]:
         """Learning statistics for a tenant."""
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             by_category = dict(
                 conn.execute(

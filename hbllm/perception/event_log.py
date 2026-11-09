@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from hbllm.perception.reality_bus import PerceptionEvent
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class EventLog:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS perception_events (
                     event_id TEXT PRIMARY KEY,
@@ -60,7 +61,7 @@ class EventLog:
     def append(self, event: PerceptionEvent) -> None:
         """Append a normalized event to the log."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 conn.execute(
                     """INSERT INTO perception_events
                        (event_id, logical_clock, entity_id, event_type, sub_type,
@@ -91,7 +92,7 @@ class EventLog:
 
     def replay(self, start_clock: int = 0) -> Iterator[PerceptionEvent]:
         """Yield events sequentially for rebuilding state or time-travel debugging."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM perception_events WHERE logical_clock >= ? "
@@ -105,6 +106,6 @@ class EventLog:
 
     def get_latest_clock(self) -> int:
         """Get the highest logical clock currently stored."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             row = conn.execute("SELECT MAX(logical_clock) FROM perception_events").fetchone()
             return row[0] if row and row[0] is not None else 0

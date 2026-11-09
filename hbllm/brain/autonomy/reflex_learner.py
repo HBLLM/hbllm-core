@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class ReflexStore:
 
     def init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS learned_reflexes (
@@ -104,7 +105,7 @@ class ReflexStore:
             conn.close()
 
     def save(self, reflex: LearnedReflex) -> None:
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "INSERT OR REPLACE INTO learned_reflexes "
@@ -137,7 +138,7 @@ class ReflexStore:
             conn.close()
 
     def get_active(self, tenant_id: str) -> list[LearnedReflex]:
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             cursor = conn.execute(
                 "SELECT * FROM learned_reflexes "
@@ -150,7 +151,7 @@ class ReflexStore:
             conn.close()
 
     def get_pending_approval(self, tenant_id: str) -> list[LearnedReflex]:
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             cursor = conn.execute(
                 "SELECT * FROM learned_reflexes "
@@ -163,7 +164,7 @@ class ReflexStore:
             conn.close()
 
     def approve(self, reflex_id: str) -> None:
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "UPDATE learned_reflexes SET approved = 1 WHERE reflex_id = ?",
@@ -174,7 +175,7 @@ class ReflexStore:
             conn.close()
 
     def record_trigger(self, reflex_id: str) -> None:
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "UPDATE learned_reflexes SET "

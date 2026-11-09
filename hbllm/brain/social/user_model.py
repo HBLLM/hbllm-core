@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -389,7 +391,7 @@ class UserModelEngine:
         self._models: dict[str, UserModel] = {}
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS user_attributes (
                     tenant_id TEXT NOT NULL,
@@ -740,7 +742,7 @@ class UserModelEngine:
     def _save_to_db(self, model: UserModel) -> None:
         """Persist a UserModel to SQLite."""
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             # Save expertise
             for domain, exp in model.expertise.items():
                 conn.execute(
@@ -893,7 +895,7 @@ class UserModelEngine:
 
     def _load_from_db(self, tenant_id: str) -> UserModel | None:
         """Load a UserModel from SQLite."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM user_attributes WHERE tenant_id = ?",
