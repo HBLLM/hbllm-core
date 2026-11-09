@@ -817,6 +817,11 @@ class AutonomousEpistemicEngine:
 
         self.recursive_value_inducer: RecursiveValueInducer = RecursiveValueInducer()
 
+        # Faculty: Working Concept Store & Analogical Schema Retrieval (AGI Gap 6)
+        from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
+
+        self.working_concept_store: WorkingConceptStore = WorkingConceptStore()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4130,6 +4135,22 @@ class AutonomousEpistemicEngine:
             return reranked
 
         return matched
+
+    def retrieve_relational_analogies(
+        self,
+        grid: np.ndarray,
+        min_match_score: float = 0.5,
+    ) -> list[tuple[Any, float, list[Any]]]:
+        """Extract object scene graph from grid and retrieve analogous relational concepts (G6)."""
+        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+            RelationalGraphMatcher,
+        )
+
+        query_graph = RelationalGraphMatcher.build_scene_graph(grid)
+        return self.working_concept_store.retrieve_analogous_concepts(
+            query_graph=query_graph,
+            min_match_score=min_match_score,
+        )
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""

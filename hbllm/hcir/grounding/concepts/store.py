@@ -237,3 +237,115 @@ class WorkingConceptStore:
                 sq_sum += z_score**2
 
         return math.sqrt(sq_sum / len(shared_keys))
+
+    def register_composite_concept(
+        self,
+        name_or_alias: str,
+        parts: dict[str, str] | None = None,
+        role_bindings: dict[str, str] | None = None,
+        higher_order_relations: list[dict[str, Any]] | None = None,
+        relational_graph: Any | None = None,
+        concept_id: str | None = None,
+    ) -> GroundedConcept:
+        """Register a new composite concept combining parts, roles, and structural graph."""
+        with self._lock:
+            cid = concept_id or _gen_concept_id()
+            concept_ref = GroundedConceptRef(id=cid)
+            concept = GroundedConcept(
+                concept_ref=concept_ref,
+                lifecycle_state=ConceptLifecycle.PROVISIONAL,
+                parts=dict(parts or {}),
+                role_bindings=dict(role_bindings or {}),
+                higher_order_relations=list(higher_order_relations or []),
+                relational_graph=relational_graph,
+                grounding_quality=GroundingQuality.balanced(0.5),
+            )
+            if name_or_alias:
+                concept.add_linguistic_alias(name_or_alias, confidence=1.0)
+            self._concepts[cid] = concept
+            self._evaluate_and_update_lifecycle(concept)
+            return concept
+
+    def retrieve_analogous_concepts(
+        self,
+        query_graph: Any,
+        min_match_score: float = 0.5,
+    ) -> list[tuple[GroundedConcept, float, list[Any]]]:
+        """Analogical concept retrieval: matches query scene graph against stored relational concepts.
+
+        Uses bipartite Hungarian structural isomorphism matching (RelationalGraphMatcher.match_graphs)
+        to identify structurally and topologically analogous concepts in working memory.
+        """
+        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+            ObjectGraph,
+            RelationalGraphMatcher,
+        )
+
+        if not isinstance(query_graph, ObjectGraph):
+            return []
+
+        results: list[tuple[GroundedConcept, float, list[Any]]] = []
+        with self._lock:
+            for concept in self._concepts.values():
+                stored_graph = concept.relational_graph
+                if stored_graph is None or not isinstance(stored_graph, ObjectGraph):
+                    continue
+
+                correspondences = RelationalGraphMatcher.match_graphs(
+                    query_graph,
+                    stored_graph,
+                    ignore_color=True,
+                    ignore_scale=True,
+                )
+                if not correspondences:
+                    continue
+
+                avg_score = float(
+                    sum(c.match_score for c in correspondences) / len(correspondences)
+                )
+                if avg_score >= min_match_score:
+                    results.append((concept, avg_score, correspondences))
+
+        results.sort(key=lambda item: item[1], reverse=True)
+        return results
+
+    def map_analogous_roles(
+        self,
+        query_graph: Any,
+        concept_id: str,
+    ) -> dict[str, int]:
+        """Maps query graph object IDs to semantic roles defined in the matched concept."""
+        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+            RelationalGraphMatcher,
+        )
+
+        with self._lock:
+            concept = self._concepts.get(concept_id)
+            if concept is None or concept.relational_graph is None:
+                return {}
+
+            correspondences = RelationalGraphMatcher.match_graphs(
+                query_graph,
+                concept.relational_graph,
+                ignore_color=True,
+                ignore_scale=True,
+            )
+
+            # Map from stored object id to role
+            stored_obj_to_role: dict[int, str] = {}
+            for role_name, filler in concept.role_bindings.items():
+                if filler.isdigit():
+                    stored_obj_to_role[int(filler)] = role_name
+                elif filler.startswith("obj_"):
+                    try:
+                        stored_obj_to_role[int(filler.split("_")[1])] = role_name
+                    except ValueError:
+                        pass
+
+            role_map: dict[str, int] = {}
+            for corr in correspondences:
+                if corr.dst_object_id in stored_obj_to_role:
+                    role_name = stored_obj_to_role[corr.dst_object_id]
+                    role_map[role_name] = corr.src_object_id
+
+            return role_map
