@@ -837,6 +837,17 @@ class AutonomousEpistemicEngine:
 
         self.option_discovery: OptionDiscoveryEngine = OptionDiscoveryEngine()
 
+        # Faculty: Value-Uncertainty Deferral, Provenance & Corrigibility (AGI Gap 15)
+        from hbllm.hcir.kernel.safety_corrigibility import (
+            CorrigibilityMonitor,
+            GoalProvenanceTracker,
+            ValueUncertaintyArbiter,
+        )
+
+        self.value_uncertainty_arbiter: ValueUncertaintyArbiter = ValueUncertaintyArbiter()
+        self.goal_provenance: GoalProvenanceTracker = GoalProvenanceTracker()
+        self.corrigibility_monitor: CorrigibilityMonitor = CorrigibilityMonitor()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4278,6 +4289,47 @@ class AutonomousEpistemicEngine:
     def get_option_reuse_rate(self) -> float:
         """Get the current option reuse rate across episodes (G11)."""
         return self.option_discovery.get_option_reuse_rate()
+
+    def evaluate_action_value_safety(
+        self,
+        action_id: Any,
+        action_type: str,
+        expected_value: float,
+        epistemic_variance: float,
+        is_hazard_cone: bool = False,
+    ) -> tuple[bool, Any | None]:
+        """Evaluate action under value variance and gate against irreversible hazard risk (G15)."""
+        return self.value_uncertainty_arbiter.evaluate_action_safety(
+            action_id=action_id,
+            action_type=action_type,
+            expected_value=expected_value,
+            epistemic_variance=epistemic_variance,
+            is_hazard_cone=is_hazard_cone,
+        )
+
+    def record_goal_provenance(
+        self,
+        goal_id: str,
+        intent: str,
+        parent_goal_id: str | None = None,
+        target_entity: str | None = None,
+        justification: str = "",
+        utility_score: float = 0.5,
+    ) -> Any:
+        """Record goal decomposition link in causal provenance ancestry tree (G15)."""
+        return self.goal_provenance.register_goal(
+            goal_id=goal_id,
+            intent=intent,
+            parent_goal_id=parent_goal_id,
+            target_entity=target_entity,
+            justification=justification,
+            utility_score=utility_score,
+        )
+
+    def explain_goal_provenance(self, goal_id: str) -> str:
+        """Produce human-interpretable explanation of goal provenance chain (G15)."""
+        chain = self.goal_provenance.get_provenance_chain(goal_id)
+        return chain.explain()
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
