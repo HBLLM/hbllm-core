@@ -55,6 +55,7 @@ class ExecutiveRuntime:
         self._engine: Any | None = None
         self._concept_learner: Any | None = None
         self._episodic_cortex: Any | None = None
+        self._library_learner: Any | None = None
 
     @property
     def services(self) -> KernelServices:
@@ -265,6 +266,8 @@ class ExecutiveRuntime:
         self._engine = engine
         if hasattr(engine, "episodic_cortex") and engine.episodic_cortex is not None:
             self._episodic_cortex = engine.episodic_cortex
+        if hasattr(engine, "library_learner") and engine.library_learner is not None:
+            self._library_learner = engine.library_learner
 
     def attach_concept_learner(self, learner: Any) -> None:
         """Bind the SGE ConceptLearner instance."""
@@ -273,6 +276,10 @@ class ExecutiveRuntime:
     def attach_episodic_cortex(self, cortex: Any) -> None:
         """Bind the HippocampalEpisodicCortex instance."""
         self._episodic_cortex = cortex
+
+    def attach_library_learner(self, learner: Any) -> None:
+        """Bind the DreamCoder LibraryLearner instance."""
+        self._library_learner = learner
 
     async def run_offline_consolidation(self) -> Any | None:
         """Execute an offline idle consolidation cycle.
@@ -311,7 +318,20 @@ class ExecutiveRuntime:
                 except Exception as exc:
                     logger.debug("Schema pruning error during offline consolidation: %s", exc)
 
-        # 4. Propose and commit consolidation state
+        # 4. Library learning sleep consolidation
+        learner = self._library_learner
+        if learner is None and self._engine is not None:
+            learner = getattr(self._engine, "library_learner", None)
+        if learner is not None and hasattr(learner, "sleep_consolidation"):
+            try:
+                learner.sleep_consolidation(
+                    self._services.tiered_workspace,
+                    tenant_id=self._state.tenant_id,
+                )
+            except Exception as exc:
+                logger.debug("Library learning sleep consolidation error: %s", exc)
+
+        # 5. Propose and commit consolidation state
         dest_ws = None
         grant = None
         tiered = self._services.tiered_workspace

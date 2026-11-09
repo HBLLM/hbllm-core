@@ -807,6 +807,11 @@ class AutonomousEpistemicEngine:
             min_support_traces=1
         )
 
+        # Faculty: DreamCoder Wake/Sleep Library Learning & Macro Skill Abstraction (AGI Gap 2)
+        from hbllm.hcir.world.library_learning import LibraryLearner
+
+        self.library_learner: LibraryLearner = LibraryLearner()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4028,6 +4033,18 @@ class AutonomousEpistemicEngine:
                     required_actions=req_acts,
                     terminal_reward=terminal_reward,
                 )
+                if hasattr(self, "library_learner") and self.library_learner is not None:
+                    context_feats = {
+                        "goal_count": len(self.learned_goal_positions),
+                        "barrier_count": len(self.learned_barriers),
+                        "has_barriers": len(self.learned_barriers) > 0,
+                    }
+                    self.library_learner.wake_record_episode(
+                        intents_or_steps=steps,
+                        context_id=self.current_context_id,
+                        context_features=context_feats,
+                        success=terminal_reward > 0,
+                    )
 
         newly_induced = self.skill_synthesizer.induce_all_recurrent_skills()
         res["induced_skills"] = newly_induced
@@ -4066,11 +4083,23 @@ class AutonomousEpistemicEngine:
     ) -> list[tuple[DeclarativeNeuroSymbolicSkill, float, str]]:
         """Query mPFC schema engine for transferable procedural skills matching current environmental context."""
         candidates = list(self.skill_synthesizer.synthesized_skills.values())
+        if hasattr(self, "library_learner") and self.library_learner is not None:
+            for m_skill in self.library_learner.macro_skills.values():
+                if m_skill not in candidates:
+                    candidates.append(m_skill)
+
         if not candidates and self.tiered_workspace is not None:
             self.skill_synthesizer.load_from_workspace(
                 self.tiered_workspace, tenant_id=self.world_id
             )
             candidates = list(self.skill_synthesizer.synthesized_skills.values())
+            if hasattr(self, "library_learner") and self.library_learner is not None:
+                self.library_learner.load_from_workspace(
+                    self.tiered_workspace, tenant_id=self.world_id
+                )
+                for m_skill in self.library_learner.macro_skills.values():
+                    if m_skill not in candidates:
+                        candidates.append(m_skill)
 
         if not candidates:
             return []
@@ -4082,9 +4111,20 @@ class AutonomousEpistemicEngine:
             available_actions=available_actions,
             metadata=metadata,
         )
-        return self.mpfc_schema_engine.query_transferable_skills(
+        matched = self.mpfc_schema_engine.query_transferable_skills(
             ctx, candidates, min_confidence=min_confidence
         )
+
+        if hasattr(self, "library_learner") and self.library_learner is not None and matched:
+            proposals = dict(self.library_learner.sample_proposals(metadata or {}, top_k=20))
+            reranked: list[tuple[DeclarativeNeuroSymbolicSkill, float, str]] = []
+            for skill, score, reason in matched:
+                bonus = proposals.get(skill.skill_name, 0.0) * 0.2
+                reranked.append((skill, score + bonus, reason))
+            reranked.sort(key=lambda item: item[1], reverse=True)
+            return reranked
+
+        return matched
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""

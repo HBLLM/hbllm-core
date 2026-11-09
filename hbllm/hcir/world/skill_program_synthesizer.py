@@ -356,7 +356,12 @@ class SkillProgramSynthesizer:
             persisted_ids.append(node_id)
 
         if ops:
-            workspace.persistent.commit_operations(ops, author="SkillProgramSynthesizer")
+            grant = getattr(workspace, "_system_grant", None)
+            workspace.persistent.commit_operations(
+                ops,
+                author="SkillProgramSynthesizer",
+                grant=grant,
+            )
             logger.info("Persisted %d synthesized skills to workspace.persistent", len(ops))
 
         return persisted_ids
