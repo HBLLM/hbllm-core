@@ -827,6 +827,11 @@ class AutonomousEpistemicEngine:
 
         self.schema_inducer: SchemaInducer = SchemaInducer()
 
+        # Faculty: Theory of Mind & Inverse Planning Social Cognition (AGI Gap 10)
+        from hbllm.hcir.world.social_cognition import SocialCognitionEngine
+
+        self.social_cognition: SocialCognitionEngine = SocialCognitionEngine()
+
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
@@ -4223,6 +4228,28 @@ class AutonomousEpistemicEngine:
     def get_highest_priority_practice_domain(self) -> str | None:
         """Get the domain currently in the Zone of Proximal Development with highest practice priority."""
         return self.working_memory.get_highest_priority_practice_domain()
+
+    def track_and_infer_agent_intents(
+        self,
+        entity_id: str,
+        feature_id: int,
+        position: tuple[int, int],
+        avatar_pos: tuple[int, int] | None = None,
+        candidate_goals: list[tuple[int, int]] | None = None,
+        grid: Any | None = None,
+    ) -> Any:
+        """Track entity position, detect intentional agency, and infer goal intent (G10)."""
+        self.social_cognition.track_entity_position(
+            entity_id=entity_id,
+            feature_id=feature_id,
+            position=position,
+            grid=grid,
+        )
+        return self.social_cognition.invert_planner_for_intent(
+            entity_id=entity_id,
+            avatar_pos=avatar_pos or getattr(self, "avatar_pos", None),
+            candidate_goals=candidate_goals or getattr(self, "goals", []),
+        )
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
