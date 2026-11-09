@@ -49,6 +49,7 @@ class CognitiveSystem:
     workspace: HCIRWorkspaceState
     tiered_workspace: TieredWorkspace
     config: CognitiveSystemConfig
+    runtime: Any | None = None  # ExecutiveRuntime
     brain: Any | None = None
 
 
@@ -124,6 +125,22 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         )
         engine.attach_grounding_bridge(bridge)
 
+    # 6. Instantiate Executive Runtime and wire dual rhythms
+    from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
+
+    runtime = ExecutiveRuntime(services=services)
+    runtime.attach_engine(engine)
+    if bridge is not None and hasattr(bridge, "bus"):
+        runtime.attach_observation_bus(bridge.bus)
+    if hasattr(engine, "episodic_cortex") and engine.episodic_cortex is not None:
+        runtime.attach_episodic_cortex(engine.episodic_cortex)
+    if (
+        bridge is not None
+        and hasattr(bridge, "concept_learner")
+        and bridge.concept_learner is not None
+    ):
+        runtime.attach_concept_learner(bridge.concept_learner)
+
     logger.info(
         "Cognitive system booted successfully (world_id=%s, seed=%s, verifier=ConstitutionalVerifier)",
         cfg.world_id,
@@ -137,4 +154,5 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         workspace=workspace,
         tiered_workspace=tiered_workspace,
         config=cfg,
+        runtime=runtime,
     )

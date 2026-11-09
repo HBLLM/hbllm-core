@@ -842,6 +842,23 @@ class HCIRSymbolicWorldTheory:
                 )
                 self.record_causal_predicate(pred)
 
+    def prune_stale_hypotheses(self) -> int:
+        """Prune invalid/stale hypotheses and clear evaluation caches during idle consolidation."""
+        pruned = len(self._barrier_eval_cache) + len(self._walkable_eval_cache)
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+
+        # Remove conflicting candidate goals that are confirmed walkable or barriers
+        conflicts = (self.candidate_goal_features & self.walkable_features) | (
+            self.candidate_goal_features & self.barrier_features
+        )
+        for c in conflicts:
+            if c not in self.goal_features:
+                self.candidate_goal_features.discard(c)
+                pruned += 1
+
+        return pruned
+
     def clear(self) -> None:
         """Clear all intensional predicates when resetting across distinct games."""
         self.goal_predicates.clear()
