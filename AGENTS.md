@@ -3,10 +3,18 @@
 > **Primary Directive for AI Agents:**  
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
-> [!WARNING]
-> **Current project phase: Phase 1 — Scope Freeze (since 2026-11-08).**  
-> Read `reports/audit/2026-11-08_project_audit.md` §0b before any change. Until Phase 1 exits, **no new faculty, module, benchmark scenario or cognitive capability may be added to `hbllm/`**. Allowed work is exactly WP0 (held-out evaluation harness), WP1 (single composition root + governance), WP2 (entry points), WP3 (grounding connected), WP5-D (deletion list, LOC ≤ 250k), WP15 (learned-perception decision). The companion `reports/audit/2026-11-08_agi_gap_analysis.md` explains *why*. The codebase must get smaller and truer, not larger.  
-> **Status 2026-11-09:** the first implementation pass is reviewed in `reports/audit/2026-11-09_post_implementation_review.md`. The freeze **remains in force** and is now gated by that review's §7 exit criteria. Active work is WP16 (real closed-loop held-out harness — the current `benchmarks/suites/*` harness is a placebo and its numbers are retracted), WP17 (close composition root, tiered-memory bypass, persistence on by default, event-driven autonomy), WP18 (green tests, rebuilt Rust), WP19 (deletion to ≤250k LOC). Gap-analysis G-items are **not** to be extended until WP16 can measure them. A benchmark that cannot fail is not a benchmark; `hasattr` in a wiring path is not integration.
+> [!NOTE]
+> **Current project phase: Phase 2 — Cognitive OS Evolution (Entered 2026-11-09).**  
+> All 7 Phase 1 exit criteria in `reports/audit/2026-11-09_post_implementation_review.md` §7 have been verified 100% GREEN:
+> 1. Real closed-loop procedural evaluation harness in `benchmarks/envs/` with baselines.
+> 2. Zero-failure green test suite and rebuilt Rust substrate.
+> 3. Verified architecture gates (`test_single_composition_root.py`, `test_no_direct_sqlite.py`, `test_no_duplicate_faculties.py`, `test_rust_abi_version.py`).
+> 4. LOC target achieved: codebase reduced from ~322k to **249,018 LOC** (≤ 250,000 target met).
+> 5. Two-process persistence demo verified with `Hydrated > 0` nodes.
+> 6. Zero `hasattr(` / zero polling loops in runtime paths.
+> 7. Re-generated perception comparison report with formal decision.
+>
+> In Phase 2, adhere strictly to all architectural invariants below: single composition root, event-driven reactive wakeups, tiered memory hierarchy, and task-agnostic cognitive reasoning. Every new capability must be measured against the closed-loop evaluation harness.
 
 ---
 

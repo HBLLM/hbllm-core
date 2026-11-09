@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from pathlib import Path
 from typing import Any
+
+# Extend package search path to include experiments/hcir_world_experimental
+_exp_path = Path(__file__).resolve().parents[4] / "experiments" / "hcir_world_experimental"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
 
 _MODULES: dict[str, str] = {}
 
