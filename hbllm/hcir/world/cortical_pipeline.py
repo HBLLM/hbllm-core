@@ -109,16 +109,43 @@ class CorticalPipeline:
                 )
                 current_ctx = current_ctx.with_signals(p_signals)
 
-            # Stage 2: SGE Assimilation Bridge Hook
-            elif (
-                self.grounding_bridge is not None
-                and getattr(stage, "name", "") == "assimilation_stage"
-            ):
-                states = current_ctx.signals.get("sge_entity_states", {})
-                a_signals = self.grounding_bridge.process_assimilation(
-                    current_ctx, current_entity_states=states if isinstance(states, dict) else {}
-                )
-                current_ctx = current_ctx.with_signals(a_signals)
+            # Stage 2: SGE Assimilation Bridge Hook & Goal Arbitration (WP10, Gap 5)
+            elif getattr(stage, "name", "") == "assimilation_stage":
+                if self.grounding_bridge is not None:
+                    states = current_ctx.signals.get("sge_entity_states", {})
+                    a_signals = self.grounding_bridge.process_assimilation(
+                        current_ctx,
+                        current_entity_states=states if isinstance(states, dict) else {},
+                    )
+                    current_ctx = current_ctx.with_signals(a_signals)
+
+                # Goal Arbitration Hook: Selects active TaskFrame using Expected Free Energy
+                if (
+                    self.engine is not None
+                    and getattr(self.engine, "goal_arbiter", None) is not None
+                ):
+                    candidates = self.engine.goal_arbiter.extract_candidate_goals(
+                        self.engine, current_ctx
+                    )
+                    if candidates:
+                        arb_result = self.engine.goal_arbiter.arbitrate(
+                            candidates=candidates,
+                            engine=self.engine,
+                            homeostatic_state=getattr(self.engine, "homeostatic_state", None),
+                            neuromodulator_system=getattr(
+                                self.engine, "neuromodulatory_system", None
+                            ),
+                            tiered_workspace=getattr(self.engine, "tiered_workspace", None),
+                        )
+                        if arb_result is not None:
+                            current_ctx = current_ctx.with_signals(
+                                {
+                                    "arbitrated_goal": arb_result.selected_goal,
+                                    "arbitration_result": arb_result,
+                                }
+                            )
+                            if hasattr(self.engine, "consume_energy"):
+                                self.engine.consume_energy(0.1)
 
             # WP1: each stage's journaled faculty writes commit before the next stage.
             if getattr(result, "journal", None) is not None and self.engine is not None:

@@ -107,6 +107,98 @@ class HeldItem:
 
 
 @dataclass
+class HomeostaticState:
+    """Homeostatic state regulating intrinsic motivation and goal arbitration (Gap 5, WP10).
+
+    Biologically grounded in allostatic regulation and active inference:
+    - energy_budget: Available computational / physical energy (0.0 to 100.0).
+      Depletion forces low-cost, safety-first policies.
+    - safety_margin: Minimum acceptable safety margin / clearance distance (0.0 to 1.0).
+    - competence_progress: Rate of prediction error reduction / learning progress d/dt(Error).
+    - social_instructions: Explicit externally-commanded goals or directives that preempt open-ended curiosity.
+    - fatigue: Accumulated cognitive fatigue decaying after rest or idle consolidation.
+    """
+
+    energy_budget: float = 100.0
+    safety_margin: float = 1.0
+    competence_progress: float = 0.0
+    social_instructions: list[dict[str, Any]] = field(default_factory=list)
+    fatigue: float = 0.0
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume energy budget and accumulate fatigue."""
+        self.energy_budget = max(0.0, float(self.energy_budget - amount))
+        self.fatigue = min(100.0, float(self.fatigue + amount * 0.5))
+        return self.energy_budget
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish energy budget and alleviate fatigue."""
+        self.energy_budget = min(100.0, float(self.energy_budget + amount))
+        self.fatigue = max(0.0, float(self.fatigue - amount))
+        return self.energy_budget
+
+    def record_progress(self, progress: float) -> None:
+        """Record competence progress signal (d/dt of prediction accuracy or error)."""
+        self.competence_progress = float(progress)
+
+    def add_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social or environmental instruction."""
+        self.social_instructions.append(dict(instruction))
+
+    def clear_instructions(self) -> None:
+        """Clear all social instructions upon fulfillment or cancellation."""
+        self.social_instructions.clear()
+
+    @property
+    def is_critical_energy(self) -> bool:
+        """True when energy is severely depleted (<= 25.0), requiring immediate risk-averse preservation."""
+        return self.energy_budget <= 25.0
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Export homeostatic variables as declarative CausalPredicates."""
+        return [
+            CausalPredicate(
+                variable="homeostatic:energy_budget",
+                operator="==",
+                value=round(self.energy_budget, 2),
+                relation="allostatic_regulation",
+                target_entity="prefrontal_working_memory",
+            ),
+            CausalPredicate(
+                variable="homeostatic:competence_progress",
+                operator="==",
+                value=round(self.competence_progress, 3),
+                relation="learning_progress",
+                target_entity="prefrontal_working_memory",
+            ),
+            CausalPredicate(
+                variable="homeostatic:social_instructions_count",
+                operator="==",
+                value=len(self.social_instructions),
+                relation="instructed_goals",
+                target_entity="prefrontal_working_memory",
+            ),
+        ]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR updates reflecting homeostatic state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="homeostatic_state",
+                node_data={
+                    "energy_budget": float(self.energy_budget),
+                    "safety_margin": float(self.safety_margin),
+                    "competence_progress": float(self.competence_progress),
+                    "social_instructions_count": len(self.social_instructions),
+                    "fatigue": float(self.fatigue),
+                    "is_critical_energy": self.is_critical_energy,
+                },
+            )
+        ]
+
+
+@dataclass
 class SubgoalStage:
     """A discrete stage in a hierarchical prefrontal behavioral schema."""
 
@@ -339,6 +431,7 @@ class PrefrontalWorkingMemory:
                 "simulation_cooldown",
                 "exploration_cooldown",
                 "pipeline_runs",
+                "homeostatic_state",
             }
         )
 
@@ -348,6 +441,7 @@ class PrefrontalWorkingMemory:
         self.last_decision_branch: str | None = None
         self.evidence_provenance_log: list[dict[str, Any]] = []
 
+        self.homeostatic_state: HomeostaticState = HomeostaticState()
         self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None
@@ -1019,4 +1113,27 @@ class PrefrontalWorkingMemory:
 
         ops.extend(self.visuospatial.to_transaction_operations())
         ops.extend(self.habenular_ior.to_transaction_operations())
+        ops.extend(self.homeostatic_state.to_transaction_operations())
         return ops
+
+    # ── Homeostatic Regulation & Social Directives (WP10) ────────────
+
+    def get_homeostatic_state(self) -> HomeostaticState:
+        """Return the current prefrontal homeostatic state."""
+        return self.homeostatic_state
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume energy budget."""
+        return self.homeostatic_state.consume_energy(amount)
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish energy budget."""
+        return self.homeostatic_state.replenish_energy(amount)
+
+    def add_social_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social instruction."""
+        self.homeostatic_state.add_instruction(instruction)
+
+    def clear_social_instructions(self) -> None:
+        """Clear all social instructions."""
+        self.homeostatic_state.clear_instructions()

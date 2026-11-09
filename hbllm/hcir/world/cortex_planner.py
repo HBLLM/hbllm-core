@@ -214,6 +214,19 @@ class EpistemicGoalScheduler:
                 if gp not in confirmed_goals:
                     confirmed_goals.append(gp)
 
+        # Goal Arbiter active goal integration (WP10, Gap 5)
+        arbitrated = getattr(engine, "active_arbitrated_goal", None)
+        if (
+            arbitrated is not None
+            and isinstance(arbitrated.target, tuple)
+            and len(arbitrated.target) == 2
+        ):
+            target_coord = (int(arbitrated.target[0]), int(arbitrated.target[1]))
+            if 0 <= target_coord[0] < H and 0 <= target_coord[1] < W and target_coord != avatar_pos:
+                if target_coord in confirmed_goals:
+                    confirmed_goals.remove(target_coord)
+                confirmed_goals.insert(0, target_coord)
+
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
             goals = list(confirmed_goals)

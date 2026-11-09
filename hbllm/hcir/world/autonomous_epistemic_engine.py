@@ -1100,6 +1100,11 @@ class AutonomousEpistemicEngine:
             transaction_manager=self.transaction_manager,
             engine=self,
         )
+        # Goal Arbiter (WP10, Gap 5)
+        from hbllm.hcir.world.goal_arbiter import GoalArbiter
+
+        self.goal_arbiter: GoalArbiter = GoalArbiter()
+        self.active_arbitrated_goal: Any | None = None
         self.grounding_bridge: Any | None = None
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
 
@@ -1250,6 +1255,29 @@ class AutonomousEpistemicEngine:
         self.working_memory.visuospatial.learned_goal_positions = val
         if hasattr(self, "_state") and self._state is not None:
             self._state.learned_goal_positions = set(val)
+
+    # ── Homeostatic Motivation & Social Directives (WP10) ────────────
+
+    @property
+    def homeostatic_state(self) -> Any:
+        """Homeostatic allostatic state in prefrontal working memory."""
+        return self.working_memory.homeostatic_state
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume computational/physical energy budget."""
+        return self.working_memory.consume_energy(amount)
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish computational/physical energy budget."""
+        return self.working_memory.replenish_energy(amount)
+
+    def add_social_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social or environment instruction."""
+        self.working_memory.add_social_instruction(instruction)
+
+    def clear_social_instructions(self) -> None:
+        """Clear all social instructions."""
+        self.working_memory.clear_social_instructions()
 
     @property
     def learned_receptacle_positions(self) -> set[tuple[int, int]]:

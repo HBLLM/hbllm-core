@@ -424,6 +424,15 @@ class TieredWorkspace:
         """Close a task frame in the working tier."""
         return self.working.close_frame(frame_id, reason)
 
+    @property
+    def active_task_frames(self) -> list[TaskFrame]:
+        """Return all active task frames in the working tier."""
+        return self.working.active_frames
+
+    def get_task_frame_by_goal(self, goal_id: str) -> TaskFrame | None:
+        """Get the active task frame for a goal."""
+        return self.working.get_frame_by_goal(goal_id)
+
     def push_interruption(
         self,
         parent_frame_id: str,
