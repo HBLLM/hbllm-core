@@ -52,6 +52,7 @@ class ExecutiveRuntime:
         self._is_idle_consolidated: bool = False
         self._consolidation_count: int = 0
         self._autonomous_task: asyncio.Task[None] | None = None
+        self._observation_event: asyncio.Event = asyncio.Event()
         self._engine: Any | None = None
         self._concept_learner: Any | None = None
         self._episodic_cortex: Any | None = None
@@ -260,6 +261,13 @@ class ExecutiveRuntime:
         """Handle incoming observation: update timestamps and reset idle consolidation flag."""
         self._last_observation_time = time.monotonic()
         self._is_idle_consolidated = False
+        self._observation_event.set()
+
+    def notify_observation(self) -> None:
+        """Manually signal sensory observation to reset idle consolidation timer."""
+        self._last_observation_time = time.monotonic()
+        self._is_idle_consolidated = False
+        self._observation_event.set()
 
     def attach_engine(self, engine: Any) -> None:
         """Bind the AutonomousEpistemicEngine instance."""
@@ -290,14 +298,22 @@ class ExecutiveRuntime:
         3. Schema and hypothesis pruning in HCIRSymbolicWorldTheory
         4. State snapshotting and persistent tier commit under author='offline_consolidation'
         """
+        from hbllm.hcir.kernel.protocols import (
+            ConceptMaintainable,
+            Consolidatable,
+            Prunable,
+            Replayable,
+            SleepConsolidatable,
+        )
+
         # 1. Hippocampal replay & mPFC schema consolidation (CLS)
-        if self._episodic_cortex is not None:
+        if isinstance(self._episodic_cortex, Replayable):
             try:
                 trajectories = getattr(self._episodic_cortex, "successful_trajectories", [])
                 if not trajectories:
                     trajectories = getattr(self._episodic_cortex, "past_episodes", [])
                 for traj in trajectories[-3:]:
-                    if traj and hasattr(self._episodic_cortex, "replay_forward_and_reverse"):
+                    if traj:
                         self._episodic_cortex.replay_forward_and_reverse(traj, terminal_reward=1.0)
                         if self._engine is not None and hasattr(self._engine, "mpfc_schema_engine"):
                             self._engine.mpfc_schema_engine.consolidate_replayed_trajectory(
@@ -307,7 +323,7 @@ class ExecutiveRuntime:
                 logger.debug("Hippocampal replay error during offline consolidation: %s", exc)
 
         # 2. Concept maintenance
-        if self._concept_learner is not None and hasattr(self._concept_learner, "maintain"):
+        if isinstance(self._concept_learner, ConceptMaintainable):
             try:
                 self._concept_learner.maintain()
             except Exception as exc:
@@ -316,7 +332,7 @@ class ExecutiveRuntime:
         # 3. Schema pruning
         if self._engine is not None and hasattr(self._engine, "symbolic_theory"):
             theory = self._engine.symbolic_theory
-            if hasattr(theory, "prune_stale_hypotheses"):
+            if isinstance(theory, Prunable):
                 try:
                     theory.prune_stale_hypotheses()
                 except Exception as exc:
@@ -326,7 +342,7 @@ class ExecutiveRuntime:
         learner = self._library_learner
         if learner is None and self._engine is not None:
             learner = getattr(self._engine, "library_learner", None)
-        if learner is not None and hasattr(learner, "sleep_consolidation"):
+        if isinstance(learner, SleepConsolidatable):
             try:
                 learner.sleep_consolidation(
                     self._services.tiered_workspace,
@@ -355,7 +371,7 @@ class ExecutiveRuntime:
         tx = None
         if dest_ws is not None:
             ops: list[Any] = []
-            if self._engine is not None and hasattr(self._engine, "to_transaction_operations"):
+            if isinstance(self._engine, Consolidatable):
                 ops = self._engine.to_transaction_operations()
 
             from hbllm.hcir.nodes import ConceptNode
@@ -438,15 +454,18 @@ class ExecutiveRuntime:
                 pass
             self._autonomous_task = None
 
-    async def _autonomous_worker(self, check_interval: float) -> None:
-        """Background worker loop monitoring sensory inactivity."""
+    async def _autonomous_worker(self, check_interval: float = 0.05) -> None:
+        """Background event-driven worker monitoring sensory inactivity without polling loops."""
         try:
             while self._is_running:
-                await asyncio.sleep(check_interval)
-                now = time.monotonic()
-                if self._last_observation_time > 0:
-                    idle_duration = now - self._last_observation_time
-                    if idle_duration >= self._idle_threshold and not self._is_idle_consolidated:
+                try:
+                    await asyncio.wait_for(
+                        self._observation_event.wait(),
+                        timeout=self._idle_threshold,
+                    )
+                    self._observation_event.clear()
+                except asyncio.TimeoutError:
+                    if self._last_observation_time > 0 and not self._is_idle_consolidated:
                         await self.run_offline_consolidation()
         except asyncio.CancelledError:
             pass

@@ -1258,6 +1258,11 @@ class PrefrontalWorkingMemory:
 
     # ── Homeostatic Regulation & Social Directives (WP10) ────────────
 
+    @property
+    def homeostatic(self) -> HomeostaticState:
+        """Alias for homeostatic_state."""
+        return self.homeostatic_state
+
     def get_homeostatic_state(self) -> HomeostaticState:
         """Return the current prefrontal homeostatic state."""
         return self.homeostatic_state

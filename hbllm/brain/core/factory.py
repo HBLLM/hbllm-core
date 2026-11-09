@@ -1186,48 +1186,48 @@ class BrainFactory:
             from hbllm.hcir.cognitive_event_log import CognitiveEventLog
             from hbllm.hcir.cognitive_journal import CognitiveJournal
             from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.governance.constitutional_verifier import (
-                ConstitutionalVerifier,
-            )
             from hbllm.hcir.kernel.scheduler import (
                 CognitiveBudget,
                 KernelInstructionScheduler,
             )
-            from hbllm.hcir.kernel.services import KernelServices
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.semantic_normalizer import SemanticNormalizer
             from hbllm.hcir.stores import InMemoryEventStore
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-            from hbllm.hcir.workspace import HCIRWorkspaceState
-            from hbllm.hcir.workspace_tiers import TieredWorkspace
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-            # 1. Core workspace — reuse existing if available
-            hcir_ws = (
-                brain.workspace_node.hcir_workspace
-                if hasattr(brain, "workspace_node") and brain.workspace_node
-                else HCIRWorkspaceState()
+            # 1. Boot canonical cognitive runtime via single composition root
+            cog_cfg = CognitiveSystemConfig(
+                world_id=getattr(cfg, "world_id", "default_brain"),
+                memory_dir=Path(cfg.data_dir)
+                / "worlds"
+                / getattr(cfg, "world_id", "default_brain"),
+                enable_brain_llm=True,
             )
+            cog_sys = build_cognitive_system(cog_cfg)
+            brain.cognitive_system = cog_sys
+            brain.hcir_services = cog_sys.services
+            brain.hcir_runtime = cog_sys.runtime
+            hcir_ws = cog_sys.workspace
+            tx_mgr = cog_sys.services.transaction_manager
+            tiered = cog_sys.tiered_workspace
 
-            # 2. Transaction manager + constitutional governance
-            verifier = ConstitutionalVerifier()
-            tx_mgr = TransactionManager(hcir_ws, verification_stages=[verifier])
-
-            # 3. Capability resolver + budget-aware scheduler
+            # 2. Capability resolver + budget-aware scheduler
             resolver = CapabilityResolver()
             budget = CognitiveBudget(total_tokens=getattr(cfg, "hcir_token_budget", 100_000))
             hcir_sched = KernelInstructionScheduler(budget=budget)
+            cog_sys.services.capability_resolver = resolver
+            cog_sys.services.scheduler = hcir_sched
 
-            # 4. Event sourcing pipeline
+            # 3. Event sourcing pipeline & bus bridge
             event_store = InMemoryEventStore()
             normalizer = SemanticNormalizer()
             journal = CognitiveJournal(store=event_store)
             event_log = CognitiveEventLog(store=event_store)
+            cog_sys.services.event_store = event_store
+            cog_sys.services.semantic_normalizer = normalizer
+            cog_sys.services.cognitive_journal = journal
+            cog_sys.services.cognitive_event_log = event_log
 
-            # 5. Tiered workspace
-            tiered = TieredWorkspace()
-
-            # 6. Bus bridge — projects MessageBus events → HCIR workspace
             bus_bridge = HCIRBusBridge(
                 bus=message_bus,
                 normalizer=normalizer,
@@ -1236,8 +1236,9 @@ class BrainFactory:
                 tiered_workspace=tiered,
                 tx_manager=tx_mgr,
             )
+            cog_sys.services.bus_bridge = bus_bridge
 
-            # 6b. Migration policy & metrics tracking (100% Cognitive Authority)
+            # 4. Migration policy & metrics tracking (100% Cognitive Authority)
             from hbllm.hcir.kernel.governance.policies.migration_policy import (
                 MigrationMode,
                 MigrationPolicy,
@@ -1251,26 +1252,8 @@ class BrainFactory:
                 migration_mode = migration_mode_val
             migration_policy = MigrationPolicy(initial_mode=migration_mode)
             migration_metrics = MigrationMetrics()
-
-            # 7. Assemble KernelServices
-            brain.hcir_services = KernelServices(
-                workspace=hcir_ws,
-                transaction_manager=tx_mgr,
-                capability_resolver=resolver,
-                scheduler=hcir_sched,
-                event_store=event_store,
-                tiered_workspace=tiered,
-                cognitive_journal=journal,
-                cognitive_event_log=event_log,
-                semantic_normalizer=normalizer,
-                constitutional_verifier=verifier,
-                bus_bridge=bus_bridge,
-                migration_policy=migration_policy,
-                migration_metrics=migration_metrics,
-            )
-
-            # 8. Executive runtime
-            brain.hcir_runtime = ExecutiveRuntime(brain.hcir_services)
+            cog_sys.services.migration_policy = migration_policy
+            cog_sys.services.migration_metrics = migration_metrics
 
             # 9. Export capability nodes for all brain nodes & record to metrics
             for node_obj in nodes:

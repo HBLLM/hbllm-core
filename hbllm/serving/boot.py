@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -210,24 +211,22 @@ class BootOrchestrator:
         # ── 2.5 Initialize HCIR Kernel & Executive Runtime ───────────
         try:
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
-            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.services import KernelServices
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-            from hbllm.hcir.workspace import HCIRWorkspaceState
-            from hbllm.hcir.workspace_tiers import TieredWorkspace
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-            hcir_ws = (
-                ctx.brain.workspace_node.hcir_workspace
-                if hasattr(ctx.brain, "workspace_node") and ctx.brain.workspace_node
-                else HCIRWorkspaceState()
+            # Route through single canonical composition root
+            cog_cfg = CognitiveSystemConfig(
+                world_id=cfg.profile_name,
+                memory_dir=Path(cfg.data_dir) / "worlds" / cfg.profile_name,
+                enable_grounding=cfg.enable_perception,
             )
-            # Create canonical verified kernel services with constitutional verifier
-            ctx.kernel_services = KernelServices.create_default(
-                workspace=hcir_ws,
-                tiered_workspace=TieredWorkspace(),
-            )
-            ctx.executive_runtime = ExecutiveRuntime(ctx.kernel_services)
-            await ctx.executive_runtime.start()
+            cog_sys = build_cognitive_system(cog_cfg)
+            ctx.kernel_services = cog_sys.services
+            ctx.executive_runtime = cog_sys.runtime
+            hcir_ws = cog_sys.workspace
+
+            if ctx.executive_runtime:
+                await ctx.executive_runtime.start()
 
             # Export brain nodes capabilities to HCIR workspace
             if hasattr(ctx.brain, "nodes"):

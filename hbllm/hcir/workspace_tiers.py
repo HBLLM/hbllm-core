@@ -413,8 +413,19 @@ class TieredWorkspace:
 
         self._snapshot_interval = snapshot_interval
         self._commits_since_snapshot: int = 0
+        self._default_working_frame: TaskFrame | None = None
 
     # ── Task Frame & Interruption Management ─────────────────────────
+
+    @property
+    def working_state(self) -> HCIRWorkspaceState:
+        """Canonical working workspace state. Returns active task frame workspace or default working frame workspace."""
+        active = self.active_task_frames
+        if active:
+            return active[0].workspace
+        if self._default_working_frame is None or not self._default_working_frame.is_active:
+            self._default_working_frame = self.create_task_frame("default_working_frame")
+        return self._default_working_frame.workspace
 
     def create_task_frame(self, goal_id: str) -> TaskFrame:
         """Create a new task frame in the working tier."""

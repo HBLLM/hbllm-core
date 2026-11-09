@@ -487,6 +487,16 @@ class HippocampalEpisodicCortex:
         self.attractor_network: HippocampalAttractorNetwork = HippocampalAttractorNetwork()
         self.distilled_relational_rules: list[Any] = []
 
+    def replay_forward_and_reverse(
+        self,
+        trajectory: list[EpisodicTransition],
+        terminal_reward: float = 1.0,
+    ) -> dict[str, Any]:
+        """Perform forward and reverse replay through the hippocampal replay consolidator."""
+        return self.replay_consolidator.replay_forward_and_reverse(
+            trajectory, terminal_reward=terminal_reward
+        )
+
     def consolidate_sleep_replay(self, terminal_reward: float = 1.0) -> dict[str, Any]:
         """Perform Hippocampal Sharp-Wave Ripple (SWR) replay and cross-episode schema distillation."""
         curr_traj = list(self.current_episode)

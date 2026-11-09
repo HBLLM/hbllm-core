@@ -1,4 +1,4 @@
-"""Canonical composition root for the HBLLM Cognitive OS (WP1).
+"""Canonical composition root for the HBLLM Cognitive OS.
 
 Provides `build_cognitive_system()` as the single factory for instantiating
 a fully-governed, verified cognitive architecture. All entry points
@@ -22,6 +22,8 @@ from hbllm.hcir.workspace_tiers import TieredWorkspace
 
 logger = logging.getLogger("hbllm.runtime.bootstrap")
 
+_DEFAULT_DIR_MARKER = object()
+
 
 @dataclass
 class CognitiveSystemConfig:
@@ -32,7 +34,7 @@ class CognitiveSystemConfig:
     exploration_budget: int = 150
     enable_logging: bool = True
     instructions: Sequence[str] | str | None = None
-    memory_dir: Path | str | None = None
+    memory_dir: Path | str | None = _DEFAULT_DIR_MARKER  # type: ignore[assignment]
     enable_grounding: bool = True
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
@@ -61,23 +63,30 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     2. ConstitutionalVerifier attached to all state modification pipelines.
     3. AutonomousEpistemicEngine and CorticalGroundingBridge sharing the same KernelServices.
     4. TieredWorkspace owning 4-tier memory state.
+    5. services.workspace is identical to tiered_workspace.working_state.
     """
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
     from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
 
     cfg = config or CognitiveSystemConfig()
 
-    # 1. State hierarchy & storage (Persistent Tier binding)
+    # 1. State hierarchy & storage (Persistent Tier binding defaults to ~/.hbllm/worlds/<world_id>)
+    resolved_mem_dir: Path | None = None
+    if cfg.memory_dir is _DEFAULT_DIR_MARKER:
+        resolved_mem_dir = Path.home() / ".hbllm" / "worlds" / cfg.world_id
+    elif cfg.memory_dir is not None:
+        resolved_mem_dir = Path(cfg.memory_dir)
+
     persistent_store = None
-    if cfg.memory_dir:
+    if resolved_mem_dir is not None:
         from hbllm.hcir.stores.sqlite_event_store import SQLiteEventStore
 
-        mem_dir = Path(cfg.memory_dir)
-        mem_dir.mkdir(parents=True, exist_ok=True)
-        persistent_store = SQLiteEventStore(mem_dir / "persistent.db")
+        resolved_mem_dir.mkdir(parents=True, exist_ok=True)
+        persistent_store = SQLiteEventStore(resolved_mem_dir / "persistent.db")
 
-    workspace = HCIRWorkspaceState()
     tiered_workspace = TieredWorkspace(persistent_store=persistent_store)
+    # Unify workspace: services.workspace IS tiered_workspace.working_state
+    workspace = tiered_workspace.working_state
 
     # 2. Constitutional verification pipeline
     authority_registry = CommitAuthorityRegistry()
@@ -103,6 +112,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         services=services,
         world_id=cfg.world_id,
         seed=cfg.seed,
+        tiered_workspace=tiered_workspace,
     )
 
     # Auto-hydrate world model & lifelong memory if persistent state exists

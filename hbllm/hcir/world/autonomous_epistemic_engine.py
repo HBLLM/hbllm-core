@@ -1772,11 +1772,37 @@ class AutonomousEpistemicEngine:
         self.tiered_workspace = tiered
         frame = tiered.create_task_frame(goal_id=goal_id)
         self.active_task_frame = frame
-        if self.transaction_manager is None:
-            if self.services is not None:
-                self.transaction_manager = self.services.transaction_manager
-            else:
-                self.transaction_manager = frame.workspace.transaction_manager
+
+        # Ensure active task frame has a TransactionManager and bind it to engine
+        if (
+            self.services is not None
+            and getattr(self.services, "transaction_manager", None) is not None
+        ):
+            self.transaction_manager = self.services.transaction_manager
+            frame.workspace.attach_transaction_manager(
+                self.services.transaction_manager, replace=True
+            )
+        elif frame.workspace.transaction_manager is not None:
+            self.transaction_manager = frame.workspace.transaction_manager
+        elif self.services is not None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            verifier = getattr(self.services, "constitutional_verifier", None)
+            stages = [verifier] if verifier is not None else None
+            tm = TransactionManager(
+                workspace=frame.workspace,
+                verification_stages=stages,
+                event_bus=self.services.event_bus,
+            )
+            frame.workspace.attach_transaction_manager(tm, replace=True)
+            self.transaction_manager = tm
+        else:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            tm = TransactionManager(workspace=frame.workspace)
+            frame.workspace.attach_transaction_manager(tm, replace=True)
+            self.transaction_manager = tm
+
         logger.info(
             "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",
             frame.frame_id,
@@ -4893,6 +4919,11 @@ class AutonomousEpistemicEngine:
                 is_death_or_reset=is_failure,
             )
             self._prev_oriented_threats = []
+            if self.tiered_workspace is not None:
+                try:
+                    self.persist_to_workspace(author="episode_boundary")
+                except Exception:
+                    pass
 
         if is_success and self.tiered_workspace is not None and self.active_task_frame is not None:
             # Commit working memory state to the active task frame
@@ -5658,17 +5689,29 @@ class AutonomousEpistemicEngine:
         if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
             self.symbolic_theory.hydrate_from_nodes(nodes)
 
-        # Hydrate goal positions, barriers, and telemetry if present
+        # Hydrate goal positions, barriers, concepts, homeostatic state, and telemetry if present
         for node in nodes:
             props = node.properties or {}
             if node.id.startswith("learned_goal_"):
                 pos = props.get("position")
-                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
-                    self.learned_goal_positions.add((int(pos[0]), int(pos[1])))
+                if pos and isinstance(pos, (list, tuple)):
+                    pos_tuple = tuple(
+                        int(x)
+                        if isinstance(x, (int, float)) and float(x).is_integer()
+                        else float(x)
+                        for x in pos
+                    )
+                    self.learned_goal_positions.add(pos_tuple)  # type: ignore[arg-type]
             elif node.id.startswith("learned_barrier_"):
                 pos = props.get("position")
-                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
-                    self.learned_barriers.add((int(pos[0]), int(pos[1])))
+                if pos and isinstance(pos, (list, tuple)):
+                    pos_tuple = tuple(
+                        int(x)
+                        if isinstance(x, (int, float)) and float(x).is_integer()
+                        else float(x)
+                        for x in pos
+                    )
+                    self.learned_barriers.add(pos_tuple)  # type: ignore[arg-type]
             elif node.id == "engine_telemetry":
                 avatar_feat = props.get("avatar_feature")
                 if avatar_feat is not None:
@@ -5677,19 +5720,41 @@ class AutonomousEpistemicEngine:
                     self.avatar_features.add(af)
                 for ta in props.get("tested_actions") or []:
                     self.tested_actions.add(ta)
+            elif node.id == "homeostatic_state":
+                homeo = getattr(self.working_memory, "homeostatic_state", None) or getattr(
+                    self.working_memory, "homeostatic", None
+                )
+                if homeo is not None:
+                    for k in (
+                        "energy_budget",
+                        "safety_margin",
+                        "competence_progress",
+                        "fatigue",
+                    ):
+                        if k in props and hasattr(homeo, k):
+                            setattr(homeo, k, props[k])
+            elif (
+                getattr(node, "node_type", None) == "concept"
+                or getattr(node, "category", None) == "memory"
+            ):
+                if hasattr(self, "working_memory") and hasattr(
+                    self.working_memory, "concept_store"
+                ):
+                    if hasattr(self.working_memory.concept_store, "restore_concept"):
+                        self.working_memory.concept_store.restore_concept(node)
 
         return len(nodes)
 
     def freeze(self) -> CognitiveContext:
         """Capture an immutable CognitiveContext snapshot of engine state for pure cortical stages.
 
-        In accordance with WP1 (Faculties emit intent; engine owns no mutable truth),
-        cortical faculties observe this frozen snapshot and emit transactional operations.
+        Faculties emit intent; engine owns no mutable truth.
+        Cortical faculties observe this frozen snapshot and emit transactional operations.
         """
         return EngineState.from_engine(self).freeze()
 
     def apply_delta(self, delta: Any, author: str = "unknown") -> None:
-        """The ONLY faculty write path: apply a StateDelta to engine state (WP1).
+        """The ONLY faculty write path: apply a StateDelta to engine state.
 
         Assigns each pending field on self/self.state and emits HCIR
         transaction operations for changed fields (one commit per call).
