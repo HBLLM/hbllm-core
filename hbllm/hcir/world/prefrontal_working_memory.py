@@ -13,10 +13,13 @@ Modeled on the primate dorsolateral prefrontal cortex (dlPFC):
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
@@ -193,6 +196,102 @@ class HomeostaticState:
                     "social_instructions_count": len(self.social_instructions),
                     "fatigue": float(self.fatigue),
                     "is_critical_energy": self.is_critical_energy,
+                },
+            )
+        ]
+
+
+@dataclass
+class DomainCompetenceProfile:
+    """Metacognitive competence profile per domain (G9).
+
+    Tracks calibration, win rate, and learning progress to answer:
+    'What am I bad at, and is practicing it worth it?'
+    """
+
+    domain_id: str
+    total_episodes: int = 0
+    successful_episodes: int = 0
+    running_win_rate: float = 0.0
+    mean_prediction_error: float = 0.50
+    error_history: list[float] = field(default_factory=list)
+    calibration_score: float = 0.50
+    learning_progress_rate: float = 0.0
+    last_updated: float = field(default_factory=time.time)
+
+    def record_episode(
+        self,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> None:
+        self.total_episodes += 1
+        if success:
+            self.successful_episodes += 1
+        self.running_win_rate = self.successful_episodes / self.total_episodes
+
+        clamped_err = max(0.0, min(1.0, float(mean_error)))
+        self.error_history.append(clamped_err)
+        if len(self.error_history) > 30:
+            self.error_history.pop(0)
+
+        alpha = 0.25
+        self.mean_prediction_error = (
+            1.0 - alpha
+        ) * self.mean_prediction_error + alpha * clamped_err
+
+        if len(self.error_history) >= 4:
+            split = len(self.error_history) // 2
+            older_mean = float(np.mean(self.error_history[:split]))
+            recent_mean = float(np.mean(self.error_history[split:]))
+            self.learning_progress_rate = max(-1.0, min(1.0, older_mean - recent_mean))
+
+        outcome_val = 1.0 if success else 0.0
+        brier = (float(predicted_confidence) - outcome_val) ** 2
+        self.calibration_score = max(0.0, min(1.0, 1.0 - brier))
+        self.last_updated = time.time()
+
+    @property
+    def practice_priority(self) -> float:
+        """Computes Zone of Proximal Development practice priority in [0.0, 1.0].
+
+        High priority when:
+        1. Not yet fully mastered (1.0 - win_rate is high)
+        2. Capable of learning (learning_progress_rate is positive or non-negative)
+        3. Well-calibrated (not delusionally overconfident on impossible tasks)
+        """
+        if self.running_win_rate >= 0.95 and self.total_episodes >= 5:
+            return 0.05
+
+        unmastered_factor = 1.0 - self.running_win_rate
+        learnability = max(0.10, min(1.0, 0.40 + self.learning_progress_rate * 1.5))
+        priority = unmastered_factor * learnability * max(0.2, self.calibration_score)
+        return float(max(0.0, min(1.0, priority)))
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        return [
+            CausalPredicate(
+                variable=f"domain_competence:{self.domain_id}",
+                operator="==",
+                value=f"win_rate:{self.running_win_rate:.2f}:priority:{self.practice_priority:.2f}",
+                relation="domain_metacognition",
+                target_entity=self.domain_id,
+            )
+        ]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"domain_competence_{self.domain_id}",
+                node_data={
+                    "domain_id": self.domain_id,
+                    "total_episodes": self.total_episodes,
+                    "successful_episodes": self.successful_episodes,
+                    "running_win_rate": self.running_win_rate,
+                    "practice_priority": self.practice_priority,
+                    "learning_progress_rate": self.learning_progress_rate,
+                    "calibration_score": self.calibration_score,
                 },
             )
         ]
@@ -442,6 +541,7 @@ class PrefrontalWorkingMemory:
         self.evidence_provenance_log: list[dict[str, Any]] = []
 
         self.homeostatic_state: HomeostaticState = HomeostaticState()
+        self.domain_competence_profiles: dict[str, DomainCompetenceProfile] = {}
         self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None
@@ -544,6 +644,46 @@ class PrefrontalWorkingMemory:
         self.object_macro_tasks: dict[str, list[Any]] = {}
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
+
+    def record_domain_episode(
+        self,
+        domain_id: str,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> DomainCompetenceProfile:
+        """Record domain performance outcome and update metacognitive competence profile (G9)."""
+        if domain_id not in self.domain_competence_profiles:
+            self.domain_competence_profiles[domain_id] = DomainCompetenceProfile(
+                domain_id=domain_id
+            )
+
+        profile = self.domain_competence_profiles[domain_id]
+        profile.record_episode(
+            success=success,
+            mean_error=mean_error,
+            predicted_confidence=predicted_confidence,
+        )
+
+        self.homeostatic_state.record_progress(profile.learning_progress_rate)
+        return profile
+
+    def get_domain_competence(self, domain_id: str) -> DomainCompetenceProfile:
+        """Retrieve competence profile for domain, creating initial profile if absent."""
+        if domain_id not in self.domain_competence_profiles:
+            self.domain_competence_profiles[domain_id] = DomainCompetenceProfile(
+                domain_id=domain_id
+            )
+        return self.domain_competence_profiles[domain_id]
+
+    def get_highest_priority_practice_domain(self) -> str | None:
+        """Identify which domain has the highest practice priority in the Zone of Proximal Development."""
+        if not self.domain_competence_profiles:
+            return None
+        return max(
+            self.domain_competence_profiles.keys(),
+            key=lambda d: self.domain_competence_profiles[d].practice_priority,
+        )
 
     def has_salience_shift(self, engine: Any) -> bool:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise

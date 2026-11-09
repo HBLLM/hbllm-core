@@ -4205,6 +4205,25 @@ class AutonomousEpistemicEngine:
 
         return " ".join(parts)
 
+    def record_domain_outcome(
+        self,
+        domain_id: str,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> Any:
+        """Record domain outcome in prefrontal working memory metacognitive competence model (G9)."""
+        return self.working_memory.record_domain_episode(
+            domain_id=domain_id,
+            success=success,
+            mean_error=mean_error,
+            predicted_confidence=predicted_confidence,
+        )
+
+    def get_highest_priority_practice_domain(self) -> str | None:
+        """Get the domain currently in the Zone of Proximal Development with highest practice priority."""
+        return self.working_memory.get_highest_priority_practice_domain()
+
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
         counts = self.action_effect_counts.setdefault(action, {})

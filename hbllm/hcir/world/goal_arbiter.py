@@ -318,6 +318,15 @@ class GoalArbiter:
                 )
             )
 
+        # 5. Metacognitive Domain Practice Priority Boosting (G9)
+        wm = getattr(engine, "working_memory", None)
+        if wm is not None and hasattr(wm, "get_domain_competence"):
+            for cand in candidates:
+                dom_id = cand.metadata.get("domain_id")
+                if dom_id:
+                    comp = wm.get_domain_competence(dom_id)
+                    cand.epistemic_utility *= 1.0 + 1.5 * comp.practice_priority
+
         return candidates
 
     def arbitrate(
