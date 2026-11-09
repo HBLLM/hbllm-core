@@ -31,7 +31,6 @@ if TYPE_CHECKING:
         CrossModalSynchronyPacket,
         InterHemisphericBindingState,
     )
-    from hbllm.hcir.world.experimental.claustrum_salience_conductor import UnifiedPerceptualGestalt
     from hbllm.hcir.world.experimental.dorsolateral_rule_abstraction import (
         AbstractRuleSchema,
         RuleTransferResult,
@@ -50,10 +49,6 @@ if TYPE_CHECKING:
         GlobalWorkspaceState,
         IgnitionPriority,
     )
-    from hbllm.hcir.world.experimental.habenula_striatum_opponency import (
-        OpponencyRegime,
-        OpponencyValueState,
-    )
     from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
         PhasePrecessionBurst,
         ThetaPhase,
@@ -63,8 +58,6 @@ if TYPE_CHECKING:
         TemporalTimeCell,
         TimeIntervalState,
     )
-    from hbllm.hcir.world.experimental.inferotemporal_shape_hasher import ShapeArchetypeSignature
-    from hbllm.hcir.world.experimental.insula_allostasis import AllostaticRegime, InteroceptiveState
     from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
         CognitiveTaskSet,
         TaskArbitrationResult,
@@ -87,11 +80,6 @@ if TYPE_CHECKING:
         ContextTransitionEvent,
         SpatialContextSchema,
     )
-    from hbllm.hcir.world.experimental.parietal_foveated_attention import (
-        FoveatedSaliencyMap,
-        FoveationResolution,
-    )
-    from hbllm.hcir.world.experimental.parietal_potential_field import PotentialFieldVector
     from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
         LocomotorDriveCommand,
         LocomotorPacingRegime,
@@ -123,7 +111,6 @@ if TYPE_CHECKING:
         BoundaryVectorCell,
         BoundaryVectorMap,
     )
-    from hbllm.hcir.world.experimental.subthalamic_drift_diffusion import DriftDiffusionDecision
     from hbllm.hcir.world.experimental.subthalamic_threshold_escalator import (
         STNBrakingStatus,
         ThresholdModulationDecision,
@@ -217,7 +204,6 @@ _LAZY_EXPORTS: dict[str, str] = {
     "AffordanceResonancePattern": "hbllm.hcir.world.ventral_premotor_resonator",
     "AllocentricHeadingVector": "hbllm.hcir.world.retrosplenial_heading",
     "AllocentricLandmark": "hbllm.hcir.world.retrosplenial_landmark_anchor",
-    "AllostaticRegime": "hbllm.hcir.world.insula_allostasis",
     "BorderCell": "hbllm.hcir.world.entorhinal_border_cell",
     "BoundaryPhaseAlignmentState": "hbllm.hcir.world.boundary_grid_phase_aligner",
     "BoundaryVectorCell": "hbllm.hcir.world.subicular_boundary_vector",
@@ -236,13 +222,10 @@ _LAZY_EXPORTS: dict[str, str] = {
     "CuriosityDriveSignal": "hbllm.hcir.world.ventral_tegmental_curiosity",
     "DefensiveVigilanceMode": "hbllm.hcir.world.amygdalar_threat_conditioning",
     "DefensiveVigilanceState": "hbllm.hcir.world.amygdalar_threat_conditioning",
-    "DriftDiffusionDecision": "hbllm.hcir.world.subthalamic_drift_diffusion",
     "EffortAllocationDecision": "hbllm.hcir.world.anterior_cingulate_effort_allocator",
     "EpistemicInformationGain": "hbllm.hcir.world.ventral_tegmental_curiosity",
     "EuclideanDistanceTransformResult": "hbllm.hcir.world.spatial_distance_transform",
     "ExplorationRegime": "hbllm.hcir.world.locus_coeruleus_noradrenaline",
-    "FoveatedSaliencyMap": "hbllm.hcir.world.parietal_foveated_attention",
-    "FoveationResolution": "hbllm.hcir.world.parietal_foveated_attention",
     "GeneralizedTaskSchema": "hbllm.hcir.world.medial_prefrontal_schema",
     "GlobalWorkspaceState": "hbllm.hcir.world.global_workspace_ignition",
     "GridModuleRescalingResult": "hbllm.hcir.world.entorhinal_border_cell",
@@ -253,7 +236,6 @@ _LAZY_EXPORTS: dict[str, str] = {
     "InhibitionRegime": "hbllm.hcir.world.ventrolateral_motor_inhibition",
     "InterHemisphericBindingState": "hbllm.hcir.world.claustrum_interhemispheric",
     "InteroceptivePacingState": "hbllm.hcir.world.anterior_insular_timing",
-    "InteroceptiveState": "hbllm.hcir.world.insula_allostasis",
     "LandmarkRecalibrationResult": "hbllm.hcir.world.retrosplenial_landmark_anchor",
     "LearnedProposalDistribution": "hbllm.hcir.world.library_learning",
     "LibraryLearner": "hbllm.hcir.world.library_learning",
@@ -262,13 +244,10 @@ _LAZY_EXPORTS: dict[str, str] = {
     "MotorPrediction": "hbllm.hcir.world.cerebellar_microzone_adaptor",
     "MultisensoryPriorityMap": "hbllm.hcir.world.superior_colliculus_arbiter",
     "NoradrenergicState": "hbllm.hcir.world.locus_coeruleus_noradrenaline",
-    "OpponencyRegime": "hbllm.hcir.world.habenula_striatum_opponency",
-    "OpponencyValueState": "hbllm.hcir.world.habenula_striatum_opponency",
     "PacingMode": "hbllm.hcir.world.anterior_insular_timing",
     "PhaseInnovationVector": "hbllm.hcir.world.boundary_grid_phase_aligner",
     "PhasePrecessionBurst": "hbllm.hcir.world.hippocampal_phase_precession",
     "PlanAttributionReport": "hbllm.hcir.world.prefrontal_blame_attribution",
-    "PotentialFieldVector": "hbllm.hcir.world.parietal_potential_field",
     "PulvinarRoutingState": "hbllm.hcir.world.pulvinar_attention_router",
     "ReplayBatch": "hbllm.hcir.world.hippocampal_replay",
     "ReplayTransition": "hbllm.hcir.world.hippocampal_replay",
@@ -280,7 +259,6 @@ _LAZY_EXPORTS: dict[str, str] = {
     "SchemaGeneralizationReport": "hbllm.hcir.world.medial_prefrontal_schema",
     "SchemaMatchResult": "hbllm.hcir.world.medial_prefrontal_schema",
     "SensoryShieldingState": "hbllm.hcir.world.thalamic_reticular_gating",
-    "ShapeArchetypeSignature": "hbllm.hcir.world.inferotemporal_shape_hasher",
     "SomaticAffectiveBias": "hbllm.hcir.world.ventromedial_somatic_marker",
     "SomaticMarker": "hbllm.hcir.world.ventromedial_somatic_marker",
     "SpatialContextSchema": "hbllm.hcir.world.parahippocampal_context",
@@ -294,7 +272,6 @@ _LAZY_EXPORTS: dict[str, str] = {
     "ThresholdModulationDecision": "hbllm.hcir.world.subthalamic_threshold_escalator",
     "TimeIntervalState": "hbllm.hcir.world.hippocampal_time_cell",
     "TransthalamicRoute": "hbllm.hcir.world.pulvinar_attention_router",
-    "UnifiedPerceptualGestalt": "hbllm.hcir.world.claustrum_salience_conductor",
     "VicariousCausalInference": "hbllm.hcir.world.ventral_premotor_resonator",
 }
 
@@ -325,7 +302,6 @@ __all__ = [
     "AffordanceResonancePattern",
     "AllocentricHeadingVector",
     "AllocentricLandmark",
-    "AllostaticRegime",
     "AutonomousEpistemicEngine",
     "BaseCausalDiscoveryEngine",
     "BasePerceptionAdapter",
@@ -358,7 +334,6 @@ __all__ = [
     "DefensiveVigilanceMode",
     "DefensiveVigilanceState",
     "DisagreementReport",
-    "DriftDiffusionDecision",
     "EffortAllocationDecision",
     "EngineState",
     "EnsemblePrediction",
@@ -370,8 +345,6 @@ __all__ = [
     "EpistemicTruthValue",
     "ExplorationRegime",
     "EuclideanDistanceTransformResult",
-    "FoveatedSaliencyMap",
-    "FoveationResolution",
     "GeneralizedTaskSchema",
     "GlobalWorkspaceState",
     "GridModuleRescalingResult",
@@ -383,7 +356,6 @@ __all__ = [
     "InhibitionRegime",
     "InterHemisphericBindingState",
     "InteroceptivePacingState",
-    "InteroceptiveState",
     "LandmarkRecalibrationResult",
     "LearnedProposalDistribution",
     "LibraryLearner",
@@ -394,8 +366,6 @@ __all__ = [
     "NoradrenergicState",
     "ObjectCategory",
     "ObjectStateGraphPlanner",
-    "OpponencyRegime",
-    "OpponencyValueState",
     "PacingMode",
     "PerceptionFrame",
     "PerceptionRegistry",
@@ -403,7 +373,6 @@ __all__ = [
     "PipelineResult",
     "PhasePrecessionBurst",
     "PlanAttributionReport",
-    "PotentialFieldVector",
     "PredictiveRealityModel",
     "PredictorDisagreementAnalyzer",
     "PredictorWeightManager",
@@ -425,7 +394,6 @@ __all__ = [
     "SchemaGeneralizationReport",
     "SchemaMatchResult",
     "SensoryShieldingState",
-    "ShapeArchetypeSignature",
     "SomaticAffectiveBias",
     "SomaticMarker",
     "SpatialContextSchema",
@@ -449,7 +417,6 @@ __all__ = [
     "TimeIntervalState",
     "TRNGateChannel",
     "TransthalamicRoute",
-    "UnifiedPerceptualGestalt",
     "VicariousCausalInference",
     "VisuospatialWorkingMemory",
     "WorkingMemorySalienceState",

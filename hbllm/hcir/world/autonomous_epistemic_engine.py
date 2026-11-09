@@ -2121,22 +2121,39 @@ class AutonomousEpistemicEngine:
         target_version = workspace.snapshot_manager.current_version
         sim_ws = workspace.get_branch(sim_branch) or workspace
 
-        if services is None:
-            # Use the engine's services when present; otherwise the sim branch
-            # workspace's own attached transaction authority (no ad-hoc mirror TM).
-            services = getattr(self, "services", None)
-        if services is None:
-            tx_mgr = sim_ws.transaction_manager
-            resolver = CapabilityResolver()
-            scheduler = KernelInstructionScheduler()
-            services = KernelServices(
+        tx_mgr = sim_ws.transaction_manager
+        if tx_mgr is None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            tx_mgr = TransactionManager(workspace=sim_ws)
+            sim_ws.attach_transaction_manager(tx_mgr, replace=True)
+
+        if services is not None and getattr(services, "workspace", None) is sim_ws:
+            branch_services = services
+        else:
+            base_services = services or getattr(self, "services", None)
+            resolver = (
+                base_services.capability_resolver
+                if base_services is not None
+                else CapabilityResolver()
+            )
+            scheduler = (
+                base_services.scheduler
+                if base_services is not None
+                else KernelInstructionScheduler()
+            )
+            from hbllm.hcir.kernel.event_bus import KernelEventBus
+
+            event_bus = base_services.event_bus if base_services is not None else KernelEventBus()
+            branch_services = KernelServices(
                 workspace=sim_ws,
                 transaction_manager=tx_mgr,
                 capability_resolver=resolver,
                 scheduler=scheduler,
+                event_bus=event_bus,
             )
 
-        interpreter = HCIRInterpreter(sim_ws, services)
+        interpreter = HCIRInterpreter(sim_ws, branch_services)
         exec_result = await interpreter.execute(stream)
         has_errors = (
             any(a.severity == "error" for a in exec_result.annotations) or not exec_result.success
@@ -2144,9 +2161,31 @@ class AutonomousEpistemicEngine:
 
         if not has_errors:
             if sim_ws is not workspace:
+                tm = (
+                    workspace.transaction_manager
+                    or (
+                        self.services.transaction_manager
+                        if self.services is not None
+                        and getattr(self.services.transaction_manager, "workspace", None)
+                        is workspace
+                        else None
+                    )
+                    or (
+                        self.transaction_manager
+                        if self.transaction_manager is not None
+                        and getattr(self.transaction_manager, "workspace", None) is workspace
+                        else None
+                    )
+                )
+                if tm is None:
+                    from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+                    tm = TransactionManager(workspace=workspace)
+                    workspace.attach_transaction_manager(tm, replace=True)
+
                 merged = workspace.merge_branch(
                     sim_branch,
-                    transaction_manager=self.transaction_manager,
+                    transaction_manager=tm,
                     author="subgoal_exec",
                 )
                 if not merged:

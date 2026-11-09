@@ -219,7 +219,29 @@ class CorticalGroundingBridge:
             elif hasattr(ent, "entity_id"):
                 ent_id = str(ent.entity_id)
 
-            if hasattr(ent, "coords"):
+            if hasattr(ent, "centroid") and ent.centroid is not None:
+                pos = tuple(float(x) for x in ent.centroid)
+                if hasattr(ent, "bounding_box") and ent.bounding_box is not None:
+                    bb = ent.bounding_box
+                    if len(bb) == 4:
+                        bbox = (
+                            float(bb[0]),
+                            float(bb[2]),
+                            float(bb[1] - bb[0] + 1),
+                            float(bb[3] - bb[2] + 1),
+                        )
+                color = (
+                    getattr(ent, "color", None)
+                    or getattr(ent, "feature_id", None)
+                    or (
+                        ent.properties.get("color")
+                        if hasattr(ent, "properties") and isinstance(ent.properties, dict)
+                        else None
+                    )
+                    or 1
+                )
+                role = str(getattr(ent, "role", "entity"))
+            elif hasattr(ent, "coords"):
                 coords = list(ent.coords)
                 if coords:
                     r_coords = [c[0] for c in coords]
@@ -233,6 +255,10 @@ class CorticalGroundingBridge:
                         float(max_r - min_r + 1),
                         float(max_c - min_c + 1),
                     )
+                color = getattr(ent, "color", 1)
+                role = str(getattr(ent, "role", "entity"))
+            elif hasattr(ent, "grid_pos") and ent.grid_pos is not None:
+                pos = tuple(float(x) for x in ent.grid_pos)
                 color = getattr(ent, "color", 1)
                 role = str(getattr(ent, "role", "entity"))
             elif isinstance(ent, dict):

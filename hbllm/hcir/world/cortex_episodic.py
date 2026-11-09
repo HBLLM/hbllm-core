@@ -2160,6 +2160,9 @@ class EpisodicStage:
 
     name: str = "episodic_stage"
 
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
+
     def observe(self, ctx: CognitiveContext) -> StageResult:
         ops: list[TransactionOperation] = []
         signals: dict[str, Any] = {}

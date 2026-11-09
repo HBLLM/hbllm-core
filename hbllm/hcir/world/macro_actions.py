@@ -2446,6 +2446,9 @@ class MacroActionStage:
 
     name: str = "macro_action_planner"
 
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
+
     def observe(self, ctx: CognitiveContext) -> StageResult:
         grid = ctx.prev_grid if ctx.prev_grid is not None else np.zeros((1, 1), dtype=np.int32)
         actions = (

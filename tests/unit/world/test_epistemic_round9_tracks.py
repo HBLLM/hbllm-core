@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-"""Comprehensive Unit Tests for Round 9 Cognitive Architecture Enhancements:
+"""Unit Tests for Round 9 Surviving Cognitive Architecture Enhancements:
 
-Track 1: Subthalamic Nucleus (STN) Decision Threshold Modulation via Drift-Diffusion Dynamics
-Track 2: Parietal Egocentric Foveation & Spatial Saliency Field Compression
 Track 3: Prefrontal Counterfactual Blame Attribution & Causal Credit Assignment
 Track 4: Native Structural Graph Minimum Spanning Tree (MST) & Geodesic Spine Extraction
 """
 
-
 from typing import Any
 
-import numpy as np
 import pytest
 
 from hbllm.hcir import algorithms
@@ -26,141 +22,16 @@ from hbllm.hcir.native_adapter import (
 )
 from hbllm.hcir.world import (
     AutonomousEpistemicEngine,
-    DriftDiffusionDecision,
-    FoveatedSaliencyMap,
-    FoveationResolution,
     PlanAttributionReport,
 )
-from hbllm.hcir.world.experimental import (
-    ParietalFoveatedAttentionEngine,
-    PrefrontalBlameAttributor,
-    SubthalamicDriftDiffusionEngine,
-)
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.prefrontal_blame_attribution import (
+    PrefrontalBlameAttributor,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Track 1: Subthalamic Nucleus (STN) Drift-Diffusion Decision Dynamics
+# Track 3: Prefrontal Counterfactual Blame Attribution
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_stn_drift_diffusion_conflict_threshold_elevation() -> None:
-    """High ACC conflict elevates STN decision boundary ('hold your horses')."""
-    engine = SubthalamicDriftDiffusionEngine(base_threshold=1.0, conflict_gain=2.0)
-
-    thresh_low_conflict = engine.compute_threshold(conflict_level=0.0, elapsed_steps=0)
-    thresh_high_conflict = engine.compute_threshold(conflict_level=0.8, elapsed_steps=0)
-
-    assert thresh_low_conflict == pytest.approx(1.0)
-    assert thresh_high_conflict == pytest.approx(1.0 * (1.0 + 2.0 * 0.8))  # 2.6
-    assert thresh_high_conflict > thresh_low_conflict
-
-
-def test_stn_drift_diffusion_urgency_collapse_and_accumulation() -> None:
-    """Evidence accumulates to bound, while urgency over time collapses threshold."""
-    engine = SubthalamicDriftDiffusionEngine(
-        base_threshold=1.0,
-        conflict_gain=1.0,
-        urgency_decay_rate=0.1,
-    )
-
-    rates = {"action_left": 0.4, "action_right": 0.1}
-
-    # Step 1: evidence accumulates, threshold not yet reached
-    dec1 = engine.step_accumulation(rates, conflict_level=0.0)
-    assert isinstance(dec1, DriftDiffusionDecision)
-    assert dec1.chosen_action is None
-    assert dec1.is_threshold_reached is False
-    assert dec1.evidence_level == pytest.approx(0.4)
-
-    # Step 2: evidence reaches ~0.8
-    dec2 = engine.step_accumulation(rates, conflict_level=0.0)
-    assert dec2.chosen_action is None
-    assert dec2.evidence_level == pytest.approx(0.8)
-
-    # Step 3: threshold decays (~0.74) and evidence reaches 1.2 -> threshold crossed!
-    dec3 = engine.step_accumulation(rates, conflict_level=0.0)
-    assert dec3.is_threshold_reached is True
-    assert dec3.chosen_action == "action_left"
-    assert dec3.confidence > 0.5
-
-    # Causal predicate and transactions
-    pred = dec3.to_causal_predicate()
-    assert pred.variable == "stn:drift_diffusion_decision"
-    assert pred.value == "action_left"
-
-    ops = dec3.to_transaction_operations()
-    assert len(ops) == 1
-    assert ops[0].node_id == "stn_decision_state"
-
-
-def test_stn_drift_diffusion_engine_integration() -> None:
-    """Autonomous epistemic engine runs drift diffusion accumulation and records predicate."""
-    engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
-    assert hasattr(engine, "drift_diffusion")
-
-    rates = {"up": 0.6, "down": 0.2}
-    dec = engine.step_drift_diffusion(rates, conflict_level=0.1)
-
-    assert isinstance(dec, DriftDiffusionDecision)
-    assert engine.symbolic_theory is not None
-    assert any(
-        "stn:drift_diffusion_decision" in p.variable
-        for p in engine.symbolic_theory.causal_predicates
-    )
-
-
-def test_parietal_foveation_multi_scale_resolution() -> None:
-    """Foveation partitions grid into FOVEA, PARAFOVEA, and PERIPHERY tiers."""
-    fovea_engine = ParietalFoveatedAttentionEngine(fovea_radius=2, parafovea_radius=4)
-    grid = np.zeros((10, 10), dtype=int)
-    grid[5, 5] = 1  # Agent
-    grid[5, 6] = 2  # Adjacent item in fovea
-    grid[1, 1] = 3  # Distant item in periphery
-
-    foveated = fovea_engine.foveate_grid(grid, gaze_center=(5, 5))
-
-    assert isinstance(foveated, FoveatedSaliencyMap)
-    assert foveated.grid_shape == (10, 10)
-    assert foveated.total_original_cells == 100
-
-    # Center is FOVEA (1x1)
-    assert foveated.resolution_grid[5][5] == FoveationResolution.FOVEA
-    assert foveated.resolution_grid[5][6] == FoveationResolution.FOVEA
-    assert foveated.get_feature_at(5, 6) == 2
-
-    # Corner (0, 0) is PERIPHERY
-    assert foveated.resolution_grid[0][0] == FoveationResolution.PERIPHERY
-
-    # Substantial compression achieved
-    assert foveated.total_compressed_cells < 100
-    assert foveated.compression_ratio > 0.40
-
-    # Serialization
-    pred = foveated.to_causal_predicate()
-    assert pred.variable == "parietal:foveated_attention"
-
-    ops = foveated.to_transaction_operations()
-    assert len(ops) == 1
-    assert ops[0].node_id == "foveated_saliency_state"
-
-
-def test_parietal_foveation_engine_integration() -> None:
-    """Engine foveates sensory lattice around avatar position and records predicate."""
-    engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
-    assert hasattr(engine, "foveated_attention")
-
-    grid = np.zeros((10, 10), dtype=int)
-    grid[3, 3] = 7
-    foveated = engine.foveate_sensory_lattice(grid=grid, gaze_center=(3, 3))
-
-    assert foveated.gaze_center == (3, 3)
-    assert foveated.compression_ratio > 0.0
-    assert any(
-        "parietal:foveated_attention" in p.variable
-        for p in engine.symbolic_theory.causal_predicates
-    )
 
 
 def test_prefrontal_blame_attribution_culprit_isolation() -> None:
@@ -231,6 +102,11 @@ def test_prefrontal_blame_attribution_engine_integration() -> None:
         "blame:plan_attribution_report" in p.variable
         for p in engine.symbolic_theory.causal_predicates
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Track 4: Native Structural Graph Minimum Spanning Tree (MST)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_native_adapter_minimum_spanning_tree() -> None:
