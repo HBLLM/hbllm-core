@@ -1254,14 +1254,20 @@ class PrefrontalDeliberationEngine:
         return act, data, None
 
     @staticmethod
-    def _target_phase(view: Any) -> EpistemicPhase:
+    def has_confirmed_goal(view: Any) -> bool:
+        """Returns True if the engine possesses verified causal or positional evidence of a goal."""
+        theory = getattr(view, "symbolic_theory", None)
+        has_theory_goal = bool(theory and theory.goal_features)
+        has_pos_goal = bool(getattr(view, "learned_goal_positions", None))
+        return has_theory_goal or has_pos_goal
+
+    @classmethod
+    def _target_phase(cls, view: Any) -> EpistemicPhase:
         """Determine target cognitive phase: exploitation requires verified reward evidence."""
-        has_confirmed_goal = bool(
-            getattr(getattr(view, "symbolic_theory", None), "goal_features", None)
-            or getattr(view, "learned_goal_positions", None)
-        )
         return (
-            EpistemicPhase.EXPLOITATION if has_confirmed_goal else EpistemicPhase.MENTAL_SIMULATION
+            EpistemicPhase.EXPLOITATION
+            if cls.has_confirmed_goal(view)
+            else EpistemicPhase.MENTAL_SIMULATION
         )
 
     def prepare(
@@ -1373,7 +1379,11 @@ class PrefrontalDeliberationEngine:
         micro_actions: Sequence[Any] | None = None,
         **kwargs: Any,
     ) -> ActionProposal | tuple[Any, dict[str, Any] | None]:
-        """Post-assimilation deliberation body (WP1 split from decide)."""
+        """Post-assimilation deliberation body."""
+        # When confirmed goals are known, exploit them directly
+        if self.has_confirmed_goal(view):
+            view.state.phase = EpistemicPhase.EXPLOITATION
+
         # Track recent avatar position on every decision step (before macro or micro action planning)
         if view.avatar_pos is not None:
             view.recent_positions.append(view.avatar_pos)
@@ -1856,12 +1866,18 @@ class PrefrontalDeliberationEngine:
             chosen_data = None
             branch = "acc_perturbation"
 
-        # 1. Prefrontal Affordance Panel & Optical Symmetry Gating
+        # 1. Prefrontal Affordance Panel & Optical Symmetry Gating (exploration / discrete manipulation only)
         elif (
-            affordance_choice := self.arbitrate_affordances(
-                view, curr_grid, available_actions, known_av_feats
+            not self.has_confirmed_goal(view)
+            and view.phase not in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
+            and (
+                affordance_choice := self.arbitrate_affordances(
+                    view, curr_grid, available_actions, known_av_feats
+                )
             )
-        ) is not None and view.inhibited_actions.get(affordance_choice[0], 0) == 0:
+            is not None
+            and view.inhibited_actions.get(affordance_choice[0], 0) == 0
+        ):
             chosen_action, chosen_data = affordance_choice
             branch = "affordance_choice"
 
@@ -2400,6 +2416,20 @@ class PrefrontalDeliberationEngine:
             cd = getattr(view, "simulation_cooldown", 0)
             if cd > 0:
                 veto_reasons.append(f"simulation_cooldown_{cd}")
+
+        # Veto candidates that deviate from an unblocked plan during exploitation
+        if (
+            getattr(view, "phase", None) == EpistemicPhase.EXPLOITATION
+            and action is not None
+            and plan is not None
+            and candidates is not None
+        ):
+            for cand_act in candidates:
+                if (
+                    cand_act != action
+                    and f"deviates_from_verified_plan_{cand_act}" not in veto_reasons
+                ):
+                    veto_reasons.append(f"deviates_from_verified_plan_{cand_act}")
 
         # Cognitive phase
         phase_str = str(

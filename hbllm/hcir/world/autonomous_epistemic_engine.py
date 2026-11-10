@@ -5459,11 +5459,20 @@ class AutonomousEpistemicEngine:
 
     # ── Master Decision Loop ──────────────────────────────────────────────────
 
-    def step(self, obs: EmbodiedObservation) -> tuple[Any, dict[str, Any] | None]:
-        """Canonical domain-agnostic step entry point for the epistemic engine (WP3).
+    def step(
+        self, obs: EmbodiedObservation, last_action: Any | None = None
+    ) -> tuple[Any, dict[str, Any] | None]:
+        """Canonical domain-agnostic step entry point for the epistemic engine.
 
         Consumes an EmbodiedObservation and executes active inference deliberation.
         """
+        if last_action is not None:
+            self.last_action = last_action
+        elif obs.metadata and "last_action" in obs.metadata:
+            self.last_action = obs.metadata["last_action"]
+        elif obs.metadata and "action_taken" in obs.metadata:
+            self.last_action = obs.metadata["action_taken"]
+
         return self.decide(
             curr_grid=obs.lattice,
             available_actions=obs.available_actions,
@@ -5594,6 +5603,13 @@ class AutonomousEpistemicEngine:
         meta.setdefault("phase", str(self._phase))
         meta.setdefault("branch", result.signals.get("branch", "unknown"))
         meta.setdefault("action_data", None)
+
+        if terminal is not None or is_success or is_failure:
+            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+            b_kind = EpisodeBoundaryKind.GOAL_REACHED if is_success else EpisodeBoundaryKind.DEATH
+            self.on_boundary(EpisodeBoundary(kind=b_kind))
+
         return act, meta
 
     def to_causal_predicate(self) -> CausalPredicate:

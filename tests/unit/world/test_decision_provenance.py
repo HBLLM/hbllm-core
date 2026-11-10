@@ -62,7 +62,7 @@ def test_scenario_d_planning_provenance() -> None:
             for _ in range(100):
                 if driver == "oracle":
                     a = env.get_oracle_action()
-                    engine.step(obs)
+                    engine.step(obs, last_action=a)
                 else:
                     a, _ = engine.step(obs)
                 obs, r, done, info = env.step(a)
