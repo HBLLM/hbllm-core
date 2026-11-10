@@ -25,7 +25,7 @@ def test_symbolic_theory_string_concepts_and_features():
     theory = HCIRSymbolicWorldTheory()
 
     # Register string concepts across cognitive roles
-    theory.avatar_features.add("agent_avatar")
+    theory.induce_avatar("agent_avatar")
     theory.induce_goal("target_cup")
     theory.induce_barrier("security_door")
     theory.induce_walkable("open_hallway")

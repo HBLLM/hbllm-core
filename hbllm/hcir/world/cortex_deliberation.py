@@ -1851,6 +1851,22 @@ class PrefrontalDeliberationEngine:
         predicted_pos: tuple[int, int] | None = None
         branch: str = "default_arbitration"
 
+        # Resolve active in-flight plan step before arbitration
+        active_step = getattr(view.working_memory, "active_plan_step", None)
+        if active_step is not None:
+            tgt = active_step.predicted_avatar_pos
+            if tgt is None or tgt == (0, 0) or view.avatar_pos == tgt:
+                view.working_memory.active_plan_step = None
+                active_step = None
+            elif (
+                getattr(view.working_memory, "last_continuous_moved", False)
+                and view.consecutive_stuck_steps == 0
+            ):
+                pass
+            else:
+                view.working_memory.active_plan_step = None
+                active_step = None
+
         # 0. ACC Forced Perturbation: break limit-cycle oscillation immediately
         if forced_acc_perturbation is not None:
             logger.info(
@@ -1872,21 +1888,60 @@ class PrefrontalDeliberationEngine:
                 )
             )
             is not None
-            and view.inhibited_actions.get(affordance_choice[0], 0) == 0
         ):
             chosen_action, chosen_data = affordance_choice
             branch = "affordance_choice"
 
-        # 2. Check active mental plan during EXPLOITATION or MENTAL_SIMULATION phase
+        # Continuous Metric Kinematic Servoing (Local Proportional Guidance into Goal Capture Basin)
         elif (
-            view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
-            and view.mental_plan
+            (c_goal := getattr(view.working_memory, "continuous_goal_pos", None)) is not None
+            and (c_agent := getattr(view.working_memory, "continuous_agent_pos", None)) is not None
+            and float(np.linalg.norm(c_goal - c_agent)) <= 1.5
+            and any(
+                (dyn := view.action_dynamics.get(a)) is not None and dyn.is_displacement_action()
+                for a in available_actions
+            )
+        ):
+            rf = getattr(view.working_memory, "reference_frame", None)
+            origin_desc = (
+                getattr(rf, "origin_description", "bottom_left_metric")
+                if rf
+                else "bottom_left_metric"
+            )
+            y_sign = 1 if "bottom_left" in origin_desc else -1
+            dx = float(c_goal[0] - c_agent[0])
+            dy = float(c_goal[1] - c_agent[1])
+
+            best_act = None
+            best_dot = -1e9
+            for act in available_actions:
+                dyn = view.action_dynamics.get(act)
+                if dyn is not None and dyn.is_displacement_action():
+                    vx = float(dyn.delta_c)
+                    vy = float(-dyn.delta_r * y_sign)
+                    dot = dx * vx + dy * vy
+                    if dot > best_dot and view.inhibited_actions.get(act, 0) == 0:
+                        best_dot = dot
+                        best_act = act
+            if best_act is not None:
+                chosen_action = best_act
+                chosen_data = None
+                branch = "continuous_servoing"
+            else:
+                # Fall through to mental plan if servoing action is inhibited
+                chosen_action = None
+
+        # 2. Check active mental plan during EXPLOITATION or MENTAL_SIMULATION phase
+        elif view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION) and (
+            view.mental_plan or active_step is not None
         ):
             # Active Inference & Efference Copy Divergence:
             # If the organism is physically stuck or the previous step produced zero movement,
             # the counterfactual mental rollout is falsified. Clear stale plan immediately.
             if view.consecutive_stuck_steps > 0:
                 view.mental_plan.clear()
+                if hasattr(view, "working_memory"):
+                    view.working_memory.active_plan_step = None
                 view.state.phase = EpistemicPhase.REPLANNING
                 macro_plan = view.object_planner.plan_macro_option(
                     view, curr_grid, available_actions
@@ -1895,6 +1950,8 @@ class PrefrontalDeliberationEngine:
                     view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
+                    if hasattr(view, "working_memory"):
+                        view.working_memory.active_plan_step = next_step
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
@@ -1924,8 +1981,17 @@ class PrefrontalDeliberationEngine:
                         grid=curr_grid,
                     )
             else:
-                next_step = view.mental_plan.popleft()
-            if not view.mental_plan:
+                if active_step is not None:
+                    next_step = active_step
+                else:
+                    next_step = view.mental_plan.popleft()
+                    if hasattr(view, "working_memory"):
+                        view.working_memory.active_plan_step = next_step
+
+            if (
+                not view.mental_plan
+                and getattr(view.working_memory, "active_plan_step", None) is None
+            ):
                 view.state.phase = EpistemicPhase.REPLANNING
                 if view.object_planner.active_target_object_id:
                     view.object_planner.ledger.record_interaction(
@@ -2004,6 +2070,8 @@ class PrefrontalDeliberationEngine:
 
             else:
                 view.mental_plan.clear()
+                if hasattr(view, "working_memory"):
+                    view.working_memory.active_plan_step = None
                 view.state.phase = EpistemicPhase.REPLANNING
                 macro_plan = view.object_planner.plan_macro_option(
                     view, curr_grid, available_actions
@@ -2012,6 +2080,8 @@ class PrefrontalDeliberationEngine:
                     view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
+                    if hasattr(view, "working_memory"):
+                        view.working_memory.active_plan_step = next_step
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
@@ -2038,6 +2108,8 @@ class PrefrontalDeliberationEngine:
                     view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(simulated_plan)))
                     next_step = view.mental_plan.popleft()
+                    if hasattr(view, "working_memory"):
+                        view.working_memory.active_plan_step = next_step
                     plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                         view, curr_grid, available_actions, next_step
                     )
@@ -2060,6 +2132,8 @@ class PrefrontalDeliberationEngine:
                         branch = "mental_simulation"
                     else:
                         view.mental_plan.clear()
+                        if hasattr(view, "working_memory"):
+                            view.working_memory.active_plan_step = None
                         view.state.phase = EpistemicPhase.REPLANNING
                         chosen_action, chosen_data = view.plan_epistemic_probe(
                             curr_grid, available_actions
@@ -2138,8 +2212,14 @@ class PrefrontalDeliberationEngine:
                     pass  # Graceful degradation if causal planner fails
 
             # 3B. Secondary: Object-Centric Macro Action Planning (Directives 3, 4, 5)
-            # If exit is not open/reachable or in search backoff, interact with intermediate objects
-            if chosen_action is None:
+            # If exit is not open/reachable or in search backoff, interact with intermediate objects.
+            # Must not preempt initial motor calibration when uncalibrated actions remain.
+            has_uncalibrated = any(
+                not view.is_action_calibrated(a) and view.inhibited_actions.get(a, 0) == 0
+                for a in available_actions
+                if not view.is_spatial_effector(a)
+            )
+            if chosen_action is None and not has_uncalibrated:
                 macro_plan = view.object_planner.plan_macro_option(
                     view, curr_grid, available_actions
                 )
@@ -2166,14 +2246,12 @@ class PrefrontalDeliberationEngine:
                                 predicted_pos or view.avatar_pos or (0, 0),
                             )
                             view.object_planner.active_target_object_id = None
-                else:
-                    if view.exploration_cooldown > 0:
-                        view.exploration_cooldown -= 1
-                    view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
-                    chosen_action, chosen_data = view.plan_epistemic_probe(
-                        curr_grid, available_actions
-                    )
-                    branch = "epistemic_probe"
+            if chosen_action is None:
+                if view.exploration_cooldown > 0:
+                    view.exploration_cooldown -= 1
+                view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                chosen_action, chosen_data = view.plan_epistemic_probe(curr_grid, available_actions)
+                branch = "epistemic_probe"
 
         # Effector Grounding Invariant
         chosen_action, chosen_data = self.ensure_effector_grounded(

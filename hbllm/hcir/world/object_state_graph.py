@@ -579,6 +579,7 @@ class ObjectStateGraphPlanner:
 
         # Static barriers and hazards directly from percept
         static_barriers = set(percept.static_barriers)
+        barrier_features = engine.symbolic_theory.barrier_features
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         failed_transitions = set(get_engine_state_attr(engine, "failed_transitions", set()))
 
@@ -653,7 +654,14 @@ class ObjectStateGraphPlanner:
                 ]
 
         # ── DIRECTIVE 3: If not, explore other objects. ──────────────────────
-        non_exit_objects = [o for o in salient_objects if o.category != ObjectCategory.EXIT]
+        non_exit_objects = [
+            o
+            for o in salient_objects
+            if o.category != ObjectCategory.EXIT
+            and o.category != ObjectCategory.BARRIER
+            and not engine.symbolic_theory.is_barrier(o.feature_id)
+            and o.feature_id not in barrier_features
+        ]
 
         # ── DIRECTIVE 4B: Active Causal Actuator Contingency Pursuit ──────────
         if spatial_effector_actions:

@@ -600,6 +600,7 @@ class InductiveHypothesisEngine:
                             target_entity=str(hyp.premise_feature),
                         )
                     )
+                    theory.induce_barrier(hyp.target_feature, evidence="remote_mechanism")
                 if (
                     hyp.premise_feature is not None
                     and hyp.premise_feature not in getattr(theory, "avatar_features", set())

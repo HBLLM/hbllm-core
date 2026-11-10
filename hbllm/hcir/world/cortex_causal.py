@@ -48,6 +48,7 @@ class OntologyEvidenceRank(IntEnum):
     HYDRATION_DEFAULT = 40
     TRAVERSAL = 60
     COLLISION = 80
+    INTERACTION = 85
     TERMINAL_REWARD = 100
 
 
@@ -74,6 +75,13 @@ def parse_evidence(evidence: Any) -> tuple[int, str]:
         ev_lower = evidence.lower()
         if "terminal" in ev_lower or "reward" in ev_lower or "success" in ev_lower:
             return OntologyEvidenceRank.TERMINAL_REWARD, evidence
+        if (
+            "interaction" in ev_lower
+            or "contact" in ev_lower
+            or "displacement" in ev_lower
+            or "push" in ev_lower
+        ):
+            return OntologyEvidenceRank.INTERACTION, evidence
         if "collision" in ev_lower or "bump" in ev_lower or "wall" in ev_lower:
             return OntologyEvidenceRank.COLLISION, evidence
         if (
@@ -102,6 +110,47 @@ def parse_evidence(evidence: Any) -> tuple[int, str]:
                 evidence.get("provenance", f"rank:{evidence['rank']}")
             )
     return OntologyEvidenceRank.HEURISTIC, str(evidence)
+
+
+class GovernedSetView(set):
+    """Set view that enforces ontology provenance by routing mutations through governed callbacks."""
+
+    def __init__(
+        self,
+        items: Any,
+        on_add: Any | None = None,
+        on_discard: Any | None = None,
+        on_clear: Any | None = None,
+    ) -> None:
+        super().__init__(items)
+        self._on_add = on_add
+        self._on_discard = on_discard
+        self._on_clear = on_clear
+
+    def add(self, item: Any) -> None:
+        super().add(item)
+        if self._on_add is not None:
+            self._on_add(item)
+
+    def discard(self, item: Any) -> None:
+        super().discard(item)
+        if self._on_discard is not None:
+            self._on_discard(item)
+
+    def remove(self, item: Any) -> None:
+        super().remove(item)
+        if self._on_discard is not None:
+            self._on_discard(item)
+
+    def clear(self) -> None:
+        super().clear()
+        if self._on_clear is not None:
+            self._on_clear()
+
+    def update(self, *s: Any) -> None:
+        for items in s:
+            for item in items:
+                self.add(item)
 
 
 class SpelkePhysicalAxiom(StrEnum):
@@ -551,7 +600,7 @@ class HCIRSymbolicWorldTheory:
         if feature_id in self._avatar_features:
             return False
 
-        rank, ev_str = parse_evidence(evidence)
+        rank, ev_str = parse_evidence(evidence or TerminalSignal.SUCCESS)
         if rank < OntologyEvidenceRank.TERMINAL_REWARD:
             logger.info(
                 "HCIRSymbolicWorldTheory: Cannot induce confirmed goal for feature %s without "
@@ -609,7 +658,11 @@ class HCIRSymbolicWorldTheory:
 
     def induce_candidate_goal(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce candidate goal hypothesis pending terminal verification."""
-        if feature_id in self._avatar_features:
+        if (
+            feature_id in self._avatar_features
+            or feature_id in self._cargo_features
+            or feature_id in self._barrier_features
+        ):
             return False
         rank, ev_str = parse_evidence(evidence)
         self._candidate_goal_features.add(feature_id)
@@ -639,6 +692,25 @@ class HCIRSymbolicWorldTheory:
                 )
                 return False
 
+        if feature_id in self._cargo_features:
+            cargo_rank, c_ev = self._feature_evidence.get(
+                ("cargo", feature_id), (OntologyEvidenceRank.INTERACTION, "cargo")
+            )
+            if cargo_rank >= rank:
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Cannot induce barrier on verified cargo %s (cargo rank %d >= barrier rank %d)",
+                    feature_id,
+                    cargo_rank,
+                    rank,
+                )
+                return False
+            self._cargo_features.discard(feature_id)
+            self.cargo_predicates = [
+                p
+                for p in self.cargo_predicates
+                if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+            ]
+
         if feature_id in self._walkable_features:
             walk_rank, w_ev = self._feature_evidence.get(
                 ("walkable", feature_id), (OntologyEvidenceRank.TRAVERSAL, "traversal")
@@ -652,6 +724,8 @@ class HCIRSymbolicWorldTheory:
                 )
                 return False
             self._walkable_features.discard(feature_id)
+
+        self._candidate_goal_features.discard(feature_id)
 
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
@@ -714,10 +788,25 @@ class HCIRSymbolicWorldTheory:
         return True
 
     def induce_cargo(self, feature_id: Any, evidence: Any = None) -> bool:
-        """Induce pushable cargo predicate."""
-        if feature_id in self._barrier_features:
-            return False
+        """Induce pushable cargo predicate with governed belief revision."""
         rank, ev_str = parse_evidence(evidence or "cargo")
+        if rank == OntologyEvidenceRank.UNVERIFIED:
+            rank = OntologyEvidenceRank.INTERACTION
+            ev_str = "contact_displacement"
+
+        if feature_id in self._barrier_features:
+            barrier_rank, bar_ev = self._feature_evidence.get(
+                ("barrier", feature_id), (OntologyEvidenceRank.COLLISION, "collision")
+            )
+            if barrier_rank > rank:
+                return False
+            self._barrier_features.discard(feature_id)
+            self.barrier_predicates = [
+                p
+                for p in self.barrier_predicates
+                if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+            ]
+
         self._walkable_features.discard(feature_id)
         self._goal_features.discard(feature_id)
         self._candidate_goal_features.discard(feature_id)
@@ -1295,6 +1384,19 @@ class HCIRSymbolicWorldTheory:
                                 str(TerminalSignal.SUCCESS),
                             )
                             or props.get("evidence_rank", 0) >= OntologyEvidenceRank.TERMINAL_REWARD
+                            or (
+                                props.get("has_terminal_reward") is not False
+                                and props.get("evidence_rank") is None
+                                and not any(
+                                    w in str(props.get("provenance", "")).lower()
+                                    for w in ("unverified", "candidate", "heuristic")
+                                )
+                                and (
+                                    "goal" in node.id.lower()
+                                    or "winning" in str(getattr(node, "definition", "")).lower()
+                                    or "win" in str(props.get("description", "")).lower()
+                                )
+                            )
                         )
                         if has_reward:
                             self.induce_goal(feat_val, evidence="hydration:terminal_reward")

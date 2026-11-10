@@ -421,6 +421,7 @@ from hbllm.hcir.world.cortex_assimilator import (
 from hbllm.hcir.world.cortex_causal import (
     ActionAffordance,
     CausalInductionCortex,
+    GovernedSetView,
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.cortex_deliberation import (
@@ -1186,9 +1187,13 @@ class AutonomousEpistemicEngine:
     # ─────────────────────────────────────────────────────────────────────────
 
     @property
-    def verified_safe_features(self) -> frozenset[int]:
+    def verified_safe_features(self) -> GovernedSetView:
         """Empirically verified safe/walkable features in symbolic world theory."""
-        return self.symbolic_theory.walkable_features
+        return GovernedSetView(
+            self.symbolic_theory.walkable_features,
+            on_add=lambda f: self.symbolic_theory.induce_walkable(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_walkable(f, reason="manual_discard"),
+        )
 
     @verified_safe_features.setter
     def verified_safe_features(self, val: Any) -> None:
@@ -1886,6 +1891,19 @@ class AutonomousEpistemicEngine:
                             str(TerminalSignal.SUCCESS),
                         )
                         or props.get("evidence_rank", 0) >= 100
+                        or (
+                            props.get("has_terminal_reward") is not False
+                            and props.get("evidence_rank") is None
+                            and not any(
+                                w in str(props.get("provenance", "")).lower()
+                                for w in ("unverified", "candidate", "heuristic")
+                            )
+                            and (
+                                "goal" in nid.lower()
+                                or "winning" in str(getattr(node, "definition", "")).lower()
+                                or "win" in str(props.get("description", "")).lower()
+                            )
+                        )
                     )
                     if has_reward:
                         self.symbolic_theory.induce_goal(
@@ -3946,8 +3964,13 @@ class AutonomousEpistemicEngine:
         )
 
     @property
-    def learned_goal_features(self) -> frozenset[int]:
-        return self.symbolic_theory.goal_features
+    def learned_goal_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.goal_features,
+            on_add=lambda f: self.symbolic_theory.induce_goal(f, evidence="terminal_reward:manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_goal(f, reason="manual_discard"),
+            on_clear=self.symbolic_theory.clear_goals,
+        )
 
     @learned_goal_features.setter
     def learned_goal_features(self, val: Any) -> None:
@@ -3958,8 +3981,13 @@ class AutonomousEpistemicEngine:
                 self.symbolic_theory.induce_goal(f, evidence="learned_goal_features_setter")
 
     @property
-    def learned_barrier_features(self) -> frozenset[int]:
-        return self.symbolic_theory.barrier_features
+    def learned_barrier_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.barrier_features,
+            on_add=lambda f: self.symbolic_theory.induce_barrier(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_barrier(f, reason="manual_discard"),
+            on_clear=self.symbolic_theory.clear_barriers,
+        )
 
     @learned_barrier_features.setter
     def learned_barrier_features(self, val: Any) -> None:
@@ -3970,8 +3998,12 @@ class AutonomousEpistemicEngine:
                 self.symbolic_theory.induce_barrier(f, evidence="learned_barrier_features_setter")
 
     @property
-    def learned_walkable_features(self) -> frozenset[int]:
-        return self.symbolic_theory.walkable_features
+    def learned_walkable_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.walkable_features,
+            on_add=lambda f: self.symbolic_theory.induce_walkable(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_walkable(f, reason="manual_discard"),
+        )
 
     @learned_walkable_features.setter
     def learned_walkable_features(self, val: Any) -> None:
@@ -3980,8 +4012,12 @@ class AutonomousEpistemicEngine:
                 self.symbolic_theory.induce_walkable(f, evidence="learned_walkable_features_setter")
 
     @property
-    def learned_cargo_features(self) -> frozenset[int]:
-        return self.symbolic_theory.cargo_features
+    def learned_cargo_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.cargo_features,
+            on_add=lambda f: self.symbolic_theory.induce_cargo(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_cargo(f, reason="manual_discard"),
+        )
 
     @learned_cargo_features.setter
     def learned_cargo_features(self, val: Any) -> None:
@@ -3990,8 +4026,14 @@ class AutonomousEpistemicEngine:
                 self.symbolic_theory.induce_cargo(f, evidence="learned_cargo_features_setter")
 
     @property
-    def learned_receptacle_features(self) -> frozenset[int]:
-        return self.symbolic_theory.receptacle_features
+    def learned_receptacle_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.receptacle_features,
+            on_add=lambda f: self.symbolic_theory.induce_receptacle(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_receptacle(
+                f, reason="manual_discard"
+            ),
+        )
 
     @learned_receptacle_features.setter
     def learned_receptacle_features(self, val: Any) -> None:
@@ -5440,7 +5482,11 @@ class AutonomousEpistemicEngine:
             for t in threats:
                 curr_by_feat.setdefault(t.feature_id, set()).add(t.pos)
             for feat, cur_positions in curr_by_feat.items():
-                if feat in effective_av_feats or feat in self.mobile_threat_features:
+                if (
+                    feat in effective_av_feats
+                    or feat in self.mobile_threat_features
+                    or feat in self.symbolic_theory.cargo_features
+                ):
                     continue
                 old_positions = prev_by_feat.get(feat, set())
                 appeared = cur_positions - old_positions
@@ -5483,6 +5529,29 @@ class AutonomousEpistemicEngine:
             self.last_action = obs.metadata["last_action"]
         elif obs.metadata and "action_taken" in obs.metadata:
             self.last_action = obs.metadata["action_taken"]
+
+        if obs.metadata:
+            self.working_memory.last_observation_metadata = dict(obs.metadata)
+            if "reference_frame" in obs.metadata:
+                self.working_memory.reference_frame = obs.metadata["reference_frame"]
+            if "agent_pos" in obs.metadata:
+                curr_cont = np.asarray(obs.metadata["agent_pos"], dtype=float)
+                prev_cont = self.working_memory.continuous_agent_pos
+                if prev_cont is not None:
+                    d_pos = curr_cont - prev_cont
+                    disp = float(np.linalg.norm(d_pos))
+                    self.working_memory.continuous_displacement = disp
+                    self.working_memory.last_continuous_moved = disp > 1e-4
+                    self.working_memory.continuous_delta = (float(d_pos[0]), float(d_pos[1]))
+                else:
+                    self.working_memory.continuous_displacement = 0.0
+                    self.working_memory.last_continuous_moved = False
+                    self.working_memory.continuous_delta = (0.0, 0.0)
+                self.working_memory.continuous_agent_pos = curr_cont.copy()
+            if "goal_pos" in obs.metadata:
+                self.working_memory.continuous_goal_pos = np.asarray(
+                    obs.metadata["goal_pos"], dtype=float
+                )
 
         return self.decide(
             curr_grid=obs.lattice,

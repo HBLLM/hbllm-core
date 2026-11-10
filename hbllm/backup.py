@@ -140,42 +140,37 @@ class BackupManager:
         archive_path = self.backup_dir / f"{backup_id}.tar.gz"
 
         # Collect files to backup
-        files_info = []
         file_paths = []
 
         for pattern in _DB_PATTERNS + _EXTRA_PATTERNS:
             for path in self.data_dir.glob(pattern):
                 if path.is_file():
                     file_paths.append(path)
-                    files_info.append(
-                        {
-                            "name": path.name,
-                            "size": path.stat().st_size,
-                            "checksum": self._file_checksum(path),
-                        }
-                    )
 
         # Also backup training subdirectory if it exists
         training_dir = self.data_dir / "training"
         if training_dir.is_dir():
             for path in training_dir.rglob("*"):
                 if path.is_file():
-                    rel = path.relative_to(self.data_dir)
                     file_paths.append(path)
-                    files_info.append(
-                        {
-                            "name": str(rel),
-                            "size": path.stat().st_size,
-                            "checksum": self._file_checksum(path),
-                        }
-                    )
 
         if not file_paths:
             logger.warning("No files found to backup in %s", self.data_dir)
             return archive_path
 
-        # Checkpoint all SQLite databases before backup
+        # Checkpoint all SQLite databases before computing manifest checksums
         self._checkpoint_databases(file_paths)
+
+        files_info = []
+        for path in file_paths:
+            rel = path.relative_to(self.data_dir)
+            files_info.append(
+                {
+                    "name": str(rel),
+                    "size": path.stat().st_size,
+                    "checksum": self._file_checksum(path),
+                }
+            )
 
         # Create compressed archive
         total_size = sum(cast(int, f["size"]) for f in files_info)

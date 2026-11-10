@@ -891,6 +891,7 @@ class MyAgent(Agent):
             raise
 
         # Parameterized / complex action coordinate attachment
+        coords: dict[str, int] | None = None
         if (hasattr(act_enum, "is_complex") and act_enum.is_complex()) or (
             action_data
             and isinstance(action_data, dict)

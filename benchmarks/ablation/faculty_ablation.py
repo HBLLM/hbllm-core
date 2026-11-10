@@ -68,11 +68,19 @@ def _load_env_class(class_path: str) -> type:
     return getattr(mod, cls_name)
 
 
-def _mk_engine(seed: int = 0):
+def _mk_engine(seed: int = 0, memory_dir: str | Path | None = None) -> Any:
+    import tempfile
+
     from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
+    mem_dir = memory_dir or tempfile.mkdtemp(prefix=f"ablation_{seed}_{os.getpid()}_")
     system = build_cognitive_system(
-        CognitiveSystemConfig(world_id=f"ablation_{seed}", enable_logging=False, seed=seed)
+        CognitiveSystemConfig(
+            world_id=f"ablation_{seed}_{os.getpid()}_{time.time_ns()}",
+            memory_dir=mem_dir,
+            enable_logging=False,
+            seed=seed,
+        )
     )
     return system.engine
 

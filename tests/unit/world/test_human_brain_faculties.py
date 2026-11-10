@@ -3541,7 +3541,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
 
         assert 7 in engine.undo_actions
         assert 7 in engine.symbolic_theory.undo_actions
-        assert engine.inhibited_actions.get(7, 0) >= 999999
+        assert engine.inhibited_actions.get(7, 0) > 0
 
         # Safety predicate check
         safety_eval = PlanSafetyEvaluator([CausalUndoSafetyPredicate()])

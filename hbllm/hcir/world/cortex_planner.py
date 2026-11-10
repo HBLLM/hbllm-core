@@ -162,8 +162,11 @@ class EpistemicGoalScheduler:
 
         # 1. Confirmed goals — causal evidence from past wins
         confirmed_goals: list[tuple[int, int]] = []
+        has_cargo_context = bool(
+            engine.symbolic_theory.cargo_features or engine.learned_cargo_features
+        )
         for e in entities:
-            if avatar_pos is not None and e.grid_pos == avatar_pos:
+            if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                 continue
             if e.feature_id == bg:
                 continue
@@ -210,8 +213,8 @@ class EpistemicGoalScheduler:
 
         # Object Permanence: Retain known goal positions if currently occluded by mobile entities
         for gp in engine.learned_goal_positions:
-            if 0 <= gp[0] < H and 0 <= gp[1] < W and gp != avatar_pos:
-                if av_feats and int(curr_grid[gp[0], gp[1]]) in av_feats:
+            if 0 <= gp[0] < H and 0 <= gp[1] < W and (gp != avatar_pos or has_cargo_context):
+                if av_feats and int(curr_grid[gp[0], gp[1]]) in av_feats and not has_cargo_context:
                     continue
                 if gp not in confirmed_goals:
                     confirmed_goals.append(gp)
@@ -411,7 +414,7 @@ class EpistemicGoalScheduler:
         if not goals:
             hypothesized_goals: list[tuple[int, int]] = []
             for e in entities:
-                if avatar_pos is not None and e.grid_pos == avatar_pos:
+                if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                     continue
                 if e.feature_id == bg:
                     continue
@@ -463,7 +466,7 @@ class EpistemicGoalScheduler:
         if not goals:
             novel_entity_goals: list[tuple[int, int]] = []
             for e in entities:
-                if avatar_pos is not None and e.grid_pos == avatar_pos:
+                if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                     continue
                 if e.feature_id == bg:
                     continue
@@ -1347,7 +1350,8 @@ class MentalSimulationPlanner:
         init_chasers: frozenset[tuple[int, int]] = frozenset(
             e.grid_pos
             for e in entities
-            if (
+            if not engine.symbolic_theory.is_cargo(e.feature_id)
+            and (
                 e.feature_id in engine.mobile_threat_features
                 or (
                     e.role == EntityRole.AGENT

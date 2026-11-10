@@ -591,6 +591,16 @@ class PrefrontalWorkingMemory:
         self.morphology: MorphologicalSaliencyEngine = MorphologicalSaliencyEngine()
         self._salience_baseline: WorkingMemorySalienceState = WorkingMemorySalienceState()
 
+        # Continuous metric reference frame & sub-cell kinematic tracking
+        self.continuous_agent_pos: np.ndarray | tuple[float, ...] | None = None
+        self.continuous_goal_pos: np.ndarray | tuple[float, ...] | None = None
+        self.continuous_displacement: float = 0.0
+        self.continuous_delta: tuple[float, float] = (0.0, 0.0)
+        self.last_continuous_moved: bool = False
+        self.reference_frame: Any | None = None
+        self.last_observation_metadata: dict[str, Any] = {}
+        self.active_plan_step: Any | None = None
+
         # Exploration & Curiosity Tracking (Single Source of Truth)
         self.active_probe_target: tuple[int, int] | None = None
         self.active_probe_id: str | None = None
@@ -802,6 +812,14 @@ class PrefrontalWorkingMemory:
         self.active_probe_target = None
         self.active_probe_id = None
         self.probe_target_steps = 0
+        self.continuous_agent_pos = None
+        self.continuous_goal_pos = None
+        self.continuous_displacement = 0.0
+        self.continuous_delta = (0.0, 0.0)
+        self.last_continuous_moved = False
+        self.active_plan_step = None
+        self.reference_frame = None
+        self.last_observation_metadata.clear()
         self.recent_positions.clear()
         self.recent_actions.clear()
         self.consecutive_effective_actuations = 0

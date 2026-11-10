@@ -1179,6 +1179,8 @@ class HippocampalEpisodicCortex:
         delta.set("_feedback_assimilated", False)
         if is_new_level or not retain_dynamics:
             view.symbolic_theory.clear_candidate_goals()
+            if is_new_level:
+                view.symbolic_theory.clear_barriers()
 
         _lvl = 0 if level is None else level
         if not retain_dynamics:

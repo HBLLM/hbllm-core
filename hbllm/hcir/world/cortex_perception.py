@@ -380,18 +380,26 @@ class SpatialRoleClassifier:
             (grid_pos in goal_set or touches_goal) and (cell_set is None or touches_goal)
         ) or grid_pos in receptacle_set
 
-        has_known_goals = bool(symbolic_theory and symbolic_theory.goal_features)
+        is_confirmed_goal = bool(symbolic_theory and val in symbolic_theory.goal_features)
+        has_known_goals = bool(
+            symbolic_theory
+            and (symbolic_theory.goal_features or symbolic_theory.receptacle_features)
+        )
         if val in av_set or (
             avatar_pos is not None
             and (grid_pos == avatar_pos or (cell_set is not None and avatar_pos in cell_set))
         ):
             return EntityRole.AGENT
+        elif is_confirmed_goal:
+            return EntityRole.GOAL
+        elif is_theory_barrier or is_border:
+            return EntityRole.OBSTACLE
+        elif is_theory_cargo:
+            return EntityRole.MANIPULABLE
         elif is_candidate_goal or (
             is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features)
         ):
             return EntityRole.GOAL
-        elif is_border or is_theory_barrier:
-            return EntityRole.OBSTACLE
         elif is_theory_actuator or (
             not is_theory_walkable
             and any(
@@ -408,8 +416,6 @@ class SpatialRoleClassifier:
             )
         ):
             return EntityRole.ACTUATOR
-        elif is_theory_cargo and not is_theory_walkable:
-            return EntityRole.MANIPULABLE
         elif area <= 16:
             return EntityRole.UNKNOWN
         else:
@@ -921,6 +927,13 @@ class PerceptionEngine:
                     feature_id=val,
                     properties={"cells": cells, "feature": val, "feature_id": val},
                 )
+                if role == EntityRole.OBSTACLE and symbolic_theory is not None:
+                    if val in symbolic_theory.candidate_goal_features:
+                        symbolic_theory.retract_candidate_goal(
+                            val, reason="perimeter_border_obstacle"
+                        )
+                    if not symbolic_theory.is_barrier(val):
+                        symbolic_theory.induce_barrier(val, evidence="topology:border")
                 entities.append(ent)
 
         # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
