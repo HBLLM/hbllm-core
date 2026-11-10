@@ -190,7 +190,7 @@ class EpistemicGoalScheduler:
                 e.feature_id in engine.symbolic_theory.walkable_features
             ) and (feat_instance_count > 2 or feat_total_cells > max_entity_area)
             if is_pervasive_substrate:
-                engine.symbolic_theory.goal_features.discard(e.feature_id)
+                engine.symbolic_theory.retract_goal(e.feature_id, reason="pervasive_substrate")
                 continue
 
             is_goal_candidate = (
@@ -913,13 +913,14 @@ class MentalSimulationPlanner:
         for gp in proposal.new_learned_goal_positions:
             engine.record_learned_goal(gp)
         for feat in proposal.new_candidate_features:
-            engine.symbolic_theory.candidate_goal_features.add(feat)
+            engine.symbolic_theory.induce_candidate_goal(feat, evidence="planner:proposal")
         if proposal.subgoal_to_pop:
             engine.subgoal_stack.pop_subgoal()
         if proposal.clear_exhausted_goals:
             engine.exhausted_candidate_goals.clear()
-        engine.symbolic_theory.goal_features.difference_update(av_feats)
-        engine.symbolic_theory.candidate_goal_features.difference_update(av_feats)
+        for av_f in av_feats:
+            engine.symbolic_theory.retract_goal(av_f, reason="avatar_feature")
+            engine.symbolic_theory.retract_candidate_goal(av_f, reason="avatar_feature")
 
         goals = proposal.goals
 
@@ -1049,7 +1050,7 @@ class MentalSimulationPlanner:
                 step_size = dist
 
         # Oriented threats
-        cargos_known = engine.symbolic_theory.cargo_features | engine.learned_cargo_features
+        cargos_known = set(engine.symbolic_theory.cargo_features | engine.learned_cargo_features)
         oriented_threats = PerceptionEngine.detect_oriented_threats(
             curr_grid,
             entities,
@@ -1702,7 +1703,7 @@ class MentalSimulationPlanner:
                         if sim_step > rem_budget + 8:
                             continue
 
-                    walkable_feats = engine.symbolic_theory.walkable_features
+                    walkable_feats = set(engine.symbolic_theory.walkable_features)
                     if engine.hazard_tracker.is_hazard_at(
                         nr,
                         nc,
@@ -1887,14 +1888,14 @@ class MentalSimulationPlanner:
                                 pushed_r,
                                 pushed_c,
                                 curr_grid,
-                                engine.symbolic_theory.barrier_features,
+                                set(engine.symbolic_theory.barrier_features),
                                 static_barriers,
                             ):
                                 land_b, _, is_b_lethal = engine.physics_engine.project_fall(
                                     pushed_r,
                                     pushed_c,
                                     curr_grid,
-                                    engine.symbolic_theory.barrier_features,
+                                    set(engine.symbolic_theory.barrier_features),
                                     static_barriers,
                                 )
                                 if is_b_lethal:

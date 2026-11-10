@@ -1186,13 +1186,15 @@ class AutonomousEpistemicEngine:
     # ─────────────────────────────────────────────────────────────────────────
 
     @property
-    def verified_safe_features(self) -> set[int]:
+    def verified_safe_features(self) -> frozenset[int]:
         """Empirically verified safe/walkable features in symbolic world theory."""
         return self.symbolic_theory.walkable_features
 
     @verified_safe_features.setter
-    def verified_safe_features(self, val: set[int]) -> None:
-        self.symbolic_theory.walkable_features = val
+    def verified_safe_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_walkable(f, evidence="verified_safe_features_setter")
 
     @property
     def mental_plan(self) -> deque[MentalSimulationStep]:
@@ -1875,12 +1877,32 @@ class AutonomousEpistemicEngine:
                     except ValueError:
                         pass
                 if feat is not None:
-                    self.symbolic_theory.goal_features.add(int(feat))
-                    self.symbolic_theory.candidate_goal_features.add(int(feat))
-                    hydrated_count += 1
-                    logger.info(
-                        "AutonomousEpistemicEngine: Hydrated persistent goal feature %s", feat
+                    has_reward = (
+                        props.get("has_terminal_reward") is True
+                        or props.get("provenance")
+                        in (
+                            "terminal_reward",
+                            "terminal_reward:success",
+                            str(TerminalSignal.SUCCESS),
+                        )
+                        or props.get("evidence_rank", 0) >= 100
                     )
+                    if has_reward:
+                        self.symbolic_theory.induce_goal(
+                            int(feat), evidence="hydration:terminal_reward"
+                        )
+                        hydrated_count += 1
+                        logger.info(
+                            "AutonomousEpistemicEngine: Hydrated persistent goal feature %s", feat
+                        )
+                    else:
+                        logger.info(
+                            "AutonomousEpistemicEngine: Hydration skipped unverified goal feature %s (no terminal reward provenance)",
+                            feat,
+                        )
+                        self.symbolic_theory.induce_candidate_goal(
+                            int(feat), evidence="hydration:unverified"
+                        )
 
             # 3. Restore Learned Spatial Goals
             elif nid.startswith("learned_goal_") or ntype == "goal":
@@ -2118,7 +2140,7 @@ class AutonomousEpistemicEngine:
         self.collision_cones.update_ballistic_particle_trajectories(
             particles=particles,
             grid=grid,
-            barrier_features=barriers,
+            barrier_features=set(barriers),
             absorbing_features=absorbing_features,
             deflection_mode=deflection_mode,
             horizon=horizon,
@@ -3924,44 +3946,60 @@ class AutonomousEpistemicEngine:
         )
 
     @property
-    def learned_goal_features(self) -> set[int]:
+    def learned_goal_features(self) -> frozenset[int]:
         return self.symbolic_theory.goal_features
 
     @learned_goal_features.setter
-    def learned_goal_features(self, val: set[int]) -> None:
-        self.symbolic_theory.goal_features = val
+    def learned_goal_features(self, val: Any) -> None:
+        if not val:
+            self.symbolic_theory.clear_goals()
+        else:
+            for f in val:
+                self.symbolic_theory.induce_goal(f, evidence="learned_goal_features_setter")
 
     @property
-    def learned_barrier_features(self) -> set[int]:
+    def learned_barrier_features(self) -> frozenset[int]:
         return self.symbolic_theory.barrier_features
 
     @learned_barrier_features.setter
-    def learned_barrier_features(self, val: set[int]) -> None:
-        self.symbolic_theory.barrier_features = val
+    def learned_barrier_features(self, val: Any) -> None:
+        if not val:
+            self.symbolic_theory.clear_barriers()
+        else:
+            for f in val:
+                self.symbolic_theory.induce_barrier(f, evidence="learned_barrier_features_setter")
 
     @property
-    def learned_walkable_features(self) -> set[int]:
+    def learned_walkable_features(self) -> frozenset[int]:
         return self.symbolic_theory.walkable_features
 
     @learned_walkable_features.setter
-    def learned_walkable_features(self, val: set[int]) -> None:
-        self.symbolic_theory.walkable_features = val
+    def learned_walkable_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_walkable(f, evidence="learned_walkable_features_setter")
 
     @property
-    def learned_cargo_features(self) -> set[int]:
+    def learned_cargo_features(self) -> frozenset[int]:
         return self.symbolic_theory.cargo_features
 
     @learned_cargo_features.setter
-    def learned_cargo_features(self, val: set[int]) -> None:
-        self.symbolic_theory.cargo_features = val
+    def learned_cargo_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_cargo(f, evidence="learned_cargo_features_setter")
 
     @property
-    def learned_receptacle_features(self) -> set[int]:
+    def learned_receptacle_features(self) -> frozenset[int]:
         return self.symbolic_theory.receptacle_features
 
     @learned_receptacle_features.setter
-    def learned_receptacle_features(self, val: set[int]) -> None:
-        self.symbolic_theory.receptacle_features = val
+    def learned_receptacle_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_receptacle(
+                    f, evidence="learned_receptacle_features_setter"
+                )
 
     # ── Epistemic status of feature values ──────────────────────────────────────
     UNVERIFIED_FEATURE_COST: float = 8.0
@@ -4519,7 +4557,7 @@ class AutonomousEpistemicEngine:
     def estimate_background(self, grid: np.ndarray) -> Any:
         bg = PerceptionEngine.estimate_background(
             grid,
-            barrier_features=self.symbolic_theory.barrier_features,
+            barrier_features=set(self.symbolic_theory.barrier_features),
             avatar_features=self.avatar_features,
             bg_feature=self.bg_feature,
         )
@@ -4532,7 +4570,7 @@ class AutonomousEpistemicEngine:
                     and old_bg != bg
                     and old_bg not in getattr(self, "verified_safe_features", set())
                 ):
-                    self.symbolic_theory.walkable_features.discard(old_bg)
+                    self.symbolic_theory.retract_walkable(old_bg, reason="background_shift")
                 elif (
                     old_bg is None
                     and hasattr(self, "default_bg_feature")
@@ -4540,9 +4578,11 @@ class AutonomousEpistemicEngine:
                     and self.default_bg_feature
                     not in getattr(self, "verified_safe_features", set())
                 ):
-                    self.symbolic_theory.walkable_features.discard(self.default_bg_feature)
+                    self.symbolic_theory.retract_walkable(
+                        self.default_bg_feature, reason="background_shift"
+                    )
                 if bg in getattr(self, "verified_safe_features", set()):
-                    self.symbolic_theory.induce_walkable(bg)
+                    self.symbolic_theory.induce_walkable(bg, evidence="background_shift")
         return bg
 
     def _perception_cache_key(self, grid: np.ndarray, bg: int) -> tuple[Any, ...]:
@@ -4642,7 +4682,7 @@ class AutonomousEpistemicEngine:
             bg=bg_val,
             avatar_features=self.avatar_features,
             avatar_feature=self.avatar_feature,
-            barrier_features=self.symbolic_theory.barrier_features,
+            barrier_features=set(self.symbolic_theory.barrier_features),
             known_lethal_features=self.hazard_tracker.known_lethal_features,
             avatar_pos=self.avatar_pos,
             **kwargs,

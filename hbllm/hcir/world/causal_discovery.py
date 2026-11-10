@@ -75,6 +75,7 @@ class CausalPredicate:
     # Causal lifecycle & confidence tracking (G8)
     causal_status: str = "HYPOTHESISED"
     confidence: float = 1.0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_composite(self) -> bool:
         """True if predicate represents a compound boolean expression."""

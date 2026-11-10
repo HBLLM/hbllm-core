@@ -582,11 +582,11 @@ class InductiveHypothesisEngine:
                     and hyp.premise_feature not in getattr(theory, "avatar_features", set())
                     and hyp.premise_feature not in getattr(theory, "walkable_features", set())
                 ):
-                    theory.actuator_features.add(hyp.premise_feature)
+                    theory.induce_actuator(hyp.premise_feature, evidence="remote_mechanism")
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                 theory.barrier_predicates.append(pred)
                 if hyp.premise_feature is not None:
-                    theory.induce_barrier(hyp.premise_feature)
+                    theory.induce_barrier(hyp.premise_feature, evidence="hazard_contact")
             elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
                 # Direct action mutations represent in-place terrain/entity transformations,
                 # NOT distal actuators (switches/buttons). The causal predicate already records this.
@@ -600,19 +600,19 @@ class InductiveHypothesisEngine:
                 retracted_ids.append(hyp.rule_id)
                 if hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                     if hyp.premise_feature is not None:
-                        theory.barrier_features.discard(hyp.premise_feature)
+                        theory.retract_barrier(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
                     pass
                 else:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 theory.domain_predicates = [
                     p
                     for p in theory.domain_predicates

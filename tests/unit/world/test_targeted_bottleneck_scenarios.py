@@ -97,10 +97,9 @@ def test_sokoban_simulation_prunes_deadlock_branch() -> None:
     grid[0, :] = 2
     grid[:, 0] = 2
 
-    engine.learned_goal_features.add(3)
-    engine.learned_cargo_features.add(4)
-    engine.symbolic_theory.cargo_features.add(4)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_cargo(4, evidence="cargo")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(0, c) for c in range(7)])
     engine.learned_barriers.update([(r, 0) for r in range(7)])
 
@@ -138,8 +137,8 @@ def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
     grid[2, 5] = 3
     grid[:, 3] = 2
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(r, 3) for r in range(5)])
 
     entities = engine.extract_entities(grid, bg=0)
@@ -190,8 +189,8 @@ def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
     grid[:, 3] = 2
     grid[4, 1] = 6  # Switch
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(r, 3) for r in range(5)])
 
     aff = RemoteCausalAffordance(
@@ -260,7 +259,7 @@ def test_oriented_threat_body_collision_avoidance() -> None:
     grid[1:4, 2:5] = 8
     grid[3, 3] = 15  # eye facing DOWN (positive delta_r)
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
 
     available_actions = [1, 2, 3, 4]
@@ -351,9 +350,9 @@ def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
     grid[6, :5] = 2
     grid[6, 8:] = 2
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -396,9 +395,9 @@ def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
     grid[:, 2] = 2
     grid[:, 6] = 2
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -753,9 +752,9 @@ def test_teleological_cutset_subgoal_decomposition() -> None:
     grid[5, 5] = 4  # Purple Door barrier at (5, 5)
     grid[1, 3] = 4  # Purple Key item at (1, 3) on avatar's side
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
-    engine.symbolic_theory.barrier_features.add(4)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
+    engine.symbolic_theory.induce_barrier(4, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -822,7 +821,7 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
     grid = np.zeros((10, 10), dtype=int)
     grid[5, 1] = 1
     grid[5, 8] = 9  # False goal at (5, 8)
-    engine.symbolic_theory.goal_features.add(9)
+    engine.symbolic_theory.induce_goal(9, evidence="terminal_reward")
 
     # Register 2 deaths at cluster near (5, 7)
     engine.working_memory.acc_conflict.register_death_event(

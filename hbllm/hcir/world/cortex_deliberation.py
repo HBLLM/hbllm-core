@@ -1735,7 +1735,9 @@ class PrefrontalDeliberationEngine:
                                     view.hazard_tracker.static_lethal_positions.add((lr, lc))
                                     cell_f = int(curr_grid[lr, lc])
                                     if cell_f in view.symbolic_theory.goal_features:
-                                        view.symbolic_theory.goal_features.discard(cell_f)
+                                        view.symbolic_theory.retract_goal(
+                                            cell_f, reason="death_cluster"
+                                        )
                                         view.hazard_tracker.known_lethal_features.add(cell_f)
                                         logger.warning(
                                             "ACC Metacognitive Shift: Inverted hypothesis for feature %d (GOAL -> LETHAL) due to death cluster at (%d, %d)",
@@ -1812,7 +1814,7 @@ class PrefrontalDeliberationEngine:
             for gp in proposal.new_learned_goal_positions:
                 view.record_learned_goal(gp)
             for feat in proposal.new_candidate_features:
-                view.symbolic_theory.candidate_goal_features.add(feat)
+                view.symbolic_theory.induce_candidate_goal(feat, evidence="deliberation:proposal")
 
         # Faculty E: Basal Ganglia Motor Gating & Phase Entrainment
         if view.pending_phase_wait_steps > 0:

@@ -33,12 +33,11 @@ def test_lifelong_persistent_memory_roundtrip(tmp_path: Path) -> None:
     engine_1 = system_1.engine
 
     # Seed and learn world theory & concepts
-    engine_1.symbolic_theory.goal_features.add(7)
-    engine_1.symbolic_theory.candidate_goal_features.add(7)
-    engine_1.symbolic_theory.barrier_features.add(4)
-    engine_1.symbolic_theory.walkable_features.add(0)
-    engine_1.symbolic_theory.cargo_features.add(3)
-    engine_1.symbolic_theory.actuator_features.add(8)
+    engine_1.symbolic_theory.induce_goal(7, evidence="terminal_reward")
+    engine_1.symbolic_theory.induce_barrier(4, evidence="collision")
+    engine_1.symbolic_theory.induce_walkable(0, evidence="traversal")
+    engine_1.symbolic_theory.induce_cargo(3, evidence="cargo")
+    engine_1.symbolic_theory.induce_actuator(8, evidence="actuator")
     engine_1.symbolic_theory.telic_goal_type = "deplete"
     engine_1.symbolic_theory.telic_target_feature = 7
 

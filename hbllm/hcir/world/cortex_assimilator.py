@@ -75,8 +75,7 @@ class EpistemicFeedbackAssimilator:
                 wf = int(view.prev_grid[r, c])
                 if wf in av or wf in lethal:
                     continue
-                view.symbolic_theory.induce_walkable(wf)
-                view.verified_safe_features.add(wf)
+                view.symbolic_theory.induce_walkable(wf, evidence="traversal")
 
     @staticmethod
     def _synchronize_lattice_stride(view: Any, stride: int) -> None:
@@ -1116,8 +1115,8 @@ class EpistemicFeedbackAssimilator:
                 view.state.avatar_features = valid_feats
                 view.state.avatar_feature = next(iter(valid_feats))
                 view.mobile_threat_features.difference_update(valid_feats)
-                view.symbolic_theory.goal_features.difference_update(valid_feats)
-                view.symbolic_theory.candidate_goal_features.difference_update(valid_feats)
+                for vf in valid_feats:
+                    view.symbolic_theory.induce_avatar(vf, evidence="kinetic_stream")
                 cells_to_purge = set(kinetic_res.self_avatar.cells)
                 if kinetic_res.raw_delta is not None:
                     dr_p, dc_p = kinetic_res.raw_delta
@@ -1358,23 +1357,16 @@ class EpistemicFeedbackAssimilator:
                 view.learned_goal_positions.discard(prev_avatar_pos)
             view.learned_goal_positions.difference_update(view.recent_positions)
             if view.avatar_features:
-                view.symbolic_theory.avatar_features.update(view.avatar_features)
-                view.symbolic_theory.goal_features.difference_update(view.avatar_features)
-                view.symbolic_theory.candidate_goal_features.difference_update(view.avatar_features)
-                view.symbolic_theory.barrier_features.difference_update(view.avatar_features)
+                for af in view.avatar_features:
+                    view.symbolic_theory.induce_avatar(af, evidence="motor_grounding")
                 view.hazard_tracker.known_lethal_features.difference_update(view.avatar_features)
-                view.learned_goal_features.difference_update(view.avatar_features)
                 if hasattr(view, "episodic_cortex"):
                     view.episodic_cortex.discovered_lethal_features.difference_update(
                         view.avatar_features
                     )
             if view.avatar_feature is not None:
-                view.symbolic_theory.avatar_features.add(view.avatar_feature)
-                view.symbolic_theory.goal_features.discard(view.avatar_feature)
-                view.symbolic_theory.candidate_goal_features.discard(view.avatar_feature)
-                view.symbolic_theory.barrier_features.discard(view.avatar_feature)
+                view.symbolic_theory.induce_avatar(view.avatar_feature, evidence="motor_grounding")
                 view.hazard_tracker.known_lethal_features.discard(view.avatar_feature)
-                view.learned_goal_features.discard(view.avatar_feature)
                 if hasattr(view, "episodic_cortex"):
                     view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
 
@@ -1434,9 +1426,13 @@ class EpistemicFeedbackAssimilator:
                                     view.record_learned_barrier((adj_r, adj_c))
 
                                 if val not in view.verified_safe_features:
-                                    view.symbolic_theory.walkable_features.discard(val)
+                                    view.symbolic_theory.retract_walkable(
+                                        val, reason="collision_obstacle"
+                                    )
                                     if not view.symbolic_theory.is_barrier(val):
-                                        view.symbolic_theory.induce_barrier(val)
+                                        view.symbolic_theory.induce_barrier(
+                                            val, evidence="collision"
+                                        )
                                         logger.info(
                                             "AutonomousEpistemicEngine: Proprioceptive obstacle grounded at leading edge (%d, %d) with feature %d",
                                             adj_r,
@@ -1796,7 +1792,7 @@ class EpistemicFeedbackAssimilator:
                     and old_v != view.avatar_feature
                     and not _sym_theory.is_barrier(old_v)
                 ):
-                    _sym_theory.induce_depletion_goal(old_v)
+                    _sym_theory.induce_depletion_goal(old_v, evidence="pixel_depletion_heuristic")
                     break
 
         if is_success:
@@ -1840,7 +1836,7 @@ class EpistemicFeedbackAssimilator:
                         and not _sym_theory.is_barrier(goal_feat)
                         and not is_substrate
                     ):
-                        _sym_theory.induce_goal(goal_feat)
+                        _sym_theory.induce_goal(goal_feat, evidence=TerminalSignal.SUCCESS)
                         logger.info(
                             "AutonomousEpistemicEngine: Grounded invariant WIN GOAL FEATURE %d at %s",
                             goal_feat,
@@ -1863,7 +1859,7 @@ class EpistemicFeedbackAssimilator:
                     ):
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
-                            _sym_theory.induce_goal(pe.feature_id)
+                            _sym_theory.induce_goal(pe.feature_id, evidence=TerminalSignal.SUCCESS)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded invariant WIN GOAL ENTITY feature %d (area=%d)",
                                 pe.feature_id,
@@ -1885,7 +1881,7 @@ class EpistemicFeedbackAssimilator:
                             sim_feat in _sym_theory.walkable_features or sim_extent > max_sim_extent
                         )
                     ):
-                        _sym_theory.induce_goal(sim_feat)
+                        _sym_theory.induce_goal(sim_feat, evidence=TerminalSignal.SUCCESS)
 
             if view.active_hypothesis:
                 view.active_hypothesis.confirmed = True
@@ -1997,10 +1993,9 @@ class EpistemicFeedbackAssimilator:
                             and feat_count <= max(64, int(total_cells * 0.40))
                         ):
                             _hazard_tracker.register_lethal_feature(cand_feat_int)
-                            _sym_theory.induce_barrier(cand_feat_int)
-                            _sym_theory.cargo_features.discard(cand_feat_int)
-                            _sym_theory.goal_features.discard(cand_feat_int)
-                            _sym_theory.candidate_goal_features.discard(cand_feat_int)
+                            _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
+                            _sym_theory.retract_cargo(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_goal(cand_feat_int, reason="lethal_hazard")
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded lethal feature %d at barrier %s",
                                 cand_feat_int,

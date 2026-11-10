@@ -820,9 +820,12 @@ class CognitiveBlackbox:
                 state.learned_target_features.update(ee.symbolic_theory.target_features)
                 state.learned_obstacle_features.update(ee.symbolic_theory.barrier_features)
                 state.learned_traversable_features.update(ee.symbolic_theory.walkable_features)
-                ee.symbolic_theory.target_features.update(state.learned_target_features)
-                ee.symbolic_theory.barrier_features.update(state.learned_obstacle_features)
-                ee.symbolic_theory.walkable_features.update(state.learned_traversable_features)
+                for tg in state.learned_target_features:
+                    ee.symbolic_theory.induce_candidate_goal(tg, evidence="blackbox_state")
+                for ob in state.learned_obstacle_features:
+                    ee.symbolic_theory.induce_barrier(ob, evidence="blackbox_state")
+                for tr in state.learned_traversable_features:
+                    ee.symbolic_theory.induce_walkable(tr, evidence="blackbox_state")
 
         # Learned target features
         if state.learned_target_features:

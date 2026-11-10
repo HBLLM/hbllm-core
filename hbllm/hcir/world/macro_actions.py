@@ -33,6 +33,7 @@ from hbllm.hcir.transactions import TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.engine_state import CognitiveContext, get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
+from hbllm.hcir.world.percept import TerminalSignal
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
 if TYPE_CHECKING:
@@ -1254,9 +1255,7 @@ def attribute_macro_action_outcome(
             if feat is not None and feat != 0:
                 step_cnt = get_engine_state_attr(engine, "step_count", 0)
                 engine.working_memory.body_schema.acquire_tool(feat, step=step_cnt, role="key")
-                engine.symbolic_theory.cargo_features.add(feat)
-                if hasattr(engine, "learned_cargo_features"):
-                    engine.learned_cargo_features.add(feat)
+                engine.symbolic_theory.induce_cargo(feat, evidence="macro_acquire_tool")
                 logger.info(
                     "ExtendedBodySchema: Acquired tool/cargo feature %d into body schema at %s",
                     feat,
@@ -1390,8 +1389,9 @@ def attribute_macro_action_outcome(
                     dest_feat = int(curr_grid[r, c])
                     bg = engine.estimate_background(curr_grid)
                     if dest_feat != bg:
-                        engine.symbolic_theory.goal_features.add(dest_feat)
-                        engine.learned_goal_features.add(dest_feat)
+                        engine.symbolic_theory.induce_candidate_goal(
+                            dest_feat, evidence="macro_navigate_to"
+                        )
             if engine.subgoal_stack.has_pending_goals:
                 cur_sg = engine.subgoal_stack.current_subgoal
                 if cur_sg and cur_sg.target_destination == macro_action.destination:
@@ -1437,7 +1437,9 @@ def attribute_macro_action_outcome(
                             and feat not in engine.symbolic_theory.goal_features
                             and feat not in engine.symbolic_theory.candidate_goal_features
                         ):
-                            engine.symbolic_theory.induce_barrier(feat)
+                            engine.symbolic_theory.induce_barrier(
+                                feat, evidence="macro_navigate_failure"
+                            )
             if engine.avatar_pos is not None and action_used is not None:
                 engine.failed_transitions.add((engine.avatar_pos, action_used))
 
@@ -1745,22 +1747,26 @@ class MacroPlanSynthesizer:
                             and (not feat or feat not in av_f)
                         ):
                             is_confirmed = bool(props.get("confirmed", False))
-                            if is_confirmed:
+                            has_reward = props.get("has_terminal_reward") is True or props.get(
+                                "provenance"
+                            ) in ("terminal_reward", str(TerminalSignal.SUCCESS))
+                            if is_confirmed and has_reward:
                                 engine.learned_goal_positions.add(pos)
                                 if hasattr(engine, "goals") and pos not in engine.goals:
                                     engine.goals.append(pos)
                                 if feat:
-                                    engine.symbolic_theory.goal_features.add(feat)
-                                    engine.learned_goal_features.add(feat)
-                                    engine.symbolic_theory.barrier_features.discard(feat)
+                                    engine.symbolic_theory.induce_goal(
+                                        feat, evidence="sync_known_objects:confirmed_terminal"
+                                    )
                                 engine.learned_barriers.discard(pos)
                             else:
                                 if feat:
-                                    engine.symbolic_theory.candidate_goal_features.add(feat)
+                                    engine.symbolic_theory.induce_candidate_goal(
+                                        feat, evidence="sync_known_objects:candidate"
+                                    )
                     elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
-                            engine.symbolic_theory.cargo_features.add(feat)
-                            engine.learned_cargo_features.add(feat)
+                            engine.symbolic_theory.induce_cargo(feat, evidence="sync_known_objects")
                     elif (
                         "receptacle" in role
                         or "door" in role
@@ -1769,7 +1775,9 @@ class MacroPlanSynthesizer:
                     ):
                         engine.learned_receptacle_positions.add(pos)
                         if feat:
-                            engine.symbolic_theory.receptacle_features.add(feat)
+                            engine.symbolic_theory.induce_receptacle(
+                                feat, evidence="sync_known_objects"
+                            )
                     elif (
                         "barrier" in role
                         or "wall" in role
@@ -1783,7 +1791,9 @@ class MacroPlanSynthesizer:
                         ):
                             engine.learned_barriers.add(pos)
                             if feat:
-                                engine.symbolic_theory.induce_barrier(feat)
+                                engine.symbolic_theory.induce_barrier(
+                                    feat, evidence="sync_known_objects:solid"
+                                )
                     elif "switch" in role or "actuator" in role or "button" in role:
                         if (
                             feat
@@ -1794,7 +1804,9 @@ class MacroPlanSynthesizer:
                             not in getattr(engine.symbolic_theory, "walkable_features", set())
                             and feat not in getattr(engine, "verified_safe_features", set())
                         ):
-                            engine.symbolic_theory.actuator_features.add(feat)
+                            engine.symbolic_theory.induce_actuator(
+                                feat, evidence="sync_known_objects"
+                            )
 
     @classmethod
     def synthesize_plan(

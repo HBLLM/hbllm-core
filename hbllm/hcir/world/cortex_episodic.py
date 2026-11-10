@@ -1178,7 +1178,7 @@ class HippocampalEpisodicCortex:
         delta.set("current_simulated_goal", None)
         delta.set("_feedback_assimilated", False)
         if is_new_level or not retain_dynamics:
-            view.symbolic_theory.candidate_goal_features.clear()
+            view.symbolic_theory.clear_candidate_goals()
 
         _lvl = 0 if level is None else level
         if not retain_dynamics:
@@ -1290,8 +1290,7 @@ class HippocampalEpisodicCortex:
             # Physical terrain affordances (e.g. tracks, bridges, road surfaces) persist across
             # rooms of the same environment unless counterfactual evidence invalidates them.
             # Local coordinate barriers reset, but empirical walkable affordances are retained.
-            view.symbolic_theory.barrier_features.clear()
-            view.symbolic_theory.barrier_predicates.clear()
+            view.symbolic_theory.clear_barriers()
             for f in view.symbolic_theory.walkable_features:
                 if not any(p.value == f for p in view.symbolic_theory.walkable_predicates):
                     view.symbolic_theory.walkable_predicates.append(
@@ -1312,7 +1311,6 @@ class HippocampalEpisodicCortex:
             view.avatar_features.clear()
             delta.set("prior_avatar_feature", None)
             view._avatar_controllability_evidence.clear()
-            view.verified_safe_features.clear()
             delta.set("avatar_pos", None)
             view.action_dynamics.clear()
             view.action_affordances.clear()

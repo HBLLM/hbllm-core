@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from typing import Any, Literal
 
 import numpy as np
@@ -31,11 +31,77 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
+from hbllm.hcir.world.percept import TerminalSignal
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class OntologyEvidenceRank(IntEnum):
+    """Hierarchy of empirical evidence strength for ontology induction."""
+
+    UNVERIFIED = 0
+    HEURISTIC = 10
+    CANDIDATE = 20
+    HYDRATION_DEFAULT = 40
+    TRAVERSAL = 60
+    COLLISION = 80
+    TERMINAL_REWARD = 100
+
+
+def parse_evidence(evidence: Any) -> tuple[int, str]:
+    """Parse raw evidence into (rank, descriptive_str)."""
+    if evidence is None:
+        return OntologyEvidenceRank.UNVERIFIED, "unverified"
+    if (
+        evidence == TerminalSignal.SUCCESS
+        or evidence == "terminal_reward"
+        or evidence == "terminal_signal"
+    ):
+        return OntologyEvidenceRank.TERMINAL_REWARD, "terminal_reward:success"
+    if isinstance(evidence, TerminalSignal):
+        return (
+            OntologyEvidenceRank.TERMINAL_REWARD
+            if evidence == TerminalSignal.SUCCESS
+            else OntologyEvidenceRank.UNVERIFIED,
+            f"terminal_signal:{evidence.value}",
+        )
+    if isinstance(evidence, (int, OntologyEvidenceRank)):
+        return int(evidence), f"rank:{int(evidence)}"
+    if isinstance(evidence, str):
+        ev_lower = evidence.lower()
+        if "terminal" in ev_lower or "reward" in ev_lower or "success" in ev_lower:
+            return OntologyEvidenceRank.TERMINAL_REWARD, evidence
+        if "collision" in ev_lower or "bump" in ev_lower or "wall" in ev_lower:
+            return OntologyEvidenceRank.COLLISION, evidence
+        if (
+            "traversal" in ev_lower
+            or "step" in ev_lower
+            or "walk" in ev_lower
+            or "free_space" in ev_lower
+        ):
+            return OntologyEvidenceRank.TRAVERSAL, evidence
+        if "hydration" in ev_lower:
+            return OntologyEvidenceRank.HYDRATION_DEFAULT, evidence
+        if "candidate" in ev_lower or "hypothesis" in ev_lower or "heuristic" in ev_lower:
+            return OntologyEvidenceRank.CANDIDATE, evidence
+        return OntologyEvidenceRank.HEURISTIC, evidence
+    if isinstance(evidence, dict):
+        if (
+            evidence.get("has_terminal_reward") is True
+            or evidence.get("terminal") == TerminalSignal.SUCCESS
+            or evidence.get("provenance") in ("terminal_reward", "terminal_reward:success")
+        ):
+            return OntologyEvidenceRank.TERMINAL_REWARD, str(
+                evidence.get("provenance", "terminal_reward")
+            )
+        if "rank" in evidence:
+            return int(evidence["rank"]), str(
+                evidence.get("provenance", f"rank:{evidence['rank']}")
+            )
+    return OntologyEvidenceRank.HEURISTIC, str(evidence)
 
 
 class SpelkePhysicalAxiom(StrEnum):
@@ -87,15 +153,16 @@ class HCIRSymbolicWorldTheory:
     actuator_predicates: list[CausalPredicate] = field(default_factory=list)
     domain_predicates: list[CausalPredicate] = field(default_factory=list)
 
-    # Fast-lookup cached sets
-    goal_features: set[Any] = field(default_factory=set)
-    candidate_goal_features: set[Any] = field(default_factory=set)
-    barrier_features: set[Any] = field(default_factory=set)
-    walkable_features: set[Any] = field(default_factory=set)
-    cargo_features: set[Any] = field(default_factory=set)
-    receptacle_features: set[Any] = field(default_factory=set)
-    actuator_features: set[Any] = field(default_factory=set)
-    avatar_features: set[Any] = field(default_factory=set)
+    # Fast-lookup cached sets (private, accessed via read-only properties)
+    _goal_features: set[Any] = field(default_factory=set)
+    _candidate_goal_features: set[Any] = field(default_factory=set)
+    _barrier_features: set[Any] = field(default_factory=set)
+    _walkable_features: set[Any] = field(default_factory=set)
+    _cargo_features: set[Any] = field(default_factory=set)
+    _receptacle_features: set[Any] = field(default_factory=set)
+    _actuator_features: set[Any] = field(default_factory=set)
+    _avatar_features: set[Any] = field(default_factory=set)
+    _feature_evidence: dict[tuple[str, Any], tuple[int, str]] = field(default_factory=dict)
     _barrier_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
     _walkable_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
 
@@ -122,18 +189,54 @@ class HCIRSymbolicWorldTheory:
     relational_confidence_map: dict[str, float] = field(default_factory=dict)
 
     @property
+    def goal_features(self) -> frozenset[Any]:
+        """Empirically verified confirmed goal features (read-only)."""
+        return frozenset(self._goal_features)
+
+    @property
+    def candidate_goal_features(self) -> frozenset[Any]:
+        """Candidate goal hypotheses pending empirical verification (read-only)."""
+        return frozenset(self._candidate_goal_features)
+
+    @property
+    def barrier_features(self) -> frozenset[Any]:
+        """Empirically verified barrier / obstacle features (read-only)."""
+        return frozenset(self._barrier_features)
+
+    @property
+    def walkable_features(self) -> frozenset[Any]:
+        """Empirically verified safe / walkable features (read-only)."""
+        return frozenset(self._walkable_features)
+
+    @property
+    def cargo_features(self) -> frozenset[Any]:
+        """Empirically verified pushable cargo features (read-only)."""
+        return frozenset(self._cargo_features)
+
+    @property
+    def receptacle_features(self) -> frozenset[Any]:
+        """Empirically verified receptacle / dock features (read-only)."""
+        return frozenset(self._receptacle_features)
+
+    @property
+    def actuator_features(self) -> frozenset[Any]:
+        """Empirically verified distal actuator / switch features (read-only)."""
+        return frozenset(self._actuator_features)
+
+    @property
+    def avatar_features(self) -> frozenset[Any]:
+        """Empirically verified self-avatar features (read-only)."""
+        return frozenset(self._avatar_features)
+
+    @property
+    def target_features(self) -> frozenset[Any]:
+        """Alias for goal_features (read-only)."""
+        return frozenset(self._goal_features)
+
+    @property
     def causal_predicates(self) -> list[CausalPredicate]:
         """Declarative causal predicates recorded in the symbolic world theory."""
         return self.domain_predicates
-
-    @property
-    def target_features(self) -> set[Any]:
-        """Empirically verified target / goal features in symbolic world theory."""
-        return self.goal_features
-
-    @target_features.setter
-    def target_features(self, val: set[Any]) -> None:
-        self.goal_features = set(val)
 
     def record_causal_predicate(self, predicate: CausalPredicate) -> None:
         """Record an empirical causal predicate into the symbolic world theory."""
@@ -200,30 +303,30 @@ class HCIRSymbolicWorldTheory:
 
     def is_avatar_feature(self, feature_id: Any) -> bool:
         """True if feature_id matches any registered avatar feature."""
-        return feature_id in self.avatar_features
+        return feature_id in self._avatar_features
 
     def is_goal(self, entity: SpatialEntity | int | str | Any) -> bool:
         """True if entity or feature satisfies any induced goal predicate or confirmed goal feature."""
         if isinstance(entity, (int, np.integer, str)):
             feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
-            if feat in self.avatar_features:
+            if feat in self._avatar_features:
                 return False
-            if feat in self.goal_features:
+            if feat in self._goal_features:
                 return True
-            if not self.goal_features and feat in self.candidate_goal_features:
+            if not self._goal_features and feat in self._candidate_goal_features:
                 return True
             props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.goal_predicates)
 
         feat = getattr(entity, "feature_id", getattr(entity, "id", getattr(entity, "name", None)))
         role = getattr(entity, "role", None)
-        if feat in self.avatar_features:
+        if feat in self._avatar_features:
             return False
         if role == EntityRole.GOAL or str(role).lower() in ("goal", "entityrole.goal", "target"):
             return True
-        if feat in self.goal_features:
+        if feat in self._goal_features:
             return True
-        if not self.goal_features and feat in self.candidate_goal_features:
+        if not self._goal_features and feat in self._candidate_goal_features:
             return True
         props = {
             "feature_id": feat,
@@ -242,13 +345,13 @@ class HCIRSymbolicWorldTheory:
 
     def is_barrier(self, feature_id: Any) -> bool:
         """True if feature satisfies any induced barrier predicate (enforcing HCIR Attractor Invariant)."""
-        if feature_id in self.avatar_features:
+        if feature_id in self._avatar_features:
             return False
-        if feature_id in self.goal_features:
+        if feature_id in self._goal_features:
             return False
-        if not self.goal_features and feature_id in self.candidate_goal_features:
+        if not self._goal_features and feature_id in self._candidate_goal_features:
             return False
-        if feature_id in self.barrier_features:
+        if feature_id in self._barrier_features:
             return True
         cached = self._barrier_eval_cache.get(feature_id)
         if cached is not None:
@@ -260,7 +363,7 @@ class HCIRSymbolicWorldTheory:
 
     def is_walkable(self, feature_id: Any) -> bool:
         """True if feature satisfies any induced walkable space predicate."""
-        if feature_id in self.walkable_features:
+        if feature_id in self._walkable_features:
             return True
         cached = self._walkable_eval_cache.get(feature_id)
         if cached is not None:
@@ -274,13 +377,13 @@ class HCIRSymbolicWorldTheory:
         """True if entity or feature satisfies any pushable cargo predicate."""
         if isinstance(entity, (int, np.integer, str)):
             feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
-            if feat in self.cargo_features:
+            if feat in self._cargo_features:
                 return True
             props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.cargo_predicates)
 
         feat = getattr(entity, "feature_id", getattr(entity, "id", None))
-        if feat in self.cargo_features:
+        if feat in self._cargo_features:
             return True
         role = getattr(entity, "role", None)
         if role in (EntityRole.MANIPULABLE, getattr(EntityRole, "CARGO", None)) or str(
@@ -301,13 +404,13 @@ class HCIRSymbolicWorldTheory:
         """True if entity or feature satisfies any receptacle predicate."""
         if isinstance(entity, (int, np.integer, str)):
             feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
-            if feat in self.receptacle_features:
+            if feat in self._receptacle_features:
                 return True
             props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.receptacle_predicates)
 
         feat = getattr(entity, "feature_id", getattr(entity, "id", None))
-        if feat in self.receptacle_features:
+        if feat in self._receptacle_features:
             return True
         role = getattr(entity, "role", None)
         if role == EntityRole.RECEPTACLE or str(role).lower() in (
@@ -326,20 +429,44 @@ class HCIRSymbolicWorldTheory:
         }
         return any(pred.evaluate(props) for pred in self.receptacle_predicates)
 
-    def induce_receptacle(self, feature_id: Any) -> None:
-        """Induce universal receptacle predicate."""
-        if feature_id not in self.receptacle_features:
-            self.receptacle_features.add(feature_id)
-            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
-            self.receptacle_predicates.append(pred)
-            logger.info("HCIRSymbolicWorldTheory: Induced Receptacle Rule: %s", pred.describe())
+    def induce_goal(self, feature_id: Any, evidence: Any = None) -> bool:
+        """Induce universal goal predicate with minimum description length and evidence gating.
 
-    def induce_goal(self, feature_id: Any) -> None:
-        """Induce universal goal predicate with minimum description length."""
-        if feature_id in self.avatar_features:
-            return
-        if feature_id in self.barrier_features:
-            self.barrier_features.discard(feature_id)
+        A confirmed goal strictly requires terminal-reward provenance (rank >= TERMINAL_REWARD).
+        If evidence is insufficient, it is registered as a candidate goal only.
+        A confirmed goal will not delete an existing barrier unless its evidence rank
+        strictly outranks the barrier's evidence.
+        """
+        if feature_id in self._avatar_features:
+            return False
+
+        rank, ev_str = parse_evidence(evidence)
+        if rank < OntologyEvidenceRank.TERMINAL_REWARD:
+            logger.info(
+                "HCIRSymbolicWorldTheory: Cannot induce confirmed goal for feature %s without "
+                "terminal-reward evidence (rank=%d, ev=%s); registering as candidate goal only",
+                feature_id,
+                rank,
+                ev_str,
+            )
+            self.induce_candidate_goal(feature_id, evidence=evidence)
+            return False
+
+        if feature_id in self._barrier_features:
+            barrier_rank, bar_ev = self._feature_evidence.get(
+                ("barrier", feature_id), (OntologyEvidenceRank.COLLISION, "collision")
+            )
+            if rank <= barrier_rank:
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Cannot delete barrier %s for goal: goal evidence rank %d "
+                    "does not outrank barrier rank %d (%s)",
+                    feature_id,
+                    rank,
+                    barrier_rank,
+                    bar_ev,
+                )
+                return False
+            self._barrier_features.discard(feature_id)
             self.barrier_predicates = [
                 p
                 for p in self.barrier_predicates
@@ -347,68 +474,303 @@ class HCIRSymbolicWorldTheory:
             ]
             self._barrier_eval_cache.clear()
             self._walkable_eval_cache.clear()
-        if feature_id not in self.goal_features:
-            self.goal_features.add(feature_id)
-            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
+
+        if feature_id not in self._goal_features:
+            self._goal_features.add(feature_id)
+            self._candidate_goal_features.add(feature_id)
+            self._feature_evidence[("goal", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "goal"},
+            )
             self.goal_predicates.append(pred)
-            logger.info("HCIRSymbolicWorldTheory: Induced Goal Rule: %s", pred.describe())
-        self.walkable_features.add(feature_id)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Induced Confirmed Goal Rule: %s (provenance=%s, rank=%d)",
+                pred.describe(),
+                ev_str,
+                rank,
+            )
+        self._walkable_features.add(feature_id)
+        self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
+        return True
 
-    def induce_barrier(self, feature_id: Any) -> None:
+    def induce_candidate_goal(self, feature_id: Any, evidence: Any = None) -> bool:
+        """Induce candidate goal hypothesis pending terminal verification."""
+        if feature_id in self._avatar_features:
+            return False
+        rank, ev_str = parse_evidence(evidence)
+        self._candidate_goal_features.add(feature_id)
+        self._feature_evidence[("candidate_goal", feature_id)] = (rank, ev_str)
+        return True
+
+    def induce_barrier(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal barrier predicate (enforcing HCIR Attractor Invariant)."""
-        if feature_id in self.avatar_features:
-            return
-        if feature_id in self.goal_features or feature_id in self.candidate_goal_features:
-            return
-        if feature_id in self.walkable_features:
-            return
-        if feature_id not in self.barrier_features:
-            self._barrier_eval_cache.clear()
-            self._walkable_eval_cache.clear()
-            self.barrier_features.add(feature_id)
-            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
-            self.barrier_predicates.append(pred)
-            self.walkable_features.discard(feature_id)
-            logger.info("HCIRSymbolicWorldTheory: Induced Barrier Rule: %s", pred.describe())
+        if feature_id in self._avatar_features:
+            return False
 
-    def induce_walkable(self, feature_id: Any) -> None:
+        rank, ev_str = parse_evidence(evidence or "collision")
+        if rank == OntologyEvidenceRank.UNVERIFIED:
+            rank = OntologyEvidenceRank.COLLISION
+            ev_str = "collision"
+
+        if feature_id in self._goal_features:
+            goal_rank, g_ev = self._feature_evidence.get(
+                ("goal", feature_id), (OntologyEvidenceRank.TERMINAL_REWARD, "terminal_reward")
+            )
+            if goal_rank >= rank:
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Cannot induce barrier on confirmed goal %s (goal rank %d >= barrier rank %d)",
+                    feature_id,
+                    goal_rank,
+                    rank,
+                )
+                return False
+
+        if feature_id in self._walkable_features:
+            walk_rank, w_ev = self._feature_evidence.get(
+                ("walkable", feature_id), (OntologyEvidenceRank.TRAVERSAL, "traversal")
+            )
+            if walk_rank > rank:
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Cannot induce barrier on walkable feature %s (walk rank %d > barrier rank %d)",
+                    feature_id,
+                    walk_rank,
+                    rank,
+                )
+                return False
+            self._walkable_features.discard(feature_id)
+
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+        if feature_id not in self._barrier_features:
+            self._barrier_features.add(feature_id)
+            self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "barrier"},
+            )
+            self.barrier_predicates.append(pred)
+            logger.info(
+                "HCIRSymbolicWorldTheory: Induced Barrier Rule: %s (provenance=%s, rank=%d)",
+                pred.describe(),
+                ev_str,
+                rank,
+            )
+        return True
+
+    def induce_walkable(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal walkable space predicate with self-correcting belief revision."""
-        if feature_id in self.barrier_features:
-            self.barrier_features.discard(feature_id)
+        rank, ev_str = parse_evidence(evidence or "traversal")
+        if rank == OntologyEvidenceRank.UNVERIFIED:
+            rank = OntologyEvidenceRank.TRAVERSAL
+            ev_str = "traversal"
+
+        if feature_id in self._barrier_features:
+            barrier_rank, bar_ev = self._feature_evidence.get(
+                ("barrier", feature_id), (OntologyEvidenceRank.COLLISION, "collision")
+            )
+            if rank <= barrier_rank:
+                logger.info(
+                    "HCIRSymbolicWorldTheory: Walkable evidence rank %d does not outrank barrier rank %d for feature %s",
+                    rank,
+                    barrier_rank,
+                    feature_id,
+                )
+                return False
+            self._barrier_features.discard(feature_id)
             self.barrier_predicates = [
                 p
                 for p in self.barrier_predicates
                 if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
             ]
-            self._barrier_eval_cache.clear()
-            self._walkable_eval_cache.clear()
-        if feature_id not in self.walkable_features:
-            self._barrier_eval_cache.clear()
-            self._walkable_eval_cache.clear()
-            self.walkable_features.add(feature_id)
-            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
-            self.walkable_predicates.append(pred)
 
-    def induce_cargo(self, feature_id: Any) -> None:
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+        if feature_id not in self._walkable_features:
+            self._walkable_features.add(feature_id)
+            self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "walkable"},
+            )
+            self.walkable_predicates.append(pred)
+        return True
+
+    def induce_cargo(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce pushable cargo predicate."""
-        if feature_id in self.barrier_features:
-            return
-        self.walkable_features.discard(feature_id)
-        self.goal_features.discard(feature_id)
-        self.candidate_goal_features.discard(feature_id)
-        if feature_id not in self.cargo_features:
-            self.cargo_features.add(feature_id)
-            pred = CausalPredicate(variable="feature_id", operator="==", value=feature_id)
+        if feature_id in self._barrier_features:
+            return False
+        rank, ev_str = parse_evidence(evidence or "cargo")
+        self._walkable_features.discard(feature_id)
+        self._goal_features.discard(feature_id)
+        self._candidate_goal_features.discard(feature_id)
+        if feature_id not in self._cargo_features:
+            self._cargo_features.add(feature_id)
+            self._feature_evidence[("cargo", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "cargo"},
+            )
             self.cargo_predicates.append(pred)
             logger.info("HCIRSymbolicWorldTheory: Induced Cargo Rule: %s", pred.describe())
+        return True
 
-    def induce_depletion_goal(self, feature_id: Any) -> None:
+    def induce_receptacle(self, feature_id: Any, evidence: Any = None) -> bool:
+        """Induce universal receptacle predicate."""
+        rank, ev_str = parse_evidence(evidence or "receptacle")
+        if feature_id not in self._receptacle_features:
+            self._receptacle_features.add(feature_id)
+            self._feature_evidence[("receptacle", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "receptacle"},
+            )
+            self.receptacle_predicates.append(pred)
+            logger.info("HCIRSymbolicWorldTheory: Induced Receptacle Rule: %s", pred.describe())
+        return True
+
+    def induce_actuator(self, feature_id: Any, evidence: Any = None) -> bool:
+        """Induce distal actuator / switch affordance."""
+        rank, ev_str = parse_evidence(evidence or "actuator")
+        if feature_id not in self._actuator_features:
+            self._actuator_features.add(feature_id)
+            self._feature_evidence[("actuator", feature_id)] = (rank, ev_str)
+            pred = CausalPredicate(
+                variable="feature_id",
+                operator="==",
+                value=feature_id,
+                metadata={"evidence": ev_str, "rank": rank, "role": "actuator"},
+            )
+            self.actuator_predicates.append(pred)
+            logger.info("HCIRSymbolicWorldTheory: Induced Actuator Rule: %s", pred.describe())
+        return True
+
+    def induce_avatar(self, feature_id: Any, evidence: Any = None) -> bool:
+        """Register avatar feature and purge from candidate/goal/barrier sets."""
+        rank, ev_str = parse_evidence(evidence or "motor_grounding")
+        self._avatar_features.add(feature_id)
+        self._feature_evidence[("avatar", feature_id)] = (rank, ev_str)
+        self._goal_features.discard(feature_id)
+        self._candidate_goal_features.discard(feature_id)
+        self._barrier_features.discard(feature_id)
+        return True
+
+    def retract_goal(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a goal feature and its associated predicates."""
+        self._goal_features.discard(feature_id)
+        self._candidate_goal_features.discard(feature_id)
+        self.goal_predicates = [
+            p
+            for p in self.goal_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._feature_evidence.pop(("goal", feature_id), None)
+        self._feature_evidence.pop(("candidate_goal", feature_id), None)
+
+    def retract_candidate_goal(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a candidate goal hypothesis."""
+        self._candidate_goal_features.discard(feature_id)
+        self._feature_evidence.pop(("candidate_goal", feature_id), None)
+
+    def retract_barrier(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a barrier feature and clear evaluation caches."""
+        self._barrier_features.discard(feature_id)
+        self.barrier_predicates = [
+            p
+            for p in self.barrier_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+        self._feature_evidence.pop(("barrier", feature_id), None)
+
+    def retract_walkable(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a walkable feature and clear evaluation caches."""
+        self._walkable_features.discard(feature_id)
+        self.walkable_predicates = [
+            p
+            for p in self.walkable_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+        self._feature_evidence.pop(("walkable", feature_id), None)
+
+    def retract_cargo(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a cargo feature."""
+        self._cargo_features.discard(feature_id)
+        self.cargo_predicates = [
+            p
+            for p in self.cargo_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._feature_evidence.pop(("cargo", feature_id), None)
+
+    def retract_receptacle(self, feature_id: Any, reason: str = "") -> None:
+        """Retract a receptacle feature."""
+        self._receptacle_features.discard(feature_id)
+        self.receptacle_predicates = [
+            p
+            for p in self.receptacle_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._feature_evidence.pop(("receptacle", feature_id), None)
+
+    def retract_actuator(self, feature_id: Any, reason: str = "") -> None:
+        """Retract an actuator feature."""
+        self._actuator_features.discard(feature_id)
+        self.actuator_predicates = [
+            p
+            for p in self.actuator_predicates
+            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+        ]
+        self._feature_evidence.pop(("actuator", feature_id), None)
+
+    def clear_goals(self) -> None:
+        """Clear all goal rules and cached features."""
+        self._goal_features.clear()
+        self._candidate_goal_features.clear()
+        self.goal_predicates.clear()
+        to_pop = [k for k in self._feature_evidence if k[0] in ("goal", "candidate_goal")]
+        for k in to_pop:
+            self._feature_evidence.pop(k, None)
+
+    def clear_candidate_goals(self) -> None:
+        """Clear all candidate goal hypotheses."""
+        self._candidate_goal_features.clear()
+        to_pop = [k for k in self._feature_evidence if k[0] == "candidate_goal"]
+        for k in to_pop:
+            self._feature_evidence.pop(k, None)
+
+    def clear_barriers(self) -> None:
+        """Clear all barrier rules and cached features."""
+        self._barrier_features.clear()
+        self.barrier_predicates.clear()
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+        to_pop = [k for k in self._feature_evidence if k[0] == "barrier"]
+        for k in to_pop:
+            self._feature_evidence.pop(k, None)
+
+    def induce_depletion_goal(self, feature_id: Any, evidence: Any = None) -> None:
         """Induce a global board depletion goal (clear board of this feature)."""
         self.telic_goal_type = "deplete"
         self.telic_target_feature = feature_id
-        self.induce_goal(feature_id)
+        self.induce_candidate_goal(feature_id, evidence=evidence or "depletion_hypothesis")
         logger.info(
-            "HCIRSymbolicWorldTheory: Induced Telic Depletion Goal for feature %s", feature_id
+            "HCIRSymbolicWorldTheory: Induced Telic Depletion Candidate Goal for feature %s (evidence=%s)",
+            feature_id,
+            evidence,
         )
 
     def induce_undo_action(self, action: Any) -> None:
@@ -696,14 +1058,15 @@ class HCIRSymbolicWorldTheory:
             )
 
         for role, feats in [
-            ("goal", self.goal_features),
-            ("barrier", self.barrier_features),
-            ("walkable", self.walkable_features),
-            ("cargo", self.cargo_features),
-            ("receptacle", self.receptacle_features),
+            ("goal", self._goal_features),
+            ("barrier", self._barrier_features),
+            ("walkable", self._walkable_features),
+            ("cargo", self._cargo_features),
+            ("receptacle", self._receptacle_features),
         ]:
             for feat in feats:
                 node_id = f"ontology_{role}_{feat}"
+                rank, ev_str = self._feature_evidence.get((role, feat), (0, "unverified"))
                 node = ConceptNode(
                     id=node_id,
                     label=f"{role}_{feat}",
@@ -713,6 +1076,9 @@ class HCIRSymbolicWorldTheory:
                         "role": role,
                         "feature_id": feat,
                         "is_intensional": True,
+                        "provenance": ev_str,
+                        "evidence_rank": rank,
+                        "has_terminal_reward": rank >= OntologyEvidenceRank.TERMINAL_REWARD,
                     },
                 )
                 ops.append(
@@ -742,14 +1108,21 @@ class HCIRSymbolicWorldTheory:
                 )
             )
 
-        for feat in self.actuator_features:
+        for feat in self._actuator_features:
             node_id = f"ontology_actuator_{feat}"
+            rank, ev_str = self._feature_evidence.get(("actuator", feat), (0, "unverified"))
             node = ConceptNode(
                 id=node_id,
                 label=f"actuator_{feat}",
                 definition=f"Learned actuator feature {feat}",
                 domain="spatial_ontology",
-                properties={"role": "actuator", "feature_id": feat, "is_intensional": True},
+                properties={
+                    "role": "actuator",
+                    "feature_id": feat,
+                    "is_intensional": True,
+                    "provenance": ev_str,
+                    "evidence_rank": rank,
+                },
             )
             ops.append(
                 TransactionOperation(
@@ -802,18 +1175,34 @@ class HCIRSymbolicWorldTheory:
                         feat_val = feat
 
                     if role == "goal":
-                        self.goal_features.add(feat_val)
-                        self.candidate_goal_features.add(feat_val)
+                        has_reward = (
+                            props.get("has_terminal_reward") is True
+                            or props.get("provenance")
+                            in (
+                                "terminal_reward",
+                                "terminal_reward:success",
+                                str(TerminalSignal.SUCCESS),
+                            )
+                            or props.get("evidence_rank", 0) >= OntologyEvidenceRank.TERMINAL_REWARD
+                        )
+                        if has_reward:
+                            self.induce_goal(feat_val, evidence="hydration:terminal_reward")
+                        else:
+                            logger.info(
+                                "HCIRSymbolicWorldTheory: Hydration skipped unverified goal feature %s (no terminal reward provenance)",
+                                feat_val,
+                            )
+                            self.induce_candidate_goal(feat_val, evidence="hydration:unverified")
                     elif role == "barrier":
-                        self.barrier_features.add(feat_val)
+                        self.induce_barrier(feat_val, evidence="hydration")
                     elif role == "walkable":
-                        self.walkable_features.add(feat_val)
+                        self.induce_walkable(feat_val, evidence="hydration")
                     elif role == "cargo":
-                        self.cargo_features.add(feat_val)
+                        self.induce_cargo(feat_val, evidence="hydration")
                     elif role == "receptacle":
-                        self.receptacle_features.add(feat_val)
+                        self.induce_receptacle(feat_val, evidence="hydration")
                     elif role == "actuator":
-                        self.actuator_features.add(feat_val)
+                        self.induce_actuator(feat_val, evidence="hydration")
 
                 if "telic_goal_type" in props:
                     self.telic_goal_type = str(props["telic_goal_type"])
@@ -849,12 +1238,12 @@ class HCIRSymbolicWorldTheory:
         self._walkable_eval_cache.clear()
 
         # Remove conflicting candidate goals that are confirmed walkable or barriers
-        conflicts = (self.candidate_goal_features & self.walkable_features) | (
-            self.candidate_goal_features & self.barrier_features
+        conflicts = (self._candidate_goal_features & self._walkable_features) | (
+            self._candidate_goal_features & self._barrier_features
         )
         for c in conflicts:
-            if c not in self.goal_features:
-                self.candidate_goal_features.discard(c)
+            if c not in self._goal_features:
+                self._candidate_goal_features.discard(c)
                 pruned += 1
 
         return pruned
@@ -868,12 +1257,16 @@ class HCIRSymbolicWorldTheory:
         self._walkable_eval_cache.clear()
         self.cargo_predicates.clear()
         self.receptacle_predicates.clear()
-        self.goal_features.clear()
-        self.candidate_goal_features.clear()
-        self.barrier_features.clear()
-        self.walkable_features.clear()
-        self.cargo_features.clear()
-        self.receptacle_features.clear()
+        self.actuator_predicates.clear()
+        self._goal_features.clear()
+        self._candidate_goal_features.clear()
+        self._barrier_features.clear()
+        self._walkable_features.clear()
+        self._cargo_features.clear()
+        self._receptacle_features.clear()
+        self._actuator_features.clear()
+        self._avatar_features.clear()
+        self._feature_evidence.clear()
         self.spelke_axioms.clear()
         self.telic_goal_type = ""
         self.telic_target_feature = None

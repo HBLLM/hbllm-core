@@ -94,8 +94,8 @@ async def test_offline_idle_consolidation_execution(tmp_path: Path) -> None:
     assert runtime is not None
 
     # Seed world theory with candidate features
-    system.engine.symbolic_theory.goal_features.add(2)
-    system.engine.symbolic_theory.walkable_features.add(0)
+    system.engine.symbolic_theory.induce_goal(2, evidence="terminal_reward")
+    system.engine.symbolic_theory.induce_walkable(0, evidence="traversal")
 
     # Execute consolidation directly
     tx = await runtime.run_offline_consolidation()
