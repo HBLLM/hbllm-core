@@ -1,4 +1,4 @@
-VENV := venv
+VENV ?= $(shell if [ -d ".venv" ]; then echo ".venv"; else echo "venv"; fi)
 PYTHON := $(VENV)/bin/python
 PIP := $(PYTHON) -m pip
 PYTEST := $(PYTHON) -m pytest

@@ -57,17 +57,19 @@ class CognitiveSystem:
 
     def process_dialogue(self, dialogue: Any, speaker_id: str = "user") -> Any:
         """Processes a natural language dialogue command or request through the grounded cognitive bridge."""
-        if self.bridge is not None and hasattr(self.bridge, "process_dialogue"):
+        if self.bridge is not None:
             return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
         from hbllm.hcir.compiler import HCIRCompiler
+        from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
 
         compiler = HCIRCompiler()
-        text = (
-            str(dialogue.metadata.get("text", ""))
-            if hasattr(dialogue, "metadata")
-            else str(dialogue)
-        )
-        return compiler.interpret_dialogue(text, speaker_id=speaker_id)
+        if isinstance(dialogue, ObservationEnvelope):
+            text = str(dialogue.metadata.get("text", ""))
+            speaker = str(dialogue.metadata.get("speaker_id", speaker_id))
+        else:
+            text = str(dialogue)
+            speaker = speaker_id
+        return compiler.interpret_dialogue(text, speaker_id=speaker)
 
 
 def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> CognitiveSystem:
