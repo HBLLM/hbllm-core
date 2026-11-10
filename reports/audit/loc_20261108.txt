@@ -1,0 +1,50 @@
+LOC Audit Report — 2026-11-08 (WP5-D Progress)
+===================================================
+
+Initial Baseline (2026-11-08 Audit):
+- hbllm total LOC: ≈321,365
+- hbllm/hcir/world total LOC: ≈67,582
+
+Current Post-Retirement Snapshot:
+- hbllm total LOC: 314,957
+- hbllm/hcir/world total LOC: 66,259
+- hbllm/hcir/world/experimental LOC: 9,583
+- hbllm/hcir/world (excluding experimental): 56,676
+
+Modules Retired / Cleaned Up:
+- Retired 7 zero-test experimental faculties:
+  * claustrum_salience_conductor.py
+  * habenula_striatum_opponency.py
+  * inferotemporal_shape_hasher.py
+  * insula_allostasis.py
+  * parietal_foveated_attention.py
+  * parietal_potential_field.py
+  * subthalamic_drift_diffusion.py
+- Retired duplicate brain/concepts/ stack:
+  * concept_consolidator.py
+  * concept_formation_loop.py
+  * concept_hypothesis_generator.py
+  * feature_accumulator.py
+  * canonicalized to hbllm.hcir.grounding.concepts
+- Retired duplicate brain/causality/ stack:
+  * causal_graph.py
+  * causal_memory.py
+  * causal_model_builder.py
+  * canonicalized to hbllm.hcir.world.cortex_causal (HCIRSymbolicWorldTheory)
+- Retired duplicate brain/epistemics/ modules:
+  * belief_manager.py
+  * calibration.py
+  * contradiction_engine.py
+  * epistemic_loop.py
+  * evidence_evaluator.py
+  * integration.py
+  * canonicalized to hbllm.hcir.grounding.epistemics
+- Retired duplicate control stack:
+  * brain/control/executive_controller.py
+  * canonicalized to hbllm.hcir.kernel.executive_controller (KernelExecutiveController)
+- Retired duplicate reasoning stack:
+  * brain/reasoning/concept_formation.py
+
+Architecture Verification:
+- tests/unit/architecture/test_no_duplicate_faculties.py: PASSED (6/6 tests green)
+
