@@ -62,9 +62,12 @@ DECISION_RULE = (
 
 
 def _mk_engine(seed: int = 0):
-    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-    return AutonomousEpistemicEngine(enable_logging=False, seed=seed)
+    sys = build_cognitive_system(
+        CognitiveSystemConfig(world_id=f"ablation_{seed}", enable_logging=False, seed=seed)
+    )
+    return sys.engine
 
 
 def faculty_inventory(engine) -> dict[str, str]:

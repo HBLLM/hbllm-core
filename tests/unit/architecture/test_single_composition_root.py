@@ -185,3 +185,37 @@ def test_consolidation_protocols_conformance():
         # Episodic cortex implements Replayable
         if system.engine.episodic_cortex is not None:
             assert isinstance(system.engine.episodic_cortex, Replayable)
+
+
+def test_autonomous_epistemic_engine_single_production_instantiation():
+    """Verify that AutonomousEpistemicEngine( appears in exactly one non-test production file (bootstrap.py)."""
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parents[3]
+    res = subprocess.run(
+        [
+            "git",
+            "grep",
+            "-n",
+            "AutonomousEpistemicEngine(",
+            "--",
+            "hbllm/",
+            "plugins/",
+            "benchmarks/",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    lines = [
+        line
+        for line in res.stdout.splitlines()
+        if line.strip() and "/tests/" not in line and not line.startswith("tests/")
+    ]
+    assert len(lines) == 1, (
+        f"Expected exactly 1 production construction site, found {len(lines)}:\n" + "\n".join(lines)
+    )
+    assert "hbllm/runtime/bootstrap.py" in lines[0], (
+        f"Expected bootstrap.py as the single root, got {lines[0]}"
+    )

@@ -3,18 +3,13 @@
 > **Primary Directive for AI Agents:**  
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
-> [!NOTE]
-> **Current project phase: Phase 2 — Cognitive OS Evolution (Entered 2026-11-09).**  
-> All 7 Phase 1 exit criteria in `reports/audit/2026-11-09_post_implementation_review.md` §7 have been verified 100% GREEN:
-> 1. Real closed-loop procedural evaluation harness in `benchmarks/envs/` with baselines.
-> 2. Zero-failure green test suite and rebuilt Rust substrate.
-> 3. Verified architecture gates (`test_single_composition_root.py`, `test_no_direct_sqlite.py`, `test_no_duplicate_faculties.py`, `test_rust_abi_version.py`).
-> 4. LOC target achieved: codebase reduced from ~322k to **249,018 LOC** (≤ 250,000 target met).
-> 5. Two-process persistence demo verified with `Hydrated > 0` nodes.
-> 6. Zero `hasattr(` / zero polling loops in runtime paths.
-> 7. Re-generated perception comparison report with formal decision.
+> [!WARNING]
+> **Current project phase: Phase 1 — Scope Freeze, final gate (re-verified 2026-11-10).**  
+> Phase 1 structural work is done and independently verified: LOC 249,249 (≤250k), 1687 tests pass / 1 fails, single composition root with unified tiered workspace, persistence on by default, event-driven runtime, closed-loop procedural harness in `benchmarks/envs/` whose oracle/random/stub baselines discriminate correctly.
 >
-> In Phase 2, adhere strictly to all architectural invariants below: single composition root, event-driven reactive wakeups, tiered memory hierarchy, and task-agnostic cognitive reasoning. Every new capability must be measured against the closed-loop evaluation harness.
+> **The freeze is NOT lifted.** The harness produced the project's first honest generality measurement and it is poor: **GridNav 0/3, SymbolicRules 2/3** (oracle 3/3), and `reports/heldout/` is empty because held-out was never run. Read `reports/audit/2026-11-09_post_implementation_review.md` **§7b and §9** before any change. Remaining gate items: fix `benchmarks/suites/runner.py` to unpack `(action, meta)` from `engine.step()`; seed the random baseline; run `hbllm bench heldout` once and commit the JSON whatever the score; fix `test_tiered_workspace_transaction_mirroring_and_promotion`; eliminate the 9 bare `AutonomousEpistemicEngine(` constructions outside `bootstrap.py`; delete the placebo `benchmarks/suites/{grid,symbolic,continuous}/`.
+>
+> **Phase 2 definition (when unlocked):** the held-out score is the compass. A change is admissible only with before/after held-out JSON attached. Do not add modules or extend gap-analysis G-items; first diagnose why the engine fails procedurally generated navigation (`ReplayDebugger` on `GridNav seed 0`), then re-run faculty ablation on the real harness and delete what does not move the score. A benchmark that cannot fail is not a benchmark; a score of zero is a result, not a pass.
 
 ---
 

@@ -17,8 +17,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.kernel.transaction_manager import TransactionManager
-from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
@@ -89,13 +87,11 @@ class BenchmarkScorecard:
 
 def _make_engine() -> tuple[AutonomousEpistemicEngine, CorticalGroundingBridge]:
     """Factory: creates a fresh engine with grounding bridge attached."""
-    ws = HCIRWorkspaceState()
-    tm = TransactionManager(ws)
-    eng = AutonomousEpistemicEngine()
-    eng.workspace = ws
-    eng.transaction_manager = tm
-    bridge = eng.attach_grounding_bridge()
-    return eng, bridge
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    sys = build_cognitive_system(CognitiveSystemConfig(world_id="sge_bench", enable_logging=False))
+    assert sys.bridge is not None
+    return sys.engine, sys.bridge
 
 
 class SGEBenchmarkRunner:

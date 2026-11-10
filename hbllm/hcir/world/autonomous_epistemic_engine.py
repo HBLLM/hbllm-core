@@ -1774,34 +1774,46 @@ class AutonomousEpistemicEngine:
         self.active_task_frame = frame
 
         # Ensure active task frame has a TransactionManager and bind it to engine
-        if (
-            self.services is not None
-            and getattr(self.services, "transaction_manager", None) is not None
-        ):
-            self.transaction_manager = self.services.transaction_manager
-            frame.workspace.attach_transaction_manager(
-                self.services.transaction_manager, replace=True
-            )
-        elif frame.workspace.transaction_manager is not None:
-            self.transaction_manager = frame.workspace.transaction_manager
-        elif self.services is not None:
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+        verifier = (
+            getattr(self.services, "constitutional_verifier", None)
+            if self.services is not None
+            else None
+        )
+        stages = [verifier] if verifier is not None else None
+        event_bus = (
+            getattr(self.services, "event_bus", None)
+            if self.services is not None
+            else getattr(self, "event_bus", None)
+        )
 
-            verifier = getattr(self.services, "constitutional_verifier", None)
-            stages = [verifier] if verifier is not None else None
+        from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+        # A task frame's working scratch workspace needs a TM bound to that exact frame.workspace
+        if (
+            self.transaction_manager is not None
+            and getattr(self.transaction_manager, "workspace", None) is frame.workspace
+        ):
+            tm = self.transaction_manager
+        elif (
+            frame.workspace.transaction_manager is not None
+            and getattr(frame.workspace.transaction_manager, "workspace", None) is frame.workspace
+        ):
+            tm = frame.workspace.transaction_manager
+        else:
             tm = TransactionManager(
                 workspace=frame.workspace,
                 verification_stages=stages,
-                event_bus=self.services.event_bus,
+                event_bus=event_bus,
             )
             frame.workspace.attach_transaction_manager(tm, replace=True)
-            self.transaction_manager = tm
-        else:
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
 
-            tm = TransactionManager(workspace=frame.workspace)
-            frame.workspace.attach_transaction_manager(tm, replace=True)
-            self.transaction_manager = tm
+        self.transaction_manager = tm
+        if (
+            self.services is not None
+            and getattr(self.services, "workspace", None) is not frame.workspace
+        ):
+            self.services.workspace = frame.workspace
+            self.services.transaction_manager = tm
 
         logger.info(
             "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",

@@ -51,6 +51,8 @@ class EvaluationReport:
     generality_score: float = 0.0
     mean_p50_latency_ms: float = 0.0
     mean_p95_latency_ms: float = 0.0
+    baselines: dict[str, Any] = field(default_factory=dict)
+    env_hash: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -204,7 +206,32 @@ class EvaluationProtocol:
 
         return result
 
-    def compute_report(self, split: str, tasks: list[TaskResult]) -> EvaluationReport:
+    @staticmethod
+    def _compute_env_hash() -> str:
+        """Deterministic sha256 hash of benchmark environment definitions and suites."""
+        hasher = hashlib.sha256()
+        envs_dir = Path("benchmarks/envs")
+        if envs_dir.exists():
+            for p in sorted(envs_dir.glob("*.py")):
+                try:
+                    hasher.update(p.name.encode("utf-8"))
+                    hasher.update(p.read_bytes())
+                except Exception:
+                    pass
+        heldout_yaml = Path("benchmarks/suites/heldout.yaml")
+        if heldout_yaml.exists():
+            try:
+                hasher.update(heldout_yaml.read_bytes())
+            except Exception:
+                pass
+        return hasher.hexdigest()[:16]
+
+    def compute_report(
+        self,
+        split: str,
+        tasks: list[TaskResult],
+        baselines: dict[str, Any] | None = None,
+    ) -> EvaluationReport:
         """Aggregate per-task results into family scores and generality score."""
         families: dict[str, list[TaskResult]] = {}
         for t in tasks:
@@ -246,6 +273,8 @@ class EvaluationProtocol:
             generality_score=generality_score,
             mean_p50_latency_ms=mean_p50,
             mean_p95_latency_ms=mean_p95,
+            baselines=baselines or {},
+            env_hash=self._compute_env_hash(),
         )
 
         # Write output file

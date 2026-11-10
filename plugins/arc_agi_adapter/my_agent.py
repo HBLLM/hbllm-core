@@ -159,7 +159,6 @@ except ImportError:
 logging.getLogger("hbllm").setLevel(logging.ERROR)
 logging.getLogger("arc_agi").setLevel(logging.ERROR)
 
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_perception import SensoryThalamus
 
 try:
@@ -574,11 +573,17 @@ class MyAgent(Agent):
                 self.level_action_counter = 0
                 self._stagnation_grid_hash = None
                 self._stagnation_steps = 0
-                self.internal_engine = AutonomousEpistemicEngine(
-                    instructions=self.instructions, seed=self._seed
+                from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+                sys = build_cognitive_system(
+                    CognitiveSystemConfig(
+                        world_id=f"arc_{base_gid}",
+                        instructions=self.instructions,
+                        seed=self._seed,
+                        enable_grounding=self.enable_grounding,
+                    )
                 )
-                if self.enable_grounding:
-                    self.internal_engine.attach_grounding_bridge()
+                self.internal_engine = sys.engine
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 

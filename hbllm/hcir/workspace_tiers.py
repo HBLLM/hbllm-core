@@ -422,14 +422,22 @@ class TieredWorkspace:
         """Canonical working workspace state. Returns active task frame workspace or default working frame workspace."""
         active = self.active_task_frames
         if active:
-            return active[0].workspace
+            return active[-1].workspace
         if self._default_working_frame is None or not self._default_working_frame.is_active:
             self._default_working_frame = self.create_task_frame("default_working_frame")
         return self._default_working_frame.workspace
 
     def create_task_frame(self, goal_id: str) -> TaskFrame:
         """Create a new task frame in the working tier."""
-        return self.working.create_frame(goal_id)
+        frame = self.working.create_frame(goal_id)
+        if (
+            self._default_working_frame is not None
+            and self._default_working_frame.is_active
+            and self._default_working_frame.frame_id != frame.frame_id
+            and self._default_working_frame.goal_id == "default_working_frame"
+        ):
+            self._default_working_frame.close(reason="superseded")
+        return frame
 
     def close_task_frame(self, frame_id: str, reason: str = "completed") -> bool:
         """Close a task frame in the working tier."""

@@ -54,9 +54,11 @@ def run_closed_loop_episode(
                 perception_mode=perception_mode,
             )
             system = build_cognitive_system(config)
-            return _run_loop(env, obs, system.engine, baseline, max_budget, latencies, errors)
+            return _run_loop(
+                env, obs, system.engine, baseline, max_budget, latencies, errors, seed=seed
+            )
 
-    return _run_loop(env, obs, None, baseline, max_budget, latencies, errors)
+    return _run_loop(env, obs, None, baseline, max_budget, latencies, errors, seed=seed)
 
 
 def _run_loop(
@@ -67,9 +69,11 @@ def _run_loop(
     max_budget: int,
     latencies: list[float],
     errors: list[str],
+    seed: int = 0,
 ) -> tuple[bool, int, list[float], list[str]]:
     success = False
     step_count = 0
+    rng = random.Random(seed)
 
     for step in range(max_budget):
         step_count = step + 1
@@ -81,16 +85,17 @@ def _run_loop(
                 # Always emits constant action (e.g. ACTION_UP = 1)
                 action = 1
             elif baseline == "random":
-                # Select random action from available actions
+                # Select random action from available actions (seeded for determinism)
                 avail = getattr(obs, "available_actions", [1, 2, 3, 4])
-                action = random.choice(list(avail))
+                action = rng.choice(list(avail))
             elif baseline == "oracle":
                 # Compute optimal action from ground-truth state
                 action = env.get_oracle_action()
             else:
-                # AutonomousEpistemicEngine step
+                # AutonomousEpistemicEngine step: unpack (action, metadata)
                 assert engine is not None
-                action = engine.step(obs)
+                raw_action = engine.step(obs)
+                action = raw_action[0] if isinstance(raw_action, tuple) else raw_action
         except Exception as e:
             errors.append(f"Action selection error at step {step_count}: {e}")
             break
@@ -200,7 +205,83 @@ def run_suite(
         )
         tasks.append(t_res)
 
-    report = protocol.compute_report(split=split, tasks=tasks)
+    baselines_dict: dict[str, Any] = {}
+    if baseline == "system":
+        print("\n--- Evaluating Reference Baselines (random, oracle, no_grounding) ---")
+        for b_name in ("random", "oracle", "no_grounding"):
+            b_tasks: list[TaskResult] = []
+            for task_def in manifest.get("tasks", []):
+                t_id = task_def["id"]
+                t_fam = task_def["family"]
+                t_cls = _load_env_class(task_def["env_class"])
+                t_budget = task_def.get("max_budget", 100)
+                t_seeds = task_def.get("seeds", [0])
+                if b_name == "no_grounding":
+                    t_seeds = t_seeds[:5]
+
+                b_succs: list[bool] = []
+                b_steps: list[int] = []
+                b_lats: list[float] = []
+                b_errs: list[str] = []
+                for s in t_seeds:
+                    env_i = t_cls(max_steps=t_budget)
+                    s_ok, s_st, s_lt, s_er = run_closed_loop_episode(
+                        env=env_i,
+                        seed=s,
+                        max_budget=t_budget,
+                        baseline=b_name,
+                        perception_mode=perception_mode,
+                    )
+                    b_succs.append(s_ok)
+                    b_steps.append(s_st)
+                    b_lats.extend(s_lt)
+                    b_errs.extend(s_er)
+
+                s_rate = sum(1 for x in b_succs if x) / max(1, len(b_succs))
+                m_steps = int(sum(b_steps) / max(1, len(b_steps)))
+                b_task_res = TaskResult(
+                    task_id=f"{t_id}_{b_name}",
+                    family=t_fam,
+                    split=split,
+                    steps=m_steps,
+                    max_budget=t_budget,
+                    success_at_budget=(s_rate >= 0.5),
+                    steps_to_first_success=m_steps if s_rate >= 0.5 else None,
+                    p50_latency_ms=round(sorted(b_lats)[len(b_lats) // 2], 2) if b_lats else 0.0,
+                    p95_latency_ms=(
+                        round(sorted(b_lats)[min(len(b_lats) - 1, int(len(b_lats) * 0.95))], 2)
+                        if b_lats
+                        else 0.0
+                    ),
+                )
+                b_tasks.append(b_task_res)
+
+            b_fams: dict[str, list[TaskResult]] = {}
+            for bt in b_tasks:
+                b_fams.setdefault(bt.family, []).append(bt)
+            b_fam_scores: dict[str, float] = {}
+            for f_name, f_list in b_fams.items():
+                solved = [x for x in f_list if x.success_at_budget]
+                if not solved:
+                    b_fam_scores[f_name] = 0.0
+                else:
+                    sr = len(solved) / len(f_list)
+                    eff = sum(
+                        max(0.0, 1.0 - (x.steps / max(1, x.max_budget))) for x in solved
+                    ) / len(solved)
+                    b_fam_scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
+            b_gen = round(sum(b_fam_scores.values()) / max(1, len(b_fam_scores)), 4)
+            tot_solved = sum(1 for bt in b_tasks if bt.success_at_budget)
+            baselines_dict[b_name] = {
+                "generality_score": b_gen,
+                "family_scores": b_fam_scores,
+                "solve_rate": round(tot_solved / max(1, len(b_tasks)), 4),
+            }
+            print(
+                f"  Baseline [{b_name}]: generality={b_gen:.4f}, solve_rate={tot_solved}/{len(b_tasks)}"
+            )
+
+    report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
 
     print("\n=== Benchmark Results Summary ===")
     print(f"Split: {report.split.upper()} | Baseline: {baseline}")
