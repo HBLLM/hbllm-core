@@ -74,12 +74,14 @@ def _run_loop(
     success = False
     step_count = 0
     rng = random.Random(seed)
+    step_journal: list[dict[str, Any]] = []
 
     for step in range(max_budget):
         step_count = step + 1
         t0 = time.perf_counter()
 
         action = None
+        meta = None
         try:
             if baseline == "stub_agent":
                 # Always emits constant action (e.g. ACTION_UP = 1)
@@ -95,11 +97,15 @@ def _run_loop(
                 # AutonomousEpistemicEngine step: unpack (action, metadata)
                 assert engine is not None
                 raw_action = engine.step(obs)
-                action = raw_action[0] if isinstance(raw_action, tuple) else raw_action
+                if isinstance(raw_action, tuple) and len(raw_action) > 1:
+                    action, meta = raw_action[0], raw_action[1]
+                else:
+                    action = raw_action
         except Exception as e:
             errors.append(f"Action selection error at step {step_count}: {e}")
             break
 
+        step_journal.append({"step": step_count, "action": action, "meta": meta})
         latencies.append((time.perf_counter() - t0) * 1000.0)
 
         # Environment closed-loop transition

@@ -5512,8 +5512,49 @@ class AutonomousEpistemicEngine:
         result = self.cortical_pipeline.run(ctx)
         self._last_decision_branch = result.signals.get("branch")
         if result.rejected:
-            return None, {"pipeline_rejected": True, "reason": result.rejection_reason}
-        return result.final_action
+            return None, {
+                "pipeline_rejected": True,
+                "reason": result.rejection_reason,
+                "goal_target": None,
+                "goal_source": "none",
+                "subgoal_stack": [],
+                "plan": None,
+                "plan_source": "arbitration",
+                "candidates": {},
+                "chosen_action": None,
+                "veto_reasons": [result.rejection_reason or "rejected"],
+                "phase": str(self._phase),
+                "branch": "rejected",
+                "action_data": None,
+            }
+
+        act = (
+            result.final_action[0]
+            if isinstance(result.final_action, (tuple, list))
+            else result.final_action
+        )
+        meta = (
+            result.final_action[1]
+            if isinstance(result.final_action, (tuple, list))
+            and len(result.final_action) > 1
+            and isinstance(result.final_action[1], dict)
+            else dict(result.signals.get("meta", {}))
+        )
+        meta.setdefault("goal_target", None)
+        meta.setdefault("goal_source", "none")
+        meta.setdefault("subgoal_stack", [])
+        meta.setdefault("plan", None)
+        meta.setdefault("plan_source", "arbitration")
+        meta.setdefault(
+            "candidates",
+            {int(a): (1.0 if a == act else 0.0) for a in available_actions},
+        )
+        meta.setdefault("chosen_action", act)
+        meta.setdefault("veto_reasons", [])
+        meta.setdefault("phase", str(self._phase))
+        meta.setdefault("branch", result.signals.get("branch", "unknown"))
+        meta.setdefault("action_data", None)
+        return act, meta
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export master epistemic engine state as a declarative causal predicate."""

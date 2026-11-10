@@ -157,6 +157,9 @@ def mind_step(
     obs: Path = typer.Option(..., "--obs", help="Path to JSON file with EmbodiedObservation"),
     world_id: str = typer.Option("default", "--world-id", help="World/Context identifier"),
     seed: int | None = typer.Option(None, "--seed", help="Random seed for reproducibility"),
+    explain: bool = typer.Option(
+        False, "--explain", help="Surface decision provenance explanation"
+    ),
 ) -> None:
     """Execute a single deterministic active inference decide() step from an observation file."""
     import numpy as np
@@ -187,7 +190,19 @@ def mind_step(
     system = build_cognitive_system(CognitiveSystemConfig(world_id=world_id, seed=seed))
     action, meta = system.engine.step(embodied_obs)
     typer.echo(f"Action: {action}")
-    if meta:
+    if explain and meta:
+        typer.echo("=== Decision Provenance ===")
+        typer.echo(f"  Chosen Action: {action}")
+        typer.echo(f"  Phase:         {meta.get('phase')}")
+        typer.echo(
+            f"  Goal Target:   {meta.get('goal_target')} (source: {meta.get('goal_source')})"
+        )
+        typer.echo(f"  Plan Source:   {meta.get('plan_source')} (branch: {meta.get('branch')})")
+        typer.echo(f"  Plan:          {meta.get('plan')}")
+        typer.echo(f"  Subgoals:      {meta.get('subgoal_stack')}")
+        typer.echo(f"  Veto Reasons:  {meta.get('veto_reasons')}")
+        typer.echo(f"  Candidates:    {meta.get('candidates')}")
+    elif meta:
         typer.echo(f"Metadata: {json.dumps(meta, default=str)}")
 
 

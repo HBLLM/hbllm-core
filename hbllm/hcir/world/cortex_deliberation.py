@@ -27,7 +27,7 @@ import math
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -1433,7 +1433,9 @@ class PrefrontalDeliberationEngine:
                 m_act, m_data = macro_step
                 if m_act in available_actions:
                     if _is_macro_step_safe(macro_plan, m_act, m_data):
-                        return ActionProposal(m_act, m_data, branch="macro_option", grid=curr_grid)
+                        return self._build_proposal(
+                            view, m_act, m_data, branch="macro_option", grid=curr_grid
+                        )
                     else:
                         macro_plan.clear()
 
@@ -1485,7 +1487,9 @@ class PrefrontalDeliberationEngine:
                 if first_step is not None:
                     m_act, m_data = first_step
                     if m_act in available_actions:
-                        return ActionProposal(m_act, m_data, branch="macro_recall", grid=curr_grid)
+                        return self._build_proposal(
+                            view, m_act, m_data, branch="macro_recall", grid=curr_grid
+                        )
 
         # ── Relational Subgoal Macro Recall (Phase E) ──────────────────────
         # When exact concrete macro does not match, query coordinate-invariant
@@ -1534,7 +1538,8 @@ class PrefrontalDeliberationEngine:
                         len(rel_path),
                         rel_macro.macro_id,
                     )
-                    return ActionProposal(
+                    return self._build_proposal(
+                        view,
                         next_step.action,
                         next_step.action_data,
                         branch="relational_macro",
@@ -1577,7 +1582,8 @@ class PrefrontalDeliberationEngine:
                             )
                             if pred_pos is None and view.mental_plan:
                                 pred_pos = view.mental_plan[0].predicted_avatar_pos
-                            return ActionProposal(
+                            return self._build_proposal(
+                                view,
                                 m_act,
                                 m_data,
                                 branch="synthesized_schema",
@@ -1820,8 +1826,8 @@ class PrefrontalDeliberationEngine:
                 and a not in undo_acts
             ]
             if non_disp:
-                return ActionProposal(
-                    non_disp[0], None, branch="non_displacement_fallback", grid=curr_grid
+                return self._build_proposal(
+                    view, non_disp[0], None, branch="non_displacement_fallback", grid=curr_grid
                 )
 
         # Faculty: Brodmann Area 10 (aPFC) Hierarchical Subgoal Stack & Cognitive Branching
@@ -1835,6 +1841,7 @@ class PrefrontalDeliberationEngine:
         chosen_action: Any
         chosen_data: dict[str, Any] | None = None
         predicted_pos: tuple[int, int] | None = None
+        branch: str = "default_arbitration"
 
         # 0. ACC Forced Perturbation: break limit-cycle oscillation immediately
         if forced_acc_perturbation is not None:
@@ -1845,6 +1852,7 @@ class PrefrontalDeliberationEngine:
             view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
             chosen_action = forced_acc_perturbation
             chosen_data = None
+            branch = "acc_perturbation"
 
         # 1. Prefrontal Affordance Panel & Optical Symmetry Gating
         elif (
@@ -1853,6 +1861,7 @@ class PrefrontalDeliberationEngine:
             )
         ) is not None and view.inhibited_actions.get(affordance_choice[0], 0) == 0:
             chosen_action, chosen_data = affordance_choice
+            branch = "affordance_choice"
 
         # 2. Check active mental plan during EXPLOITATION or MENTAL_SIMULATION phase
         elif (
@@ -1878,7 +1887,8 @@ class PrefrontalDeliberationEngine:
                     chosen_action, chosen_data = self.ensure_effector_grounded(
                         view, curr_grid, available_actions, chosen_action, chosen_data
                     )
-                    return ActionProposal(
+                    return self._build_proposal(
+                        view,
                         chosen_action,
                         chosen_data,
                         branch="macro_plan",
@@ -1892,8 +1902,12 @@ class PrefrontalDeliberationEngine:
                     chosen_action, chosen_data = self.ensure_effector_grounded(
                         view, curr_grid, available_actions, chosen_action, chosen_data
                     )
-                    return ActionProposal(
-                        chosen_action, chosen_data, branch="epistemic_probe", grid=curr_grid
+                    return self._build_proposal(
+                        view,
+                        chosen_action,
+                        chosen_data,
+                        branch="epistemic_probe",
+                        grid=curr_grid,
                     )
             else:
                 next_step = view.mental_plan.popleft()
@@ -1914,6 +1928,7 @@ class PrefrontalDeliberationEngine:
                 chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
                     view, curr_grid, available_actions, next_step, wait_steps
                 )
+                branch = "temporal_pacing"
             elif not plan_safe:
                 view.state.consecutive_pacing_steps = 0
                 view.mental_plan.clear()
@@ -1930,6 +1945,7 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+                    branch = "macro_plan"
                 else:
                     danger_cells = (
                         {next_step.predicted_avatar_pos}
@@ -1953,10 +1969,12 @@ class PrefrontalDeliberationEngine:
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
                         predicted_pos = next_step.predicted_avatar_pos
+                        branch = "mental_simulation"
                     else:
                         chosen_action, chosen_data = view.plan_epistemic_probe(
                             curr_grid, available_actions
                         )
+                        branch = "epistemic_probe"
             elif (
                 next_step.action in available_actions
                 and (has_temporal or view.inhibited_actions.get(next_step.action, 0) == 0)
@@ -1968,6 +1986,7 @@ class PrefrontalDeliberationEngine:
                 chosen_action = next_step.action
                 chosen_data = next_step.action_data
                 predicted_pos = next_step.predicted_avatar_pos
+                branch = "mental_plan"
 
             else:
                 view.mental_plan.clear()
@@ -1982,10 +2001,12 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+                    branch = "macro_plan"
                 else:
                     chosen_action, chosen_data = view.plan_epistemic_probe(
                         curr_grid, available_actions
                     )
+                    branch = "epistemic_probe"
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
@@ -2010,6 +2031,7 @@ class PrefrontalDeliberationEngine:
                         chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
                             view, curr_grid, available_actions, next_step, wait_steps
                         )
+                        branch = "temporal_pacing"
                     elif (
                         plan_safe
                         and next_step.action in available_actions
@@ -2021,12 +2043,14 @@ class PrefrontalDeliberationEngine:
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
                         predicted_pos = next_step.predicted_avatar_pos
+                        branch = "mental_simulation"
                     else:
                         view.mental_plan.clear()
                         view.state.phase = EpistemicPhase.REPLANNING
                         chosen_action, chosen_data = view.plan_epistemic_probe(
                             curr_grid, available_actions
                         )
+                        branch = "epistemic_probe"
 
                 else:
                     view.consecutive_simulation_failures += 1
@@ -2091,6 +2115,7 @@ class PrefrontalDeliberationEngine:
                                 chosen_action = next_step.action
                                 chosen_data = next_step.action_data
                                 predicted_pos = next_step.predicted_avatar_pos
+                                branch = "causal_path"
                                 logger.info(
                                     "Phase B: CausalTheoryPlanner produced %d-step path",
                                     len(causal_path),
@@ -2118,6 +2143,7 @@ class PrefrontalDeliberationEngine:
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
+                    branch = "macro_plan"
                     if not view.mental_plan:
                         view.state.phase = EpistemicPhase.REPLANNING
                         if view.object_planner.active_target_object_id:
@@ -2133,6 +2159,7 @@ class PrefrontalDeliberationEngine:
                     chosen_action, chosen_data = view.plan_epistemic_probe(
                         curr_grid, available_actions
                     )
+                    branch = "epistemic_probe"
 
         # Effector Grounding Invariant
         chosen_action, chosen_data = self.ensure_effector_grounded(
@@ -2153,6 +2180,7 @@ class PrefrontalDeliberationEngine:
                 )
                 if actuation_target is not None:
                     chosen_action = eff_act
+                    branch = "point_actuation"
                     aff = view.action_affordances.get(eff_act)
                     # Snap the exploratory actuation onto the declared valid-target
                     # lattice when the affordance enumerates one: off-lattice
@@ -2190,10 +2218,11 @@ class PrefrontalDeliberationEngine:
                         else:
                             chosen_data = view.ground_effector_action(curr_grid, eff_act)
 
-        return ActionProposal(
+        return self._build_proposal(
+            view,
             chosen_action,
             chosen_data,
-            branch="default_arbitration",
+            branch=branch,
             predicted_pos=predicted_pos,
             grid=curr_grid,
         )
@@ -2242,6 +2271,161 @@ class PrefrontalDeliberationEngine:
                     )
                     chosen_data = None
         return chosen_action, chosen_data
+
+    @classmethod
+    def _build_proposal(
+        cls,
+        view: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        branch: str,
+        predicted_pos: tuple[int, int] | None = None,
+        grid: np.ndarray | None = None,
+        candidates: dict[int, float] | None = None,
+        veto_reasons: list[str] | None = None,
+    ) -> ActionProposal:
+        # Determine goal target and goal source
+        goal_target: tuple[int, int] | None = None
+        goal_source: str = "none"
+
+        # Check active mental plan target first
+        mental_plan = getattr(view, "mental_plan", None)
+        if mental_plan:
+            last_step = mental_plan[-1]
+            last_pos = getattr(last_step, "predicted_avatar_pos", None)
+            if last_pos is not None:
+                goal_target = last_pos
+                goal_source = (
+                    "learned_position"
+                    if goal_target in getattr(view, "learned_goal_positions", ())
+                    else "epistemic"
+                )
+
+        # If no target from active plan, check confirmed reward goal features in visible grid
+        if (
+            goal_target is None
+            and grid is not None
+            and hasattr(grid, "shape")
+            and len(grid.shape) >= 2
+        ):
+            theory = getattr(view, "symbolic_theory", None)
+            confirmed_feats = getattr(theory, "goal_features", set())
+            if confirmed_feats:
+                for r in range(grid.shape[0]):
+                    for c in range(grid.shape[1]):
+                        if int(grid[r, c]) in confirmed_feats:
+                            goal_target = (r, c)
+                            goal_source = "reward"
+                            break
+                    if goal_target is not None:
+                        break
+
+        # Check learned goal positions
+        if goal_target is None and getattr(view, "learned_goal_positions", None):
+            av_p = getattr(view, "avatar_pos", None)
+            if av_p is not None:
+                goal_target = min(
+                    view.learned_goal_positions,
+                    key=lambda g: abs(g[0] - av_p[0]) + abs(g[1] - av_p[1]),
+                )
+            else:
+                goal_target = next(iter(view.learned_goal_positions))
+            goal_source = "learned_position"
+
+        # Check subgoal stack
+        if goal_target is None:
+            sg_stack = getattr(view, "subgoal_stack", None)
+            curr_sg = getattr(sg_stack, "current_subgoal", None) if sg_stack else None
+            if curr_sg and getattr(curr_sg, "target_destination", None):
+                goal_target = curr_sg.target_destination
+                goal_source = "epistemic"
+
+        # Subgoal stack representation
+        subgoal_stack: list[Any] = []
+        sg_stack = getattr(view, "subgoal_stack", None)
+        if sg_stack and hasattr(sg_stack, "stack"):
+            subgoal_stack = [getattr(s, "subgoal_id", str(s)) for s in sg_stack.stack]
+
+        # Plan trajectory representation
+        plan: list[tuple[int, int]] | None = None
+        if mental_plan:
+            plan_positions = [
+                s.predicted_avatar_pos
+                for s in mental_plan
+                if getattr(s, "predicted_avatar_pos", None) is not None
+            ]
+            if plan_positions:
+                plan = plan_positions
+
+        # Plan source classification
+        if branch in ("mental_simulation", "mental_plan", "causal_path", "astar"):
+            plan_source = "astar"
+        elif branch in (
+            "macro_option",
+            "macro_recall",
+            "relational_macro",
+            "synthesized_schema",
+            "macro_plan",
+        ):
+            plan_source = "macro"
+        elif branch in ("escape", "evasion", "temporal_pacing"):
+            plan_source = "escape"
+        else:
+            plan_source = "arbitration"
+
+        # Candidate action scoring
+        if candidates is None:
+            avail = getattr(view, "available_actions", [1, 2, 3, 4]) or [1, 2, 3, 4]
+            candidates = {int(a): (1.0 if a == action else 0.0) for a in avail}
+
+        # Veto reasons
+        if veto_reasons is None:
+            veto_reasons = []
+            inhibited = getattr(view, "inhibited_actions", {})
+            for act_id, count in inhibited.items():
+                if count > 0:
+                    veto_reasons.append(f"inhibited_action_{act_id}_cooldown_{count}")
+            hab_ior = getattr(getattr(view, "working_memory", None), "habenular_ior", None)
+            if hab_ior and hasattr(hab_ior, "is_action_inhibited"):
+                av_p = getattr(view, "avatar_pos", None)
+                if av_p:
+                    for a in getattr(view, "available_actions", []):
+                        if hab_ior.is_action_inhibited(av_p, a, None):
+                            veto_reasons.append(f"habenula_ior_veto_{a}")
+            stuck = getattr(view, "consecutive_stuck_steps", 0)
+            if stuck > 0:
+                veto_reasons.append(f"consecutive_stuck_steps_{stuck}")
+            cd = getattr(view, "simulation_cooldown", 0)
+            if cd > 0:
+                veto_reasons.append(f"simulation_cooldown_{cd}")
+
+        # Cognitive phase
+        phase_str = str(
+            getattr(getattr(view, "state", view), "phase", getattr(view, "phase", "unknown"))
+        )
+
+        meta = {
+            "goal_target": goal_target,
+            "goal_source": goal_source,
+            "subgoal_stack": subgoal_stack,
+            "plan": plan,
+            "plan_source": plan_source,
+            "candidates": candidates,
+            "chosen_action": action,
+            "veto_reasons": veto_reasons,
+            "phase": phase_str,
+            "branch": branch,
+            "action_data": action_data,
+        }
+
+        return ActionProposal(
+            action=action,
+            action_data=action_data,
+            branch=branch,
+            predicted_pos=predicted_pos,
+            grid=grid,
+            meta=meta,
+        )
 
     @classmethod
     def _finalize_step(
@@ -2293,10 +2477,9 @@ class PrefrontalDeliberationEngine:
         ]
 
 
-@dataclass
 @dataclass(frozen=True)
 class ActionProposal:
-    """Deliberation's decision intent — finalised by MotorStage (WP1)."""
+    """Deliberation's decision intent — finalised by MotorStage."""
 
     action: Any
     action_data: Any = None
@@ -2304,6 +2487,7 @@ class ActionProposal:
     predicted_pos: Any = None
     grid: Any = None
     finalized: bool = False
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -2355,11 +2539,16 @@ class DeliberationStage:
                 raise
             finally:
                 self._current_journal = None
+            meta = dict(getattr(proposal, "meta", {}))
             return StageResult(
                 author=self.name,
                 journal=journal,
                 wm_deltas=list(journal.deltas),
-                signals={"_proposal": proposal},
+                signals={
+                    "_proposal": proposal,
+                    "branch": getattr(proposal, "branch", "unknown"),
+                    "meta": meta,
+                },
             )
         act = ctx.signals.get("mental_plan_action")
         if act is None:

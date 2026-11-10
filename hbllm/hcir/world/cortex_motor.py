@@ -2250,10 +2250,13 @@ class MotorStage:
             if proposal is None or not hasattr(proposal, "action"):
                 return StageResult(author=self.name)
             if getattr(proposal, "finalized", False):
+                meta = dict(getattr(proposal, "meta", {}))
+                meta["chosen_action"] = proposal.action
+                meta["action_data"] = proposal.action_data
                 return StageResult(
                     author=self.name,
-                    signals={"branch": proposal.branch},
-                    proposed_action=(proposal.action, proposal.action_data),
+                    signals={"branch": proposal.branch, "meta": meta},
+                    proposed_action=(proposal.action, meta),
                 )
             from hbllm.hcir.world.engine_state import (
                 FacultyWriteJournal,
@@ -2275,11 +2278,14 @@ class MotorStage:
                 raise
             finally:
                 self._current_journal = None
+            meta = dict(getattr(proposal, "meta", {}))
+            meta["chosen_action"] = act
+            meta["action_data"] = data
             return StageResult(
                 author=self.name,
                 journal=journal,
-                signals={"branch": proposal.branch},
-                proposed_action=(act, data),
+                signals={"branch": proposal.branch, "meta": meta},
+                proposed_action=(act, meta),
             )
         proposed_action = ctx.signals.get("proposed_action")
         ops: list[TransactionOperation] = []
@@ -2291,9 +2297,28 @@ class MotorStage:
                 or [1, 2, 3, 4]
             )
             proposed_action = actions[0] if actions else None
+        meta = dict(ctx.signals.get("meta", {}))
+        meta.setdefault("chosen_action", proposed_action)
+        meta.setdefault("goal_target", None)
+        meta.setdefault("goal_source", "none")
+        meta.setdefault("subgoal_stack", [])
+        meta.setdefault("plan", None)
+        meta.setdefault("plan_source", "arbitration")
+        meta.setdefault(
+            "candidates",
+            {
+                int(a): (1.0 if a == proposed_action else 0.0)
+                for a in (actions if proposed_action is not None else [1, 2, 3, 4])
+            },
+        )
+        meta.setdefault("veto_reasons", [])
+        meta.setdefault("phase", "unknown")
+        meta.setdefault("branch", "fallback")
+        meta.setdefault("action_data", None)
+        signals["meta"] = meta
         return StageResult(
             author=self.name,
             operations=ops,
             signals=signals,
-            proposed_action=proposed_action,
+            proposed_action=(proposed_action, meta),
         )
