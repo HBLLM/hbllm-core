@@ -530,6 +530,12 @@ class InductiveHypothesisEngine:
             self.event_log.append(event)
             updated_rules.append(hyp)
 
+        # 3. Solved solution induction: rules active during winning trajectories are confirmed
+        if context.is_won:
+            for h in self.hypotheses.values():
+                if h.positive_support >= 1 and h.counterexamples == 0:
+                    h.status = HypothesisStatus.CONFIRMED
+
         return updated_rules
 
     def get_confirmed_rules(self) -> list[RelationalRuleHypothesis]:
@@ -537,7 +543,15 @@ class InductiveHypothesisEngine:
         return [
             h
             for h in self.hypotheses.values()
-            if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+            if (
+                h.status == HypothesisStatus.CONFIRMED
+                or (
+                    h.positive_support >= 1
+                    and h.counterexamples == 0
+                    and h.rule_type == HypothesisType.REMOTE_MECHANISM
+                )
+            )
+            and h.is_valid
         ]
 
     def get_rule_for_barrier(self, barrier_feat: int) -> RelationalRuleHypothesis | None:
@@ -566,8 +580,17 @@ class InductiveHypothesisEngine:
             pred = hyp.to_causal_predicate()
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
-                if hyp.target_feature is not None:
-                    theory.induce_barrier(hyp.target_feature)
+                if hyp.target_feature is not None and hyp.premise_feature is not None:
+                    theory.induce_conditional_affordance(
+                        feature=hyp.target_feature,
+                        condition=CausalPredicate(
+                            variable="inventory",
+                            operator="contains",
+                            value=hyp.premise_feature,
+                        ),
+                        evidence=f"remote_mech:{hyp.premise_feature}_clears_{hyp.target_feature}",
+                        prerequisite_feature=hyp.premise_feature,
+                    )
                     theory.barrier_predicates.append(
                         CausalPredicate(
                             variable="feature_id",
@@ -643,7 +666,8 @@ class InductiveHypothesisEngine:
             self.hypotheses = {
                 k: h
                 for k, h in self.hypotheses.items()
-                if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+                if (h.status == HypothesisStatus.CONFIRMED or h.positive_support >= 1)
+                and h.is_valid
             }
         else:
             self.hypotheses.clear()

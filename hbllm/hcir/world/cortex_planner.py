@@ -231,6 +231,95 @@ class EpistemicGoalScheduler:
         if confirmed_goals:
             goals = list(confirmed_goals)
 
+        # Causal Prerequisite Subgoal Scheduling via Conditional Affordances (BA10 / OFC)
+        if (
+            goals
+            and avatar_pos is not None
+            and engine.symbolic_theory.conditional_affordances
+            and not engine.subgoal_stack.has_pending_goals
+        ):
+            cond_affs = engine.symbolic_theory.conditional_affordances
+            held_ids = getattr(engine.working_memory, "held_feature_ids", set())
+            unfulfilled = [
+                aff
+                for aff in cond_affs.values()
+                if aff.prerequisite_feature is not None
+                and aff.prerequisite_feature not in held_ids
+                and np.any(curr_grid == aff.feature)
+            ]
+            if unfulfilled:
+                aff_features = {a.feature for a in unfulfilled}
+                primary_target = goals[0]
+                q_decomp: deque[tuple[int, int]] = deque([avatar_pos])
+                visited_decomp: set[tuple[int, int]] = {avatar_pos}
+                parent_decomp: dict[tuple[int, int], tuple[int, int]] = {}
+                reached_target = False
+                while q_decomp:
+                    cp = q_decomp.popleft()
+                    if cp == primary_target:
+                        reached_target = True
+                        break
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = cp[0] + dr, cp[1] + dc
+                        if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited_decomp:
+                            cell_v = int(curr_grid[nr, nc])
+                            if (
+                                cell_v != bg
+                                and engine.symbolic_theory.is_barrier(cell_v)
+                                and cell_v not in aff_features
+                            ):
+                                continue
+                            visited_decomp.add((nr, nc))
+                            parent_decomp[(nr, nc)] = cp
+                            q_decomp.append((nr, nc))
+
+                if reached_target:
+                    curr_track = primary_target
+                    path_to_tgt: list[tuple[int, int]] = []
+                    while curr_track in parent_decomp:
+                        path_to_tgt.append(curr_track)
+                        curr_track = parent_decomp[curr_track]
+                    path_to_tgt.reverse()
+
+                    blocking_aff: Any | None = None
+                    for cell in path_to_tgt:
+                        cv = int(curr_grid[cell[0], cell[1]])
+                        if cv in aff_features:
+                            blocking_aff = next((a for a in unfulfilled if a.feature == cv), None)
+                            break
+
+                    if blocking_aff is not None and blocking_aff.prerequisite_feature is not None:
+                        prereq_feat = blocking_aff.prerequisite_feature
+                        prereq_coords = [
+                            e.grid_pos for e in entities if e.feature_id == prereq_feat
+                        ]
+                        if not prereq_coords:
+                            y_idxs, x_idxs = np.where(curr_grid == prereq_feat)
+                            prereq_coords = [(int(y), int(x)) for y, x in zip(y_idxs, x_idxs)]
+
+                        if prereq_coords:
+                            prereq_coords.sort(
+                                key=lambda c: abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1])
+                            )
+                            best_prereq_pos = prereq_coords[0]
+
+                            engine.schedule_causal_subgoal_chain(
+                                target_destination=primary_target,
+                                target_type=SubgoalType.DELIVER_TO_GOAL,
+                                causal_prerequisites=[
+                                    (
+                                        f"NAVIGATE_TO_{prereq_feat}",
+                                        best_prereq_pos,
+                                        SubgoalType.NAVIGATE_TO,
+                                        prereq_feat,
+                                    )
+                                ],
+                                target_id=f"target_goal_{primary_target[0]}_{primary_target[1]}",
+                            )
+                            if best_prereq_pos in goals:
+                                goals.remove(best_prereq_pos)
+                            goals.insert(0, best_prereq_pos)
+
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
         wm = get_engine_state_attr(engine, "working_memory", None)
         if wm is not None:
@@ -278,11 +367,12 @@ class EpistemicGoalScheduler:
         # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
         if engine.subgoal_stack.has_pending_goals:
             cur_sg = engine.subgoal_stack.current_subgoal
+            held_ids = getattr(engine.working_memory, "held_feature_ids", set())
             if (
                 cur_sg is not None
                 and cur_sg.target_destination != avatar_pos
                 and not engine.subgoal_stack.is_subgoal_satisfied(
-                    cur_sg, set(), avatar_pos=avatar_pos
+                    cur_sg, set(), avatar_pos=avatar_pos, held_features=held_ids
                 )
             ):
                 sg_dest = cur_sg.target_destination
@@ -290,8 +380,19 @@ class EpistemicGoalScheduler:
                     if sg_dest in goals:
                         goals.remove(sg_dest)
                     goals.insert(0, sg_dest)
-            elif cur_sg is not None and cur_sg.target_destination == avatar_pos:
+            elif cur_sg is not None and (
+                cur_sg.target_destination == avatar_pos
+                or engine.subgoal_stack.is_subgoal_satisfied(
+                    cur_sg, set(), avatar_pos=avatar_pos, held_features=held_ids
+                )
+            ):
                 subgoal_to_pop = True
+                if len(engine.subgoal_stack.stack) > 1:
+                    next_sg_dest = engine.subgoal_stack.stack[-2].target_destination
+                    if 0 <= next_sg_dest[0] < H and 0 <= next_sg_dest[1] < W:
+                        if next_sg_dest in goals:
+                            goals.remove(next_sg_dest)
+                        goals.insert(0, next_sg_dest)
 
         # Panel coordinates filter
         panel_coords: set[tuple[int, int]] = set()
@@ -708,10 +809,11 @@ class MentalSimulationPlanner:
                 ):
                     static_barriers.add((r, c))
 
+        agent_state = {"inventory": getattr(engine.working_memory, "held_feature_ids", set())}
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
-                if engine.symbolic_theory.is_barrier(val) or (
+                if engine.symbolic_theory.is_barrier(val, agent_state=agent_state) or (
                     val in engine.hazard_tracker.known_lethal_features
                     and val not in engine.mobile_threat_features
                 ):
@@ -1294,9 +1396,20 @@ class MentalSimulationPlanner:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    if (
-                        (curr_p, act) in engine.failed_transitions
-                        or engine.working_memory.habenular_ior.is_action_inhibited(curr_p, act)
+                    next_is_open = (
+                        0 <= next_p[0] < H
+                        and 0 <= next_p[1] < W
+                        and (
+                            int(curr_grid[next_p[0], next_p[1]]) == bg
+                            or engine.symbolic_theory.is_walkable(
+                                int(curr_grid[next_p[0], next_p[1]])
+                            )
+                            or next_p in goals
+                        )
+                    )
+                    is_failed = (curr_p, act) in engine.failed_transitions and not next_is_open
+                    if is_failed or engine.working_memory.habenular_ior.is_action_inhibited(
+                        curr_p, act
                     ):
                         plan_valid = False
                         break

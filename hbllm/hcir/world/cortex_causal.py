@@ -137,6 +137,20 @@ class ActionAffordance:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ConditionalAffordance:
+    """Expresses that feature is traversable / operable iff condition predicate holds.
+
+    General form of key->door, switch->gate, cargo->receptacle causal dependencies.
+    """
+
+    feature: Any
+    condition: CausalPredicate
+    evidence: str = ""
+    target_action: str = "traverse"
+    prerequisite_feature: Any | None = None
+
+
 @dataclass
 class HCIRSymbolicWorldTheory:
     """Neuro-symbolic domain-agnostic world theory grounded in HCIR CausalPredicates.
@@ -162,6 +176,7 @@ class HCIRSymbolicWorldTheory:
     _receptacle_features: set[Any] = field(default_factory=set)
     _actuator_features: set[Any] = field(default_factory=set)
     _avatar_features: set[Any] = field(default_factory=set)
+    _conditional_affordances: dict[Any, ConditionalAffordance] = field(default_factory=dict)
     _feature_evidence: dict[tuple[str, Any], tuple[int, str]] = field(default_factory=dict)
     _barrier_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
     _walkable_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
@@ -232,6 +247,64 @@ class HCIRSymbolicWorldTheory:
     def target_features(self) -> frozenset[Any]:
         """Alias for goal_features (read-only)."""
         return frozenset(self._goal_features)
+
+    @property
+    def conditional_affordances(self) -> dict[Any, ConditionalAffordance]:
+        """Learned conditional affordances (read-only mapping)."""
+        return dict(self._conditional_affordances)
+
+    def induce_conditional_affordance(
+        self,
+        feature: Any,
+        condition: CausalPredicate,
+        evidence: str = "",
+        prerequisite_feature: Any | None = None,
+        target_action: str = "traverse",
+    ) -> None:
+        """Induce conditional affordance for feature governed by condition predicate."""
+        prereq = prerequisite_feature if prerequisite_feature is not None else condition.value
+        aff = ConditionalAffordance(
+            feature=feature,
+            condition=condition,
+            evidence=evidence,
+            target_action=target_action,
+            prerequisite_feature=prereq,
+        )
+        self._conditional_affordances[feature] = aff
+        self.record_causal_predicate(
+            CausalPredicate(
+                variable=f"affordance_gated:{feature}",
+                operator="==",
+                value=prereq,
+                relation="requires_prerequisite",
+                target_entity=str(prereq),
+                metadata={"evidence": evidence, "feature": feature},
+            )
+        )
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+
+    def retract_conditional_affordance(self, feature: Any, reason: str = "") -> None:
+        """Retract conditional affordance for feature."""
+        if feature in self._conditional_affordances:
+            del self._conditional_affordances[feature]
+            self._barrier_eval_cache.clear()
+            self._walkable_eval_cache.clear()
+
+    def get_conditional_affordance(self, feature: Any) -> ConditionalAffordance | None:
+        """Retrieve conditional affordance for feature if defined."""
+        return self._conditional_affordances.get(feature)
+
+    def is_conditionally_traversable(
+        self, feature: Any, agent_state: dict[str, Any] | None = None
+    ) -> bool:
+        """Returns True if feature is traversable under current agent state."""
+        aff = self._conditional_affordances.get(feature)
+        if aff is None:
+            return self.is_walkable(feature, agent_state=agent_state)
+        if agent_state is None:
+            return False
+        return aff.condition.evaluate(agent_state)
 
     @property
     def causal_predicates(self) -> list[CausalPredicate]:
@@ -343,7 +416,7 @@ class HCIRSymbolicWorldTheory:
         """True if feature satisfies any induced goal predicate or confirmed goal feature."""
         return self.is_goal(feature_id)
 
-    def is_barrier(self, feature_id: Any) -> bool:
+    def is_barrier(self, feature_id: Any, agent_state: dict[str, Any] | None = None) -> bool:
         """True if feature satisfies any induced barrier predicate (enforcing HCIR Attractor Invariant)."""
         if feature_id in self._avatar_features:
             return False
@@ -351,6 +424,10 @@ class HCIRSymbolicWorldTheory:
             return False
         if not self._goal_features and feature_id in self._candidate_goal_features:
             return False
+        if feature_id in self._conditional_affordances:
+            if agent_state is not None:
+                return not self.is_conditionally_traversable(feature_id, agent_state)
+            return True
         if feature_id in self._barrier_features:
             return True
         cached = self._barrier_eval_cache.get(feature_id)
@@ -361,8 +438,12 @@ class HCIRSymbolicWorldTheory:
         self._barrier_eval_cache[feature_id] = res
         return res
 
-    def is_walkable(self, feature_id: Any) -> bool:
+    def is_walkable(self, feature_id: Any, agent_state: dict[str, Any] | None = None) -> bool:
         """True if feature satisfies any induced walkable space predicate."""
+        if feature_id in self._conditional_affordances:
+            if agent_state is not None:
+                return self.is_conditionally_traversable(feature_id, agent_state)
+            return False
         if feature_id in self._walkable_features:
             return True
         cached = self._walkable_eval_cache.get(feature_id)

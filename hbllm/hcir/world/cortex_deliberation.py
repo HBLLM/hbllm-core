@@ -435,7 +435,7 @@ class CausalUndoSafetyPredicate(PlanSafetyPredicate):
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
         undo_acts = get_engine_state_attr(view, "undo_actions", set())
-        if next_step.action in undo_acts:
+        if next_step.action in undo_acts and not view.is_displacement_action(next_step.action):
             return SafetyGateResult(
                 is_safe=False,
                 reason=f"Action {next_step.action} is an empirical state-reversion undo operator",
@@ -2358,11 +2358,11 @@ class PrefrontalDeliberationEngine:
                 goal_target = curr_sg.target_destination
                 goal_source = "epistemic"
 
-        # Subgoal stack representation
+        # Subgoal stack representation (top-of-stack first)
         subgoal_stack: list[Any] = []
         sg_stack = getattr(view, "subgoal_stack", None)
         if sg_stack and hasattr(sg_stack, "stack"):
-            subgoal_stack = [getattr(s, "subgoal_id", str(s)) for s in sg_stack.stack]
+            subgoal_stack = [getattr(s, "subgoal_id", str(s)) for s in reversed(sg_stack.stack)]
 
         # Plan trajectory representation
         plan: list[tuple[int, int]] | None = None

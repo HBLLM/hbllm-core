@@ -440,12 +440,18 @@ class FrontopolarSubgoalStack:
         if subgoal.subgoal_type in (SubgoalType.PARK_IN_HOLDING_BAY, SubgoalType.DELIVER_TO_GOAL):
             return dest in current_entity_positions
         if subgoal.subgoal_type in (
+            SubgoalType.NAVIGATE_TO,
+            SubgoalType.ACQUIRE_TOOL,
+            SubgoalType.COLLECT_ITEM,
             SubgoalType.TRANSIT_CORRIDOR,
             SubgoalType.UNLOCK_REMOTE_MECHANISM,
             SubgoalType.ALIGN_OPTICAL_REFLECTOR,
         ):
             if avatar_pos is not None and avatar_pos == dest:
                 return True
+            if held_features is not None and subgoal.required_feature is not None:
+                if subgoal.required_feature in held_features:
+                    return True
             if grid is not None and background_feature is not None and dest is not None:
                 dr, dc = dest
                 if 0 <= dr < grid.shape[0] and 0 <= dc < grid.shape[1]:

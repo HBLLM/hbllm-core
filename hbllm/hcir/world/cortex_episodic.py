@@ -1290,7 +1290,7 @@ class HippocampalEpisodicCortex:
             # Physical terrain affordances (e.g. tracks, bridges, road surfaces) persist across
             # rooms of the same environment unless counterfactual evidence invalidates them.
             # Local coordinate barriers reset, but empirical walkable affordances are retained.
-            view.symbolic_theory.clear_barriers()
+            view.learned_barriers.clear()
             for f in view.symbolic_theory.walkable_features:
                 if not any(p.value == f for p in view.symbolic_theory.walkable_predicates):
                     view.symbolic_theory.walkable_predicates.append(

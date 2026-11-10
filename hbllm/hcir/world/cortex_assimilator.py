@@ -343,7 +343,7 @@ class EpistemicFeedbackAssimilator:
                     )
 
         # Empirical State-Reversion / Undo Action Discovery:
-        # If executing this action restored the grid to the previous-previous state,
+        # If executing this action restored the grid to the previous-previous state without avatar locomotion,
         # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
         if (
             action is not None
@@ -351,6 +351,8 @@ class EpistemicFeedbackAssimilator:
             and len(view.grid_history) >= 2
             and not is_effector_action
             and not view.is_displacement_action(action)
+            and action not in getattr(view, "action_deltas", {})
+            and prev_avatar_pos == view.avatar_pos
         ):
             if np.array_equal(curr_grid, view.grid_history[-2]):
                 view.symbolic_theory.induce_undo_action(action)
@@ -2035,13 +2037,20 @@ class EpistemicFeedbackAssimilator:
 
         # Prefrontal item acquisition
         if view.avatar_pos is not None:
+            cond_prereqs = {
+                aff.prerequisite_feature
+                for aff in _sym_theory.conditional_affordances.values()
+                if aff.prerequisite_feature is not None
+            }
             for pe in prev_entities:
                 if (
-                    pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                    (
+                        pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                        or pe.feature_id in cond_prereqs
+                    )
                     and pe.feature_id not in av_feats
                     and pe.feature_id != bg
                     and pe.feature_id != _bg_feature
-                    and not _sym_theory.is_walkable(pe.feature_id)
                 ):
                     dist_to_av = abs(pe.grid_pos[0] - view.avatar_pos[0]) + abs(
                         pe.grid_pos[1] - view.avatar_pos[1]
@@ -2049,26 +2058,40 @@ class EpistemicFeedbackAssimilator:
                     if dist_to_av <= 1:
                         view.working_memory.acquire_item(
                             feature_id=pe.feature_id,
-                            role=pe.role.value,
+                            role=getattr(pe.role, "value", str(pe.role)),
                             step=view.step_counter,
                             position=pe.grid_pos,
                         )
 
         # Tool-Barrier Resonance Credit Assignment
-        if (
-            _prev_grid is not None
-            and view.working_memory.held_items
-            and diff.changed_mask is not None
-        ):
+        if _prev_grid is not None and diff.changed_mask is not None:
             changed_coords = np.argwhere(diff.changed_mask)
             _barrier_feats = _sym_theory.barrier_features
             _learned_barriers = view.learned_barriers
             for mr, mc in changed_coords:
                 orig_val = int(_prev_grid[mr, mc])
                 post_val = int(curr_grid[mr, mc])
-                if (orig_val in _barrier_feats or (int(mr), int(mc)) in _learned_barriers) and (
-                    post_val == _bg_feature or _sym_theory.is_walkable(post_val)
+                if (
+                    orig_val in _barrier_feats
+                    or orig_val in _sym_theory.conditional_affordances
+                    or (int(mr), int(mc)) in _learned_barriers
+                ) and (
+                    post_val == _bg_feature
+                    or _sym_theory.is_walkable(post_val)
+                    or _sym_theory.is_conditionally_traversable(post_val)
                 ):
+                    view.learned_barriers.discard((int(mr), int(mc)))
+                    if hasattr(view, "failed_transitions") and hasattr(view, "action_deltas"):
+                        stale_txs = set()
+                        for p, act in view.failed_transitions:
+                            d = view.action_deltas.get(act)
+                            if d and (p[0] + d[0], p[1] + d[1]) == (int(mr), int(mc)):
+                                stale_txs.add((p, act))
+                        view.failed_transitions.difference_update(stale_txs)
+                        if hasattr(view.working_memory, "habenular_ior"):
+                            view.working_memory.habenular_ior.failed_transitions.difference_update(
+                                stale_txs
+                            )
                     for h_item in view.working_memory.held_items:
                         view.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
 

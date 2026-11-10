@@ -77,18 +77,30 @@ def test_scenario_d_planning_provenance() -> None:
         # Episode C: oracle demonstrates solution (key -> door -> goal)
         _run_ep("oracle")
 
-        # Episode D: self on identical layout — must explain decisions and exploit
+        # Episode D: self on identical layout — must explain decisions, prioritize key subgoal, and exploit
         obs_d = env.reset(seed=100010)
-        for step_idx in range(5):
+        solved = False
+        total_steps = 0
+        for step_idx in range(50):
             action, meta = engine.step(obs_d)
             assert meta is not None, f"Step {step_idx}: meta is None"
             assert meta.get("goal_target") is not None, (
                 f"Step {step_idx}: goal_target is None (meta={meta})"
             )
-            plan = meta.get("plan")
-            assert plan is not None and len(plan) > 0, (
-                f"Step {step_idx}: plan is empty or None (meta={meta})"
-            )
-            obs_d, _, done, _ = env.step(action)
+            if step_idx == 0:
+                # P2-4 Acceptance: subgoal_stack begins with NAVIGATE_TO the key feature (3)
+                sg_stack = meta.get("subgoal_stack")
+                assert sg_stack and len(sg_stack) > 0, f"Step 0: subgoal_stack empty (meta={meta})"
+                assert "NAVIGATE_TO" in sg_stack[0] and "3" in sg_stack[0], (
+                    f"Step 0: subgoal_stack does not begin with key prerequisite (got {sg_stack})"
+                )
+
+            obs_d, _, done, info = env.step(action)
+            total_steps = step_idx + 1
             if done:
+                solved = info.get("success", False)
                 break
+
+        # Acceptance: Scenario D succeeds in <= 2x oracle steps (oracle took 18 steps)
+        assert solved, f"Episode D did not succeed (finished at step {total_steps})"
+        assert total_steps <= 36, f"Episode D took too many steps: {total_steps} > 36"
