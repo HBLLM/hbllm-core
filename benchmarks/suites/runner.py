@@ -81,11 +81,14 @@ def run_closed_loop_task(
 
             env_instance = env_cls(max_steps=max_budget)
             obs = env_instance.reset(seed=task_seed)
+            ep_baseline = baseline
+            if baseline == "demonstration":
+                ep_baseline = "demonstration_oracle" if ep_idx == 0 else "system"
             succ, steps, lats, errs = _run_loop(
                 env_instance,
                 obs,
                 engine,
-                baseline,
+                ep_baseline,
                 max_budget,
                 [],
                 [],
@@ -97,14 +100,14 @@ def run_closed_loop_task(
             all_errors.extend(errs)
             prev_succ = succ
 
-    if baseline in ("system", "no_grounding"):
+    if baseline in ("system", "no_grounding", "demonstration"):
         with tempfile.TemporaryDirectory() as tmp_dir:
 
             def make_system():
                 config = CognitiveSystemConfig(
                     world_id=f"bench_{task_id}_{baseline}",
                     memory_dir=tmp_dir,
-                    enable_grounding=(baseline == "system"),
+                    enable_grounding=(baseline in ("system", "demonstration")),
                     perception_mode=perception_mode,
                 )
                 return build_cognitive_system(config)
@@ -134,6 +137,56 @@ def run_closed_loop_task(
         else (int(sum(episode_steps) / max(1, len(episode_steps))))
     )
 
+    one_shot_imitation: dict[str, Any] = {}
+    if baseline == "demonstration":
+        one_shot_imitation = {
+            "success": episode_successes[1] if len(episode_successes) > 1 else False,
+            "steps": episode_steps[1] if len(episode_steps) > 1 else max_budget,
+            "oracle_success": episode_successes[0] if episode_successes else False,
+            "oracle_steps": episode_steps[0] if episode_steps else max_budget,
+        }
+    elif baseline == "system" and hasattr(env_cls, "get_oracle_action"):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = CognitiveSystemConfig(
+                world_id=f"bench_{task_id}_demo",
+                memory_dir=tmp_dir,
+                enable_grounding=True,
+                perception_mode=perception_mode,
+            )
+            demo_sys = build_cognitive_system(config)
+            demo_engine = demo_sys.engine
+            demo_env = env_cls(max_steps=max_budget)
+            d_obs = demo_env.reset(seed=task_seed)
+            d_succ, d_steps, _, _ = _run_loop(
+                demo_env,
+                d_obs,
+                demo_engine,
+                "demonstration_oracle",
+                max_budget,
+                [],
+                [],
+                seed=task_seed,
+            )
+            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+            demo_engine.on_boundary(
+                EpisodeBoundary(
+                    kind=(
+                        EpisodeBoundaryKind.LEVEL_COMPLETE if d_succ else EpisodeBoundaryKind.DEATH
+                    )
+                )
+            )
+            d_obs = demo_env.reset(seed=task_seed)
+            i_succ, i_steps, _, _ = _run_loop(
+                demo_env, d_obs, demo_engine, "system", max_budget, [], [], seed=task_seed
+            )
+            one_shot_imitation = {
+                "success": i_succ,
+                "steps": i_steps,
+                "oracle_success": d_succ,
+                "oracle_steps": d_steps,
+            }
+
     extra = {
         "episode_successes": episode_successes,
         "episode_steps": episode_steps,
@@ -150,6 +203,7 @@ def run_closed_loop_task(
             "steps": episode_steps,
             "steps_to_stable_policy": stable_idx,
         },
+        "one_shot_imitation": one_shot_imitation,
     }
 
     return overall_success, mean_steps, all_latencies, all_errors, extra
@@ -219,6 +273,15 @@ def _run_loop(
                 action = rng.choice(list(avail))
             elif baseline == "oracle":
                 # Compute optimal action from ground-truth state
+                action = env.get_oracle_action()
+            elif baseline == "demonstration_oracle":
+                if engine is not None:
+                    try:
+                        raw_action = engine.step(obs)
+                        if isinstance(raw_action, tuple) and len(raw_action) > 1:
+                            meta = raw_action[1]
+                    except Exception:
+                        pass
                 action = env.get_oracle_action()
             else:
                 # AutonomousEpistemicEngine step: unpack (action, metadata)
@@ -335,8 +398,10 @@ def run_suite(
 
     baselines_dict: dict[str, Any] = {}
     if baseline == "system":
-        print("\n--- Evaluating Reference Baselines (random, oracle, no_grounding) ---")
-        for b_name in ("random", "oracle", "no_grounding"):
+        print(
+            "\n--- Evaluating Reference Baselines (random, oracle, no_grounding, demonstration) ---"
+        )
+        for b_name in ("random", "oracle", "no_grounding", "demonstration"):
             b_tasks: list[TaskResult] = []
             for task_def in manifest.get("tasks", []):
                 t_id = task_def["id"]

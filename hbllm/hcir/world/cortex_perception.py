@@ -245,6 +245,7 @@ class FigureGroundSegregator:
         barrier_features: set[int] | None = None,
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
+        walkable_features: set[int] | None = None,
     ) -> int:
         grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
@@ -254,10 +255,41 @@ class FigureGroundSegregator:
 
         barriers = barrier_features or set()
         av_feats = avatar_features or set()
+        walkables = walkable_features or set()
+
+        g_vals, g_counts = np.unique(grid, return_counts=True)
+        g_dominant = int(g_vals[np.argmax(g_counts)])
+
+        # 1. Empirically Verified Walkable Ground:
+        # If the organism has traversed a feature present in the grid, that navigable ground
+        # takes priority as the spatial background canvas over non-walkables.
+        if walkables:
+            valid_walkables = [w for w in walkables if w not in av_feats and w not in barriers]
+            if valid_walkables:
+                walk_counts = {
+                    w: int(np.sum(grid == w)) for w in valid_walkables if np.any(grid == w)
+                }
+                if walk_counts:
+                    best_w = max(walk_counts.items(), key=lambda item: item[1])[0]
+                    if top_val not in valid_walkables:
+                        return best_w
+
+        # 2. Gestalt Perimeter Enclosure vs Canvas Ground:
+        # If the outer border is dominated by top_val (an enclosing bounding wall/frame),
+        # but the global grid is dominated by another feature (the interior canvas),
+        # verify if the interior canvas is the true ground.
+        if top_val != g_dominant and g_dominant not in av_feats and g_dominant not in barriers:
+            if H > 2 and W > 2:
+                interior = grid[1:-1, 1:-1]
+                int_vals, int_counts = np.unique(interior, return_counts=True)
+                int_dominant = int(int_vals[np.argmax(int_counts)])
+                if (
+                    int_dominant == g_dominant
+                    and np.sum(interior == g_dominant) > 0.40 * interior.size
+                ):
+                    return g_dominant
 
         if top_val in barriers:
-            g_vals, g_counts = np.unique(grid, return_counts=True)
-            g_dominant = int(g_vals[np.argmax(g_counts)])
             if top_val == g_dominant and g_counts[np.argmax(g_counts)] > 0.35 * grid.size:
                 pass
             else:
@@ -787,12 +819,14 @@ class PerceptionEngine:
         barrier_features: set[int] | None = None,
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
+        walkable_features: set[int] | None = None,
     ) -> int:
         return FigureGroundSegregator.estimate_background(
             grid=grid,
             barrier_features=barrier_features,
             avatar_features=avatar_features,
             bg_feature=bg_feature,
+            walkable_features=walkable_features,
         )
 
     @staticmethod

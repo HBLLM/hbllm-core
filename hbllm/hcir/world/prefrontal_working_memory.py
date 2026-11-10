@@ -598,6 +598,8 @@ class PrefrontalWorkingMemory:
         self.probed_entity_ids: set[str] = set()
         self.entity_visit_counts: dict[str, int] = {}
         self.position_visit_counts: dict[tuple[int, int], int] = {}
+        self.visited_cells: set[tuple[int, int]] = set()
+        self.active_epistemic_conditions: dict[tuple[int, int], dict[str, Any]] = {}
         self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
         self.recent_actions: deque[Any] = deque(maxlen=16)
         self.exhausted_candidate_goals: set[tuple[int, int]] = set()
@@ -644,6 +646,21 @@ class PrefrontalWorkingMemory:
         self.object_macro_tasks: dict[str, list[Any]] = {}
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
+
+    def inhibit_action(self, action: Any, duration: int = 4) -> None:
+        """Apply bounded, decaying inhibition to an action (Rule 1.8 & P2-7)."""
+        if action is not None:
+            self.inhibited_actions[action] = max(
+                self.inhibited_actions.get(action, 0), min(int(duration), 10)
+            )
+
+    def decay_inhibited_actions(self) -> None:
+        """Decay all active action inhibitions by 1 step, evicting expired ones."""
+        expired = [act for act, timer in self.inhibited_actions.items() if timer <= 1]
+        for act in list(self.inhibited_actions.keys()):
+            self.inhibited_actions[act] -= 1
+        for act in expired:
+            self.inhibited_actions.pop(act, None)
 
     def record_domain_episode(
         self,

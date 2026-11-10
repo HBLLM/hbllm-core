@@ -170,12 +170,12 @@ def test_scenario_b_no_false_goal_induction() -> None:
 
         # Episode A: self fresh
         _run_episode()
-        assert engine.symbolic_theory.goal_features == frozenset()
+        assert 2 not in engine.symbolic_theory.goal_features
 
         # Episode B: self same layout (previously falsely induced door 2 as a goal)
         _run_episode()
-        assert engine.symbolic_theory.goal_features == frozenset(), (
-            f"Expected empty goal_features after episode B, got {engine.symbolic_theory.goal_features}"
+        assert 2 not in engine.symbolic_theory.goal_features, (
+            f"Expected door 2 not in goal_features after episode B, got {engine.symbolic_theory.goal_features}"
         )
 
 

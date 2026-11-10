@@ -4555,11 +4555,22 @@ class AutonomousEpistemicEngine:
         return PerceptionFrame(shape=(H, W))
 
     def estimate_background(self, grid: np.ndarray) -> Any:
+        walkables = (
+            set(self.symbolic_theory.walkable_features)
+            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
+            else None
+        )
+        barriers = (
+            set(self.symbolic_theory.barrier_features)
+            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
+            else None
+        )
         bg = PerceptionEngine.estimate_background(
             grid,
-            barrier_features=set(self.symbolic_theory.barrier_features),
+            barrier_features=barriers,
             avatar_features=self.avatar_features,
             bg_feature=self.bg_feature,
+            walkable_features=walkables,
         )
         if self.bg_feature is None or self.bg_feature != bg:
             old_bg = self.bg_feature
@@ -5956,6 +5967,11 @@ class AutonomousEpistemicEngine:
         field = delta.field
         val = delta.value
         op = delta.op
+
+        if field == "inhibit_action":
+            action, duration = val if isinstance(val, (tuple, list)) else (val, 4)
+            self.working_memory.inhibit_action(action, duration)
+            return
 
         if hasattr(self, field):
             if op == "set":

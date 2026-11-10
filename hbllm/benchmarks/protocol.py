@@ -40,6 +40,7 @@ class TaskResult:
     episode_steps: list[int] = field(default_factory=list)
     zero_shot: dict[str, Any] = field(default_factory=dict)
     lifelong: dict[str, Any] = field(default_factory=dict)
+    one_shot_imitation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,6 +60,7 @@ class EvaluationReport:
     env_hash: str = ""
     zero_shot: dict[str, Any] = field(default_factory=dict)
     lifelong: dict[str, Any] = field(default_factory=dict)
+    one_shot_imitation: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -230,6 +232,7 @@ class EvaluationProtocol:
                     "steps_to_stable_policy": result.steps_to_stable_policy,
                 },
             )
+            result.one_shot_imitation = extra.get("one_shot_imitation", {})
 
             if latencies:
                 sorted_lats = sorted(latencies)
@@ -342,6 +345,31 @@ class EvaluationProtocol:
             round(sum(stable_policies) / len(stable_policies), 2) if stable_policies else None
         )
 
+        # One-shot imitation (demonstration mode)
+        osi_fam_scores: dict[str, float] = {}
+        for fam, t_list in families.items():
+            osi_solved = [t for t in t_list if t.one_shot_imitation.get("success", False)]
+            if not osi_solved:
+                osi_fam_scores[fam] = 0.0
+            else:
+                sr = len(osi_solved) / len(t_list)
+                eff = sum(
+                    max(
+                        0.0,
+                        1.0
+                        - (t.one_shot_imitation.get("steps", t.max_budget) / max(1, t.max_budget)),
+                    )
+                    for t in osi_solved
+                ) / len(osi_solved)
+                osi_fam_scores[fam] = round(0.5 * sr + 0.5 * eff, 4)
+
+        osi_gen = (
+            round(sum(osi_fam_scores.values()) / max(1, len(osi_fam_scores)), 4)
+            if osi_fam_scores
+            else 0.0
+        )
+        osi_solved_count = sum(1 for t in tasks if t.one_shot_imitation.get("success", False))
+
         zero_shot_dict = {
             "generality_score": zs_gen,
             "family_scores": zs_fam_scores,
@@ -352,6 +380,11 @@ class EvaluationProtocol:
             "family_scores": lf_fam_scores,
             "solve_rate": round(lf_solved_count / max(1, len(tasks)), 4),
             "mean_steps_to_stable_policy": mean_stable,
+        }
+        one_shot_imitation_dict = {
+            "generality_score": osi_gen,
+            "family_scores": osi_fam_scores,
+            "solve_rate": round(osi_solved_count / max(1, len(tasks)), 4),
         }
 
         all_p50 = [t.p50_latency_ms for t in tasks if t.p50_latency_ms > 0]
@@ -374,6 +407,7 @@ class EvaluationProtocol:
             env_hash=self._compute_env_hash(),
             zero_shot=zero_shot_dict,
             lifelong=lifelong_dict,
+            one_shot_imitation=one_shot_imitation_dict,
         )
 
         # Write output file

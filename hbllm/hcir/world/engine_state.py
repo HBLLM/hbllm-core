@@ -850,6 +850,15 @@ class JournaledEngineView:
         val = delta.value
         op = delta.op
 
+        if field == "inhibit_action":
+            action, duration = val if isinstance(val, (tuple, list)) else (val, 4)
+            self._record_touch(
+                "working_memory.inhibited_actions",
+                dict(getattr(eng.working_memory, "inhibited_actions", {})),
+            )
+            eng.working_memory.inhibit_action(action, duration)
+            return
+
         # Engine-first if exposed on engine (properties sync backing stores cleanly)
         if hasattr(eng, field):
             self._record_touch(field, getattr(eng, field, _ABSENT))

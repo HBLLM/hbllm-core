@@ -170,6 +170,8 @@ class HCIRSymbolicWorldTheory:
     # Fast-lookup cached sets (private, accessed via read-only properties)
     _goal_features: set[Any] = field(default_factory=set)
     _candidate_goal_features: set[Any] = field(default_factory=set)
+    _explored_features: set[Any] = field(default_factory=set)
+    _explored_positions: set[tuple[int, int]] = field(default_factory=set)
     _barrier_features: set[Any] = field(default_factory=set)
     _walkable_features: set[Any] = field(default_factory=set)
     _cargo_features: set[Any] = field(default_factory=set)
@@ -212,6 +214,34 @@ class HCIRSymbolicWorldTheory:
     def candidate_goal_features(self) -> frozenset[Any]:
         """Candidate goal hypotheses pending empirical verification (read-only)."""
         return frozenset(self._candidate_goal_features)
+
+    @property
+    def explored_features(self) -> frozenset[Any]:
+        """Features that have been collected, visited, or epistemically satisfied (read-only)."""
+        return frozenset(self._explored_features)
+
+    @property
+    def explored_positions(self) -> frozenset[tuple[int, int]]:
+        """Coordinates that have been visited or epistemically satisfied (read-only)."""
+        return frozenset(self._explored_positions)
+
+    def mark_feature_explored(self, feature: Any, reason: str = "") -> None:
+        """Mark a feature as epistemically explored so curiosity does not re-target it."""
+        self._explored_features.add(feature)
+        logger.info(
+            "HCIRSymbolicWorldTheory: Marked feature %s explored (reason=%s)", feature, reason
+        )
+
+    def is_feature_explored(self, feature: Any) -> bool:
+        return feature in self._explored_features
+
+    def mark_position_explored(self, pos: tuple[int, int], reason: str = "") -> None:
+        """Mark a coordinate as epistemically explored."""
+        self._explored_positions.add(pos)
+        logger.info("HCIRSymbolicWorldTheory: Marked position %s explored (reason=%s)", pos, reason)
+
+    def is_position_explored(self, pos: tuple[int, int]) -> bool:
+        return pos in self._explored_positions
 
     @property
     def barrier_features(self) -> frozenset[Any]:
@@ -1341,6 +1371,8 @@ class HCIRSymbolicWorldTheory:
         self.actuator_predicates.clear()
         self._goal_features.clear()
         self._candidate_goal_features.clear()
+        self._explored_features.clear()
+        self._explored_positions.clear()
         self._barrier_features.clear()
         self._walkable_features.clear()
         self._cargo_features.clear()

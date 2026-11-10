@@ -92,6 +92,7 @@ kaggle_submission/environment_files/
 !/reports/heldout/
 !/reports/ablation/
 !/reports/audit/
+!/reports/dev/
 !/reports/*.md
 !/reports/*.json
 /scratch/
@@ -102,6 +103,7 @@ kaggle_submission/environment_files/
 !/reports/heldout/
 !/reports/ablation/
 !/reports/audit/
+!/reports/dev/
 !/reports/*.md
 !/reports/*.json
 /bench_runs

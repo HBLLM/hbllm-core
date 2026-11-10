@@ -170,6 +170,71 @@ env-specific logic to `hbllm/`.
 
 ---
 
+## 4b. Review #2 (SHA `90e378e2`) — P2-1…P2-6 verified; the failure has moved again
+
+**Verified done:** `step()` returns full provenance (`goal_target/source, plan/plan_source,
+subgoal_stack, veto_reasons, phase`); ontology writers outside `cortex_causal.py` → **0**;
+`ConditionalAffordance` exists and is *induced from experience* (`{2: door iff inventory
+contains 3}` after a single self-driven episode); runner has `shared_memory` / 5-episode
+curves; ablation retargeted.
+
+**The behavioural result — first real success.** Scenario D (same layout after one observed
+oracle episode) now **succeeds in 18 steps, matching the oracle action-for-action from t=1**:
+epistemic goal → key `(2,4)` via A*, pickup, `goal_source=reward` → `(3,8)` via the door, done.
+Knowledge → plan → motor works. This is the first time the system has solved a procedural
+task, and the provenance shows *why*, which is the point of P2-1.
+
+**The score is still 0.0** (dev `ae57c75d`: every lifelong curve `[F,F,F,F,F]`), because the
+system never has its "episode C": self-driven exploration never reaches the goal once, so
+there is nothing to exploit in episodes 2–5. The traced self-driven episode (Appendix C) shows
+exactly why — two defects, both now visible only because of provenance:
+
+1. **Permanent action ban from a misclassified "undo".** At t=1 the agent steps UP, at t=2
+   DOWN; the grid equals `grid_history[-2]`, so `cortex_assimilator.py:345-366` grounds DOWN as
+   an UNDO/STATE_REVERSION affordance and sets `inhibited_actions[DOWN] = 999999`. From then on
+   `veto_reasons` carries `inhibited_action_2_cooldown_9999xx` for the rest of the episode; by
+   t=20 actions 4 and 7 are banned too. The agent spends 80 steps oscillating in rows 1–2,
+   visits 17 of 58 free cells, and never sees feature 8. Reversible locomotion is not an undo
+   button; this heuristic is ARC-shaped (ARC games have an undo key) and the block also uses
+   `hasattr` (Invariant 3 anti-pattern). *Fix generally:* an action is an undo candidate only if
+   it reverts a **non-locomotion** state change (inventory/feature counts/non-avatar cells), and
+   inhibition must decay (bounded cooldown), never `999999`.
+2. **Epistemic goals never retire.** After the key at `(2,4)` is collected (t=11) the cell is
+   floor, yet `goal_target=(2,4) source=epistemic` is re-selected for ~80 steps with plan
+   `[(2,3),(2,4)]`, interleaved with INTERACT at nothing. There is no lifecycle for curiosity
+   goals (`rg "retire|satisfy" hbllm/hcir/world` → nothing): a goal whose target feature no
+   longer exists at the target, or that has been reached N times without surprise, must be
+   retracted and its feature marked *explored*. Also check the `(6,8)` epistemic target at
+   t=11 — no entity is there (door `(6,5)`, goal `(3,8)`); looks like a row/col mix-up in target
+   coordinate derivation.
+3. **No coverage fallback.** With novel features `2` and `8` visible on the grid from step 0,
+   curiosity should rank *unvisited novel features* first, then *frontier cells*. Nothing
+   drives the agent toward unexplored space once feature 3 is consumed.
+
+### Next items (in order; dev JSON before/after each)
+
+- **P2-7 Undo-affordance discipline.** Restrict undo grounding as above; replace `999999` with a
+  decaying `WorkingMemoryDelta` cooldown owned by `PrefrontalWorkingMemory`; remove the
+  `hasattr`. *Acceptance:* traced self episode on seed 100010 has no `inhibited_action_*` veto
+  for displacement actions after a wall-free reversal; `>= 40` distinct cells visited in 100
+  steps.
+- **P2-8 Epistemic goal lifecycle.** `GoalProposal` gets `satisfied_when` (target feature
+  absent at target / visited-without-surprise count ≥ k) evaluated in the assimilation stage;
+  satisfied goals are retracted via the governed path and the feature enters an *explored* set
+  on the theory. Fix the target-coordinate bug. *Acceptance:* after key pickup, `goal_target`
+  is never `(2,4)` again; `goal_source` moves to the next novel feature (`8` or `2`).
+- **P2-9 Frontier exploration as the default epistemic goal.** When no novel-feature goal
+  exists, propose the nearest reachable frontier cell (unvisited floor adjacent to visited).
+  Domain-general; lives in `EpistemicGoalScheduler`. *Acceptance:* self-driven seed 100010
+  reaches `(3,8)` at least once in 100 steps → lifelong curve becomes `[?, T, T, T, T]`.
+- **Then** re-run dev; expect grid > 0 and a learning curve. Only then held-out, once.
+- Record a **demonstration mode** in the runner (one oracle episode observed, then N self
+  episodes) as a third metric — it is the one that currently shows nonzero competence and is
+  the honest way to report what scenario D proved. Label it clearly as one-shot imitation, not
+  zero-shot generality.
+
+---
+
 ## 5. Honest position
 
 - Harness: real, discriminating, reward-complete. The number it produces is trustworthy.
@@ -227,3 +292,48 @@ t  avatar  key  engine  oracle     t  avatar  key  engine  oracle
 12 (3,3)   F    3       1          29 (2,3)   F    3       4
 ```
 `branch=default_arbitration` and `meta=None` on every step.
+
+## Appendix C — Self-driven episode after P2-1…P2-6 (seed 100010, excerpts)
+
+```
+t=0  av=(8,3) a=UP    goal=None  src=none       phase=epistemic_exploration
+t=1  av=(7,3) a=DOWN  plan_source=macro
+t=2  av=(8,3) a=LEFT  veto=[inhibited_action_2_cooldown_999998]      <- DOWN banned for the episode
+t=9  av=(3,3) a=UP    goal=(2,4) src=epistemic plan=[(2,4)]          <- key found by curiosity (good)
+t=11 av=(2,4) key=True a=DOWN goal=(6,8) src=epistemic              <- nothing is at (6,8)
+t=20 av=(2,1) key=True goal=(2,4) src=epistemic plan=[(1,2),(2,2),(2,3),(2,4)]   <- key already taken
+t=30 av=(1,4) key=True goal=(2,4) src=epistemic plan=[(2,3),(2,4)]
+t=44 av=(1,3) key=True a=INTERACT goal=None veto=[inhibited_action_2, inhibited_action_7, ...]
+...
+t=90 av=(1,4) key=True a=INTERACT
+visited 17 / 58 free cells; feature 8 never observed adjacent; result: fail
+```
+
+---
+
+## 5. Phase 2 Resolution & Verification (P2-7, P2-8, P2-9 & Demonstration Mode)
+
+### 5.1 Root Causes Diagnosed and Resolved
+1. **Perimeter Wall Canvas Inversion (`cortex_perception.py`)**:
+   In enclosed mazes with solid perimeter borders (feature 5), border sampling falsely classified walls as the background canvas (`bg = 5`), treating open floor (feature 0) as an obstacle and retracting 0 from `symbolic_theory.walkable_features`. Resolved via:
+   - Prioritizing empirically verified `walkable_features` over non-walkable perimeter borders.
+   - Gestalt Perimeter Enclosure Principle: if perimeter border is dominated by a bounding frame but the interior grid is dominated by open space (>40%), the interior is grounded as the canvas.
+2. **Consecutive Stuck Counter Desynchronization (`cortex_assimilator.py`)**:
+   `cortex_assimilator.py` reset `view.state.consecutive_stuck_steps = 0`, but `view.consecutive_stuck_steps` reads from `working_memory.consecutive_stuck_steps`. This desync left the stuck counter active, causing deliberation to wipe `view.mental_plan.clear()` on every subsequent step. Resolved by updating through property setters.
+3. **P2-7 Undo-Affordance & Decaying Inhibition Discipline (`cortex_assimilator.py`, `prefrontal_working_memory.py`)**:
+   Replaced infinite 999999 lockout with bounded decaying inhibition (`duration=8`, decaying to 0). Restricted state-reversion induction strictly to non-locomotion state diffs without hardcoding action numbers. Locomotion actions are never permanently vetoed.
+4. **P2-8 Epistemic Curiosity Goal Retirement (`cortex_assimilator.py`, `cortex_causal.py`)**:
+   Target curiosity features are marked `explored` on `symbolic_theory` and candidate goals are retracted once reached or collected. Eliminated coordinate row/col transposition bug.
+5. **P2-9 Frontier Exploration Default (`cortex_planner.py`)**:
+   When no novel feature goals remain, frontier exploration schedules subgoals to the nearest reachable unvisited walkable cells, driving the agent through unexplored corridors until the exit/goal is sighted.
+6. **Demonstration Mode Integration (`protocol.py`, `runner.py`)**:
+   Implemented one-shot imitation protocol where episode 0 is driven by oracle demonstration while the engine observes and assimilates ontology, followed by self-directed execution on subsequent episodes.
+
+### 5.2 Verification & Benchmark Results
+- **Dev Benchmark Report**: `reports/dev/dev_handcrafted_20261110_135107.json`
+- **Lifelong Generality Score**: **0.2975** (up from 0.0000; family grid: **0.5950**)
+- **One-Shot Imitation Generality Score**: **0.2650** (family grid: **0.5300**)
+- **Task `grid_nav_dev` Lifelong Curve**: `[False, True, True, True, True]` (steps: `[4, 42, 31, 31, 31]`, stable at episode 1).
+- **Task `grid_nav_dev` Demonstration**: Oracle finished at step 18; agent imitation finished at step 44 (`success: True`).
+- **Unit Suite**: `tests/unit/world/test_p2_epistemic_navigation.py` and `tests/unit/world/test_ontology_governance.py` pass 100% clean.
+

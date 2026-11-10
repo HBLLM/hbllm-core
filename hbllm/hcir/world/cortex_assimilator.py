@@ -243,7 +243,67 @@ class EpistemicFeedbackAssimilator:
         action = view.last_action
         action_data = view.last_action_data
 
-        # WP0.3: classify the observed effect kind for the motor posterior.
+        # Track visited cells in PrefrontalWorkingMemory (P2-9)
+        if view.avatar_pos is not None:
+            view.working_memory.visited_cells.add(view.avatar_pos)
+
+        # Epistemic Goal Lifecycle Evaluation (P2-8):
+        # A curiosity goal is satisfied when:
+        # 1. Target feature is absent at target coordinate (consumed / collected / changed)
+        # 2. Or target coordinate was visited without surprise >= max_visits
+        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        goals_to_retire: set[tuple[int, int]] = set()
+        for target_pos, cond in list(satisfied_when_map.items()):
+            tr, tc = target_pos
+            expected_feat = cond.get("feature")
+            max_visits = cond.get("max_visits", 2)
+
+            # Condition 1: Target feature absent at target coordinate
+            if expected_feat is not None and 0 <= tr < H and 0 <= tc < W:
+                curr_cell_val = int(curr_grid[tr, tc])
+                if curr_cell_val != expected_feat:
+                    view.symbolic_theory.mark_feature_explored(
+                        expected_feat, reason="target_absent_or_consumed"
+                    )
+                    view.symbolic_theory.mark_position_explored(
+                        target_pos, reason="feature_consumed"
+                    )
+                    goals_to_retire.add(target_pos)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Epistemic goal satisfied — feature %s absent at %s (now %s)",
+                        expected_feat,
+                        target_pos,
+                        curr_cell_val,
+                    )
+
+            # Condition 2: Avatar reached target coordinate
+            if view.avatar_pos == target_pos:
+                visits = cond.get("visits", 0) + 1
+                cond["visits"] = visits
+                if visits >= max_visits:
+                    if expected_feat is not None:
+                        view.symbolic_theory.mark_feature_explored(
+                            expected_feat, reason="visited_without_surprise"
+                        )
+                    view.symbolic_theory.mark_position_explored(target_pos, reason="visited_target")
+                    goals_to_retire.add(target_pos)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Epistemic goal satisfied — reached %s %d times",
+                        target_pos,
+                        visits,
+                    )
+
+        for gp in goals_to_retire:
+            satisfied_when_map.pop(gp, None)
+            view.exhausted_candidate_goals.add(gp)
+            if hasattr(view, "goals") and gp in view.goals:
+                view.goals.remove(gp)
+            if view.mental_plan:
+                last_step = view.mental_plan[-1]
+                if getattr(last_step, "predicted_avatar_pos", None) == gp:
+                    view.mental_plan.clear()
+
+        # Classify the observed effect kind for the motor posterior.
         if action is not None and hasattr(view, "record_action_effect"):
             _is_eff = bool(
                 (
@@ -342,24 +402,62 @@ class EpistemicFeedbackAssimilator:
                         step=view.step_counter,
                     )
 
-        # Empirical State-Reversion / Undo Action Discovery:
-        # If executing this action restored the grid to the previous-previous state without avatar locomotion,
-        # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
+        # Empirical State-Reversion / Undo Action Discovery (P2-7):
+        # An action is an undo candidate ONLY if it reverts a non-locomotion state change
+        # (e.g. object transform, switch, paint, or cargo state), never reversible locomotion.
         if (
             action is not None
-            and hasattr(view, "grid_history")
             and len(view.grid_history) >= 2
             and not is_effector_action
             and not view.is_displacement_action(action)
             and action not in getattr(view, "action_deltas", {})
-            and prev_avatar_pos == view.avatar_pos
         ):
-            if np.array_equal(curr_grid, view.grid_history[-2]):
+            prev_prev_grid = view.grid_history[-2]
+            prev_grid = view.prev_grid
+            av_feats = set(view.avatar_features)
+            if view.avatar_feature is not None:
+                av_feats.add(view.avatar_feature)
+
+            # Check if avatar moved in current transition
+            av_mask_curr = (
+                np.isin(curr_grid, list(av_feats))
+                if av_feats
+                else np.zeros_like(curr_grid, dtype=bool)
+            )
+            av_mask_prev = (
+                np.isin(prev_grid, list(av_feats))
+                if av_feats
+                else np.zeros_like(prev_grid, dtype=bool)
+            )
+            avatar_displaced = bool(
+                np.any((curr_grid != prev_grid) & (av_mask_curr | av_mask_prev))
+            )
+
+            # Check if non-avatar cells changed in prior step and were reverted in this step
+            prior_diff = prev_grid != prev_prev_grid
+            prior_coords = np.argwhere(prior_diff)
+            non_av_changed_prior = any(
+                int(prev_grid[r, c]) not in av_feats and int(prev_prev_grid[r, c]) not in av_feats
+                for r, c in prior_coords
+            )
+            curr_diff = curr_grid != prev_grid
+            curr_coords = np.argwhere(curr_diff)
+            non_av_changed_curr = any(
+                int(curr_grid[r, c]) not in av_feats and int(prev_grid[r, c]) not in av_feats
+                for r, c in curr_coords
+            )
+
+            if (
+                not avatar_displaced
+                and non_av_changed_prior
+                and non_av_changed_curr
+                and np.array_equal(curr_grid, prev_prev_grid)
+            ):
                 view.symbolic_theory.induce_undo_action(action)
                 view.undo_actions.add(action)
                 if action in view.action_affordances:
                     view.action_affordances[action].is_undo = True
-                view.inhibited_actions[action] = 999999
+                view.apply_wm_delta(WorkingMemoryDelta("inhibit_action", (action, 4)))
                 logger.info(
                     "AutonomousEpistemicEngine: Grounded empirical UNDO / STATE_REVERSION affordance for action %s",
                     action,
@@ -1489,9 +1587,9 @@ class EpistemicFeedbackAssimilator:
                                 (prev_avatar_pos, view.last_action)
                             )
                 else:
-                    view.state.consecutive_stuck_steps = 0
+                    view.consecutive_stuck_steps = 0
             else:
-                view.state.consecutive_stuck_steps = 0
+                view.consecutive_stuck_steps = 0
 
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (

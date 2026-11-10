@@ -1625,11 +1625,7 @@ class PrefrontalDeliberationEngine:
 
         if view.simulation_cooldown > 0:
             view.simulation_cooldown -= 1
-        to_uninhibited = [act for act, timer in view.inhibited_actions.items() if timer <= 1]
-        for act in view.inhibited_actions:
-            view.inhibited_actions[act] -= 1
-        for act in to_uninhibited:
-            view.inhibited_actions.pop(act, None)
+        view.working_memory.decay_inhibited_actions()
 
         # Anterior Mid-Cingulate & Lateral Habenula: Limit Cycle / Oscillation Detection
         osc_acts = view.working_memory.habenular_ior.detect_cyclic_actions()

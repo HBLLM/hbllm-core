@@ -103,6 +103,7 @@ class EpistemicGoalProposal:
     new_candidate_features: set[int] = field(default_factory=set)
     subgoal_to_pop: bool = False
     clear_exhausted_goals: bool = False
+    satisfied_when: dict[tuple[int, int], dict[str, Any]] = field(default_factory=dict)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export goal proposal as a declarative causal predicate."""
@@ -157,6 +158,7 @@ class EpistemicGoalScheduler:
         new_candidate_feats: set[int] = set()
         subgoal_to_pop = False
         clear_exhausted = False
+        satisfied_when: dict[tuple[int, int], dict[str, Any]] = {}
 
         # 1. Confirmed goals — causal evidence from past wins
         confirmed_goals: list[tuple[int, int]] = []
@@ -457,7 +459,45 @@ class EpistemicGoalScheduler:
             if hypothesized_goals:
                 goals = hypothesized_goals
 
-        # (c) Structural inference: geometric patterns suggesting goals
+        # (c) Real Unvisited Novel / Interactive Entities on the Grid (Epistemic Curiosity)
+        if not goals:
+            novel_entity_goals: list[tuple[int, int]] = []
+            for e in entities:
+                if avatar_pos is not None and e.grid_pos == avatar_pos:
+                    continue
+                if e.feature_id == bg:
+                    continue
+                if e.feature_id in av_feats:
+                    continue
+                if e.grid_pos in panel_coords:
+                    continue
+                if (
+                    engine.symbolic_theory.is_barrier(e.feature_id)
+                    or e.role == EntityRole.OBSTACLE
+                    or e.feature_id in engine.hazard_tracker.known_lethal_features
+                    or e.feature_id in engine.mobile_threat_features
+                ):
+                    continue
+                if engine.symbolic_theory.is_feature_explored(e.feature_id):
+                    continue
+                if engine.symbolic_theory.is_position_explored(e.grid_pos):
+                    continue
+                if e.grid_pos in engine.exhausted_candidate_goals:
+                    continue
+                if not (1 <= e.area <= 64):
+                    continue
+                novel_entity_goals.append(e.grid_pos)
+                satisfied_when[e.grid_pos] = {"feature": e.feature_id, "max_visits": 2}
+                new_candidate_feats.add(e.feature_id)
+
+            if novel_entity_goals:
+                if avatar_pos is not None:
+                    novel_entity_goals.sort(
+                        key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                    )
+                goals = novel_entity_goals
+
+        # (d) Structural inference: geometric patterns suggesting goals
         if not goals and engine.learned_goal_positions:
             goals = [
                 g
@@ -516,6 +556,7 @@ class EpistemicGoalScheduler:
                             and 0 <= cp[1] < W
                             and cp != avatar_pos
                             and cp not in panel_coords
+                            and int(curr_grid[cp[0], cp[1]]) != bg
                         ):
                             if cp not in goals:
                                 goals.append(cp)
@@ -531,6 +572,7 @@ class EpistemicGoalScheduler:
                         and 0 <= pos[1] < W
                         and pos != avatar_pos
                         and pos not in panel_coords
+                        and int(curr_grid[pos[0], pos[1]]) != bg
                     ):
                         if pos not in goals:
                             goals.append(pos)
@@ -539,48 +581,52 @@ class EpistemicGoalScheduler:
                         ):
                             new_learned_positions.add(pos)
 
-        # (d) Exploratory guesses: unknown entities
+        # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
         if not goals:
-            exploratory_goals = [
-                e.grid_pos
-                for e in entities
-                if e.grid_pos not in panel_coords
-                and e.role
-                in (
-                    EntityRole.UNKNOWN,
-                    EntityRole.AGENT,
-                    EntityRole.ACTUATOR,
-                    EntityRole.MANIPULABLE,
-                    EntityRole.RESOURCE,
-                )
-                and 1 <= e.area <= 64
-                and e.feature_id != bg
-                and not engine.symbolic_theory.is_walkable(e.feature_id)
-                and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                and not engine.symbolic_theory.is_barrier(e.feature_id)
-                and (
-                    e.feature_id not in av_feats
-                    or (
-                        avatar_pos is not None
-                        and (
-                            abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
-                        )
-                        > 4
-                    )
+            visited = set(getattr(engine.working_memory, "visited_cells", set()))
+            if avatar_pos is not None:
+                visited.add(avatar_pos)
+
+            reachable_passable: set[tuple[int, int]] = set()
+            if avatar_pos is not None:
+                q_frontier: deque[tuple[int, int]] = deque([avatar_pos])
+                reachable_passable.add(avatar_pos)
+                while q_frontier:
+                    curr_cell = q_frontier.popleft()
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = curr_cell[0] + dr, curr_cell[1] + dc
+                        if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reachable_passable:
+                            c_val = int(curr_grid[nr, nc])
+                            if (
+                                (c_val == bg or engine.symbolic_theory.is_walkable(c_val))
+                                and not engine.symbolic_theory.is_barrier(c_val)
+                                and c_val not in engine.hazard_tracker.known_lethal_features
+                            ):
+                                reachable_passable.add((nr, nc))
+                                q_frontier.append((nr, nc))
+
+            frontier_candidates = [
+                cp
+                for cp in reachable_passable
+                if cp not in visited
+                and cp not in panel_coords
+                and any(
+                    (cp[0] + dr, cp[1] + dc) in visited
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                 )
             ]
-            if exploratory_goals:
-                goals = exploratory_goals
-                for e in entities:
-                    if (
-                        e.grid_pos in goals
-                        and e.feature_id != bg
-                        and e.feature_id not in av_feats
-                        and e.grid_pos not in panel_coords
-                        and e.feature_id not in engine.mobile_threat_features
-                        and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                    ):
-                        new_candidate_feats.add(e.feature_id)
+            if not frontier_candidates:
+                frontier_candidates = [
+                    cp for cp in reachable_passable if cp not in visited and cp not in panel_coords
+                ]
+
+            if frontier_candidates and avatar_pos is not None:
+                frontier_candidates.sort(
+                    key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                )
+                nearest_frontier = frontier_candidates[0]
+                goals.append(nearest_frontier)
+                satisfied_when[nearest_frontier] = {"max_visits": 1}
 
         if avatar_pos is not None:
             goals = [
@@ -656,6 +702,7 @@ class EpistemicGoalScheduler:
             new_candidate_features=new_candidate_feats,
             subgoal_to_pop=subgoal_to_pop,
             clear_exhausted_goals=clear_exhausted,
+            satisfied_when=satisfied_when,
         )
 
     @classmethod
@@ -796,10 +843,23 @@ class MentalSimulationPlanner:
         av_feats: set[int],
         goals: Sequence[tuple[int, int]],
         blocked_cells: set[tuple[int, int]] | None = None,
+        entities: Sequence[Any] | None = None,
     ) -> tuple[set[tuple[int, int]], bool]:
         """Compute static physical barriers and void background boundaries."""
         H, W = curr_grid.shape
         static_barriers: set[tuple[int, int]] = set()
+
+        if entities:
+            for e in entities:
+                if (
+                    e.role == EntityRole.OBSTACLE
+                    and e.feature_id != bg
+                    and e.feature_id not in av_feats
+                    and not engine.symbolic_theory.is_walkable(e.feature_id)
+                ):
+                    for cr, cc in e.properties.get("cells", [e.grid_pos]):
+                        if (int(cr), int(cc)) not in goals:
+                            static_barriers.add((int(cr), int(cc)))
 
         for r, c in engine.learned_barriers:
             if 0 <= r < H and 0 <= c < W:
@@ -1023,6 +1083,8 @@ class MentalSimulationPlanner:
         for av_f in av_feats:
             engine.symbolic_theory.retract_goal(av_f, reason="avatar_feature")
             engine.symbolic_theory.retract_candidate_goal(av_f, reason="avatar_feature")
+        if proposal.satisfied_when:
+            engine.working_memory.active_epistemic_conditions.update(proposal.satisfied_when)
 
         goals = proposal.goals
 
@@ -1098,6 +1160,7 @@ class MentalSimulationPlanner:
             av_feats=av_feats,
             goals=goals,
             blocked_cells=blocked_cells,
+            entities=entities,
         )
 
         # 4. State mutation triggers
