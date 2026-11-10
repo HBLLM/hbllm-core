@@ -337,3 +337,12 @@ visited 17 / 58 free cells; feature 8 never observed adjacent; result: fail
 - **Task `grid_nav_dev` Demonstration**: Oracle finished at step 18; agent imitation finished at step 44 (`success: True`).
 - **Unit Suite**: `tests/unit/world/test_p2_epistemic_navigation.py` and `tests/unit/world/test_ontology_governance.py` pass 100% clean.
 
+### 5.3 Held-Out Benchmark Evaluation (The Number Moves)
+- **Held-Out Benchmark Report**: `reports/heldout/1ba1f412a4967c474c26befab259c8243ce9858b_handcrafted_20261110_142352.json`
+- **Zero-Shot Generality Score**: **0.2100** (up from **0.0000**; family grid: **0.6300**)
+- **Lifelong Generality Score**: **0.2067** (up from **0.0000**; family grid: **0.6200**)
+- **One-Shot Imitation Generality Score**: **0.2150** (family grid: **0.6450**)
+- **Task `grid_nav_heldout` Lifelong Curve**: `[True, True, True, True, True]` (steps: `[24, 26, 26, 26, 26]`, stable policy at episode 0 — 100% solve rate across all 5 episodes!).
+- **Task `grid_nav_heldout` One-Shot Imitation**: Oracle finished at step 18; agent imitation finished at step 21 (`success: True`).
+- **Conclusion**: The Phase 2 gate requirement (*"Move the held-out number"*) is formally accomplished. General navigation with topological frontier search, Gestalt ground perception, bounded decaying inhibition, and Pearl-grounded affordance discovery succeeds across both dev and held-out environments without memorized paths or level-specific heuristics.
+
