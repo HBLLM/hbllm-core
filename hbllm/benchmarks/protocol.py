@@ -36,6 +36,10 @@ class TaskResult:
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
     errors: list[str] = field(default_factory=list)
+    episode_successes: list[bool] = field(default_factory=list)
+    episode_steps: list[int] = field(default_factory=list)
+    zero_shot: dict[str, Any] = field(default_factory=dict)
+    lifelong: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,6 +57,8 @@ class EvaluationReport:
     mean_p95_latency_ms: float = 0.0
     baselines: dict[str, Any] = field(default_factory=dict)
     env_hash: str = ""
+    zero_shot: dict[str, Any] = field(default_factory=dict)
+    lifelong: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -173,7 +179,11 @@ class EvaluationProtocol:
         task_id: str,
         family: str,
         split: str,
-        run_fn: Callable[[], tuple[bool, int, list[float], list[str]]],
+        run_fn: Callable[
+            [],
+            tuple[bool, int, list[float], list[str]]
+            | tuple[bool, int, list[float], list[str], dict[str, Any]],
+        ],
         max_budget: int = 200,
     ) -> TaskResult:
         """Run a single task under protocol measurement."""
@@ -185,13 +195,41 @@ class EvaluationProtocol:
         )
 
         try:
-            success, steps, latencies, errors = run_fn()
+            fn_res = run_fn()
+            extra: dict[str, Any] = {}
+            if len(fn_res) >= 5:
+                success, steps, latencies, errors, extra = (
+                    fn_res[0],
+                    fn_res[1],
+                    fn_res[2],
+                    fn_res[3],
+                    fn_res[4],
+                )  # type: ignore[misc]
+            else:
+                success, steps, latencies, errors = fn_res[0], fn_res[1], fn_res[2], fn_res[3]  # type: ignore[misc]
+
             result.steps = steps
             result.errors = errors
             result.success_at_budget = success
-            if success:
-                result.steps_to_first_success = steps
-                result.steps_to_stable_policy = steps  # In deterministic tasks, success is stable
+            result.episode_successes = extra.get("episode_successes", [success])
+            result.episode_steps = extra.get("episode_steps", [steps])
+            result.steps_to_first_success = extra.get(
+                "steps_to_first_success", steps if success else None
+            )
+            result.steps_to_stable_policy = extra.get(
+                "steps_to_stable_policy", steps if success else None
+            )
+            result.zero_shot = extra.get("zero_shot", {"success": success, "steps": steps})
+            result.lifelong = extra.get(
+                "lifelong",
+                {
+                    "success": success,
+                    "episodes": len(result.episode_successes),
+                    "successes": result.episode_successes,
+                    "steps": result.episode_steps,
+                    "steps_to_stable_policy": result.steps_to_stable_policy,
+                },
+            )
 
             if latencies:
                 sorted_lats = sorted(latencies)
@@ -257,6 +295,65 @@ class EvaluationProtocol:
             round(sum(family_scores.values()) / len(family_scores), 4) if family_scores else 0.0
         )
 
+        # Compute zero-shot and lifelong aggregated metrics
+        zs_fam_scores: dict[str, float] = {}
+        lf_fam_scores: dict[str, float] = {}
+        for fam, t_list in families.items():
+            # Zero-shot
+            zs_solved = [t for t in t_list if t.zero_shot.get("success", t.success_at_budget)]
+            if not zs_solved:
+                zs_fam_scores[fam] = 0.0
+            else:
+                sr = len(zs_solved) / len(t_list)
+                eff = sum(
+                    max(0.0, 1.0 - (t.zero_shot.get("steps", t.steps) / max(1, t.max_budget)))
+                    for t in zs_solved
+                ) / len(zs_solved)
+                zs_fam_scores[fam] = round(0.5 * sr + 0.5 * eff, 4)
+
+            # Lifelong
+            lf_solved = [t for t in t_list if t.lifelong.get("success", t.success_at_budget)]
+            if not lf_solved:
+                lf_fam_scores[fam] = 0.0
+            else:
+                sr = len(lf_solved) / len(t_list)
+                eff = sum(
+                    max(0.0, 1.0 - (t.steps / max(1, t.max_budget))) for t in lf_solved
+                ) / len(lf_solved)
+                lf_fam_scores[fam] = round(0.5 * sr + 0.5 * eff, 4)
+
+        zs_gen = (
+            round(sum(zs_fam_scores.values()) / max(1, len(zs_fam_scores)), 4)
+            if zs_fam_scores
+            else 0.0
+        )
+        lf_gen = (
+            round(sum(lf_fam_scores.values()) / max(1, len(lf_fam_scores)), 4)
+            if lf_fam_scores
+            else 0.0
+        )
+        zs_solved_count = sum(1 for t in tasks if t.zero_shot.get("success", t.success_at_budget))
+        lf_solved_count = sum(1 for t in tasks if t.lifelong.get("success", t.success_at_budget))
+
+        stable_policies = [
+            t.steps_to_stable_policy for t in tasks if t.steps_to_stable_policy is not None
+        ]
+        mean_stable = (
+            round(sum(stable_policies) / len(stable_policies), 2) if stable_policies else None
+        )
+
+        zero_shot_dict = {
+            "generality_score": zs_gen,
+            "family_scores": zs_fam_scores,
+            "solve_rate": round(zs_solved_count / max(1, len(tasks)), 4),
+        }
+        lifelong_dict = {
+            "generality_score": lf_gen,
+            "family_scores": lf_fam_scores,
+            "solve_rate": round(lf_solved_count / max(1, len(tasks)), 4),
+            "mean_steps_to_stable_policy": mean_stable,
+        }
+
         all_p50 = [t.p50_latency_ms for t in tasks if t.p50_latency_ms > 0]
         all_p95 = [t.p95_latency_ms for t in tasks if t.p95_latency_ms > 0]
         mean_p50 = round(sum(all_p50) / len(all_p50), 2) if all_p50 else 0.0
@@ -275,6 +372,8 @@ class EvaluationProtocol:
             mean_p95_latency_ms=mean_p95,
             baselines=baselines or {},
             env_hash=self._compute_env_hash(),
+            zero_shot=zero_shot_dict,
+            lifelong=lifelong_dict,
         )
 
         # Write output file

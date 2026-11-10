@@ -10,7 +10,7 @@ from benchmarks.envs.continuous_reach import ContinuousReachEnvironment
 from benchmarks.envs.grid_nav import GridNavEnvironment
 from benchmarks.envs.grid_push import GridPushEnvironment
 from benchmarks.envs.symbolic_rules import SymbolicRulesEnvironment
-from benchmarks.suites.runner import run_closed_loop_episode
+from benchmarks.suites.runner import run_closed_loop_episode, run_closed_loop_task, run_suite
 from hbllm.benchmarks.protocol import EvaluationProtocol
 
 
@@ -162,3 +162,93 @@ def test_successful_oracle_episode_populates_goal_features():
 
     assert info.get("success") is True
     assert 8 in system.engine.symbolic_theory.goal_features
+
+
+def test_closed_loop_lifelong_oracle_flat_and_stub_zero():
+    """Lifelong evaluation: oracle shows flat True curve, stub shows flat False curve."""
+    task_def = {
+        "id": "test_grid_nav",
+        "family": "grid",
+        "env_class": "benchmarks.envs.grid_nav.GridNavEnvironment",
+        "seeds": [10],
+    }
+
+    # 1. Oracle baseline (N=5 episodes)
+    ok_o, steps_o, _, _, extra_o = run_closed_loop_task(
+        env_cls=GridNavEnvironment,
+        task_def=task_def,
+        max_budget=100,
+        baseline="oracle",
+        episodes=5,
+        shared_memory=True,
+    )
+    assert ok_o is True
+    assert extra_o["episode_successes"] == [True, True, True, True, True]
+    assert len(extra_o["episode_steps"]) == 5
+    assert extra_o["steps_to_stable_policy"] == 0
+    assert extra_o["zero_shot"]["success"] is True
+    assert extra_o["lifelong"]["success"] is True
+
+    # 2. Stub agent baseline (N=5 episodes)
+    ok_s, steps_s, _, _, extra_s = run_closed_loop_task(
+        env_cls=GridNavEnvironment,
+        task_def=task_def,
+        max_budget=60,
+        baseline="stub_agent",
+        episodes=5,
+        shared_memory=True,
+    )
+    assert ok_s is False
+    assert extra_s["episode_successes"] == [False, False, False, False, False]
+    assert extra_s["steps_to_stable_policy"] is None
+    assert extra_s["zero_shot"]["success"] is False
+    assert extra_s["lifelong"]["success"] is False
+
+
+def test_closed_loop_lifelong_json_schema(tmp_path: Path):
+    """Evaluation report JSON must contain both zero_shot and lifelong schemas."""
+    import json
+
+    dev_manifest = tmp_path / "mini_dev.yaml"
+    dev_manifest.write_text(
+        yaml.dump(
+            {
+                "split": "dev",
+                "tasks": [
+                    {
+                        "id": "mini_reach",
+                        "family": "continuous",
+                        "env_class": "benchmarks.envs.continuous_reach.ContinuousReachEnvironment",
+                        "seeds": [50],
+                        "max_budget": 30,
+                    }
+                ],
+            }
+        )
+    )
+
+    code = run_suite(
+        split="dev",
+        reports_dir=str(tmp_path / "reports"),
+        perception_mode="handcrafted",
+        baseline="oracle",
+        manifest_path=str(dev_manifest),
+        episodes_per_task=4,
+        shared_memory=True,
+    )
+    assert code == 0
+
+    report_files = list((tmp_path / "reports" / "dev").glob("dev_*.json"))
+    assert len(report_files) == 1
+
+    report_data = json.loads(report_files[0].read_text(encoding="utf-8"))
+    assert "zero_shot" in report_data
+    assert "lifelong" in report_data
+    assert "generality_score" in report_data["zero_shot"]
+    assert "generality_score" in report_data["lifelong"]
+
+    task = report_data["tasks"][0]
+    assert "episode_successes" in task
+    assert "episode_steps" in task
+    assert "steps_to_stable_policy" in task
+    assert len(task["episode_successes"]) == 4

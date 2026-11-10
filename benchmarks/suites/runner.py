@@ -15,6 +15,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Ensure core root is on sys.path
+_CORE_ROOT = Path(__file__).resolve().parents[2]
+if str(_CORE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_CORE_ROOT))
+
 import yaml
 
 from hbllm.benchmarks.protocol import EvaluationProtocol, TaskResult
@@ -26,6 +31,128 @@ def _load_env_class(class_path: str) -> type:
     module_name, class_name = class_path.rsplit(".", 1)
     mod = importlib.import_module(module_name)
     return getattr(mod, class_name)
+
+
+def run_closed_loop_task(
+    env_cls: type,
+    task_def: dict[str, Any],
+    max_budget: int,
+    baseline: str = "system",
+    perception_mode: str = "handcrafted",
+    episodes: int = 5,
+    shared_memory: bool = True,
+) -> tuple[bool, int, list[float], list[str], dict[str, Any]]:
+    """Execute a task over N episodes in closed loop with optional shared memory.
+
+    Returns:
+        (overall_success, steps, latencies_ms, errors, extra)
+    """
+    seeds = task_def.get("seeds", [0])
+    task_seed = seeds[0]
+    task_id = task_def.get("id", f"task_{task_seed}")
+
+    episode_successes: list[bool] = []
+    episode_steps: list[int] = []
+    all_latencies: list[float] = []
+    all_errors: list[str] = []
+
+    def _execute(engine_factory=None):
+        system = None
+        engine = None
+        if engine_factory is not None and shared_memory:
+            system = engine_factory()
+            engine = system.engine
+
+        prev_succ = False
+        for ep_idx in range(episodes):
+            if engine_factory is not None and not shared_memory:
+                system = engine_factory()
+                engine = system.engine
+            elif engine is not None and ep_idx > 0:
+                from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+                b_kind = (
+                    EpisodeBoundaryKind.LEVEL_COMPLETE if prev_succ else EpisodeBoundaryKind.DEATH
+                )
+                try:
+                    engine.on_boundary(EpisodeBoundary(kind=b_kind))
+                except Exception:
+                    pass
+
+            env_instance = env_cls(max_steps=max_budget)
+            obs = env_instance.reset(seed=task_seed)
+            succ, steps, lats, errs = _run_loop(
+                env_instance,
+                obs,
+                engine,
+                baseline,
+                max_budget,
+                [],
+                [],
+                seed=task_seed,
+            )
+            episode_successes.append(succ)
+            episode_steps.append(steps)
+            all_latencies.extend(lats)
+            all_errors.extend(errs)
+            prev_succ = succ
+
+    if baseline in ("system", "no_grounding"):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+
+            def make_system():
+                config = CognitiveSystemConfig(
+                    world_id=f"bench_{task_id}_{baseline}",
+                    memory_dir=tmp_dir,
+                    enable_grounding=(baseline == "system"),
+                    perception_mode=perception_mode,
+                )
+                return build_cognitive_system(config)
+
+            _execute(make_system)
+    else:
+        _execute(None)
+
+    # Compute stable policy metric (first i after which 3 consecutive successes occur)
+    stable_idx = None
+    for i in range(len(episode_successes) - 2):
+        if episode_successes[i] and episode_successes[i + 1] and episode_successes[i + 2]:
+            stable_idx = i
+            break
+
+    # First success
+    first_succ_steps = None
+    for i, s in enumerate(episode_successes):
+        if s:
+            first_succ_steps = episode_steps[i]
+            break
+
+    overall_success = bool(episode_successes[-1]) if episode_successes else False
+    mean_steps = (
+        episode_steps[-1]
+        if (episode_steps and overall_success)
+        else (int(sum(episode_steps) / max(1, len(episode_steps))))
+    )
+
+    extra = {
+        "episode_successes": episode_successes,
+        "episode_steps": episode_steps,
+        "steps_to_stable_policy": stable_idx,
+        "steps_to_first_success": first_succ_steps,
+        "zero_shot": {
+            "success": episode_successes[0] if episode_successes else False,
+            "steps": episode_steps[0] if episode_steps else max_budget,
+        },
+        "lifelong": {
+            "success": overall_success,
+            "episodes": episodes,
+            "successes": episode_successes,
+            "steps": episode_steps,
+            "steps_to_stable_policy": stable_idx,
+        },
+    }
+
+    return overall_success, mean_steps, all_latencies, all_errors, extra
 
 
 def run_closed_loop_episode(
@@ -134,6 +261,8 @@ def run_suite(
     perception_mode: str = "handcrafted",
     baseline: str = "system",
     manifest_path: str | None = None,
+    episodes_per_task: int = 5,
+    shared_memory: bool = True,
 ) -> int:
     """Executes the closed-loop benchmark evaluation for the given split."""
     manifest_file = (
@@ -156,6 +285,8 @@ def run_suite(
             "perception_mode": perception_mode,
             "baseline": baseline,
             "split": split,
+            "episodes_per_task": episodes_per_task,
+            "shared_memory": shared_memory,
         },
     )
 
@@ -163,7 +294,7 @@ def run_suite(
         protocol.verify_heldout_gate()
 
     print(
-        f"=== Running HBLLM Generality Suite [{split.upper()}] (baseline={baseline}, perception={perception_mode}) ==="
+        f"=== Running HBLLM Generality Suite [{split.upper()}] (baseline={baseline}, perception={perception_mode}, episodes={episodes_per_task}, shared_memory={shared_memory}) ==="
     )
     print(f"Git SHA: {protocol.git_sha} | Config Hash: {protocol.config_hash}")
 
@@ -173,38 +304,23 @@ def run_suite(
         task_id = task_def["id"]
         family = task_def["family"]
         env_cls = _load_env_class(task_def["env_class"])
-        seeds = task_def.get("seeds", [0])
         max_budget = task_def.get("max_budget", 100)
 
         print(
-            f"-> Evaluating task [{task_id}] ({family}, {len(seeds)} seeds, budget={max_budget})..."
+            f"-> Evaluating task [{task_id}] ({family}, episodes={episodes_per_task}, shared_memory={shared_memory}, budget={max_budget})..."
         )
 
-        def make_task_runner(t_seeds: list[int], t_budget: int):
-            def run_task() -> tuple[bool, int, list[float], list[str]]:
-                all_successes: list[bool] = []
-                all_steps: list[int] = []
-                all_latencies: list[float] = []
-                all_errors: list[str] = []
-
-                for s in t_seeds:
-                    env_instance = env_cls(max_steps=t_budget)
-                    succ, st, lats, errs = run_closed_loop_episode(
-                        env=env_instance,
-                        seed=s,
-                        max_budget=t_budget,
-                        baseline=baseline,
-                        perception_mode=perception_mode,
-                    )
-                    all_successes.append(succ)
-                    all_steps.append(st)
-                    all_latencies.extend(lats)
-                    all_errors.extend(errs)
-
-                solve_rate = sum(1 for s in all_successes if s) / len(all_successes)
-                overall_success = solve_rate >= 0.5
-                mean_steps = int(sum(all_steps) / len(all_steps))
-                return overall_success, mean_steps, all_latencies, all_errors
+        def make_task_runner(t_def: dict[str, Any], t_budget: int):
+            def run_task():
+                return run_closed_loop_task(
+                    env_cls=env_cls,
+                    task_def=t_def,
+                    max_budget=t_budget,
+                    baseline=baseline,
+                    perception_mode=perception_mode,
+                    episodes=episodes_per_task,
+                    shared_memory=shared_memory,
+                )
 
             return run_task
 
@@ -212,7 +328,7 @@ def run_suite(
             task_id=f"{task_id}_{baseline}_{perception_mode}",
             family=family,
             split=split,
-            run_fn=make_task_runner(seeds, max_budget),
+            run_fn=make_task_runner(task_def, max_budget),
             max_budget=max_budget,
         )
         tasks.append(t_res)
@@ -227,44 +343,35 @@ def run_suite(
                 t_fam = task_def["family"]
                 t_cls = _load_env_class(task_def["env_class"])
                 t_budget = task_def.get("max_budget", 100)
-                t_seeds = task_def.get("seeds", [0])
-                if b_name == "no_grounding":
-                    t_seeds = t_seeds[:5]
 
-                b_succs: list[bool] = []
-                b_steps: list[int] = []
-                b_lats: list[float] = []
-                b_errs: list[str] = []
-                for s in t_seeds:
-                    env_i = t_cls(max_steps=t_budget)
-                    s_ok, s_st, s_lt, s_er = run_closed_loop_episode(
-                        env=env_i,
-                        seed=s,
-                        max_budget=t_budget,
-                        baseline=b_name,
-                        perception_mode=perception_mode,
-                    )
-                    b_succs.append(s_ok)
-                    b_steps.append(s_st)
-                    b_lats.extend(s_lt)
-                    b_errs.extend(s_er)
-
-                s_rate = sum(1 for x in b_succs if x) / max(1, len(b_succs))
-                m_steps = int(sum(b_steps) / max(1, len(b_steps)))
+                b_ok, b_st, b_lt, b_er, b_extra = run_closed_loop_task(
+                    env_cls=t_cls,
+                    task_def=task_def,
+                    max_budget=t_budget,
+                    baseline=b_name,
+                    perception_mode=perception_mode,
+                    episodes=episodes_per_task,
+                    shared_memory=shared_memory,
+                )
                 b_task_res = TaskResult(
                     task_id=f"{t_id}_{b_name}",
                     family=t_fam,
                     split=split,
-                    steps=m_steps,
+                    steps=b_st,
                     max_budget=t_budget,
-                    success_at_budget=(s_rate >= 0.5),
-                    steps_to_first_success=m_steps if s_rate >= 0.5 else None,
-                    p50_latency_ms=round(sorted(b_lats)[len(b_lats) // 2], 2) if b_lats else 0.0,
+                    success_at_budget=b_ok,
+                    steps_to_first_success=b_extra.get("steps_to_first_success"),
+                    steps_to_stable_policy=b_extra.get("steps_to_stable_policy"),
+                    p50_latency_ms=round(sorted(b_lt)[len(b_lt) // 2], 2) if b_lt else 0.0,
                     p95_latency_ms=(
-                        round(sorted(b_lats)[min(len(b_lats) - 1, int(len(b_lats) * 0.95))], 2)
-                        if b_lats
+                        round(sorted(b_lt)[min(len(b_lt) - 1, int(len(b_lt) * 0.95))], 2)
+                        if b_lt
                         else 0.0
                     ),
+                    episode_successes=b_extra.get("episode_successes", []),
+                    episode_steps=b_extra.get("episode_steps", []),
+                    zero_shot=b_extra.get("zero_shot", {}),
+                    lifelong=b_extra.get("lifelong", {}),
                 )
                 b_tasks.append(b_task_res)
 
@@ -284,25 +391,49 @@ def run_suite(
                     b_fam_scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
             b_gen = round(sum(b_fam_scores.values()) / max(1, len(b_fam_scores)), 4)
             tot_solved = sum(1 for bt in b_tasks if bt.success_at_budget)
+
+            b_curves = [bt.episode_successes for bt in b_tasks if bt.episode_successes]
+            avg_curve = (
+                [all(c[ep] for c in b_curves) for ep in range(episodes_per_task)]
+                if b_curves
+                else []
+            )
+            stable_list = [
+                bt.steps_to_stable_policy for bt in b_tasks if bt.steps_to_stable_policy is not None
+            ]
+            b_stable = round(sum(stable_list) / len(stable_list), 2) if stable_list else None
+
             baselines_dict[b_name] = {
                 "generality_score": b_gen,
                 "family_scores": b_fam_scores,
                 "solve_rate": round(tot_solved / max(1, len(b_tasks)), 4),
+                "lifelong_curve": avg_curve,
+                "mean_steps_to_stable_policy": b_stable,
             }
             print(
-                f"  Baseline [{b_name}]: generality={b_gen:.4f}, solve_rate={tot_solved}/{len(b_tasks)}"
+                f"  Baseline [{b_name}]: generality={b_gen:.4f}, solve_rate={tot_solved}/{len(b_tasks)}, curve={avg_curve}, stable={b_stable}"
             )
 
     report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
 
     print("\n=== Benchmark Results Summary ===")
     print(f"Split: {report.split.upper()} | Baseline: {baseline}")
+    print(
+        f"Zero-shot: generality={report.zero_shot.get('generality_score', 0.0):.4f}, solve_rate={report.zero_shot.get('solve_rate', 0.0):.4f}"
+    )
+    print(
+        f"Lifelong:  generality={report.lifelong.get('generality_score', 0.0):.4f}, solve_rate={report.lifelong.get('solve_rate', 0.0):.4f}, stable_policy={report.lifelong.get('mean_steps_to_stable_policy')}"
+    )
     for fam, score in report.family_scores.items():
         print(f"  Family [{fam}]: {score:.4f}")
     print(f"Generality Score: {report.generality_score:.4f}")
     print(
         f"Mean Latency: p50={report.mean_p50_latency_ms:.2f}ms | p95={report.mean_p95_latency_ms:.2f}ms"
     )
+    for t in report.tasks:
+        print(
+            f"  Task [{t.task_id}]: curve={t.episode_successes}, steps={t.episode_steps}, stable={t.steps_to_stable_policy}"
+        )
     print("Report written successfully.")
 
     return 0
@@ -325,6 +456,25 @@ def main() -> int:
         help="Evaluation policy baseline",
     )
     parser.add_argument("--manifest", default=None, help="Custom manifest YAML path")
+    parser.add_argument(
+        "--episodes-per-task",
+        type=int,
+        default=5,
+        help="Number of episodes per task for lifelong evaluation",
+    )
+    parser.add_argument(
+        "--shared-memory",
+        dest="shared_memory",
+        action="store_true",
+        default=True,
+        help="Retain memory across episodes in lifelong evaluation",
+    )
+    parser.add_argument(
+        "--no-shared-memory",
+        dest="shared_memory",
+        action="store_false",
+        help="Do not retain memory across episodes",
+    )
     args = parser.parse_args()
 
     return run_suite(
@@ -333,6 +483,8 @@ def main() -> int:
         perception_mode=args.perception_mode,
         baseline=args.baseline,
         manifest_path=args.manifest,
+        episodes_per_task=args.episodes_per_task,
+        shared_memory=args.shared_memory,
     )
 
 
