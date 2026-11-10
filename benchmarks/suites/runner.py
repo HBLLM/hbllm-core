@@ -111,6 +111,12 @@ def _run_loop(
 
         if done:
             success = bool(info.get("success", False))
+            # Feed terminal observation back to engine to trigger reward/goal learning
+            if engine is not None:
+                try:
+                    engine.step(obs)
+                except Exception:
+                    pass
             break
 
     return success, step_count, latencies, errors

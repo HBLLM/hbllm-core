@@ -727,16 +727,17 @@ class TieredWorkspace:
                     )
                 )
         if ops:
-            # One atomic transaction: the archive either lands in full or not at all.
-            result = self.persistent.commit_operations(
-                ops,
-                author="archive:brain→persistent",
-                grant=getattr(self, "_system_grant", None),
-                metadata={"tier_transfer": "archive"},
-            )
-            if not result.is_committed:
-                logger.warning("archive_brain rejected: %s", result.annotations)
-                return 0
+            batch_size = 400
+            for i in range(0, len(ops), batch_size):
+                result = self.persistent.commit_operations(
+                    ops[i : i + batch_size],
+                    author="archive:brain→persistent",
+                    grant=getattr(self, "_system_grant", None),
+                    metadata={"tier_transfer": "archive"},
+                )
+                if not result.is_committed:
+                    logger.warning("archive_brain rejected: %s", result.annotations)
+                    return 0
 
         logger.info("Archived %d brain nodes to persistent workspace", count)
         return count
@@ -805,17 +806,19 @@ class TieredWorkspace:
 
         grant = getattr(self, "_system_grant", None)
         if decay_ops:
-            target_ws.commit_operations(
-                decay_ops,
-                author=f"{author}:energy_update",
-                grant=grant,
-            )
+            for i in range(0, len(decay_ops), 400):
+                target_ws.commit_operations(
+                    decay_ops[i : i + 400],
+                    author=f"{author}:energy_update",
+                    grant=grant,
+                )
         if remove_ops:
-            target_ws.commit_operations(
-                remove_ops,
-                author=f"{author}:eviction",
-                grant=grant,
-            )
+            for i in range(0, len(remove_ops), 400):
+                target_ws.commit_operations(
+                    remove_ops[i : i + 400],
+                    author=f"{author}:eviction",
+                    grant=grant,
+                )
             logger.info(
                 "Exponential decay pruned %d sub-threshold nodes from %s", len(remove_ops), tier
             )
@@ -888,11 +891,12 @@ class TieredWorkspace:
 
         if remove_ops:
             grant = getattr(self, "_system_grant", None)
-            target_ws.commit_operations(
-                remove_ops,
-                author=f"{author}:redundancy_resolved",
-                grant=grant,
-            )
+            for i in range(0, len(remove_ops), 400):
+                target_ws.commit_operations(
+                    remove_ops[i : i + 400],
+                    author=f"{author}:redundancy_resolved",
+                    grant=grant,
+                )
             logger.info(
                 "Interference resolution pruned %d redundant nodes from %s", len(remove_ops), tier
             )

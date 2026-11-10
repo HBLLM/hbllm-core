@@ -23,7 +23,7 @@ from benchmarks.envs.protocol import (
     ACTION_UP,
     BenchmarkEnvironment,
 )
-from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
 
 
 class GridPushEnvironment(BenchmarkEnvironment):
@@ -81,7 +81,7 @@ class GridPushEnvironment(BenchmarkEnvironment):
         self.done = False
         return self._make_observation()
 
-    def _make_observation(self) -> EmbodiedObservation:
+    def _make_observation(self, terminal: TerminalSignal | None = None) -> EmbodiedObservation:
         return EmbodiedObservation(
             lattice=self.grid.copy(),
             available_actions=[
@@ -90,14 +90,20 @@ class GridPushEnvironment(BenchmarkEnvironment):
                 ACTION_LEFT,
                 ACTION_RIGHT,
             ],
+            terminal=terminal,
             context_id=f"grid_push_{self.current_seed}",
-            episode_id=f"ep_{self.steps}",
+            episode_id=str(self.current_seed),
             entities=(),  # Zero oracle role labels
         )
 
     def step(self, action: Any) -> tuple[EmbodiedObservation, float, bool, dict[str, Any]]:
         if self.done:
-            return self._make_observation(), 0.0, True, {"success": False, "steps": self.steps}
+            return (
+                self._make_observation(terminal=TerminalSignal.TIMEOUT),
+                0.0,
+                True,
+                {"success": False, "steps": self.steps},
+            )
 
         self.steps += 1
         r, c = self.avatar_pos
@@ -149,7 +155,7 @@ class GridPushEnvironment(BenchmarkEnvironment):
                         success = True
                         reward = 1.0
                         return (
-                            self._make_observation(),
+                            self._make_observation(terminal=TerminalSignal.SUCCESS),
                             reward,
                             True,
                             {
@@ -166,15 +172,17 @@ class GridPushEnvironment(BenchmarkEnvironment):
                 self.avatar_pos = next_avatar
                 self.grid[self.avatar_pos[0], self.avatar_pos[1]] = 1
 
+        terminal = None
         if self.steps >= self.max_steps:
             self.done = True
+            terminal = TerminalSignal.TIMEOUT
 
         info = {
             "success": success,
             "steps": self.steps,
             "box_at_goal": self.box_pos == self.goal_pos,
         }
-        return self._make_observation(), reward, self.done, info
+        return self._make_observation(terminal=terminal), reward, self.done, info
 
     def get_oracle_action(self) -> int | None:
         """Compute optimal action using A* over state (avatar_pos, box_pos)."""

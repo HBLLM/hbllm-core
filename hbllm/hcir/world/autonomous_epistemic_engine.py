@@ -1948,11 +1948,14 @@ class AutonomousEpistemicEngine:
         if not ops:
             return None
 
-        tx = HCIRTransaction(
-            author="AutonomousEpistemicEngine",
-            operations=ops,
-        )
-        committed_tx = self.transaction_manager.commit(tx)
+        batch_size = 400
+        committed_tx = None
+        for i in range(0, len(ops), batch_size):
+            tx = HCIRTransaction(
+                author="AutonomousEpistemicEngine",
+                operations=ops[i : i + batch_size],
+            )
+            committed_tx = self.transaction_manager.commit(tx)
 
         if self.tiered_workspace is not None:
             self.tiered_workspace.notify_commit()
@@ -5702,7 +5705,9 @@ class AutonomousEpistemicEngine:
                 grant = reg.issue(author, {dest_ws.tier})
 
         if dest_ws is not None and ops:
-            dest_ws.commit_operations(ops, author=author, grant=grant)
+            batch_size = 400
+            for i in range(0, len(ops), batch_size):
+                dest_ws.commit_operations(ops[i : i + batch_size], author=author, grant=grant)
         return ops
 
     def hydrate_from_workspace(

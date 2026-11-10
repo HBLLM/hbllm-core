@@ -1253,6 +1253,17 @@ class PrefrontalDeliberationEngine:
         act, data = view.plan_epistemic_probe(curr_grid, available_actions)
         return act, data, None
 
+    @staticmethod
+    def _target_phase(view: Any) -> EpistemicPhase:
+        """Determine target cognitive phase: exploitation requires verified reward evidence."""
+        has_confirmed_goal = bool(
+            getattr(getattr(view, "symbolic_theory", None), "goal_features", None)
+            or getattr(view, "learned_goal_positions", None)
+        )
+        return (
+            EpistemicPhase.EXPLOITATION if has_confirmed_goal else EpistemicPhase.MENTAL_SIMULATION
+        )
+
     def prepare(
         self,
         view: Any,
@@ -1515,7 +1526,7 @@ class PrefrontalDeliberationEngine:
                             )
                         )
                         sim_pos = next_pos
-                    view.state.phase = EpistemicPhase.EXPLOITATION
+                    view.state.phase = self._target_phase(view)
                     view.state.mental_plan = deque(rel_plan)
                     next_step = view.mental_plan.popleft()
                     logger.info(
@@ -1560,7 +1571,7 @@ class PrefrontalDeliberationEngine:
                                 view.phase == EpistemicPhase.MOTOR_GROUNDING
                                 and view.is_motor_grounded()
                             ):
-                                view.state.phase = EpistemicPhase.EXPLOITATION
+                                view.state.phase = self._target_phase(view)
                             pred_pos = getattr(
                                 synthesized.current_action, "next_predicted_pos", None
                             )
@@ -1614,7 +1625,7 @@ class PrefrontalDeliberationEngine:
                 has_progress = False
             else:
                 has_progress = (
-                    view.phase == EpistemicPhase.EXPLOITATION
+                    view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
                     and bool(view.mental_plan)
                     and any(
                         s.predicted_avatar_pos is not None
@@ -1636,7 +1647,7 @@ class PrefrontalDeliberationEngine:
             # in intentional temporal pacing/evasion around dynamic threats, or if an active
             # mental plan exhibits future forward progress once the looming hazard clears.
             has_progress = (
-                view.phase == EpistemicPhase.EXPLOITATION
+                view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
                 and bool(view.mental_plan)
                 and any(
                     s.predicted_avatar_pos is not None and s.predicted_avatar_pos != view.avatar_pos
@@ -1843,8 +1854,11 @@ class PrefrontalDeliberationEngine:
         ) is not None and view.inhibited_actions.get(affordance_choice[0], 0) == 0:
             chosen_action, chosen_data = affordance_choice
 
-        # 2. Check active mental plan during EXPLOITATION phase
-        elif view.phase == EpistemicPhase.EXPLOITATION and view.mental_plan:
+        # 2. Check active mental plan during EXPLOITATION or MENTAL_SIMULATION phase
+        elif (
+            view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
+            and view.mental_plan
+        ):
             # Active Inference & Efference Copy Divergence:
             # If the organism is physically stuck or the previous step produced zero movement,
             # the counterfactual mental rollout is falsified. Clear stale plan immediately.
@@ -1855,7 +1869,7 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
@@ -1910,7 +1924,7 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
@@ -1930,9 +1944,7 @@ class PrefrontalDeliberationEngine:
                             WorkingMemoryDelta("consecutive_simulation_failures", 0)
                         )
                         view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
-                        view.apply_wm_delta(
-                            WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION)
-                        )
+                        view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                         view.apply_wm_delta(
                             WorkingMemoryDelta("mental_plan", deque(simulated_plan))
                         )
@@ -1964,7 +1976,7 @@ class PrefrontalDeliberationEngine:
                     view, curr_grid, available_actions
                 )
                 if macro_plan:
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action
@@ -1988,7 +2000,7 @@ class PrefrontalDeliberationEngine:
                 if simulated_plan:
                     view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
                     view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(simulated_plan)))
                     next_step = view.mental_plan.popleft()
                     plan_safe, should_wait, wait_steps = self.validate_plan_safety(
@@ -2073,7 +2085,7 @@ class PrefrontalDeliberationEngine:
                                         )
                                     )
                                     sim_pos = next_pos
-                                view.state.phase = EpistemicPhase.EXPLOITATION
+                                view.state.phase = self._target_phase(view)
                                 view.state.mental_plan = deque(causal_plan)
                                 next_step = view.mental_plan.popleft()
                                 chosen_action = next_step.action
@@ -2100,7 +2112,7 @@ class PrefrontalDeliberationEngine:
                         view.avatar_pos, macro_plan[0].action, macro_plan[0].action_data
                     )
                 ):
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", EpistemicPhase.EXPLOITATION))
+                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
                     next_step = view.mental_plan.popleft()
                     chosen_action = next_step.action

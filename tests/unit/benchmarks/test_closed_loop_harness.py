@@ -140,3 +140,25 @@ def test_config_hash_covers_envs_and_heldout_manifest():
     h = protocol.config_hash
     assert isinstance(h, str)
     assert len(h) == 16
+
+
+def test_successful_oracle_episode_populates_goal_features():
+    """Verify that a successful episode with terminal signal populates symbolic_theory.goal_features."""
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    env = GridNavEnvironment(size=10, max_steps=100)
+    obs = env.reset(seed=0)
+    system = build_cognitive_system(
+        CognitiveSystemConfig(world_id="test_oracle_goal", enable_logging=False)
+    )
+
+    done = False
+    while not done:
+        system.engine.step(obs)
+        action = env.get_oracle_action()
+        obs, reward, done, info = env.step(action)
+    if info.get("success"):
+        system.engine.step(obs)
+
+    assert info.get("success") is True
+    assert 8 in system.engine.symbolic_theory.goal_features

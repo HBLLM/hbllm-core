@@ -26,7 +26,7 @@ from benchmarks.envs.protocol import (
     ACTION_UP,
     BenchmarkEnvironment,
 )
-from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
 
 
 class GridNavEnvironment(BenchmarkEnvironment):
@@ -111,7 +111,7 @@ class GridNavEnvironment(BenchmarkEnvironment):
 
         return self._make_observation()
 
-    def _make_observation(self) -> EmbodiedObservation:
+    def _make_observation(self, terminal: TerminalSignal | None = None) -> EmbodiedObservation:
         """Construct raw observation lattice without oracle role labels."""
         return EmbodiedObservation(
             lattice=self.grid.copy(),
@@ -122,15 +122,21 @@ class GridNavEnvironment(BenchmarkEnvironment):
                 ACTION_RIGHT,
                 ACTION_INTERACT,
             ],
+            terminal=terminal,
             context_id=f"grid_nav_{self.current_seed}",
-            episode_id=f"ep_{self.steps}",
+            episode_id=str(self.current_seed),
             entities=(),  # Zero oracle entity roles
         )
 
     def step(self, action: Any) -> tuple[EmbodiedObservation, float, bool, dict[str, Any]]:
         """Advance simulation by executing proposed motor action."""
         if self.done:
-            return self._make_observation(), 0.0, True, {"success": False, "steps": self.steps}
+            return (
+                self._make_observation(terminal=TerminalSignal.TIMEOUT),
+                0.0,
+                True,
+                {"success": False, "steps": self.steps},
+            )
 
         self.steps += 1
         r, c = self.avatar_pos
@@ -185,7 +191,7 @@ class GridNavEnvironment(BenchmarkEnvironment):
                 reward = -1.0
                 self.grid[target_r, target_c] = 9
                 return (
-                    self._make_observation(),
+                    self._make_observation(terminal=TerminalSignal.FAILURE),
                     reward,
                     True,
                     {
@@ -202,7 +208,7 @@ class GridNavEnvironment(BenchmarkEnvironment):
                 reward = 1.0
                 self.grid[target_r, target_c] = 1
                 return (
-                    self._make_observation(),
+                    self._make_observation(terminal=TerminalSignal.SUCCESS),
                     reward,
                     True,
                     {
@@ -215,8 +221,10 @@ class GridNavEnvironment(BenchmarkEnvironment):
             # Update avatar on grid
             self.grid[target_r, target_c] = 1
 
+        terminal = None
         if self.steps >= self.max_steps:
             self.done = True
+            terminal = TerminalSignal.TIMEOUT
 
         info = {
             "success": success,
@@ -224,7 +232,7 @@ class GridNavEnvironment(BenchmarkEnvironment):
             "door_unlocked": self.door_unlocked,
             "steps": self.steps,
         }
-        return self._make_observation(), reward, self.done, info
+        return self._make_observation(terminal=terminal), reward, self.done, info
 
     def _collect_key(self) -> None:
         """Collect key and unlock barrier door."""

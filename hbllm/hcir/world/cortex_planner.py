@@ -418,7 +418,9 @@ class EpistemicGoalScheduler:
                         ):
                             if cp not in goals:
                                 goals.append(cp)
-                            if is_high_conf:
+                            if is_high_conf and (
+                                feat is not None and feat in engine.symbolic_theory.goal_features
+                            ):
                                 new_learned_positions.add(cp)
                 else:
                     pos = sg.get("position")
@@ -431,7 +433,9 @@ class EpistemicGoalScheduler:
                     ):
                         if pos not in goals:
                             goals.append(pos)
-                        if is_high_conf:
+                        if is_high_conf and (
+                            feat is not None and feat in engine.symbolic_theory.goal_features
+                        ):
                             new_learned_positions.add(pos)
 
         # (d) Exploratory guesses: unknown entities

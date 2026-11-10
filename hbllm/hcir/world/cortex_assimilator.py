@@ -1392,23 +1392,6 @@ class EpistemicFeedbackAssimilator:
                         av_feats = view.avatar_features or (
                             {view.avatar_feature} if view.avatar_feature is not None else set()
                         )
-                        # HCIR Attractor Invariant: Gather candidate goal features
-                        bg_val = view.bg_feature if view.bg_feature is not None else 0
-                        cand_goals = view.detect_structural_goals(curr_grid, bg=bg_val)
-                        cand_goal_feats = {
-                            int(g["feature"])
-                            for g in cand_goals
-                            if "feature" in g
-                            and g["feature"] is not None
-                            and int(g["feature"]) != bg_val
-                            and int(g["feature"]) not in av_feats
-                        }
-                        cand_goal_positions = {
-                            g["position"]
-                            for g in cand_goals
-                            if "position" in g and g["position"] is not None
-                        }
-
                         av_rad_r = max(0, (get_engine_state_attr(view, "avatar_h", 1) or 1) // 2)
                         av_rad_c = max(0, (get_engine_state_attr(view, "avatar_w", 1) or 1) // 2)
 
@@ -1422,18 +1405,19 @@ class EpistemicFeedbackAssimilator:
                                 if view.prev_grid is not None
                                 else int(curr_grid[adj_r, adj_c])
                             )
-                            is_candidate_goal = (
-                                val in view.learned_goal_features
-                                or val in cand_goal_feats
-                                or (adj_r, adj_c) in cand_goal_positions
+                            is_confirmed_goal = (
+                                val in view.symbolic_theory.goal_features
+                                or (adj_r, adj_c) in view.learned_goal_positions
+                            )
+                            is_avatar = (
+                                val in av_feats
+                                or val in view.avatar_features
+                                or val == view.avatar_feature
                             )
                             if (
-                                val not in av_feats
-                                and val not in view.avatar_features
-                                and val != view.avatar_feature
-                                and val != bg
-                                and val != view.bg_feature
-                                and not is_candidate_goal
+                                not is_avatar
+                                and not is_confirmed_goal
+                                and val not in view.symbolic_theory.walkable_features
                             ):
                                 # Multi-cell leading edge recording
                                 if step_c != 0:
@@ -1459,7 +1443,7 @@ class EpistemicFeedbackAssimilator:
                                             adj_c,
                                             val,
                                         )
-                                        if view.bg_feature == val:
+                                        if view.bg_feature == val or bg == val:
                                             view.state.bg_feature = view.estimate_background(
                                                 curr_grid
                                             )
@@ -1817,7 +1801,11 @@ class EpistemicFeedbackAssimilator:
 
         if is_success:
             win_target = None
-            if prev_avatar_pos is not None:
+            if view.avatar_pos is not None and (
+                prev_avatar_pos is None or view.avatar_pos != prev_avatar_pos
+            ):
+                win_target = view.avatar_pos
+            elif prev_avatar_pos is not None:
                 dr, dc = 0, 0
                 if action in view.action_dynamics:
                     dr, dc = view.action_dynamics[action].get_displacement()

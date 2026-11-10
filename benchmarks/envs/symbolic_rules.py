@@ -26,7 +26,7 @@ from benchmarks.envs.protocol import (
     ACTION_UP,
     BenchmarkEnvironment,
 )
-from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
 
 
 class SymbolicRulesEnvironment(BenchmarkEnvironment):
@@ -90,7 +90,7 @@ class SymbolicRulesEnvironment(BenchmarkEnvironment):
         self.done = False
         return self._make_observation()
 
-    def _make_observation(self) -> EmbodiedObservation:
+    def _make_observation(self, terminal: TerminalSignal | None = None) -> EmbodiedObservation:
         return EmbodiedObservation(
             lattice=self.grid.copy(),
             available_actions=[
@@ -101,14 +101,20 @@ class SymbolicRulesEnvironment(BenchmarkEnvironment):
                 ACTION_TOGGLE,
                 ACTION_INTERACT,
             ],
+            terminal=terminal,
             context_id=f"symbolic_rules_{self.current_seed}",
-            episode_id=f"ep_{self.steps}",
+            episode_id=str(self.current_seed),
             entities=(),
         )
 
     def step(self, action: Any) -> tuple[EmbodiedObservation, float, bool, dict[str, Any]]:
         if self.done:
-            return self._make_observation(), 0.0, True, {"success": False, "steps": self.steps}
+            return (
+                self._make_observation(terminal=TerminalSignal.TIMEOUT),
+                0.0,
+                True,
+                {"success": False, "steps": self.steps},
+            )
 
         self.steps += 1
         r, c = self.avatar_pos
@@ -155,7 +161,7 @@ class SymbolicRulesEnvironment(BenchmarkEnvironment):
                     self.avatar_pos = (nr, nc)
                     self.grid[nr, nc] = 1
                     return (
-                        self._make_observation(),
+                        self._make_observation(terminal=TerminalSignal.SUCCESS),
                         reward,
                         True,
                         {
@@ -168,15 +174,17 @@ class SymbolicRulesEnvironment(BenchmarkEnvironment):
                     self.avatar_pos = (nr, nc)
                     self.grid[nr, nc] = 1
 
+        terminal = None
         if self.steps >= self.max_steps:
             self.done = True
+            terminal = TerminalSignal.TIMEOUT
 
         info = {
             "success": success,
             "door_open": self.door_open,
             "steps": self.steps,
         }
-        return self._make_observation(), reward, self.done, info
+        return self._make_observation(terminal=terminal), reward, self.done, info
 
     def get_oracle_action(self) -> int | None:
         """Compute optimal oracle action: navigate to target switch, toggle it, then navigate to goal."""

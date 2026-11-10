@@ -22,7 +22,7 @@ from benchmarks.envs.protocol import (
     BenchmarkEnvironment,
 )
 from hbllm.hcir.grounding.contracts.observation import CoordinateType, ReferenceFrame
-from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.hcir.world.percept import EmbodiedObservation, TerminalSignal
 
 
 class ContinuousReachEnvironment(BenchmarkEnvironment):
@@ -101,7 +101,7 @@ class ContinuousReachEnvironment(BenchmarkEnvironment):
 
         return grid
 
-    def _make_observation(self) -> EmbodiedObservation:
+    def _make_observation(self, terminal: TerminalSignal | None = None) -> EmbodiedObservation:
         lattice = self._render_lattice()
         return EmbodiedObservation(
             lattice=lattice,
@@ -111,8 +111,9 @@ class ContinuousReachEnvironment(BenchmarkEnvironment):
                 ACTION_LEFT,
                 ACTION_RIGHT,
             ],
+            terminal=terminal,
             context_id=f"continuous_reach_{self.current_seed}",
-            episode_id=f"ep_{self.steps}",
+            episode_id=str(self.current_seed),
             entities=(),
             metadata={
                 "reference_frame": self.reference_frame,
@@ -125,7 +126,12 @@ class ContinuousReachEnvironment(BenchmarkEnvironment):
 
     def step(self, action: Any) -> tuple[EmbodiedObservation, float, bool, dict[str, Any]]:
         if self.done:
-            return self._make_observation(), 0.0, True, {"success": False, "steps": self.steps}
+            return (
+                self._make_observation(terminal=TerminalSignal.TIMEOUT),
+                0.0,
+                True,
+                {"success": False, "steps": self.steps},
+            )
 
         self.steps += 1
         act_id = getattr(action, "value", action)
@@ -160,15 +166,19 @@ class ContinuousReachEnvironment(BenchmarkEnvironment):
             success = True
             reward = 1.0
 
-        if self.steps >= self.max_steps:
+        terminal = None
+        if success:
+            terminal = TerminalSignal.SUCCESS
+        elif self.steps >= self.max_steps:
             self.done = True
+            terminal = TerminalSignal.TIMEOUT
 
         info = {
             "success": success,
             "dist_to_goal": float(dist_to_goal),
             "steps": self.steps,
         }
-        return self._make_observation(), reward, self.done, info
+        return self._make_observation(terminal=terminal), reward, self.done, info
 
     def get_oracle_action(self) -> int | None:
         """Exact continuous A* search over kinematic state (x, y) with obstacle avoidance."""

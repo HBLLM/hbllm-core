@@ -529,6 +529,64 @@ and never looked at while coding.
 
 ---
 
+## 10. Third verification (2026-11-10, SHA `aa0bca54`+) — gate met, first root-cause diagnosis
+
+**Gate status.** All amended §7b criteria are now satisfied: runner unpacks `(action, meta)`;
+held-out was run and committed honestly
+(`reports/heldout/aa0bca54…_handcrafted_20261110_024939.json`: system **0.0000** on all 3
+families, oracle 0.8938 / solve-rate 1.0, random 0.0, no-grounding 0.0); the mirroring test
+passes; bare-engine constructions → 0; LOC 249,301. The freeze may be lifted into §9 — and §9
+step 1 (diagnose GridNav) was started here so the next agent does not start blind.
+
+**Diagnostic probe (GridNav seed 100010, 40 steps, composed system).**
+
+```
+env:   avatar (8,3)  goal (3,8)  key (2,4)  door (6,5)  walls = 5
+actions emitted: [1,2,3,1,1,1,1,1,1,1,3,4,3,1,7,7,7,7,7,7,7,3,7,7,7,7,7,7,7,7,…]
+avatar ends at (1,1) — top-left corner — spamming INTERACT (7) for 25 steps
+theory after 40 steps:
+  avatar_features {1}   walkable {0}   barrier set()   goal_features set()   actuator set()
+  learned_goal_positions {(7,4),(2,4),(6,8),(6,5)}   phase = exploitation
+```
+
+Three defects, in causal order. The first two are **harness contract defects**, not engine
+defects, and they alone make a nonzero system score impossible:
+
+1. **The engine is never told it succeeded or failed.** `EmbodiedObservation.terminal`
+   (`percept.py:69`) is the engine's only reward channel — the ARC adapter sets
+   `terminal=TerminalSignal.SUCCESS` (`plugins/arc_agi_adapter/my_agent.py:808`); the four
+   procedural envs never set it (`grep terminal= benchmarks/envs/` → 0). The env *computes*
+   `reward = ±1.0` (`grid_nav.py:185,202`) and the runner *receives* it (`runner.py:107`) and
+   drops it. The runner also `break`s on `done` (`runner.py:112`) without feeding the terminal
+   observation back, so even a lucky success teaches nothing. Result: `goal_features` can never
+   be populated (`cortex_causal.py:351,805` require a success signal), so the planner has no
+   target and the engine is reduced to curiosity-driven wandering. Fix in `benchmarks/` only:
+   envs set `terminal=TerminalSignal.SUCCESS|FAILURE|TIMEOUT` on the final observation; the
+   runner delivers that observation with one more `engine.step()` before breaking.
+2. **`episode_id` changes every step.** All four envs emit `episode_id=f"ep_{self.steps}"`
+   (`grid_nav.py:126`, `grid_push.py:94`, `continuous_reach.py:115`, `symbolic_rules.py:105`),
+   so from the engine's point of view each step is a new episode. Make it stable per `reset()`.
+3. **Engine defects, visible once 1–2 are fixed:** (a) `barrier_features` stays empty after
+   repeatedly bumping walls — collision-based barrier induction (`cortex_causal.py:368,808`)
+   does not fire on this palette; (b) `learned_goal_positions` is filled with key/door/arbitrary
+   cells with no reward evidence (callers: `cortex_planner.py:910`, `cortex_deliberation.py:1796`,
+   `cortex_assimilator.py:1838`, `autonomous_epistemic_engine.py:1897`) — this is what drives the
+   INTERACT spam at a corner; (c) phase flips to `exploitation` with nothing learned. These are
+   the §9 step-1 targets. Fix them generally (what counts as evidence for a goal / barrier), not
+   per-env.
+
+**One design gap the harness must also close before "generality" means anything:** one
+fresh system per seed, one episode per seed, no terminal signal = a *zero-shot* test of an
+agent whose whole design is learn-by-interaction. Chollet-style skill-acquisition efficiency
+needs N episodes per task with shared memory and a learning curve (§7b "lifelong mode"). Add it
+as a second reported metric; keep the zero-shot number too.
+
+**Order for the next agent:** fix 1 → 2 (benchmark-side, ~20 lines, with a test that a
+successful oracle episode populates `symbolic_theory.goal_features`) → re-run **dev** → work
+on 3 against dev → run held-out once → commit JSON. Do not touch `heldout.yaml` seeds.
+
+---
+
 ## Appendix C — Closed-loop probe with correct action unpacking
 
 ```python
