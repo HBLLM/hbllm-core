@@ -75,7 +75,7 @@ def run_closed_loop_task(
                     EpisodeBoundaryKind.LEVEL_COMPLETE if prev_succ else EpisodeBoundaryKind.DEATH
                 )
                 try:
-                    engine.on_boundary(EpisodeBoundary(kind=b_kind))
+                    engine.on_boundary(EpisodeBoundary(kind=b_kind, same_level=shared_memory))
                 except Exception:
                     pass
 
@@ -256,6 +256,7 @@ def _run_loop(
     step_count = 0
     rng = random.Random(seed)
     step_journal: list[dict[str, Any]] = []
+    last_oracle_action: Any | None = None
 
     for step in range(max_budget):
         step_count = step + 1
@@ -277,12 +278,13 @@ def _run_loop(
             elif baseline == "demonstration_oracle":
                 if engine is not None:
                     try:
-                        raw_action = engine.step(obs)
+                        raw_action = engine.step(obs, last_action=last_oracle_action)
                         if isinstance(raw_action, tuple) and len(raw_action) > 1:
                             meta = raw_action[1]
                     except Exception:
                         pass
                 action = env.get_oracle_action()
+                last_oracle_action = action
             else:
                 # AutonomousEpistemicEngine step: unpack (action, metadata)
                 assert engine is not None
@@ -310,7 +312,12 @@ def _run_loop(
             # Feed terminal observation back to engine to trigger reward/goal learning
             if engine is not None:
                 try:
-                    engine.step(obs)
+                    engine.step(
+                        obs,
+                        last_action=(
+                            last_oracle_action if baseline == "demonstration_oracle" else None
+                        ),
+                    )
                 except Exception:
                     pass
             break

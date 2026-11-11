@@ -336,7 +336,15 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
             or bool(view.mobile_threat_features)
             or bool(view.collision_cones.projected_trajectories)
         )
-        if not has_temporal and view.inhibited_actions.get(next_step.action, 0) > 0:
+        is_action_trigger = getattr(next_step, "expected_mutation", "") in (
+            "ACTION_TRIGGER",
+            "INTERACT_TRIGGER",
+        )
+        if (
+            not has_temporal
+            and not is_action_trigger
+            and view.inhibited_actions.get(next_step.action, 0) > 0
+        ):
             return SafetyGateResult(
                 is_safe=False, reason=f"Action {next_step.action} in refractory inhibition"
             )
@@ -1410,12 +1418,30 @@ class PrefrontalDeliberationEngine:
             if cur_op is not None and getattr(cur_op, "is_strict", False):
                 return True
 
-            # Safety gating aborts if displacement moves into collision cone or ping-pongs in limit cycle.
+            # Safety gating aborts if displacement moves into collision cone, solid obstacle, or ping-pongs in limit cycle.
             if view.avatar_pos is not None and act in view.action_dynamics:
                 dyn = view.action_dynamics[act]
                 if dyn.is_displacement_action():
                     dr, dc = dyn.delta_r, dyn.delta_c
                     nr, nc = view.avatar_pos[0] + dr, view.avatar_pos[1] + dc
+                    if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2:
+                        H, W = curr_grid.shape[0], curr_grid.shape[1]
+                        if not (0 <= nr < H and 0 <= nc < W):
+                            return False
+                        cell_v = int(curr_grid[nr, nc])
+                        bg_v = getattr(view, "bg_feature", 0)
+                        theory = getattr(view, "symbolic_theory", None)
+                        if theory is not None:
+                            if theory.is_barrier(cell_v) or (nr, nc) in getattr(
+                                view, "learned_barriers", set()
+                            ):
+                                return False
+                            if (
+                                not theory.is_walkable(cell_v)
+                                and cell_v != bg_v
+                                and cell_v not in theory.goal_features
+                            ):
+                                return False
                     if hasattr(
                         view, "collision_cones"
                     ) and view.collision_cones.is_collision_hazard(nr, nc, 1):
@@ -2055,42 +2081,53 @@ class PrefrontalDeliberationEngine:
                             curr_grid, available_actions
                         )
                         branch = "epistemic_probe"
-            elif (
-                next_step.action in available_actions
-                and (has_temporal or view.inhibited_actions.get(next_step.action, 0) == 0)
-                and not view.working_memory.habenular_ior.is_action_inhibited(
-                    view.avatar_pos, next_step.action, next_step.action_data
-                )
-            ):
-                view.state.consecutive_pacing_steps = 0
-                chosen_action = next_step.action
-                chosen_data = next_step.action_data
-                predicted_pos = next_step.predicted_avatar_pos
-                branch = "mental_plan"
-
             else:
-                view.mental_plan.clear()
-                if hasattr(view, "working_memory"):
-                    view.working_memory.active_plan_step = None
-                view.state.phase = EpistemicPhase.REPLANNING
-                macro_plan = view.object_planner.plan_macro_option(
-                    view, curr_grid, available_actions
+                is_action_trigger = getattr(next_step, "expected_mutation", "") in (
+                    "ACTION_TRIGGER",
+                    "INTERACT_TRIGGER",
                 )
-                if macro_plan:
-                    view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
-                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
-                    next_step = view.mental_plan.popleft()
-                    if hasattr(view, "working_memory"):
-                        view.working_memory.active_plan_step = next_step
+                if (
+                    next_step.action in available_actions
+                    and (
+                        has_temporal
+                        or is_action_trigger
+                        or view.inhibited_actions.get(next_step.action, 0) == 0
+                    )
+                    and not view.working_memory.habenular_ior.is_action_inhibited(
+                        view.avatar_pos, next_step.action, next_step.action_data
+                    )
+                ):
+                    if is_action_trigger:
+                        view.inhibited_actions[next_step.action] = 0
+                    view.state.consecutive_pacing_steps = 0
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
-                    branch = "macro_plan"
+                    branch = "mental_plan"
+
                 else:
-                    chosen_action, chosen_data = view.plan_epistemic_probe(
-                        curr_grid, available_actions
+                    view.mental_plan.clear()
+                    if hasattr(view, "working_memory"):
+                        view.working_memory.active_plan_step = None
+                    view.state.phase = EpistemicPhase.REPLANNING
+                    macro_plan = view.object_planner.plan_macro_option(
+                        view, curr_grid, available_actions
                     )
-                    branch = "epistemic_probe"
+                    if macro_plan:
+                        view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
+                        view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
+                        next_step = view.mental_plan.popleft()
+                        if hasattr(view, "working_memory"):
+                            view.working_memory.active_plan_step = next_step
+                        chosen_action = next_step.action
+                        chosen_data = next_step.action_data
+                        predicted_pos = next_step.predicted_avatar_pos
+                        branch = "macro_plan"
+                    else:
+                        chosen_action, chosen_data = view.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
+                        branch = "epistemic_probe"
 
         # 3. Master Planning Branch (when no active plan is in flight)
         else:
@@ -2118,27 +2155,38 @@ class PrefrontalDeliberationEngine:
                             view, curr_grid, available_actions, next_step, wait_steps
                         )
                         branch = "temporal_pacing"
-                    elif (
-                        plan_safe
-                        and next_step.action in available_actions
-                        and (has_temporal or view.inhibited_actions.get(next_step.action, 0) == 0)
-                        and not view.working_memory.habenular_ior.is_action_inhibited(
-                            view.avatar_pos, next_step.action, next_step.action_data
-                        )
-                    ):
-                        chosen_action = next_step.action
-                        chosen_data = next_step.action_data
-                        predicted_pos = next_step.predicted_avatar_pos
-                        branch = "mental_simulation"
                     else:
-                        view.mental_plan.clear()
-                        if hasattr(view, "working_memory"):
-                            view.working_memory.active_plan_step = None
-                        view.state.phase = EpistemicPhase.REPLANNING
-                        chosen_action, chosen_data = view.plan_epistemic_probe(
-                            curr_grid, available_actions
+                        is_action_trigger = getattr(next_step, "expected_mutation", "") in (
+                            "ACTION_TRIGGER",
+                            "INTERACT_TRIGGER",
                         )
-                        branch = "epistemic_probe"
+                        if (
+                            plan_safe
+                            and next_step.action in available_actions
+                            and (
+                                has_temporal
+                                or is_action_trigger
+                                or view.inhibited_actions.get(next_step.action, 0) == 0
+                            )
+                            and not view.working_memory.habenular_ior.is_action_inhibited(
+                                view.avatar_pos, next_step.action, next_step.action_data
+                            )
+                        ):
+                            if is_action_trigger:
+                                view.inhibited_actions[next_step.action] = 0
+                            chosen_action = next_step.action
+                            chosen_data = next_step.action_data
+                            predicted_pos = next_step.predicted_avatar_pos
+                            branch = "mental_simulation"
+                        else:
+                            view.mental_plan.clear()
+                            if hasattr(view, "working_memory"):
+                                view.working_memory.active_plan_step = None
+                            view.state.phase = EpistemicPhase.REPLANNING
+                            chosen_action, chosen_data = view.plan_epistemic_probe(
+                                curr_grid, available_actions
+                            )
+                            branch = "epistemic_probe"
 
                 else:
                     view.consecutive_simulation_failures += 1

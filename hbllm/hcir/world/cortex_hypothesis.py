@@ -289,8 +289,22 @@ class RemoteMechanismObserver(HypothesisObserver):
         if not (0 <= cr < H and 0 <= cc < W):
             return []
 
-        contact_feat = int(context.prev_grid[cr, cc])
-        if contact_feat == context.background_feature:
+        contact_feat: int | None = int(context.prev_grid[cr, cc])
+        av_feat = (
+            int(context.prev_grid[context.prev_avatar_pos[0], context.prev_avatar_pos[1]])
+            if context.prev_avatar_pos is not None
+            else None
+        )
+        if contact_feat == av_feat or contact_feat == context.background_feature:
+            contact_feat = None
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    cand_f = int(context.prev_grid[nr, nc])
+                    if cand_f != context.background_feature and cand_f != av_feat:
+                        contact_feat = cand_f
+                        break
+        if contact_feat is None or contact_feat == context.background_feature:
             return []
 
         diff_mask = context.diff_mask

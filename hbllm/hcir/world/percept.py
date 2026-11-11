@@ -132,6 +132,7 @@ class EpisodeBoundary:
         EpisodeBoundaryKind.CONTEXT_RESET
     )
     retain_dynamics: bool = True
+    same_level: bool = False
 
 
 @dataclass

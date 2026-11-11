@@ -227,7 +227,16 @@ class GoalArbiter:
                 )
 
         # 2. Confirmed Extrinsic Goals (known reward attractors)
-        goals = getattr(engine, "goals", []) or []
+        goals = list(getattr(engine, "goals", []) or [])
+        if hasattr(engine, "learned_goal_positions"):
+            for lgp in engine.learned_goal_positions:
+                if lgp not in goals:
+                    goals.append(lgp)
+        theory = getattr(engine, "symbolic_theory", None)
+        if theory is not None and hasattr(theory, "goal_features") and theory.goal_features:
+            for e in getattr(engine, "entities", []):
+                if e.feature_id in theory.goal_features and e.grid_pos not in goals:
+                    goals.append(e.grid_pos)
         for gp in goals:
             if avatar_pos is not None and gp == avatar_pos:
                 continue
@@ -252,19 +261,24 @@ class GoalArbiter:
             grid = getattr(engine, "prev_grid", None)
             if grid is not None and hasattr(grid, "shape"):
                 H, W = grid.shape
+                exhausted = getattr(engine, "exhausted_candidate_goals", set())
                 for feat in theory.candidate_goal_features:
                     coords = list(zip(*((grid == feat).nonzero())))
+                    cue_boost = 15.0 if len(coords) == 2 else 0.0
                     for r, c in coords[:3]:  # sample top candidate positions
+                        coord = (int(r), int(c))
+                        if theory.is_position_explored(coord) or coord in exhausted:
+                            continue
                         cost = 1.0
                         if avatar_pos is not None:
                             cost = max(1.0, float(abs(avatar_pos[0] - r) + abs(avatar_pos[1] - c)))
                         candidates.append(
                             CandidateGoal(
                                 goal_id=f"explore_feat_{feat}_{r}_{c}",
-                                target=(int(r), int(c)),
+                                target=coord,
                                 goal_type="epistemic_exploration",
-                                extrinsic_utility=5.0,
-                                epistemic_utility=25.0,
+                                extrinsic_utility=5.0 + cue_boost,
+                                epistemic_utility=25.0 + cue_boost,
                                 estimated_cost=cost,
                                 hazard_risk=0.0,
                                 metadata={"feature_id": feat},

@@ -92,7 +92,14 @@ class VisuospatialWorkingMemory:
     def on_boundary(self, boundary) -> None:
         """Episode lifecycle boundary handler (WP0.5). Delegates to the
         deprecated reset_episode for backward-compatible semantics."""
-        self.reset_episode()
+        from hbllm.hcir.world.percept import EpisodeBoundaryKind
+
+        kind = getattr(boundary, "kind", boundary)
+        is_context_reset = kind in (
+            EpisodeBoundaryKind.CONTEXT_RESET,
+            "context_reset",
+        )
+        self.reset_episode(retain_long_term=not is_context_reset)
 
     @property
     def boundary_retention(self):
@@ -101,7 +108,7 @@ class VisuospatialWorkingMemory:
 
         return RetentionPolicy.LEVEL_LOCAL
 
-    def reset_episode(self, retain_long_term: bool = False) -> None:
+    def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient slot bindings while optionally preserving task-level stencil theories."""
         self.bound_slots.clear()
         self.feature_to_coords.clear()

@@ -396,10 +396,10 @@ class SpatialRoleClassifier:
             return EntityRole.OBSTACLE
         elif is_theory_cargo:
             return EntityRole.MANIPULABLE
-        elif is_candidate_goal or (
-            is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features)
-        ):
+        elif is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features):
             return EntityRole.GOAL
+        elif is_candidate_goal:
+            return EntityRole.UNKNOWN
         elif is_theory_actuator or (
             not is_theory_walkable
             and any(

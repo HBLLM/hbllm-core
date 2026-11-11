@@ -725,8 +725,6 @@ class HCIRSymbolicWorldTheory:
                 return False
             self._walkable_features.discard(feature_id)
 
-        self._candidate_goal_features.discard(feature_id)
-
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
         if feature_id not in self._barrier_features:

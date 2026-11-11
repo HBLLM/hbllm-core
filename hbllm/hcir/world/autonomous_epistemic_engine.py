@@ -4122,17 +4122,18 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.world.percept import EpisodeBoundaryKind
 
         kind = getattr(boundary, "kind", boundary)
+        same_level = getattr(boundary, "same_level", False)
         if kind in (
             EpisodeBoundaryKind.GOAL_REACHED,
             EpisodeBoundaryKind.LEVEL_COMPLETE,
             "goal_reached",
             "level_complete",
         ):
-            self.reset_episode(retain_dynamics=True, is_new_level=True)
+            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             self.reset_episode(retain_dynamics=True, is_new_level=False)
         else:
-            self.reset_episode(retain_dynamics=True, is_new_level=True)
+            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         # Fan out to every faculty exposing a boundary handler (WP0.5).
         for attr in vars(self).values():
             handler = getattr(attr, "on_boundary", None)
