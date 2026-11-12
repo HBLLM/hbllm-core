@@ -240,6 +240,13 @@ register("ThalamocorticalBindingEngine", "hbllm.hcir.world.experimental.thalamoc
 register("EntorhinalGridCortex", "hbllm.hcir.world.experimental.entorhinal_grid_cortex")
 register("VentralRelationalGraphMatcher", "hbllm.hcir.world.experimental.relational_graph_matcher")
 register("RelationalGraphMatcher", "hbllm.hcir.world.experimental.relational_graph_matcher")
+register("ScaleInferenceResult", "hbllm.hcir.world.experimental.morphology_arc")
+register("FractionalScaleTransformer", "hbllm.hcir.world.experimental.morphology_arc")
+register("StampInstance", "hbllm.hcir.world.experimental.morphology_arc")
+register("GenerativePatternStamper", "hbllm.hcir.world.experimental.morphology_arc")
+register("WallpaperSymmetryGroup", "hbllm.hcir.world.experimental.morphology_arc")
+register("WallpaperTilingModel", "hbllm.hcir.world.experimental.morphology_arc")
+register("WallpaperTilingInducer", "hbllm.hcir.world.experimental.morphology_arc")
 
 
 def restore(obj, name: str) -> bool:

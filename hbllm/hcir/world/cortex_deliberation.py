@@ -340,15 +340,21 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
             "ACTION_TRIGGER",
             "INTERACT_TRIGGER",
         )
+        is_failed_transition = (view.avatar_pos, next_step.action) in getattr(
+            view, "failed_transitions", set()
+        )
         if (
             not has_temporal
             and not is_action_trigger
+            and is_failed_transition
             and view.inhibited_actions.get(next_step.action, 0) > 0
         ):
             return SafetyGateResult(
                 is_safe=False, reason=f"Action {next_step.action} in refractory inhibition"
             )
-        if view.working_memory.habenular_ior.is_action_inhibited(view.avatar_pos, next_step.action):
+        if is_failed_transition and view.working_memory.habenular_ior.is_action_inhibited(
+            view.avatar_pos, next_step.action
+        ):
             return SafetyGateResult(is_safe=False, reason="Action inhibited by Habenular IOR")
         return SafetyGateResult(is_safe=True)
 
@@ -499,8 +505,21 @@ class OFCCounterfactualMentalSimulationPredicate(PlanSafetyPredicate):
                 )
 
             # Check corner deadlock if position is trapped and not a goal
-            if (r, c) not in goals and CounterfactualDeadlockDetector.is_corner_deadlock(
-                (r, c), goals, static_barriers, (H, W)
+            has_cargo_ctx = bool(
+                view.symbolic_theory.cargo_features or getattr(view, "learned_cargo_features", None)
+            )
+            is_trapped_avatar = all(
+                not (0 <= r + dr < H and 0 <= c + dc < W) or (r + dr, c + dc) in static_barriers
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            )
+            if (r, c) not in goals and (
+                is_trapped_avatar
+                or (
+                    has_cargo_ctx
+                    and CounterfactualDeadlockDetector.is_corner_deadlock(
+                        (r, c), goals, static_barriers, (H, W)
+                    )
+                )
             ):
                 return SafetyGateResult(
                     is_safe=False,
@@ -560,13 +579,21 @@ class PlanSafetyEvaluator:
         return SafetyGateResult(is_safe=True)
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export plan safety evaluator capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export plan safety evaluator capability and active hazard count as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "multivariate_prefrontal_safety_gating"
+        if view is not None:
+            lethals = len(
+                getattr(getattr(view, "hazard_tracker", None), "known_lethal_features", set())
+                or set()
+            )
+            rel = f"multivariate_prefrontal_safety_gating:lethal_features:{lethals}"
         return CausalPredicate(
             variable="plan_safety_evaluator",
             operator="==",
-            value="ACTIVE",
-            relation="multivariate_prefrontal_safety_gating",
+            value=val,
+            relation=rel,
             target_entity="cortex_deliberation",
         )
 
@@ -999,7 +1026,7 @@ class PrefrontalDeliberationEngine:
         known_av_feats: set[int],
     ) -> tuple[Any, dict[str, Any] | None] | None:
         """Arbitrate control panel affordances and interactive targets via registered policies or generic fallbacks."""
-        # 1. Query external registered deliberation policies first (e.g. ARC3DeliberationPolicy)
+        # 1. Query external registered deliberation policies first
         for policy in get_engine_state_attr(view, "deliberation_policies", []):
             if hasattr(policy, "arbitrate_affordances"):
                 res = policy.arbitrate_affordances(
@@ -1391,6 +1418,22 @@ class PrefrontalDeliberationEngine:
         # When confirmed goals are known, exploit them directly
         if self.has_confirmed_goal(view):
             view.state.phase = EpistemicPhase.EXPLOITATION
+
+        # VTA-LC Coupled Neuromodulatory Dynamics: Step dopamine & noradrenaline dynamics
+        try:
+            rew = getattr(view, "last_reward", 0.0) or 0.0
+            acc_conf = 0.0
+            if hasattr(view, "acc_conflict_monitor") and view.acc_conflict_monitor is not None:
+                acc_conf = getattr(view.acc_conflict_monitor, "current_conflict", 0.0) or 0.0
+            self.step_neuromodulatory_dynamics(
+                view,
+                reward=rew,
+                predicted_value=0.0,
+                actual_value=rew,
+                conflict_level=acc_conf,
+            )
+        except Exception:
+            pass
 
         # Track recent avatar position on every decision step (before macro or micro action planning)
         if view.avatar_pos is not None:
@@ -2095,16 +2138,23 @@ class PrefrontalDeliberationEngine:
                     "ACTION_TRIGGER",
                     "INTERACT_TRIGGER",
                 )
+                is_failed_step = (view.avatar_pos, next_step.action) in getattr(
+                    view, "failed_transitions", set()
+                )
                 if (
                     next_step.action in available_actions
                     and (
                         has_temporal
                         or is_action_trigger
+                        or not is_failed_step
                         or view.inhibited_actions.get(next_step.action, 0) == 0
                         or all(view.inhibited_actions.get(a, 0) > 0 for a in available_actions)
                     )
-                    and not view.working_memory.habenular_ior.is_action_inhibited(
-                        view.avatar_pos, next_step.action, next_step.action_data
+                    and (
+                        not is_failed_step
+                        or not view.working_memory.habenular_ior.is_action_inhibited(
+                            view.avatar_pos, next_step.action, next_step.action_data
+                        )
                     )
                 ):
                     if is_action_trigger:
@@ -2170,19 +2220,26 @@ class PrefrontalDeliberationEngine:
                             "ACTION_TRIGGER",
                             "INTERACT_TRIGGER",
                         )
+                        is_failed_step = (view.avatar_pos, next_step.action) in getattr(
+                            view, "failed_transitions", set()
+                        )
                         if (
                             plan_safe
                             and next_step.action in available_actions
                             and (
                                 has_temporal
                                 or is_action_trigger
+                                or not is_failed_step
                                 or view.inhibited_actions.get(next_step.action, 0) == 0
                                 or all(
                                     view.inhibited_actions.get(a, 0) > 0 for a in available_actions
                                 )
                             )
-                            and not view.working_memory.habenular_ior.is_action_inhibited(
-                                view.avatar_pos, next_step.action, next_step.action_data
+                            and (
+                                not is_failed_step
+                                or not view.working_memory.habenular_ior.is_action_inhibited(
+                                    view.avatar_pos, next_step.action, next_step.action_data
+                                )
                             )
                         ):
                             if is_action_trigger:
@@ -2571,6 +2628,44 @@ class PrefrontalDeliberationEngine:
             getattr(getattr(view, "state", view), "phase", getattr(view, "phase", "unknown"))
         )
 
+        # Basal Ganglia Tri-Pathway Channel Scoring & Neuromodulatory State Provenance
+        bg_channel_scores: dict[Any, dict[str, Any]] = {}
+        neuromodulators: dict[str, Any] = {}
+        try:
+            delib_inst = getattr(view, "deliberation_engine", None)
+            if delib_inst is not None and hasattr(delib_inst, "arbitrate_basal_ganglia_action"):
+                acc_conf = 0.0
+                if hasattr(view, "acc_conflict_monitor") and view.acc_conflict_monitor is not None:
+                    acc_conf = float(
+                        getattr(view.acc_conflict_monitor, "current_conflict", 0.0) or 0.0
+                    )
+                _, bg_decisions = delib_inst.arbitrate_basal_ganglia_action(
+                    view, candidates or {}, acc_conflict=acc_conf
+                )
+                for d in bg_decisions:
+                    bg_channel_scores[d.action] = {
+                        "go": d.d1_go_drive,
+                        "nogo": d.d2_nogo_drive,
+                        "hyperdirect": d.stn_brake_signal,
+                        "net": d.net_drive,
+                        "pathway": d.pathway.value,
+                        "suppressed": d.is_suppressed,
+                    }
+            if delib_inst is not None and hasattr(delib_inst, "neuromodulation"):
+                nm = delib_inst.neuromodulation.current_state
+                neuromodulators = {
+                    "dopamine_tonic": nm.dopamine_tonic,
+                    "dopamine_phasic_rpe": nm.dopamine_phasic_rpe,
+                    "noradrenaline_tonic": nm.noradrenaline_tonic,
+                    "noradrenaline_phasic": nm.noradrenaline_phasic,
+                    "exploration_gain": nm.exploration_gain,
+                    "exploitation_gain": nm.exploitation_gain,
+                    "regime": nm.regime,
+                    "is_disengaged": nm.is_disengaged,
+                }
+        except Exception:
+            pass
+
         meta = {
             "goal_target": goal_target,
             "goal_source": goal_source,
@@ -2578,6 +2673,8 @@ class PrefrontalDeliberationEngine:
             "plan": plan,
             "plan_source": plan_source,
             "candidates": candidates,
+            "bg_channel_scores": bg_channel_scores,
+            "neuromodulators": neuromodulators,
             "chosen_action": action,
             "veto_reasons": veto_reasons,
             "phase": phase_str,
@@ -2618,28 +2715,37 @@ class PrefrontalDeliberationEngine:
         view.state.last_predicted_pos = predicted_pos
         return chosen_action, chosen_data
 
-    @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export prefrontal deliberation view capability as a declarative causal predicate."""
+    def to_causal_predicate(self: Any = None) -> CausalPredicate:
+        """Export prefrontal deliberation view capability and runtime neuromodulatory state as a declarative causal predicate."""
+        regime = "ACTIVE"
+        relation = "dlpfc_vmpfc_arbitration"
+        if self is not None and hasattr(self, "neuromodulation"):
+            nm = self.neuromodulation.current_state
+            relation = f"dlpfc_vmpfc_arbitration:regime:{nm.regime}:da:{nm.dopamine_tonic:.2f}:na:{nm.noradrenaline_tonic:.2f}"
         return CausalPredicate(
             variable="prefrontal_deliberation_engine",
             operator="==",
-            value="ACTIVE",
-            relation="dlpfc_vmpfc_arbitration",
+            value=regime,
+            relation=relation,
             target_entity="cortex_deliberation",
         )
 
-    @classmethod
-    def to_transaction_operations(cls) -> list[TransactionOperation]:
-        """Propose atomic HCIR transaction registering deliberation view."""
+    def to_transaction_operations(self: Any = None) -> list[TransactionOperation]:
+        """Propose atomic HCIR transaction registering deliberation view and runtime state."""
+        node_data: dict[str, Any] = {
+            "faculty": "prefrontal_deliberation_engine",
+            "status": "ACTIVE",
+        }
+        if self is not None and hasattr(self, "neuromodulation"):
+            nm = self.neuromodulation.current_state
+            node_data["regime"] = nm.regime
+            node_data["dopamine_tonic"] = float(nm.dopamine_tonic)
+            node_data["noradrenaline_tonic"] = float(nm.noradrenaline_tonic)
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
                 node_id="deliberation_engine",
-                node_data={
-                    "faculty": "prefrontal_deliberation_engine",
-                    "status": "ACTIVE",
-                },
+                node_data=node_data,
             )
         ]
 

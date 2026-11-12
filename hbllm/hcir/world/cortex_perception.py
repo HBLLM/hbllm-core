@@ -344,7 +344,10 @@ class SpatialRoleClassifier:
             (min_r <= 1 and max_r >= H - 2 and min_c <= 1 and max_c >= W - 2)
             or (max_r - min_r >= H - 2 and max_c - min_c >= W - 2)
             or (area > H * W * 0.20)
-            or (area >= 60 and (max_r - min_r >= H // 3 or max_c - min_c >= W // 3) and area > 100)
+            or (
+                area >= max(4, int(H * W * 0.025))
+                and (max_r - min_r >= H // 3 or max_c - min_c >= W // 3)
+            )
         )
 
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
@@ -416,8 +419,6 @@ class SpatialRoleClassifier:
             )
         ):
             return EntityRole.ACTUATOR
-        elif area <= 16:
-            return EntityRole.UNKNOWN
         else:
             return EntityRole.UNKNOWN
 
@@ -1176,13 +1177,19 @@ class PerceptionEngine:
         return pruned
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export perception engine capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export perception engine capability and runtime sensory state as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "thalamocortical_segmentation"
+        if view is not None:
+            bg = getattr(view, "bg_feature", None)
+            av = getattr(view, "avatar_pos", None)
+            rel = f"thalamocortical_segmentation:bg:{bg}:avatar:{av}"
         return CausalPredicate(
             variable="cortex_perception_engine",
             operator="==",
-            value="ACTIVE",
-            relation="thalamocortical_segmentation",
+            value=val,
+            relation=rel,
             target_entity="cortex_perception",
         )
 

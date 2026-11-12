@@ -1659,12 +1659,12 @@ class MotorCortexEffector:
         if r == 0 or r == H - 1 or c == 0 or c == W - 1:
             return True
 
-        # 2. Universal Top HUD / Status Banner Detection:
-        # A top HUD banner is a multi-row band across the top (r <= 16, H >= 24)
-        # separated from the gameplay grid by a distinct divider line or having a distinct
-        # banner background color different from the main gameplay field.
-        if r <= 16 and H >= 24:
-            for div_r in range(min(16, H // 3), 2, -1):
+        # 2. Scale-Invariant Top Peripheral Partition Detection:
+        # A top peripheral partition is a band across the top (r <= H // 4, H >= 24)
+        # separated from the main field by a distinct divider line or homogeneous background.
+        band_depth = H // 4
+        if r <= band_depth and H >= 24:
+            for div_r in range(band_depth, 2, -1):
                 line = grid[div_r, :]
                 line_vals, line_counts = np.unique(line, return_counts=True)
                 if len(line_counts) > 0:
@@ -1690,9 +1690,9 @@ class MotorCortexEffector:
                                     return True
                                 break
 
-        # 3. Bottom HUD / Status Banner Detection
-        if r >= H - 16 and H >= 24:
-            for div_r in range(H - 4, max(H - 18, H - H // 3), -1):
+        # 3. Scale-Invariant Bottom Peripheral Partition Detection
+        if r >= H - band_depth and H >= 24:
+            for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
                 line = grid[div_r, :]
                 line_vals_bot, line_counts_bot = np.unique(line, return_counts=True)
                 if len(line_counts_bot) > 0:
@@ -2041,13 +2041,18 @@ class MotorCortexEffector:
         return coords_fallback
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export motor cortex effector capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export motor cortex effector capability and runtime DOFs as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "allocentric_spatial_grounding"
+        if view is not None:
+            dofs = len(getattr(view, "action_dynamics", {}) or {})
+            rel = f"allocentric_spatial_grounding:dofs:{dofs}"
         return CausalPredicate(
             variable="motor_cortex_effector",
             operator="==",
-            value="ACTIVE",
-            relation="allocentric_spatial_grounding",
+            value=val,
+            relation=rel,
             target_entity="cortex_motor",
         )
 

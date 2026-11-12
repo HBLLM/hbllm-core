@@ -409,6 +409,75 @@ class ActionMutationObserver(HypothesisObserver):
         return results
 
 
+class RelationalCueObserver(HypothesisObserver):
+    """Observes relational contextual cue pairs where interacting adjacent to a paired feature clears a distal barrier."""
+
+    def observe(
+        self,
+        context: TransitionObservationContext,
+        hypotheses: dict[str, RelationalRuleHypothesis],
+        min_support_to_confirm: int,
+    ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
+        if (
+            context.curr_avatar_pos is None
+            or context.prev_avatar_pos != context.curr_avatar_pos
+            or not (1 <= context.changed_count <= 8)
+        ):
+            return []
+
+        H, W = context.prev_grid.shape
+        ar, ac = context.curr_avatar_pos
+        bg = context.background_feature
+        results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
+
+        adj_paired_feats: set[int] = set()
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = ar + dr, ac + dc
+            if 0 <= nr < H and 0 <= nc < W:
+                f = int(context.prev_grid[nr, nc])
+                if f != bg and int(np.count_nonzero(context.prev_grid == f)) == 2:
+                    adj_paired_feats.add(f)
+
+        if not adj_paired_feats:
+            return []
+
+        for mr, mc in np.argwhere(context.diff_mask):
+            if abs(int(mr) - ar) + abs(int(mc) - ac) <= 1:
+                continue
+            old_f = int(context.prev_grid[mr, mc])
+            new_f = int(context.curr_grid[mr, mc])
+            if old_f != bg and new_f == bg:
+                for pf in adj_paired_feats:
+                    hid = f"relational_cue_{pf}_clears_{old_f}"
+                    if hid in hypotheses:
+                        hyp = hypotheses[hid]
+                        event = hyp.record_support(min_support=min_support_to_confirm)
+                        results.append((hyp, event))
+                    else:
+                        hyp = RelationalRuleHypothesis(
+                            rule_id=hid,
+                            rule_type=HypothesisType.REMOTE_MECHANISM,
+                            premise_feature=pf,
+                            target_feature=old_f,
+                            action_id=context.action,
+                            positive_support=1,
+                            confidence=0.85,
+                            description=f"Relational cue-paired feature {pf} clears distal barrier {old_f}",
+                        )
+                        event = HypothesisTransitionEvent(
+                            event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                            rule_id=hid,
+                            rule_type=hyp.rule_type,
+                            timestamp=time.time(),
+                            confidence_before=0.0,
+                            confidence_after=hyp.confidence,
+                            reason="Relational contextual cue pair remote clearance",
+                        )
+                        results.append((hyp, event))
+
+        return results
+
+
 class PopperianFalsifier:
     """Evaluates active hypotheses against counterexamples to immediately falsify refutations."""
 
@@ -460,6 +529,7 @@ class InductiveHypothesisEngine:
                 HazardContactObserver(),
                 RemoteMechanismObserver(),
                 ActionMutationObserver(),
+                RelationalCueObserver(),
             ]
         )
         self.falsifier: PopperianFalsifier = PopperianFalsifier()

@@ -59,6 +59,7 @@ class ActionDynamicsModel:
     confidence: float = 0.5
     probes_tested: int = 0
     displacement: tuple[float, ...] = ()
+    continuous_deltas: list[tuple[float, float]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     conditional_branches: dict[str, ActionDynamicsModel] = field(default_factory=dict)
 
@@ -68,6 +69,23 @@ class ActionDynamicsModel:
         elif self.delta_r == 0 and self.delta_c == 0 and len(self.displacement) >= 2:
             self.delta_r = int(round(self.displacement[0]))
             self.delta_c = int(round(self.displacement[1]))
+
+    def record_continuous_delta(self, dx: float, dy: float) -> None:
+        """Record an empirically observed continuous displacement vector (dx, dy)."""
+        if abs(dx) > 1e-6 or abs(dy) > 1e-6:
+            self.continuous_deltas.append((float(dx), float(dy)))
+            if len(self.continuous_deltas) > 64:
+                self.continuous_deltas = self.continuous_deltas[-64:]
+
+    def get_continuous_velocity(self) -> tuple[float, float]:
+        """Compute the mean continuous velocity vector (vx, vy) from observed trials."""
+        if self.continuous_deltas:
+            vx = sum(d[0] for d in self.continuous_deltas) / len(self.continuous_deltas)
+            vy = sum(d[1] for d in self.continuous_deltas) / len(self.continuous_deltas)
+            return (float(vx), float(vy))
+        if len(self.displacement) >= 2:
+            return (float(self.displacement[0]), float(self.displacement[1]))
+        return (float(self.delta_r), float(self.delta_c))
 
     def get_dynamics(self, condition: str | None = None) -> ActionDynamicsModel:
         """Retrieve the dynamics model for a specific condition or fallback to self."""
@@ -88,7 +106,10 @@ class ActionDynamicsModel:
     def is_displacement_action(self, condition: str | None = None) -> bool:
         """True if empirical testing demonstrates spatial translation of the body."""
         dr, dc = self.get_displacement(condition)
-        return dr != 0 or dc != 0
+        if dr != 0 or dc != 0:
+            return True
+        vx, vy = self.get_continuous_velocity()
+        return (vx * vx + vy * vy) > 1e-6
 
     def update_from_trial(
         self,

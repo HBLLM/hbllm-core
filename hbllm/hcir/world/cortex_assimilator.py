@@ -667,26 +667,6 @@ class EpistemicFeedbackAssimilator:
                             reason="avatar_relocation_assimilated",
                         )
 
-                # Numerical / neighborhood cardinality constraint discovery:
-                if get_sub_attr(view.working_memory, "has_cardinality_hypothesis", False):
-                    tr, tc = target_coord
-                    if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
-                        new_feat = int(curr_grid[tr, tc])
-                        if 0 <= new_feat <= 8 and new_feat != view.bg_feature:
-                            new_safe, new_hazards = (
-                                view.working_memory.register_cardinality_constraint(
-                                    center=target_coord,
-                                    count=new_feat,
-                                    grid_shape=curr_grid.shape,
-                                    radius=1,
-                                )
-                            )
-                            for hz in new_hazards:
-                                view.hazard_tracker.register_lethal_feature(
-                                    int(curr_grid[hz[0], hz[1]])
-                                )
-                                view.record_learned_barrier(hz)
-
             # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attribution
             loci: list[tuple[int, int]] = []
             if target_coord is not None:
@@ -726,10 +706,51 @@ class EpistemicFeedbackAssimilator:
                             or view.symbolic_theory.is_walkable(aff.mutated_remote_feature)
                         ):
                             view.learned_barriers.discard(aff.remote_pos)
+                            view.failed_transitions.clear()
+                            view.recent_positions.clear()
+                            if (
+                                hasattr(view, "acc_conflict_monitor")
+                                and view.acc_conflict_monitor is not None
+                            ):
+                                if hasattr(view.acc_conflict_monitor, "action_history"):
+                                    view.acc_conflict_monitor.action_history.clear()
+                                if hasattr(view.acc_conflict_monitor, "position_history"):
+                                    view.acc_conflict_monitor.position_history.clear()
+                            view.mental_plan.clear()
+                            for dr_u, dc_u in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                                nr_u, nc_u = aff.remote_pos[0] + dr_u, aff.remote_pos[1] + dc_u
+                                if 0 <= nr_u < H and 0 <= nc_u < W:
+                                    nf_u = int(curr_grid[nr_u, nc_u])
+                                    if (
+                                        nf_u != view.bg_feature
+                                        and (
+                                            view.avatar_features is None
+                                            or nf_u not in view.avatar_features
+                                        )
+                                        and nf_u != view.avatar_feature
+                                        and int(np.count_nonzero(curr_grid == nf_u)) <= 2
+                                    ):
+                                        view.learned_barriers.discard((nr_u, nc_u))
+                                        view.symbolic_theory.retract_barrier(
+                                            nf_u, reason="unlocked_by_remote_door"
+                                        )
+                                        view.symbolic_theory.unmark_position_explored((nr_u, nc_u))
+                                        view.exhausted_candidate_goals.discard((nr_u, nc_u))
+                                        view.record_learned_goal((nr_u, nc_u))
+                                        view.symbolic_theory.induce_candidate_goal(
+                                            nf_u, evidence="adjacent_to_opened_door"
+                                        )
+                            if view.subgoal_stack.has_pending_goals:
+                                view.subgoal_stack.pop_subgoal()
                         view.working_memory.activated_triggers.add(aff.trigger_pos)
-                        if aff.trigger_feature is not None and (
-                            view.avatar_features is None
-                            or aff.trigger_feature not in view.avatar_features
+                        if (
+                            aff.trigger_feature is not None
+                            and (
+                                view.avatar_features is None
+                                or aff.trigger_feature not in view.avatar_features
+                            )
+                            and aff.original_remote_feature != view.bg_feature
+                            and not view.symbolic_theory.is_walkable(aff.original_remote_feature)
                         ):
                             from hbllm.hcir.world.causal_discovery import CausalPredicate
 
@@ -1515,6 +1536,10 @@ class EpistemicFeedbackAssimilator:
                             )
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
         continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
+        if continuous_moved and action is not None and not is_effector_action:
+            cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+            if (abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4) and action in view.action_dynamics:
+                view.action_dynamics[action].record_continuous_delta(cd_x, cd_y)
         if not av_moved and continuous_moved and action is not None:
             cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
             if abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4:
@@ -1546,6 +1571,7 @@ class EpistemicFeedbackAssimilator:
                         view.action_dynamics[action].update_from_trial(
                             (dr_c, dc_c), success=True, learning_rate=0.5
                         )
+                    view.action_dynamics[action].record_continuous_delta(cd_x, cd_y)
                     if action in view.action_affordances:
                         view.action_affordances[action].is_displacement = True
                         view.action_affordances[action].delta = (dr_c, dc_c)
@@ -1673,7 +1699,9 @@ class EpistemicFeedbackAssimilator:
                                 or val in view.avatar_features
                                 or val == view.avatar_feature
                             )
-                            if (
+                            if not is_avatar and is_confirmed_goal:
+                                view.record_learned_barrier((adj_r, adj_c))
+                            elif (
                                 not is_avatar
                                 and not is_confirmed_goal
                                 and val not in view.symbolic_theory.walkable_features
@@ -1692,11 +1720,26 @@ class EpistemicFeedbackAssimilator:
                                 else:
                                     view.record_learned_barrier((adj_r, adj_c))
 
+                                has_discrete_non_disp = len(available_actions or []) > 4 and any(
+                                    not view.is_displacement_action(a)
+                                    and not view.is_spatial_effector(a)
+                                    for a in (available_actions or [])
+                                )
+                                is_isolated_interior = (
+                                    has_discrete_non_disp
+                                    and 1 <= adj_r < H - 1
+                                    and 1 <= adj_c < W - 1
+                                    and int(np.count_nonzero(curr_grid == val)) <= 2
+                                )
+
                                 if val not in view.verified_safe_features:
                                     view.symbolic_theory.retract_walkable(
                                         val, reason="collision_obstacle"
                                     )
-                                    if not view.symbolic_theory.is_barrier(val):
+                                    if (
+                                        not is_isolated_interior
+                                        and not view.symbolic_theory.is_barrier(val)
+                                    ):
                                         view.symbolic_theory.induce_barrier(
                                             val, evidence="collision"
                                         )
@@ -1946,7 +1989,7 @@ class EpistemicFeedbackAssimilator:
         def _hud_flags() -> np.ndarray:
             nonlocal _hud_row_flags
             pH, _ = _prev_grid.shape
-            max_hud_depth = max(16, pH // 4)
+            max_hud_depth = pH // 4
             div_rows = _divider_rows if _divider_rows is not None else _hud_dividers()
             flags = np.zeros(pH, dtype=bool)
             # Top peripheral band partitioned by a solid non-background divider
@@ -1962,7 +2005,10 @@ class EpistemicFeedbackAssimilator:
             return flags
 
         def is_hud_mutation(r: int, c: int) -> bool:
-            """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
+            """Exogenous / peripheral status region isolation: detects uncontrollable or partitioned peripheral mutations."""
+            exog = getattr(getattr(view, "working_memory", None), "exogenous_uncontrollable", None)
+            if exog and (r, c) in exog:
+                return True
             if _prev_grid is None:
                 return False
             pH, pW = _prev_grid.shape
@@ -2121,32 +2167,6 @@ class EpistemicFeedbackAssimilator:
         av_feats = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
-
-        # Faculty: Telic Depletion Goal Induction
-        # When an interventional non-locomotion action clears pixels of a non-background, non-avatar feature,
-        # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
-        is_locomotion = False
-        if action in view.action_dynamics and view.action_dynamics[action].is_displacement_action():
-            is_locomotion = True
-        elif view.is_displacement_action(action):
-            is_locomotion = True
-
-        if (
-            diff.mutated_pixels
-            and not is_failure
-            and not is_locomotion
-            and view.is_motor_grounded()
-        ):
-            for r, c, old_v, new_v in diff.mutated_pixels:
-                if (
-                    new_v == bg
-                    and old_v != bg
-                    and old_v not in av_feats
-                    and old_v != view.avatar_feature
-                    and not _sym_theory.is_barrier(old_v)
-                ):
-                    _sym_theory.induce_depletion_goal(old_v, evidence="pixel_depletion_heuristic")
-                    break
 
         if is_success:
             win_target = None
@@ -2584,13 +2604,19 @@ class EpistemicFeedbackAssimilator:
             view.mobile_threat_features.discard(view.avatar_feature)
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export feedback assimilator capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export feedback assimilator capability and runtime grounding state as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "motor_dynamics_assimilation"
+        if view is not None:
+            grounded = len(getattr(view, "action_dynamics", {}) or {})
+            phase = getattr(getattr(view, "state", None), "phase", "unknown")
+            rel = f"motor_dynamics_assimilation:grounded:{grounded}:phase:{phase}"
         return CausalPredicate(
             variable="epistemic_feedback_assimilator",
             operator="==",
-            value="ACTIVE",
-            relation="motor_dynamics_assimilation",
+            value=val,
+            relation=rel,
             target_entity="cortex_assimilator",
         )
 

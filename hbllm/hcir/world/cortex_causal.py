@@ -289,6 +289,25 @@ class HCIRSymbolicWorldTheory:
         self._explored_positions.add(pos)
         logger.info("HCIRSymbolicWorldTheory: Marked position %s explored (reason=%s)", pos, reason)
 
+    def unmark_position_explored(self, pos: tuple[int, int]) -> None:
+        """Unmark a coordinate from explored positions when world state unlocks it."""
+        self._explored_positions.discard(pos)
+
+    def induce_relational_cue_pair(
+        self, feature_id: Any, locations: Sequence[tuple[int, int]]
+    ) -> None:
+        """Record a relational co-occurrence pair linking an indicator cue and an actuator (WP-C2)."""
+        self.record_causal_predicate(
+            CausalPredicate(
+                variable=f"feature_{feature_id}_relational_pair",
+                operator="==",
+                value=True,
+                relation="cue_actuator_resonance",
+                target_entity=str(list(locations)),
+                confidence=0.85,
+            )
+        )
+
     def is_position_explored(self, pos: tuple[int, int]) -> bool:
         return pos in self._explored_positions
 
@@ -341,6 +360,9 @@ class HCIRSymbolicWorldTheory:
         target_action: str = "traverse",
     ) -> None:
         """Induce conditional affordance for feature governed by condition predicate."""
+        bg = getattr(self, "_bg_feature", None)
+        if (bg is not None and feature == bg) or feature in self._walkable_features:
+            return
         prereq = prerequisite_feature if prerequisite_feature is not None else condition.value
         aff = ConditionalAffordance(
             feature=feature,
