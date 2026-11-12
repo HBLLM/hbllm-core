@@ -91,10 +91,12 @@ class ACCConflictMonitor:
         self.history_window = history_window
         self.oscillation_threshold = oscillation_threshold
         self.action_history: deque[Any] = deque(maxlen=history_window)
-        self.position_history: deque[tuple[int, int]] = deque(maxlen=history_window)
+        self.position_history: deque[Any] = deque(maxlen=history_window)
         self.conflict_records: list[ACCConflictRecord] = []
 
-    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+    def record_step(
+        self, action: Any, avatar_pos: tuple[float, float] | tuple[int, int] | None
+    ) -> None:
         """Record an executed action and resulting position."""
         self.action_history.append(action)
         if avatar_pos is not None:

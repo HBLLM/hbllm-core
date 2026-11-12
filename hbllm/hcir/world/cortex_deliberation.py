@@ -1677,7 +1677,11 @@ class PrefrontalDeliberationEngine:
 
         # Faculty: Anterior Cingulate Cortex (ACC) Limit Cycle & Conflict Suppression
         forced_acc_perturbation: Any | None = None
-        view.acc_conflict_monitor.record_step(view.last_action, view.avatar_pos)
+        eff_pos: Any = view.avatar_pos
+        cont_pos = getattr(getattr(view, "working_memory", None), "continuous_agent_pos", None)
+        if cont_pos is not None:
+            eff_pos = (round(float(cont_pos[0]), 3), round(float(cont_pos[1]), 3))
+        view.acc_conflict_monitor.record_step(view.last_action, eff_pos)
         is_osc, cyclic_acts = view.acc_conflict_monitor.detect_oscillation()
         if is_osc:
             # Purposeful Active Inference & Hesitation Invariant:
@@ -1691,7 +1695,7 @@ class PrefrontalDeliberationEngine:
                     s.predicted_avatar_pos is not None and s.predicted_avatar_pos != view.avatar_pos
                     for s in view.mental_plan
                 )
-            )
+            ) or getattr(getattr(view, "working_memory", None), "last_continuous_moved", False)
             is_deliberate_pacing = has_temporal and (
                 view.consecutive_pacing_steps > 0
                 or bool(
@@ -1701,7 +1705,12 @@ class PrefrontalDeliberationEngine:
             )
             if not has_progress and not is_deliberate_pacing:
                 for cyc_a in cyclic_acts:
-                    view.inhibited_actions[cyc_a] = max(view.inhibited_actions.get(cyc_a, 0), 8)
+                    if hasattr(view, "working_memory") and hasattr(
+                        view.working_memory, "inhibit_action"
+                    ):
+                        view.working_memory.inhibit_action(cyc_a, duration=8)
+                    else:
+                        view.inhibited_actions[cyc_a] = max(view.inhibited_actions.get(cyc_a, 0), 8)
                 view.mental_plan.clear()
                 from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
 
@@ -2092,6 +2101,7 @@ class PrefrontalDeliberationEngine:
                         has_temporal
                         or is_action_trigger
                         or view.inhibited_actions.get(next_step.action, 0) == 0
+                        or all(view.inhibited_actions.get(a, 0) > 0 for a in available_actions)
                     )
                     and not view.working_memory.habenular_ior.is_action_inhibited(
                         view.avatar_pos, next_step.action, next_step.action_data
@@ -2167,6 +2177,9 @@ class PrefrontalDeliberationEngine:
                                 has_temporal
                                 or is_action_trigger
                                 or view.inhibited_actions.get(next_step.action, 0) == 0
+                                or all(
+                                    view.inhibited_actions.get(a, 0) > 0 for a in available_actions
+                                )
                             )
                             and not view.working_memory.habenular_ior.is_action_inhibited(
                                 view.avatar_pos, next_step.action, next_step.action_data
