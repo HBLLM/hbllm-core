@@ -1691,7 +1691,7 @@ class PrefrontalDeliberationEngine:
         )
 
         # Metacognitive Refractory Inhibition: decay refractory timers
-
+        in_simulation_cooldown = view.simulation_cooldown > 0
         if view.simulation_cooldown > 0:
             view.simulation_cooldown -= 1
         view.working_memory.decay_inhibited_actions()
@@ -2197,7 +2197,11 @@ class PrefrontalDeliberationEngine:
 
             # 3A. Primary: Forward Mental Simulation over learned dynamics & verified exits
             # (Executive Directive 1 & 2: Check if exit is open, if open go through it)
-            if view.is_motor_grounded() and view.simulation_cooldown == 0:
+            if (
+                view.is_motor_grounded()
+                and not in_simulation_cooldown
+                and view.simulation_cooldown == 0
+            ):
                 simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
                 if simulated_plan:
                     view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
@@ -2813,6 +2817,14 @@ class DeliberationStage:
             finally:
                 self._current_journal = None
             meta = dict(getattr(proposal, "meta", {}))
+            if "simulation_summary" not in meta:
+                meta["simulation_summary"] = {
+                    "plan_len": len(getattr(engine, "mental_plan", ()) or ()),
+                    "subgoal_stack_depth": len(
+                        getattr(getattr(engine, "subgoal_stack", None), "stack", ()) or ()
+                    ),
+                    "active_goals": len(getattr(engine, "learned_goal_positions", ()) or ()),
+                }
             return StageResult(
                 author=self.name,
                 journal=journal,

@@ -1,0 +1,339 @@
+{
+  "git_sha": "1fc93d1deda457bfaf57813c325746ae7417751c",
+  "config_hash": "633c7583e7b02077",
+  "timestamp": "20261112_143353",
+  "split": "dev",
+  "tasks": [
+    {
+      "task_id": "grid_nav_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 20,
+      "max_budget": 100,
+      "steps_to_first_success": 29,
+      "steps_to_stable_policy": 1,
+      "success_at_budget": true,
+      "p50_latency_ms": 46.43,
+      "p95_latency_ms": 463.78,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        9,
+        29,
+        20,
+        20,
+        20
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 9
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          9,
+          29,
+          20,
+          20,
+          20
+        ],
+        "steps_to_stable_policy": 1
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 18,
+        "oracle_success": true,
+        "oracle_steps": 18
+      }
+    },
+    {
+      "task_id": "grid_push_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 6,
+      "max_budget": 100,
+      "steps_to_first_success": 19,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 29.32,
+      "p95_latency_ms": 166.7,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        19,
+        6,
+        6,
+        6,
+        6
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 19
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          19,
+          6,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 6,
+        "oracle_success": true,
+        "oracle_steps": 6
+      }
+    },
+    {
+      "task_id": "continuous_reach_dev_system_handcrafted",
+      "family": "continuous",
+      "split": "dev",
+      "steps": 25,
+      "max_budget": 60,
+      "steps_to_first_success": 29,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 29.45,
+      "p95_latency_ms": 111.81,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        29,
+        25,
+        25,
+        25,
+        25
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 29
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          29,
+          25,
+          25,
+          25,
+          25
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 25,
+        "oracle_success": true,
+        "oracle_steps": 25
+      }
+    },
+    {
+      "task_id": "symbolic_rules_dev_system_handcrafted",
+      "family": "symbolic",
+      "split": "dev",
+      "steps": 14,
+      "max_budget": 80,
+      "steps_to_first_success": 25,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 40.89,
+      "p95_latency_ms": 269.97,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        25,
+        14,
+        14,
+        14,
+        14
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 25
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          25,
+          14,
+          14,
+          14,
+          14
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 14,
+        "oracle_success": true,
+        "oracle_steps": 14
+      }
+    }
+  ],
+  "family_scores": {
+    "grid": 0.935,
+    "continuous": 0.7917,
+    "symbolic": 0.9125
+  },
+  "generality_score": 0.8797,
+  "mean_p50_latency_ms": 36.52,
+  "mean_p95_latency_ms": 253.06,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.0,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": null
+    },
+    "oracle": {
+      "generality_score": 0.8814,
+      "family_scores": {
+        "grid": 0.94,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "no_grounding": {
+      "generality_score": 0.8797,
+      "family_scores": {
+        "grid": 0.935,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.25
+    },
+    "demonstration": {
+      "generality_score": 0.8814,
+      "family_scores": {
+        "grid": 0.94,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    }
+  },
+  "env_hash": "88b8bea0d5cc4bc9",
+  "zero_shot": {
+    "generality_score": 0.7524,
+    "family_scores": {
+      "grid": 0.655,
+      "continuous": 0.7583,
+      "symbolic": 0.8438
+    },
+    "solve_rate": 0.75
+  },
+  "lifelong": {
+    "generality_score": 0.8797,
+    "family_scores": {
+      "grid": 0.935,
+      "continuous": 0.7917,
+      "symbolic": 0.9125
+    },
+    "solve_rate": 1.0,
+    "mean_steps_to_stable_policy": 0.25
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.8814,
+    "family_scores": {
+      "grid": 0.94,
+      "continuous": 0.7917,
+      "symbolic": 0.9125
+    },
+    "solve_rate": 1.0
+  }
+}

@@ -38,7 +38,7 @@ class ExecutiveRuntime:
         kernel: CognitiveKernel | None = None,
     ) -> None:
         self._services = services
-        self._kernel = kernel or CognitiveKernel(services.workspace)
+        self._kernel = kernel or CognitiveKernel(services.workspace, services=services)
         self._controller = KernelExecutiveController(services)
         self._state = RuntimeState()
         self._services.runtime_state = self._state

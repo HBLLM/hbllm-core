@@ -397,7 +397,19 @@ class EpistemicGoalScheduler:
                             ):
                                 if 0 <= rem_pos[0] < H and 0 <= rem_pos[1] < W:
                                     cur_rf = int(curr_grid[rem_pos[0], rem_pos[1]])
-                                    for r_aff in aff_list:
+                                    unfulfilled_prereqs = {
+                                        a.prerequisite_feature
+                                        for a in unfulfilled
+                                        if a.prerequisite_feature is not None
+                                    }
+                                    ordered_affs = sorted(
+                                        aff_list,
+                                        key=lambda ra: (
+                                            0 if ra.trigger_feature in unfulfilled_prereqs else 1,
+                                            -getattr(ra, "confidence", 0.0),
+                                        ),
+                                    )
+                                    for r_aff in ordered_affs:
                                         if (
                                             cur_rf == r_aff.original_remote_feature
                                             and r_aff.trigger_feature is not None
@@ -492,9 +504,30 @@ class EpistemicGoalScheduler:
                                         ):
                                             adj_candidates.append((ar, ac))
                                 if adj_candidates:
+
+                                    def _other_adj_entities(stance: tuple[int, int]) -> int:
+                                        cnt = 0
+                                        for dr2, dc2 in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                            nr2, nc2 = stance[0] + dr2, stance[1] + dc2
+                                            if (
+                                                0 <= nr2 < H
+                                                and 0 <= nc2 < W
+                                                and (nr2, nc2) != best_prereq_pos
+                                            ):
+                                                nf = int(curr_grid[nr2, nc2])
+                                                if (
+                                                    nf != bg
+                                                    and nf not in av_feats
+                                                    and not engine.symbolic_theory.is_walkable(nf)
+                                                    and not engine.symbolic_theory.is_barrier(nf)
+                                                ):
+                                                    cnt += 1
+                                        return cnt
+
                                     adj_candidates.sort(
                                         key=lambda c: (
-                                            abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1])
+                                            _other_adj_entities(c),
+                                            abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1]),
                                         )
                                     )
                                     nav_target_pos = adj_candidates[0]
@@ -4202,9 +4235,24 @@ class SimulationStage:
         self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        if getattr(self, "engine", None) is not None or ctx.signals.get("_unified_deliberation"):
-            # folded into DeliberationStage (WP1)
-            return StageResult(author=self.name)
+        engine = getattr(self, "engine", None)
+        if engine is not None or ctx.signals.get("_unified_deliberation"):
+            plan_len = len(getattr(engine, "mental_plan", ctx.mental_plan) or ())
+            sg_obj = getattr(engine, "subgoal_stack", None) or ctx.subgoal_stack
+            sg_depth = len(getattr(sg_obj, "stack", ()) or ())
+            active_goals = len(
+                getattr(engine, "learned_goal_positions", ctx.learned_goal_positions) or ()
+            )
+            return StageResult(
+                author=self.name,
+                signals={
+                    "simulation_summary": {
+                        "plan_len": plan_len,
+                        "subgoal_stack_depth": sg_depth,
+                        "active_goals": active_goals,
+                    }
+                },
+            )
         proposed = None
         if ctx.mental_plan:
             first_step = ctx.mental_plan[0]

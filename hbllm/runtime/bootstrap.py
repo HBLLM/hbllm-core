@@ -52,6 +52,7 @@ class CognitiveSystem:
     tiered_workspace: TieredWorkspace
     config: CognitiveSystemConfig
     runtime: Any | None = None  # ExecutiveRuntime
+    reasoning_runtime: Any | None = None  # UnifiedReasoningRuntime
     brain: Any | None = None
     hydrated_count: int = 0
 
@@ -164,6 +165,8 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
             runtime.attach_concept_learner(bridge.concept_learner)
     if getattr(engine, "episodic_cortex", None) is not None:
         runtime.attach_episodic_cortex(engine.episodic_cortex)
+    if getattr(engine, "library_learner", None) is not None:
+        runtime.attach_library_learner(engine.library_learner)
 
     logger.info(
         "Cognitive system booted successfully (world_id=%s, seed=%s, verifier=ConstitutionalVerifier)",
@@ -179,5 +182,6 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         tiered_workspace=tiered_workspace,
         config=cfg,
         runtime=runtime,
+        reasoning_runtime=runtime.controller.reasoning_runtime,
         hydrated_count=hydrated_count,
     )

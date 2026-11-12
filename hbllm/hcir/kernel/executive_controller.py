@@ -30,6 +30,7 @@ from hbllm.hcir.kernel.attention_graph import AttentionManager
 from hbllm.hcir.kernel.services import KernelServices
 
 if TYPE_CHECKING:
+    from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
     from hbllm.hcir.cognitive_state import UnifiedCognitiveState
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,8 @@ class KernelExecutiveController:
     """
 
     def __init__(self, services: KernelServices) -> None:
+        from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+        from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
         from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
         from hbllm.hcir.interpreter import HCIRInterpreter
         from hbllm.hcir.learning_loop import LearningLoopEngine
@@ -70,7 +73,13 @@ class KernelExecutiveController:
         self._cf_planner = CounterfactualPlanner(self._workspace, services)
         self._interpreter = HCIRInterpreter(self._workspace, services)
         self._learning_engine = LearningLoopEngine(self._workspace, services.transaction_manager)
+        self._reasoning_runtime = UnifiedReasoningRuntime(create_default_operator_registry())
         self._cycle_count = 0
+
+    @property
+    def reasoning_runtime(self) -> UnifiedReasoningRuntime:
+        """Return the formal LLM-free reasoning runtime bound to this controller."""
+        return self._reasoning_runtime
 
     async def run_cycle(
         self,
@@ -98,6 +107,29 @@ class KernelExecutiveController:
             if active_goals
             else GoalNode(id="goal_default", description="Maintain baseline stability")
         )
+
+        # Invoke formal reasoning operators over immutable FrozenGraphView when graph has state
+        if self._workspace.graph.node_count > 0:
+            from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
+
+            problem = ReasoningProblem(
+                problem_id=f"cycle_{self._cycle_count}_{primary_goal.id}",
+                problem_type=ProblemType.PREDICTION,
+                description=primary_goal.description or primary_goal.id,
+                goal_node_ids=(primary_goal.id,)
+                if self._workspace.graph.get_node(primary_goal.id) is not None
+                else (),
+            )
+            trace = self._reasoning_runtime.reason(
+                graph=self._workspace.graph,
+                problem=problem,
+                snapshot_sequence=self._cycle_count,
+            )
+            if trace.proposed_transaction and trace.proposed_transaction.operations:
+                self._workspace.commit_operations(
+                    list(trace.proposed_transaction.operations),
+                    author="reasoning_runtime",
+                )
 
         selected_action_id = None
         selected_action = None

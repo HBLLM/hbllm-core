@@ -23,6 +23,7 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     HCIRNodeType,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class GroundedConceptRegistry:
 
     Usage::
 
-        registry = GroundedConceptRegistry(graph)
+        registry = GroundedConceptRegistry(graph, workspace=workspace)
         concept_id = registry.register(
             concept_name="C-00417",
             feature_prototype={...},
@@ -43,8 +44,13 @@ class GroundedConceptRegistry:
         registry.update_confidence(concept_id, prediction_success=True)
     """
 
-    def __init__(self, graph: CognitiveGraph) -> None:
-        self._graph = graph
+    def __init__(self, graph: CognitiveGraph | Any, workspace: Any | None = None) -> None:
+        if hasattr(graph, "commit_operations") and hasattr(graph, "graph"):
+            self._workspace = graph
+            self._graph = graph.graph
+        else:
+            self._workspace = workspace
+            self._graph = graph
         self._concept_counter = 0
         # Prediction tracking: concept_id → list of (correct: bool)
         self._prediction_history: dict[str, list[bool]] = {}
@@ -85,18 +91,41 @@ class GroundedConceptRegistry:
             utility_delta=utility_delta,
             tags=["grounded_concept", domain, formation_source],
         )
-        self._graph.add_node(concept)
-
-        # Create INSTANCE_OF edges (validated — passed predictive utility test)
-        for member_id in member_ids:
-            if self._graph.get_node(member_id) is not None:
-                self._graph.add_edge(
-                    HCIREdge(
+        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+            ops: list[TransactionOperation] = [
+                TransactionOperation(
+                    op=TransactionOp.INSERT_NODE,
+                    node_id=concept.id,
+                    node_data=concept.model_dump(),
+                )
+            ]
+            for member_id in member_ids:
+                if self._graph.get_node(member_id) is not None:
+                    edge = HCIREdge(
                         edge_type=HCIREdgeType.INSTANCE_OF,
                         sources=[member_id],
                         targets=[concept.id],
                     )
-                )
+                    ops.append(
+                        TransactionOperation(
+                            op=TransactionOp.ADD_EDGE,
+                            edge_id=edge.id,
+                            edge_data=edge.model_dump(),
+                        )
+                    )
+            self._workspace.commit_operations(ops, author="grounded_concept_registry")
+        else:
+            self._graph.add_node(concept)
+            # Create INSTANCE_OF edges (validated — passed predictive utility test)
+            for member_id in member_ids:
+                if self._graph.get_node(member_id) is not None:
+                    self._graph.add_edge(
+                        HCIREdge(
+                            edge_type=HCIREdgeType.INSTANCE_OF,
+                            sources=[member_id],
+                            targets=[concept.id],
+                        )
+                    )
 
         self._prediction_history[concept.id] = []
 
@@ -148,7 +177,19 @@ class GroundedConceptRegistry:
             success_rate = sum(recent) / len(recent)
             concept.confidence = success_rate
 
-        self._graph.upsert_node(concept)
+        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+            self._workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=concept.id,
+                        node_data=concept.model_dump(),
+                    )
+                ],
+                author="grounded_concept_registry",
+            )
+        else:
+            self._graph.upsert_node(concept)
 
     def concept_members(self, concept_id: str) -> list[str]:
         """Get all entity IDs that are INSTANCE_OF this concept."""

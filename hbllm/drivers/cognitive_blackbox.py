@@ -629,7 +629,25 @@ class CognitiveBlackbox:
 
         # Autonomous epistemic world discovery and mental simulation engines
         self._epistemic_engines: dict[str, AutonomousEpistemicEngine] = {}
+        self._cognitive_systems: dict[str, Any] = {}
         self._observation_adapter: Any | None = None
+
+    @property
+    def epistemic_engine(self) -> AutonomousEpistemicEngine:
+        """Return the default AutonomousEpistemicEngine bound to this blackbox."""
+        return self.get_epistemic_engine("default")
+
+    def get_cognitive_system(self, source_id: str = "default") -> Any:
+        """Get or initialize the canonical CognitiveSystem for a specific source/domain."""
+        if source_id not in self._cognitive_systems:
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+            system = build_cognitive_system(
+                CognitiveSystemConfig(world_id=source_id, memory_dir=None)
+            )
+            self._cognitive_systems[source_id] = system
+            self._epistemic_engines[source_id] = system.engine
+        return self._cognitive_systems[source_id]
 
     @property
     def observation_adapter(self) -> Any:
@@ -651,10 +669,7 @@ class CognitiveBlackbox:
     def get_epistemic_engine(self, source_id: str = "default") -> AutonomousEpistemicEngine:
         """Get or initialize the AutonomousEpistemicEngine for active curiosity and mental simulation."""
         if source_id not in self._epistemic_engines:
-            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
-
-            system = build_cognitive_system(CognitiveSystemConfig(world_id=source_id))
-            self._epistemic_engines[source_id] = system.engine
+            self.get_cognitive_system(source_id)
         return self._epistemic_engines[source_id]
 
     # ── Driver, Lifter & Resolver Registration ────────────────────────────

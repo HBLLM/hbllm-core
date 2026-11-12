@@ -295,7 +295,7 @@ class EpistemicFeedbackAssimilator:
         satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
         goals_to_retire: set[tuple[int, int]] = set()
         for target_pos, cond in list(satisfied_when_map.items()):
-            tr, tc = target_pos
+            tr, tc = cond.get("entity_pos", target_pos)
             expected_feat = cond.get("feature")
             max_visits = cond.get("max_visits", 2)
 
