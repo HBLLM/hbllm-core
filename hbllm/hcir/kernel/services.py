@@ -186,16 +186,21 @@ class KernelServices:
         from hbllm.hcir.world_kernel import WorldKernel
 
         registry = commit_authority_registry
-        if registry is None and verification_pipeline:
+        verifier: ConstitutionalVerifier | None = None
+        if verification_pipeline:
             for s in verification_pipeline:
-                if isinstance(s, ConstitutionalVerifier) and s.authority_registry:
-                    registry = s.authority_registry
+                if isinstance(s, ConstitutionalVerifier):
+                    verifier = s
+                    if registry is None and s.authority_registry:
+                        registry = s.authority_registry
                     break
         if registry is None:
             registry = CommitAuthorityRegistry()
+        if verifier is None:
+            verifier = ConstitutionalVerifier(authority_registry=registry)
 
         pipeline = verification_pipeline or create_default_pipeline(
-            constitutional_verifier=ConstitutionalVerifier(authority_registry=registry)
+            constitutional_verifier=verifier
         )
         event_bus = KernelEventBus()
         tx_mgr = TransactionManager(workspace, verification_stages=pipeline, event_bus=event_bus)
@@ -345,4 +350,5 @@ class KernelServices:
             sandbox_manager=sandbox_mgr,
             runtime_state=RuntimeState(),
             world_kernel=world_k,
+            constitutional_verifier=verifier,
         )

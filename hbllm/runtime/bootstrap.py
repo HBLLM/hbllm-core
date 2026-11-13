@@ -154,10 +154,15 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         )
         engine.attach_grounding_bridge(bridge)
 
-    # 6. Instantiate Executive Runtime and wire dual rhythms
+    # 6. Instantiate Executive Runtime and wire dual rhythms + classical reasoning CPU
+    from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
+    from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
     from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
 
+    reasoning_rt = UnifiedReasoningRuntime(create_default_operator_registry())
+    services.extensions["reasoning_runtime"] = reasoning_rt
     runtime = ExecutiveRuntime(services=services)
+    runtime.controller.attach_reasoning_runtime(reasoning_rt)
     runtime.attach_engine(engine)
     if bridge is not None:
         runtime.attach_observation_bus(bridge.bus)
