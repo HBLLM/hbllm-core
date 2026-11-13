@@ -145,7 +145,16 @@ class ThreeTierEntityTracker:
             min_dist = float("inf")
 
             if spatial_coords:
+                trk_state = self._tracklets.get(tracklet_ref.id)
+                trk_color = trk_state.metadata.get("color") if trk_state is not None else None
                 for cid, cand in self._candidates.items():
+                    cand_color = cand.properties.get("color")
+                    if (
+                        trk_color is not None
+                        and cand_color is not None
+                        and int(trk_color) != int(cand_color)
+                    ):
+                        continue
                     if cand.spatial_trajectory:
                         last_pos = cand.spatial_trajectory[-1]
                         dist = self._euclidean_distance(spatial_coords, last_pos)

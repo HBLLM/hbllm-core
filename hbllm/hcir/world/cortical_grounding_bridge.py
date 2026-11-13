@@ -89,6 +89,8 @@ class CorticalGroundingState:
     pending_epistemic_goals: list[GoalProposal] = field(default_factory=list)
     last_feature_vectors: list[PerceptualFeatureVector] = field(default_factory=list)
     last_concept_assignments: list[ConceptAssignment] = field(default_factory=list)
+    last_feature_concept_ids: dict[int, str] = field(default_factory=dict)
+    last_role_priors: dict[int, dict[str, float]] = field(default_factory=dict)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0
 
@@ -147,7 +149,16 @@ class CorticalGroundingBridge:
         )
         self.tracker = ThreeTierEntityTracker(spatial_distance_threshold=1.5)
         self.concept_store = WorkingConceptStore()
-        self.concept_learner = ConceptLearner(concept_store=self.concept_store)
+        if perception_mode in ("learned", "snn"):
+            # Bounded neural embeddings (LayerNorm+tanh) operate on tight [0.0..0.8] RMS scale
+            self.concept_learner = ConceptLearner(
+                concept_store=self.concept_store,
+                assignment_threshold=0.18,
+                split_dispersion_threshold=0.35,
+                merge_distance_threshold=0.10,
+            )
+        else:
+            self.concept_learner = ConceptLearner(concept_store=self.concept_store)
         self.feature_registry = FeatureExtractorRegistry.default(perception_mode=perception_mode)
         self.relation_learner = RelationLearner(proximity_threshold=3.0)
         self.evaluator = EpistemicEvaluator(acceptance_threshold=acceptance_threshold)
@@ -167,6 +178,10 @@ class CorticalGroundingBridge:
     def boundary_retention(self, boundary: Any) -> None:
         """Apply boundary retention to grounding state on episode transitions."""
         apply_boundary_retention(self.state, boundary)
+        self.state.last_role_priors.clear()
+        for ext in self.feature_registry.extractors:
+            if hasattr(ext, "reset_traces"):
+                ext.reset_traces()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 1: SGE -> Cortical Perception
@@ -270,24 +285,40 @@ class CorticalGroundingBridge:
                 if b and len(b) == 4:
                     bbox = (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
+            ent_size = 1
+            if hasattr(ent, "area") and ent.area:
+                ent_size = int(ent.area)
+            elif hasattr(ent, "coords"):
+                ent_size = max(1, len(list(ent.coords)))
+            elif isinstance(ent, dict) and "size" in ent:
+                ent_size = max(1, int(ent["size"]))
+
             # Determine stable tracklet ID (WP3: permutation-invariant association)
+            prev_coords = None
             if ent_id:
                 tracklet_id = TrackletRef(f"trk_{ent_id}")
             else:
                 best_trk_id: str | None = None
+                best_cand_id: str | None = None
                 best_dist = float("inf")
                 for c in active_cands:
                     cid = c.candidate_ref.id
                     if cid in matched_cand_ids:
+                        continue
+                    c_color = c.properties.get("color")
+                    if c_color is not None and int(c_color) != int(color):
                         continue
                     if c.spatial_trajectory:
                         last_p = c.spatial_trajectory[-1]
                         dist = math.sqrt((pos[0] - last_p[0]) ** 2 + (pos[1] - last_p[1]) ** 2)
                         if dist < best_dist and dist <= self.tracker._spatial_distance_threshold:
                             best_dist = dist
+                            prev_coords = last_p
                             if c.associated_tracklet_ids:
                                 best_trk_id = next(iter(c.associated_tracklet_ids))
-                                matched_cand_ids.add(cid)
+                                best_cand_id = cid
+                if best_cand_id is not None:
+                    matched_cand_ids.add(best_cand_id)
 
                 if best_trk_id is not None:
                     tracklet_id = TrackletRef(best_trk_id)
@@ -302,10 +333,28 @@ class CorticalGroundingBridge:
             )
             cand = self.tracker.auto_associate(tracklet_id, spatial_coords=pos)
             matched_cand_ids.add(cand.id)
+            cand_state = self.tracker.get_candidate(cand.id)
+            if cand_state is not None:
+                cand_state.properties["color"] = int(color)
+            if (
+                prev_coords is None
+                and cand_state is not None
+                and len(cand_state.spatial_trajectory) >= 2
+            ):
+                prev_coords = cand_state.spatial_trajectory[-2]
+            vel = (
+                (float(pos[0]) - float(prev_coords[0]), float(pos[1]) - float(prev_coords[1]))
+                if prev_coords is not None
+                else (0.0, 0.0)
+            )
+            moved = bool(prev_coords is not None and (vel[0] != 0.0 or vel[1] != 0.0))
             entity_states[cand.id] = {
                 "position": pos,
                 "bbox": bbox,
                 "color": color,
+                "size": ent_size,
+                "velocity": vel,
+                "moved": moved,
                 "role": role,
             }
 
@@ -345,6 +394,11 @@ class CorticalGroundingBridge:
         active_cands = self.tracker.get_active_candidates()
 
         # 5. Feature Extraction via FeatureExtractorRegistry
+        if ctx is not None:
+            curr_grid = getattr(ctx, "curr_grid", None)
+            if curr_grid is not None:
+                envelope.metadata["grid"] = curr_grid
+                envelope.metadata["bg_feature"] = getattr(ctx, "bg_feature", 0)
         if entity_states:
             envelope.metadata["entities"] = [
                 {"id": cand_id, **state} for cand_id, state in entity_states.items()
@@ -357,15 +411,32 @@ class CorticalGroundingBridge:
         except Exception as exc:
             logger.debug("FeatureExtractorRegistry.extract_all failed: %s", exc)
 
-        # 6. Concept Learning via ConceptLearner
+        # 6. Concept Learning & Role Prior Inference via ConceptLearner
         concept_assignments: list[ConceptAssignment] = []
+        feature_concept_ids: dict[int, str] = {}
+        role_priors: dict[int, dict[str, float]] = {}
+        infer_priors = self.perception_mode in ("learned", "snn")
         for fv in feature_vectors:
             try:
                 entity_id: str | None = fv.feature_metadata.get("entity_id")
                 if not entity_id and active_cands:
                     entity_id = active_cands[0].candidate_ref.id
+                if infer_priors and "raw_color" in fv.feature_metadata:
+                    priors = self.concept_learner.infer_role_priors(
+                        fv, max_distance=0.45, distance_scale=0.25
+                    )
+                    if priors:
+                        rc = int(fv.feature_metadata["raw_color"])
+                        existing_rp = role_priors.setdefault(rc, {})
+                        for r_name, r_conf in priors.items():
+                            if r_conf > existing_rp.get(r_name, 0.0):
+                                existing_rp[r_name] = r_conf
                 assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
                 concept_assignments.append(assignment)
+                if "raw_color" in fv.feature_metadata:
+                    feature_concept_ids[int(fv.feature_metadata["raw_color"])] = (
+                        assignment.concept_ref.id
+                    )
             except Exception as exc:
                 logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
 
@@ -399,6 +470,8 @@ class CorticalGroundingBridge:
 
         self.state.last_feature_vectors = feature_vectors
         self.state.last_concept_assignments = concept_assignments
+        self.state.last_feature_concept_ids = feature_concept_ids
+        self.state.last_role_priors = role_priors
 
         # 7. Post-Action Outcome Verification (from previous cycle)
         outcome_verified = False
@@ -418,6 +491,7 @@ class CorticalGroundingBridge:
             "sge_proposed_claims_count": len(claims),
             "sge_committed_claims_count": len(committed_claims),
             "sge_feature_vectors_count": len(feature_vectors),
+            "sge_role_priors": role_priors,
             "sge_concept_assignments": [
                 {
                     "concept_id": a.concept_ref.id,
@@ -430,6 +504,43 @@ class CorticalGroundingBridge:
             "sge_concept_merges": merge_count,
             "sge_outcome_verified": outcome_verified,
         }
+
+    def sync_theory_roles(self, theory: Any) -> int:
+        """Bind empirically discovered symbolic roles onto matching GroundedConcepts."""
+        if theory is None or not self.state.last_feature_vectors:
+            return 0
+        bound = 0
+        seen_pairs: set[tuple[int, str]] = set()
+        for fv in self.state.last_feature_vectors:
+            entity_id = fv.feature_metadata.get("entity_id")
+            raw_color = fv.feature_metadata.get("raw_color")
+            if not entity_id or raw_color is None:
+                continue
+            feat = int(raw_color)
+            cid = self.state.last_feature_concept_ids.get(feat)
+            target_concept = self.concept_store.get_concept(cid) if cid else None
+            roles: list[str] = []
+            if theory.is_cargo(feat):
+                roles.append("cargo")
+            if feat in theory.goal_features:
+                roles.append("goal")
+            if feat in theory.receptacle_features:
+                roles.append("receptacle")
+            if theory.is_barrier(feat):
+                roles.append("barrier")
+            if theory.is_avatar_feature(feat):
+                roles.append("avatar")
+            for r_name in roles:
+                if (feat, r_name) in seen_pairs:
+                    continue
+                seen_pairs.add((feat, r_name))
+                if target_concept is not None:
+                    target_concept.bind_role(f"empirical_role:{r_name}", "1.000")
+                    target_concept.affordances.add(f"role:{r_name}")
+                    bound += 1
+                elif self.concept_learner.bind_role_to_exemplar(str(entity_id), r_name):
+                    bound += 1
+        return bound
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 2: SGE -> Assimilation & Surprise Induction

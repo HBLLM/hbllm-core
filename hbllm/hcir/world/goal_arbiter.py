@@ -263,6 +263,8 @@ class GoalArbiter:
                 H, W = grid.shape
                 exhausted = getattr(engine, "exhausted_candidate_goals", set())
                 for feat in theory.candidate_goal_features:
+                    if theory.is_cargo(feat) or theory.is_feature_explored(feat):
+                        continue
                     coords = list(zip(*((grid == feat).nonzero())))
                     cue_boost = 15.0 if len(coords) == 2 else 0.0
                     for r, c in coords[:3]:  # sample top candidate positions

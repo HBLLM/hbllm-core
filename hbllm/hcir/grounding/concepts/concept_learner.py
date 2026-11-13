@@ -259,6 +259,58 @@ class ConceptLearner:
     def total_assignments(self) -> int:
         return self._total_assignments
 
+    def bind_role_to_exemplar(
+        self,
+        exemplar_entity_id: str,
+        role_name: str,
+        confidence: float = 1.0,
+    ) -> GroundedConcept | None:
+        """Bind an empirically discovered causal role onto the concept owning an exemplar."""
+        clean_role = role_name.strip().lower()
+        if not clean_role or not exemplar_entity_id:
+            return None
+        for concept in self._store.get_all_concepts():
+            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                continue
+            if exemplar_entity_id in concept.exemplar_entity_ids:
+                concept.role_bindings[f"empirical_role:{clean_role}"] = f"{confidence:.3f}"
+                concept.affordances.add(f"role:{clean_role}")
+                return concept
+        return None
+
+    def infer_role_priors(
+        self,
+        feature: PerceptualFeatureVector,
+        *,
+        max_distance: float = 1.6,
+        distance_scale: float = 1.0,
+    ) -> dict[str, float]:
+        """Infer soft structural role priors from nearest role-annotated GroundedConcepts.
+
+        Ignores palette color aliases so structural-topological representations
+        transfer zero-shot across recolored / shifted feature IDs.
+        """
+        features_dict = self._embedding_to_dict(feature)
+        scale = max(distance_scale, 1e-6)
+        role_scores: dict[str, float] = {}
+        for concept in self._store.get_all_concepts():
+            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                continue
+            roles = [
+                aff.removeprefix("role:") for aff in concept.affordances if aff.startswith("role:")
+            ]
+            if not roles:
+                continue
+            dist = self._mahalanobis_distance(features_dict, concept, ignore_color_labels=True)
+            if dist <= max_distance:
+                d_scaled = dist / scale
+                sim = math.exp(-d_scaled * d_scaled)
+                for r in roles:
+                    prev = role_scores.get(r, 0.0)
+                    if sim > prev:
+                        role_scores[r] = round(sim, 4)
+        return role_scores
+
     # ------------------------------------------------------------------
     # Nearest-concept assignment
     # ------------------------------------------------------------------
@@ -285,6 +337,8 @@ class ConceptLearner:
     def _mahalanobis_distance(
         features: dict[str, Any],
         concept: GroundedConcept,
+        *,
+        ignore_color_labels: bool = False,
     ) -> float:
         """Computes normalised Mahalanobis-like distance from a feature dict to a concept.
 
@@ -295,33 +349,34 @@ class ConceptLearner:
         if not concept.feature_distributions:
             return float("inf")
 
-        # Mutually exclusive categorical label conflict gate (e.g. distinct colors)
-        color_names = {
-            "black",
-            "blue",
-            "red",
-            "green",
-            "yellow",
-            "grey",
-            "magenta",
-            "orange",
-            "cyan",
-            "brown",
-        }
-        color_labels_new = {
-            k for k in features if k.startswith("label_") and any(c in k for c in color_names)
-        }
-        color_labels_concept = {
-            k
-            for k in concept.feature_distributions
-            if k.startswith("label_") and any(c in k for c in color_names)
-        }
-        if (
-            color_labels_new
-            and color_labels_concept
-            and not (color_labels_new & color_labels_concept)
-        ):
-            return float("inf")
+        if not ignore_color_labels:
+            # Mutually exclusive categorical label conflict gate (e.g. distinct colors)
+            color_names = {
+                "black",
+                "blue",
+                "red",
+                "green",
+                "yellow",
+                "grey",
+                "magenta",
+                "orange",
+                "cyan",
+                "brown",
+            }
+            color_labels_new = {
+                k for k in features if k.startswith("label_") and any(c in k for c in color_names)
+            }
+            color_labels_concept = {
+                k
+                for k in concept.feature_distributions
+                if k.startswith("label_") and any(c in k for c in color_names)
+            }
+            if (
+                color_labels_new
+                and color_labels_concept
+                and not (color_labels_new & color_labels_concept)
+            ):
+                return float("inf")
 
         shared = set(features.keys()) & set(concept.feature_distributions.keys())
         if not shared:

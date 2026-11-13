@@ -96,6 +96,15 @@ class SpatiotemporalCollisionCones:
         self.persistent_velocities.clear()
         self.occluded_trackers.clear()
 
+    def clear_feature(self, feature_id: int) -> None:
+        """Purge all projected/occluded collision state for a feature (e.g. inert cargo)."""
+        self.persistent_velocities.pop(feature_id, None)
+        self.occluded_trackers.pop(feature_id, None)
+        self.step_occupied_by_feat.pop(feature_id, None)
+        self.projected_trajectories = [
+            p for p in self.projected_trajectories if p.feature_id != feature_id
+        ]
+
     def update_trajectories(
         self,
         kinetic_entities: list[KineticEntity],
@@ -105,6 +114,7 @@ class SpatiotemporalCollisionCones:
         oriented_threats: Sequence[Any] | None = None,
         mobile_threat_features: set[int] | None = None,
         stride: int = 1,
+        ignored_features: set[int] | None = None,
     ) -> None:
         """Extrapolate forward space-time trajectories for all moving entities.
 
@@ -119,12 +129,19 @@ class SpatiotemporalCollisionCones:
         self.step_occupied_cells.clear()
         self.step_occupied_by_feat.clear()
 
+        if ignored_features:
+            for ig in ignored_features:
+                self.persistent_velocities.pop(ig, None)
+                self.occluded_trackers.pop(ig, None)
+
         for t in range(1, T + 1):
             self.step_occupied_cells[t] = set()
 
         # Update persistent velocities from kinetic entities
         for entity in kinetic_entities:
             feat_id = next(iter(entity.features)) if entity.features else 0
+            if ignored_features and feat_id in ignored_features:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
             if vr != 0 or vc != 0:
@@ -135,6 +152,8 @@ class SpatiotemporalCollisionCones:
 
         for idx, entity in enumerate(kinetic_entities):
             feat_id = next(iter(entity.features)) if entity.features else 0
+            if ignored_features and feat_id in ignored_features:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
 

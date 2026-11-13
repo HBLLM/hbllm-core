@@ -129,6 +129,18 @@ class EpistemicFeedbackAssimilator:
             is_pushed = is_contact and is_ahead and (delta == (dr, dc))
             if is_pushed:
                 view.symbolic_theory.induce_cargo(ce.feature_id, evidence="contact_displacement")
+                if hasattr(view, "collision_cones") and hasattr(
+                    view.collision_cones, "clear_feature"
+                ):
+                    view.collision_cones.clear_feature(ce.feature_id)
+                active_arb = getattr(view, "active_arbitrated_goal", None)
+                if active_arb is not None:
+                    arb_meta = getattr(active_arb, "metadata", None) or {}
+                    if (
+                        arb_meta.get("feature_id") == ce.feature_id
+                        or getattr(active_arb, "goal_type", None) == "epistemic_exploration"
+                    ):
+                        setattr(view, "active_arbitrated_goal", None)
                 logger.info(
                     "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
                     ce.feature_id,
@@ -1314,6 +1326,7 @@ class EpistemicFeedbackAssimilator:
             oriented_threats=get_engine_state_attr(view, "_prev_oriented_threats", None),
             mobile_threat_features=view.mobile_threat_features,
             stride=get_engine_state_attr(view, "spatial_lattice_stride", 1),
+            ignored_features=known_cargo,
         )
 
         if (

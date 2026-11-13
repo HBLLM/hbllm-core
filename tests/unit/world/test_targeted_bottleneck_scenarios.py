@@ -1084,3 +1084,242 @@ def test_filter_reachable_includes_hazard_tracker_lethal_features() -> None:
         goals=[(1, 0), (2, 4)],
     )
     assert filtered_split == [(1, 0)]
+
+
+def test_find_shortest_path_honors_static_barriers_with_percept() -> None:
+    """Verify ObjectStateGraphPlanner.find_shortest_path respects static_barriers even when percept is supplied.
+
+    Regression for GridPush seed=110: _filter_reversible adds the cargo cell to static_barriers
+    when approaching from an open reversible stance; BFS must route around it even before the
+    cargo feature is registered as solid on the percept.
+    """
+    from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
+    from hbllm.hcir.world.percept import PerceptionFrame
+
+    planner = ObjectStateGraphPlanner()
+    grid = np.zeros((8, 8), dtype=int)
+    grid[0, :] = 5
+    grid[-1, :] = 5
+    grid[:, 0] = 5
+    grid[:, -1] = 5
+    grid[5, 3] = 8
+    grid[5, 5] = 4  # unverified cargo cell blocking direct horizontal push
+    grid[6, 5] = 5
+    grid[5, 3] = 1  # avatar at (5, 3)
+
+    percept = PerceptionFrame(shape=(8, 8), avatar_pos=(5, 3))
+    path = planner.find_shortest_path(
+        start_pos=(5, 3),
+        target_stances={(5, 6)},
+        static_barriers={(5, 5), (6, 5)},
+        lethal_features=set(),
+        movable_actions=[(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)],
+        grid_shape=(8, 8),
+        curr_grid=grid,
+        percept=percept,
+    )
+    assert path is not None and len(path) > 3
+    visited = [step.predicted_avatar_pos for step in path]
+    assert (5, 5) not in visited
+    assert visited[-1] == (5, 6)
+
+
+def test_collision_cone_clear_and_ignore_cargo_feature() -> None:
+    """Verify SpatiotemporalCollisionCones clears occluded velocity predictions when a feature is cargo."""
+    from hbllm.hcir.world.kinetic_stream import KineticEntity
+    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
+
+    cones = SpatiotemporalCollisionCones()
+    cargo_ent = KineticEntity(
+        centroid=(2.0, 3.0),
+        velocity=(0.0, 1.0),
+        cells=[(2, 3)],
+        bounding_box=(2, 2, 3, 3),
+        area=1,
+        features={4},
+    )
+    cones.update_trajectories(
+        kinetic_entities=[cargo_ent],
+        static_barriers=set(),
+        grid_shape=(6, 6),
+    )
+    assert 4 in cones.persistent_velocities
+
+    # When cargo disappears/stops, occluded extrapolation triggers until cleared/ignored.
+    cones.update_trajectories(
+        kinetic_entities=[],
+        static_barriers=set(),
+        grid_shape=(6, 6),
+    )
+    assert 4 in cones.occluded_trackers or 4 in cones.persistent_velocities
+
+    cones.clear_feature(4)
+    assert 4 not in cones.occluded_trackers
+    assert 4 not in cones.persistent_velocities
+
+    cones.update_trajectories(
+        kinetic_entities=[cargo_ent],
+        static_barriers=set(),
+        grid_shape=(6, 6),
+        ignored_features={4},
+    )
+    assert 4 not in cones.persistent_velocities
+
+
+def test_learned_representation_structural_separation_and_palette_transfer() -> None:
+    """Verify 14-D learned and SNN extractors separate structural roles invariant to feature-ID remapping."""
+    from hbllm.hcir.grounding.concepts.concept_learner import ConceptLearner
+    from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
+    from hbllm.hcir.grounding.contracts.enums import ModalitySource, TrafficClass
+    from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+    from hbllm.hcir.grounding.features.feature_extractor import (
+        LearnedPerceptualFeatureExtractor,
+        SNNPerceptualFeatureExtractor,
+    )
+
+    def _make_envelope(remap: dict[int, int]) -> ObservationEnvelope:
+        grid = np.zeros((7, 7), dtype=int)
+        grid[0, :] = remap[5]
+        grid[-1, :] = remap[5]
+        grid[:, 0] = remap[5]
+        grid[:, -1] = remap[5]
+        grid[3, 3] = remap[4]  # mobile interior entity
+        grid[4, 4] = remap[8]  # static interior landmark
+        entities = [
+            {
+                "id": f"wall_{remap[5]}",
+                "position": (0.0, 3.0),
+                "bbox": (0.0, 0.0, 1.0, 7.0),
+                "color": remap[5],
+                "size": 7,
+                "velocity": (0.0, 0.0),
+                "moved": False,
+            },
+            {
+                "id": f"box_{remap[4]}",
+                "position": (3.0, 3.0),
+                "bbox": (3.0, 3.0, 1.0, 1.0),
+                "color": remap[4],
+                "size": 1,
+                "velocity": (0.0, 1.0),
+                "moved": True,
+            },
+            {
+                "id": f"goal_{remap[8]}",
+                "position": (4.0, 4.0),
+                "bbox": (4.0, 4.0, 1.0, 1.0),
+                "color": remap[8],
+                "size": 1,
+                "velocity": (0.0, 0.0),
+                "moved": False,
+            },
+        ]
+        return ObservationEnvelope.create(
+            observation_id=f"obs_{remap[4]}",
+            source_modality=ModalitySource.VISION,
+            source_channel_id="cortical_perception",
+            traffic_class=TrafficClass.CLASS_HIGH_FREQ,
+            sequence_number=1,
+            payload_ref="mem://test_lattice",
+            metadata={"grid": grid, "bg_feature": 0, "entities": entities},
+        )
+
+    env_a = _make_envelope({4: 4, 5: 5, 8: 8})
+    env_b = _make_envelope({4: 14, 5: 15, 8: 18})
+
+    for extractor in (LearnedPerceptualFeatureExtractor(), SNNPerceptualFeatureExtractor()):
+        if hasattr(extractor, "reset_traces"):
+            extractor.reset_traces()
+        fvs_a = extractor.extract(env_a)
+        if hasattr(extractor, "reset_traces"):
+            extractor.reset_traces()
+        fvs_b = extractor.extract(env_b)
+
+        # Invariant 1: color-permutation changes should stay close for the same structural role
+        def _vec(fvs: list, prefix: str) -> np.ndarray:
+            for fv in fvs:
+                if str(fv.feature_metadata.get("entity_id", "")).startswith(prefix):
+                    return np.array(fv.embedding, dtype=float)
+            raise AssertionError(f"missing {prefix}")
+
+        same_box = float(np.sqrt(np.mean((_vec(fvs_a, "box_") - _vec(fvs_b, "box_")) ** 2)))
+        diff_box_wall = float(np.sqrt(np.mean((_vec(fvs_a, "box_") - _vec(fvs_b, "wall_")) ** 2)))
+        assert diff_box_wall > same_box + 0.15
+
+        # ConceptLearner binds roles from Palette A and transfers priors to unseen Palette B
+        learner = ConceptLearner(
+            concept_store=WorkingConceptStore(),
+            assignment_threshold=0.18,
+            split_dispersion_threshold=0.35,
+            merge_distance_threshold=0.10,
+        )
+        for fv in fvs_a:
+            learner.learn(fv, exemplar_entity_id=str(fv.feature_metadata["entity_id"]))
+        learner.bind_role_to_exemplar("box_4", "cargo", confidence=0.95)
+        learner.bind_role_to_exemplar("wall_5", "barrier", confidence=0.95)
+
+        priors_b_cargo = learner.infer_role_priors(
+            next(
+                fv
+                for fv in fvs_b
+                if str(fv.feature_metadata.get("entity_id", "")).startswith("box_")
+            ),
+            max_distance=0.45,
+            distance_scale=0.25,
+        )
+        priors_b_wall = learner.infer_role_priors(
+            next(
+                fv
+                for fv in fvs_b
+                if str(fv.feature_metadata.get("entity_id", "")).startswith("wall_")
+            ),
+            max_distance=0.45,
+            distance_scale=0.25,
+        )
+        assert priors_b_cargo.get("cargo", 0.0) > priors_b_cargo.get("barrier", 0.0)
+        assert priors_b_wall.get("barrier", 0.0) > priors_b_wall.get("cargo", 0.0)
+
+
+def test_grid_push_seed_110_and_grid_nav_seed_200_zero_shot() -> None:
+    """End-to-end regression: GridPush seed=110 solves zero-shot and GridNav seed=200 solves without timeout."""
+    import tempfile
+
+    from benchmarks.envs.grid_nav import GridNavEnvironment
+    from benchmarks.envs.grid_push import GridPushEnvironment
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    with tempfile.TemporaryDirectory() as d:
+        sys_push = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="reg_push_110",
+                memory_dir=d,
+                enable_grounding=True,
+                perception_mode="learned",
+            )
+        )
+        env_push = GridPushEnvironment()
+        obs = env_push.reset(seed=110)
+        done, steps, info = False, 0, {}
+        while not done and steps < 100:
+            act, _ = sys_push.engine.step(obs)
+            obs, _, done, info = env_push.step(act)
+            steps += 1
+        assert info.get("success") is True
+
+    with tempfile.TemporaryDirectory() as d:
+        sys_nav = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="reg_nav_200",
+                memory_dir=d,
+                enable_grounding=True,
+                perception_mode="handcrafted",
+            )
+        )
+        env_nav = GridNavEnvironment()
+        obs = env_nav.reset(seed=200)
+        done, steps, info = False, 0, {}
+        while not done and steps < 100:
+            act, _ = sys_nav.engine.step(obs)
+            obs, _, done, info = env_nav.step(act)
+            steps += 1
+        assert info.get("success") is True

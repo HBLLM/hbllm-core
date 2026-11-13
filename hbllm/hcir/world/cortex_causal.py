@@ -222,6 +222,7 @@ class HCIRSymbolicWorldTheory:
     _candidate_goal_features: set[Any] = field(default_factory=set)
     _explored_features: set[Any] = field(default_factory=set)
     _explored_positions: set[tuple[int, int]] = field(default_factory=set)
+    _probed_actuator_positions: set[tuple[int, int]] = field(default_factory=set)
     _barrier_features: set[Any] = field(default_factory=set)
     _walkable_features: set[Any] = field(default_factory=set)
     _cargo_features: set[Any] = field(default_factory=set)
@@ -288,11 +289,14 @@ class HCIRSymbolicWorldTheory:
     def mark_position_explored(self, pos: tuple[int, int], reason: str = "") -> None:
         """Mark a coordinate as epistemically explored."""
         self._explored_positions.add(pos)
+        if reason == "actuator_probed":
+            self._probed_actuator_positions.add(pos)
         logger.info("HCIRSymbolicWorldTheory: Marked position %s explored (reason=%s)", pos, reason)
 
     def unmark_position_explored(self, pos: tuple[int, int]) -> None:
         """Unmark a coordinate from explored positions when world state unlocks it."""
         self._explored_positions.discard(pos)
+        self._probed_actuator_positions.discard(pos)
 
     def induce_relational_cue_pair(
         self, feature_id: Any, locations: Sequence[tuple[int, int]]
@@ -311,6 +315,10 @@ class HCIRSymbolicWorldTheory:
 
     def is_position_explored(self, pos: tuple[int, int]) -> bool:
         return pos in self._explored_positions
+
+    def is_position_actuator_probed(self, pos: tuple[int, int]) -> bool:
+        """Return True when an adjacent interact/actuator action failed at pos."""
+        return pos in self._probed_actuator_positions
 
     @property
     def barrier_features(self) -> frozenset[Any]:
@@ -991,6 +999,7 @@ class HCIRSymbolicWorldTheory:
     def clear_explored_positions(self, clear_features: bool = False) -> None:
         """Clear episode-local explored coordinate markers (and optionally explored features on level change)."""
         self._explored_positions.clear()
+        self._probed_actuator_positions.clear()
         if clear_features:
             self._explored_features.clear()
 
@@ -1521,6 +1530,7 @@ class HCIRSymbolicWorldTheory:
         self._candidate_goal_features.clear()
         self._explored_features.clear()
         self._explored_positions.clear()
+        self._probed_actuator_positions.clear()
         self._barrier_features.clear()
         self._walkable_features.clear()
         self._cargo_features.clear()

@@ -590,6 +590,7 @@ class PrefrontalWorkingMemory:
         self.hypothesis_engine: InductiveHypothesisEngine = InductiveHypothesisEngine()
         self.morphology: MorphologicalSaliencyEngine = MorphologicalSaliencyEngine()
         self._salience_baseline: WorkingMemorySalienceState = WorkingMemorySalienceState()
+        self.concept_role_priors: dict[int, dict[str, float]] = {}
 
         # Continuous metric reference frame & sub-cell kinematic tracking
         self.continuous_agent_pos: np.ndarray | tuple[float, ...] | None = None

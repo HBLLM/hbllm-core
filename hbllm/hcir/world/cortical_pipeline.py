@@ -108,6 +108,14 @@ class CorticalPipeline:
                     extracted_entities=extracted if isinstance(extracted, list) else None,
                 )
                 current_ctx = current_ctx.with_signals(p_signals)
+                if (
+                    self.engine is not None
+                    and getattr(self.engine, "working_memory", None) is not None
+                    and "sge_role_priors" in p_signals
+                ):
+                    self.engine.working_memory.concept_role_priors = dict(
+                        p_signals["sge_role_priors"]
+                    )
 
             # Stage 2: SGE Assimilation Bridge Hook & Goal Arbitration (WP10, Gap 5)
             elif getattr(stage, "name", "") == "assimilation_stage":
@@ -118,6 +126,12 @@ class CorticalPipeline:
                         current_entity_states=states if isinstance(states, dict) else {},
                     )
                     current_ctx = current_ctx.with_signals(a_signals)
+                    if (
+                        self.engine is not None
+                        and getattr(self.engine, "symbolic_theory", None) is not None
+                        and hasattr(self.grounding_bridge, "sync_theory_roles")
+                    ):
+                        self.grounding_bridge.sync_theory_roles(self.engine.symbolic_theory)
 
                 # Goal Arbitration Hook: Selects active TaskFrame using Expected Free Energy
                 if self.engine is not None and getattr(self.engine, "goal_arbiter", None):
