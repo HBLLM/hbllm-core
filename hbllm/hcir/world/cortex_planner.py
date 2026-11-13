@@ -197,14 +197,26 @@ class EpistemicGoalScheduler:
                     b1 not in engine.learned_barriers
                     and b1 not in engine.current_level_lethal_positions
                     and not th.is_barrier(f1)
-                    and (f1 == bg or th.is_walkable(f1) or f1 in goal_like)
+                    and (
+                        f1 == bg
+                        or b1 == avatar_pos
+                        or th.is_avatar_feature(f1)
+                        or th.is_walkable(f1)
+                        or f1 in goal_like
+                    )
                 )
             if 0 <= b2[0] < H and 0 <= b2[1] < W:
                 f2 = int(curr_grid[b2[0], b2[1]])
                 b2_open = (
                     b2 not in engine.learned_barriers
                     and not th.is_barrier(f2)
-                    and (f2 == bg or th.is_walkable(f2) or f2 in goal_like)
+                    and (
+                        f2 == bg
+                        or b2 == avatar_pos
+                        or th.is_avatar_feature(f2)
+                        or th.is_walkable(f2)
+                        or f2 in goal_like
+                    )
                 )
             if b1_open and b2_open:
                 safe_stances.append(ap)
