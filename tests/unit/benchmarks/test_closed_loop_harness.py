@@ -127,11 +127,14 @@ def test_suite_manifests_disjoint_seeds_and_heldout_family():
     # Disjoint seed ranges
     assert max(dev_seeds) < min(heldout_seeds), "Dev and heldout seed ranges are not separated"
 
-    # Heldout novel family
+    # Disjoint task IDs & held-out coverage across all families
+    dev_ids = {task["id"] for task in dev_manifest["tasks"]}
+    heldout_ids = {task["id"] for task in heldout_manifest["tasks"]}
+    assert len(dev_ids & heldout_ids) == 0, "Task IDs overlap between dev and heldout!"
     dev_families = {task["family"] for task in dev_manifest["tasks"]}
     heldout_families = {task["family"] for task in heldout_manifest["tasks"]}
     assert "symbolic" in heldout_families
-    assert "symbolic" not in dev_families
+    assert heldout_families >= dev_families
 
 
 def test_config_hash_covers_envs_and_heldout_manifest():

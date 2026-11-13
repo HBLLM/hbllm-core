@@ -7,7 +7,7 @@ from hbllm.hcir.kernel.consensus_engine import CandidateBelief, CognitiveConsens
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.kernel.verification import BranchModeVerifier
 from hbllm.hcir.replay_debugger import CognitiveBreakpoint
-from hbllm.hcir.transactions import HCIRTransaction
+from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.types import BranchMode
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
@@ -85,11 +85,22 @@ class TestConsensusEngine:
 class TestAttentionManager:
     def test_recompute_attention_allocates_goals_and_surprise(self):
         ws = HCIRWorkspaceState()
-        ws.add_node(GoalNode(id="g1", description="Yield optimization", priority=0.9))
-        ws.add_node(
-            PredictionErrorNode(
-                id="pe1", prediction_id="pred1", error_magnitude=0.8, suspected_cause="sensor_drift"
-            )
+        ws.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node=GoalNode(id="g1", description="Yield optimization", priority=0.9),
+                ),
+                TransactionOperation(
+                    op=TransactionOp.ADD_NODE,
+                    node=PredictionErrorNode(
+                        id="pe1",
+                        prediction_id="pred1",
+                        error_magnitude=0.8,
+                        suspected_cause="sensor_drift",
+                    ),
+                ),
+            ]
         )
 
         attn_mgr = AttentionManager(ws)
