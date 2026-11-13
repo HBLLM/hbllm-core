@@ -4069,11 +4069,7 @@ class AutonomousEpistemicEngine:
         th = self.symbolic_theory
         if th.is_walkable(feat) or th.is_barrier(feat):
             return False
-        if (
-            feat in th.goal_features
-            or feat in th.candidate_goal_features
-            or feat in th.cargo_features
-        ):
+        if feat in th.goal_features or feat in th.cargo_features:
             return False
         return True
 
@@ -4193,7 +4189,7 @@ class AutonomousEpistemicEngine:
         )
         self.apply_delta(delta, author="episodic_cortex")
         self.step_counter = 0
-        if hasattr(self, "entropy_monitor") and self.entropy_monitor is not None:
+        if hasattr(self, "entropy_monitor") and self.entropy_monitor:
             self.entropy_monitor.reset_for_level()
         if is_new_level:
             self.environmental_step_limit = None

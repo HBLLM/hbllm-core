@@ -491,7 +491,9 @@ class StateMutationModel:
         self.posterior_value = posterior_value
         self.confidence = confidence
         self.occurrences = occurrences
-        self.metadata = dict(kwargs)
+        meta_kw = kwargs.pop("metadata", None)
+        self.metadata: dict[str, Any] = dict(meta_kw) if isinstance(meta_kw, dict) else {}
+        self.metadata.update(kwargs)
 
     @property
     def trigger_color(self) -> Any:

@@ -1827,6 +1827,8 @@ class PrefrontalDeliberationEngine:
                     action_dynamics=view.action_dynamics,
                 )
                 H, W = curr_grid.shape
+                unverified_fallback: Any | None = None
+                bg_feat = getattr(view, "bg_feature", getattr(view, "default_bg_feature", 0))
                 for cand_a in ortho_acts:
                     if view.inhibited_actions.get(cand_a, 0) > 0:
                         continue
@@ -1846,11 +1848,25 @@ class PrefrontalDeliberationEngine:
                             feat_at_dest = int(curr_grid[nr, nc])
                             if feat_at_dest in view.hazard_tracker.known_lethal_features:
                                 continue
+                            if view.symbolic_theory.is_barrier(feat_at_dest):
+                                continue
+                            is_known_safe = (
+                                feat_at_dest == bg_feat
+                                or view.symbolic_theory.is_walkable(feat_at_dest)
+                                or feat_at_dest in view.symbolic_theory.goal_features
+                                or feat_at_dest in (view.avatar_features or ())
+                            )
+                            if not is_known_safe:
+                                if unverified_fallback is None:
+                                    unverified_fallback = cand_a
+                                continue
                             forced_acc_perturbation = cand_a
                             break
                     else:
                         forced_acc_perturbation = cand_a
                         break
+                if forced_acc_perturbation is None and unverified_fallback is not None:
+                    forced_acc_perturbation = unverified_fallback
 
         # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
         acc_death_conflict = get_sub_attr(view.working_memory, "acc_conflict", None)

@@ -94,7 +94,7 @@
     "dual_memory": "DualStoreMemoryManager",
     "world_kernel": "WorldKernel",
     "point_actuation_learner": "AblatedFaculty",
-    "entropy_monitor": "DeliberationEntropyMonitor",
+    "entropy_monitor": "AblatedFaculty",
     "goal_arbiter": "GoalArbiter",
     "grounding_bridge": "CorticalGroundingBridge"
   },

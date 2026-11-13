@@ -322,16 +322,17 @@ class EpistemicFeedbackAssimilator:
                 visits = cond.get("visits", 0) + 1
                 cond["visits"] = visits
                 if visits >= max_visits:
-                    if expected_feat is not None:
+                    entity_pos_cond = cond.get("entity_pos")
+                    is_adjacent_stance = (
+                        entity_pos_cond is not None and entity_pos_cond != target_pos
+                    )
+                    if expected_feat is not None and not is_adjacent_stance:
                         view.symbolic_theory.mark_feature_explored(
                             expected_feat, reason="visited_without_surprise"
                         )
                     view.symbolic_theory.mark_position_explored(target_pos, reason="visited_target")
-                    if "entity_pos" in cond:
-                        view.symbolic_theory.mark_position_explored(
-                            cond["entity_pos"], reason="interacted_entity"
-                        )
-                        view.exhausted_candidate_goals.add(cond["entity_pos"])
+                    if is_adjacent_stance:
+                        view.exhausted_candidate_goals.add(target_pos)
                     goals_to_retire.add(target_pos)
                     logger.info(
                         "AutonomousEpistemicEngine: Epistemic goal satisfied — reached %s %d times",
@@ -2114,6 +2115,9 @@ class EpistemicFeedbackAssimilator:
                 )
                 if existing_mut is not None:
                     existing_mut.record_observation(distant_mutations[0][3])
+                    existing_mut.metadata["mutated_positions"] = [
+                        (int(mr), int(mc)) for mr, mc, _, _ in distant_mutations
+                    ]
                 else:
                     is_action_trigger = (
                         bool(action_data and "x" in action_data)
@@ -2129,7 +2133,12 @@ class EpistemicFeedbackAssimilator:
                         posterior_value=distant_mutations[0][3],
                         confidence=0.8,
                         occurrences=1,
-                        metadata={"action_id": action},
+                        metadata={
+                            "action_id": action,
+                            "mutated_positions": [
+                                (int(mr), int(mc)) for mr, mc, _, _ in distant_mutations
+                            ],
+                        },
                     )
                     view.state_mutations.append(mutation_model)
                     view.exhausted_candidate_goals.clear()
