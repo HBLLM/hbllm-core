@@ -1261,6 +1261,53 @@ class EpistemicGoalScheduler:
             if reachable_goals:
                 goals = reachable_goals
 
+        # DreamCoder LibraryLearner proposal prior guidance over unconfirmed exploratory goals
+        if (
+            len(goals) > 1
+            and not confirmed_goals
+            and getattr(engine, "library_learner", None)
+            and getattr(engine.library_learner, "proposal_distribution", None) is not None
+        ):
+            ll_ctx = {
+                "has_goal": bool(engine.symbolic_theory.goal_features),
+                "has_cargo": bool(engine.symbolic_theory.cargo_features),
+                "has_switches": bool(
+                    engine.symbolic_theory.conditional_affordances
+                    or getattr(getattr(engine, "remote_causal", None), "remote_actuators", None)
+                ),
+                "has_threats": bool(getattr(engine.hazard_tracker, "known_lethal_features", None)),
+                "n_actions": len(available_actions),
+            }
+            ll_proposals = engine.library_learner.sample_proposals(ll_ctx, top_k=5)
+            if len(ll_proposals) >= 2 and ll_proposals[0][1] > ll_proposals[1][1] + 0.01:
+                top_intent = ll_proposals[0][0].upper()
+                actuator_feats = getattr(engine.symbolic_theory, "actuator_features", set())
+                cargo_feats = getattr(engine.symbolic_theory, "cargo_features", set())
+                goal_feats = (
+                    engine.symbolic_theory.goal_features
+                    | engine.symbolic_theory.candidate_goal_features
+                )
+
+                def _ll_priority(g: tuple[int, int]) -> tuple[int, int]:
+                    feat = int(curr_grid[g[0], g[1]])
+                    sw_feat = satisfied_when.get(g, {}).get("feature")
+                    dist = (
+                        abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
+                        if avatar_pos is not None
+                        else 0
+                    )
+                    if "INTERACT" in top_intent or "ACTIVATE" in top_intent:
+                        tier = 0 if (feat in actuator_feats or sw_feat in actuator_feats) else 1
+                    elif "PICKUP" in top_intent:
+                        tier = 0 if feat in cargo_feats else 1
+                    elif "NAV" in top_intent:
+                        tier = 0 if feat in goal_feats else 1
+                    else:
+                        tier = 0
+                    return (tier, dist)
+
+                goals.sort(key=_ll_priority)
+
         return EpistemicGoalProposal(
             goals=goals,
             confirmed_goals=confirmed_goals,

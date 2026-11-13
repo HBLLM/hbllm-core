@@ -215,6 +215,7 @@ class HCIRSymbolicWorldTheory:
     receptacle_predicates: list[CausalPredicate] = field(default_factory=list)
     actuator_predicates: list[CausalPredicate] = field(default_factory=list)
     domain_predicates: list[CausalPredicate] = field(default_factory=list)
+    _domain_predicate_keys: set[tuple[Any, ...]] = field(default_factory=set, repr=False)
 
     # Fast-lookup cached sets (private, accessed via read-only properties)
     _goal_features: set[Any] = field(default_factory=set)
@@ -412,9 +413,24 @@ class HCIRSymbolicWorldTheory:
         """Declarative causal predicates recorded in the symbolic world theory."""
         return self.domain_predicates
 
+    @staticmethod
+    def _predicate_key(predicate: CausalPredicate) -> tuple[Any, ...]:
+        return (
+            predicate.variable,
+            predicate.operator,
+            repr(predicate.value),
+            predicate.relation,
+            predicate.target_entity,
+        )
+
     def record_causal_predicate(self, predicate: CausalPredicate) -> None:
         """Record an empirical causal predicate into the symbolic world theory."""
-        self.domain_predicates.append(predicate)
+        if len(self._domain_predicate_keys) != len(self.domain_predicates):
+            self._domain_predicate_keys = {self._predicate_key(p) for p in self.domain_predicates}
+        key = self._predicate_key(predicate)
+        if key not in self._domain_predicate_keys:
+            self._domain_predicate_keys.add(key)
+            self.domain_predicates.append(predicate)
 
     def record_tool_barrier_affinity(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal resonance where tool_feat cleared barrier_feat."""
@@ -1046,7 +1062,11 @@ class HCIRSymbolicWorldTheory:
 
     def register_predicate(self, predicate: CausalPredicate) -> None:
         """Register a generic or learned causal predicate into the symbolic world theory."""
-        if predicate not in self.domain_predicates:
+        if len(self._domain_predicate_keys) != len(self.domain_predicates):
+            self._domain_predicate_keys = {self._predicate_key(p) for p in self.domain_predicates}
+        key = self._predicate_key(predicate)
+        if key not in self._domain_predicate_keys:
+            self._domain_predicate_keys.add(key)
             self.domain_predicates.append(predicate)
 
     def export_causal_predicates(self) -> list[CausalPredicate]:

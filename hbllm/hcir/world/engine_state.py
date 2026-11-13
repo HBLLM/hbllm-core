@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from collections import deque
+import copy
+from collections import OrderedDict, deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
+
+_CTX_ENTITY_CACHE: OrderedDict[tuple[Any, ...], list[Any]] = OrderedDict()
+_CTX_ENTITY_CACHE_MAX: int = 64
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -295,7 +299,30 @@ class CognitiveContext:
         from hbllm.hcir.world.cortex_perception import PerceptionEngine
 
         bg_val = bg if bg is not None else self.bg_feature
-        return PerceptionEngine.extract_entities(
+        # Fast cache keyed on immutable grid bytes and classification inputs (avoids redundant scipy.ndimage.label)
+        mut_sig = tuple(
+            (getattr(m, "feature", None), getattr(m, "pos", None))
+            for m in self.state_mutations[-4:]
+        )
+        cache_key = (
+            curr_grid.shape,
+            curr_grid.dtype.str,
+            curr_grid.tobytes(),
+            int(bg_val) if bg_val is not None else None,
+            self.avatar_pos,
+            frozenset(self.avatar_features),
+            frozenset(self.learned_barriers),
+            frozenset(self.learned_goal_positions),
+            frozenset(self.learned_receptacle_positions),
+            len(self.state_mutations),
+            mut_sig,
+        )
+        cached = _CTX_ENTITY_CACHE.get(cache_key)
+        if cached is not None:
+            _CTX_ENTITY_CACHE.move_to_end(cache_key)
+            return [copy.copy(e) for e in cached]
+
+        entities = PerceptionEngine.extract_entities(
             curr_grid,
             bg_val,
             avatar_features=set(self.avatar_features),
@@ -305,6 +332,10 @@ class CognitiveContext:
             learned_receptacle_positions=set(self.learned_receptacle_positions),
             avatar_pos=self.avatar_pos,
         )
+        _CTX_ENTITY_CACHE[cache_key] = [copy.copy(e) for e in entities]
+        if len(_CTX_ENTITY_CACHE) > _CTX_ENTITY_CACHE_MAX:
+            _CTX_ENTITY_CACHE.popitem(last=False)
+        return entities
 
     def with_signals(
         self, new_signals: Mapping[str, Any] | None = None, **kwargs: Any

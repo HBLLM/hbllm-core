@@ -227,6 +227,7 @@ register(
     "LateralPrefrontalTaskSwitcher", "hbllm.hcir.world.experimental.lateral_prefrontal_switcher"
 )
 register("ThalamicReticularGatingEngine", "hbllm.hcir.world.experimental.thalamic_reticular_gating")
+register("DeliberationEntropyMonitor", "hbllm.hcir.world.autonomous_learning")
 register(
     "VentrolateralMotorInhibitionEngine",
     "hbllm.hcir.world.experimental.ventrolateral_motor_inhibition",

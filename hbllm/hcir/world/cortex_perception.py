@@ -15,7 +15,7 @@ Biological Modeling:
 """
 
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -444,8 +444,10 @@ class GestaltAffordanceDetector:
         if avatar_feature is not None:
             av_feats.add(avatar_feature)
 
+        unique_feats = np.unique(grid)
+
         # 1. Detect target zones and salient interior constellations
-        for feat in np.unique(grid):
+        for feat in unique_feats:
             feat_int = int(feat)
             if (
                 feat_int == bg
@@ -502,7 +504,7 @@ class GestaltAffordanceDetector:
                 )
 
         # 2. Detect edge and near-edge exit markers
-        for feat in np.unique(grid):
+        for feat in unique_feats:
             feat_int = int(feat)
             if (
                 feat_int == bg
@@ -753,6 +755,9 @@ class GestaltAffordanceDetector:
             )
         return panels
 
+    _ORIENTED_THREAT_CACHE: OrderedDict[tuple[Any, ...], list[OrientedThreat]] = OrderedDict()
+    _ORIENTED_THREAT_CACHE_MAX: int = 64
+
     @staticmethod
     def detect_oriented_threats(
         grid: np.ndarray,
@@ -767,6 +772,39 @@ class GestaltAffordanceDetector:
         av_feats = avatar_features or set()
         goal_set = goals or set()
         cargos = cargo_features or set()
+
+        # Fast short-circuit if no entity has a plausible multi-cell body bounding box
+        candidate_sig: list[tuple[int, int, tuple[int, int, int, int]]] = []
+        for e in entities:
+            if e.area < 2 or e.area > 36:
+                continue
+            if getattr(e, "role", None) == EntityRole.MANIPULABLE:
+                continue
+            r0, r1, c0, c1 = e.bounding_box
+            if not (1 <= r1 - r0 <= 6 and 1 <= c1 - c0 <= 6):
+                continue
+            candidate_sig.append((e.feature_id, e.area, e.bounding_box))
+        if not candidate_sig:
+            return []
+
+        cache = GestaltAffordanceDetector._ORIENTED_THREAT_CACHE
+        cache_key = (
+            grid.shape,
+            grid.dtype.str,
+            grid.tobytes(),
+            int(bg),
+            int(step_size),
+            avatar_pos,
+            frozenset(av_feats),
+            frozenset(goal_set),
+            frozenset(cargos),
+            tuple(candidate_sig),
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.move_to_end(cache_key)
+            return list(cached)
+
         oriented_threats: list[OrientedThreat] = []
 
         for e in entities:
@@ -810,6 +848,9 @@ class GestaltAffordanceDetector:
                             feature_id=body_val,
                         )
                     )
+        cache[cache_key] = list(oriented_threats)
+        if len(cache) > GestaltAffordanceDetector._ORIENTED_THREAT_CACHE_MAX:
+            cache.popitem(last=False)
         return oriented_threats
 
 
@@ -1409,12 +1450,14 @@ class PerceptionStage:
             except Exception:
                 entities = []
         avatar_candidate = ctx.avatar_pos
-        ops: list[TransactionOperation] = [
+        ops = [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
                 node_id="perception_observation",
                 node_data={
-                    "stage": self.name,
+                    "id": "perception_observation",
+                    "node_type": "observation",
+                    "category": "perception",
                     "entity_count": len(entities),
                     "step": ctx.step_counter,
                 },

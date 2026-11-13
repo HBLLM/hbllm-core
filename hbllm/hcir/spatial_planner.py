@@ -181,6 +181,22 @@ class SpatialEntity:
             self.properties["reference_frame"] = reference_frame
         self.properties.update(kwargs)
 
+    def __copy__(self) -> SpatialEntity:
+        """Fast shallow copy avoiding redundant coordinate coercion in __init__."""
+        clone = object.__new__(type(self))
+        clone.id = self.id
+        clone.role = self.role
+        clone.grid_pos = self.grid_pos
+        clone.centroid = self.centroid
+        clone.area = self.area
+        clone.bounding_box = self.bounding_box
+        clone.component_id = self.component_id
+        clone.is_deliverable = self.is_deliverable
+        clone.is_delivered = self.is_delivered
+        clone.shape_archetype = self.shape_archetype
+        clone.properties = dict(self.properties)
+        return clone
+
     @property
     def dimensionality(self) -> int:
         """Dimensionality of the entity's spatial coordinates."""

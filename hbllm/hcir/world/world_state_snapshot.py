@@ -40,7 +40,12 @@ class WorldStateSnapshot:
 
         def _default_serializer(obj: Any) -> Any:
             if isinstance(obj, np.ndarray):
-                return obj.tolist()
+                contig = np.ascontiguousarray(obj)
+                return {
+                    "__ndarray__": list(contig.shape),
+                    "dtype": contig.dtype.str,
+                    "sha256": hashlib.sha256(contig.tobytes()).hexdigest(),
+                }
             if isinstance(obj, (set, frozenset)):
                 return sorted(list(obj))
             return str(obj)

@@ -253,3 +253,88 @@ async def test_executive_runtime_offline_sleep_consolidation() -> None:
     persistent_nodes = list(services.tiered_workspace.persistent.graph.nodes.values())
     macro_nodes = [n for n in persistent_nodes if getattr(n, "name", "") == macro_name]
     assert len(macro_nodes) == 1
+
+
+def test_library_learner_skill_compiles_to_macro_plan_and_guides_scheduler() -> None:
+    """Consolidated LibraryLearner skills compile to MacroActionPlan and guide goal ranking."""
+    import numpy as np
+
+    from hbllm.hcir.skills.declarative import (
+        DeclarativeNeuroSymbolicSkill,
+        SpatialActionIntent,
+        SubgoalSequence,
+        SymbolicSubgoal,
+    )
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.causal_discovery import CausalPredicate
+    from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler
+    from hbllm.hcir.world.macro_actions import InteractWith, MacroActionPlan, NavigateTo
+
+    class LearnedSwitchGoalSkill(DeclarativeNeuroSymbolicSkill):
+        skill_name = "learned_switch_then_goal"
+        program = SubgoalSequence(
+            SymbolicSubgoal(intent=SpatialActionIntent.INTERACT, target_query={"role": "actuator"}),
+            SymbolicSubgoal(intent=SpatialActionIntent.NAVIGATE_TO, target_query={"role": "goal"}),
+        )
+
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 2] = 1  # avatar
+    grid[2, 3] = 5  # actuator
+    grid[0, 4] = 9  # goal
+    engine.avatar_pos = (2, 2)
+    engine.avatar_feature = 1
+    engine.avatar_features.add(1)
+    engine.symbolic_theory.induce_actuator(5, evidence="test")
+    engine.symbolic_theory.induce_goal(9, evidence="test")
+    engine.record_learned_goal((0, 4))
+
+    plan = MacroActionPlan.from_skill(
+        LearnedSwitchGoalSkill(), engine, grid, available_actions=[1, 2, 3, 4, 5]
+    )
+    assert plan is not None and not plan.is_empty()
+    assert isinstance(plan.actions[0], InteractWith)
+    assert isinstance(plan.actions[1], NavigateTo)
+
+    # Proposal distribution prefers INTERACT when has_switches is active
+    engine2 = AutonomousEpistemicEngine(enable_logging=False)
+    engine2.library_learner.wake_record_episode(
+        ["INTERACT", "INTERACT", "NAVIGATE"],
+        context_id="switch_domain",
+        context_features={"has_switches": True},
+        success=True,
+    )
+    engine2.library_learner.wake_record_episode(
+        ["INTERACT", "NAVIGATE"],
+        context_id="switch_domain_2",
+        context_features={"has_switches": True},
+        success=True,
+    )
+    grid2 = np.zeros((5, 5), dtype=int)
+    grid2[0, 0] = 1  # avatar at (0, 0)
+    grid2[0, 4] = 9  # closer candidate at distance 4
+    grid2[4, 4] = 5  # distant walkable switch at distance 8
+    engine2.avatar_pos = (0, 0)
+    engine2.avatar_feature = 1
+    engine2.avatar_features.add(1)
+    engine2.symbolic_theory.induce_actuator(5, evidence="test")
+    engine2.symbolic_theory.induce_walkable(5, evidence="test_walkable_switch")
+    engine2.symbolic_theory.induce_conditional_affordance(
+        feature=99,
+        condition=CausalPredicate(variable="trigger", operator="==", value=5),
+        evidence="test_switch_context",
+        prerequisite_feature=5,
+    )
+    engine2.symbolic_theory.induce_candidate_goal(9, evidence="test")
+    engine2.symbolic_theory.induce_candidate_goal(5, evidence="test")
+    entities = engine2.extract_entities(grid2, 0)
+    prop = EpistemicGoalScheduler.schedule_goals(
+        engine=engine2,
+        curr_grid=grid2,
+        entities=entities,
+        bg=0,
+        av_feats={1},
+        available_actions=[1, 2, 3, 4, 5],
+    )
+    assert prop.goals
+    assert prop.goals[0] == (4, 4)

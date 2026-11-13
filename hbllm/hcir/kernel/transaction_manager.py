@@ -23,7 +23,7 @@ import logging
 import threading
 from collections import deque
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
@@ -274,8 +274,26 @@ class TransactionManager:
         transaction.status = TransactionStatus.VALIDATED
 
         # Apply operations atomically: on any failure, revert the partial effects.
+        event_store = getattr(self._workspace, "_event_store", None)
+        batch_fn = getattr(event_store, "batch", None)
+        batch_cm = batch_fn() if callable(batch_fn) else nullcontext()
         try:
-            undo_entries = self._apply_operations(transaction)
+            with batch_cm:
+                undo_entries = self._apply_operations(transaction)
+                transaction.status = TransactionStatus.COMMITTED
+                self._record_committed(transaction, undo_entries)
+
+                snap = self._workspace.create_snapshot()
+                self._tx_versions[transaction.id] = snap.version
+
+                self._workspace.snapshot_manager.record_kernel_event(
+                    EventType.TRANSACTION_COMMITTED,
+                    {
+                        "tx_id": transaction.id,
+                        "author": transaction.author,
+                        "op_count": transaction.operation_count,
+                    },
+                )
         except Exception as exc:
             transaction.status = TransactionStatus.REJECTED
             transaction.annotations.append(
@@ -293,20 +311,6 @@ class TransactionManager:
             logger.error("Transaction %s apply failed, reverted: %s", transaction.id, exc)
             return transaction
 
-        transaction.status = TransactionStatus.COMMITTED
-        self._record_committed(transaction, undo_entries)
-
-        snap = self._workspace.create_snapshot()
-        self._tx_versions[transaction.id] = snap.version
-
-        self._workspace.snapshot_manager.record_kernel_event(
-            EventType.TRANSACTION_COMMITTED,
-            {
-                "tx_id": transaction.id,
-                "author": transaction.author,
-                "op_count": transaction.operation_count,
-            },
-        )
         self._publish(
             KernelEventType.TRANSACTION_COMMITTED,
             {

@@ -13,6 +13,7 @@ Implements the fundamental cognitive loop:
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections import deque
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -1135,14 +1136,12 @@ class AutonomousEpistemicEngine:
             self.attach_tiered_workspace(self.tiered_workspace)
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
-        from hbllm.hcir.world.autonomous_learning import (
-            DeliberationEntropyMonitor,
-        )
-
         self.point_actuation_learner: PointActuationAffordanceLearner | Any = _ablated(
             "point_actuation_learner", "PointActuationAffordanceLearner"
         )  # WP2 ablated
-        self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
+        self.entropy_monitor: Any = _ablated(
+            "entropy_monitor", "DeliberationEntropyMonitor"
+        )  # P2-6 ablated (Δscore=-0.0202)
 
         # Canonical 5-Stage Active Inference Pipeline (AGENTS.md §2, WP1)
         from hbllm.hcir.world.cortical_pipeline import CorticalPipeline
@@ -1988,12 +1987,19 @@ class AutonomousEpistemicEngine:
         if not ops:
             return None
 
+        dest_ws = getattr(self.transaction_manager, "workspace", None) or getattr(
+            self.active_task_frame, "workspace", None
+        )
+        filtered = self._filter_unchanged_upserts(dest_ws, ops)
+        if not filtered:
+            filtered = [ops[0]]  # Ensure atomic telemetry heartbeat when tx requested
+
         batch_size = 400
         committed_tx = None
-        for i in range(0, len(ops), batch_size):
+        for i in range(0, len(filtered), batch_size):
             tx = HCIRTransaction(
                 author="AutonomousEpistemicEngine",
-                operations=ops[i : i + batch_size],
+                operations=filtered[i : i + batch_size],
             )
             committed_tx = self.transaction_manager.commit(tx)
 
@@ -4719,22 +4725,7 @@ class AutonomousEpistemicEngine:
             if len(self._entity_cache) >= 4:
                 self._entity_cache.pop(next(iter(self._entity_cache)))
             self._entity_cache[key] = cached
-        return [
-            SpatialEntity(
-                id=e.id,
-                role=e.role,
-                centroid=e.centroid,
-                grid_pos=e.grid_pos,
-                area=e.area,
-                bounding_box=e.bounding_box,
-                component_id=e.component_id,
-                is_deliverable=e.is_deliverable,
-                is_delivered=e.is_delivered,
-                shape_archetype=e.shape_archetype,
-                properties=dict(e.properties),
-            )
-            for e in cached
-        ]
+        return [copy.copy(e) for e in cached]
 
     def compute_frame_diff(
         self, prev_grid: np.ndarray, curr_grid: np.ndarray
@@ -5101,36 +5092,45 @@ class AutonomousEpistemicEngine:
                     pass
 
         if is_success and self.tiered_workspace is not None and self.active_task_frame is not None:
-            # Commit working memory state to the active task frame
+            # Commit only delta/missing working memory state to active task frame
             self.commit_working_memory_transactions()
 
-            # Promote verified goals, ontology, and procedural skills to WorkspaceTier.PERSISTENT
-            for goal_feat in self.symbolic_theory.goal_features:
-                node_id = f"ontology_goal_{goal_feat}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+            # Promote verified goals, ontology, and procedural skills when present in WORKING task frames
+            active_frames = getattr(self.tiered_workspace, "active_task_frames", ())
+            if active_frames:
 
-            all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
-            for g_set in self.working_memory.visuospatial.level_learned_goals.values():
-                all_goals.update(g_set)
-            for goal_pos in all_goals:
-                node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+                def _in_working(nid: str) -> bool:
+                    return any(f.workspace.get_node(nid) is not None for f in active_frames)
 
-            for schema_name in self.working_memory.procedural_library:
-                node_id = f"procedural_skill_{schema_name}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+                for goal_feat in self.symbolic_theory.goal_features:
+                    node_id = f"ontology_goal_{goal_feat}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
+
+                all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
+                for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+                    all_goals.update(g_set)
+                for goal_pos in all_goals:
+                    node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
+
+                for schema_name in self.working_memory.procedural_library:
+                    node_id = f"procedural_skill_{schema_name}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
 
         # Attribute environmental mutations to active object interaction
         active_obj_id = getattr(self.object_planner, "active_target_object_id", None)
@@ -5881,6 +5881,54 @@ class AutonomousEpistemicEngine:
             )
         return ops
 
+    @staticmethod
+    def _filter_unchanged_upserts(
+        dest_ws: Any, ops: list[TransactionOperation]
+    ) -> list[TransactionOperation]:
+        """Filter out UPSERT_NODE operations whose target node already exists with identical fields."""
+        if dest_ws is None or not ops:
+            return ops
+        get_node = getattr(dest_ws, "get_node", None)
+        if not callable(get_node):
+            return ops
+        sentinel = object()
+        skip_keys = frozenset({"id", "provenance", "created_at", "updated_at"})
+        filtered: list[TransactionOperation] = []
+        for op in ops:
+            if (
+                op.op != TransactionOp.UPSERT_NODE
+                or not op.node_id
+                or not isinstance(op.node_data, dict)
+            ):
+                filtered.append(op)
+                continue
+            existing = get_node(op.node_id)
+            if existing is None:
+                filtered.append(op)
+                continue
+            same = True
+            for k, v in op.node_data.items():
+                if k in skip_keys:
+                    continue
+                if hasattr(v, "value"):
+                    v = v.value
+                ev_field = getattr(existing, k, sentinel)
+                if ev_field is sentinel:
+                    same = False
+                    break
+                if hasattr(ev_field, "value"):
+                    ev_cmp = ev_field.value
+                elif hasattr(ev_field, "model_dump") and isinstance(v, dict):
+                    ev_cmp = ev_field.model_dump(mode="python")
+                else:
+                    ev_cmp = ev_field
+                if ev_cmp != v:
+                    same = False
+                    break
+            if not same:
+                filtered.append(op)
+        return filtered
+
     def persist_to_workspace(
         self,
         target: Any = None,
@@ -5913,9 +5961,10 @@ class AutonomousEpistemicEngine:
                 grant = reg.issue(author, {dest_ws.tier})
 
         if dest_ws is not None and ops:
+            delta_ops = self._filter_unchanged_upserts(dest_ws, ops)
             batch_size = 400
-            for i in range(0, len(ops), batch_size):
-                dest_ws.commit_operations(ops[i : i + batch_size], author=author, grant=grant)
+            for i in range(0, len(delta_ops), batch_size):
+                dest_ws.commit_operations(delta_ops[i : i + batch_size], author=author, grant=grant)
         return ops
 
     def hydrate_from_workspace(
@@ -6144,6 +6193,37 @@ class AutonomousEpistemicEngine:
                 except Exception:
                     pass
 
+    @staticmethod
+    def _journal_values_equal(before: Any, current: Any) -> bool:
+        """Fast recursive equality check that avoids np.array2string/repr() on lattice arrays."""
+        if before is current:
+            return True
+        if type(before) is not type(current):
+            return False
+        if isinstance(before, np.ndarray):
+            return (
+                before.shape == current.shape
+                and before.dtype == current.dtype
+                and bool(np.array_equal(before, current))
+            )
+        if isinstance(before, dict):
+            if len(before) != len(current) or before.keys() != current.keys():
+                return False
+            eq = AutonomousEpistemicEngine._journal_values_equal
+            return all(eq(v, current[k]) for k, v in before.items())
+        if isinstance(before, (list, tuple)):
+            if len(before) != len(current):
+                return False
+            eq = AutonomousEpistemicEngine._journal_values_equal
+            return all(eq(a, b) for a, b in zip(before, current))
+        try:
+            res = before == current
+            if isinstance(res, np.ndarray):
+                return bool(res.all())
+            return bool(res)
+        except Exception:
+            return False
+
     def commit_faculty_journal(self, journal: Any) -> bool:
         """Commit a journaled faculty write set as one HCIR transaction (WP1).
 
@@ -6161,7 +6241,7 @@ class AutonomousEpistemicEngine:
                 current = getattr(self.state, key[6:], None)
             else:
                 current = getattr(self, key, None)
-            if repr(current) != repr(before):
+            if not self._journal_values_equal(before, current):
                 changed[key] = before
         if not changed:
             return True

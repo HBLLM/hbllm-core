@@ -1440,7 +1440,7 @@ class PrefrontalDeliberationEngine:
             view.recent_positions.append(view.avatar_pos)
 
         # Metacognitive Fail-Fast & Entropy Monitoring (Phase I)
-        if hasattr(view, "entropy_monitor") and view.entropy_monitor is not None:
+        if getattr(view, "entropy_monitor", None):
             cur_h = float("inf")
             if view.avatar_pos is not None and view.learned_goal_positions:
                 cur_h = min(
@@ -1519,9 +1519,64 @@ class PrefrontalDeliberationEngine:
                         macro_plan.clear()
 
         from hbllm.hcir.world.macro_actions import (
+            MacroActionPlan,
             MacroPlanSynthesizer,
             ProceduralReplayAction,
         )
+
+        # ── DreamCoder Transferable Skill Guidance ────────────────────────
+        if (
+            (macro_plan is None or macro_plan.is_empty())
+            and not view.mental_plan
+            and getattr(view, "library_learner", None)
+            and getattr(view.library_learner, "macro_skills", None)
+            and view.is_motor_grounded()
+            and not view.learned_goal_positions
+        ):
+            ll_ctx = {
+                "has_goal": bool(view.symbolic_theory.goal_features),
+                "has_cargo": bool(view.symbolic_theory.cargo_features),
+                "has_switches": bool(
+                    view.symbolic_theory.conditional_affordances
+                    or getattr(getattr(view, "remote_causal", None), "remote_actuators", None)
+                ),
+                "has_threats": bool(getattr(view.hazard_tracker, "known_lethal_features", None)),
+                "n_actions": len(available_actions),
+            }
+            for t_skill, _score, _src in view.query_transferable_skills(
+                curr_grid, list(available_actions), metadata=ll_ctx, min_confidence=0.45
+            ):
+                prog = getattr(t_skill, "program", None)
+                subgoals = getattr(prog, "subgoals", None) if prog is not None else None
+                if not hasattr(t_skill, "compile_to_macro_plan"):
+                    if not subgoals:
+                        continue
+                    unique_intents = {
+                        str(getattr(getattr(sg, "intent", ""), "value", getattr(sg, "intent", "")))
+                        for sg in subgoals
+                    }
+                    # Pure homogeneous navigation sequences should defer to shortest-path mental simulation
+                    if unique_intents <= {"NAVIGATE", "NAVIGATE_TO"}:
+                        continue
+                ll_plan = MacroActionPlan.from_skill(t_skill, view, curr_grid, available_actions)
+                if ll_plan is not None and not ll_plan.is_empty():
+                    ll_step = ll_plan.step(
+                        view, curr_grid, available_actions, prev_grid=view.prev_grid
+                    )
+                    if ll_step is not None:
+                        ll_act, ll_data = ll_step
+                        if ll_act in available_actions and _is_macro_step_safe(
+                            ll_plan, ll_act, ll_data
+                        ):
+                            view.working_memory.macro_plan = ll_plan
+                            return self._build_proposal(
+                                view,
+                                ll_act,
+                                ll_data,
+                                branch="library_learner_skill",
+                                grid=curr_grid,
+                            )
+                        ll_plan.clear()
 
         # ── Procedural Memory Recall ───────────────────────────────────────
         # Before synthesizing a new plan from scratch, check if episodic memory

@@ -1581,8 +1581,137 @@ class MacroActionPlan:
     ) -> MacroActionPlan | None:
         """Compile a MacroActionPlan directly from a declarative skill."""
         if hasattr(skill, "compile_to_macro_plan"):
-            return skill.compile_to_macro_plan(engine, curr_grid, available_actions)
-        return None
+            plan = skill.compile_to_macro_plan(engine, curr_grid, available_actions)
+            if plan is not None and not plan.is_empty():
+                return plan
+
+        program = getattr(skill, "program", None)
+        subgoals = getattr(program, "subgoals", None)
+        if not subgoals:
+            return None
+
+        cursor_pos = getattr(engine, "avatar_pos", None)
+        if cursor_pos is None:
+            return None
+
+        bg = engine.estimate_background(curr_grid)
+        entities = engine.extract_entities(curr_grid, bg)
+        theory = getattr(engine, "symbolic_theory", None)
+        H, W = curr_grid.shape
+
+        def _find_target(
+            intent_str: str, tq: dict[str, Any], cur_p: tuple[int, int]
+        ) -> tuple[tuple[int, int] | None, int | None]:
+            pos_q = tq.get("pos") or tq.get("position")
+            if isinstance(pos_q, (tuple, list)) and len(pos_q) == 2:
+                rr, cc = int(pos_q[0]), int(pos_q[1])
+                if 0 <= rr < H and 0 <= cc < W:
+                    return (rr, cc), int(curr_grid[rr, cc])
+
+            req_feat = tq.get("feature", tq.get("feature_id"))
+            role_q = str(tq.get("role", "")).lower()
+            cand_feats: set[int] = set()
+            if req_feat is not None:
+                cand_feats.add(int(req_feat))
+            elif theory is not None:
+                if (
+                    "pickup" in intent_str
+                    or "cargo" in role_q
+                    or "key" in role_q
+                    or "resource" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "cargo_features", set()))
+                elif (
+                    "interact" in intent_str
+                    or "actuate" in intent_str
+                    or "switch" in role_q
+                    or "actuator" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "actuator_features", set()))
+                elif (
+                    "drop" in intent_str
+                    or "barrier" in role_q
+                    or "door" in role_q
+                    or "portal" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "conditional_affordances", {}).keys())
+                elif "nav" in intent_str or "goal" in role_q:
+                    for gp in getattr(engine, "learned_goal_positions", ()):
+                        if 0 <= gp[0] < H and 0 <= gp[1] < W:
+                            return gp, int(curr_grid[gp[0], gp[1]])
+                    cand_feats.update(getattr(theory, "goal_features", set()))
+
+            best_coord: tuple[int, int] | None = None
+            best_feat: int | None = None
+            best_dist = 10**9
+            for ent in entities:
+                ent_role = str(getattr(ent.role, "value", ent.role)).lower()
+                feat_match = bool(cand_feats and ent.feature_id in cand_feats)
+                role_match = bool(role_q and role_q in ent_role)
+                if not feat_match and not role_match:
+                    continue
+                ent_cells = (
+                    ent.properties.get("cells")
+                    if isinstance(getattr(ent, "properties", None), dict)
+                    else None
+                ) or ([ent.grid_pos] if getattr(ent, "grid_pos", None) is not None else [])
+                for pt in ent_cells:
+                    r_p, c_p = int(pt[0]), int(pt[1])
+                    if (r_p, c_p) == cur_p:
+                        continue
+                    d = abs(r_p - cur_p[0]) + abs(c_p - cur_p[1])
+                    if d < best_dist:
+                        best_dist = d
+                        best_coord = (r_p, c_p)
+                        best_feat = int(ent.feature_id)
+            return best_coord, best_feat
+
+        plan = cls()
+        for sg in subgoals:
+            intent_raw = getattr(sg, "intent", "")
+            intent_val = str(getattr(intent_raw, "value", intent_raw)).upper()
+            tq = dict(getattr(sg, "target_query", {}) or {})
+            target_pos, target_feat = _find_target(intent_val.lower(), tq, cursor_pos)
+            if target_pos is None:
+                return None
+
+            if "PICKUP" in intent_val and target_feat is not None:
+                plan.append(
+                    PickUpCargo(
+                        cargo_pos=target_pos,
+                        cargo_feature=target_feat,
+                        description=f"Skill subgoal PICKUP at {target_pos}",
+                    )
+                )
+            elif "INTERACT" in intent_val or "ACTUATE" in intent_val or "ACTIVATE" in intent_val:
+                plan.append(
+                    InteractWith(
+                        target_coord=target_pos,
+                        description=f"Skill subgoal INTERACT at {target_pos}",
+                    )
+                )
+            elif "DROP" in intent_val:
+                held = getattr(engine.working_memory.body_schema, "held_tools", ())
+                tool_f = held[0].feature_id if held else (target_feat or 0)
+                plan.append(
+                    UseToolOnBarrier(
+                        barrier_pos=target_pos,
+                        tool_feature=tool_f,
+                        description=f"Skill subgoal DROP/USE at {target_pos}",
+                    )
+                )
+            elif "NAV" in intent_val:
+                plan.append(
+                    NavigateTo(
+                        destination=target_pos,
+                        description=f"Skill subgoal NAVIGATE to {target_pos}",
+                    )
+                )
+            else:
+                return None
+            cursor_pos = target_pos
+
+        return plan if not plan.is_empty() else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1835,6 +1964,34 @@ class MacroPlanSynthesizer:
                 curr_grid, list(available_actions), metadata={"engine": engine}
             ):
                 skill_plan = MacroActionPlan.from_skill(skill, engine, curr_grid, available_actions)
+                if skill_plan is not None and not skill_plan.is_empty():
+                    return skill_plan
+
+        # 0B-2. Query abstracted LibraryLearner & transferable macro skills
+        if getattr(engine, "library_learner", None) and hasattr(
+            engine, "query_transferable_skills"
+        ):
+            ll_ctx = {
+                "has_goal": bool(
+                    getattr(engine, "learned_goal_positions", None)
+                    or getattr(getattr(engine, "symbolic_theory", None), "goal_features", None)
+                ),
+                "has_cargo": bool(
+                    getattr(getattr(engine, "symbolic_theory", None), "cargo_features", None)
+                ),
+                "has_switches": bool(
+                    getattr(
+                        getattr(engine, "symbolic_theory", None), "conditional_affordances", None
+                    )
+                ),
+                "n_actions": len(available_actions),
+            }
+            for t_skill, _score, _src in engine.query_transferable_skills(
+                curr_grid, list(available_actions), metadata=ll_ctx, min_confidence=0.45
+            ):
+                skill_plan = MacroActionPlan.from_skill(
+                    t_skill, engine, curr_grid, available_actions
+                )
                 if skill_plan is not None and not skill_plan.is_empty():
                     return skill_plan
 
