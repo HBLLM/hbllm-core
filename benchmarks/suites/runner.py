@@ -41,6 +41,7 @@ def run_closed_loop_task(
     perception_mode: str = "handcrafted",
     episodes: int = 5,
     shared_memory: bool = True,
+    cross_seed: bool = True,
 ) -> tuple[bool, int, list[float], list[str], dict[str, Any]]:
     """Execute a task over N episodes in closed loop with optional shared memory.
 
@@ -187,6 +188,60 @@ def run_closed_loop_task(
                 "oracle_steps": d_steps,
             }
 
+    # Cross-seed procedural transfer: one shared engine across DISTINCT procedural
+    # layouts (seeds[0..k]) with same_level=False boundaries, measuring whether
+    # feature-level world theory and consolidated skills transfer between layouts.
+    cross_seed_transfer: dict[str, Any] = {}
+    if cross_seed and baseline in ("system", "no_grounding") and len(seeds) > 1:
+        xs_seeds = [seeds[i % len(seeds)] for i in range(episodes)]
+        xs_succ: list[bool] = []
+        xs_steps: list[int] = []
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = CognitiveSystemConfig(
+                world_id=f"bench_{task_id}_xseed_{baseline}",
+                memory_dir=tmp_dir,
+                enable_grounding=(baseline == "system"),
+                perception_mode=perception_mode,
+            )
+            xs_engine = build_cognitive_system(config).engine
+            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+            prev_ok = False
+            for ep_idx, ep_seed in enumerate(xs_seeds):
+                if ep_idx > 0:
+                    try:
+                        xs_engine.on_boundary(
+                            EpisodeBoundary(
+                                kind=(
+                                    EpisodeBoundaryKind.LEVEL_COMPLETE
+                                    if prev_ok
+                                    else EpisodeBoundaryKind.DEATH
+                                ),
+                                same_level=False,
+                            )
+                        )
+                    except Exception:
+                        pass
+                xs_env = env_cls(max_steps=max_budget)
+                xs_obs = xs_env.reset(seed=ep_seed)
+                ok, st, _, _ = _run_loop(
+                    xs_env, xs_obs, xs_engine, "system", max_budget, [], [], seed=ep_seed
+                )
+                xs_succ.append(ok)
+                xs_steps.append(st)
+                prev_ok = ok
+            skills = len(getattr(getattr(xs_engine, "library_learner", None), "macro_skills", {}))
+        cross_seed_transfer = {
+            "seeds": xs_seeds,
+            "successes": xs_succ,
+            "steps": xs_steps,
+            "solve_rate": round(sum(xs_succ) / max(1, len(xs_succ)), 4),
+            "transfer_solve_rate": (
+                round(sum(xs_succ[1:]) / max(1, len(xs_succ) - 1), 4) if len(xs_succ) > 1 else 0.0
+            ),
+            "skills_consolidated": skills,
+        }
+
     extra = {
         "episode_successes": episode_successes,
         "episode_steps": episode_steps,
@@ -204,6 +259,7 @@ def run_closed_loop_task(
             "steps_to_stable_policy": stable_idx,
         },
         "one_shot_imitation": one_shot_imitation,
+        "cross_seed_transfer": cross_seed_transfer,
     }
 
     return overall_success, mean_steps, all_latencies, all_errors, extra
@@ -333,6 +389,7 @@ def run_suite(
     manifest_path: str | None = None,
     episodes_per_task: int = 5,
     shared_memory: bool = True,
+    cross_seed: bool = True,
 ) -> int:
     """Executes the closed-loop benchmark evaluation for the given split."""
     manifest_file = (
@@ -390,6 +447,7 @@ def run_suite(
                     perception_mode=perception_mode,
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
+                    cross_seed=cross_seed,
                 )
 
             return run_task
@@ -424,6 +482,7 @@ def run_suite(
                     perception_mode=perception_mode,
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
+                    cross_seed=False,
                 )
                 b_task_res = TaskResult(
                     task_id=f"{t_id}_{b_name}",
@@ -496,6 +555,10 @@ def run_suite(
     print(
         f"Lifelong:  generality={report.lifelong.get('generality_score', 0.0):.4f}, solve_rate={report.lifelong.get('solve_rate', 0.0):.4f}, stable_policy={report.lifelong.get('mean_steps_to_stable_policy')}"
     )
+    if report.cross_seed_transfer:
+        print(
+            f"Cross-seed: solve_rate={report.cross_seed_transfer.get('solve_rate', 0.0):.4f}, transfer_solve_rate={report.cross_seed_transfer.get('transfer_solve_rate', 0.0):.4f}, skills={report.cross_seed_transfer.get('skills_consolidated', 0)}"
+        )
     for fam, score in report.family_scores.items():
         print(f"  Family [{fam}]: {score:.4f}")
     print(f"Generality Score: {report.generality_score:.4f}")
@@ -506,6 +569,10 @@ def run_suite(
         print(
             f"  Task [{t.task_id}]: curve={t.episode_successes}, steps={t.episode_steps}, stable={t.steps_to_stable_policy}"
         )
+        if t.cross_seed_transfer:
+            print(
+                f"    cross-seed seeds={t.cross_seed_transfer.get('seeds')} curve={t.cross_seed_transfer.get('successes')} steps={t.cross_seed_transfer.get('steps')}"
+            )
     print("Report written successfully.")
 
     return 0
@@ -547,6 +614,13 @@ def main() -> int:
         action="store_false",
         help="Do not retain memory across episodes",
     )
+    parser.add_argument(
+        "--no-cross-seed",
+        dest="cross_seed",
+        action="store_false",
+        default=True,
+        help="Skip cross-seed procedural transfer evaluation",
+    )
     args = parser.parse_args()
 
     return run_suite(
@@ -557,6 +631,7 @@ def main() -> int:
         manifest_path=args.manifest,
         episodes_per_task=args.episodes_per_task,
         shared_memory=args.shared_memory,
+        cross_seed=args.cross_seed,
     )
 
 

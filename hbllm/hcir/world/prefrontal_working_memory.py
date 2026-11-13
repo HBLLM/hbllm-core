@@ -822,6 +822,8 @@ class PrefrontalWorkingMemory:
         self.last_observation_metadata.clear()
         self.recent_positions.clear()
         self.recent_actions.clear()
+        self.visited_cells.clear()
+        self.active_epistemic_conditions.clear()
         self.consecutive_effective_actuations = 0
         self.consecutive_goal_converging_actuations = 0
         self.active_causal_actuator_coord = None

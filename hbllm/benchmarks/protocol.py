@@ -41,6 +41,7 @@ class TaskResult:
     zero_shot: dict[str, Any] = field(default_factory=dict)
     lifelong: dict[str, Any] = field(default_factory=dict)
     one_shot_imitation: dict[str, Any] = field(default_factory=dict)
+    cross_seed_transfer: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +62,7 @@ class EvaluationReport:
     zero_shot: dict[str, Any] = field(default_factory=dict)
     lifelong: dict[str, Any] = field(default_factory=dict)
     one_shot_imitation: dict[str, Any] = field(default_factory=dict)
+    cross_seed_transfer: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -233,6 +235,7 @@ class EvaluationProtocol:
                 },
             )
             result.one_shot_imitation = extra.get("one_shot_imitation", {})
+            result.cross_seed_transfer = extra.get("cross_seed_transfer", {})
 
             if latencies:
                 sorted_lats = sorted(latencies)
@@ -387,6 +390,28 @@ class EvaluationProtocol:
             "solve_rate": round(osi_solved_count / max(1, len(tasks)), 4),
         }
 
+        # Cross-seed procedural transfer (distinct layouts, shared engine)
+        xs_tasks = [t for t in tasks if t.cross_seed_transfer.get("successes")]
+        cross_seed_dict: dict[str, Any] = {}
+        if xs_tasks:
+            xs_fam: dict[str, list[float]] = {}
+            for t in xs_tasks:
+                xs_fam.setdefault(t.family, []).append(
+                    float(t.cross_seed_transfer.get("solve_rate", 0.0))
+                )
+            all_eps = sum(len(t.cross_seed_transfer["successes"]) for t in xs_tasks)
+            all_ok = sum(sum(t.cross_seed_transfer["successes"]) for t in xs_tasks)
+            tr_eps = sum(max(0, len(t.cross_seed_transfer["successes"]) - 1) for t in xs_tasks)
+            tr_ok = sum(sum(t.cross_seed_transfer["successes"][1:]) for t in xs_tasks)
+            cross_seed_dict = {
+                "solve_rate": round(all_ok / max(1, all_eps), 4),
+                "transfer_solve_rate": round(tr_ok / max(1, tr_eps), 4),
+                "family_solve_rates": {f: round(sum(v) / len(v), 4) for f, v in xs_fam.items()},
+                "skills_consolidated": sum(
+                    int(t.cross_seed_transfer.get("skills_consolidated", 0)) for t in xs_tasks
+                ),
+            }
+
         all_p50 = [t.p50_latency_ms for t in tasks if t.p50_latency_ms > 0]
         all_p95 = [t.p95_latency_ms for t in tasks if t.p95_latency_ms > 0]
         mean_p50 = round(sum(all_p50) / len(all_p50), 2) if all_p50 else 0.0
@@ -408,6 +433,7 @@ class EvaluationProtocol:
             zero_shot=zero_shot_dict,
             lifelong=lifelong_dict,
             one_shot_imitation=one_shot_imitation_dict,
+            cross_seed_transfer=cross_seed_dict,
         )
 
         # Write output file

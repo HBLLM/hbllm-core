@@ -4129,6 +4129,21 @@ class AutonomousEpistemicEngine:
             "goal_reached",
             "level_complete",
         ):
+            # Hippocampal sleep consolidation MUST precede the episodic reset, which
+            # clears the active episode buffer that carries the winning trace.
+            if self.episodic_cortex.current_episode:
+                try:
+                    self.consolidate_episodic_memory(terminal_reward=1.0)
+                except Exception as exc:  # consolidation must never break the lifecycle
+                    logger.debug("Episodic consolidation failed at boundary: %s", exc)
+                if getattr(self, "library_learner", None) is not None:
+                    try:
+                        self.library_learner.sleep_consolidation(
+                            tiered_workspace=self.tiered_workspace,
+                            tenant_id=self.world_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("Library sleep consolidation failed: %s", exc)
             self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             self.reset_episode(retain_dynamics=True, is_new_level=False)

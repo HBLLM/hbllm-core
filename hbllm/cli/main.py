@@ -225,6 +225,11 @@ def bench_dev(
     shared_memory: bool = typer.Option(
         True, "--shared-memory/--no-shared-memory", help="Retain memory across episodes"
     ),
+    cross_seed: bool = typer.Option(
+        True,
+        "--cross-seed/--no-cross-seed",
+        help="Also measure transfer across distinct procedural seeds with one shared engine",
+    ),
 ) -> None:
     """Run the frozen dev evaluation suite."""
     from benchmarks.suites.runner import run_suite
@@ -235,6 +240,7 @@ def bench_dev(
         perception_mode=perception,
         episodes_per_task=episodes,
         shared_memory=shared_memory,
+        cross_seed=cross_seed,
     )
     if code != 0:
         raise typer.Exit(code=code)
@@ -254,6 +260,11 @@ def bench_heldout(
     shared_memory: bool = typer.Option(
         True, "--shared-memory/--no-shared-memory", help="Retain memory across episodes"
     ),
+    cross_seed: bool = typer.Option(
+        True,
+        "--cross-seed/--no-cross-seed",
+        help="Also measure transfer across distinct procedural seeds with one shared engine",
+    ),
 ) -> None:
     """Run the frozen heldout evaluation suite (anti-tamper: once per git sha)."""
     from benchmarks.suites.runner import run_suite
@@ -264,6 +275,7 @@ def bench_heldout(
         perception_mode=perception,
         episodes_per_task=episodes,
         shared_memory=shared_memory,
+        cross_seed=cross_seed,
     )
     if code != 0:
         raise typer.Exit(code=code)

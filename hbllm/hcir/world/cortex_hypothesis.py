@@ -665,14 +665,20 @@ class InductiveHypothesisEngine:
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                 if hyp.target_feature is not None and hyp.premise_feature is not None:
+                    is_rel_cue = hyp.rule_id.startswith("relational_cue_")
                     theory.induce_conditional_affordance(
                         feature=hyp.target_feature,
                         condition=CausalPredicate(
-                            variable="inventory",
-                            operator="contains",
+                            variable="relational_cue" if is_rel_cue else "inventory",
+                            operator="==" if is_rel_cue else "contains",
                             value=hyp.premise_feature,
+                            relation="cue_actuator_resonance" if is_rel_cue else "",
                         ),
-                        evidence=f"remote_mech:{hyp.premise_feature}_clears_{hyp.target_feature}",
+                        evidence=(
+                            f"relational_cue:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                            if is_rel_cue
+                            else f"remote_mech:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                        ),
                         prerequisite_feature=hyp.premise_feature,
                     )
                     theory.barrier_predicates.append(

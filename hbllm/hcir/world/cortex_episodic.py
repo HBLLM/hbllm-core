@@ -1177,6 +1177,9 @@ class HippocampalEpisodicCortex:
         view.working_memory.reset_salience_baseline()
         delta.set("current_simulated_goal", None)
         delta.set("_feedback_assimilated", False)
+        view.symbolic_theory.clear_explored_positions(
+            clear_features=(is_new_level or not retain_dynamics)
+        )
         if is_new_level or not retain_dynamics:
             view.symbolic_theory.clear_candidate_goals()
             if is_new_level:
@@ -1271,11 +1274,16 @@ class HippocampalEpisodicCortex:
             view.bilateral_integrator.active_bilateral_state = None
 
             view.entity_visit_counts.clear()
+            view.position_visit_counts.clear()
             view.probed_entity_ids.clear()
             view.quiescent_actuation_targets.clear()
             view.effective_actuation_targets.clear()
             view.actuation_affordances.clear()
             view.quiescent_features.clear()
+            if hasattr(view.working_memory, "remote_causal"):
+                # Coordinate-keyed distal links are layout-specific; the feature-level
+                # law survives in symbolic_theory.conditional_affordances.
+                view.working_memory.remote_causal.reset_episode(retain_long_term=False)
             if hasattr(view, "feature_quiescent_counts"):
                 view.feature_quiescent_counts.clear()
             if hasattr(view, "_feature_quiescent_counts"):

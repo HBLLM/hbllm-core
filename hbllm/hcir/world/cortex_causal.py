@@ -972,6 +972,12 @@ class HCIRSymbolicWorldTheory:
         for k in to_pop:
             self._feature_evidence.pop(k, None)
 
+    def clear_explored_positions(self, clear_features: bool = False) -> None:
+        """Clear episode-local explored coordinate markers (and optionally explored features on level change)."""
+        self._explored_positions.clear()
+        if clear_features:
+            self._explored_features.clear()
+
     def clear_barriers(self) -> None:
         """Clear all barrier rules and cached features."""
         self._barrier_features.clear()

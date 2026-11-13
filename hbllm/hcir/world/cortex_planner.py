@@ -410,6 +410,19 @@ class EpistemicGoalScheduler:
                                         ),
                                     )
                                     for r_aff in ordered_affs:
+                                        # Reject stale links whose trigger cell no longer
+                                        # holds the trigger feature on this lattice.
+                                        if not (
+                                            0 <= r_aff.trigger_pos[0] < H
+                                            and 0 <= r_aff.trigger_pos[1] < W
+                                            and int(
+                                                curr_grid[
+                                                    r_aff.trigger_pos[0], r_aff.trigger_pos[1]
+                                                ]
+                                            )
+                                            == r_aff.trigger_feature
+                                        ):
+                                            continue
                                         if (
                                             cur_rf == r_aff.original_remote_feature
                                             and r_aff.trigger_feature is not None
@@ -462,21 +475,90 @@ class EpistemicGoalScheduler:
                                 if blocking_aff is not None:
                                     break
 
+                    # Also check interior cells adjacent to primary_target for unfulfilled conditional affordances
+                    if blocking_aff is None and unfulfilled:
+                        for dr_g, dc_g in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr_g, nc_g = primary_target[0] + dr_g, primary_target[1] + dc_g
+                            if 1 <= nr_g < H - 1 and 1 <= nc_g < W - 1:
+                                cv_g = int(curr_grid[nr_g, nc_g])
+                                if cv_g in aff_features:
+                                    blocking_aff = next(
+                                        (a for a in unfulfilled if a.feature == cv_g), None
+                                    )
+                                    guarded_barrier_pos = (nr_g, nc_g)
+                                    break
+
                     if blocking_aff is not None and blocking_aff.prerequisite_feature is not None:
                         prereq_feat = blocking_aff.prerequisite_feature
+
+                        def _walkable_neighbors(coord: tuple[int, int]) -> int:
+                            return sum(
+                                1
+                                for dr_w, dc_w in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                                if 0 <= coord[0] + dr_w < H
+                                and 0 <= coord[1] + dc_w < W
+                                and (
+                                    int(curr_grid[coord[0] + dr_w, coord[1] + dc_w]) == bg
+                                    or engine.symbolic_theory.is_walkable(
+                                        int(curr_grid[coord[0] + dr_w, coord[1] + dc_w])
+                                    )
+                                    or (coord[0] + dr_w, coord[1] + dc_w) == avatar_pos
+                                )
+                            )
+
+                        # Relational Cue Resonance: If the conditional affordance was induced from a
+                        # relational cue pair (count == 2) and prereq_feat no longer has count == 2
+                        # on this lattice, bind prereq_feat to the current cue-matched interior actuator.
+                        is_rel_aff = (
+                            str(getattr(blocking_aff, "evidence", "")).startswith("relational_cue:")
+                            or getattr(blocking_aff.condition, "relation", "")
+                            == "cue_actuator_resonance"
+                        )
+                        if not is_rel_aff and hasattr(engine, "working_memory"):
+                            hyp_eng = getattr(engine.working_memory, "hypothesis_engine", None)
+                            if hyp_eng is not None:
+                                is_rel_aff = any(
+                                    h.target_feature == blocking_aff.feature
+                                    and h.rule_id.startswith("relational_cue_")
+                                    for h in hyp_eng.hypotheses.values()
+                                )
+                        if is_rel_aff and int(np.count_nonzero(curr_grid == prereq_feat)) != 2:
+                            for e_cand in entities:
+                                cf = e_cand.feature_id
+                                if (
+                                    cf != bg
+                                    and cf not in av_feats
+                                    and cf != blocking_aff.feature
+                                    and not engine.symbolic_theory.is_barrier(cf)
+                                    and e_cand.grid_pos not in engine.quiescent_actuation_targets
+                                    and int(np.count_nonzero(curr_grid == cf)) == 2
+                                    and _walkable_neighbors(e_cand.grid_pos) == 4
+                                ):
+                                    prereq_feat = cf
+                                    known_trigger_pos = None
+                                    break
+
                         best_prereq_pos = known_trigger_pos
                         if best_prereq_pos is None:
                             prereq_coords = [
-                                e.grid_pos for e in entities if e.feature_id == prereq_feat
+                                e.grid_pos
+                                for e in entities
+                                if e.feature_id == prereq_feat
+                                and e.grid_pos not in engine.quiescent_actuation_targets
                             ]
                             if not prereq_coords:
                                 y_idxs, x_idxs = np.where(curr_grid == prereq_feat)
-                                prereq_coords = [(int(y), int(x)) for y, x in zip(y_idxs, x_idxs)]
+                                prereq_coords = [
+                                    (int(y), int(x))
+                                    for y, x in zip(y_idxs, x_idxs)
+                                    if (int(y), int(x)) not in engine.quiescent_actuation_targets
+                                ]
 
                             if prereq_coords:
                                 prereq_coords.sort(
                                     key=lambda c: (
-                                        abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1])
+                                        -_walkable_neighbors(c),
+                                        abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1]),
                                     )
                                 )
                                 best_prereq_pos = prereq_coords[0]
@@ -634,6 +716,16 @@ class EpistemicGoalScheduler:
                 sg_dest = cur_sg.target_destination
                 if 0 <= sg_dest[0] < H and 0 <= sg_dest[1] < W:
                     goals = [sg_dest]
+                    if (
+                        cur_sg.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM
+                        and cur_sg.target_entity_pos is not None
+                    ):
+                        satisfied_when[sg_dest] = {
+                            "feature": cur_sg.required_feature,
+                            "entity_pos": cur_sg.target_entity_pos,
+                            "max_visits": 2,
+                            "role": "actuator",
+                        }
             elif cur_sg is not None and (
                 is_sg_sat
                 or (
@@ -1669,7 +1761,10 @@ class MentalSimulationPlanner:
                     probe_target_pos_imm = cur_sg.target_entity_pos
 
         if probe_target_pos_imm is not None and start_pos is not None:
-            if engine.symbolic_theory.is_position_explored(probe_target_pos_imm):
+            if (
+                not engine.subgoal_stack.has_pending_goals
+                and engine.symbolic_theory.is_position_explored(probe_target_pos_imm)
+            ):
                 probe_target_pos_imm = None
 
         if probe_target_pos_imm is not None and start_pos is not None:
@@ -2178,20 +2273,16 @@ class MentalSimulationPlanner:
                 grid_shape=(H, W),
                 traversable=traversable_cells,
             )
-        # Gather all physical cells of confirmed goal entities
+        # Gather all physical cells of current target goal entities
         all_goal_cells: set[tuple[int, int]] = set(goals)
         known_goal_features: set[int] = (
             engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
         )
         for e in entities:
-            if (
-                e.grid_pos in goals
-                or engine.symbolic_theory.is_goal(e)
-                or e.role == EntityRole.GOAL
-                or e.feature_id in known_goal_features
-            ):
+            if e.grid_pos in goals:
                 for cr, cc in e.properties.get("cells", [e.grid_pos]):
-                    all_goal_cells.add((int(cr), int(cc)))
+                    if (int(cr), int(cc)) not in engine.learned_barriers:
+                        all_goal_cells.add((int(cr), int(cc)))
         if not all_goal_cells:
             for gf in known_goal_features:
                 if gf != bg and gf not in av_feats:

@@ -155,6 +155,9 @@ class RemoteCausalAttributor:
 
         av_set = avatar_features or set()
         trigger_feat = int(prev_grid[tr, tc])
+        # An empty background locus cannot be a mechanism (no object to actuate).
+        if trigger_feat == background_feature:
+            return []
 
         # Compute all cell mutations between frames
         diff_mask = prev_grid != curr_grid
@@ -194,6 +197,7 @@ class RemoteCausalAttributor:
 
             if existing:
                 aff = existing[0]
+                aff.trigger_feature = trigger_feat
                 aff.activation_count = count
                 aff.confidence = conf
                 aff.mutated_remote_feature = mut_feat
