@@ -888,6 +888,93 @@ class PerceptionEngine:
         att = FovealSaccadeAttention()
         return att.compute_saccade(curr_grid, prev_grid)
 
+    _COMPONENT_GEOM_CACHE: OrderedDict[
+        tuple[tuple[int, ...], str, int, bytes],
+        tuple[
+            tuple[
+                int,
+                int,
+                tuple[int, int, int, int],
+                tuple[float, float],
+                tuple[int, int],
+                tuple[tuple[int, int], ...],
+            ],
+            ...,
+        ],
+    ] = OrderedDict()
+    _COMPONENT_GEOM_CACHE_MAX = 128
+
+    @classmethod
+    def _get_cached_component_geometry(
+        cls,
+        grid: np.ndarray,
+        bg: int,
+        unique_vals: list[int],
+    ) -> tuple[
+        tuple[
+            int,
+            int,
+            tuple[int, int, int, int],
+            tuple[float, float],
+            tuple[int, int],
+            tuple[tuple[int, int], ...],
+        ],
+        ...,
+    ]:
+        """Compute or reuse pure geometric connected components for `(grid, bg)`."""
+        cache_key = (grid.shape, str(grid.dtype), int(bg), grid.tobytes())
+        cached = cls._COMPONENT_GEOM_CACHE.get(cache_key)
+        if cached is not None:
+            cls._COMPONENT_GEOM_CACHE.move_to_end(cache_key)
+            return cached
+
+        H, W = grid.shape
+        struct = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+        components: list[
+            tuple[
+                int,
+                int,
+                tuple[int, int, int, int],
+                tuple[float, float],
+                tuple[int, int],
+                tuple[tuple[int, int], ...],
+            ]
+        ] = []
+        for val in unique_vals:
+            mask = grid == val
+            labeled_mask, num_components = label(mask, structure=struct)
+            _flat_labels = labeled_mask.ravel()
+            _nz = np.nonzero(_flat_labels)[0]
+            _order = np.argsort(_flat_labels[_nz], kind="stable")
+            _nz = _nz[_order]
+            _nz_labels = _flat_labels[_nz]
+            _splits = np.flatnonzero(np.diff(_nz_labels)) + 1
+            _groups = np.split(_nz, _splits)
+            for comp_idx in range(1, num_components + 1):
+                flat = _groups[comp_idx - 1]
+                coords = np.stack((flat // W, flat % W), axis=1)
+                area = int(len(coords))
+                if area == 0:
+                    continue
+                cells = tuple((int(r), int(c)) for r, c in coords)
+                min_r = int(np.min(coords[:, 0]))
+                max_r = int(np.max(coords[:, 0]))
+                min_c = int(np.min(coords[:, 1]))
+                max_c = int(np.max(coords[:, 1]))
+                mean_r = float(np.mean(coords[:, 0]))
+                mean_c = float(np.mean(coords[:, 1]))
+                centroid = (mean_r, mean_c)
+                grid_pos = (int(round(mean_r)), int(round(mean_c)))
+                components.append(
+                    (val, area, (min_r, max_r, min_c, max_c), centroid, grid_pos, cells)
+                )
+
+        result = tuple(components)
+        cls._COMPONENT_GEOM_CACHE[cache_key] = result
+        if len(cls._COMPONENT_GEOM_CACHE) > cls._COMPONENT_GEOM_CACHE_MAX:
+            cls._COMPONENT_GEOM_CACHE.popitem(last=False)
+        return result
+
     @staticmethod
     def extract_entities(
         grid: np.ndarray,
@@ -910,73 +997,43 @@ class PerceptionEngine:
         entities: list[SpatialEntity] = []
 
         unique_vals = [int(v) for v in np.unique(grid) if int(v) != bg]
-        # 4-connectivity structuring element
-        struct = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+        geom_comps = PerceptionEngine._get_cached_component_geometry(grid, bg, unique_vals)
+        for val, area, bbox, centroid, grid_pos, cells in geom_comps:
+            cells_list = list(cells)
+            min_r, max_r, min_c, max_c = bbox
 
-        for val in unique_vals:
-            mask = grid == val
-            labeled_mask, num_components = label(mask, structure=struct)
-            # Single-pass coordinate lifting: bin all labeled pixels by component
-            # id once instead of rescanning the lattice per component (argwhere
-            # returns row-major coordinates, identical to this ordering).
-            _flat_labels = labeled_mask.ravel()
-            _nz = np.nonzero(_flat_labels)[0]
-            _order = np.argsort(_flat_labels[_nz], kind="stable")
-            _nz = _nz[_order]
-            _nz_labels = _flat_labels[_nz]
-            _splits = np.flatnonzero(np.diff(_nz_labels)) + 1
-            _groups = np.split(_nz, _splits)
-            for comp_idx in range(1, num_components + 1):
-                flat = _groups[comp_idx - 1]
-                coords = np.stack((flat // W, flat % W), axis=1)
-                area = int(len(coords))
-                if area == 0:
-                    continue
+            role = SpatialRoleClassifier.classify_role(
+                val=val,
+                area=area,
+                bounding_box=bbox,
+                grid_pos=grid_pos,
+                H=H,
+                W=W,
+                symbolic_theory=symbolic_theory,
+                av_feats=av_feats,
+                mutations=mutations,
+                goal_pos=goal_pos,
+                receptacle_pos=receptacle_pos,
+                avatar_pos=avatar_pos,
+                cells=cells_list,
+            )
 
-                cells = [(int(r), int(c)) for r, c in coords]
-                min_r = int(np.min(coords[:, 0]))
-                max_r = int(np.max(coords[:, 0]))
-                min_c = int(np.min(coords[:, 1]))
-                max_c = int(np.max(coords[:, 1]))
-                mean_r = float(np.mean(coords[:, 0]))
-                mean_c = float(np.mean(coords[:, 1]))
-                centroid = (mean_r, mean_c)
-                grid_pos = (int(round(mean_r)), int(round(mean_c)))
-
-                role = SpatialRoleClassifier.classify_role(
-                    val=val,
-                    area=area,
-                    bounding_box=(min_r, max_r, min_c, max_c),
-                    grid_pos=grid_pos,
-                    H=H,
-                    W=W,
-                    symbolic_theory=symbolic_theory,
-                    av_feats=av_feats,
-                    mutations=mutations,
-                    goal_pos=goal_pos,
-                    receptacle_pos=receptacle_pos,
-                    avatar_pos=avatar_pos,
-                    cells=cells,
-                )
-
-                ent = SpatialEntity(
-                    id=f"ent_{val}_{len(entities)}_{min_r}_{min_c}",
-                    role=role,
-                    centroid=centroid,
-                    grid_pos=grid_pos,
-                    area=area,
-                    bounding_box=(min_r, max_r, min_c, max_c),
-                    feature_id=val,
-                    properties={"cells": cells, "feature": val, "feature_id": val},
-                )
-                if role == EntityRole.OBSTACLE and symbolic_theory is not None:
-                    if val in symbolic_theory.candidate_goal_features:
-                        symbolic_theory.retract_candidate_goal(
-                            val, reason="perimeter_border_obstacle"
-                        )
-                    if not symbolic_theory.is_barrier(val):
-                        symbolic_theory.induce_barrier(val, evidence="topology:border")
-                entities.append(ent)
+            ent = SpatialEntity(
+                id=f"ent_{val}_{len(entities)}_{min_r}_{min_c}",
+                role=role,
+                centroid=centroid,
+                grid_pos=grid_pos,
+                area=area,
+                bounding_box=bbox,
+                feature_id=val,
+                properties={"cells": cells_list, "feature": val, "feature_id": val},
+            )
+            if role == EntityRole.OBSTACLE and symbolic_theory is not None:
+                if val in symbolic_theory.candidate_goal_features:
+                    symbolic_theory.retract_candidate_goal(val, reason="perimeter_border_obstacle")
+                if not symbolic_theory.is_barrier(val):
+                    symbolic_theory.induce_barrier(val, evidence="topology:border")
+            entities.append(ent)
 
         # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
         agent_entities = [e for e in entities if e.feature_id in av_feats]

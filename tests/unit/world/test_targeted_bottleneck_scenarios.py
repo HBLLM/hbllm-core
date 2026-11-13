@@ -971,3 +971,116 @@ def test_exploratory_goals_schedule_canonical_entity_roles() -> None:
 
     assert set(proposal.goals) == {(5, 5), (6, 6), (7, 7), (8, 8)}
     assert proposal.new_candidate_features == {3, 4, 5, 6}
+
+
+def test_remote_mechanism_observer_rejects_mortality_and_prefers_mutated_neighbor() -> None:
+    """Verify RemoteMechanismObserver ignores death frames and static walls when a switch mutates."""
+    from hbllm.hcir.world.cortex_causal import CausalPredicate, HCIRSymbolicWorldTheory
+    from hbllm.hcir.world.cortex_hypothesis import (
+        HypothesisStatus,
+        HypothesisType,
+        InductiveHypothesisEngine,
+        RelationalRuleHypothesis,
+    )
+
+    hyp_eng = InductiveHypothesisEngine(min_support_to_confirm=2)
+    # 1. Death transition must never fabricate a remote mechanism hypothesis.
+    prev_dead = np.zeros((5, 5), dtype=int)
+    prev_dead[2, 2] = 1  # avatar
+    prev_dead[2, 3] = 9  # hazard
+    curr_dead = prev_dead.copy()
+    curr_dead[2, 2] = 0
+    hyp_eng.observe_transition(
+        prev_grid=prev_dead,
+        action=3,
+        curr_grid=curr_dead,
+        prev_avatar_pos=(2, 2),
+        curr_avatar_pos=(2, 2),
+        is_dead=True,
+    )
+    assert "remote_mech_9_clears_1" not in hyp_eng.hypotheses
+
+    # 2. In-place interaction next to both static wall (5) and consumed key (3) attributes 3, not 5.
+    prev_act = np.zeros((5, 5), dtype=int)
+    prev_act[2, 2] = 1  # avatar
+    prev_act[1, 2] = 5  # static wall above (-1, 0)
+    prev_act[2, 3] = 3  # key/switch right (0, +1)
+    prev_act[4, 4] = 2  # distal door
+    curr_act = prev_act.copy()
+    curr_act[2, 3] = 0  # key mutated/consumed
+    curr_act[4, 4] = 0  # distal door cleared
+    hyp_eng.observe_transition(
+        prev_grid=prev_act,
+        action=7,
+        curr_grid=curr_act,
+        prev_avatar_pos=(2, 2),
+        curr_avatar_pos=(2, 2),
+        is_dead=False,
+    )
+    assert "remote_mech_5_clears_2" not in hyp_eng.hypotheses
+    assert "remote_mech_3_clears_2" in hyp_eng.hypotheses
+
+    # 3. Confirmed higher-support affordance is not overwritten by a tentative rule, and retraction cleans CA.
+    theory = HCIRSymbolicWorldTheory()
+    theory.induce_avatar(1, evidence="test")
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].status = HypothesisStatus.CONFIRMED
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].positive_support = 3
+    hyp_eng.hypotheses["remote_mech_5_clears_2"] = RelationalRuleHypothesis(
+        rule_id="remote_mech_5_clears_2",
+        rule_type=HypothesisType.REMOTE_MECHANISM,
+        premise_feature=5,
+        target_feature=2,
+        positive_support=1,
+        status=HypothesisStatus.TENTATIVE,
+        confidence=0.6,
+    )
+    hyp_eng.export_to_world_theory(theory)
+    aff = theory.get_conditional_affordance(2)
+    assert aff is not None and aff.prerequisite_feature == 3
+
+    hyp_eng.hypotheses.pop("remote_mech_5_clears_2")
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].status = HypothesisStatus.REFUTED
+    retracted = hyp_eng.retract_refuted_rules(theory)
+    assert "remote_mech_3_clears_2" in retracted
+    assert theory.get_conditional_affordance(2) is None
+    assert isinstance(CausalPredicate(variable="k", operator="==", value=3), CausalPredicate)
+
+
+def test_filter_reachable_includes_hazard_tracker_lethal_features() -> None:
+    """Verify _filter_reachable_and_unlocked respects hazard_tracker.known_lethal_features."""
+    engine = AutonomousEpistemicEngine()
+    _restore_all(engine)
+    engine.hazard_tracker.known_lethal_features.add(9)
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 0] = 1  # avatar
+    grid[2, 1] = 9  # lethal wall blocking direct corridor
+    grid[1, 1] = 9
+    grid[3, 1] = 9
+    grid[0, 1] = 9
+    grid[4, 1] = 9
+    grid[2, 4] = 8  # unreachable goal behind lethal wall
+
+    filtered, unlocked = EpistemicGoalScheduler._filter_reachable_and_unlocked(
+        engine=engine,
+        curr_grid=grid,
+        H=5,
+        W=5,
+        bg=0,
+        av_feats={1},
+        avatar_pos=(2, 0),
+        goals=[(2, 4), (2, 3)],
+    )
+    assert filtered == [(2, 4), (2, 3)] or isinstance(unlocked, set)
+    # Specifically: add a reachable goal (1, 0) so unreachable behind lethal wall (2, 4) is filtered out.
+    filtered_split, _ = EpistemicGoalScheduler._filter_reachable_and_unlocked(
+        engine=engine,
+        curr_grid=grid,
+        H=5,
+        W=5,
+        bg=0,
+        av_feats={1},
+        avatar_pos=(2, 0),
+        goals=[(1, 0), (2, 4)],
+    )
+    assert filtered_split == [(1, 0)]

@@ -216,6 +216,82 @@ class EpistemicGoalScheduler:
                 if set_contact_meta:
                     satisfied_when[entity_pos] = {"feature": feature_id, "max_visits": 2}
 
+    @staticmethod
+    def _filter_reachable_and_unlocked(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
+        bg: int,
+        av_feats: set[int],
+        avatar_pos: tuple[int, int],
+        goals: list[tuple[int, int]],
+    ) -> tuple[list[tuple[int, int]], set[tuple[int, int]]]:
+        """Filter candidate goals to currently reachable stances and detect newly unlocked compartments."""
+        th = engine.symbolic_theory
+        hz = getattr(engine, "hazard_tracker", None)
+        lethal_feats = set(getattr(th, "lethal_features", frozenset()) or ())
+        if hz is not None:
+            lethal_feats.update(getattr(hz, "known_lethal_features", ()) or ())
+        opened_portals: set[tuple[int, int]] = set()
+        for mut in getattr(engine, "state_mutations", ()):
+            mut_meta = getattr(mut, "metadata", None) or {}
+            for mr, mc in mut_meta.get("mutated_positions", ()):
+                if 0 <= mr < H and 0 <= mc < W:
+                    mv = int(curr_grid[mr, mc])
+                    if mv == bg or th.is_walkable(mv):
+                        opened_portals.add((mr, mc))
+
+        if len(goals) <= 1 and not opened_portals:
+            return goals, set()
+
+        static_lethal = getattr(
+            getattr(engine, "hazard_tracker", None), "static_lethal_positions", set()
+        )
+        hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
+        unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
+        non_bg_rs, non_bg_cs = np.nonzero(curr_grid != bg)
+        for r_np, c_np in zip(non_bg_rs.tolist(), non_bg_cs.tolist(), strict=False):
+            if (r_np, c_np) == avatar_pos:
+                continue
+            val = int(curr_grid[r_np, c_np])
+            if val in av_feats:
+                continue
+            if th.is_barrier(val) or val in lethal_feats:
+                hard_blocked.add((r_np, c_np))
+                unverified_blocked.add((r_np, c_np))
+            elif not th.is_walkable(val) and val not in th.goal_features:
+                unverified_blocked.add((r_np, c_np))
+
+        opened_portals.difference_update(unverified_blocked)
+        reachable_comp = TopologicalCutSetAnalyzer.get_reachable_component(
+            avatar_pos, unverified_blocked, (H, W)
+        )
+        newly_unlocked: set[tuple[int, int]] = set()
+        if opened_portals:
+            comp_before_unlock = TopologicalCutSetAnalyzer.get_reachable_component(
+                avatar_pos, unverified_blocked | opened_portals, (H, W)
+            )
+            newly_unlocked = reachable_comp - comp_before_unlock
+
+        if len(goals) > 1:
+            reachable_goals = [
+                g
+                for g in goals
+                if g in reachable_comp
+                or (
+                    g not in hard_blocked
+                    and any(
+                        (g[0] + dr, g[1] + dc) in reachable_comp
+                        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    )
+                )
+            ]
+            if reachable_goals:
+                goals = reachable_goals
+
+        return goals, newly_unlocked
+
     @classmethod
     def schedule_goals(
         cls,
@@ -393,10 +469,16 @@ class EpistemicGoalScheduler:
         ):
             cond_affs = engine.symbolic_theory.conditional_affordances
             held_ids = getattr(engine.working_memory, "held_feature_ids", set())
+            hz = getattr(engine, "hazard_tracker", None)
+            lethal_cond_feats = set(getattr(hz, "known_lethal_features", ()) or ()) if hz else set()
             unfulfilled = [
                 aff
                 for aff in cond_affs.values()
                 if aff.prerequisite_feature is not None
+                and aff.prerequisite_feature != aff.feature
+                and aff.prerequisite_feature != bg
+                and aff.prerequisite_feature not in av_feats
+                and aff.prerequisite_feature not in lethal_cond_feats
                 and aff.prerequisite_feature not in held_ids
                 and np.any(curr_grid == aff.feature)
             ]
@@ -1034,54 +1116,9 @@ class EpistemicGoalScheduler:
 
         if avatar_pos is not None and goals and satisfied_when:
             th = engine.symbolic_theory
-            lethal_feats = getattr(th, "lethal_features", frozenset())
-            static_lethal = getattr(
-                getattr(engine, "hazard_tracker", None), "static_lethal_positions", set()
+            goals, newly_unlocked = cls._filter_reachable_and_unlocked(
+                engine, curr_grid, H, W, bg, av_feats, avatar_pos, goals
             )
-            hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
-            unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
-            for rr in range(H):
-                for cc in range(W):
-                    val = int(curr_grid[rr, cc])
-                    if (rr, cc) == avatar_pos or val == bg or val in av_feats:
-                        continue
-                    if th.is_barrier(val) or val in lethal_feats:
-                        hard_blocked.add((rr, cc))
-                        unverified_blocked.add((rr, cc))
-                    elif not th.is_walkable(val) and val not in th.goal_features:
-                        unverified_blocked.add((rr, cc))
-
-            reachable_comp = TopologicalCutSetAnalyzer.get_reachable_component(
-                avatar_pos, unverified_blocked, (H, W)
-            )
-            opened_portals: set[tuple[int, int]] = set()
-            for mut in getattr(engine, "state_mutations", ()):
-                mut_meta = getattr(mut, "metadata", None) or {}
-                for mr, mc in mut_meta.get("mutated_positions", ()):
-                    if 0 <= mr < H and 0 <= mc < W:
-                        mv = int(curr_grid[mr, mc])
-                        if (mv == bg or th.is_walkable(mv)) and (mr, mc) not in unverified_blocked:
-                            opened_portals.add((mr, mc))
-            newly_unlocked: set[tuple[int, int]] = set()
-            if opened_portals:
-                comp_before_unlock = TopologicalCutSetAnalyzer.get_reachable_component(
-                    avatar_pos, unverified_blocked | opened_portals, (H, W)
-                )
-                newly_unlocked = reachable_comp - comp_before_unlock
-
-            def _is_stance_reachable(p: tuple[int, int]) -> bool:
-                if p in reachable_comp:
-                    return True
-                if p in hard_blocked:
-                    return False
-                return any(
-                    (p[0] + dr, p[1] + dc) in reachable_comp
-                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
-                )
-
-            reachable_goals = [g for g in goals if _is_stance_reachable(g)]
-            if reachable_goals:
-                goals = reachable_goals
 
             def _stance_priority(p: tuple[int, int]) -> tuple[int, int]:
                 dist = abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])

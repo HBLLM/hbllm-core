@@ -397,7 +397,14 @@ class ExecutiveRuntime:
                 )
             )
 
-            tx = dest_ws.commit_operations(ops, author="offline_consolidation", grant=grant)
+            filter_fn = getattr(self._engine, "_filter_unchanged_upserts", None)
+            if callable(filter_fn):
+                ops = filter_fn(dest_ws, ops)
+            batch_size = 400
+            for i in range(0, len(ops), batch_size):
+                tx = dest_ws.commit_operations(
+                    ops[i : i + batch_size], author="offline_consolidation", grant=grant
+                )
             if tiered is not None:
                 tiered.notify_commit()
 

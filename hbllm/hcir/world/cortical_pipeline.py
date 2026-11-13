@@ -120,10 +120,7 @@ class CorticalPipeline:
                     current_ctx = current_ctx.with_signals(a_signals)
 
                 # Goal Arbitration Hook: Selects active TaskFrame using Expected Free Energy
-                if (
-                    self.engine is not None
-                    and getattr(self.engine, "goal_arbiter", None) is not None
-                ):
+                if self.engine is not None and getattr(self.engine, "goal_arbiter", None):
                     candidates = self.engine.goal_arbiter.extract_candidate_goals(
                         self.engine, current_ctx
                     )

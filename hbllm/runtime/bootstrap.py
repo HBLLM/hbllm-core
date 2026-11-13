@@ -163,9 +163,9 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         runtime.attach_observation_bus(bridge.bus)
         if getattr(bridge, "concept_learner", None) is not None:
             runtime.attach_concept_learner(bridge.concept_learner)
-    if getattr(engine, "episodic_cortex", None) is not None:
+    if getattr(engine, "episodic_cortex", None):
         runtime.attach_episodic_cortex(engine.episodic_cortex)
-    if getattr(engine, "library_learner", None) is not None:
+    if getattr(engine, "library_learner", None):
         runtime.attach_library_learner(engine.library_learner)
 
     logger.info(

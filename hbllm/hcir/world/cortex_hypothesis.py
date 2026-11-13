@@ -281,7 +281,12 @@ class RemoteMechanismObserver(HypothesisObserver):
         hypotheses: dict[str, RelationalRuleHypothesis],
         min_support_to_confirm: int,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
-        if context.curr_avatar_pos is None or context.prev_avatar_pos is None:
+        if (
+            context.is_dead
+            or context.changed_count == 0
+            or context.curr_avatar_pos is None
+            or context.prev_avatar_pos is None
+        ):
             return []
 
         H, W = context.prev_grid.shape
@@ -297,13 +302,24 @@ class RemoteMechanismObserver(HypothesisObserver):
         )
         if contact_feat == av_feat or contact_feat == context.background_feature:
             contact_feat = None
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = cr + dr, cc + dc
-                if 0 <= nr < H and 0 <= nc < W:
-                    cand_f = int(context.prev_grid[nr, nc])
-                    if cand_f != context.background_feature and cand_f != av_feat:
-                        contact_feat = cand_f
-                        break
+            # Only attribute an adjacent contact when performing an in-place
+            # interaction (standing still); walking onto empty floor is not contact.
+            if context.curr_avatar_pos == context.prev_avatar_pos:
+                changed_adj: list[int] = []
+                static_adj: list[int] = []
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = cr + dr, cc + dc
+                    if 0 <= nr < H and 0 <= nc < W:
+                        cand_f = int(context.prev_grid[nr, nc])
+                        if cand_f != context.background_feature and cand_f != av_feat:
+                            if bool(context.diff_mask[nr, nc]):
+                                changed_adj.append(cand_f)
+                            else:
+                                static_adj.append(cand_f)
+                if len(set(changed_adj)) == 1:
+                    contact_feat = changed_adj[0]
+                elif not changed_adj and len(set(static_adj)) == 1:
+                    contact_feat = static_adj[0]
         if contact_feat is None or contact_feat == context.background_feature:
             return []
 
@@ -314,7 +330,11 @@ class RemoteMechanismObserver(HypothesisObserver):
 
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
         for cleared in cleared_feats:
-            if cleared != contact_feat and cleared != context.background_feature:
+            if (
+                cleared != contact_feat
+                and cleared != context.background_feature
+                and cleared != av_feat
+            ):
                 hid = f"remote_mech_{contact_feat}_clears_{cleared}"
                 if hid in hypotheses:
                     hyp = hypotheses[hid]
@@ -660,11 +680,27 @@ class InductiveHypothesisEngine:
 
     def export_to_world_theory(self, theory: HCIRSymbolicWorldTheory) -> None:
         """Ground confirmed inductive rules into first-order HCIR CausalPredicates."""
-        for hyp in self.get_confirmed_rules():
+        av_feats = getattr(theory, "avatar_features", set())
+        confirmed = sorted(
+            self.get_confirmed_rules(),
+            key=lambda h: (
+                h.status == HypothesisStatus.CONFIRMED,
+                h.positive_support,
+                h.confidence,
+            ),
+        )
+        for hyp in confirmed:
             pred = hyp.to_causal_predicate()
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
-                if hyp.target_feature is not None and hyp.premise_feature is not None:
+                if (
+                    hyp.target_feature is not None
+                    and hyp.premise_feature is not None
+                    and hyp.premise_feature != hyp.target_feature
+                    and hyp.premise_feature not in av_feats
+                    and hyp.target_feature not in av_feats
+                    and self.get_hazard_rule(hyp.premise_feature) is None
+                ):
                     is_rel_cue = hyp.rule_id.startswith("relational_cue_")
                     theory.induce_conditional_affordance(
                         feature=hyp.target_feature,
@@ -693,8 +729,9 @@ class InductiveHypothesisEngine:
                     theory.induce_barrier(hyp.target_feature, evidence="remote_mechanism")
                 if (
                     hyp.premise_feature is not None
-                    and hyp.premise_feature not in getattr(theory, "avatar_features", set())
+                    and hyp.premise_feature not in av_feats
                     and hyp.premise_feature not in getattr(theory, "walkable_features", set())
+                    and self.get_hazard_rule(hyp.premise_feature) is None
                 ):
                     theory.induce_actuator(hyp.premise_feature, evidence="remote_mechanism")
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
@@ -718,6 +755,9 @@ class InductiveHypothesisEngine:
                 elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                     if hyp.target_feature is not None:
                         theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
+                        theory.retract_conditional_affordance(
+                            hyp.target_feature, reason="refuted_rule"
+                        )
                     if hyp.premise_feature is not None:
                         theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
