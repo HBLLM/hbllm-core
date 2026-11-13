@@ -1005,7 +1005,8 @@ class EpistemicGoalScheduler:
                 meta = satisfied_when.get(p)
                 if meta and "entity_pos" in meta:
                     ep = meta["entity_pos"]
-                    ef = int(meta.get("feature", -1))
+                    raw_ef = meta.get("feature")
+                    ef = int(raw_ef) if raw_ef is not None else -1
                     if ef >= 0:
                         walk_n = sum(
                             1
@@ -1677,6 +1678,154 @@ class MentalSimulationPlanner:
         return penalties
 
     @staticmethod
+    def _select_stance_actuation(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+        satisfied_when: dict[tuple[int, int], dict[str, Any]],
+        H: int,
+        W: int,
+        check_start_explored: bool = False,
+        mark_probed_pos: bool = True,
+    ) -> list[MentalSimulationStep] | None:
+        """Select a stationary actuation if standing adjacent to a pending probe/actuator target."""
+        start_pos = engine.avatar_pos
+        if start_pos is None:
+            return None
+
+        cur_sg = (
+            engine.subgoal_stack.current_subgoal if engine.subgoal_stack.has_pending_goals else None
+        )
+        probe_target_pos: tuple[int, int] | None = None
+        if start_pos in satisfied_when and "entity_pos" in satisfied_when[start_pos]:
+            probe_target_pos = satisfied_when[start_pos]["entity_pos"]
+        elif cur_sg is not None and cur_sg.target_entity_pos is not None:
+            probe_target_pos = cur_sg.target_entity_pos
+
+        if probe_target_pos is None:
+            return None
+
+        if not engine.subgoal_stack.has_pending_goals and (
+            (not check_start_explored or start_pos not in satisfied_when)
+            and (
+                (check_start_explored and engine.symbolic_theory.is_position_explored(start_pos))
+                or engine.symbolic_theory.is_position_explored(probe_target_pos)
+            )
+        ):
+            return None
+
+        te_pos = probe_target_pos
+        te_feat = (
+            int(curr_grid[te_pos[0], te_pos[1]])
+            if (0 <= te_pos[0] < H and 0 <= te_pos[1] < W)
+            else None
+        )
+        if not (
+            te_feat is not None
+            and not engine.symbolic_theory.is_walkable(te_feat)
+            and abs(start_pos[0] - te_pos[0]) + abs(start_pos[1] - te_pos[1]) <= 1
+        ):
+            return None
+
+        is_unlock_sg = (
+            cur_sg is not None and cur_sg.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM
+        )
+        act_id: int | None = None
+        confirmed_stationary = False
+        for m in engine.state_mutations:
+            if m.trigger_pos == te_pos or (
+                m.trigger_feature is not None and te_feat == m.trigger_feature
+            ):
+                if m.trigger_type == "ACTION":
+                    aid = m.metadata.get("action_id")
+                    if aid is not None and aid in available_actions:
+                        act_id = int(aid)
+                        confirmed_stationary = True
+                        break
+
+        if act_id is None:
+            discrete_acts = [
+                a
+                for a in available_actions
+                if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            ]
+            tried = (
+                cur_sg.metadata.get("tried_actions", set())
+                if is_unlock_sg and cur_sg is not None
+                else set()
+            )
+            candidates = (
+                [a for a in discrete_acts if a not in tried] if is_unlock_sg else discrete_acts
+            )
+            if not candidates:
+                if is_unlock_sg and cur_sg is not None:
+                    engine.symbolic_theory.mark_position_explored(
+                        te_pos, reason="actuator_exhausted"
+                    )
+                    engine.exhausted_candidate_goals.add(start_pos)
+                    cur_sg.metadata["triggered"] = True
+                return None
+
+            dynamics = getattr(engine, "action_dynamics", {})
+            candidates.sort(
+                key=lambda a: (
+                    0 if engine.inhibited_actions.get(a, 0) == 0 else 1,
+                    0
+                    if (
+                        a in dynamics
+                        and float(getattr(dynamics[a], "delta_r", 0)) == 0.0
+                        and float(getattr(dynamics[a], "delta_c", 0)) == 0.0
+                    )
+                    else 1,
+                )
+            )
+            act_id = int(candidates[0])
+            confirmed_stationary = (
+                act_id in dynamics
+                and float(getattr(dynamics[act_id], "delta_r", 0)) == 0.0
+                and float(getattr(dynamics[act_id], "delta_c", 0)) == 0.0
+            )
+
+        if act_id is None:
+            return None
+
+        if is_unlock_sg and cur_sg is not None:
+            cur_sg.metadata.setdefault("tried_actions", set()).add(act_id)
+            if not confirmed_stationary:
+                # Defer "triggered" confirmation until AssimilationStage verifies
+                # whether the candidate action actually triggered or merely displaced the avatar.
+                logger.info(
+                    "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Probing candidate action %d.",
+                    te_pos,
+                    act_id,
+                )
+                return [
+                    MentalSimulationStep(
+                        action=act_id,
+                        predicted_avatar_pos=start_pos,
+                        expected_mutation="ACTION_TRIGGER",
+                    )
+                ]
+
+        if mark_probed_pos:
+            engine.symbolic_theory.mark_position_explored(te_pos, reason="actuator_probed")
+            engine.exhausted_candidate_goals.add(start_pos)
+        if cur_sg is not None:
+            cur_sg.metadata["triggered"] = True
+        logger.info(
+            "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Triggering action %d.",
+            te_pos,
+            act_id,
+        )
+        return [
+            MentalSimulationStep(
+                action=act_id,
+                predicted_avatar_pos=start_pos,
+                expected_mutation="ACTION_TRIGGER",
+            )
+        ]
+
+    @staticmethod
     def simulate_in_mind(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
@@ -1751,76 +1900,18 @@ class MentalSimulationPlanner:
 
         # Immediate Actuator Stance Execution (if already adjacent to interactive target entity)
         start_pos = engine.avatar_pos
-        probe_target_pos_imm: tuple[int, int] | None = None
-        if start_pos is not None:
-            if start_pos in satisfied_when and "entity_pos" in satisfied_when[start_pos]:
-                probe_target_pos_imm = satisfied_when[start_pos]["entity_pos"]
-            elif engine.subgoal_stack.has_pending_goals:
-                cur_sg = engine.subgoal_stack.current_subgoal
-                if cur_sg is not None and cur_sg.target_entity_pos is not None:
-                    probe_target_pos_imm = cur_sg.target_entity_pos
-
-        if probe_target_pos_imm is not None and start_pos is not None:
-            if (
-                not engine.subgoal_stack.has_pending_goals
-                and engine.symbolic_theory.is_position_explored(probe_target_pos_imm)
-            ):
-                probe_target_pos_imm = None
-
-        if probe_target_pos_imm is not None and start_pos is not None:
-            te_pos = probe_target_pos_imm
-            te_feat = (
-                int(curr_grid[te_pos[0], te_pos[1]])
-                if (0 <= te_pos[0] < H and 0 <= te_pos[1] < W)
-                else None
-            )
-            if (
-                te_feat is not None
-                and not engine.symbolic_theory.is_walkable(te_feat)
-                and abs(start_pos[0] - te_pos[0]) + abs(start_pos[1] - te_pos[1]) <= 1
-            ):
-                act_id_imm: int | None = None
-                for m in engine.state_mutations:
-                    if m.trigger_pos == te_pos or (
-                        m.trigger_feature is not None and te_feat == m.trigger_feature
-                    ):
-                        if m.trigger_type == "ACTION":
-                            aid = m.metadata.get("action_id")
-                            if aid is not None and aid in available_actions:
-                                act_id_imm = int(aid)
-                                break
-                if act_id_imm is None:
-                    discrete_acts = [
-                        a
-                        for a in available_actions
-                        if not engine.is_displacement_action(a)
-                        and not engine.is_spatial_effector(a)
-                    ]
-                    if discrete_acts:
-                        uninhib = [
-                            a for a in discrete_acts if engine.inhibited_actions.get(a, 0) == 0
-                        ]
-                        act_id_imm = int(uninhib[0]) if uninhib else int(discrete_acts[0])
-                if act_id_imm is not None:
-                    engine.symbolic_theory.mark_position_explored(te_pos, reason="actuator_probed")
-                    engine.exhausted_candidate_goals.add(start_pos)
-                    if (
-                        engine.subgoal_stack.has_pending_goals
-                        and engine.subgoal_stack.current_subgoal is not None
-                    ):
-                        engine.subgoal_stack.current_subgoal.metadata["triggered"] = True
-                    logger.info(
-                        "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Triggering action %d.",
-                        te_pos,
-                        act_id_imm,
-                    )
-                    return [
-                        MentalSimulationStep(
-                            action=act_id_imm,
-                            predicted_avatar_pos=start_pos,
-                            expected_mutation="ACTION_TRIGGER",
-                        )
-                    ]
+        imm_stance_plan = MentalSimulationPlanner._select_stance_actuation(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            satisfied_when=satisfied_when,
+            H=H,
+            W=W,
+            check_start_explored=False,
+            mark_probed_pos=True,
+        )
+        if imm_stance_plan is not None:
+            return imm_stance_plan
 
         # Faculty D: Bilateral Convergent Coordinate Frames
         if engine.bilateral_state is not None and len(engine.action_dynamics) >= 2:
@@ -2963,78 +3054,18 @@ class MentalSimulationPlanner:
             return None, had_relaxable_block
 
         # Stance Check: If already standing adjacent to an unfulfilled actuator or probe entity, execute interaction immediately
-        probe_target_pos_imm = None
-        if start_pos is not None:
-            if start_pos in satisfied_when and "entity_pos" in satisfied_when[start_pos]:
-                probe_target_pos_imm = satisfied_when[start_pos]["entity_pos"]
-            elif engine.subgoal_stack.has_pending_goals:
-                cur_sg = engine.subgoal_stack.current_subgoal
-                if cur_sg is not None and cur_sg.target_entity_pos is not None:
-                    probe_target_pos_imm = cur_sg.target_entity_pos
-
-        if probe_target_pos_imm is not None and start_pos is not None:
-            if (
-                not engine.subgoal_stack.has_pending_goals
-                and (start_pos not in satisfied_when)
-                and (
-                    engine.symbolic_theory.is_position_explored(start_pos)
-                    or engine.symbolic_theory.is_position_explored(probe_target_pos_imm)
-                )
-            ):
-                probe_target_pos_imm = None
-
-        if probe_target_pos_imm is not None and start_pos is not None:
-            te_pos = probe_target_pos_imm
-            te_feat = (
-                int(curr_grid[te_pos[0], te_pos[1]])
-                if (0 <= te_pos[0] < H and 0 <= te_pos[1] < W)
-                else None
-            )
-            if (
-                te_feat is not None
-                and not engine.symbolic_theory.is_walkable(te_feat)
-                and abs(start_pos[0] - te_pos[0]) + abs(start_pos[1] - te_pos[1]) <= 1
-            ):
-                act_id_imm = None
-                for m in engine.state_mutations:
-                    if m.trigger_pos == te_pos or (
-                        m.trigger_feature is not None and te_feat == m.trigger_feature
-                    ):
-                        if m.trigger_type == "ACTION":
-                            aid = m.metadata.get("action_id")
-                            if aid is not None and aid in available_actions:
-                                act_id_imm = int(aid)
-                                break
-                if act_id_imm is None:
-                    discrete_acts = [
-                        a
-                        for a in available_actions
-                        if not engine.is_displacement_action(a)
-                        and not engine.is_spatial_effector(a)
-                    ]
-                    if discrete_acts:
-                        uninhib = [
-                            a for a in discrete_acts if engine.inhibited_actions.get(a, 0) == 0
-                        ]
-                        act_id_imm = int(uninhib[0]) if uninhib else int(discrete_acts[0])
-                if act_id_imm is not None:
-                    if (
-                        engine.subgoal_stack.has_pending_goals
-                        and engine.subgoal_stack.current_subgoal is not None
-                    ):
-                        engine.subgoal_stack.current_subgoal.metadata["triggered"] = True
-                    logger.info(
-                        "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Triggering action %d.",
-                        te_pos,
-                        act_id_imm,
-                    )
-                    return [
-                        MentalSimulationStep(
-                            action=act_id_imm,
-                            predicted_avatar_pos=start_pos,
-                            expected_mutation="ACTION_TRIGGER",
-                        )
-                    ]
+        post_stance_plan = MentalSimulationPlanner._select_stance_actuation(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            satisfied_when=satisfied_when,
+            H=H,
+            W=W,
+            check_start_explored=True,
+            mark_probed_pos=False,
+        )
+        if post_stance_plan is not None:
+            return post_stance_plan
 
         # Run primary safety-first A* pass
         plan, had_relaxable_block = _search_spacetime_astar(_relaxed_safety=False)

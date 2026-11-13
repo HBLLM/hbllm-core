@@ -1526,10 +1526,18 @@ class PrefrontalDeliberationEngine:
         # ── Procedural Memory Recall ───────────────────────────────────────
         # Before synthesizing a new plan from scratch, check if episodic memory
         # has a consolidated procedural macro applicable to the current observation.
-        # This is the retrieval arm of the procedural consolidation loop (Phase A):
-        #   Episode win → consolidate macro → query on future levels → replay.
+        # When motor dynamics and causal goal/cargo ontology are grounded, prefer
+        # model-based shortest-path planning over replaying noisy exploration tapes.
+        _has_grounded_goal_model = view.is_motor_grounded() and bool(
+            view.learned_goal_positions
+            or (
+                getattr(view, "symbolic_theory", None) is not None
+                and (view.symbolic_theory.goal_features or view.symbolic_theory.cargo_features)
+            )
+        )
         if (
-            (macro_plan is None or macro_plan.is_empty())
+            not _has_grounded_goal_model
+            and (macro_plan is None or macro_plan.is_empty())
             and not view.mental_plan
             and hasattr(view, "episodic_cortex")
             and view.episodic_cortex.consolidated_macros
