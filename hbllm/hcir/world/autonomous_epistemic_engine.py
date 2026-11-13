@@ -4130,8 +4130,14 @@ class AutonomousEpistemicEngine:
             "level_complete",
         ):
             # Hippocampal sleep consolidation MUST precede the episodic reset, which
-            # clears the active episode buffer that carries the winning trace.
-            if self.episodic_cortex.current_episode:
+            # clears the active episode buffer that carries the winning trace. Also cover
+            # traces already archived into successful_trajectories by SWR replay inside
+            # AssimilationStage before on_boundary fires.
+            ep = self.episodic_cortex
+            has_unconsolidated_win = bool(ep.current_episode) or (
+                len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0)
+            )
+            if has_unconsolidated_win:
                 try:
                     self.consolidate_episodic_memory(terminal_reward=1.0)
                 except Exception as exc:  # consolidation must never break the lifecycle
@@ -4207,7 +4213,6 @@ class AutonomousEpistemicEngine:
         schemas = res.get("schemas", [])
         for schema in schemas:
             self.symbolic_theory.register_predicate(schema.causal_predicate)
-            self.episodic_cortex.consolidated_macros[schema.schema_id] = schema.action_motif
             if hasattr(self, "procedural_macros"):
                 self.procedural_macros[schema.schema_id] = schema.action_motif
 
@@ -4215,9 +4220,20 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.spatial_planner import SpatialActionIntent
         from hbllm.hcir.world.skill_program_synthesizer import ActionTraceStep
 
-        if terminal_reward > 0 and self.episodic_cortex.current_episode:
+        ep = self.episodic_cortex
+        unconsolidated_traces: list[list[Any]] = []
+        if terminal_reward > 0:
+            if ep.current_episode:
+                unconsolidated_traces.append(list(ep.current_episode))
+            elif len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0):
+                unconsolidated_traces.extend(
+                    ep.successful_trajectories[getattr(ep, "consolidated_trajectory_count", 0) :]
+                )
+            ep.consolidated_trajectory_count = len(ep.successful_trajectories)
+
+        for trace in unconsolidated_traces:
             steps: list[ActionTraceStep] = []
-            for tr in self.episodic_cortex.current_episode:
+            for tr in trace:
                 intent = (
                     SpatialActionIntent.NAVIGATE_TO
                     if self.is_displacement_action(tr.action_id)
@@ -4235,11 +4251,7 @@ class AutonomousEpistemicEngine:
                     )
                 )
             if steps:
-                req_acts = {
-                    tr.action_id
-                    for tr in self.episodic_cortex.current_episode
-                    if isinstance(tr.action_id, int)
-                }
+                req_acts = {tr.action_id for tr in trace if isinstance(tr.action_id, int)}
                 self.skill_synthesizer.record_winning_trace(
                     steps=steps,
                     required_actions=req_acts,
@@ -5617,6 +5629,9 @@ class AutonomousEpistemicEngine:
         """
         if (lim := kwargs.pop("step_limit", None)) is not None:
             self.set_environmental_step_limit(int(lim))
+        if (ctx_id := kwargs.get("context_id")) is not None and str(ctx_id):
+            if str(ctx_id) != "default" or self._current_context_id == "default":
+                self.current_context_id = str(ctx_id)
         from hbllm.hcir.world.compute_budget import ComputeBudget
 
         self.compute_budget = ComputeBudget.for_step(

@@ -1541,6 +1541,7 @@ class PrefrontalDeliberationEngine:
                 top_k=1,
                 min_confidence=0.5,
                 entities=curr_entities,
+                min_match_score=0.9,
             )
             if applicable_macros:
                 best_macro = applicable_macros[0]

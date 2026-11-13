@@ -2331,6 +2331,22 @@ class EpistemicFeedbackAssimilator:
                 view.active_hypothesis.confirmed = True
                 view.active_hypothesis.confidence = 1.0
 
+            # Record the terminal winning transition before reset clears current_episode
+            # so Hippocampal SWR consolidation and DreamCoder LibraryLearner capture the full trace.
+            view.episodic_cortex.record_transition(
+                step=view.step_counter,
+                avatar_pos=view.avatar_pos,
+                action=action,
+                action_data=action_data,
+                observation_diff=diff,
+                reward=1.0,
+                is_terminal=True,
+                terminal=terminal,
+                is_failure=False,
+                is_success=True,
+                grid_snapshot=curr_grid,
+            )
+
             # Level transition: cleanly reset episodic spatial memory for the next level
             view.reset_episode(
                 retain_dynamics=True, is_new_level=True, level=view.current_level + 1

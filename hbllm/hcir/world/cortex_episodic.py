@@ -459,6 +459,7 @@ class HippocampalEpisodicCortex:
         # Multi-episode history archives
         self.past_episodes: list[list[EpisodicTransition]] = []
         self.successful_trajectories: list[list[EpisodicTransition]] = []
+        self.consolidated_trajectory_count: int = 0
         self.failed_trajectories: list[list[EpisodicTransition]] = []
         self.catastrophic_replays: list[ReplayCreditAssignment] = []
 
@@ -927,6 +928,7 @@ class HippocampalEpisodicCortex:
         self.current_episode.clear()
         self.past_episodes.clear()
         self.successful_trajectories.clear()
+        self.consolidated_trajectory_count = 0
         self.catastrophic_replays.clear()
         self.grounded_lethal_transitions.clear()
         self.discovered_lethal_features.clear()
@@ -947,6 +949,7 @@ class HippocampalEpisodicCortex:
         top_k: int = 3,
         min_confidence: float = 0.3,
         entities: Sequence[Any] | None = None,
+        min_match_score: float = 0.0,
     ) -> list[ProceduralMacro]:
         """Retrieve ranked procedural macros applicable to the current observation.
 
@@ -958,7 +961,7 @@ class HippocampalEpisodicCortex:
             if macro.confidence < min_confidence:
                 continue
             score = macro.match_score(grid, available_actions, entities=entities)
-            if score > 0.0:
+            if score > 0.0 and score >= min_match_score:
                 candidates.append((score, macro))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
