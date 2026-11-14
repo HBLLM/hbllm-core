@@ -695,6 +695,8 @@ class EpistemicFeedbackAssimilator:
             if agent_ref is not None and view.prev_grid is not None:
                 ar, ac = agent_ref
                 H_p, W_p = view.prev_grid.shape
+                mutated_adj: list[tuple[int, int]] = []
+                nonbarrier_adj: list[tuple[int, int]] = []
                 for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                     nr, nc = ar + dr, ac + dc
                     if 0 <= nr < H_p and 0 <= nc < W_p:
@@ -704,10 +706,14 @@ class EpistemicFeedbackAssimilator:
                             and (view.avatar_features is None or f_adj not in view.avatar_features)
                             and not view.symbolic_theory.is_walkable(f_adj)
                         ):
-                            loci.append((nr, nc))
+                            if int(curr_grid[nr, nc]) != f_adj:
+                                mutated_adj.append((nr, nc))
+                            elif not view.symbolic_theory.is_barrier(f_adj):
+                                nonbarrier_adj.append((nr, nc))
+                loci.extend(mutated_adj if mutated_adj else nonbarrier_adj)
 
             if view.prev_grid is not None:
-                for locus in set(loci):
+                for locus in dict.fromkeys(loci):
                     confirmed_affs = view.working_memory.remote_causal.record_transition(
                         prev_grid=view.prev_grid,
                         curr_grid=curr_grid,
@@ -767,8 +773,6 @@ class EpistemicFeedbackAssimilator:
                             and aff.original_remote_feature != view.bg_feature
                             and not view.symbolic_theory.is_walkable(aff.original_remote_feature)
                         ):
-                            from hbllm.hcir.world.causal_discovery import CausalPredicate
-
                             view.symbolic_theory.induce_conditional_affordance(
                                 feature=aff.original_remote_feature,
                                 condition=CausalPredicate(
@@ -1682,6 +1686,7 @@ class EpistemicFeedbackAssimilator:
                 if hasattr(view, "episodic_cortex"):
                     view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
 
+        leading_cell_mutated = False
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_success:
@@ -1703,7 +1708,15 @@ class EpistemicFeedbackAssimilator:
                         # can physically impede motor displacement. Distant features across void are NEVER obstacles.
                         adj_r = prev_avatar_pos[0] + step_r * (av_rad_r + 1)
                         adj_c = prev_avatar_pos[1] + step_c * (av_rad_c + 1)
-                        if 0 <= adj_r < H and 0 <= adj_c < W:
+                        leading_cell_mutated = bool(
+                            view.prev_grid is not None
+                            and 0 <= adj_r < H
+                            and 0 <= adj_c < W
+                            and int(curr_grid[adj_r, adj_c]) != int(view.prev_grid[adj_r, adj_c])
+                        )
+                        if leading_cell_mutated:
+                            view.learned_barriers.discard((adj_r, adj_c))
+                        elif 0 <= adj_r < H and 0 <= adj_c < W:
                             val = (
                                 int(view.prev_grid[adj_r, adj_c])
                                 if view.prev_grid is not None
@@ -1778,7 +1791,11 @@ class EpistemicFeedbackAssimilator:
                             if 0 <= end_r < H and 0 <= end_c < W:
                                 view.record_learned_barrier((end_r, end_c))
 
-                    if view.last_action is not None and prev_avatar_pos is not None:
+                    if (
+                        not leading_cell_mutated
+                        and view.last_action is not None
+                        and prev_avatar_pos is not None
+                    ):
                         view.failed_transitions.add((prev_avatar_pos, view.last_action))
                         is_disp = view.is_displacement_action(view.last_action)
                         if not is_disp:
@@ -1795,7 +1812,7 @@ class EpistemicFeedbackAssimilator:
                         )
 
             if diff.changed_pixel_count == 0 and not is_success and not is_failure:
-                if continuous_moved:
+                if continuous_moved or leading_cell_mutated:
                     view.working_memory.consecutive_stuck_steps = 0
                 else:
                     view.working_memory.consecutive_stuck_steps += 1
@@ -1813,7 +1830,7 @@ class EpistemicFeedbackAssimilator:
                             )
             elif prev_avatar_pos is not None and view.avatar_pos is not None:
                 if view.avatar_pos == prev_avatar_pos and not is_success and not is_failure:
-                    if continuous_moved:
+                    if continuous_moved or leading_cell_mutated:
                         view.working_memory.consecutive_stuck_steps = 0
                     else:
                         view.working_memory.consecutive_stuck_steps += 1
@@ -1828,6 +1845,9 @@ class EpistemicFeedbackAssimilator:
                             )
                 else:
                     view.working_memory.consecutive_stuck_steps = 0
+                    for inh_act in list(view.inhibited_actions.keys()):
+                        if view.is_displacement_action(inh_act):
+                            view.inhibited_actions.pop(inh_act, None)
             else:
                 view.working_memory.consecutive_stuck_steps = 0
 
@@ -2159,6 +2179,25 @@ class EpistemicFeedbackAssimilator:
                         },
                     )
                     view.state_mutations.append(mutation_model)
+                    if (
+                        trigger_feat is not None
+                        and mutation_model.prior_value != view.bg_feature
+                        and not view.symbolic_theory.is_walkable(mutation_model.prior_value)
+                        and (
+                            mutation_model.posterior_value == view.bg_feature
+                            or view.symbolic_theory.is_walkable(mutation_model.posterior_value)
+                        )
+                    ):
+                        view.symbolic_theory.induce_conditional_affordance(
+                            feature=mutation_model.prior_value,
+                            condition=CausalPredicate(
+                                variable="trigger",
+                                operator="==",
+                                value=trigger_feat,
+                            ),
+                            evidence=f"state_mutation:{trigger_pos}",
+                            prerequisite_feature=trigger_feat,
+                        )
                     view.exhausted_candidate_goals.clear()
                     if view.avatar_pos is not None:
                         satisfied_when_map.pop(view.avatar_pos, None)

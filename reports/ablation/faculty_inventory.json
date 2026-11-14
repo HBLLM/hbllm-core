@@ -6,7 +6,6 @@
     "remote_causal": "RemoteCausalAttributor",
     "optical_projector": "AblatedFaculty",
     "it_segmenter": "InferotemporalSegmentationEngine",
-    "acc_conflict": "AnteriorCingulateConflictMonitor",
     "hazard_tracker": "SpatiotemporalHazardTracker",
     "physics_engine": "IntuitivePhysicsEngine",
     "dorsal_kinetic_stream": "DorsalKineticStream",
@@ -89,7 +88,6 @@
     "action_discovery": "UngroundedActionDiscoveryEngine",
     "budget_governor": "ActionBudgetGovernor",
     "goal_induction": "BayesianGoalInductionEngine",
-    "delayed_effects": "DelayedEffectModeler",
     "delayed_effect_modeler": "DelayedEffectModeler",
     "dual_memory": "DualStoreMemoryManager",
     "world_kernel": "WorldKernel",
@@ -98,5 +96,5 @@
     "goal_arbiter": "GoalArbiter",
     "grounding_bridge": "CorticalGroundingBridge"
   },
-  "count": 97
+  "count": 95
 }

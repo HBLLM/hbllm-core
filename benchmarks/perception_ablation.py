@@ -24,8 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks.envs.visual_transfer import VisualMorphologyTransferEnv
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +60,16 @@ class ModeSummary:
 
 def run_transfer_trial(mode: str, seed: int, max_steps: int = 35) -> TrialResult:
     """Run Episode 1 adaptation followed by Attempt-1 Episode 2 unseen-palette transfer."""
-    engine = AutonomousEpistemicEngine(enable_logging=False, seed=seed)
-    bridge: CorticalGroundingBridge | None = None
-    if mode != "no_grounding":
-        bridge = CorticalGroundingBridge(
-            symbolic_theory=engine.symbolic_theory,
-            surprise_engine=engine.surprise_engine,
+    system = build_cognitive_system(
+        CognitiveSystemConfig(
+            enable_logging=False,
+            seed=seed,
+            enable_grounding=(mode != "no_grounding"),
             perception_mode=mode,
+            memory_dir=None,
         )
-        engine.attach_grounding_bridge(bridge)
+    )
+    engine = system.engine
 
     e1 = VisualMorphologyTransferEnv(palette_offset=0, max_steps=max_steps, dynamic_hazard=False)
     ep1_attempts = 0

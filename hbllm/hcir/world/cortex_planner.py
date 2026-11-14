@@ -4450,6 +4450,21 @@ class MentalSimulationPlanner:
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
 
+        known_prereq_feats: set[int] = (
+            {
+                aff.prerequisite_feature
+                for bf in boundary_barrier_feats
+                if (aff := engine.symbolic_theory.get_conditional_affordance(bf)) is not None
+                and aff.prerequisite_feature is not None
+            }
+            | {
+                aff.prerequisite_feature
+                for aff in engine.symbolic_theory.conditional_affordances.values()
+                if aff.prerequisite_feature is not None
+            }
+            | set(engine.symbolic_theory.actuator_features)
+        )
+
         for e in entities:
             if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
                 continue
@@ -4496,8 +4511,13 @@ class MentalSimulationPlanner:
             if not target_path:
                 continue
 
+            # Learned causal prerequisite / actuator (cross-seed key/switch prior)
+            if e.feature_id in known_prereq_feats and e.area <= 16:
+                candidate_subgoal_targets.append(
+                    (e.grid_pos, 250.0, f"learned_prerequisite_{e.feature_id}", target_path)
+                )
             # A. Color-matching Key / Affordance (Feature match with door in boundary cut-set)
-            if e.feature_id in boundary_barrier_feats and e.area <= 16:
+            elif e.feature_id in boundary_barrier_feats and e.area <= 16:
                 candidate_subgoal_targets.append(
                     (e.grid_pos, 200.0, f"color_match_key_{e.feature_id}", target_path)
                 )

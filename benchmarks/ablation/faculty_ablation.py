@@ -10,6 +10,7 @@ Decisions per the pre-registered rule (see DECISION_RULE below).
 from __future__ import annotations
 
 import argparse
+import copy
 import inspect
 import json
 import math
@@ -17,8 +18,11 @@ import multiprocessing as mp
 import os
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -29,6 +33,8 @@ BENCH_ENVS = [
     ("grid_push", "benchmarks.envs.grid_push.GridPushEnvironment", 100),
     ("continuous_reach", "benchmarks.envs.continuous_reach.ContinuousReachEnvironment", 60),
     ("symbolic_rules", "benchmarks.envs.symbolic_rules.SymbolicRulesEnvironment", 80),
+    ("visual_transfer", "benchmarks.envs.visual_transfer.VisualMorphologyTransferEnv", 35),
+    ("minigrid_doorkey", "benchmarks.envs.external_benchmarks.MiniGridDoorKeyBenchmarkEnv", 80),
 ]
 
 CORE_OWNERS = {
@@ -85,11 +91,23 @@ def _mk_engine(seed: int = 0, memory_dir: str | Path | None = None) -> Any:
     return system.engine
 
 
+_ALIAS_FACULTY_CANONICAL = {
+    "acc_conflict": "acc_conflict_monitor",
+    "delayed_effects": "delayed_effect_modeler",
+}
+
+
 def faculty_inventory(engine: Any) -> dict[str, str]:
     """{attr_name: ClassName} for world-defined, non-core, non-kernel attrs."""
     inv = {}
-    for name, v in vars(engine).items():
+    attrs = vars(engine)
+    for name, v in attrs.items():
         if name in CORE_OWNERS or name in KERNEL_OBJS or name.startswith("_"):
+            continue
+        if (
+            name in _ALIAS_FACULTY_CANONICAL
+            and attrs.get(_ALIAS_FACULTY_CANONICAL[name]) is not None
+        ):
             continue
         if v is None:
             continue
@@ -163,48 +181,311 @@ class CountingProxy:
         return 1 if inner else 0
 
 
-def _neutral_for_return(cls: type, name: str) -> Any:
-    try:
-        sig = inspect.signature(getattr(cls, name))
-        ann = sig.return_annotation
-    except Exception:
-        return None
-    text = str(ann)
-    if "bool" in text:
-        return False
-    if "int" in text and "print" not in text:
-        return 0
-    if "float" in text:
-        return 0.0
-    if "list" in text:
-        return []
-    if "dict" in text:
-        return {}
-    if "set" in text:
-        return set()
-    if "tuple" in text:
+class NullResult:
+    """Permissive null return object for custom dataclass/result types in faculty ablation."""
+
+    def __getattr__(self, name: str) -> Any:
+        if name in ("self_avatar", "winner", "detected_macro_period", "active_goal"):
+            return None
+        if name == "shape":
+            return (0, 0)
+        if name.startswith(("is_", "has_", "should_", "can_", "enable_")):
+            return False
+        if name.endswith(("_features", "_positions", "_cells", "_transitions", "_ids", "_set")):
+            return set()
+        if name.endswith(
+            ("_list", "_history", "_agents", "_objects", "_steps", "_subgoals", "_trajectories")
+        ):
+            return []
+        if name.endswith(("_map", "_dict", "_scores", "_values", "_graph")) or name in (
+            "variables",
+            "relations",
+            "metadata",
+            "scores",
+            "weights",
+            "params",
+        ):
+            return {}
+        if name in ("max_depth", "depth", "count", "steps", "recommended_simulation_depth"):
+            return 0
+        if name.startswith(("total_", "num_", "n_")) and not name.endswith(
+            ("_energy", "_precision", "_weight", "_score")
+        ):
+            return 0
+        return NullResult()
+
+    def __setattr__(self, name: str, val: Any) -> None:
+        pass
+
+    def __getitem__(self, k: Any) -> Any:
+        return 1.0
+
+    def __iter__(self) -> Any:
+        return iter(())
+
+    def keys(self) -> Any:
         return ()
-    return None
+
+    def items(self) -> Any:
+        return ()
+
+    def values(self) -> Any:
+        return ()
+
+    def __len__(self) -> int:
+        return 0
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __float__(self) -> float:
+        return 0.0
+
+    def __int__(self) -> int:
+        return 0
+
+    def __lt__(self, other: Any) -> bool:
+        try:
+            return 0.0 < float(other)
+        except (TypeError, ValueError):
+            return False
+
+    def __le__(self, other: Any) -> bool:
+        try:
+            return 0.0 <= float(other)
+        except (TypeError, ValueError):
+            return False
+
+    def __gt__(self, other: Any) -> bool:
+        try:
+            return 0.0 > float(other)
+        except (TypeError, ValueError):
+            return False
+
+    def __ge__(self, other: Any) -> bool:
+        try:
+            return 0.0 >= float(other)
+        except (TypeError, ValueError):
+            return False
+
+    def __add__(self, other: Any) -> float:
+        try:
+            return 0.0 + float(other)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __radd__(self, other: Any) -> float:
+        try:
+            return float(other) + 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __sub__(self, other: Any) -> float:
+        try:
+            return 0.0 - float(other)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __rsub__(self, other: Any) -> float:
+        try:
+            return float(other) - 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __mul__(self, other: Any) -> float:
+        try:
+            return 0.0 * float(other)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __rmul__(self, other: Any) -> float:
+        try:
+            return float(other) * 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __truediv__(self, other: Any) -> float:
+        try:
+            denom = float(other)
+            return 0.0 / denom if denom != 0.0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __call__(self, *a: Any, **k: Any) -> NullResult:
+        return self
+
+
+def _split_top_level_args(text: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in text:
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(ch)
+    if buf:
+        parts.append("".join(buf).strip())
+    return parts
+
+
+def _neutral_for_type_text(raw_text: str) -> Any:
+    text = raw_text.strip()
+    if text.startswith("typing."):
+        text = text[len("typing.") :]
+    # Unwrap Optional[...] or X | None
+    if text.startswith("Optional[") and text.endswith("]"):
+        text = text[len("Optional[") : -1].strip()
+    if " | None" in text:
+        text = text.replace(" | None", "").strip()
+    elif "None | " in text:
+        text = text.replace("None | ", "").strip()
+    if text.startswith("Union[") and text.endswith("]"):
+        args = [a for a in _split_top_level_args(text[6:-1]) if a != "None"]
+        if args:
+            text = args[0]
+
+    low = text.lower()
+    if text in ("None", "NoneType", "<class 'NoneType'>", "<class 'inspect._empty'>"):
+        return None
+    if low.startswith(("tuple[", "typing.tuple[")):
+        inner = text[text.find("[") + 1 : -1]
+        args = _split_top_level_args(inner)
+        if not args or args == ["()"] or (len(args) == 2 and args[1] == "..."):
+            return ()
+        return tuple(_neutral_for_type_text(a) for a in args)
+    if low in ("tuple", "<class 'tuple'>"):
+        return ()
+    if low.startswith(("list[", "sequence[", "mutable", "iterable[")) or low in (
+        "list",
+        "<class 'list'>",
+    ):
+        return []
+    if low.startswith("frozenset") or low in ("frozenset", "<class 'frozenset'>"):
+        return frozenset()
+    if low.startswith(("set[", "abstractset[", "mutableset[")) or low in ("set", "<class 'set'>"):
+        return set()
+    if low.startswith(("dict[", "mapping[", "mutablemapping[")) or low in (
+        "dict",
+        "<class 'dict'>",
+    ):
+        return defaultdict(lambda: 1.0)
+    if "ndarray" in low:
+        return np.zeros((0, 0), dtype=float)
+    if low in ("bool", "<class 'bool'>"):
+        return False
+    if low in ("int", "<class 'int'>"):
+        return 0
+    if low in ("float", "<class 'float'>"):
+        return 0.0
+    if low in ("str", "<class 'str'>"):
+        return ""
+    if "callable" in low:
+        return lambda *a, **k: None
+    return NullResult()
+
+
+def _neutral_for_return(cls: type, name: str, instance: Any = None) -> Any:
+    if instance is not None:
+        bound = getattr(instance, name, None)
+        try:
+            sig = inspect.signature(bound if callable(bound) else getattr(cls, name))
+            ann = sig.return_annotation
+        except Exception:
+            return None
+    else:
+        try:
+            sig = inspect.signature(getattr(cls, name))
+            ann = sig.return_annotation
+        except Exception:
+            return None
+    if ann is inspect.Signature.empty:
+        return None
+    if isinstance(ann, str):
+        ann_str = ann
+    elif isinstance(ann, type):
+        ann_str = ann.__name__
+    else:
+        ann_str = str(ann)
+    val = _neutral_for_type_text(ann_str)
+    if name == "get_modulation_params" and isinstance(val, dict):
+        return defaultdict(lambda: 1.0)
+    return val
 
 
 class NullFaculty:
     """Generic null object: methods return neutral-by-annotation values."""
 
-    def __init__(self, cls: type) -> None:
+    def __init__(self, cls: type, instance: Any = None) -> None:
         object.__setattr__(self, "_cls", cls)
+        object.__setattr__(self, "_instance", instance)
 
     def __getattr__(self, name: str) -> Any:
         cls = object.__getattribute__(self, "_cls")
+        instance = object.__getattribute__(self, "_instance")
         member = getattr(cls, name, None)
-        if callable(member):
-            neutral = _neutral_for_return(cls, name)
-            return lambda *a, **k: neutral
-        # attribute read: neutral-by-annotation if declared, else None
+        if callable(member) and not isinstance(member, property):
+            if name == "compete_and_ignite":
+                return lambda candidates=(), *a, **k: candidates[0] if candidates else None
+            neutral = _neutral_for_return(cls, name, instance)
+            return lambda *a, _ret=neutral, **k: copy.copy(_ret)
+        if instance is not None:
+            has_attr = True
+            try:
+                val = getattr(instance, name)
+            except Exception:
+                has_attr = False
+                val = None
+            if has_attr and val is None:
+                return None
+            if callable(val):
+                neutral = _neutral_for_return(cls, name, instance)
+                return lambda *a, _ret=neutral, **k: copy.copy(_ret)
+            if isinstance(val, bool):
+                return False
+            if isinstance(val, int):
+                return 0
+            if isinstance(val, float):
+                return 0.0
+            if isinstance(val, str):
+                return ""
+            if isinstance(val, set):
+                return set()
+            if isinstance(val, frozenset):
+                return frozenset()
+            if isinstance(val, list):
+                return []
+            if isinstance(val, tuple):
+                return ()
+            if isinstance(val, dict):
+                return defaultdict(lambda: 1.0)
+            if val is not None:
+                return NullFaculty(type(val), val)
+        # Fallback by attribute annotation or name convention
         for klass in getattr(cls, "__mro__", [cls]):
             ann = getattr(klass, "__annotations__", {})
             if name in ann:
-                return _neutral_for_return(cls, name)
-        return None
+                ann_val = ann[name]
+                ann_str = ann_val.__name__ if isinstance(ann_val, type) else str(ann_val)
+                return _neutral_for_type_text(ann_str)
+        if name.endswith(("_features", "_positions", "_transitions", "_cells", "_ids")):
+            return set()
+        if name.endswith(("_history", "_trajectories", "_agents", "_objects")):
+            return []
+        if name.endswith(("_values", "_scores", "_map")):
+            return {}
+        if name.startswith(("total_",)) or name.endswith(("_energy", "_precision", "_weight")):
+            return 0.0
+        if name.startswith(("max_",)) or name.endswith(("_count", "_depth")):
+            return 0
+        if name.startswith(("is_", "has_")):
+            return False
+        return NullResult()
 
     def __setattr__(self, name: str, val: Any) -> None:
         pass  # swallow writes
@@ -220,6 +501,9 @@ class NullFaculty:
 
     def __contains__(self, k: Any) -> bool:
         return False
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return NullResult()
 
 
 def _run_env_lifelong(
@@ -317,10 +601,11 @@ def _task_run(task: tuple[str, int, int, int]) -> dict[str, Any]:
         e = _mk_engine(seed)
         if faculty != "__baseline__":
             inv = faculty_inventory(e)
-            cls = type(getattr(e, faculty)) if faculty in inv else None
+            orig_inst = getattr(e, faculty, None) if faculty in inv else None
+            cls = type(orig_inst) if orig_inst is not None else None
             if cls is None:
                 continue
-            setattr(e, faculty, NullFaculty(cls))
+            setattr(e, faculty, NullFaculty(cls, orig_inst))
         try:
             out[env_id] = _run_env_lifelong(env_cls, seed, min(steps, max_b), e, episodes=episodes)
         except Exception as exc:  # noqa: BLE001 — ablation crash is the signal

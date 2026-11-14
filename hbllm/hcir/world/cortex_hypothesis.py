@@ -1172,9 +1172,14 @@ class InductiveHypothesisEngine:
                 elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                     if hyp.target_feature is not None:
                         theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
-                        theory.retract_conditional_affordance(
-                            hyp.target_feature, reason="refuted_rule"
-                        )
+                        existing_aff = theory.get_conditional_affordance(hyp.target_feature)
+                        if (
+                            existing_aff is not None
+                            and existing_aff.prerequisite_feature == hyp.premise_feature
+                        ):
+                            theory.retract_conditional_affordance(
+                                hyp.target_feature, reason="refuted_rule"
+                            )
                     if hyp.premise_feature is not None:
                         theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type in (
@@ -1185,9 +1190,14 @@ class InductiveHypothesisEngine:
                         hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM
                         and hyp.target_feature is not None
                     ):
-                        theory.retract_conditional_affordance(
-                            hyp.target_feature, reason="refuted_rule"
-                        )
+                        existing_aff = theory.get_conditional_affordance(hyp.target_feature)
+                        if (
+                            existing_aff is not None
+                            and existing_aff.prerequisite_feature == hyp.premise_feature
+                        ):
+                            theory.retract_conditional_affordance(
+                                hyp.target_feature, reason="refuted_rule"
+                            )
                 else:
                     if hyp.target_feature is not None:
                         theory.retract_barrier(hyp.target_feature, reason="refuted_rule")

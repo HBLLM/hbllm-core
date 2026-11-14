@@ -308,6 +308,16 @@ class ObjectStateGraphPlanner:
                 e.feature_id in lethal_features or e.role == EntityRole.DYNAMIC_HAZARD
             ) and e.area > 9:
                 continue
+            # Skip known walkable floor substrates unless they carry an interactive/goal role
+            if (
+                engine.symbolic_theory.is_walkable(e.feature_id)
+                and e.feature_id not in known_goal_features
+                and not engine.symbolic_theory.is_goal(e)
+                and e.feature_id not in engine.symbolic_theory.actuator_features
+                and e.feature_id not in engine.symbolic_theory.cargo_features
+                and e.role not in (EntityRole.GOAL, EntityRole.ACTUATOR, EntityRole.MANIPULABLE)
+            ):
+                continue
 
             entity_cells = set(e.properties.get("cells", [e.grid_pos]))
 
@@ -1241,6 +1251,27 @@ class ObjectStateGraphPlanner:
 
         if not path:
             # Avatar is already at or adjacent to the object stance!
+            if obj.is_solid and interact_act is not None:
+                return [
+                    MentalSimulationStep(
+                        action=interact_act,
+                        predicted_avatar_pos=engine.avatar_pos,
+                        expected_mutation="INTERACT",
+                    )
+                ]
+            if engine.avatar_pos is not None and engine.avatar_pos not in obj.cells:
+                for act, dr, dc in movable_actions:
+                    bump_pos = (engine.avatar_pos[0] + dr, engine.avatar_pos[1] + dc)
+                    if bump_pos in obj.cells:
+                        return [
+                            MentalSimulationStep(
+                                action=act,
+                                predicted_avatar_pos=bump_pos
+                                if not obj.is_solid
+                                else engine.avatar_pos,
+                                expected_mutation="BUMP",
+                            )
+                        ]
             if interact_act is not None:
                 return [
                     MentalSimulationStep(
@@ -1253,9 +1284,9 @@ class ObjectStateGraphPlanner:
 
         target_stance = path[-1].predicted_avatar_pos
 
-        # If the object is solid and the stance is adjacent to it, execute terminal interaction
-        if obj.is_solid and target_stance not in obj.cells:
-            if interact_act is not None:
+        # If target stance is adjacent to the object (not onto it), execute terminal interaction or bump
+        if target_stance not in obj.cells:
+            if obj.is_solid and interact_act is not None:
                 interact_step = MentalSimulationStep(
                     action=interact_act,
                     predicted_avatar_pos=target_stance,
@@ -1263,13 +1294,13 @@ class ObjectStateGraphPlanner:
                 )
                 return path + [interact_step]
             else:
-                # Find bump move directed towards the object
+                # Find bump/contact move directed towards the object
                 for act, dr, dc in movable_actions:
                     bump_pos = (target_stance[0] + dr, target_stance[1] + dc)
                     if bump_pos in obj.cells:
                         bump_step = MentalSimulationStep(
                             action=act,
-                            predicted_avatar_pos=target_stance,
+                            predicted_avatar_pos=bump_pos if not obj.is_solid else target_stance,
                             expected_mutation="BUMP",
                         )
                         return path + [bump_step]
