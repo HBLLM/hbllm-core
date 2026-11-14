@@ -17,13 +17,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-try:
-    import asyncpg  # type: ignore[import-untyped]
-    from pgvector.asyncpg import register_vector  # type: ignore[import-untyped]
 
-    _HAS_ASYNCPG = True
-except ImportError:
-    _HAS_ASYNCPG = False
+def _load_asyncpg() -> tuple[Any | None, Any | None]:
+    try:
+        import asyncpg  # type: ignore[import-untyped]
+        from pgvector.asyncpg import register_vector  # type: ignore[import-untyped]
+
+        return asyncpg, register_vector
+    except ImportError:
+        return None, None
 
 
 class DBPool:
@@ -41,13 +43,14 @@ class DBPool:
         if cls._pool is not None:
             return cls._pool
 
-        if not _HAS_ASYNCPG:
-            logger.warning("asyncpg or pgvector not installed. PostgreSQL persistence unavailable.")
-            return None
-
         cls._db_url = os.getenv("HBLLM_DATABASE_URL")
         if not cls._db_url:
             # We don't error out, allowing SQLite fallbacks
+            return None
+
+        asyncpg, register_vector = _load_asyncpg()
+        if asyncpg is None or register_vector is None:
+            logger.warning("asyncpg or pgvector not installed. PostgreSQL persistence unavailable.")
             return None
 
         cls._max_per_tenant = int(os.getenv("HBLLM_DB_MAX_PER_TENANT", "5"))

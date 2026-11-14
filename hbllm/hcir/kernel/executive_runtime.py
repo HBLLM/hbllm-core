@@ -7,7 +7,9 @@ background event bus subscriptions, and HCIR workspace-driven cognitive cycles.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from hbllm.hcir.kernel.cognitive_kernel import CognitiveKernel
@@ -22,9 +24,12 @@ logger = logging.getLogger(__name__)
 class ExecutiveRuntime:
     """The lifecycle runtime daemon managing Cognitive OS execution.
 
-    Extended to be workspace-driven: each cycle logs to the
-    CognitiveJournal, creates task frames for goals, and notifies
-    the tiered workspace of commits.
+    Operates on a dual-rhythm cognitive architecture:
+    1. Online Reactive: Cycle triggered strictly by incoming observation envelopes
+       from the ObservationBus.
+    2. Offline Idle Consolidation: Triggered when the sensory bus is quiet for
+       Δt > idle_threshold. Runs hippocampal replay, concept maintenance,
+       and theory pruning committed under author='offline_consolidation'.
     """
 
     def __init__(
@@ -33,12 +38,25 @@ class ExecutiveRuntime:
         kernel: CognitiveKernel | None = None,
     ) -> None:
         self._services = services
-        self._kernel = kernel or CognitiveKernel(services.workspace)
+        self._kernel = kernel or CognitiveKernel(services.workspace, services=services)
         self._controller = KernelExecutiveController(services)
         self._state = RuntimeState()
         self._services.runtime_state = self._state
         self._is_running = False
         self._session_id: str = ""
+
+        # Dual-Rhythm Autonomy
+        self._observation_bus: Any | None = None
+        self._idle_threshold: float = 2.0
+        self._last_observation_time: float = 0.0
+        self._is_idle_consolidated: bool = False
+        self._consolidation_count: int = 0
+        self._autonomous_task: asyncio.Task[None] | None = None
+        self._observation_event: asyncio.Event = asyncio.Event()
+        self._engine: Any | None = None
+        self._concept_learner: Any | None = None
+        self._episodic_cortex: Any | None = None
+        self._library_learner: Any | None = None
 
     @property
     def services(self) -> KernelServices:
@@ -64,6 +82,22 @@ class ExecutiveRuntime:
     def session_id(self) -> str:
         return self._session_id
 
+    @property
+    def last_observation_time(self) -> float:
+        return self._last_observation_time
+
+    @property
+    def idle_threshold(self) -> float:
+        return self._idle_threshold
+
+    @property
+    def consolidation_count(self) -> int:
+        return self._consolidation_count
+
+    @property
+    def is_idle_consolidated(self) -> bool:
+        return self._is_idle_consolidated
+
     async def start(self) -> None:
         """Start the executive runtime lifecycle daemon."""
         if self._is_running:
@@ -85,6 +119,7 @@ class ExecutiveRuntime:
 
     async def stop(self) -> None:
         """Stop the executive runtime lifecycle daemon."""
+        await self.stop_autonomous_loop()
         # Stop the bus bridge if available
         if self._services.bus_bridge is not None:
             try:
@@ -212,3 +247,233 @@ class ExecutiveRuntime:
         logger.info("Session ended: %s (archived %d nodes)", self._session_id, archived)
         self._session_id = ""
         return archived
+
+    # ── Dual-Rhythm Autonomy ──────────────────────────────────────────
+
+    def attach_observation_bus(self, bus: Any) -> None:
+        """Bind an ObservationBus to receive incoming multimodal envelopes for reactive execution."""
+        self._observation_bus = bus
+        subscribe_fn = getattr(bus, "subscribe", None)
+        if callable(subscribe_fn):
+            subscribe_fn(self._on_observation)
+        self._last_observation_time = time.monotonic()
+
+    def _on_observation(self, envelope: Any) -> None:
+        """Handle incoming observation: update timestamps and reset idle consolidation flag."""
+        self._last_observation_time = time.monotonic()
+        self._is_idle_consolidated = False
+        self._observation_event.set()
+
+    def notify_observation(self) -> None:
+        """Manually signal sensory observation to reset idle consolidation timer."""
+        self._last_observation_time = time.monotonic()
+        self._is_idle_consolidated = False
+        self._observation_event.set()
+
+    def attach_engine(self, engine: Any) -> None:
+        """Bind the AutonomousEpistemicEngine instance."""
+        self._engine = engine
+        cortex = getattr(engine, "episodic_cortex", None)
+        if cortex is not None:
+            self._episodic_cortex = cortex
+        learner = getattr(engine, "library_learner", None)
+        if learner is not None:
+            self._library_learner = learner
+
+    def attach_concept_learner(self, learner: Any) -> None:
+        """Bind the SGE ConceptLearner instance."""
+        self._concept_learner = learner
+
+    def attach_episodic_cortex(self, cortex: Any) -> None:
+        """Bind the HippocampalEpisodicCortex instance."""
+        self._episodic_cortex = cortex
+
+    def attach_library_learner(self, learner: Any) -> None:
+        """Bind the DreamCoder LibraryLearner instance."""
+        self._library_learner = learner
+
+    async def run_offline_consolidation(self) -> Any | None:
+        """Execute an offline idle consolidation cycle.
+
+        Executes:
+        1. Hippocampal replay of recent episodic traces
+        2. Concept maintenance (splits/merges) in ConceptLearner
+        3. Schema and hypothesis pruning in HCIRSymbolicWorldTheory
+        4. State snapshotting and persistent tier commit under author='offline_consolidation'
+        """
+        from hbllm.hcir.kernel.protocols import (
+            ConceptMaintainable,
+            Consolidatable,
+            Prunable,
+            Replayable,
+            SleepConsolidatable,
+        )
+
+        # 1. Hippocampal replay & mPFC schema consolidation (CLS)
+        if isinstance(self._episodic_cortex, Replayable):
+            try:
+                trajectories = getattr(self._episodic_cortex, "successful_trajectories", [])
+                if not trajectories:
+                    trajectories = getattr(self._episodic_cortex, "past_episodes", [])
+                for traj in trajectories[-3:]:
+                    if traj:
+                        self._episodic_cortex.replay_forward_and_reverse(traj, terminal_reward=1.0)
+                        mpfc = getattr(self._engine, "mpfc_schema_engine", None)
+                        if mpfc is not None:
+                            mpfc.consolidate_replayed_trajectory(traj, terminal_reward=1.0)
+            except Exception as exc:
+                logger.debug("Hippocampal replay error during offline consolidation: %s", exc)
+
+        # 2. Concept maintenance
+        if isinstance(self._concept_learner, ConceptMaintainable):
+            try:
+                self._concept_learner.maintain()
+            except Exception as exc:
+                logger.debug("Concept maintenance error during offline consolidation: %s", exc)
+
+        # 3. Schema pruning
+        theory = getattr(self._engine, "symbolic_theory", None)
+        if isinstance(theory, Prunable):
+            try:
+                theory.prune_stale_hypotheses()
+            except Exception as exc:
+                logger.debug("Schema pruning error during offline consolidation: %s", exc)
+
+        # 4. Library learning sleep consolidation
+        learner = self._library_learner
+        if learner is None and self._engine is not None:
+            learner = getattr(self._engine, "library_learner", None)
+        if isinstance(learner, SleepConsolidatable):
+            try:
+                learner.sleep_consolidation(
+                    self._services.tiered_workspace,
+                    tenant_id=self._state.tenant_id,
+                )
+            except Exception as exc:
+                logger.debug("Library learning sleep consolidation error: %s", exc)
+
+        # 5. Memory hygiene & principled forgetting (decay and interference pruning)
+        if self._services.tiered_workspace is not None:
+            try:
+                self._services.tiered_workspace.run_memory_hygiene_cycle()
+            except Exception as exc:
+                logger.debug("Memory hygiene error during offline consolidation: %s", exc)
+
+        # 6. Propose and commit consolidation state
+        dest_ws = None
+        grant = None
+        tiered = self._services.tiered_workspace
+        if tiered is not None:
+            dest_ws = tiered.persistent
+            grant = getattr(tiered, "_system_grant", None)
+        else:
+            dest_ws = self._services.workspace
+
+        tx = None
+        if dest_ws is not None:
+            ops: list[Any] = []
+            if isinstance(self._engine, Consolidatable):
+                ops = self._engine.to_transaction_operations()
+
+            from hbllm.hcir.nodes import ConceptNode
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+            marker = ConceptNode(
+                id=f"consolidation_marker_{self._consolidation_count + 1}",
+                label=f"consolidation_{self._consolidation_count + 1}",
+                definition="Offline idle consolidation snapshot",
+                domain="cognitive_maintenance",
+                properties={
+                    "timestamp": time.time(),
+                    "consolidation_index": self._consolidation_count + 1,
+                    "cycle_count": self._state.cycle_count,
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=marker.id,
+                    node_data=marker.model_dump(),
+                )
+            )
+
+            filter_fn = getattr(self._engine, "_filter_unchanged_upserts", None)
+            if callable(filter_fn):
+                ops = filter_fn(dest_ws, ops)
+            batch_size = 400
+            for i in range(0, len(ops), batch_size):
+                tx = dest_ws.commit_operations(
+                    ops[i : i + batch_size], author="offline_consolidation", grant=grant
+                )
+            if tiered is not None:
+                tiered.notify_commit()
+
+        self._consolidation_count += 1
+        self._is_idle_consolidated = True
+
+        # Log to journal
+        journal = self._services.cognitive_journal
+        if journal is not None:
+            from hbllm.hcir.cognitive_journal import CognitiveEvent
+            from hbllm.hcir.semantic_normalizer import CognitiveEventKind
+
+            journal.record(
+                CognitiveEvent(
+                    kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
+                    author="offline_consolidation",
+                    session_id=self._session_id,
+                    data={
+                        "event": "offline_consolidation_completed",
+                        "consolidation_count": self._consolidation_count,
+                        "transaction_id": getattr(tx, "id", ""),
+                    },
+                )
+            )
+
+        logger.info(
+            "Offline consolidation #%d committed (author='offline_consolidation')",
+            self._consolidation_count,
+        )
+        return tx
+
+    async def start_autonomous_loop(
+        self,
+        idle_threshold: float = 2.0,
+        check_interval: float = 0.05,
+    ) -> asyncio.Task[None]:
+        """Start the background autonomous worker monitoring idle threshold for offline consolidation."""
+        await self.stop_autonomous_loop()
+        self._idle_threshold = idle_threshold
+        if self._last_observation_time <= 0:
+            self._last_observation_time = time.monotonic()
+        self._is_running = True
+        self._autonomous_task = asyncio.create_task(
+            self._autonomous_worker(check_interval=check_interval)
+        )
+        return self._autonomous_task
+
+    async def stop_autonomous_loop(self) -> None:
+        """Stop the background autonomous consolidation worker."""
+        if self._autonomous_task is not None:
+            self._autonomous_task.cancel()
+            try:
+                await self._autonomous_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._autonomous_task = None
+
+    async def _autonomous_worker(self, check_interval: float = 0.05) -> None:
+        """Background event-driven worker monitoring sensory inactivity without polling loops."""
+        try:
+            while self._is_running:
+                try:
+                    await asyncio.wait_for(
+                        self._observation_event.wait(),
+                        timeout=self._idle_threshold,
+                    )
+                    self._observation_event.clear()
+                except asyncio.TimeoutError:
+                    if self._last_observation_time > 0 and not self._is_idle_consolidated:
+                        await self.run_offline_consolidation()
+        except asyncio.CancelledError:
+            pass

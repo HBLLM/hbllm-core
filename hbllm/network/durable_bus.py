@@ -25,6 +25,7 @@ from typing import Any, cast
 
 from hbllm.network.bus import InProcessBus, MessageBus, MessageHandler, Subscription
 from hbllm.network.messages import Message, MessageType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class DurableBus(MessageBus):
 
     async def start(self) -> None:
         """Initialize DB and start inner bus + retry loop."""
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._conn = open_connection(self._db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (

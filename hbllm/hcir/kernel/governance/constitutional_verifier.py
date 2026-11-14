@@ -97,6 +97,10 @@ class ConstitutionalVerifier:
             return 1.0
         return self._approvals / self._evaluations
 
+    @property
+    def forbidden_node_types(self) -> set[str]:
+        return self._forbidden_types
+
     def verify(
         self,
         transaction: HCIRTransaction,

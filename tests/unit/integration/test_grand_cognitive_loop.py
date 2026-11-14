@@ -26,8 +26,6 @@ grounded cognitive substrate — running 100% deterministically with ZERO LLMs.
 
 from __future__ import annotations
 
-from hbllm.brain.concepts.concept_prediction_bridge import ConceptPredictionBridge
-from hbllm.brain.concepts.grounded_concept_registry import GroundedConceptRegistry
 from hbllm.brain.language.core.reference import ReferenceResolver
 from hbllm.brain.language.core.semantic_frame import (
     LanguageErrorType,
@@ -44,6 +42,8 @@ from hbllm.hcir.graph import (
     HCIRNodeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.grounding.concepts.bridge import ConceptPredictionBridge
+from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Scenario 1: The Full 14-Step Cognitive Loop
@@ -446,7 +446,7 @@ class TestZeroLLMIntegration:
 
         check_code = """
 import sys
-import hbllm.brain.concepts
+import hbllm.hcir.grounding.concepts
 import hbllm.brain.language.runtime
 import hbllm.brain.learning
 import hbllm.brain.world

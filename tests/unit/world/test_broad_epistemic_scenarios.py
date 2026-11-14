@@ -20,14 +20,14 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicPhase,
 )
-from hbllm.hcir.world.bilateral_coordination import (
-    BilateralCoordinateIntegrator,
-    SymmetryAxis,
-)
 from hbllm.hcir.world.cortex_motor import (
     MotorCortexEffector,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.bilateral_coordination import (
+    BilateralCoordinateIntegrator,
+    SymmetryAxis,
+)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     SubgoalType,
 )
@@ -255,7 +255,7 @@ def test_e2e_frontopolar_subgoal_decomposition_multi_stage_puzzle() -> None:
     grid[:, 4] = 2  # Barrier wall blocking direct transit
     grid[5, 2] = 6  # Switch
 
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_barrier(2)
     engine.learned_barriers.update([(r, 4) for r in range(7)])
 
     # Register remote causal affordance: switch at (5, 2) mutates barrier at (2, 4) from 2 to 0
@@ -330,8 +330,9 @@ def test_e2e_nested_multi_stage_subgoals_lifo_execution() -> None:
     grid[3, 1] = 6  # Switch 1
     grid[3, 4] = 7  # Switch 2
 
-    engine.symbolic_theory.walkable_features.add(0)
-    engine.symbolic_theory.barrier_features.update({2, 4})
+    engine.symbolic_theory.induce_walkable(0)
+    engine.symbolic_theory.induce_barrier(2)
+    engine.symbolic_theory.induce_barrier(4)
     engine.learned_barriers.update([(r, 3) for r in range(5)] + [(r, 6) for r in range(5)])
 
     aff1 = RemoteCausalAffordance(
@@ -519,7 +520,7 @@ def test_e2e_high_surprise_hypothesis_invalidation_and_replanning() -> None:
     engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
     engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
     engine.learned_goal_features.add(3)
-    engine.symbolic_theory.walkable_features.add(0)
+    engine.symbolic_theory.induce_walkable(0)
 
     # 5x7 grid: Avatar at (2, 1), Goal at (2, 5)
     grid = np.zeros((5, 7), dtype=int)

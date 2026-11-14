@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import ActionNode, GoalNode, HCIRNodeType
@@ -31,6 +31,21 @@ from hbllm.hcir.kernel.services import KernelServices
 
 if TYPE_CHECKING:
     from hbllm.hcir.cognitive_state import UnifiedCognitiveState
+
+
+class ReasoningRuntimeProtocol(Protocol):
+    """Minimal structural interface for an injected classical reasoning runtime."""
+
+    def reason_for_cycle(
+        self,
+        graph: Any,
+        *,
+        problem_id: str,
+        description: str,
+        goal_node_ids: tuple[str, ...] = (),
+        snapshot_sequence: int = 0,
+    ) -> Any: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +72,11 @@ class KernelExecutiveController:
         res = await executive.run_cycle()
     """
 
-    def __init__(self, services: KernelServices) -> None:
+    def __init__(
+        self,
+        services: KernelServices,
+        reasoning_runtime: ReasoningRuntimeProtocol | None = None,
+    ) -> None:
         from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
         from hbllm.hcir.interpreter import HCIRInterpreter
         from hbllm.hcir.learning_loop import LearningLoopEngine
@@ -70,7 +89,21 @@ class KernelExecutiveController:
         self._cf_planner = CounterfactualPlanner(self._workspace, services)
         self._interpreter = HCIRInterpreter(self._workspace, services)
         self._learning_engine = LearningLoopEngine(self._workspace, services.transaction_manager)
+        self._reasoning_runtime: ReasoningRuntimeProtocol | None = (
+            reasoning_runtime
+            if reasoning_runtime is not None
+            else services.extensions.get("reasoning_runtime")
+        )
         self._cycle_count = 0
+
+    @property
+    def reasoning_runtime(self) -> ReasoningRuntimeProtocol | None:
+        """Return the formal LLM-free reasoning runtime bound to this controller."""
+        return self._reasoning_runtime
+
+    def attach_reasoning_runtime(self, runtime: ReasoningRuntimeProtocol) -> None:
+        """Bind a higher-layer classical reasoning runtime via dependency injection."""
+        self._reasoning_runtime = runtime
 
     async def run_cycle(
         self,
@@ -98,6 +131,23 @@ class KernelExecutiveController:
             if active_goals
             else GoalNode(id="goal_default", description="Maintain baseline stability")
         )
+
+        # Invoke formal reasoning operators over immutable FrozenGraphView when graph has state
+        if self._reasoning_runtime is not None and self._workspace.graph.node_count > 0:
+            trace = self._reasoning_runtime.reason_for_cycle(
+                graph=self._workspace.graph,
+                problem_id=f"cycle_{self._cycle_count}_{primary_goal.id}",
+                description=primary_goal.description or primary_goal.id,
+                goal_node_ids=(primary_goal.id,)
+                if self._workspace.graph.get_node(primary_goal.id) is not None
+                else (),
+                snapshot_sequence=self._cycle_count,
+            )
+            if trace.proposed_transaction and trace.proposed_transaction.operations:
+                self._workspace.commit_operations(
+                    list(trace.proposed_transaction.operations),
+                    author="reasoning_runtime",
+                )
 
         selected_action_id = None
         selected_action = None

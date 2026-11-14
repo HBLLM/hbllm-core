@@ -11,23 +11,24 @@ from __future__ import annotations
 
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
+from hbllm.hcir.world.autonomous_epistemic_engine import (
+    AutonomousEpistemicEngine,
+)
+from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator import (
     AnteriorCingulateEffortAllocator,
     ConflictProfile,
     EffortAllocationDecision,
 )
-from hbllm.hcir.world.autonomous_epistemic_engine import (
-    AutonomousEpistemicEngine,
-)
-from hbllm.hcir.world.cerebellar_microzone_adaptor import (
+from hbllm.hcir.world.experimental.cerebellar_microzone_adaptor import (
     CerebellarMicrozoneAdaptor,
     ClimbingFiberFeedback,
     MotorPrediction,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.ventral_premotor_resonator import (
+from hbllm.hcir.world.experimental.ventral_premotor_resonator import (
     VentralPremotorAffordanceResonator,
 )
 
@@ -207,8 +208,8 @@ def test_cognitive_graph_max_flow_parity() -> None:
     graph.add_edge(e1)
     graph.add_edge(e2)
 
-    max_flow, cut_edges, source_set, sink_set = graph.max_flow_min_cut(
-        source="Source", sink="Sink", capacity_attribute="weight"
+    max_flow, cut_edges, source_set, sink_set = algorithms.max_flow_min_cut(
+        graph, source="Source", sink="Sink", capacity_attr="weight"
     )
 
     # Bottleneck is 4.0 on e2

@@ -21,7 +21,7 @@ from hbllm.hcir.world.capability_evidence import (
     IntegrationStatus,
     UnitTestStatus,
 )
-from hbllm.hcir.world.confidence_calibrator import (
+from hbllm.hcir.world.experimental.confidence_calibrator import (
     ConfidenceCalibrator,
     PredictionConfidenceVector,
 )

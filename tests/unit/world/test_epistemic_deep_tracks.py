@@ -11,13 +11,13 @@ from __future__ import annotations
 import numpy as np
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.entorhinal_grid_cortex import EntorhinalGridCortex
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.metacognitive_agency_cortex import MetacognitiveAgencyCortex
-from hbllm.hcir.world.prediction_budget import PredictionBudget
-from hbllm.hcir.world.relational_graph_matcher import (
+from hbllm.hcir.world.experimental.entorhinal_grid_cortex import EntorhinalGridCortex
+from hbllm.hcir.world.experimental.relational_graph_matcher import (
     RelationalGraphMatcher as VentralRelationalGraphMatcher,
 )
+from hbllm.hcir.world.metacognitive_agency_cortex import MetacognitiveAgencyCortex
+from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.temporal_dependency_tracker import (
     DelayedEffectModeler,
     LongHorizonDependencyGraph,

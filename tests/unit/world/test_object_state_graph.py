@@ -22,7 +22,7 @@ def test_object_extraction_and_categorization() -> None:
     grid[9, :] = 1
     grid[:, 0] = 1
     grid[:, 9] = 1
-    engine.symbolic_theory.barrier_features.add(1)
+    engine.symbolic_theory.induce_barrier(1, evidence="collision")
 
     # Avatar at (2, 2)
     grid[2, 2] = 2
@@ -31,7 +31,7 @@ def test_object_extraction_and_categorization() -> None:
 
     # Exit at (8, 8)
     grid[8, 8] = 3
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     # Key / interactive item at (5, 5)
     grid[5, 5] = 4
@@ -74,7 +74,7 @@ def test_directive_1_and_2_exit_open() -> None:
     engine.avatar_pos = (2, 2)
 
     grid[2, 6] = 3  # Goal / Exit
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     plan = engine.object_planner.plan_macro_option(engine, grid, [1, 2, 3, 4, 5])
     assert plan is not None
@@ -108,11 +108,11 @@ def test_directive_3_and_4_causal_switch_unlocking() -> None:
 
     # Goal at (2, 8)
     grid[2, 8] = 3
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     # Wall completely blocking goal column 6
     grid[:, 6] = 1
-    engine.symbolic_theory.barrier_features.add(1)
+    engine.symbolic_theory.induce_barrier(1, evidence="collision")
 
     # Switch at (5, 2) known to toggle barrier
     grid[5, 2] = 5
@@ -160,9 +160,9 @@ def test_directive_5_epistemic_probing() -> None:
 
     # Goal at (2, 8) behind wall column 6
     grid[2, 8] = 3
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     grid[:, 6] = 1
-    engine.symbolic_theory.barrier_features.add(1)
+    engine.symbolic_theory.induce_barrier(1, evidence="collision")
 
     # Untouched candidate object at (4, 2)
     grid[4, 2] = 7
@@ -198,7 +198,7 @@ def test_decide_macro_option_execution_and_transition() -> None:
 
     # Goal at (2, 5)
     grid[2, 5] = 3
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     # Step 1: decide should trigger macro option to exit (3 steps RIGHT)
     act1, data1 = engine.decide(grid, [1, 2, 3, 4, 5])
@@ -233,7 +233,7 @@ def test_spatial_effector_macro_option_click() -> None:
     grid = np.zeros((10, 10), dtype=int)
     # Exit object at (5, 5)
     grid[5, 5] = 3
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     plan = engine.object_planner.plan_macro_option(engine, grid, [6])
     assert plan is not None
@@ -255,7 +255,7 @@ def test_object_causal_effect_tracking() -> None:
 
     # Barrier at (2, 6)
     grid[2, 6] = 1
-    engine.symbolic_theory.barrier_features.add(1)
+    engine.symbolic_theory.induce_barrier(1, evidence="collision")
     engine.learned_barriers.add((2, 6))
 
     # Switch object at (3, 2)

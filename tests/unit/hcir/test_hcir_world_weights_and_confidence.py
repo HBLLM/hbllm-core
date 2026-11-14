@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
+from hbllm.hcir.world.experimental.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictor_weights import PredictorWeightManager
 from hbllm.hcir.world.weight_policy import WeightUpdatePolicy

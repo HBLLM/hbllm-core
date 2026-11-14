@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -139,7 +141,7 @@ class MetaLearner:
         self._load_strategies()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS learning_sessions (
                     session_id TEXT PRIMARY KEY,
@@ -164,7 +166,7 @@ class MetaLearner:
 
     def _load_strategies(self) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 for row in conn.execute("SELECT * FROM strategies"):
                     data = json.loads(row["data"])
@@ -181,7 +183,7 @@ class MetaLearner:
 
     def _persist_strategy(self, strategy: LearningStrategy) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO strategies
                        (domain, data, updated_at)
@@ -217,7 +219,7 @@ class MetaLearner:
 
         # Persist session
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO learning_sessions
                        (session_id, domain, method, confidence_before,
@@ -297,7 +299,7 @@ class MetaLearner:
         effectiveness: dict[str, list[float]] = {}
 
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT method, confidence_before, confidence_after, "
@@ -328,7 +330,7 @@ class MetaLearner:
         total_cost = 0.0
 
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 row = conn.execute(
                     "SELECT COUNT(*), SUM(confidence_after - confidence_before), "
                     "SUM(resource_cost) FROM learning_sessions"
@@ -353,7 +355,7 @@ class MetaLearner:
     def _update_strategy(self, domain: str) -> None:
         """Recompute strategy for a domain from session history."""
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 sessions = conn.execute(
                     "SELECT * FROM learning_sessions WHERE domain = ? "

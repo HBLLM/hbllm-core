@@ -9,11 +9,11 @@ Verifies:
 import numpy as np
 
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.bilateral_coordination import (
+from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
+from hbllm.hcir.world.experimental.bilateral_coordination import (
     BilateralCoordinateIntegrator,
     SymmetryAxis,
 )
-from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
 from hbllm.hcir.world.kinetic_stream import DorsalKineticStream
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
@@ -292,7 +292,10 @@ def test_spatiotemporal_collision_cone_footprint() -> None:
 
 def test_optical_ray_mental_imagery() -> None:
     """Test Kosslyn optical mental imagery ray projection and mirror solving."""
-    from hbllm.hcir.world.optical_ray_projection import MirrorOrientation, OpticalRayProjector
+    from hbllm.hcir.world.experimental.optical_ray_projection import (
+        MirrorOrientation,
+        OpticalRayProjector,
+    )
 
     grid = np.zeros((20, 20), dtype=int)
     # Emitter beam propagating RIGHT from (5, 2) to (5, 5) with feature 4

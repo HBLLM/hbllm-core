@@ -1,11 +1,10 @@
-"""
-HBLLM CLI — top-level command dispatcher.
+"""HBLLM CLI — top-level command dispatcher.
 
-Re-exports ``main`` from the sibling ``_cli_app`` module so that
-``pyproject.toml``'s ``hbllm.cli:main`` entry-point works even though
-``hbllm/cli/`` is a package (which shadows the old ``hbllm/cli.py``).
+Re-exports ``main`` and ``app`` from the canonical Typer application in ``main``.
 """
 
-from hbllm._cli_app import main
+from __future__ import annotations
 
-__all__ = ["main"]
+from hbllm.cli.main import app, main
+
+__all__ = ["app", "main"]

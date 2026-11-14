@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +21,7 @@ from typing import Any
 from hbllm.memory.interface import MemoryType
 from hbllm.memory.pool import DatabasePool
 from hbllm.memory.repository import MemoryRepository
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +258,7 @@ class ProceduralMemory(MemoryRepository):
         """Synchronously retrieve a single skill by tenant and skill name."""
         if not self.db_path.exists():
             return None
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM skills WHERE tenant_id = ? AND skill_name = ?",
@@ -285,7 +285,7 @@ class ProceduralMemory(MemoryRepository):
 
         now = datetime.now(timezone.utc).isoformat()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS skills (
@@ -342,7 +342,7 @@ class ProceduralMemory(MemoryRepository):
         """Synchronously search skills matching a query."""
         if not self.db_path.exists():
             return []
-        with sqlite3.connect(str(self.db_path)) as conn:
+        with open_connection(str(self.db_path)) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """SELECT * FROM skills

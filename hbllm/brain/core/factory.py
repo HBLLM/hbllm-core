@@ -454,6 +454,17 @@ class Brain:
             if self.token_optimizer:
                 self.token_optimizer.optimize(text)
 
+            # ── HCIR cognitive cycle (pre-decisional candidate generation) ──
+            if self.hcir_runtime is not None:
+                try:
+                    # Ensure session is started
+                    if self.hcir_runtime.session_id != session_id:
+                        await self.hcir_runtime.start_session(session_id)
+                    # Run a workspace-driven cognitive cycle
+                    await self.hcir_runtime.run_cycle()
+                except Exception as _hcir_ex:
+                    logger.warning("[Brain] HCIR cycle error: %s", _hcir_ex)
+
             result = await self.pipeline.process(
                 text=text,
                 tenant_id=tenant_id,
@@ -463,17 +474,6 @@ class Brain:
             )
 
             _elapsed = (_time.monotonic() - _start) * 1000
-
-            # ── HCIR cognitive cycle ──────────────────────────────────
-            if self.hcir_runtime is not None:
-                try:
-                    # Ensure session is started
-                    if self.hcir_runtime.session_id != session_id:
-                        await self.hcir_runtime.start_session(session_id)
-                    # Run a workspace-driven cognitive cycle
-                    await self.hcir_runtime.run_cycle()
-                except Exception as _hcir_ex:
-                    logger.debug("[Brain] HCIR cycle error: %s", _hcir_ex)
 
             # Post-process: record cognitive metrics
             if self.cognitive_metrics:
@@ -1186,49 +1186,48 @@ class BrainFactory:
             from hbllm.hcir.cognitive_event_log import CognitiveEventLog
             from hbllm.hcir.cognitive_journal import CognitiveJournal
             from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.governance.constitutional_verifier import (
-                ConstitutionalVerifier,
-            )
             from hbllm.hcir.kernel.scheduler import (
                 CognitiveBudget,
                 KernelInstructionScheduler,
             )
-            from hbllm.hcir.kernel.services import KernelServices
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.semantic_normalizer import SemanticNormalizer
             from hbllm.hcir.stores import InMemoryEventStore
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-            from hbllm.hcir.workspace import HCIRWorkspaceState
-            from hbllm.hcir.workspace_tiers import TieredWorkspace
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-            # 1. Core workspace — reuse existing if available
-            hcir_ws = (
-                brain.workspace_node.hcir_workspace
-                if hasattr(brain, "workspace_node") and brain.workspace_node
-                else HCIRWorkspaceState()
+            # 1. Boot canonical cognitive runtime via single composition root
+            cog_cfg = CognitiveSystemConfig(
+                world_id=getattr(cfg, "world_id", "default_brain"),
+                memory_dir=Path(cfg.data_dir)
+                / "worlds"
+                / getattr(cfg, "world_id", "default_brain"),
+                enable_brain_llm=True,
             )
+            cog_sys = build_cognitive_system(cog_cfg)
+            brain.cognitive_system = cog_sys
+            brain.hcir_services = cog_sys.services
+            brain.hcir_runtime = cog_sys.runtime
+            hcir_ws = cog_sys.workspace
+            tx_mgr = cog_sys.services.transaction_manager
+            tiered = cog_sys.tiered_workspace
 
-            # 2. Transaction manager + constitutional governance
-            tx_mgr = TransactionManager(hcir_ws)
-            verifier = ConstitutionalVerifier()
-            tx_mgr.add_verification_stage(verifier)
-
-            # 3. Capability resolver + budget-aware scheduler
+            # 2. Capability resolver + budget-aware scheduler
             resolver = CapabilityResolver()
             budget = CognitiveBudget(total_tokens=getattr(cfg, "hcir_token_budget", 100_000))
             hcir_sched = KernelInstructionScheduler(budget=budget)
+            cog_sys.services.capability_resolver = resolver
+            cog_sys.services.scheduler = hcir_sched
 
-            # 4. Event sourcing pipeline
+            # 3. Event sourcing pipeline & bus bridge
             event_store = InMemoryEventStore()
             normalizer = SemanticNormalizer()
             journal = CognitiveJournal(store=event_store)
             event_log = CognitiveEventLog(store=event_store)
+            cog_sys.services.event_store = event_store
+            cog_sys.services.semantic_normalizer = normalizer
+            cog_sys.services.cognitive_journal = journal
+            cog_sys.services.cognitive_event_log = event_log
 
-            # 5. Tiered workspace
-            tiered = TieredWorkspace()
-
-            # 6. Bus bridge — projects MessageBus events → HCIR workspace
             bus_bridge = HCIRBusBridge(
                 bus=message_bus,
                 normalizer=normalizer,
@@ -1237,8 +1236,9 @@ class BrainFactory:
                 tiered_workspace=tiered,
                 tx_manager=tx_mgr,
             )
+            cog_sys.services.bus_bridge = bus_bridge
 
-            # 6b. Migration policy & metrics tracking (100% Cognitive Authority)
+            # 4. Migration policy & metrics tracking (100% Cognitive Authority)
             from hbllm.hcir.kernel.governance.policies.migration_policy import (
                 MigrationMode,
                 MigrationPolicy,
@@ -1252,26 +1252,8 @@ class BrainFactory:
                 migration_mode = migration_mode_val
             migration_policy = MigrationPolicy(initial_mode=migration_mode)
             migration_metrics = MigrationMetrics()
-
-            # 7. Assemble KernelServices
-            brain.hcir_services = KernelServices(
-                workspace=hcir_ws,
-                transaction_manager=tx_mgr,
-                capability_resolver=resolver,
-                scheduler=hcir_sched,
-                event_store=event_store,
-                tiered_workspace=tiered,
-                cognitive_journal=journal,
-                cognitive_event_log=event_log,
-                semantic_normalizer=normalizer,
-                constitutional_verifier=verifier,
-                bus_bridge=bus_bridge,
-                migration_policy=migration_policy,
-                migration_metrics=migration_metrics,
-            )
-
-            # 8. Executive runtime
-            brain.hcir_runtime = ExecutiveRuntime(brain.hcir_services)
+            cog_sys.services.migration_policy = migration_policy
+            cog_sys.services.migration_metrics = migration_metrics
 
             # 9. Export capability nodes for all brain nodes & record to metrics
             for node_obj in nodes:
@@ -1502,14 +1484,12 @@ class BrainFactory:
         _autonomous_learner_ref = None  # Will be wired to GoalManager later
         if cfg.inject_autonomous_learning:
             try:
-                from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
                 from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer
                 from hbllm.brain.learning.autonomous_learner import AutonomousLearner
                 from hbllm.brain.learning.experiment_engine import ExperimentEngine
                 from hbllm.brain.learning.learning_subsystem import CognitiveGraph
                 from hbllm.brain.learning.meta_learner import MetaLearner
                 from hbllm.brain.reasoning.belief_store import BeliefStore
-                from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
                 from hbllm.brain.reasoning.contradiction_detector import (
                     BeliefRevisionEngine,
                     ContradictionDetector,
@@ -1521,11 +1501,7 @@ class BrainFactory:
                 mechanism_store = skills.mechanism_store if skills is not None else None
 
                 # Build learning subsystems
-                causal_builder = CausalModelBuilder(
-                    llm=llm,
-                    mechanism_store=mechanism_store,
-                    data_dir=learning_data_dir,
-                )
+                causal_builder = None
                 experiment_engine = ExperimentEngine(
                     llm=llm,
                     data_dir=learning_data_dir,
@@ -1533,16 +1509,10 @@ class BrainFactory:
                 contradiction_detector = ContradictionDetector(llm=llm)
                 belief_engine = BeliefRevisionEngine(data_dir=learning_data_dir)
                 meta_learner = MetaLearner(data_dir=learning_data_dir)
-                concept_engine = ConceptFormationEngine(
-                    llm=llm,
-                    causal_model_builder=causal_builder,
-                    mechanism_store=mechanism_store,
-                    belief_store=BeliefStore(data_dir=learning_data_dir),
-                    data_dir=learning_data_dir,
-                )
+                concept_engine = None
 
-                # Persistent belief storage (Phase 3) — use same instance
-                belief_store = concept_engine.belief_store
+                # Persistent belief storage (Phase 3)
+                belief_store = BeliefStore(data_dir=learning_data_dir)
 
                 # Build shared CognitiveGraph (was LearningSubsystem)
                 learning_subsystem = CognitiveGraph(
@@ -2159,31 +2129,6 @@ class BrainFactory:
         await autonomy.start(message_bus)
         brain.autonomy_core = autonomy
         logger.info("AutonomyCore started — cognitive heartbeat active")
-
-        # ── Epistemic Runtime (hypothesis, discovery, calibration) ──
-        try:
-            from hbllm.brain.epistemics.integration import wire_epistemics
-            from hbllm.hcir.graph import CognitiveGraph as HCIRCognitiveGraph
-
-            hcir_graph: HCIRCognitiveGraph | None = None
-            if brain.hcir_services and hasattr(brain.hcir_services, "workspace"):
-                candidate = getattr(brain.hcir_services.workspace, "graph", None)
-                if isinstance(candidate, HCIRCognitiveGraph):
-                    hcir_graph = candidate
-
-            if hcir_graph is None:
-                hcir_graph = HCIRCognitiveGraph()
-
-            data_dir = getattr(cfg, "data_dir", "data")
-            brain.epistemic_loop = wire_epistemics(
-                autonomy_core=autonomy,
-                graph=hcir_graph,
-                data_dir=data_dir,
-                llm=getattr(brain, "llm", None),
-            )
-            logger.info("Epistemic runtime wired into AutonomyCore")
-        except Exception as e:
-            logger.warning("Epistemic runtime failed to wire: %s", e)
 
         # ── Unified Reasoning Runtime (A12) ───────────────────────
         try:

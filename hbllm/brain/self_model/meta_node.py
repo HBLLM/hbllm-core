@@ -17,6 +17,7 @@ from typing import Any
 
 from hbllm.network.messages import FeedbackPayload, Message, MessageType, SystemImprovePayload
 from hbllm.network.node import Node, NodeType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class MetaReasoningNode(Node):
     def _db_insert_feedback(self, domain: str, instruction: str, response: str) -> None:
         """Persist a negative-feedback sample to SQLite."""
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     "INSERT INTO negative_feedback (domain, instruction, response, created_at)"
                     " VALUES (?, ?, ?, ?)",
@@ -91,7 +92,7 @@ class MetaReasoningNode(Node):
     def _db_clear_feedback(self, domain: str) -> None:
         """Delete all feedback rows for *domain* from SQLite."""
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute("DELETE FROM negative_feedback WHERE domain = ?", (domain,))
         except (sqlite3.Error, OSError) as e:
             logger.exception("Failed to clear SQLite feedback for domain '%s': %s", domain, e)
@@ -100,7 +101,7 @@ class MetaReasoningNode(Node):
 
     def _init_db(self) -> None:
         """Initialize SQLite schema for persistent feedback storage."""
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negative_feedback (
@@ -116,7 +117,7 @@ class MetaReasoningNode(Node):
 
     def _load_from_db(self) -> None:
         """Restore in-memory buffer from SQLite on startup."""
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT domain, instruction, response FROM negative_feedback"

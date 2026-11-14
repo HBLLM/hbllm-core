@@ -13,6 +13,7 @@ Implements the fundamental cognitive loop:
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections import deque
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -21,6 +22,201 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from hbllm.hcir.world.active_inference import HierarchicalActiveInferenceEngine
+    from hbllm.hcir.world.autonomous_learning import PointActuationAffordanceLearner
+    from hbllm.hcir.world.cortex_episodic import FalsifiableAnalogyEngine
+    from hbllm.hcir.world.cortex_perception import GibsonianAffordanceExtractor
+    from hbllm.hcir.world.counterfactual_simulation import (
+        CounterfactualComparison,
+        CounterfactualRegretEvaluator,
+    )
+    from hbllm.hcir.world.experimental.active_inference_efe import (
+        ExpectedFreeEnergyEvaluator,
+        ExpectedFreeEnergyScore,
+    )
+    from hbllm.hcir.world.experimental.amygdalar_threat_conditioning import (
+        AmygdalarThreatConditioningEngine,
+        ConditionedThreatStimulus,
+        DefensiveVigilanceState,
+    )
+    from hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator import (
+        AnteriorCingulateEffortAllocator,
+        EffortAllocationDecision,
+    )
+    from hbllm.hcir.world.experimental.anterior_insular_timing import (
+        AnteriorInsularTimingEngine,
+        InteroceptivePacingState,
+    )
+    from hbllm.hcir.world.experimental.bilateral_coordination import (
+        BilateralCoordinateIntegrator,
+        BilateralState,
+    )
+    from hbllm.hcir.world.experimental.boundary_grid_phase_aligner import BoundaryGridPhaseAligner
+    from hbllm.hcir.world.experimental.cerebellar_microzone_adaptor import (
+        CerebellarMicrozoneAdaptor,
+        ClimbingFiberFeedback,
+    )
+    from hbllm.hcir.world.experimental.claustrum_interhemispheric import (
+        ClaustrumInterhemisphericIntegrator,
+        CrossModalSynchronyPacket,
+    )
+    from hbllm.hcir.world.experimental.claustrum_salience_conductor import (
+        ClaustrumSalienceConductor,
+        UnifiedPerceptualGestalt,
+    )
+    from hbllm.hcir.world.experimental.confidence_calibrator import ConfidenceCalibrator
+    from hbllm.hcir.world.experimental.dorsolateral_rule_abstraction import (
+        DorsolateralRuleAbstractionEngine,
+        RuleTransferResult,
+    )
+    from hbllm.hcir.world.experimental.entorhinal_border_cell import (
+        EntorhinalBorderCellEngine,
+        GridModuleRescalingResult,
+    )
+    from hbllm.hcir.world.experimental.entorhinal_grid_cortex import EntorhinalGridCortex
+    from hbllm.hcir.world.experimental.frontopolar_exploration_horizon import (
+        BranchSwitchDecision,
+        FrontopolarExplorationHorizonEngine,
+    )
+    from hbllm.hcir.world.experimental.global_neuronal_workspace import (
+        GlobalNeuronalWorkspace,
+        IgnitionEvent,
+    )
+    from hbllm.hcir.world.experimental.global_workspace_ignition import (
+        GlobalWorkspaceIgnitionEngine,
+    )
+    from hbllm.hcir.world.experimental.habenula_striatum_opponency import (
+        DualValueOpponencyCortex,
+        OpponencyValueState,
+    )
+    from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
+        HippocampalPhasePrecessionEngine,
+        PhasePrecessionBurst,
+    )
+    from hbllm.hcir.world.experimental.hippocampal_replay import (
+        HippocampalPrioritizedReplayBuffer,
+        ReplayBatch,
+        ReplayTransition,
+    )
+    from hbllm.hcir.world.experimental.hippocampal_time_cell import (
+        HippocampalTimeCellEngine,
+        TimeIntervalState,
+    )
+    from hbllm.hcir.world.experimental.inferotemporal_shape_hasher import (
+        InferotemporalShapeHasher,
+        ShapeArchetypeSignature,
+    )
+    from hbllm.hcir.world.experimental.insula_allostasis import (
+        InteroceptiveAllostasisCortex,
+        InteroceptiveState,
+    )
+    from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
+        LateralPrefrontalTaskSwitcher,
+        TaskArbitrationResult,
+    )
+    from hbllm.hcir.world.experimental.locus_coeruleus_noradrenaline import (
+        LocusCoeruleusNoradrenalineEngine,
+        NoradrenergicState,
+    )
+    from hbllm.hcir.world.experimental.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
+    from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
+    from hbllm.hcir.world.experimental.orbitofrontal_credit_assignment import (
+        CounterfactualCreditReport,
+        OrbitofrontalCreditAssignmentEngine,
+    )
+    from hbllm.hcir.world.experimental.parahippocampal_context import (
+        ParahippocampalContextEngine,
+        SpatialContextSchema,
+    )
+    from hbllm.hcir.world.experimental.parietal_foveated_attention import (
+        FoveatedSaliencyMap,
+        ParietalFoveatedAttentionEngine,
+    )
+    from hbllm.hcir.world.experimental.parietal_potential_field import (
+        ParietalPotentialFieldNavigator,
+        PotentialFieldVector,
+    )
+    from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
+        LocomotorDriveCommand,
+        PedunculopontineLocomotorEngine,
+    )
+    from hbllm.hcir.world.experimental.prefrontal_blame_attribution import (
+        PlanAttributionReport,
+        PrefrontalBlameAttributor,
+    )
+    from hbllm.hcir.world.experimental.pulvinar_attention_router import (
+        PulvinarAttentionRouter,
+        PulvinarRoutingState,
+    )
+    from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        ObjectCorrespondence,
+    )
+    from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        RelationalGraphMatcher as VentralRelationalGraphMatcher,
+    )
+    from hbllm.hcir.world.experimental.retrosplenial_heading import (
+        AllocentricHeadingVector,
+        RetrosplenialHeadingEngine,
+    )
+    from hbllm.hcir.world.experimental.retrosplenial_landmark_anchor import (
+        LandmarkRecalibrationResult,
+        RetrosplenialLandmarkAnchorEngine,
+    )
+    from hbllm.hcir.world.experimental.somatosensory_haptic import (
+        HapticAffordanceFeedback,
+        SomatosensoryHapticEngine,
+    )
+    from hbllm.hcir.world.experimental.spatial_distance_transform import (
+        EuclideanDistanceTransformResult,
+        SpatialDistanceTransformEngine,
+    )
+    from hbllm.hcir.world.experimental.subicular_boundary_vector import (
+        BoundaryVectorMap,
+        SubicularBoundaryVectorEngine,
+    )
+    from hbllm.hcir.world.experimental.subthalamic_drift_diffusion import (
+        DriftDiffusionDecision,
+        SubthalamicDriftDiffusionEngine,
+    )
+    from hbllm.hcir.world.experimental.subthalamic_threshold_escalator import (
+        SubthalamicThresholdEscalator,
+    )
+    from hbllm.hcir.world.experimental.superior_colliculus_arbiter import (
+        SaccadeTarget,
+        SuperiorColliculusTargetArbiter,
+    )
+    from hbllm.hcir.world.experimental.superposition_planner import (
+        SuperpositionEvaluationResult,
+        SuperpositionPlanner,
+    )
+    from hbllm.hcir.world.experimental.thalamic_reticular_gating import (
+        SensoryShieldingState,
+        ThalamicReticularGatingEngine,
+    )
+    from hbllm.hcir.world.experimental.thalamocortical_binding import (
+        BoundFeatureBundle,
+        ThalamocorticalBindingEngine,
+    )
+    from hbllm.hcir.world.experimental.ventral_premotor_resonator import (
+        AffordanceResonancePattern,
+        VentralPremotorAffordanceResonator,
+    )
+    from hbllm.hcir.world.experimental.ventral_tegmental_curiosity import (
+        EpistemicInformationGain,
+        VentralTegmentalCuriosityEngine,
+    )
+    from hbllm.hcir.world.experimental.ventrolateral_motor_inhibition import (
+        ResponseInhibitionCommand,
+        VentrolateralMotorInhibitionEngine,
+    )
+    from hbllm.hcir.world.experimental.ventromedial_somatic_marker import (
+        SomaticAffectiveBias,
+        VentromedialSomaticMarkerEngine,
+    )
+    from hbllm.hcir.world.parietal_coordinate_transform import (
+        RetrosplenialCoordinateTransformer,
+    )
+    from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
     from hbllm.hcir.world_kernel import WorldKernel
 
 import uuid
@@ -35,7 +231,6 @@ from hbllm.hcir.graph import (
     EventNode,
     GoalNode,
     ObservationNode,
-    SkillNode,
 )
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
@@ -44,84 +239,32 @@ from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
+from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
-from hbllm.hcir.world.active_inference import (
-    ActiveInferenceEngine,
-    HierarchicalActiveInferenceEngine,
-)
-from hbllm.hcir.world.active_inference_efe import (
-    ExpectedFreeEnergyEvaluator,
-    ExpectedFreeEnergyScore,
-)
-from hbllm.hcir.world.amygdalar_threat_conditioning import (
-    AmygdalarThreatConditioningEngine,
-    ConditionedThreatStimulus,
-    DefensiveVigilanceState,
-)
+from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
-from hbllm.hcir.world.anterior_cingulate_effort_allocator import (
-    AnteriorCingulateEffortAllocator,
-    EffortAllocationDecision,
-)
-from hbllm.hcir.world.anterior_insular_timing import (
-    AnteriorInsularTimingEngine,
-    InteroceptivePacingState,
-)
-from hbllm.hcir.world.bilateral_coordination import (
-    BilateralCoordinateIntegrator,
-    BilateralState,
-)
-from hbllm.hcir.world.boundary_grid_phase_aligner import (
-    BoundaryGridPhaseAligner,
-)
 from hbllm.hcir.world.causal_discovery import (
     BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
     CausalHypothesis,
     CausalPredicate,
 )
-from hbllm.hcir.world.cerebellar_microzone_adaptor import (
-    CerebellarMicrozoneAdaptor,
-    ClimbingFiberFeedback,
-)
 from hbllm.hcir.world.cerebellar_phase_clock import (
     CerebellarPhaseClock,
     CerebellarSmithPredictor,
     PhaseGateDecision,
 )
-from hbllm.hcir.world.claustrum_interhemispheric import (
-    ClaustrumInterhemisphericIntegrator,
-    CrossModalSynchronyPacket,
-)
-from hbllm.hcir.world.claustrum_salience_conductor import (
-    ClaustrumSalienceConductor,
-    UnifiedPerceptualGestalt,
-)
-from hbllm.hcir.world.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.counterfactual_simulation import (
     CounterfactualComparison,
     CounterfactualDeadlockDetector,
-    CounterfactualRegretEvaluator,
-)
-from hbllm.hcir.world.dorsolateral_rule_abstraction import (
-    DorsolateralRuleAbstractionEngine,
-    RuleTransferResult,
-)
-from hbllm.hcir.world.entorhinal_border_cell import (
-    EntorhinalBorderCellEngine,
-    GridModuleRescalingResult,
 )
 from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
-)
-from hbllm.hcir.world.frontopolar_exploration_horizon import (
-    BranchSwitchDecision,
-    FrontopolarExplorationHorizonEngine,
 )
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
@@ -131,37 +274,12 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.frontopolar_subgoal_tree import (
     RecursiveSubgoalTree,
 )
-from hbllm.hcir.world.habenula_striatum_opponency import (
-    DualValueOpponencyCortex,
-    OpponencyValueState,
-)
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.hierarchical_precision_control import (
     HierarchicalPrecisionController,
 )
-from hbllm.hcir.world.hippocampal_phase_precession import (
-    HippocampalPhasePrecessionEngine,
-    PhasePrecessionBurst,
-)
-from hbllm.hcir.world.hippocampal_replay import (
-    HippocampalPrioritizedReplayBuffer,
-    ReplayBatch,
-    ReplayTransition,
-)
-from hbllm.hcir.world.hippocampal_time_cell import (
-    HippocampalTimeCellEngine,
-    TimeIntervalState,
-)
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
-)
-from hbllm.hcir.world.inferotemporal_shape_hasher import (
-    InferotemporalShapeHasher,
-    ShapeArchetypeSignature,
-)
-from hbllm.hcir.world.insula_allostasis import (
-    InteroceptiveAllostasisCortex,
-    InteroceptiveState,
 )
 from hbllm.hcir.world.interactive_action_discovery import (
     ActionBudgetGovernor,
@@ -180,17 +298,6 @@ from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
 from hbllm.hcir.world.kinetic_stream import (
     DorsalKineticStream,
 )
-from hbllm.hcir.world.lateral_prefrontal_switcher import (
-    LateralPrefrontalTaskSwitcher,
-    TaskArbitrationResult,
-)
-from hbllm.hcir.world.locus_coeruleus_noradrenaline import (
-    LocusCoeruleusNoradrenalineEngine,
-    NoradrenergicState,
-)
-from hbllm.hcir.world.medial_prefrontal_schema import (
-    MedialPrefrontalSchemaEngine,
-)
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -199,35 +306,11 @@ from hbllm.hcir.world.object_state_graph import (
     ObjectStateGraphPlanner,
     RelationalGraphMatcher,
 )
-from hbllm.hcir.world.optical_ray_projection import (
-    OpticalRayProjector,
-)
-from hbllm.hcir.world.orbitofrontal_credit_assignment import (
-    CounterfactualCreditReport,
-    OrbitofrontalCreditAssignmentEngine,
-)
-from hbllm.hcir.world.parahippocampal_context import (
-    ParahippocampalContextEngine,
-    SpatialContextSchema,
-)
 from hbllm.hcir.world.parietal_coordinate_transform import (
     EgocentricCoordinate,
     GeometricModelSelector,
     HeadingOrientation,
     ParietalCoordinateTransformer,
-    RetrosplenialCoordinateTransformer,
-)
-from hbllm.hcir.world.parietal_foveated_attention import (
-    FoveatedSaliencyMap,
-    ParietalFoveatedAttentionEngine,
-)
-from hbllm.hcir.world.parietal_potential_field import (
-    ParietalPotentialFieldNavigator,
-    PotentialFieldVector,
-)
-from hbllm.hcir.world.pedunculopontine_locomotor import (
-    LocomotorDriveCommand,
-    PedunculopontineLocomotorEngine,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -239,33 +322,13 @@ from hbllm.hcir.world.percept import (
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
-from hbllm.hcir.world.prefrontal_blame_attribution import (
-    PlanAttributionReport,
-    PrefrontalBlameAttributor,
-)
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
-from hbllm.hcir.world.pulvinar_attention_router import (
-    PulvinarAttentionRouter,
-    PulvinarRoutingState,
-)
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
 from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
-from hbllm.hcir.world.retrosplenial_heading import (
-    AllocentricHeadingVector,
-    RetrosplenialHeadingEngine,
-)
-from hbllm.hcir.world.retrosplenial_landmark_anchor import (
-    LandmarkRecalibrationResult,
-    RetrosplenialLandmarkAnchorEngine,
-)
 from hbllm.hcir.world.rule_induction import (
     RuleInductionEngine,
-)
-from hbllm.hcir.world.somatosensory_haptic import (
-    HapticAffordanceFeedback,
-    SomatosensoryHapticEngine,
 )
 from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
@@ -275,21 +338,6 @@ from hbllm.hcir.world.spatiotemporal_tracker import (
     MorphologicalDeformationTracker,
     SpatiotemporalHazardTracker,
 )
-from hbllm.hcir.world.subicular_boundary_vector import (
-    BoundaryVectorMap,
-    SubicularBoundaryVectorEngine,
-)
-from hbllm.hcir.world.subthalamic_drift_diffusion import (
-    DriftDiffusionDecision,
-    SubthalamicDriftDiffusionEngine,
-)
-from hbllm.hcir.world.subthalamic_threshold_escalator import (
-    SubthalamicThresholdEscalator,
-)
-from hbllm.hcir.world.superior_colliculus_arbiter import (
-    SaccadeTarget,
-    SuperiorColliculusTargetArbiter,
-)
 from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
 from hbllm.hcir.world.temporal_dependency_tracker import (
     DelayedEffectModeler,
@@ -297,26 +345,6 @@ from hbllm.hcir.world.temporal_dependency_tracker import (
     EnvironmentChangeDetector,
     LongHorizonDependencyGraph,
     ObjectiveLearningEfficiencyTracker,
-)
-from hbllm.hcir.world.thalamic_reticular_gating import (
-    SensoryShieldingState,
-    ThalamicReticularGatingEngine,
-)
-from hbllm.hcir.world.ventral_premotor_resonator import (
-    AffordanceResonancePattern,
-    VentralPremotorAffordanceResonator,
-)
-from hbllm.hcir.world.ventral_tegmental_curiosity import (
-    EpistemicInformationGain,
-    VentralTegmentalCuriosityEngine,
-)
-from hbllm.hcir.world.ventrolateral_motor_inhibition import (
-    ResponseInhibitionCommand,
-    VentrolateralMotorInhibitionEngine,
-)
-from hbllm.hcir.world.ventromedial_somatic_marker import (
-    SomaticAffectiveBias,
-    VentromedialSomaticMarkerEngine,
 )
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.world_state_snapshot import (
@@ -394,6 +422,7 @@ from hbllm.hcir.world.cortex_assimilator import (
 from hbllm.hcir.world.cortex_causal import (
     ActionAffordance,
     CausalInductionCortex,
+    GovernedSetView,
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.cortex_deliberation import (
@@ -404,7 +433,6 @@ from hbllm.hcir.world.cortex_deliberation import (
     PrefrontalDeliberationEngine,
 )
 from hbllm.hcir.world.cortex_episodic import (
-    FalsifiableAnalogyEngine,
     HippocampalEpisodicCortex,
 )
 from hbllm.hcir.world.cortex_motor import (
@@ -414,7 +442,6 @@ from hbllm.hcir.world.cortex_motor import (
 )
 from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
-    GibsonianAffordanceExtractor,
     OrientedThreat,
     PerceptionEngine,
     TopologicalContour,
@@ -423,17 +450,8 @@ from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
+from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
 from hbllm.hcir.world.engine_state import CognitiveContext, EngineState
-from hbllm.hcir.world.entorhinal_grid_cortex import (
-    EntorhinalGridCortex,
-)
-from hbllm.hcir.world.global_neuronal_workspace import (
-    GlobalNeuronalWorkspace,
-    IgnitionEvent,
-)
-from hbllm.hcir.world.global_workspace_ignition import (
-    GlobalWorkspaceIgnitionEngine,
-)
 from hbllm.hcir.world.metacognitive_agency_cortex import (
     MetacognitiveAgencyCortex,
     MetacognitiveAssessment,
@@ -445,31 +463,6 @@ from hbllm.hcir.world.neuromodulatory_system import (
 from hbllm.hcir.world.predictive_coding_cortex import (
     HierarchicalPredictiveCodingCortex,
     PredictiveCodingSnapshot,
-)
-from hbllm.hcir.world.relational_graph_matcher import (
-    ObjectCorrespondence,
-)
-from hbllm.hcir.world.relational_graph_matcher import (
-    RelationalGraphMatcher as VentralRelationalGraphMatcher,
-)
-from hbllm.hcir.world.skill_program_synthesizer import (
-    SkillProgramSynthesizer,
-)
-from hbllm.hcir.world.spatial_distance_transform import (
-    EuclideanDistanceTransformResult,
-    SpatialDistanceTransformEngine,
-)
-from hbllm.hcir.world.superposition_planner import (
-    SuperpositionEvaluationResult,
-    SuperpositionPlanner,
-)
-from hbllm.hcir.world.temporal_dependency_tracker import (
-    DelayedEffectModeler,
-    LongHorizonDependencyGraph,
-)
-from hbllm.hcir.world.thalamocortical_binding import (
-    BoundFeatureBundle,
-    ThalamocorticalBindingEngine,
 )
 
 
@@ -554,6 +547,31 @@ class AutonomousEpistemicEngine:
     MIN_PROBES_PER_ACTION: int = 3
     consecutive_pacing_steps: int = 0
 
+    @classmethod
+    def for_tests(
+        cls,
+        exploration_budget: int = 150,
+        enable_logging: bool = True,
+        instructions: Sequence[str] | str | None = None,
+        world_id: str = "default",
+        seed: int | None = None,
+        tiered_workspace: TieredWorkspace | None = None,
+    ) -> AutonomousEpistemicEngine:
+        """Construct an engine with default verified kernel services for tests."""
+        from hbllm.hcir.kernel.services import KernelServices
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+
+        services = KernelServices.create_default(HCIRWorkspaceState())
+        return cls(
+            exploration_budget=exploration_budget,
+            enable_logging=enable_logging,
+            instructions=instructions,
+            services=services,
+            world_id=world_id,
+            seed=seed,
+            tiered_workspace=tiered_workspace,
+        )
+
     def __init__(
         self,
         exploration_budget: int = 150,
@@ -562,7 +580,14 @@ class AutonomousEpistemicEngine:
         services: KernelServices | None = None,
         world_id: str = "default",
         seed: int | None = None,
+        tiered_workspace: TieredWorkspace | None = None,
     ) -> None:
+        if services is None:
+            from hbllm.hcir.kernel.services import KernelServices
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            services = KernelServices.create_default(HCIRWorkspaceState())
+
         self.exploration_budget = exploration_budget
         # Deterministic decide-path RNG (WP0.1 replay determinism)
         self._rng = __import__("numpy").random.default_rng(seed)
@@ -589,14 +614,14 @@ class AutonomousEpistemicEngine:
 
         # Memory of frames & actions
         self._prev_grid: np.ndarray | None = None
-        self._last_action: int | None = None
+        self._last_action: Any | None = None
         self._last_action_data: dict[str, Any] | None = None
         self._consecutive_quiescent_actions: int = 0
         self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 
         # Avatar self-model (Motor Grounding)
-        self._avatar_feature: int | None = None
-        self._avatar_features: set[int] = set()
+        self._avatar_feature: Any | None = None
+        self._avatar_features: set[Any] = set()
         self._avatar_pos: tuple[int, int] | None = None
         self._avatar_size: int = 1
         self._effector_kinetics_mode: int | None = None
@@ -604,8 +629,9 @@ class AutonomousEpistemicEngine:
         self._last_surprise: float = 0.0
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
+        self.default_bg_feature: Any = getattr(self, "default_bg_feature", 0)
         self.symbolic_theory: HCIRSymbolicWorldTheory = HCIRSymbolicWorldTheory()
-        self.symbolic_theory.seed_core_knowledge(bg_feature=0)
+        self.symbolic_theory.seed_core_knowledge(bg_feature=self.default_bg_feature)
 
         # Prefrontal Working Memory & Executive Faculties (SSOT for cognitive state)
         self.working_memory: PrefrontalWorkingMemory = PrefrontalWorkingMemory()
@@ -618,7 +644,7 @@ class AutonomousEpistemicEngine:
         self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
         self.optical_projector: OpticalRayProjector | Any = _ablated(
-            "optical_projector", OpticalRayProjector
+            "optical_projector", "OpticalRayProjector"
         )  # WP2 ablated
         self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
         self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
@@ -631,7 +657,8 @@ class AutonomousEpistemicEngine:
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
 
-        # Episodic Ground Facts (Layout coordinates, preserved per-level across attempts)
+        # Episodic Ground Facts (Layout coordinates, preserved per-context across attempts)
+        self._current_context_id: str = "default"
         self._current_level: int = 0
         self.working_memory.visuospatial.current_level = 0
         self.habenular_ior.current_level = 0
@@ -649,7 +676,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
         self.bilateral_integrator: BilateralCoordinateIntegrator | Any = _ablated(
-            "bilateral_integrator", BilateralCoordinateIntegrator
+            "bilateral_integrator", "BilateralCoordinateIntegrator"
         )  # WP2 ablated
         self._bilateral_state: BilateralState | None = None
 
@@ -706,7 +733,7 @@ class AutonomousEpistemicEngine:
             w_cost=0.10,
         )
         self.hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any = _ablated(
-            "hierarchical_active_inference", HierarchicalActiveInferenceEngine
+            "hierarchical_active_inference", "HierarchicalActiveInferenceEngine"
         )  # WP2 ablated
         self.precision_controller: HierarchicalPrecisionController = (
             HierarchicalPrecisionController()
@@ -716,10 +743,10 @@ class AutonomousEpistemicEngine:
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
         self.efe_evaluator: ExpectedFreeEnergyEvaluator | Any = _ablated(
-            "efe_evaluator", ExpectedFreeEnergyEvaluator
+            "efe_evaluator", "ExpectedFreeEnergyEvaluator"
         )  # WP2 ablated
         self.affordance_extractor: GibsonianAffordanceExtractor | Any = _ablated(
-            "affordance_extractor", GibsonianAffordanceExtractor
+            "affordance_extractor", "GibsonianAffordanceExtractor"
         )  # WP2 ablated
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
@@ -731,22 +758,22 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
         self.retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any = _ablated(
-            "retrosplenial_transformer", RetrosplenialCoordinateTransformer
+            "retrosplenial_transformer", "RetrosplenialCoordinateTransformer"
         )  # WP2 ablated
 
         # Faculty: Constraint-Aware Relational Graph Matcher (W038)
 
         # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
         self.analogy_engine: FalsifiableAnalogyEngine | Any = _ablated(
-            "analogy_engine", FalsifiableAnalogyEngine
+            "analogy_engine", "FalsifiableAnalogyEngine"
         )  # WP2 ablated
         self.counterfactual_regret: CounterfactualRegretEvaluator | Any = _ablated(
-            "counterfactual_regret", CounterfactualRegretEvaluator
+            "counterfactual_regret", "CounterfactualRegretEvaluator"
         )  # WP2 ablated
 
         # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
         self.gnw: GlobalNeuronalWorkspace | Any = _ablated(
-            "gnw", GlobalNeuronalWorkspace
+            "gnw", "GlobalNeuronalWorkspace"
         )  # WP2 ablated
 
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
@@ -754,12 +781,12 @@ class AutonomousEpistemicEngine:
 
         # Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Attentional Gating
         self.thalamocortical_binding: ThalamocorticalBindingEngine | Any = _ablated(
-            "thalamocortical_binding", ThalamocorticalBindingEngine
+            "thalamocortical_binding", "ThalamocorticalBindingEngine"
         )  # WP2 ablated
 
         # Track 4: Superposition Counterfactual Tree Search Planner
         self.superposition_planner: SuperpositionPlanner | Any = _ablated(
-            "superposition_planner", SuperpositionPlanner
+            "superposition_planner", "SuperpositionPlanner"
         )  # WP2 ablated
 
         # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
@@ -769,225 +796,270 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Entorhinal Grid Cells & Hippocampal Path Integration (Moser & O'Keefe)
         self.entorhinal_grid_cortex: EntorhinalGridCortex | Any = _ablated(
-            "entorhinal_grid_cortex", EntorhinalGridCortex
+            "entorhinal_grid_cortex", "EntorhinalGridCortex"
         )  # WP2 ablated
 
         # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
         self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
 
         # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
-        self.skill_synthesizer: SkillProgramSynthesizer | Any = _ablated(
-            "skill_synthesizer", SkillProgramSynthesizer
-        )  # WP2 ablated
+        from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
+
+        self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer(
+            min_support_traces=1
+        )
+
+        # Faculty: DreamCoder Wake/Sleep Library Learning & Macro Skill Abstraction (AGI Gap 2)
+        from hbllm.hcir.world.library_learning import LibraryLearner
+
+        self.library_learner: LibraryLearner = LibraryLearner()
+
+        # Faculty: Recursive Value Induction & Backward Causal Credit Propagation (AGI Gap 5)
+        from hbllm.hcir.world.recursive_value_induction import RecursiveValueInducer
+
+        self.recursive_value_inducer: RecursiveValueInducer = RecursiveValueInducer()
+
+        # Faculty: Working Concept Store & Analogical Schema Retrieval (AGI Gap 6)
+        from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
+
+        self.working_concept_store: WorkingConceptStore = WorkingConceptStore()
+
+        # Faculty: Causal Schema Inducer & Latent Variable Discovery (AGI Gap 7)
+        from hbllm.hcir.grounding.causal.schema import SchemaInducer
+
+        self.schema_inducer: SchemaInducer = SchemaInducer()
+
+        # Faculty: Theory of Mind & Inverse Planning Social Cognition (AGI Gap 10)
+        from hbllm.hcir.world.social_cognition import SocialCognitionEngine
+
+        self.social_cognition: SocialCognitionEngine = SocialCognitionEngine()
+
+        # Faculty: Temporal Option Discovery & Bottleneck Cuts (AGI Gap 11)
+        from hbllm.hcir.world.option_discovery import OptionDiscoveryEngine
+
+        self.option_discovery: OptionDiscoveryEngine = OptionDiscoveryEngine()
+
+        # Faculty: Value-Uncertainty Deferral, Provenance & Corrigibility (AGI Gap 15)
+        from hbllm.hcir.kernel.safety_corrigibility import (
+            CorrigibilityMonitor,
+            GoalProvenanceTracker,
+            ValueUncertaintyArbiter,
+        )
+
+        self.value_uncertainty_arbiter: ValueUncertaintyArbiter = ValueUncertaintyArbiter()
+        self.goal_provenance: GoalProvenanceTracker = GoalProvenanceTracker()
+        self.corrigibility_monitor: CorrigibilityMonitor = CorrigibilityMonitor()
 
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
         # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
         self.ventral_relational_matcher: VentralRelationalGraphMatcher | Any = _ablated(
-            "ventral_relational_matcher", VentralRelationalGraphMatcher
+            "ventral_relational_matcher", "VentralRelationalGraphMatcher"
         )  # WP2 ablated
 
         # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
         self.allostasis_cortex: InteroceptiveAllostasisCortex | Any = _ablated(
-            "allostasis_cortex", InteroceptiveAllostasisCortex
+            "allostasis_cortex", "InteroceptiveAllostasisCortex"
         )  # WP2 ablated
 
         # Round 7 Faculty: Claustrum Multimodal Salience Conductor & Perceptual Binding (Crick & Koch / Smith)
         self.claustrum_conductor: ClaustrumSalienceConductor | Any = _ablated(
-            "claustrum_conductor", ClaustrumSalienceConductor
+            "claustrum_conductor", "ClaustrumSalienceConductor"
         )  # WP2 ablated
 
         # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
 
         # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
         self.distance_transform_engine: SpatialDistanceTransformEngine | Any = _ablated(
-            "distance_transform_engine", SpatialDistanceTransformEngine
+            "distance_transform_engine", "SpatialDistanceTransformEngine"
         )  # WP2 ablated
 
         # Round 8 Faculty: Ventral Striatum & Lateral Habenula Dual Value Opponency (Matsumoto & Hikosaka / Cools)
         self.value_opponency: DualValueOpponencyCortex | Any = _ablated(
-            "value_opponency", DualValueOpponencyCortex
+            "value_opponency", "DualValueOpponencyCortex"
         )  # WP2 ablated
 
         # Round 8 Faculty: Posterior Parietal Cortex (PPC) Potential Field Navigation (Andersen & Buneo / Khatib)
         self.potential_field_navigator: ParietalPotentialFieldNavigator | Any = _ablated(
-            "potential_field_navigator", ParietalPotentialFieldNavigator
+            "potential_field_navigator", "ParietalPotentialFieldNavigator"
         )  # WP2 ablated
 
         # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
         self.shape_hasher: InferotemporalShapeHasher | Any = _ablated(
-            "shape_hasher", InferotemporalShapeHasher
+            "shape_hasher", "InferotemporalShapeHasher"
         )  # WP2 ablated
 
         # Round 9 Faculty: Subthalamic Nucleus (STN) Drift-Diffusion Threshold Modulation (Ratcliff / Frank)
         self.drift_diffusion: SubthalamicDriftDiffusionEngine | Any = _ablated(
-            "drift_diffusion", SubthalamicDriftDiffusionEngine
+            "drift_diffusion", "SubthalamicDriftDiffusionEngine"
         )  # WP2 ablated
 
         # Round 9 Faculty: Parietal Egocentric Multi-Scale Foveation (Itti & Koch / Schwartz)
         self.foveated_attention: ParietalFoveatedAttentionEngine | Any = _ablated(
-            "foveated_attention", ParietalFoveatedAttentionEngine
+            "foveated_attention", "ParietalFoveatedAttentionEngine"
         )  # WP2 ablated
 
         # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
         self.blame_attributor: PrefrontalBlameAttributor | Any = _ablated(
-            "blame_attributor", PrefrontalBlameAttributor
+            "blame_attributor", "PrefrontalBlameAttributor"
         )  # WP2 ablated
 
         # Round 10 Faculty: Hippocampal-Entorhinal Prioritized Experience Replay (Foster & Wilson / Schaul)
         self.hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any = _ablated(
-            "hippocampal_replay", HippocampalPrioritizedReplayBuffer
+            "hippocampal_replay", "HippocampalPrioritizedReplayBuffer"
         )  # WP2 ablated
 
         # Round 10 Faculty: Lateral Prefrontal Cortex (LPFC) Dual Task Switcher (Monsell / Koechlin)
         self.task_switcher: LateralPrefrontalTaskSwitcher | Any = _ablated(
-            "task_switcher", LateralPrefrontalTaskSwitcher
+            "task_switcher", "LateralPrefrontalTaskSwitcher"
         )  # WP2 ablated
 
         # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
         self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any = _ablated(
-            "retrosplenial_anchor", RetrosplenialLandmarkAnchorEngine
+            "retrosplenial_anchor", "RetrosplenialLandmarkAnchorEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Hippocampal Theta-Gamma Phase Precession & Macro Chunking (O'Keefe / Lisman)
         self.phase_precession: HippocampalPhasePrecessionEngine | Any = _ablated(
-            "phase_precession", HippocampalPhasePrecessionEngine
+            "phase_precession", "HippocampalPhasePrecessionEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Frontopolar BA10 Counterfactual Exploration Horizon Engine (Koechlin / Rushworth)
         self.exploration_horizon: FrontopolarExplorationHorizonEngine | Any = _ablated(
-            "exploration_horizon", FrontopolarExplorationHorizonEngine
+            "exploration_horizon", "FrontopolarExplorationHorizonEngine"
         )  # WP2 ablated
 
         # Round 11 Faculty: Superior Colliculus Multisensory Alignment & Saccadic Arbiter (Stein & Meredith)
         self.superior_colliculus: SuperiorColliculusTargetArbiter | Any = _ablated(
-            "superior_colliculus", SuperiorColliculusTargetArbiter
+            "superior_colliculus", "SuperiorColliculusTargetArbiter"
         )  # WP2 ablated
 
         # Round 12 Faculty: Cerebellar Microzone Granule-Purkinje Forward Adaptation (Marr-Albus-Ito)
         self.cerebellar_microzone: CerebellarMicrozoneAdaptor | Any = _ablated(
-            "cerebellar_microzone", CerebellarMicrozoneAdaptor
+            "cerebellar_microzone", "CerebellarMicrozoneAdaptor"
         )  # WP2 ablated
 
         # Round 12 Faculty: Ventral Premotor (F5 / Mirror Neuron) Affordance Resonator (Rizzolatti)
         self.premotor_resonator: VentralPremotorAffordanceResonator | Any = _ablated(
-            "premotor_resonator", VentralPremotorAffordanceResonator
+            "premotor_resonator", "VentralPremotorAffordanceResonator"
         )  # WP2 ablated
 
         # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
         self.effort_allocator: AnteriorCingulateEffortAllocator | Any = _ablated(
-            "effort_allocator", AnteriorCingulateEffortAllocator
+            "effort_allocator", "AnteriorCingulateEffortAllocator"
         )  # WP2 ablated
 
         # Round 13 Faculty: Subicular Egocentric-to-Allocentric Boundary Vector Cell (BVC) Map (Hartley-Burgess)
         self.subicular_bvc: SubicularBoundaryVectorEngine | Any = _ablated(
-            "subicular_bvc", SubicularBoundaryVectorEngine
+            "subicular_bvc", "SubicularBoundaryVectorEngine"
         )  # WP2 ablated
 
         # Round 13 Faculty: Ventromedial Prefrontal Cortex (vmPFC) Somatic Marker Engine (Damasio-Bechara)
         self.somatic_marker: VentromedialSomaticMarkerEngine | Any = _ablated(
-            "somatic_marker", VentromedialSomaticMarkerEngine
+            "somatic_marker", "VentromedialSomaticMarkerEngine"
         )  # WP2 ablated
 
         # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
         self.pulvinar_router: PulvinarAttentionRouter | Any = _ablated(
-            "pulvinar_router", PulvinarAttentionRouter
+            "pulvinar_router", "PulvinarAttentionRouter"
         )  # WP2 ablated
 
         # Round 14 Faculty: Parahippocampal Scene Schemas & Topological Recognition (Epstein / Bar)
         self.parahippocampal_context: ParahippocampalContextEngine | Any = _ablated(
-            "parahippocampal_context", ParahippocampalContextEngine
+            "parahippocampal_context", "ParahippocampalContextEngine"
         )  # WP2 ablated
 
         # Round 14 Faculty: Locus Coeruleus Noradrenergic Exploration-Exploitation Switch (Aston-Jones / Cohen)
         self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any = _ablated(
-            "locus_coeruleus", LocusCoeruleusNoradrenalineEngine
+            "locus_coeruleus", "LocusCoeruleusNoradrenalineEngine"
         )  # WP2 ablated
 
         # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
         self.somatosensory_haptic: SomatosensoryHapticEngine | Any = _ablated(
-            "somatosensory_haptic", SomatosensoryHapticEngine
+            "somatosensory_haptic", "SomatosensoryHapticEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Entorhinal Border Cells & Grid Module Rescaling (Solstad / Barry)
         self.entorhinal_border: EntorhinalBorderCellEngine | Any = _ablated(
-            "entorhinal_border", EntorhinalBorderCellEngine
+            "entorhinal_border", "EntorhinalBorderCellEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Amygdalar Pavlovian Threat Conditioning & Defensive Cascades (LeDoux / Phelps)
         self.amygdala_threat: AmygdalarThreatConditioningEngine | Any = _ablated(
-            "amygdala_threat", AmygdalarThreatConditioningEngine
+            "amygdala_threat", "AmygdalarThreatConditioningEngine"
         )  # WP2 ablated
 
         # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
         self.vta_curiosity: VentralTegmentalCuriosityEngine | Any = _ablated(
-            "vta_curiosity", VentralTegmentalCuriosityEngine
+            "vta_curiosity", "VentralTegmentalCuriosityEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Retrosplenial Heading Integration & Ring Attractors (Taube / Burgess)
         self.retrosplenial_heading: RetrosplenialHeadingEngine | Any = _ablated(
-            "retrosplenial_heading", RetrosplenialHeadingEngine
+            "retrosplenial_heading", "RetrosplenialHeadingEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Thalamic Reticular Nucleus (TRN) Sensory Gating & Shielding (Crick / Halassa)
         self.trn_gating: ThalamicReticularGatingEngine | Any = _ablated(
-            "trn_gating", ThalamicReticularGatingEngine
+            "trn_gating", "ThalamicReticularGatingEngine"
         )  # WP2 ablated
 
         # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
         self.rule_abstraction: DorsolateralRuleAbstractionEngine | Any = _ablated(
-            "rule_abstraction", DorsolateralRuleAbstractionEngine
+            "rule_abstraction", "DorsolateralRuleAbstractionEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Hippocampal CA1 Temporal Distance Cells & Relative Interval Timing (MacDonald / Eichenbaum)
         self.hippocampal_time: HippocampalTimeCellEngine | Any = _ablated(
-            "hippocampal_time", HippocampalTimeCellEngine
+            "hippocampal_time", "HippocampalTimeCellEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Ventrolateral Prefrontal Cortex (vlPFC / rIFG) Motor Rule Retrieval & Response Inhibition (Aron / Wiecki)
         self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any = _ablated(
-            "vl_motor_inhibition", VentrolateralMotorInhibitionEngine
+            "vl_motor_inhibition", "VentrolateralMotorInhibitionEngine"
         )  # WP2 ablated
 
         # Round 17 Faculty: Claustrum Dynamic Inter-Hemispheric Synchrony & Cross-Modal Gestalt Binding (Crick & Koch / Smythies)
         self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any = _ablated(
-            "claustrum_interhemispheric", ClaustrumInterhemisphericIntegrator
+            "claustrum_interhemispheric", "ClaustrumInterhemisphericIntegrator"
         )  # WP2 ablated
 
         # Round 18 Faculty: Anterior Insular Cortex (AIC) Subjective Time Dilation & Interoceptive Pacing (Craig / Wittmann)
         self.anterior_insula_timing: AnteriorInsularTimingEngine | Any = _ablated(
-            "anterior_insula_timing", AnteriorInsularTimingEngine
+            "anterior_insula_timing", "AnteriorInsularTimingEngine"
         )  # WP2 ablated
 
         # Round 18 Faculty: Orbitofrontal Cortex (OFC) Counterfactual Credit Assignment & Contingent Updating (Walton / Rushworth)
         self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any = _ablated(
-            "ofc_counterfactual", OrbitofrontalCreditAssignmentEngine
+            "ofc_counterfactual", "OrbitofrontalCreditAssignmentEngine"
         )  # WP2 ablated
 
         # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
         self.ppn_locomotor: PedunculopontineLocomotorEngine | Any = _ablated(
-            "ppn_locomotor", PedunculopontineLocomotorEngine
+            "ppn_locomotor", "PedunculopontineLocomotorEngine"
         )  # WP2 ablated
 
         # Round 19 Faculty: Hippocampal-Entorhinal Boundary-to-Grid Phase Alignment (Bush / Giocomo)
         self.boundary_grid_aligner: BoundaryGridPhaseAligner | Any = _ablated(
-            "boundary_grid_aligner", BoundaryGridPhaseAligner
+            "boundary_grid_aligner", "BoundaryGridPhaseAligner"
         )  # WP2 ablated
 
         # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
-        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine | Any = _ablated(
-            "mpfc_schema_engine", MedialPrefrontalSchemaEngine
-        )  # WP2 ablated
+        from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
+
+        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine(
+            match_threshold=0.35
+        )
 
         # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
         self.stn_escalator: SubthalamicThresholdEscalator | Any = _ablated(
-            "stn_escalator", SubthalamicThresholdEscalator
+            "stn_escalator", "SubthalamicThresholdEscalator"
         )  # WP2 ablated
 
         # Round 20 Capstone Faculty: Global Neuronal Workspace Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
         self.workspace_ignition: GlobalWorkspaceIgnitionEngine | Any = _ablated(
-            "workspace_ignition", GlobalWorkspaceIgnitionEngine
+            "workspace_ignition", "GlobalWorkspaceIgnitionEngine"
         )  # WP2 ablated
 
         # Connect GNW conscious broadcast listener for executive arbitration
@@ -1007,7 +1079,7 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Predictive Confidence Calibrator (W090)
         self.confidence_calibrator: ConfidenceCalibrator | Any = _ablated(
-            "confidence_calibrator", ConfidenceCalibrator
+            "confidence_calibrator", "ConfidenceCalibrator"
         )  # WP2 ablated
 
         # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
@@ -1015,8 +1087,7 @@ class AutonomousEpistemicEngine:
         # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
 
         # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
-        self.relational_confidence_map: dict[str, float] = {}
-        self.evidence_provenance_log: list[dict[str, Any]] = []
+        # Delegated to formal internal memory stores (symbolic_theory and working_memory)
 
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
@@ -1050,7 +1121,9 @@ class AutonomousEpistemicEngine:
             getattr(services, "capability_resolver", None) if services is not None else None
         )
         self.tiered_workspace: TieredWorkspace | None = (
-            getattr(services, "tiered_workspace", None) if services is not None else None
+            tiered_workspace
+            if tiered_workspace is not None
+            else (getattr(services, "tiered_workspace", None) if services is not None else None)
         )
         self.transaction_manager: TransactionManager | None = (
             getattr(services, "transaction_manager", None) if services is not None else None
@@ -1059,19 +1132,16 @@ class AutonomousEpistemicEngine:
             getattr(services, "world_kernel", None) if services is not None else None
         )
         self.active_task_frame: TaskFrame | None = None
-        if services is not None and self.tiered_workspace is not None:
+        if self.tiered_workspace is not None:
             self.attach_tiered_workspace(self.tiered_workspace)
 
         # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
-        from hbllm.hcir.world.autonomous_learning import (
-            DeliberationEntropyMonitor,
-            PointActuationAffordanceLearner,
-        )
-
         self.point_actuation_learner: PointActuationAffordanceLearner | Any = _ablated(
-            "point_actuation_learner", PointActuationAffordanceLearner
+            "point_actuation_learner", "PointActuationAffordanceLearner"
         )  # WP2 ablated
-        self.entropy_monitor: DeliberationEntropyMonitor = DeliberationEntropyMonitor()
+        self.entropy_monitor: Any = _ablated(
+            "entropy_monitor", "DeliberationEntropyMonitor"
+        )  # P2-6 ablated (Δscore=-0.0202)
 
         # Canonical 5-Stage Active Inference Pipeline (AGENTS.md §2, WP1)
         from hbllm.hcir.world.cortical_pipeline import CorticalPipeline
@@ -1080,20 +1150,55 @@ class AutonomousEpistemicEngine:
             transaction_manager=self.transaction_manager,
             engine=self,
         )
+        # Goal Arbiter (WP10, Gap 5)
+        from hbllm.hcir.world.goal_arbiter import GoalArbiter
+
+        self.goal_arbiter: GoalArbiter = GoalArbiter()
+        self.active_arbitrated_goal: Any | None = None
+        self.grounding_bridge: Any | None = None
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
+
+    def attach_grounding_bridge(
+        self,
+        bridge: Any | None = None,
+    ) -> Any:
+        """Attaches an SGE CorticalGroundingBridge to bind SGE into the active inference cycle."""
+        if bridge is not None:
+            self.grounding_bridge = bridge
+        else:
+            from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
+
+            ws = getattr(self, "workspace", None)
+            if ws is None and hasattr(self, "services") and self.services is not None:
+                ws = getattr(self.services, "workspace", None)
+            self.grounding_bridge = CorticalGroundingBridge(
+                workspace=ws,
+                services=self.services,
+                transaction_manager=self.transaction_manager,
+                symbolic_theory=self.symbolic_theory,
+                surprise_engine=getattr(self, "surprise_engine", None),
+            )
+        self.cortical_pipeline.grounding_bridge = self.grounding_bridge
+        return self.grounding_bridge
 
     # ─────────────────────────────────────────────────────────────────────────
     # Working Memory & Knowledge Base Properties (Single Source of Truth)
     # ─────────────────────────────────────────────────────────────────────────
 
     @property
-    def verified_safe_features(self) -> set[int]:
+    def verified_safe_features(self) -> GovernedSetView:
         """Empirically verified safe/walkable features in symbolic world theory."""
-        return self.symbolic_theory.walkable_features
+        return GovernedSetView(
+            self.symbolic_theory.walkable_features,
+            on_add=lambda f: self.symbolic_theory.induce_walkable(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_walkable(f, reason="manual_discard"),
+        )
 
     @verified_safe_features.setter
-    def verified_safe_features(self, val: set[int]) -> None:
-        self.symbolic_theory.walkable_features = val
+    def verified_safe_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_walkable(f, evidence="verified_safe_features_setter")
 
     @property
     def mental_plan(self) -> deque[MentalSimulationStep]:
@@ -1206,6 +1311,29 @@ class AutonomousEpistemicEngine:
         self.working_memory.visuospatial.learned_goal_positions = val
         if hasattr(self, "_state") and self._state is not None:
             self._state.learned_goal_positions = set(val)
+
+    # ── Homeostatic Motivation & Social Directives (WP10) ────────────
+
+    @property
+    def homeostatic_state(self) -> Any:
+        """Homeostatic allostatic state in prefrontal working memory."""
+        return self.working_memory.homeostatic_state
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume computational/physical energy budget."""
+        return self.working_memory.consume_energy(amount)
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish computational/physical energy budget."""
+        return self.working_memory.replenish_energy(amount)
+
+    def add_social_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social or environment instruction."""
+        self.working_memory.add_social_instruction(instruction)
+
+    def clear_social_instructions(self) -> None:
+        """Clear all social instructions."""
+        self.working_memory.clear_social_instructions()
 
     @property
     def learned_receptacle_positions(self) -> set[tuple[int, int]]:
@@ -1506,11 +1634,11 @@ class AutonomousEpistemicEngine:
         self.working_memory.inhibited_actions = val
 
     @property
-    def prior_avatar_feature(self) -> int | None:
+    def prior_avatar_feature(self) -> Any | None:
         return self.working_memory.prior_avatar_feature
 
     @prior_avatar_feature.setter
-    def prior_avatar_feature(self, val: int | None) -> None:
+    def prior_avatar_feature(self, val: Any | None) -> None:
         self.working_memory.prior_avatar_feature = val
 
     @property
@@ -1650,11 +1778,49 @@ class AutonomousEpistemicEngine:
         self.tiered_workspace = tiered
         frame = tiered.create_task_frame(goal_id=goal_id)
         self.active_task_frame = frame
-        if self.transaction_manager is None:
-            if self.services is not None:
-                self.transaction_manager = self.services.transaction_manager
-            else:
-                self.transaction_manager = frame.workspace.transaction_manager
+
+        # Ensure active task frame has a TransactionManager and bind it to engine
+        verifier = (
+            getattr(self.services, "constitutional_verifier", None)
+            if self.services is not None
+            else None
+        )
+        stages = [verifier] if verifier is not None else None
+        event_bus = (
+            getattr(self.services, "event_bus", None)
+            if self.services is not None
+            else getattr(self, "event_bus", None)
+        )
+
+        from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+        # A task frame's working scratch workspace needs a TM bound to that exact frame.workspace
+        if (
+            self.transaction_manager is not None
+            and getattr(self.transaction_manager, "workspace", None) is frame.workspace
+        ):
+            tm = self.transaction_manager
+        elif (
+            frame.workspace.transaction_manager is not None
+            and getattr(frame.workspace.transaction_manager, "workspace", None) is frame.workspace
+        ):
+            tm = frame.workspace.transaction_manager
+        else:
+            tm = TransactionManager(
+                workspace=frame.workspace,
+                verification_stages=stages,
+                event_bus=event_bus,
+            )
+            frame.workspace.attach_transaction_manager(tm, replace=True)
+
+        self.transaction_manager = tm
+        if (
+            self.services is not None
+            and getattr(self.services, "workspace", None) is not frame.workspace
+        ):
+            self.services.workspace = frame.workspace
+            self.services.transaction_manager = tm
+
         logger.info(
             "AutonomousEpistemicEngine: Attached TieredWorkspace (Frame: %s, Goal: %s)",
             frame.frame_id,
@@ -1715,17 +1881,50 @@ class AutonomousEpistemicEngine:
                     except ValueError:
                         pass
                 if feat is not None:
-                    self.symbolic_theory.goal_features.add(int(feat))
-                    self.symbolic_theory.candidate_goal_features.add(int(feat))
-                    hydrated_count += 1
-                    logger.info(
-                        "AutonomousEpistemicEngine: Hydrated persistent goal feature %s", feat
+                    has_reward = (
+                        props.get("has_terminal_reward") is True
+                        or props.get("provenance")
+                        in (
+                            "terminal_reward",
+                            "terminal_reward:success",
+                            str(TerminalSignal.SUCCESS),
+                        )
+                        or props.get("evidence_rank", 0) >= 100
+                        or (
+                            props.get("has_terminal_reward") is not False
+                            and props.get("evidence_rank") is None
+                            and not any(
+                                w in str(props.get("provenance", "")).lower()
+                                for w in ("unverified", "candidate", "heuristic")
+                            )
+                            and (
+                                "goal" in nid.lower()
+                                or "winning" in str(getattr(node, "definition", "")).lower()
+                                or "win" in str(props.get("description", "")).lower()
+                            )
+                        )
                     )
+                    if has_reward:
+                        self.symbolic_theory.induce_goal(
+                            int(feat), evidence="hydration:terminal_reward"
+                        )
+                        hydrated_count += 1
+                        logger.info(
+                            "AutonomousEpistemicEngine: Hydrated persistent goal feature %s", feat
+                        )
+                    else:
+                        logger.info(
+                            "AutonomousEpistemicEngine: Hydration skipped unverified goal feature %s (no terminal reward provenance)",
+                            feat,
+                        )
+                        self.symbolic_theory.induce_candidate_goal(
+                            int(feat), evidence="hydration:unverified"
+                        )
 
             # 3. Restore Learned Spatial Goals
             elif nid.startswith("learned_goal_") or ntype == "goal":
                 pos = props.get("position")
-                if pos and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     gp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_goal_").split("_")
@@ -1740,7 +1939,7 @@ class AutonomousEpistemicEngine:
             # 4. Restore Learned Barriers
             elif nid.startswith("learned_barrier_") or ntype == "constraint":
                 pos = props.get("position")
-                if pos and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     bp = (int(pos[0]), int(pos[1]))
                 else:
                     parts = nid.removeprefix("learned_barrier_").split("_")
@@ -1788,11 +1987,21 @@ class AutonomousEpistemicEngine:
         if not ops:
             return None
 
-        tx = HCIRTransaction(
-            author="AutonomousEpistemicEngine",
-            operations=ops,
+        dest_ws = getattr(self.transaction_manager, "workspace", None) or getattr(
+            self.active_task_frame, "workspace", None
         )
-        committed_tx = self.transaction_manager.commit(tx)
+        filtered = self._filter_unchanged_upserts(dest_ws, ops)
+        if not filtered:
+            filtered = [ops[0]]  # Ensure atomic telemetry heartbeat when tx requested
+
+        batch_size = 400
+        committed_tx = None
+        for i in range(0, len(filtered), batch_size):
+            tx = HCIRTransaction(
+                author="AutonomousEpistemicEngine",
+                operations=filtered[i : i + batch_size],
+            )
+            committed_tx = self.transaction_manager.commit(tx)
 
         if self.tiered_workspace is not None:
             self.tiered_workspace.notify_commit()
@@ -1955,7 +2164,7 @@ class AutonomousEpistemicEngine:
         self.collision_cones.update_ballistic_particle_trajectories(
             particles=particles,
             grid=grid,
-            barrier_features=barriers,
+            barrier_features=set(barriers),
             absorbing_features=absorbing_features,
             deflection_mode=deflection_mode,
             horizon=horizon,
@@ -1973,22 +2182,39 @@ class AutonomousEpistemicEngine:
         target_version = workspace.snapshot_manager.current_version
         sim_ws = workspace.get_branch(sim_branch) or workspace
 
-        if services is None:
-            # Use the engine's services when present; otherwise the sim branch
-            # workspace's own attached transaction authority (no ad-hoc mirror TM).
-            services = getattr(self, "services", None)
-        if services is None:
-            tx_mgr = sim_ws.transaction_manager
-            resolver = CapabilityResolver()
-            scheduler = KernelInstructionScheduler()
-            services = KernelServices(
+        tx_mgr = sim_ws.transaction_manager
+        if tx_mgr is None:
+            from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+            tx_mgr = TransactionManager(workspace=sim_ws)
+            sim_ws.attach_transaction_manager(tx_mgr, replace=True)
+
+        if services is not None and getattr(services, "workspace", None) is sim_ws:
+            branch_services = services
+        else:
+            base_services = services or getattr(self, "services", None)
+            resolver = (
+                base_services.capability_resolver
+                if base_services is not None
+                else CapabilityResolver()
+            )
+            scheduler = (
+                base_services.scheduler
+                if base_services is not None
+                else KernelInstructionScheduler()
+            )
+            from hbllm.hcir.kernel.event_bus import KernelEventBus
+
+            event_bus = base_services.event_bus if base_services is not None else KernelEventBus()
+            branch_services = KernelServices(
                 workspace=sim_ws,
                 transaction_manager=tx_mgr,
                 capability_resolver=resolver,
                 scheduler=scheduler,
+                event_bus=event_bus,
             )
 
-        interpreter = HCIRInterpreter(sim_ws, services)
+        interpreter = HCIRInterpreter(sim_ws, branch_services)
         exec_result = await interpreter.execute(stream)
         has_errors = (
             any(a.severity == "error" for a in exec_result.annotations) or not exec_result.success
@@ -1996,9 +2222,31 @@ class AutonomousEpistemicEngine:
 
         if not has_errors:
             if sim_ws is not workspace:
+                tm = (
+                    workspace.transaction_manager
+                    or (
+                        self.services.transaction_manager
+                        if self.services is not None
+                        and getattr(self.services.transaction_manager, "workspace", None)
+                        is workspace
+                        else None
+                    )
+                    or (
+                        self.transaction_manager
+                        if self.transaction_manager is not None
+                        and getattr(self.transaction_manager, "workspace", None) is workspace
+                        else None
+                    )
+                )
+                if tm is None:
+                    from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+                    tm = TransactionManager(workspace=workspace)
+                    workspace.attach_transaction_manager(tm, replace=True)
+
                 merged = workspace.merge_branch(
                     sim_branch,
-                    transaction_manager=self.transaction_manager,
+                    transaction_manager=tm,
                     author="subgoal_exec",
                 )
                 if not merged:
@@ -3149,12 +3397,19 @@ class AutonomousEpistemicEngine:
     @property
     def phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase."""
+        if (
+            hasattr(self, "working_memory")
+            and getattr(self.working_memory, "phase", None) is not None
+        ):
+            return self.working_memory.phase
         if hasattr(self, "state") and getattr(self.state, "phase", None) is not None:
             return self.state.phase
         return self._phase
 
     @phase.setter
     def phase(self, value: EpistemicPhase) -> None:
+        if hasattr(self, "working_memory"):
+            self.working_memory.phase = value
         if hasattr(self, "state"):
             self.state.phase = value
         self.transition_to_phase(value, reason="state_assignment")
@@ -3164,8 +3419,60 @@ class AutonomousEpistemicEngine:
         """Active cognitive lifecycle phase (alias)."""
         return self.phase
 
+    @property
+    def relational_confidence_map(self) -> dict[str, float]:
+        """Relational confidence map managed in symbolic world theory (Invariant 8)."""
+        return self.symbolic_theory.relational_confidence_map
+
+    @relational_confidence_map.setter
+    def relational_confidence_map(self, val: dict[str, float]) -> None:
+        self.symbolic_theory.relational_confidence_map = val
+
+    @property
+    def evidence_provenance_log(self) -> list[dict[str, Any]]:
+        """Evidence provenance log managed in prefrontal working memory (Invariant 8)."""
+        return self.working_memory.evidence_provenance_log
+
+    @evidence_provenance_log.setter
+    def evidence_provenance_log(self, val: list[dict[str, Any]]) -> None:
+        self.working_memory.evidence_provenance_log = val
+
+    @property
+    def _pipeline_runs(self) -> int:
+        return self.working_memory.pipeline_runs
+
+    @_pipeline_runs.setter
+    def _pipeline_runs(self, val: int) -> None:
+        self.working_memory.pipeline_runs = val
+
+    @property
+    def pipeline_runs(self) -> int:
+        return self.working_memory.pipeline_runs
+
+    @pipeline_runs.setter
+    def pipeline_runs(self, val: int) -> None:
+        self.working_memory.pipeline_runs = val
+
+    @property
+    def _last_decision_branch(self) -> str | None:
+        return self.working_memory.last_decision_branch
+
+    @_last_decision_branch.setter
+    def _last_decision_branch(self, val: str | None) -> None:
+        self.working_memory.last_decision_branch = val
+
+    @property
+    def last_decision_branch(self) -> str | None:
+        return self.working_memory.last_decision_branch
+
+    @last_decision_branch.setter
+    def last_decision_branch(self, val: str | None) -> None:
+        self.working_memory.last_decision_branch = val
+
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
+        if hasattr(self, "working_memory"):
+            self.working_memory.phase = new_phase
         if hasattr(self, "state"):
             self.state.phase = new_phase
         if self._phase != new_phase:
@@ -3445,7 +3752,7 @@ class AutonomousEpistemicEngine:
     # ── Property Pass-Throughs to HCIRSymbolicWorldTheory ─────────────────────
 
     @property
-    def avatar_feature(self) -> int | None:
+    def avatar_feature(self) -> Any | None:
         if hasattr(self, "state") and self.state.avatar_feature is not None:
             return self.state.avatar_feature
         if hasattr(self, "state") and self.state.avatar_features:
@@ -3457,7 +3764,7 @@ class AutonomousEpistemicEngine:
         return None
 
     @avatar_feature.setter
-    def avatar_feature(self, val: int | None) -> None:
+    def avatar_feature(self, val: Any | None) -> None:
         self._avatar_feature = val
         if hasattr(self, "state"):
             self.state.avatar_feature = val
@@ -3468,7 +3775,7 @@ class AutonomousEpistemicEngine:
             self.avatar_features.clear()
 
     @property
-    def avatar_features(self) -> set[int]:
+    def avatar_features(self) -> set[Any]:
         if hasattr(self, "state"):
             return self.state.avatar_features
         return self._avatar_features
@@ -3663,44 +3970,84 @@ class AutonomousEpistemicEngine:
         )
 
     @property
-    def learned_goal_features(self) -> set[int]:
-        return self.symbolic_theory.goal_features
+    def learned_goal_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.goal_features,
+            on_add=lambda f: self.symbolic_theory.induce_goal(f, evidence="terminal_reward:manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_goal(f, reason="manual_discard"),
+            on_clear=self.symbolic_theory.clear_goals,
+        )
 
     @learned_goal_features.setter
-    def learned_goal_features(self, val: set[int]) -> None:
-        self.symbolic_theory.goal_features = val
+    def learned_goal_features(self, val: Any) -> None:
+        if not val:
+            self.symbolic_theory.clear_goals()
+        else:
+            for f in val:
+                self.symbolic_theory.induce_goal(f, evidence="learned_goal_features_setter")
 
     @property
-    def learned_barrier_features(self) -> set[int]:
-        return self.symbolic_theory.barrier_features
+    def learned_barrier_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.barrier_features,
+            on_add=lambda f: self.symbolic_theory.induce_barrier(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_barrier(f, reason="manual_discard"),
+            on_clear=self.symbolic_theory.clear_barriers,
+        )
 
     @learned_barrier_features.setter
-    def learned_barrier_features(self, val: set[int]) -> None:
-        self.symbolic_theory.barrier_features = val
+    def learned_barrier_features(self, val: Any) -> None:
+        if not val:
+            self.symbolic_theory.clear_barriers()
+        else:
+            for f in val:
+                self.symbolic_theory.induce_barrier(f, evidence="learned_barrier_features_setter")
 
     @property
-    def learned_walkable_features(self) -> set[int]:
-        return self.symbolic_theory.walkable_features
+    def learned_walkable_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.walkable_features,
+            on_add=lambda f: self.symbolic_theory.induce_walkable(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_walkable(f, reason="manual_discard"),
+        )
 
     @learned_walkable_features.setter
-    def learned_walkable_features(self, val: set[int]) -> None:
-        self.symbolic_theory.walkable_features = val
+    def learned_walkable_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_walkable(f, evidence="learned_walkable_features_setter")
 
     @property
-    def learned_cargo_features(self) -> set[int]:
-        return self.symbolic_theory.cargo_features
+    def learned_cargo_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.cargo_features,
+            on_add=lambda f: self.symbolic_theory.induce_cargo(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_cargo(f, reason="manual_discard"),
+        )
 
     @learned_cargo_features.setter
-    def learned_cargo_features(self, val: set[int]) -> None:
-        self.symbolic_theory.cargo_features = val
+    def learned_cargo_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_cargo(f, evidence="learned_cargo_features_setter")
 
     @property
-    def learned_receptacle_features(self) -> set[int]:
-        return self.symbolic_theory.receptacle_features
+    def learned_receptacle_features(self) -> GovernedSetView:
+        return GovernedSetView(
+            self.symbolic_theory.receptacle_features,
+            on_add=lambda f: self.symbolic_theory.induce_receptacle(f, evidence="manual"),
+            on_discard=lambda f: self.symbolic_theory.retract_receptacle(
+                f, reason="manual_discard"
+            ),
+        )
 
     @learned_receptacle_features.setter
-    def learned_receptacle_features(self, val: set[int]) -> None:
-        self.symbolic_theory.receptacle_features = val
+    def learned_receptacle_features(self, val: Any) -> None:
+        if val:
+            for f in val:
+                self.symbolic_theory.induce_receptacle(
+                    f, evidence="learned_receptacle_features_setter"
+                )
 
     # ── Epistemic status of feature values ──────────────────────────────────────
     UNVERIFIED_FEATURE_COST: float = 8.0
@@ -3722,11 +4069,7 @@ class AutonomousEpistemicEngine:
         th = self.symbolic_theory
         if th.is_walkable(feat) or th.is_barrier(feat):
             return False
-        if (
-            feat in th.goal_features
-            or feat in th.candidate_goal_features
-            or feat in th.cargo_features
-        ):
+        if feat in th.goal_features or feat in th.cargo_features:
             return False
         return True
 
@@ -3737,6 +4080,18 @@ class AutonomousEpistemicEngine:
     def load_instructions(self, instructions: Sequence[str] | str | None) -> None:
         """Load executive cognitive directives into working memory to guide epistemic policies."""
         self.working_memory.load_instructions(instructions)
+
+    @property
+    def current_context_id(self) -> str:
+        return getattr(self, "_current_context_id", str(self._current_level))
+
+    @current_context_id.setter
+    def current_context_id(self, val: str) -> None:
+        self._current_context_id = str(val)
+        try:
+            self.set_current_level(int(val))
+        except (ValueError, TypeError):
+            pass
 
     @property
     def current_level(self) -> int:
@@ -3769,12 +4124,39 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.world.percept import EpisodeBoundaryKind
 
         kind = getattr(boundary, "kind", boundary)
-        if kind == EpisodeBoundaryKind.LEVEL_COMPLETE or kind == "level_complete":
-            self.reset_episode(retain_dynamics=True, is_new_level=True)
+        same_level = getattr(boundary, "same_level", False)
+        if kind in (
+            EpisodeBoundaryKind.GOAL_REACHED,
+            EpisodeBoundaryKind.LEVEL_COMPLETE,
+            "goal_reached",
+            "level_complete",
+        ):
+            # Hippocampal sleep consolidation MUST precede the episodic reset, which
+            # clears the active episode buffer that carries the winning trace. Also cover
+            # traces already archived into successful_trajectories by SWR replay inside
+            # AssimilationStage before on_boundary fires.
+            ep = self.episodic_cortex
+            has_unconsolidated_win = bool(ep.current_episode) or (
+                len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0)
+            )
+            if has_unconsolidated_win:
+                try:
+                    self.consolidate_episodic_memory(terminal_reward=1.0)
+                except Exception as exc:  # consolidation must never break the lifecycle
+                    logger.debug("Episodic consolidation failed at boundary: %s", exc)
+                if getattr(self, "library_learner", None) is not None:
+                    try:
+                        self.library_learner.sleep_consolidation(
+                            tiered_workspace=self.tiered_workspace,
+                            tenant_id=self.world_id,
+                        )
+                    except Exception as exc:
+                        logger.debug("Library sleep consolidation failed: %s", exc)
+            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             self.reset_episode(retain_dynamics=True, is_new_level=False)
         else:
-            self.reset_episode(retain_dynamics=True, is_new_level=True)
+            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         # Fan out to every faculty exposing a boundary handler (WP0.5).
         for attr in vars(self).values():
             handler = getattr(attr, "on_boundary", None)
@@ -3807,7 +4189,7 @@ class AutonomousEpistemicEngine:
         )
         self.apply_delta(delta, author="episodic_cortex")
         self.step_counter = 0
-        if hasattr(self, "entropy_monitor") and self.entropy_monitor is not None:
+        if hasattr(self, "entropy_monitor") and self.entropy_monitor:
             self.entropy_monitor.reset_for_level()
         if is_new_level:
             self.environmental_step_limit = None
@@ -3833,7 +4215,6 @@ class AutonomousEpistemicEngine:
         schemas = res.get("schemas", [])
         for schema in schemas:
             self.symbolic_theory.register_predicate(schema.causal_predicate)
-            self.episodic_cortex.consolidated_macros[schema.schema_id] = schema.action_motif
             if hasattr(self, "procedural_macros"):
                 self.procedural_macros[schema.schema_id] = schema.action_motif
 
@@ -3841,9 +4222,20 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.spatial_planner import SpatialActionIntent
         from hbllm.hcir.world.skill_program_synthesizer import ActionTraceStep
 
-        if terminal_reward > 0 and self.episodic_cortex.current_episode:
+        ep = self.episodic_cortex
+        unconsolidated_traces: list[list[Any]] = []
+        if terminal_reward > 0:
+            if ep.current_episode:
+                unconsolidated_traces.append(list(ep.current_episode))
+            elif len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0):
+                unconsolidated_traces.extend(
+                    ep.successful_trajectories[getattr(ep, "consolidated_trajectory_count", 0) :]
+                )
+            ep.consolidated_trajectory_count = len(ep.successful_trajectories)
+
+        for trace in unconsolidated_traces:
             steps: list[ActionTraceStep] = []
-            for tr in self.episodic_cortex.current_episode:
+            for tr in trace:
                 intent = (
                     SpatialActionIntent.NAVIGATE_TO
                     if self.is_displacement_action(tr.action_id)
@@ -3861,47 +4253,35 @@ class AutonomousEpistemicEngine:
                     )
                 )
             if steps:
-                req_acts = {
-                    tr.action_id
-                    for tr in self.episodic_cortex.current_episode
-                    if isinstance(tr.action_id, int)
-                }
+                req_acts = {tr.action_id for tr in trace if isinstance(tr.action_id, int)}
                 self.skill_synthesizer.record_winning_trace(
                     steps=steps,
                     required_actions=req_acts,
                     terminal_reward=terminal_reward,
                 )
+                if hasattr(self, "library_learner") and self.library_learner is not None:
+                    context_feats = {
+                        "goal_count": len(self.learned_goal_positions),
+                        "barrier_count": len(self.learned_barriers),
+                        "has_barriers": len(self.learned_barriers) > 0,
+                    }
+                    self.library_learner.wake_record_episode(
+                        intents_or_steps=steps,
+                        context_id=self.current_context_id,
+                        context_features=context_feats,
+                        success=terminal_reward > 0,
+                    )
 
         newly_induced = self.skill_synthesizer.induce_all_recurrent_skills()
         res["induced_skills"] = newly_induced
 
-        # Promote newly induced skills to TieredWorkspace.persistent if attached
-        if self.tiered_workspace is not None:
+        # Promote newly induced skills to TieredWorkspace.persistent and register schemas in mPFC
+        if newly_induced:
             for skill in newly_induced:
-                skill_name = getattr(skill, "name", "skill")
-                subgoals = getattr(skill, "program", [])
-                subgoal_count = (
-                    len(getattr(subgoals, "subgoals", []))
-                    if hasattr(subgoals, "subgoals")
-                    else len(subgoals)
-                )
-                skill_node = SkillNode(
-                    id=f"synthesized_skill_{skill_name}",
-                    name=skill_name,
-                    skill_name=skill_name,
-                    description=f"Synthesized neuro-symbolic DSL skill with {subgoal_count} subgoals",
-                    preconditions=[str(getattr(skill, "signature", ""))],
-                    success_rate=0.9,
-                )
-                self.tiered_workspace.persistent.commit_operations(
-                    [
-                        TransactionOperation(
-                            op=TransactionOp.UPSERT_NODE,
-                            node_id=skill_node.id,
-                            node_data=skill_node.model_dump(),
-                        )
-                    ],
-                    author="SkillProgramSynthesizer",
+                self.mpfc_schema_engine.register_skill_schema(skill)
+            if self.tiered_workspace is not None:
+                self.skill_synthesizer.persist_to_workspace(
+                    self.tiered_workspace, tenant_id=self.world_id
                 )
 
         # Propose state mutations through TransactionManager if present
@@ -3919,6 +4299,227 @@ class AutonomousEpistemicEngine:
             self.transaction_manager.commit(tx)
 
         return res
+
+    def query_transferable_skills(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+        min_confidence: float = 0.40,
+    ) -> list[tuple[DeclarativeNeuroSymbolicSkill, float, str]]:
+        """Query mPFC schema engine for transferable procedural skills matching current environmental context."""
+        candidates = list(self.skill_synthesizer.synthesized_skills.values())
+        if hasattr(self, "library_learner") and self.library_learner is not None:
+            for m_skill in self.library_learner.macro_skills.values():
+                if m_skill not in candidates:
+                    candidates.append(m_skill)
+
+        if not candidates and self.tiered_workspace is not None:
+            self.skill_synthesizer.load_from_workspace(
+                self.tiered_workspace, tenant_id=self.world_id
+            )
+            candidates = list(self.skill_synthesizer.synthesized_skills.values())
+            if hasattr(self, "library_learner") and self.library_learner is not None:
+                self.library_learner.load_from_workspace(
+                    self.tiered_workspace, tenant_id=self.world_id
+                )
+                for m_skill in self.library_learner.macro_skills.values():
+                    if m_skill not in candidates:
+                        candidates.append(m_skill)
+
+        if not candidates:
+            return []
+
+        from hbllm.hcir.skills.declarative import SkillEvaluationContext
+
+        ctx = SkillEvaluationContext(
+            grid=grid,
+            available_actions=available_actions,
+            metadata=metadata,
+        )
+        matched = self.mpfc_schema_engine.query_transferable_skills(
+            ctx, candidates, min_confidence=min_confidence
+        )
+
+        if hasattr(self, "library_learner") and self.library_learner is not None and matched:
+            proposals = dict(self.library_learner.sample_proposals(metadata or {}, top_k=20))
+            reranked: list[tuple[DeclarativeNeuroSymbolicSkill, float, str]] = []
+            for skill, score, reason in matched:
+                bonus = proposals.get(skill.skill_name, 0.0) * 0.2
+                reranked.append((skill, score + bonus, reason))
+            reranked.sort(key=lambda item: item[1], reverse=True)
+            return reranked
+
+        return matched
+
+    def retrieve_relational_analogies(
+        self,
+        grid: np.ndarray,
+        min_match_score: float = 0.5,
+    ) -> list[tuple[Any, float, list[Any]]]:
+        """Extract object scene graph from grid and retrieve analogous relational concepts (G6)."""
+        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+            RelationalGraphMatcher,
+        )
+
+        query_graph = RelationalGraphMatcher.build_scene_graph(grid)
+        return self.working_concept_store.retrieve_analogous_concepts(
+            query_graph=query_graph,
+            min_match_score=min_match_score,
+        )
+
+    def query_latent_counterfactual(
+        self,
+        action_type: str,
+        target_role: str,
+        hypothetical_latent_state: bool,
+    ) -> dict[str, Any] | None:
+        """Evaluate Pearl Level 3 counterfactual prediction over hypothetical latent state (G7)."""
+        return self.schema_inducer.evaluate_latent_counterfactual(
+            action_type=action_type,
+            target_role=target_role,
+            hypothetical_latent_state=hypothetical_latent_state,
+        )
+
+    def explain_last_decision(self) -> str:
+        """Generate human-interpretable natural language explanation of the last decision (G8 / §15)."""
+        act = self.last_action
+        if act is None:
+            return "No decision has been made yet: agent is in an uninitialized idle state."
+
+        phase = getattr(self, "epistemic_phase", "Active Deliberation")
+        target = getattr(self, "active_subgoal", None) or getattr(self, "current_target", None)
+
+        pc = getattr(self, "hierarchical_precision_controller", None) or getattr(
+            self, "precision_controller", None
+        )
+        lp_str = ""
+        if pc is not None and hasattr(pc, "current_state"):
+            lp = getattr(pc.current_state, "learning_progress", 0.0)
+            gain = getattr(pc.current_state, "epistemic_exploration_gain", 1.0)
+            lp_str = f" [Learning progress: {lp:+.2f}, Exploration gain: {gain:.2f}]"
+
+        parts = [f"Chose motor action {act} during epistemic phase '{phase}'.{lp_str}"]
+        if target is not None:
+            parts.append(f"Pursuing target/subgoal at {target}.")
+
+        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
+            active_causes = [
+                p
+                for p in getattr(self.symbolic_theory, "causal_predicates", [])
+                if getattr(p, "is_active", True)
+            ]
+            if active_causes:
+                parts.append(
+                    f"Conditioned on active causal hypothesis '{active_causes[-1].variable} {active_causes[-1].operator} {active_causes[-1].value}'."
+                )
+
+        return " ".join(parts)
+
+    def record_domain_outcome(
+        self,
+        domain_id: str,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> Any:
+        """Record domain outcome in prefrontal working memory metacognitive competence model (G9)."""
+        return self.working_memory.record_domain_episode(
+            domain_id=domain_id,
+            success=success,
+            mean_error=mean_error,
+            predicted_confidence=predicted_confidence,
+        )
+
+    def get_highest_priority_practice_domain(self) -> str | None:
+        """Get the domain currently in the Zone of Proximal Development with highest practice priority."""
+        return self.working_memory.get_highest_priority_practice_domain()
+
+    def track_and_infer_agent_intents(
+        self,
+        entity_id: str,
+        feature_id: int,
+        position: tuple[int, int],
+        avatar_pos: tuple[int, int] | None = None,
+        candidate_goals: list[tuple[int, int]] | None = None,
+        grid: Any | None = None,
+    ) -> Any:
+        """Track entity position, detect intentional agency, and infer goal intent (G10)."""
+        self.social_cognition.track_entity_position(
+            entity_id=entity_id,
+            feature_id=feature_id,
+            position=position,
+            grid=grid,
+        )
+        return self.social_cognition.invert_planner_for_intent(
+            entity_id=entity_id,
+            avatar_pos=avatar_pos or getattr(self, "avatar_pos", None),
+            candidate_goals=candidate_goals or getattr(self, "goals", []),
+        )
+
+    def discover_and_induce_options(self, grid: Any | None = None) -> list[Any]:
+        """Discover topological bottleneck states and induce temporal options (G11)."""
+        current_grid = grid if grid is not None else getattr(self, "grid", None)
+        if current_grid is None or not isinstance(current_grid, np.ndarray):
+            return []
+
+        bottlenecks = self.option_discovery.discover_bottlenecks_from_grid(current_grid)
+        options = []
+        for b in bottlenecks:
+            opt = self.option_discovery.induce_option(bottleneck=b)
+            options.append(opt)
+        return options
+
+    def record_option_usage(self, option_id: str, steps: int, success: bool = True) -> None:
+        """Record option execution steps and success to track reuse rate (G11)."""
+        self.option_discovery.record_option_execution(
+            option_id=option_id, steps=steps, success=success
+        )
+
+    def get_option_reuse_rate(self) -> float:
+        """Get the current option reuse rate across episodes (G11)."""
+        return self.option_discovery.get_option_reuse_rate()
+
+    def evaluate_action_value_safety(
+        self,
+        action_id: Any,
+        action_type: str,
+        expected_value: float,
+        epistemic_variance: float,
+        is_hazard_cone: bool = False,
+    ) -> tuple[bool, Any | None]:
+        """Evaluate action under value variance and gate against irreversible hazard risk (G15)."""
+        return self.value_uncertainty_arbiter.evaluate_action_safety(
+            action_id=action_id,
+            action_type=action_type,
+            expected_value=expected_value,
+            epistemic_variance=epistemic_variance,
+            is_hazard_cone=is_hazard_cone,
+        )
+
+    def record_goal_provenance(
+        self,
+        goal_id: str,
+        intent: str,
+        parent_goal_id: str | None = None,
+        target_entity: str | None = None,
+        justification: str = "",
+        utility_score: float = 0.5,
+    ) -> Any:
+        """Record goal decomposition link in causal provenance ancestry tree (G15)."""
+        return self.goal_provenance.register_goal(
+            goal_id=goal_id,
+            intent=intent,
+            parent_goal_id=parent_goal_id,
+            target_entity=target_entity,
+            justification=justification,
+            utility_score=utility_score,
+        )
+
+    def explain_goal_provenance(self, goal_id: str) -> str:
+        """Produce human-interpretable explanation of goal provenance chain (G15)."""
+        chain = self.goal_provenance.get_provenance_chain(goal_id)
+        return chain.explain()
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
@@ -4025,31 +4626,46 @@ class AutonomousEpistemicEngine:
         H, W = raw_observation.shape[0], raw_observation.shape[1]
         return PerceptionFrame(shape=(H, W))
 
-    def estimate_background(self, grid: np.ndarray) -> int:
+    def estimate_background(self, grid: np.ndarray) -> Any:
+        walkables = (
+            set(self.symbolic_theory.walkable_features)
+            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
+            else None
+        )
+        barriers = (
+            set(self.symbolic_theory.barrier_features)
+            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
+            else None
+        )
         bg = PerceptionEngine.estimate_background(
             grid,
-            barrier_features=self.symbolic_theory.barrier_features,
+            barrier_features=barriers,
             avatar_features=self.avatar_features,
             bg_feature=self.bg_feature,
+            walkable_features=walkables,
         )
         if self.bg_feature is None or self.bg_feature != bg:
             old_bg = self.bg_feature
             self.bg_feature = bg
             if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
                 if (
-                    old_bg is None
-                    and bg != 0
-                    and 0 not in getattr(self, "verified_safe_features", set())
-                ):
-                    self.symbolic_theory.walkable_features.discard(0)
-                elif (
                     old_bg is not None
                     and old_bg != bg
                     and old_bg not in getattr(self, "verified_safe_features", set())
                 ):
-                    self.symbolic_theory.walkable_features.discard(old_bg)
+                    self.symbolic_theory.retract_walkable(old_bg, reason="background_shift")
+                elif (
+                    old_bg is None
+                    and hasattr(self, "default_bg_feature")
+                    and self.default_bg_feature != bg
+                    and self.default_bg_feature
+                    not in getattr(self, "verified_safe_features", set())
+                ):
+                    self.symbolic_theory.retract_walkable(
+                        self.default_bg_feature, reason="background_shift"
+                    )
                 if bg in getattr(self, "verified_safe_features", set()):
-                    self.symbolic_theory.induce_walkable(bg)
+                    self.symbolic_theory.induce_walkable(bg, evidence="background_shift")
         return bg
 
     def _perception_cache_key(self, grid: np.ndarray, bg: int) -> tuple[Any, ...]:
@@ -4105,22 +4721,7 @@ class AutonomousEpistemicEngine:
             if len(self._entity_cache) >= 4:
                 self._entity_cache.pop(next(iter(self._entity_cache)))
             self._entity_cache[key] = cached
-        return [
-            SpatialEntity(
-                id=e.id,
-                role=e.role,
-                centroid=e.centroid,
-                grid_pos=e.grid_pos,
-                area=e.area,
-                bounding_box=e.bounding_box,
-                component_id=e.component_id,
-                is_deliverable=e.is_deliverable,
-                is_delivered=e.is_delivered,
-                shape_archetype=e.shape_archetype,
-                properties=dict(e.properties),
-            )
-            for e in cached
-        ]
+        return [copy.copy(e) for e in cached]
 
     def compute_frame_diff(
         self, prev_grid: np.ndarray, curr_grid: np.ndarray
@@ -4149,7 +4750,7 @@ class AutonomousEpistemicEngine:
             bg=bg_val,
             avatar_features=self.avatar_features,
             avatar_feature=self.avatar_feature,
-            barrier_features=self.symbolic_theory.barrier_features,
+            barrier_features=set(self.symbolic_theory.barrier_features),
             known_lethal_features=self.hazard_tracker.known_lethal_features,
             avatar_pos=self.avatar_pos,
             **kwargs,
@@ -4480,38 +5081,52 @@ class AutonomousEpistemicEngine:
                 is_death_or_reset=is_failure,
             )
             self._prev_oriented_threats = []
+            if self.tiered_workspace is not None:
+                try:
+                    self.persist_to_workspace(author="episode_boundary")
+                except Exception:
+                    pass
 
         if is_success and self.tiered_workspace is not None and self.active_task_frame is not None:
-            # Commit working memory state to the active task frame
+            # Commit only delta/missing working memory state to active task frame
             self.commit_working_memory_transactions()
 
-            # Promote verified goals, ontology, and procedural skills to WorkspaceTier.PERSISTENT
-            for goal_feat in self.symbolic_theory.goal_features:
-                node_id = f"ontology_goal_{goal_feat}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+            # Promote verified goals, ontology, and procedural skills when present in WORKING task frames
+            active_frames = getattr(self.tiered_workspace, "active_task_frames", ())
+            if active_frames:
 
-            all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
-            for g_set in self.working_memory.visuospatial.level_learned_goals.values():
-                all_goals.update(g_set)
-            for goal_pos in all_goals:
-                node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+                def _in_working(nid: str) -> bool:
+                    return any(f.workspace.get_node(nid) is not None for f in active_frames)
 
-            for schema_name in self.working_memory.procedural_library:
-                node_id = f"procedural_skill_{schema_name}"
-                self.tiered_workspace.promote(
-                    node_id=node_id,
-                    from_tier=WorkspaceTier.WORKING,
-                    to_tier=WorkspaceTier.PERSISTENT,
-                )
+                for goal_feat in self.symbolic_theory.goal_features:
+                    node_id = f"ontology_goal_{goal_feat}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
+
+                all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
+                for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+                    all_goals.update(g_set)
+                for goal_pos in all_goals:
+                    node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
+
+                for schema_name in self.working_memory.procedural_library:
+                    node_id = f"procedural_skill_{schema_name}"
+                    if _in_working(node_id):
+                        self.tiered_workspace.promote(
+                            node_id=node_id,
+                            from_tier=WorkspaceTier.WORKING,
+                            to_tier=WorkspaceTier.PERSISTENT,
+                        )
 
         # Attribute environmental mutations to active object interaction
         active_obj_id = getattr(self.object_planner, "active_target_object_id", None)
@@ -4891,7 +5506,11 @@ class AutonomousEpistemicEngine:
             for t in threats:
                 curr_by_feat.setdefault(t.feature_id, set()).add(t.pos)
             for feat, cur_positions in curr_by_feat.items():
-                if feat in effective_av_feats or feat in self.mobile_threat_features:
+                if (
+                    feat in effective_av_feats
+                    or feat in self.mobile_threat_features
+                    or feat in self.symbolic_theory.cargo_features
+                ):
                     continue
                 old_positions = prev_by_feat.get(feat, set())
                 appeared = cur_positions - old_positions
@@ -4921,11 +5540,43 @@ class AutonomousEpistemicEngine:
 
     # ── Master Decision Loop ──────────────────────────────────────────────────
 
-    def step(self, obs: EmbodiedObservation) -> tuple[Any, dict[str, Any] | None]:
-        """Canonical domain-agnostic step entry point for the epistemic engine (WP3).
+    def step(
+        self, obs: EmbodiedObservation, last_action: Any | None = None
+    ) -> tuple[Any, dict[str, Any] | None]:
+        """Canonical domain-agnostic step entry point for the epistemic engine.
 
         Consumes an EmbodiedObservation and executes active inference deliberation.
         """
+        if last_action is not None:
+            self.last_action = last_action
+        elif obs.metadata and "last_action" in obs.metadata:
+            self.last_action = obs.metadata["last_action"]
+        elif obs.metadata and "action_taken" in obs.metadata:
+            self.last_action = obs.metadata["action_taken"]
+
+        if obs.metadata:
+            self.working_memory.last_observation_metadata = dict(obs.metadata)
+            if "reference_frame" in obs.metadata:
+                self.working_memory.reference_frame = obs.metadata["reference_frame"]
+            if "agent_pos" in obs.metadata:
+                curr_cont = np.asarray(obs.metadata["agent_pos"], dtype=float)
+                prev_cont = self.working_memory.continuous_agent_pos
+                if prev_cont is not None:
+                    d_pos = curr_cont - prev_cont
+                    disp = float(np.linalg.norm(d_pos))
+                    self.working_memory.continuous_displacement = disp
+                    self.working_memory.last_continuous_moved = disp > 1e-4
+                    self.working_memory.continuous_delta = (float(d_pos[0]), float(d_pos[1]))
+                else:
+                    self.working_memory.continuous_displacement = 0.0
+                    self.working_memory.last_continuous_moved = False
+                    self.working_memory.continuous_delta = (0.0, 0.0)
+                self.working_memory.continuous_agent_pos = curr_cont.copy()
+            if "goal_pos" in obs.metadata:
+                self.working_memory.continuous_goal_pos = np.asarray(
+                    obs.metadata["goal_pos"], dtype=float
+                )
+
         return self.decide(
             curr_grid=obs.lattice,
             available_actions=obs.available_actions,
@@ -4974,6 +5625,9 @@ class AutonomousEpistemicEngine:
         """
         if (lim := kwargs.pop("step_limit", None)) is not None:
             self.set_environmental_step_limit(int(lim))
+        if (ctx_id := kwargs.get("context_id")) is not None and str(ctx_id):
+            if str(ctx_id) != "default" or self._current_context_id == "default":
+                self.current_context_id = str(ctx_id)
         from hbllm.hcir.world.compute_budget import ComputeBudget
 
         self.compute_budget = ComputeBudget.for_step(
@@ -4999,7 +5653,6 @@ class AutonomousEpistemicEngine:
             step_counter=self.step_counter,
             signals=MappingProxyType(
                 {
-                    "_engine": self,
                     "_curr_grid": curr_grid,
                     "_available_actions": list(available_actions),
                     "_terminal": terminal,
@@ -5015,8 +5668,56 @@ class AutonomousEpistemicEngine:
         result = self.cortical_pipeline.run(ctx)
         self._last_decision_branch = result.signals.get("branch")
         if result.rejected:
-            return None, {"pipeline_rejected": True, "reason": result.rejection_reason}
-        return result.final_action
+            return None, {
+                "pipeline_rejected": True,
+                "reason": result.rejection_reason,
+                "goal_target": None,
+                "goal_source": "none",
+                "subgoal_stack": [],
+                "plan": None,
+                "plan_source": "arbitration",
+                "candidates": {},
+                "chosen_action": None,
+                "veto_reasons": [result.rejection_reason or "rejected"],
+                "phase": str(self._phase),
+                "branch": "rejected",
+                "action_data": None,
+            }
+
+        act = (
+            result.final_action[0]
+            if isinstance(result.final_action, (tuple, list))
+            else result.final_action
+        )
+        meta = (
+            result.final_action[1]
+            if isinstance(result.final_action, (tuple, list))
+            and len(result.final_action) > 1
+            and isinstance(result.final_action[1], dict)
+            else dict(result.signals.get("meta", {}))
+        )
+        meta.setdefault("goal_target", None)
+        meta.setdefault("goal_source", "none")
+        meta.setdefault("subgoal_stack", [])
+        meta.setdefault("plan", None)
+        meta.setdefault("plan_source", "arbitration")
+        meta.setdefault(
+            "candidates",
+            {int(a): (1.0 if a == act else 0.0) for a in available_actions},
+        )
+        meta.setdefault("chosen_action", act)
+        meta.setdefault("veto_reasons", [])
+        meta.setdefault("phase", str(self._phase))
+        meta.setdefault("branch", result.signals.get("branch", "unknown"))
+        meta.setdefault("action_data", None)
+
+        if terminal is not None or is_success or is_failure:
+            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+
+            b_kind = EpisodeBoundaryKind.GOAL_REACHED if is_success else EpisodeBoundaryKind.DEATH
+            self.on_boundary(EpisodeBoundary(kind=b_kind))
+
+        return act, meta
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export master epistemic engine state as a declarative causal predicate."""
@@ -5176,16 +5877,193 @@ class AutonomousEpistemicEngine:
             )
         return ops
 
+    @staticmethod
+    def _filter_unchanged_upserts(
+        dest_ws: Any, ops: list[TransactionOperation]
+    ) -> list[TransactionOperation]:
+        """Filter out UPSERT_NODE operations whose target node already exists with identical fields."""
+        if dest_ws is None or not ops:
+            return ops
+        get_node = getattr(dest_ws, "get_node", None)
+        if not callable(get_node):
+            return ops
+        sentinel = object()
+        skip_keys = frozenset({"id", "provenance", "created_at", "updated_at"})
+        filtered: list[TransactionOperation] = []
+        for op in ops:
+            if (
+                op.op != TransactionOp.UPSERT_NODE
+                or not op.node_id
+                or not isinstance(op.node_data, dict)
+            ):
+                filtered.append(op)
+                continue
+            existing = get_node(op.node_id)
+            if existing is None:
+                filtered.append(op)
+                continue
+            same = True
+            for k, v in op.node_data.items():
+                if k in skip_keys:
+                    continue
+                if hasattr(v, "value"):
+                    v = v.value
+                ev_field = getattr(existing, k, sentinel)
+                if ev_field is sentinel:
+                    same = False
+                    break
+                if hasattr(ev_field, "value"):
+                    ev_cmp = ev_field.value
+                elif hasattr(ev_field, "model_dump") and isinstance(v, dict):
+                    ev_cmp = ev_field.model_dump(mode="python")
+                else:
+                    ev_cmp = ev_field
+                if ev_cmp != v:
+                    same = False
+                    break
+            if not same:
+                filtered.append(op)
+        return filtered
+
+    def persist_to_workspace(
+        self,
+        target: Any = None,
+        author: str = "epistemic_engine",
+    ) -> list[TransactionOperation]:
+        """Propose and commit all world theory, concepts, and internal memory to persistent workspace."""
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+        ops = self.to_transaction_operations()
+        dest_ws: HCIRWorkspaceState | None = None
+        grant: Any = None
+
+        if target is not None:
+            if isinstance(target, TieredWorkspace):
+                dest_ws = target.persistent
+                grant = getattr(target, "_system_grant", None)
+            elif isinstance(target, HCIRWorkspaceState):
+                dest_ws = target
+        elif hasattr(self, "services") and self.services is not None:
+            if self.services.tiered_workspace is not None:
+                dest_ws = self.services.tiered_workspace.persistent
+                grant = getattr(self.services.tiered_workspace, "_system_grant", None)
+            else:
+                dest_ws = self.services.workspace
+
+        if grant is None and hasattr(self, "services") and self.services is not None:
+            reg = getattr(self.services, "commit_authority_registry", None)
+            if reg is not None and dest_ws is not None:
+                grant = reg.issue(author, {dest_ws.tier})
+
+        if dest_ws is not None and ops:
+            delta_ops = self._filter_unchanged_upserts(dest_ws, ops)
+            batch_size = 400
+            for i in range(0, len(delta_ops), batch_size):
+                dest_ws.commit_operations(delta_ops[i : i + batch_size], author=author, grant=grant)
+        return ops
+
+    def hydrate_from_workspace(
+        self,
+        source: Any = None,
+    ) -> int:
+        """Hydrate world theory, concepts, and internal memory from workspace nodes.
+
+        Returns the count of nodes hydrated.
+        """
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+        from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+        src_ws: HCIRWorkspaceState | None = None
+
+        if source is not None:
+            if isinstance(source, TieredWorkspace):
+                src_ws = source.persistent
+            elif isinstance(source, HCIRWorkspaceState):
+                src_ws = source
+        elif hasattr(self, "services") and self.services is not None:
+            if self.services.tiered_workspace is not None:
+                src_ws = self.services.tiered_workspace.persistent
+            else:
+                src_ws = self.services.workspace
+
+        if src_ws is None:
+            return 0
+
+        nodes = list(src_ws.graph.all_nodes())
+        if not nodes:
+            return 0
+
+        # Hydrate symbolic theory
+        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
+            self.symbolic_theory.hydrate_from_nodes(nodes)
+
+        # Hydrate goal positions, barriers, concepts, homeostatic state, and telemetry if present
+        for node in nodes:
+            props = node.properties or {}
+            if node.id.startswith("learned_goal_"):
+                pos = props.get("position")
+                if pos and isinstance(pos, (list, tuple)):
+                    pos_tuple = tuple(
+                        int(x)
+                        if isinstance(x, (int, float)) and float(x).is_integer()
+                        else float(x)
+                        for x in pos
+                    )
+                    self.learned_goal_positions.add(pos_tuple)  # type: ignore[arg-type]
+            elif node.id.startswith("learned_barrier_"):
+                pos = props.get("position")
+                if pos and isinstance(pos, (list, tuple)):
+                    pos_tuple = tuple(
+                        int(x)
+                        if isinstance(x, (int, float)) and float(x).is_integer()
+                        else float(x)
+                        for x in pos
+                    )
+                    self.learned_barriers.add(pos_tuple)  # type: ignore[arg-type]
+            elif node.id == "engine_telemetry":
+                avatar_feat = props.get("avatar_feature")
+                if avatar_feat is not None:
+                    self._avatar_feature = avatar_feat
+                for af in props.get("avatar_features") or []:
+                    self.avatar_features.add(af)
+                for ta in props.get("tested_actions") or []:
+                    self.tested_actions.add(ta)
+            elif node.id == "homeostatic_state":
+                homeo = getattr(self.working_memory, "homeostatic_state", None) or getattr(
+                    self.working_memory, "homeostatic", None
+                )
+                if homeo is not None:
+                    for k in (
+                        "energy_budget",
+                        "safety_margin",
+                        "competence_progress",
+                        "fatigue",
+                    ):
+                        if k in props and hasattr(homeo, k):
+                            setattr(homeo, k, props[k])
+            elif (
+                getattr(node, "node_type", None) == "concept"
+                or getattr(node, "category", None) == "memory"
+            ):
+                if hasattr(self, "working_memory") and hasattr(
+                    self.working_memory, "concept_store"
+                ):
+                    if hasattr(self.working_memory.concept_store, "restore_concept"):
+                        self.working_memory.concept_store.restore_concept(node)
+
+        return len(nodes)
+
     def freeze(self) -> CognitiveContext:
         """Capture an immutable CognitiveContext snapshot of engine state for pure cortical stages.
 
-        In accordance with WP1 (Faculties emit intent; engine owns no mutable truth),
-        cortical faculties observe this frozen snapshot and emit transactional operations.
+        Faculties emit intent; engine owns no mutable truth.
+        Cortical faculties observe this frozen snapshot and emit transactional operations.
         """
         return EngineState.from_engine(self).freeze()
 
     def apply_delta(self, delta: Any, author: str = "unknown") -> None:
-        """The ONLY faculty write path: apply a StateDelta to engine state (WP1).
+        """The ONLY faculty write path: apply a StateDelta to engine state.
 
         Assigns each pending field on self/self.state and emits HCIR
         transaction operations for changed fields (one commit per call).
@@ -5216,17 +6094,8 @@ class AutonomousEpistemicEngine:
                 setattr(self, field, value)
         # HCIR emission: fields mirrored into the world-theory snapshot get a
         # single transaction commit; unmapped fields are engine-transient.
-        _MIRRORED = {
-            "phase",
-            "step_counter",
-            "avatar_pos",
-            "avatar_feature",
-            "avatar_features",
-            "tested_actions",
-            "exploration_budget",
-            "consecutive_plan_failures",
-        }
-        if _MIRRORED & set(delta.items()):
+        mirrored = self.working_memory.get_mirrored_fields()
+        if mirrored & set(delta.items()):
             try:
                 ops = [self._telemetry_operation()]
                 ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
@@ -5237,6 +6106,119 @@ class AutonomousEpistemicEngine:
             except Exception as exc:
                 self.rejected_delta_commits = getattr(self, "rejected_delta_commits", 0) + 1
                 logger.error("apply_delta commit rejected (author=%s): %s", author, exc)
+
+    def apply_wm_delta(self, delta: WorkingMemoryDelta) -> None:
+        """Apply a declarative WorkingMemoryDelta to working memory and engine state."""
+        field = delta.field
+        val = delta.value
+        op = delta.op
+
+        if field == "inhibit_action":
+            action, duration = val if isinstance(val, (tuple, list)) else (val, 4)
+            self.working_memory.inhibit_action(action, duration)
+            return
+
+        if hasattr(self, field):
+            if op == "set":
+                setattr(self, field, val)
+            elif op == "append":
+                cur = getattr(self, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(self, "working_memory") and hasattr(self.working_memory, field):
+            if op == "set":
+                setattr(self.working_memory, field, val)
+            elif op == "append":
+                cur = getattr(self.working_memory, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self.working_memory, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+        elif hasattr(self, "state") and hasattr(self.state, field):
+            if op == "set":
+                setattr(self.state, field, val)
+            elif op == "append":
+                cur = getattr(self.state, field)
+                if isinstance(cur, list):
+                    cur.append(val)
+            elif op == "add":
+                cur = getattr(self.state, field)
+                if isinstance(cur, set):
+                    cur.add(val)
+
+    def rollback_faculty_journal(self, journal: Any) -> None:
+        """Roll back all mutations recorded in a FacultyWriteJournal."""
+        if journal is None or not getattr(journal, "touched", None):
+            return
+        for key in journal.touched:
+            before = journal.before.get(key)
+            if repr(before) == "<object object>":
+                continue
+            if key.startswith("working_memory."):
+                target = getattr(self, "working_memory", None)
+                fname = key[15:]
+            elif key.startswith("state."):
+                target = getattr(self, "state", None)
+                fname = key[6:]
+            else:
+                target = self
+                fname = key
+            if target is None:
+                continue
+            live = getattr(target, fname, None)
+            if isinstance(live, dict) and isinstance(before, dict):
+                live.clear()
+                live.update(before)
+            elif isinstance(live, (set, frozenset)) and isinstance(before, (set, frozenset, list)):
+                live.clear()
+                live.update(before)
+            elif isinstance(live, list) and isinstance(before, list):
+                live[:] = before
+            elif hasattr(live, "clear") and hasattr(live, "extend") and hasattr(before, "__iter__"):
+                live.clear()
+                live.extend(before)
+            else:
+                try:
+                    setattr(target, fname, before)
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _journal_values_equal(before: Any, current: Any) -> bool:
+        """Fast recursive equality check that avoids np.array2string/repr() on lattice arrays."""
+        if before is current:
+            return True
+        if type(before) is not type(current):
+            return False
+        if isinstance(before, np.ndarray):
+            return (
+                before.shape == current.shape
+                and before.dtype == current.dtype
+                and bool(np.array_equal(before, current))
+            )
+        if isinstance(before, dict):
+            if len(before) != len(current) or before.keys() != current.keys():
+                return False
+            eq = AutonomousEpistemicEngine._journal_values_equal
+            return all(eq(v, current[k]) for k, v in before.items())
+        if isinstance(before, (list, tuple)):
+            if len(before) != len(current):
+                return False
+            eq = AutonomousEpistemicEngine._journal_values_equal
+            return all(eq(a, b) for a, b in zip(before, current))
+        try:
+            res = before == current
+            if isinstance(res, np.ndarray):
+                return bool(res.all())
+            return bool(res)
+        except Exception:
+            return False
 
     def commit_faculty_journal(self, journal: Any) -> bool:
         """Commit a journaled faculty write set as one HCIR transaction (WP1).
@@ -5249,26 +6231,20 @@ class AutonomousEpistemicEngine:
         changed: dict[str, Any] = {}
         for key in journal.touched:
             before = journal.before.get(key)
-            if key.startswith("state."):
+            if key.startswith("working_memory."):
+                current = getattr(self.working_memory, key[15:], None)
+            elif key.startswith("state."):
                 current = getattr(self.state, key[6:], None)
             else:
                 current = getattr(self, key, None)
-            if repr(current) != repr(before):
+            if not self._journal_values_equal(before, current):
                 changed[key] = before
         if not changed:
             return True
         try:
-            _MIRRORED = {
-                "phase",
-                "step_counter",
-                "avatar_pos",
-                "avatar_feature",
-                "avatar_features",
-                "tested_actions",
-                "exploration_budget",
-                "consecutive_plan_failures",
-            }
-            if _MIRRORED & {k.removeprefix("state.") for k in changed}:
+            mirrored = self.working_memory.get_mirrored_fields()
+            raw_fields = {k.removeprefix("state.").removeprefix("working_memory.") for k in changed}
+            if mirrored & raw_fields:
                 ops = [self._telemetry_operation()]
                 ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
                 if ws is None and getattr(self, "active_task_frame", None) is not None:
@@ -5279,24 +6255,5 @@ class AutonomousEpistemicEngine:
         except Exception as exc:
             self.rejected_faculty_commits = getattr(self, "rejected_faculty_commits", 0) + 1
             logger.error("faculty journal commit rejected (author=%s): %s", journal.author, exc)
-            for key in journal.touched:
-                before = journal.before.get(key)
-                target = self.state if key.startswith("state.") else self
-                fname = key[6:] if key.startswith("state.") else key
-                live = getattr(target, fname, None)
-                if isinstance(live, dict) and isinstance(before, dict):
-                    live.clear()
-                    live.update(before)
-                elif isinstance(live, (set, frozenset)) and isinstance(
-                    before, (set, frozenset, list)
-                ):
-                    live.clear()
-                    live.update(before)
-                elif isinstance(live, list) and isinstance(before, list):
-                    live[:] = before
-                elif before is not None and repr(before) != "<object object>":
-                    try:
-                        setattr(target, fname, before)
-                    except Exception:
-                        pass
+            self.rollback_faculty_journal(journal)
             return False

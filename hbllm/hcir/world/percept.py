@@ -76,8 +76,9 @@ class EmbodiedObservation:
 class EpisodeBoundaryKind(StrEnum):
     """Typed episode lifecycle boundaries (WP0.5)."""
 
-    DEATH = "death"  # episode ended in failure; retry same level
-    LEVEL_COMPLETE = "level_complete"  # level solved; advance
+    DEATH = "death"  # episode ended in failure; retry same level/context
+    GOAL_REACHED = "goal_reached"  # task/goal solved; advance
+    LEVEL_COMPLETE = "level_complete"  # backward-compatible alias for GOAL_REACHED
     CONTEXT_RESET = "context_reset"  # lattice/context changed mid-stream
 
 
@@ -102,7 +103,9 @@ def apply_boundary_retention(owner: Any, boundary: Any) -> None:
         return
     kind = getattr(boundary, "kind", boundary)
     if kind in (
+        EpisodeBoundaryKind.GOAL_REACHED,
         EpisodeBoundaryKind.LEVEL_COMPLETE,
+        "goal_reached",
         "level_complete",
         EpisodeBoundaryKind.DEATH,
         "death",
@@ -129,6 +132,7 @@ class EpisodeBoundary:
         EpisodeBoundaryKind.CONTEXT_RESET
     )
     retain_dynamics: bool = True
+    same_level: bool = False
 
 
 @dataclass

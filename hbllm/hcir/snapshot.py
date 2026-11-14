@@ -213,8 +213,9 @@ class SnapshotManager:
         return hasher.hexdigest()
 
     def replay(self, event_store: IEventStore, to_sequence: int | None = None) -> CognitiveGraph:
-        """Replay events from the store up to a given sequence number to reconstruct a CognitiveGraph (WP7)."""
+        """Replay events from the store up to a given sequence number to reconstruct a CognitiveGraph."""
         from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
+        from hbllm.hcir.kernel.transaction_manager import TransactionManager
         from hbllm.hcir.stores import EventType
 
         graph = CognitiveGraph(enable_native_substrate=False)
@@ -226,19 +227,21 @@ class SnapshotManager:
             if ev.event_type == EventType.NODE_ADDED:
                 node_payload = d.get("node") or d.get("node_data")
                 if node_payload is not None:
-                    graph.add_node(
+                    node = (
                         node_payload
                         if isinstance(node_payload, HCIRNode)
-                        else HCIRNode.model_validate(node_payload)
+                        else TransactionManager._deserialize_node(node_payload)
                     )
+                    graph.add_node(node)
             elif ev.event_type == EventType.NODE_MODIFIED:
                 node_payload = d.get("node") or d.get("node_data")
                 if node_payload is not None:
-                    graph.upsert_node(
+                    node = (
                         node_payload
                         if isinstance(node_payload, HCIRNode)
-                        else HCIRNode.model_validate(node_payload)
+                        else TransactionManager._deserialize_node(node_payload)
                     )
+                    graph.upsert_node(node)
                 elif "node_id" in d and "changes" in d:
                     if graph.has_node(d["node_id"]):
                         curr = graph.get_node(d["node_id"])

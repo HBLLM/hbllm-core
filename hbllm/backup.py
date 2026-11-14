@@ -38,12 +38,13 @@ import hashlib
 import json
 import logging
 import shutil
-import sqlite3
 import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -139,42 +140,37 @@ class BackupManager:
         archive_path = self.backup_dir / f"{backup_id}.tar.gz"
 
         # Collect files to backup
-        files_info = []
         file_paths = []
 
         for pattern in _DB_PATTERNS + _EXTRA_PATTERNS:
             for path in self.data_dir.glob(pattern):
                 if path.is_file():
                     file_paths.append(path)
-                    files_info.append(
-                        {
-                            "name": path.name,
-                            "size": path.stat().st_size,
-                            "checksum": self._file_checksum(path),
-                        }
-                    )
 
         # Also backup training subdirectory if it exists
         training_dir = self.data_dir / "training"
         if training_dir.is_dir():
             for path in training_dir.rglob("*"):
                 if path.is_file():
-                    rel = path.relative_to(self.data_dir)
                     file_paths.append(path)
-                    files_info.append(
-                        {
-                            "name": str(rel),
-                            "size": path.stat().st_size,
-                            "checksum": self._file_checksum(path),
-                        }
-                    )
 
         if not file_paths:
             logger.warning("No files found to backup in %s", self.data_dir)
             return archive_path
 
-        # Checkpoint all SQLite databases before backup
+        # Checkpoint all SQLite databases before computing manifest checksums
         self._checkpoint_databases(file_paths)
+
+        files_info = []
+        for path in file_paths:
+            rel = path.relative_to(self.data_dir)
+            files_info.append(
+                {
+                    "name": str(rel),
+                    "size": path.stat().st_size,
+                    "checksum": self._file_checksum(path),
+                }
+            )
 
         # Create compressed archive
         total_size = sum(cast(int, f["size"]) for f in files_info)
@@ -439,7 +435,7 @@ class BackupManager:
     def _push_via_http(self, backup_path: Path) -> dict[str, Any]:
         """Fallback HTTP upload for environments without boto3."""
         try:
-            import httpx  # type: ignore  # type: ignore
+            import httpx  # type: ignore
 
             endpoint = self._cloud_config["endpoint"]  # type: ignore
             bucket = self._cloud_config["bucket"]  # type: ignore
@@ -476,7 +472,7 @@ class BackupManager:
         for path in file_paths:
             if path.suffix == ".db":
                 try:
-                    conn = sqlite3.connect(str(path))
+                    conn = open_connection(str(path))
                     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                     conn.close()
                 except Exception as e:

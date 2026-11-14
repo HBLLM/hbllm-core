@@ -323,15 +323,24 @@ class ObjectStateGraphPlanner:
                 or e.feature_id in known_goal_features
                 or any(cp in known_goal_positions for cp in entity_cells)
             )
-            is_switch = any(
-                m.trigger_pos in entity_cells
-                or (m.trigger_feature is not None and m.trigger_feature == e.feature_id)
-                for m in engine.state_mutations
+            is_switch = (
+                (
+                    bool(engine.symbolic_theory)
+                    and e.feature_id in engine.symbolic_theory.actuator_features
+                )
+                or e.role == EntityRole.ACTUATOR
+                or any(
+                    m.trigger_pos in entity_cells
+                    or (m.trigger_feature is not None and m.trigger_feature == e.feature_id)
+                    for m in engine.state_mutations
+                )
             )
-            is_cargo = (
-                e.role == EntityRole.MANIPULABLE
-                or engine.symbolic_theory.is_cargo(e)
-                or e.feature_id in engine.symbolic_theory.cargo_features
+            is_cargo = e.role == EntityRole.MANIPULABLE or (
+                bool(engine.symbolic_theory)
+                and (
+                    e.feature_id in engine.symbolic_theory.cargo_features
+                    or engine.symbolic_theory.is_cargo(e.feature_id)
+                )
             )
 
             if is_goal:
@@ -340,15 +349,15 @@ class ObjectStateGraphPlanner:
             elif is_switch:
                 category = ObjectCategory.SWITCH
                 is_solid = is_barrier
+            elif is_barrier:
+                category = ObjectCategory.BARRIER
+                is_solid = True
             elif is_cargo:
                 category = ObjectCategory.MANIPULABLE
                 is_solid = True
             elif e.area <= 16:
                 category = ObjectCategory.KEY
                 is_solid = is_barrier
-            elif is_barrier:
-                category = ObjectCategory.BARRIER
-                is_solid = True
             else:
                 category = ObjectCategory.UNKNOWN
                 is_solid = e.role == EntityRole.OBSTACLE
@@ -476,14 +485,14 @@ class ObjectStateGraphPlanner:
                     kr = cur_pos[0] + step_r * k
                     kc = cur_pos[1] + step_c * k
                     is_target = k == dist and (kr, kc) in target_stances
+                    if (kr, kc) in static_barriers and not is_target:
+                        blocked = True
+                        break
                     if percept is not None:
                         if not is_target and not percept.is_passable(kr, kc):
                             blocked = True
                             break
                     else:
-                        if (kr, kc) in static_barriers and not is_target:
-                            blocked = True
-                            break
                         if 0 <= kr < H and 0 <= kc < W and curr_grid is not None:
                             val = int(curr_grid[kr, kc])
                             if val in lethal_features and not is_target:
@@ -570,6 +579,7 @@ class ObjectStateGraphPlanner:
 
         # Static barriers and hazards directly from percept
         static_barriers = set(percept.static_barriers)
+        barrier_features = engine.symbolic_theory.barrier_features
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         failed_transitions = set(get_engine_state_attr(engine, "failed_transitions", set()))
 
@@ -586,17 +596,82 @@ class ObjectStateGraphPlanner:
         salient_objects = self.lift_salient_objects(percept, engine)
 
         # ── DIRECTIVE 1 & 2: Check if exit is open. If open, go through it. ───
+        # Suppress bare-avatar exit walk when unconfirmed cargo must still be pushed onto a receptacle
+        # (unless an exit feature is already confirmed in symbolic_theory.goal_features).
+        theory = getattr(engine, "symbolic_theory", None)
+        known_cargo = set(getattr(theory, "cargo_features", ()) or ()) | set(
+            getattr(engine, "learned_cargo_features", ()) or ()
+        )
+        known_goal_feats = set(getattr(theory, "goal_features", ()) or ())
+        has_cargo_on_grid = bool(known_cargo) and any(
+            e.feature_id in known_cargo for e in percept.entities
+        )
         exit_objects = [o for o in salient_objects if o.category == ObjectCategory.EXIT]
+        has_confirmed_walk_exit = any(o.feature_id in known_goal_feats for o in exit_objects)
         exit_stances: set[tuple[int, int]] = set(percept.candidate_goals)
         for eo in exit_objects:
             exit_stances.update(eo.interaction_stances)
 
+        def _filter_reversible(
+            candidate_cells: set[tuple[int, int]],
+            stances: set[tuple[int, int]],
+            barriers: set[tuple[int, int]],
+        ) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+            if grid_arr is None or theory is None or av_pos is None:
+                return stances, barriers
+            from hbllm.hcir.world.cortex_planner import EpistemicGoalScheduler
+
+            bg_val = getattr(engine, "bg_feature", 0) or 0
+            eff_stances = set(stances)
+            eff_barriers = set(barriers)
+            for ep in candidate_cells:
+                if not (0 <= ep[0] < H and 0 <= ep[1] < W):
+                    continue
+                e_feat = int(grid_arr[ep[0], ep[1]])
+                e_area = next(
+                    (
+                        int(e.area)
+                        for e in percept.entities
+                        if e.grid_pos == ep or ep in e.properties.get("cells", ())
+                    ),
+                    1,
+                )
+                safe_stances = EpistemicGoalScheduler.compute_reversible_approach_stances(
+                    engine=engine,
+                    curr_grid=grid_arr,
+                    H=H,
+                    W=W,
+                    bg=bg_val,
+                    avatar_pos=av_pos,
+                    entity_pos=ep,
+                    feature_id=e_feat,
+                    entity_area=e_area,
+                    has_cargo_context=has_cargo_on_grid,
+                )
+                if safe_stances:
+                    eff_stances.discard(ep)
+                    for dr_x, dc_x in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        adj_x = (ep[0] + dr_x, ep[1] + dc_x)
+                        if adj_x not in safe_stances:
+                            eff_stances.discard(adj_x)
+                    eff_stances.update(safe_stances)
+                    eff_barriers.add(ep)
+            return eff_stances, eff_barriers
+
         # 1A. Displacement Navigation to Exit
-        if exit_stances and movable_actions and av_pos is not None:
+        if (
+            exit_stances
+            and movable_actions
+            and av_pos is not None
+            and (not has_cargo_on_grid or has_confirmed_walk_exit)
+        ):
+            eff_exit_stances, eff_exit_barriers = _filter_reversible(
+                exit_stances, exit_stances, static_barriers
+            )
             path_to_exit = self.find_shortest_path(
                 start_pos=av_pos,
-                target_stances=exit_stances,
-                static_barriers=static_barriers,
+                target_stances=eff_exit_stances,
+                static_barriers=eff_exit_barriers,
                 lethal_features=lethal_features,
                 movable_actions=movable_actions,
                 grid_shape=(H, W),
@@ -644,7 +719,14 @@ class ObjectStateGraphPlanner:
                 ]
 
         # ── DIRECTIVE 3: If not, explore other objects. ──────────────────────
-        non_exit_objects = [o for o in salient_objects if o.category != ObjectCategory.EXIT]
+        non_exit_objects = [
+            o
+            for o in salient_objects
+            if o.category != ObjectCategory.EXIT
+            and o.category != ObjectCategory.BARRIER
+            and not engine.symbolic_theory.is_barrier(o.feature_id)
+            and o.feature_id not in barrier_features
+        ]
 
         # ── DIRECTIVE 4B: Active Causal Actuator Contingency Pursuit ──────────
         if spatial_effector_actions:
@@ -685,11 +767,15 @@ class ObjectStateGraphPlanner:
             for obj in non_exit_objects:
                 if not obj.interaction_stances:
                     continue
-                obj_stances = set(obj.interaction_stances)
+                obj_stances, obj_barriers = _filter_reversible(
+                    set(obj.cells) if len(obj.cells) <= 4 else set(),
+                    set(obj.interaction_stances),
+                    static_barriers,
+                )
                 path = self.find_shortest_path(
                     start_pos=av_pos,
                     target_stances=obj_stances,
-                    static_barriers=static_barriers,
+                    static_barriers=obj_barriers,
                     lethal_features=lethal_features,
                     movable_actions=movable_actions,
                     grid_shape=(H, W),

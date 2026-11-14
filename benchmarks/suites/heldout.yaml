@@ -1,0 +1,24 @@
+split: heldout
+seed_range: [100000, 100199]
+eval_seeds_per_family: 20
+tasks:
+  - id: grid_nav_heldout
+    family: grid
+    env_class: benchmarks.envs.grid_nav.GridNavEnvironment
+    seeds: [100010, 100011, 100012, 100013, 100014, 100015, 100016, 100017, 100018, 100019, 100020, 100021, 100022, 100023, 100024, 100025, 100026, 100027, 100028, 100029]
+    max_budget: 100
+  - id: grid_push_heldout
+    family: grid
+    env_class: benchmarks.envs.grid_push.GridPushEnvironment
+    seeds: [100030, 100031, 100032, 100033, 100034, 100035, 100036, 100037, 100038, 100039, 100040, 100041, 100042, 100043, 100044, 100045, 100046, 100047, 100048, 100049]
+    max_budget: 100
+  - id: continuous_reach_heldout
+    family: continuous
+    env_class: benchmarks.envs.continuous_reach.ContinuousReachEnvironment
+    seeds: [100050, 100051, 100052, 100053, 100054, 100055, 100056, 100057, 100058, 100059, 100060, 100061, 100062, 100063, 100064, 100065, 100066, 100067, 100068, 100069]
+    max_budget: 60
+  - id: symbolic_rules_heldout
+    family: symbolic
+    env_class: benchmarks.envs.symbolic_rules.SymbolicRulesEnvironment
+    seeds: [100070, 100071, 100072, 100073, 100074, 100075, 100076, 100077, 100078, 100079, 100080, 100081, 100082, 100083, 100084, 100085, 100086, 100087, 100088, 100089]
+    max_budget: 80

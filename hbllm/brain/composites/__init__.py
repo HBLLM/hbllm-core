@@ -5,6 +5,15 @@ Each composite wraps multiple underlying nodes into a single bus-registered
 entity, reducing bus overhead and simplifying the factory wiring.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
+_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "composites"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
+
+
 from hbllm.brain.composites.governance_guard import GovernanceGuard
 from hbllm.brain.composites.learning_loop import LearningLoop
 from hbllm.brain.composites.memory_system import MemorySystem

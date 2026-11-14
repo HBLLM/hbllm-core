@@ -14,6 +14,7 @@ import sqlite3
 
 from fastapi import APIRouter, Request
 
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.serving.studio.helpers import get_data_dir, get_node, get_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ def _get_persona_from_db(tenant_id: str) -> dict:
     """Fallback: read traits directly from identity.db."""
     db_path = os.path.join(get_data_dir(), "identity.db")
     try:
-        with sqlite3.connect(db_path) as conn:
+        with open_connection(db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT traits_json FROM identities WHERE tenant_id = ?",
@@ -102,7 +103,7 @@ async def override_persona(request: Request):
     # Fallback: write to DB
     db_path = os.path.join(get_data_dir(), "identity.db")
     try:
-        with sqlite3.connect(db_path) as conn:
+        with open_connection(db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT traits_json FROM identities WHERE tenant_id = ?",
@@ -142,7 +143,7 @@ async def reset_persona(request: Request):
     # Fallback to DB
     db_path = os.path.join(get_data_dir(), "identity.db")
     try:
-        with sqlite3.connect(db_path) as conn:
+        with open_connection(db_path) as conn:
             conn.execute(
                 "UPDATE identities SET traits_json = '{}' WHERE tenant_id = ?",
                 (tenant_id,),

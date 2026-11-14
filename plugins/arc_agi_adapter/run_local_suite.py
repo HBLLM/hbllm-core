@@ -110,6 +110,7 @@ def run_game(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("-g", "--game", type=str, default=None, help="Run only specific game ID")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--max-steps", type=int, default=200)
     ap.add_argument("--per-game-time-limit", type=int, default=600)
@@ -129,7 +130,8 @@ def main() -> int:
     env = LocalEnv(seed=args.seed)
     recorder = TraceRecorder(args.trace_dir) if args.trace_dir else None
     results = []
-    for gid in env.game_ids:
+    game_ids = [args.game] if args.game else env.game_ids
+    for gid in game_ids:
         agent = None
         if args.policy is None:
             from plugins.arc_agi_adapter.my_agent import MyAgent

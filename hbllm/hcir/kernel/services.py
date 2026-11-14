@@ -118,8 +118,17 @@ class KernelServices:
 
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
+    require_verified: bool = False
 
     def __post_init__(self) -> None:
+        import os
+
+        if getattr(self.transaction_manager, "unverified", False):
+            if self.require_verified or not os.environ.get("PYTEST_CURRENT_TEST"):
+                raise AssertionError(
+                    "KernelServices cannot be initialized with an unverified TransactionManager"
+                )
+
         # Guarantee the TM publishes lifecycle events on the shared bus so that
         # ``WAIT event_type="transaction.*"`` can resolve.
         if self.transaction_manager.event_bus is None:
@@ -137,7 +146,7 @@ class KernelServices:
                 self.commit_authority_registry = CommitAuthorityRegistry()
             stages = list(getattr(self.transaction_manager, "_verification_stages", []))
             for stage in stages:
-                if isinstance(stage, ConstitutionalVerifier) and stage.authority_registry is None:
+                if isinstance(stage, ConstitutionalVerifier):
                     stage.authority_registry = self.commit_authority_registry
             self.tiered_workspace.attach_authorities(
                 stages, self.event_bus, self.commit_authority_registry
@@ -156,6 +165,7 @@ class KernelServices:
         workspace: HCIRWorkspaceState,
         verification_pipeline: list[Any] | None = None,
         tiered_workspace: TieredWorkspace | None = None,
+        commit_authority_registry: CommitAuthorityRegistry | None = None,
     ) -> KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
@@ -175,9 +185,22 @@ class KernelServices:
         from hbllm.hcir.kernel.verification import create_default_pipeline
         from hbllm.hcir.world_kernel import WorldKernel
 
-        registry = CommitAuthorityRegistry()
+        registry = commit_authority_registry
+        verifier: ConstitutionalVerifier | None = None
+        if verification_pipeline:
+            for s in verification_pipeline:
+                if isinstance(s, ConstitutionalVerifier):
+                    verifier = s
+                    if registry is None and s.authority_registry:
+                        registry = s.authority_registry
+                    break
+        if registry is None:
+            registry = CommitAuthorityRegistry()
+        if verifier is None:
+            verifier = ConstitutionalVerifier(authority_registry=registry)
+
         pipeline = verification_pipeline or create_default_pipeline(
-            constitutional_verifier=ConstitutionalVerifier(authority_registry=registry)
+            constitutional_verifier=verifier
         )
         event_bus = KernelEventBus()
         tx_mgr = TransactionManager(workspace, verification_stages=pipeline, event_bus=event_bus)
@@ -327,4 +350,5 @@ class KernelServices:
             sandbox_manager=sandbox_mgr,
             runtime_state=RuntimeState(),
             world_kernel=world_k,
+            constitutional_verifier=verifier,
         )

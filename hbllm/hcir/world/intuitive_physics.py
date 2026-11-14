@@ -17,6 +17,7 @@ import logging
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 import numpy as np
 
@@ -97,9 +98,25 @@ class IntuitivePhysicsEngine:
         self.field_evidence: dict[tuple[int, int], int] = {}
         self.known_platforms: set[tuple[int, int]] = set()
 
-    def on_boundary(self, boundary) -> None:
-        """Episode lifecycle boundary handler (WP0.5). Delegates to the
-        deprecated reset_episode for backward-compatible semantics."""
+    def on_boundary(self, boundary: Any) -> None:
+        """Episode lifecycle boundary handler.
+        LEVEL_COMPLETE and CONTEXT_RESET clear level-local force fields.
+        """
+        from hbllm.hcir.world.percept import EpisodeBoundaryKind
+
+        kind = getattr(boundary, "kind", boundary)
+        if kind in (
+            EpisodeBoundaryKind.GOAL_REACHED,
+            EpisodeBoundaryKind.LEVEL_COMPLETE,
+            EpisodeBoundaryKind.CONTEXT_RESET,
+            "goal_reached",
+            "level_complete",
+            "context_reset",
+        ):
+            self.has_gravity = False
+            self.gravity_vector = (0, 0)
+            self.gravity_evidence = 0
+            self.field_evidence.clear()
         self.reset_episode()
 
     @property
@@ -128,8 +145,23 @@ class IntuitivePhysicsEngine:
         actual_dr = curr_pos[0] - prev_pos[0]
         actual_dc = curr_pos[1] - prev_pos[1]
 
-        # Calculate uncommanded environmental force vector
-        # (what the world added beyond the agent's motor command)
+        # 1. Normal resistance: If avatar did not move, it's resting or blocked by an obstacle.
+        # An obstacle resisting movement is zero normal force reaction, NEVER an environmental force field.
+        if actual_dr == 0 and actual_dc == 0:
+            if not self.has_gravity:
+                for k in list(self.field_evidence.keys()):
+                    if self.field_evidence[k] > 0:
+                        self.field_evidence[k] -= 1
+            return
+
+        # 2. Uncalibrated motor command: if an action is declared as displacement but
+        # commanded_delta is (0, 0), dynamics are not yet calibrated; cannot separate
+        # motor displacement from environmental force.
+        if is_displacement_action and commanded_delta == (0, 0):
+            return
+
+        # 3. Calculate uncommanded environmental force vector:
+        # What the world added beyond the agent's motor command.
         uncommanded_r = actual_dr - commanded_delta[0]
         uncommanded_c = actual_dc - commanded_delta[1]
 

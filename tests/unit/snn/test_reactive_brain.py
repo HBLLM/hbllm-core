@@ -421,13 +421,10 @@ class TestCognitiveState:
 # 7. Cognitive Event-Driven Scheduler
 # ═══════════════════════════════════════════════════════════════════════════
 
-from typing import Any
 
 from hbllm.brain.control.competition_engine import CompetitionEngine
 from hbllm.brain.control.event_queue import CognitiveEventQueue
-from hbllm.brain.control.executive_controller import TripartiteExecutiveController
 from hbllm.brain.core.cognitive_event import CognitiveEvent, CognitiveEventType
-from hbllm.brain.core.cognitive_interfaces import IWorkspace
 from hbllm.brain.self_model.saliency_evaluator import SaliencyEvaluator
 
 
@@ -587,102 +584,6 @@ class TestCompetitionEngine:
         winners = await engine.compete(events)
         # Should have fewer or equal winners than input
         assert len(winners) <= len(events)
-
-
-class TestTripartiteExecutiveController:
-    """Test the full cognitive loop pipeline."""
-
-    @pytest.fixture
-    def pipeline(self) -> tuple:
-        """Build a complete M1 pipeline."""
-        queue = CognitiveEventQueue()
-        evaluator = SaliencyEvaluator()
-        competition = CompetitionEngine(executive_k_winners=3)
-
-        # Minimal workspace mock
-        class MockWorkspace(IWorkspace):
-            def __init__(self) -> None:
-                self.received: list = []
-
-            async def submit_for_reasoning(self, event: Any) -> None:
-                self.received.append(event)
-
-        workspace = MockWorkspace()
-
-        controller = TripartiteExecutiveController(
-            queue=queue,
-            attention=evaluator,
-            competition=competition,
-            workspace=workspace,
-            max_batch_size=10,
-        )
-
-        return controller, queue, workspace
-
-    @pytest.mark.asyncio
-    async def test_full_cycle(self, pipeline: tuple) -> None:
-        """10 events → score → compete → route → workspace receives top winners."""
-        controller, queue, workspace = pipeline
-
-        # Submit 10 varied events
-        ts = time.time()
-        event_types = [
-            (CognitiveEventType.USER_SPOKE, 0.9),
-            (CognitiveEventType.MEMORY_UPDATED, 0.4),
-            (CognitiveEventType.MEMORY_CONFLICT, 0.7),
-            (CognitiveEventType.PREDICTION_FAILED, 0.6),
-            (CognitiveEventType.GOAL_ADDED, 0.5),
-            (CognitiveEventType.GOAL_COMPLETED, 0.3),
-            (CognitiveEventType.EMOTION_CHANGED, 0.5),
-            (CognitiveEventType.REWARD_RECEIVED, 0.4),
-            (CognitiveEventType.TASK_COMPLETED, 0.3),
-            (CognitiveEventType.IDLE_DETECTED, 0.1),
-        ]
-
-        for evt_type, priority in event_types:
-            await queue.submit(
-                CognitiveEvent(
-                    type=evt_type,
-                    source_node="test",
-                    priority=priority,
-                    timestamp=ts,
-                )
-            )
-
-        # Run one cycle
-        winners = await controller.run_cycle()
-
-        # Verify pipeline worked — competition may filter aggressively
-        assert len(winners) <= 10
-        assert len(workspace.received) == len(winners)
-
-        # Verify stats
-        stats = controller.stats()
-        assert stats["cycle_count"] == 1
-        assert stats["total_events_processed"] == 10
-
-    @pytest.mark.asyncio
-    async def test_empty_queue_noop(self, pipeline: tuple) -> None:
-        """Empty queue returns empty winners."""
-        controller, _, workspace = pipeline
-        winners = await controller.run_cycle()
-        assert winners == []
-        assert workspace.received == []
-
-    @pytest.mark.asyncio
-    async def test_cognitive_state_delta(self, pipeline: tuple) -> None:
-        """Executive controller can apply cognitive state deltas."""
-        controller, _, _ = pipeline
-
-        assert controller.cognitive_state.confidence == 0.5
-
-        delta = CognitiveStateDelta(
-            source_node="test",
-            changes={"confidence": 0.9},
-        )
-        new_state = controller.apply_delta(delta)
-        assert new_state.confidence == 0.9
-        assert controller.cognitive_state.confidence == 0.9
 
 
 # ═══════════════════════════════════════════════════════════════════════════

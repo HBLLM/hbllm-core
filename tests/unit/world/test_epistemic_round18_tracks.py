@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import (
     CognitiveGraph,
     FactNode,
@@ -19,10 +20,6 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
 )
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.anterior_insular_timing import (
-    AnteriorInsularTimingEngine,
-    PacingMode,
-)
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
@@ -30,10 +27,14 @@ from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.orbitofrontal_credit_assignment import (
+from hbllm.hcir.world.experimental.anterior_insular_timing import (
+    AnteriorInsularTimingEngine,
+    PacingMode,
+)
+from hbllm.hcir.world.experimental.orbitofrontal_credit_assignment import (
     OrbitofrontalCreditAssignmentEngine,
 )
-from hbllm.hcir.world.pedunculopontine_locomotor import (
+from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
     LocomotorPacingRegime,
     PedunculopontineLocomotorEngine,
 )
@@ -200,7 +201,7 @@ class TestStructuralGraphFeedbackVertexSet:
         )
 
         # Acyclic directed path: FVS should be empty
-        assert graph.feedback_vertex_set() == set()
+        assert algorithms.feedback_vertex_set(graph) == set()
 
         adapter = NativeGraphAdapter()
         for n in ["A", "B", "C"]:
@@ -224,7 +225,7 @@ class TestStructuralGraphFeedbackVertexSet:
             HCIREdge(id="e3", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"])
         )
 
-        fvs_cycle = graph_cycle.feedback_vertex_set()
+        fvs_cycle = algorithms.feedback_vertex_set(graph_cycle)
         assert len(fvs_cycle) == 1
         assert list(fvs_cycle)[0] in {"A", "B", "C"}
 
@@ -248,7 +249,7 @@ class TestStructuralGraphFeedbackVertexSet:
             HCIREdge(id="e4", edge_type=HCIREdgeType.CAUSES, sources=["C"], targets=["A"])
         )
 
-        fvs_fig8 = graph_fig8.feedback_vertex_set()
+        fvs_fig8 = algorithms.feedback_vertex_set(graph_fig8)
         assert fvs_fig8 == {"A"}
 
         # Parity check on NativeGraphAdapter

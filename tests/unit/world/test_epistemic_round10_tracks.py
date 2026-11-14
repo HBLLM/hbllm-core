@@ -9,22 +9,23 @@ Covers:
 
 from __future__ import annotations
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.hippocampal_replay import (
+from hbllm.hcir.world.experimental.hippocampal_replay import (
     HippocampalPrioritizedReplayBuffer,
     ReplayBatch,
     ReplayTransition,
 )
-from hbllm.hcir.world.lateral_prefrontal_switcher import (
+from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
     CognitiveTaskSet,
     LateralPrefrontalTaskSwitcher,
 )
-from hbllm.hcir.world.retrosplenial_landmark_anchor import (
+from hbllm.hcir.world.experimental.retrosplenial_landmark_anchor import (
     LandmarkRecalibrationResult,
     RetrosplenialLandmarkAnchorEngine,
 )
@@ -272,11 +273,11 @@ def test_cognitive_graph_apsp_parity() -> None:
     graph.add_edge(e1)
     graph.add_edge(e2)
 
-    dist, paths = graph.all_pairs_shortest_paths(weight_attribute="weight")
+    dist, paths = algorithms.all_pairs_shortest_paths(graph, weight_attr="weight")
 
     assert dist[("X", "Z")] == 6.0
     assert paths[("X", "Z")] == ["X", "Y", "Z"]
-    assert graph.graph_diameter(weight_attribute="weight") == 6.0
+    assert algorithms.graph_radius_and_diameter(graph, weight_attr="weight")[1] == 6.0
 
 
 # ============================================================================

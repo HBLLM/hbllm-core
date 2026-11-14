@@ -17,9 +17,6 @@ Track 4: Gibsonian Affordance Fields & Closed Topological Boundary Contours
 
 import numpy as np
 
-from hbllm.hcir.world.active_inference_efe import (
-    ExpectedFreeEnergyEvaluator,
-)
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_deliberation import (
     BasalGangliaGatingCircuit,
@@ -29,6 +26,9 @@ from hbllm.hcir.world.cortex_perception import (
     GibsonianAffordanceExtractor,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.active_inference_efe import (
+    ExpectedFreeEnergyEvaluator,
+)
 
 
 class TestTrack1BasalGangliaTriPathwayArbitration:

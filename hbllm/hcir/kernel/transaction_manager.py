@@ -23,7 +23,7 @@ import logging
 import threading
 from collections import deque
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
@@ -180,6 +180,11 @@ class TransactionManager:
     ) -> None:
         self._workspace = workspace
         self._verification_stages = verification_stages or []
+        if not self._verification_stages:
+            logger.warning("TransactionManager created without verification pipeline")
+            self.unverified = True
+        else:
+            self.unverified = False
         self._validator = validator or GraphValidator()
         self._event_bus = event_bus
         self._max_log_size = max(1, max_log_size)
@@ -269,8 +274,26 @@ class TransactionManager:
         transaction.status = TransactionStatus.VALIDATED
 
         # Apply operations atomically: on any failure, revert the partial effects.
+        event_store = getattr(self._workspace, "_event_store", None)
+        batch_fn = getattr(event_store, "batch", None)
+        batch_cm = batch_fn() if callable(batch_fn) else nullcontext()
         try:
-            undo_entries = self._apply_operations(transaction)
+            with batch_cm:
+                undo_entries = self._apply_operations(transaction)
+                transaction.status = TransactionStatus.COMMITTED
+                self._record_committed(transaction, undo_entries)
+
+                snap = self._workspace.create_snapshot()
+                self._tx_versions[transaction.id] = snap.version
+
+                self._workspace.snapshot_manager.record_kernel_event(
+                    EventType.TRANSACTION_COMMITTED,
+                    {
+                        "tx_id": transaction.id,
+                        "author": transaction.author,
+                        "op_count": transaction.operation_count,
+                    },
+                )
         except Exception as exc:
             transaction.status = TransactionStatus.REJECTED
             transaction.annotations.append(
@@ -288,20 +311,6 @@ class TransactionManager:
             logger.error("Transaction %s apply failed, reverted: %s", transaction.id, exc)
             return transaction
 
-        transaction.status = TransactionStatus.COMMITTED
-        self._record_committed(transaction, undo_entries)
-
-        snap = self._workspace.create_snapshot()
-        self._tx_versions[transaction.id] = snap.version
-
-        self._workspace.snapshot_manager.record_kernel_event(
-            EventType.TRANSACTION_COMMITTED,
-            {
-                "tx_id": transaction.id,
-                "author": transaction.author,
-                "op_count": transaction.operation_count,
-            },
-        )
         self._publish(
             KernelEventType.TRANSACTION_COMMITTED,
             {
@@ -635,6 +644,15 @@ class TransactionManager:
             elif op == TransactionOp.ADD_EDGE:
                 if eid:
                     inverse.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
+            elif op == TransactionOp.UPSERT_EDGE:
+                if prev_edge:
+                    inverse.append(
+                        TransactionOperation(
+                            op=TransactionOp.UPSERT_EDGE, edge_id=eid, edge_data=prev_edge
+                        )
+                    )
+                elif eid:
+                    inverse.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
             elif op == TransactionOp.REMOVE_EDGE:
                 if prev_edge:
                     inverse.append(
@@ -781,6 +799,15 @@ class TransactionManager:
             ws._add_edge(edge, author=author)
             undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": None})
 
+        elif op.op == TransactionOp.UPSERT_EDGE:
+            raw_edge = dict(op.edge_data or {})
+            if "id" not in raw_edge and op.edge_id:
+                raw_edge["id"] = op.edge_id
+            edge = HCIREdge.model_validate(raw_edge)
+            prev_edge = self._edge_snapshot(edge.id)
+            ws._upsert_edge(edge, author=author)
+            undo_entries.append({"op": op.op, "edge_id": edge.id, "previous_edge": prev_edge})
+
         elif op.op == TransactionOp.REMOVE_EDGE:
             if op.edge_id:
                 prev_edge = self._edge_snapshot(op.edge_id)
@@ -822,5 +849,15 @@ class TransactionManager:
         cls = NODE_TYPE_REGISTRY.get(node_type)
         if cls is None:
             raise ValueError(f"No registered class for node type: {node_type}")
+
+        model_fields = set(cls.model_fields.keys())
+        extra = {k: v for k, v in data.items() if k not in model_fields}
+        if extra:
+            cleaned = {k: v for k, v in data.items() if k in model_fields}
+            if "properties" in model_fields:
+                existing_props = dict(cleaned.get("properties") or {})
+                existing_props.update(extra)
+                cleaned["properties"] = existing_props
+            return cls.model_validate(cleaned)
 
         return cls.model_validate(data)

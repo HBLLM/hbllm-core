@@ -238,6 +238,8 @@ class FrontopolarSubgoalStack:
 
     def push_subgoal(self, subgoal: FrontopolarSubgoal) -> None:
         """Push a newly formulated subgoal to the top of the stack (cognitive branching)."""
+        if any(existing.subgoal_id == subgoal.subgoal_id for existing in self.stack):
+            return
         if len(self.stack) >= self.max_depth:
             logger.warning(
                 "FrontopolarSubgoalStack: Maximum stack depth reached, dropping bottom goal."
@@ -439,13 +441,38 @@ class FrontopolarSubgoalStack:
         dest = subgoal.target_destination
         if subgoal.subgoal_type in (SubgoalType.PARK_IN_HOLDING_BAY, SubgoalType.DELIVER_TO_GOAL):
             return dest in current_entity_positions
+        if subgoal.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM:
+            b_pos = subgoal.metadata.get("barrier_pos")
+            b_feat = subgoal.metadata.get("barrier_feat")
+            if b_pos is not None and grid is not None:
+                br, bc = int(b_pos[0]), int(b_pos[1])
+                if 0 <= br < grid.shape[0] and 0 <= bc < grid.shape[1]:
+                    if b_feat is not None and int(grid[br, bc]) != b_feat:
+                        return True
+                    elif (
+                        b_feat is None
+                        and background_feature is not None
+                        and int(grid[br, bc]) == background_feature
+                    ):
+                        return True
+            if subgoal.metadata.get("triggered", False):
+                return True
+            if avatar_pos is not None and avatar_pos == dest and subgoal.target_entity_pos == dest:
+                return True
+            return False
+
         if subgoal.subgoal_type in (
+            SubgoalType.NAVIGATE_TO,
+            SubgoalType.ACQUIRE_TOOL,
+            SubgoalType.COLLECT_ITEM,
             SubgoalType.TRANSIT_CORRIDOR,
-            SubgoalType.UNLOCK_REMOTE_MECHANISM,
             SubgoalType.ALIGN_OPTICAL_REFLECTOR,
         ):
             if avatar_pos is not None and avatar_pos == dest:
                 return True
+            if held_features is not None and subgoal.required_feature is not None:
+                if subgoal.required_feature in held_features:
+                    return True
             if grid is not None and background_feature is not None and dest is not None:
                 dr, dc = dest
                 if 0 <= dr < grid.shape[0] and 0 <= dc < grid.shape[1]:

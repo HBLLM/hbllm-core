@@ -47,6 +47,29 @@ def check_event_loop() -> str:
     return "asyncio (default CPython loop)"
 
 
+def check_cognitive_subsystems() -> dict[str, Any]:
+    """Inspect Cognitive OS kernel, constitutional verifier, memory tiers, and native graph health."""
+    from hbllm.hcir.kernel.governance.constitutional_verifier import (
+        ConstitutionalVerifier,
+    )
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    system = build_cognitive_system(CognitiveSystemConfig(world_id="diagnostics_check"))
+    tm = system.services.transaction_manager
+    verifier_present = any(
+        isinstance(stage, ConstitutionalVerifier) for stage in tm._verification_stages
+    )
+    substrate_health = system.workspace.graph.native_health()
+
+    return {
+        "kernel_services": "online",
+        "verifier_attached": verifier_present,
+        "transaction_manager": "verified" if not tm.unverified else "unverified",
+        "memory_tiers": ["working", "brain", "persistent", "meta"],
+        "substrate": substrate_health,
+    }
+
+
 def run_diagnostics() -> dict[str, Any]:
     """Run full diagnostic collection."""
     rust_crates = check_rust_crates()
@@ -69,6 +92,7 @@ def run_diagnostics() -> dict[str, Any]:
         "sqlite": {
             "version": sqlite3.sqlite_version,
         },
+        "cognitive_os": check_cognitive_subsystems(),
     }
 
 
@@ -88,6 +112,22 @@ def print_diagnostics() -> None:
     print(f"  Event Loop    : {diag['event_loop']}")
     print(f"  SQLite        : v{diag['sqlite']['version']}")
     print()
+
+    cog = diag.get("cognitive_os", {})
+    if cog:
+        print("  Cognitive OS & Subsystems:")
+        print(f"    - Kernel Services          : {cog.get('kernel_services', 'unknown')}")
+        v_sym = "✓ attached" if cog.get("verifier_attached") else "✗ missing"
+        print(f"    - Constitutional Verifier  : {v_sym}")
+        print(f"    - Transaction Governance   : {cog.get('transaction_manager', 'unknown')}")
+        tiers_str = ", ".join(t.lower() for t in cog.get("memory_tiers", []))
+        print(f"    - Memory Tiers             : 4 tiers active ({tiers_str})")
+        sub = cog.get("substrate", {})
+        sub_avail = "✓ available" if sub.get("available") else "python fallback"
+        print(
+            f"    - Graph Native Substrate   : {sub_avail} (divergences: {sub.get('divergences', 0)})"
+        )
+        print()
 
     rust = diag["rust"]
     print(f"  Rust Acceleration ({rust['compiled_count']} crates compiled):")

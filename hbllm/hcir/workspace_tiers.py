@@ -413,16 +413,44 @@ class TieredWorkspace:
 
         self._snapshot_interval = snapshot_interval
         self._commits_since_snapshot: int = 0
+        self._default_working_frame: TaskFrame | None = None
 
     # ── Task Frame & Interruption Management ─────────────────────────
 
+    @property
+    def working_state(self) -> HCIRWorkspaceState:
+        """Canonical working workspace state. Returns active task frame workspace or default working frame workspace."""
+        active = self.active_task_frames
+        if active:
+            return active[-1].workspace
+        if self._default_working_frame is None or not self._default_working_frame.is_active:
+            self._default_working_frame = self.create_task_frame("default_working_frame")
+        return self._default_working_frame.workspace
+
     def create_task_frame(self, goal_id: str) -> TaskFrame:
         """Create a new task frame in the working tier."""
-        return self.working.create_frame(goal_id)
+        frame = self.working.create_frame(goal_id)
+        if (
+            self._default_working_frame is not None
+            and self._default_working_frame.is_active
+            and self._default_working_frame.frame_id != frame.frame_id
+            and self._default_working_frame.goal_id == "default_working_frame"
+        ):
+            self._default_working_frame.close(reason="superseded")
+        return frame
 
     def close_task_frame(self, frame_id: str, reason: str = "completed") -> bool:
         """Close a task frame in the working tier."""
         return self.working.close_frame(frame_id, reason)
+
+    @property
+    def active_task_frames(self) -> list[TaskFrame]:
+        """Return all active task frames in the working tier."""
+        return self.working.active_frames
+
+    def get_task_frame_by_goal(self, goal_id: str) -> TaskFrame | None:
+        """Get the active task frame for a goal."""
+        return self.working.get_frame_by_goal(goal_id)
 
     def push_interruption(
         self,
@@ -699,19 +727,207 @@ class TieredWorkspace:
                     )
                 )
         if ops:
-            # One atomic transaction: the archive either lands in full or not at all.
-            result = self.persistent.commit_operations(
-                ops,
-                author="archive:brain→persistent",
-                grant=getattr(self, "_system_grant", None),
-                metadata={"tier_transfer": "archive"},
-            )
-            if not result.is_committed:
-                logger.warning("archive_brain rejected: %s", result.annotations)
-                return 0
+            batch_size = 400
+            for i in range(0, len(ops), batch_size):
+                result = self.persistent.commit_operations(
+                    ops[i : i + batch_size],
+                    author="archive:brain→persistent",
+                    grant=getattr(self, "_system_grant", None),
+                    metadata={"tier_transfer": "archive"},
+                )
+                if not result.is_committed:
+                    logger.warning("archive_brain rejected: %s", result.annotations)
+                    return 0
 
         logger.info("Archived %d brain nodes to persistent workspace", count)
         return count
+
+    # ── Principled Forgetting & Memory Hygiene (CLS / Gap 3) ─────────
+
+    def apply_exponential_decay(
+        self,
+        tier: WorkspaceTier = WorkspaceTier.BRAIN,
+        half_life_seconds: float = 3600.0,
+        min_energy: float = 0.10,
+        author: str = "decay_engine",
+    ) -> list[str]:
+        """Apply exponential decay to node activation energies and prune sub-threshold memories.
+
+        Biologically grounded in Ebbinghaus retention curves and synaptic depression:
+            E(t) = E_0 * (2.0 ** (-elapsed / half_life))
+        When energy falls below min_energy, nodes that are not locked or permanent are pruned.
+
+        Returns:
+            List of node IDs that were pruned due to sub-threshold decay.
+        """
+        target_ws = self.get_tier(tier)
+        if target_ws is None:
+            return []
+
+        now = time.time()
+        pruned_ids: list[str] = []
+        decay_ops: list[TransactionOperation] = []
+        remove_ops: list[TransactionOperation] = []
+
+        for node in target_ws.graph.all_nodes():
+            props = getattr(node, "properties", {})
+            # Protected nodes (core axioms, permanent skills, protected concepts)
+            if props.get("permanent") or props.get("is_axiom") or props.get("locked"):
+                continue
+
+            raw_ts = (
+                props.get("last_accessed")
+                or props.get("timestamp")
+                or getattr(node, "created_at", None)
+            )
+            last_ts = float(raw_ts) if raw_ts is not None else now
+            initial_energy = float(props.get("activation_energy", 1.0))
+            elapsed = max(0.0, now - last_ts)
+            decay_factor = 2.0 ** (-elapsed / max(1.0, half_life_seconds))
+            current_energy = initial_energy * decay_factor
+
+            if current_energy < min_energy:
+                remove_ops.append(
+                    TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node.id)
+                )
+                pruned_ids.append(node.id)
+            else:
+                updated_props = dict(props)
+                updated_props["activation_energy"] = current_energy
+                copied = node.model_copy(deep=True)
+                copied.properties = updated_props
+                decay_ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node.id,
+                        node_data=copied.model_dump(),
+                    )
+                )
+
+        grant = getattr(self, "_system_grant", None)
+        if decay_ops:
+            for i in range(0, len(decay_ops), 400):
+                target_ws.commit_operations(
+                    decay_ops[i : i + 400],
+                    author=f"{author}:energy_update",
+                    grant=grant,
+                )
+        if remove_ops:
+            for i in range(0, len(remove_ops), 400):
+                target_ws.commit_operations(
+                    remove_ops[i : i + 400],
+                    author=f"{author}:eviction",
+                    grant=grant,
+                )
+            logger.info(
+                "Exponential decay pruned %d sub-threshold nodes from %s", len(remove_ops), tier
+            )
+
+        return pruned_ids
+
+    def prune_interfering_memories(
+        self,
+        tier: WorkspaceTier = WorkspaceTier.BRAIN,
+        similarity_threshold: float = 0.85,
+        author: str = "interference_pruner",
+    ) -> list[str]:
+        """Detect and prune interfering redundant memories in a tier.
+
+        When two memories (e.g. concept hypotheses or episodic traces) have overlapping
+        signatures / labels exceeding similarity_threshold, retains the higher-confidence
+        exemplar and prunes the duplicate to avoid catastrophic interference.
+
+        Returns:
+            List of pruned redundant node IDs.
+        """
+        target_ws = self.get_tier(tier)
+        if target_ws is None:
+            return []
+
+        nodes = list(target_ws.graph.all_nodes())
+        pruned_ids: list[str] = []
+        remove_ops: list[TransactionOperation] = []
+
+        by_type: dict[str, list[HCIRNode]] = {}
+        for n in nodes:
+            t_str = str(getattr(n, "node_type", "node"))
+            by_type.setdefault(t_str, []).append(n)
+
+        for t_str, group in by_type.items():
+            if len(group) < 2:
+                continue
+            to_remove_in_group: set[str] = set()
+            for i in range(len(group)):
+                node_a = group[i]
+                if node_a.id in to_remove_in_group:
+                    continue
+                label_a = (
+                    getattr(node_a, "name", "") or getattr(node_a, "label", "") or node_a.id
+                ).lower()
+                conf_a = float(getattr(node_a, "confidence", 0.5) or 0.5)
+
+                for j in range(i + 1, len(group)):
+                    node_b = group[j]
+                    if node_b.id in to_remove_in_group:
+                        continue
+                    label_b = (
+                        getattr(node_b, "name", "") or getattr(node_b, "label", "") or node_b.id
+                    ).lower()
+                    conf_b = float(getattr(node_b, "confidence", 0.5) or 0.5)
+
+                    tokens_a = set(label_a.split("_"))
+                    tokens_b = set(label_b.split("_"))
+                    inter = len(tokens_a & tokens_b)
+                    union = len(tokens_a | tokens_b)
+                    sim = inter / max(1, union) if union > 0 else 0.0
+
+                    if sim >= similarity_threshold:
+                        loser = node_b if conf_a >= conf_b else node_a
+                        to_remove_in_group.add(loser.id)
+                        remove_ops.append(
+                            TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=loser.id)
+                        )
+                        pruned_ids.append(loser.id)
+
+        if remove_ops:
+            grant = getattr(self, "_system_grant", None)
+            for i in range(0, len(remove_ops), 400):
+                target_ws.commit_operations(
+                    remove_ops[i : i + 400],
+                    author=f"{author}:redundancy_resolved",
+                    grant=grant,
+                )
+            logger.info(
+                "Interference resolution pruned %d redundant nodes from %s", len(remove_ops), tier
+            )
+
+        return pruned_ids
+
+    def run_memory_hygiene_cycle(
+        self,
+        half_life_seconds: float = 3600.0,
+        similarity_threshold: float = 0.85,
+    ) -> dict[str, Any]:
+        """Execute complete memory hygiene across working, brain, and persistent tiers."""
+        decayed_brain = self.apply_exponential_decay(
+            tier=WorkspaceTier.BRAIN,
+            half_life_seconds=half_life_seconds,
+        )
+        pruned_brain = self.prune_interfering_memories(
+            tier=WorkspaceTier.BRAIN,
+            similarity_threshold=similarity_threshold,
+        )
+        decayed_persistent = self.apply_exponential_decay(
+            tier=WorkspaceTier.PERSISTENT,
+            half_life_seconds=half_life_seconds * 10.0,
+        )
+
+        return {
+            "decayed_brain_nodes": len(decayed_brain),
+            "pruned_brain_nodes": len(pruned_brain),
+            "decayed_persistent_nodes": len(decayed_persistent),
+            "total_pruned": len(decayed_brain) + len(pruned_brain) + len(decayed_persistent),
+        }
 
     def snapshot(self, tier: WorkspaceTier) -> Snapshot | None:
         """Create a graph snapshot for a specific tier.

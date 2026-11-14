@@ -1,0 +1,27 @@
+split: dev
+seed_range: [500, 599]
+eval_seeds_per_family: 10
+tasks:
+  - id: gym_frozenlake_independent
+    family: external_gymnasium
+    env_class: benchmarks.envs.external_benchmarks.GymFrozenLakeBenchmarkEnv
+    seeds: [500, 501, 502, 503, 504, 505, 506, 507, 508, 509]
+    max_budget: 60
+
+  - id: minigrid_empty_independent
+    family: external_minigrid
+    env_class: benchmarks.envs.external_benchmarks.MiniGridEmptyBenchmarkEnv
+    seeds: [510, 511, 512, 513, 514, 515, 516, 517, 518, 519]
+    max_budget: 60
+
+  - id: minigrid_lavagap_independent
+    family: external_minigrid
+    env_class: benchmarks.envs.external_benchmarks.MiniGridLavaGapBenchmarkEnv
+    seeds: [520, 521, 522, 523, 524, 525, 526, 527, 528, 529]
+    max_budget: 60
+
+  - id: minigrid_doorkey_independent
+    family: external_minigrid
+    env_class: benchmarks.envs.external_benchmarks.MiniGridDoorKeyBenchmarkEnv
+    seeds: [530, 531, 532, 533, 534, 535, 536, 537, 538, 539]
+    max_budget: 80

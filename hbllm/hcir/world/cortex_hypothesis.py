@@ -21,16 +21,22 @@ Popperian counterexample refutation, and causal rule abstraction:
 """
 
 import logging
+import math
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hbllm.hcir.world.causal_discovery import BeliefTransitionType, CausalPredicate
+from hbllm.hcir.world.causal_discovery import (
+    BeliefTransitionType,
+    CausalPredicate,
+    LogicOperator,
+)
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
@@ -45,6 +51,7 @@ class HypothesisType(StrEnum):
     ACTION_MUTATION = "ACTION_MUTATION"
     REMOTE_MECHANISM = "REMOTE_MECHANISM"
     HAZARD_CONTACT = "HAZARD_CONTACT"
+    COMPOSITIONAL_PROGRAM = "COMPOSITIONAL_PROGRAM"
 
 
 class HypothesisStatus(StrEnum):
@@ -143,6 +150,21 @@ class RelationalRuleHypothesis:
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Compile this hypothesis into a formal first-order CausalPredicate."""
+        if self.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+            ast_obj = self.metadata.get("ast")
+            if isinstance(ast_obj, SynthesizedRuleAST):
+                return CausalPredicate(
+                    variable=f"inductive_program:{self.rule_id}",
+                    operator="==",
+                    value=ast_obj.effect_operator,
+                    relation="synthesized_transition_rule",
+                    target_entity=ast_obj.precondition.describe(),
+                    logic_op=ast_obj.precondition.logic_op,
+                    children=list(ast_obj.precondition.children),
+                    causal_status=self.status.value,
+                    confidence=self.confidence,
+                    metadata={"effect_params": dict(ast_obj.effect_params)},
+                )
         if self.rule_type == HypothesisType.REMOTE_MECHANISM:
             return CausalPredicate(
                 variable=f"inductive_rule:{self.rule_id}",
@@ -281,7 +303,12 @@ class RemoteMechanismObserver(HypothesisObserver):
         hypotheses: dict[str, RelationalRuleHypothesis],
         min_support_to_confirm: int,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
-        if context.curr_avatar_pos is None or context.prev_avatar_pos is None:
+        if (
+            context.is_dead
+            or context.changed_count == 0
+            or context.curr_avatar_pos is None
+            or context.prev_avatar_pos is None
+        ):
             return []
 
         H, W = context.prev_grid.shape
@@ -289,8 +316,33 @@ class RemoteMechanismObserver(HypothesisObserver):
         if not (0 <= cr < H and 0 <= cc < W):
             return []
 
-        contact_feat = int(context.prev_grid[cr, cc])
-        if contact_feat == context.background_feature:
+        contact_feat: int | None = int(context.prev_grid[cr, cc])
+        av_feat = (
+            int(context.prev_grid[context.prev_avatar_pos[0], context.prev_avatar_pos[1]])
+            if context.prev_avatar_pos is not None
+            else None
+        )
+        if contact_feat == av_feat or contact_feat == context.background_feature:
+            contact_feat = None
+            # Only attribute an adjacent contact when performing an in-place
+            # interaction (standing still); walking onto empty floor is not contact.
+            if context.curr_avatar_pos == context.prev_avatar_pos:
+                changed_adj: list[int] = []
+                static_adj: list[int] = []
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = cr + dr, cc + dc
+                    if 0 <= nr < H and 0 <= nc < W:
+                        cand_f = int(context.prev_grid[nr, nc])
+                        if cand_f != context.background_feature and cand_f != av_feat:
+                            if bool(context.diff_mask[nr, nc]):
+                                changed_adj.append(cand_f)
+                            else:
+                                static_adj.append(cand_f)
+                if len(set(changed_adj)) == 1:
+                    contact_feat = changed_adj[0]
+                elif not changed_adj and len(set(static_adj)) == 1:
+                    contact_feat = static_adj[0]
+        if contact_feat is None or contact_feat == context.background_feature:
             return []
 
         diff_mask = context.diff_mask
@@ -300,7 +352,11 @@ class RemoteMechanismObserver(HypothesisObserver):
 
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
         for cleared in cleared_feats:
-            if cleared != contact_feat and cleared != context.background_feature:
+            if (
+                cleared != contact_feat
+                and cleared != context.background_feature
+                and cleared != av_feat
+            ):
                 hid = f"remote_mech_{contact_feat}_clears_{cleared}"
                 if hid in hypotheses:
                     hyp = hypotheses[hid]
@@ -395,6 +451,424 @@ class ActionMutationObserver(HypothesisObserver):
         return results
 
 
+class RelationalCueObserver(HypothesisObserver):
+    """Observes relational contextual cue pairs where interacting adjacent to a paired feature clears a distal barrier."""
+
+    def observe(
+        self,
+        context: TransitionObservationContext,
+        hypotheses: dict[str, RelationalRuleHypothesis],
+        min_support_to_confirm: int,
+    ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
+        if (
+            context.curr_avatar_pos is None
+            or context.prev_avatar_pos != context.curr_avatar_pos
+            or not (1 <= context.changed_count <= 8)
+        ):
+            return []
+
+        H, W = context.prev_grid.shape
+        ar, ac = context.curr_avatar_pos
+        bg = context.background_feature
+        results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
+
+        adj_paired_feats: set[int] = set()
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = ar + dr, ac + dc
+            if 0 <= nr < H and 0 <= nc < W:
+                f = int(context.prev_grid[nr, nc])
+                if f != bg and int(np.count_nonzero(context.prev_grid == f)) == 2:
+                    adj_paired_feats.add(f)
+
+        if not adj_paired_feats:
+            return []
+
+        for mr, mc in np.argwhere(context.diff_mask):
+            if abs(int(mr) - ar) + abs(int(mc) - ac) <= 1:
+                continue
+            old_f = int(context.prev_grid[mr, mc])
+            new_f = int(context.curr_grid[mr, mc])
+            if old_f != bg and new_f == bg:
+                for pf in adj_paired_feats:
+                    hid = f"relational_cue_{pf}_clears_{old_f}"
+                    if hid in hypotheses:
+                        hyp = hypotheses[hid]
+                        event = hyp.record_support(min_support=min_support_to_confirm)
+                        results.append((hyp, event))
+                    else:
+                        hyp = RelationalRuleHypothesis(
+                            rule_id=hid,
+                            rule_type=HypothesisType.REMOTE_MECHANISM,
+                            premise_feature=pf,
+                            target_feature=old_f,
+                            action_id=context.action,
+                            positive_support=1,
+                            confidence=0.85,
+                            description=f"Relational cue-paired feature {pf} clears distal barrier {old_f}",
+                        )
+                        event = HypothesisTransitionEvent(
+                            event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                            rule_id=hid,
+                            rule_type=hyp.rule_type,
+                            timestamp=time.time(),
+                            confidence_before=0.0,
+                            confidence_after=hyp.confidence,
+                            reason="Relational contextual cue pair remote clearance",
+                        )
+                        results.append((hyp, event))
+
+        return results
+
+
+@dataclass(frozen=True)
+class SynthesizedRuleAST:
+    """Open-ended symbolic transition rule T(s, a) -> delta_s represented as a program AST."""
+
+    precondition: CausalPredicate
+    effect_operator: str
+    effect_params: dict[str, Any] = field(default_factory=dict)
+    ast_depth: int = 1
+    productions_used: tuple[str, ...] = ()
+
+    @staticmethod
+    def extract_transition_features(context: TransitionObservationContext) -> dict[str, Any]:
+        """Extract observable transition features without environment-specific labels."""
+        H, W = context.prev_grid.shape
+        contact_feat: int | None = None
+        if context.curr_avatar_pos is not None:
+            cr, cc = context.curr_avatar_pos
+            if 0 <= cr < H and 0 <= cc < W:
+                contact_feat = int(context.prev_grid[cr, cc])
+        adj_feats: list[int] = []
+        if context.prev_avatar_pos is not None:
+            pr, pc = context.prev_avatar_pos
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = pr + dr, pc + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    f = int(context.prev_grid[nr, nc])
+                    if f != context.background_feature and f not in adj_feats:
+                        adj_feats.append(f)
+        moved = (
+            context.prev_avatar_pos is not None
+            and context.curr_avatar_pos is not None
+            and context.prev_avatar_pos != context.curr_avatar_pos
+        )
+        return {
+            "action_id": context.action,
+            "contact_feature": contact_feat,
+            "adjacent_features": adj_feats,
+            "changed_count": context.changed_count,
+            "avatar_moved": moved,
+            "is_dead": context.is_dead,
+            "is_won": context.is_won,
+        }
+
+    def evaluate_precondition(self, context: TransitionObservationContext) -> bool:
+        """Evaluate whether this AST precondition matches the current transition."""
+        feats = self.extract_transition_features(context)
+        return bool(self.precondition.evaluate(feats))
+
+    def evaluate_effect(self, context: TransitionObservationContext) -> bool:
+        """Evaluate whether the transition delta conforms to this AST effect operator."""
+        diff_mask = context.diff_mask
+        if self.effect_operator == "modulate_terminal":
+            target = str(self.effect_params.get("terminal", ""))
+            if target == "dead":
+                return bool(context.is_dead)
+            if target == "won":
+                return bool(context.is_won)
+            return False
+        if not np.any(diff_mask):
+            return False
+        if self.effect_operator == "clear_distal_feature":
+            tf = self.effect_params.get("target_feature")
+            if tf is None:
+                return False
+            prev_n = int(np.count_nonzero(context.prev_grid == tf))
+            curr_n = int(np.count_nonzero(context.curr_grid == tf))
+            return curr_n < prev_n
+        if self.effect_operator == "transform_feature":
+            src = self.effect_params.get("src_feature")
+            dst = self.effect_params.get("dst_feature")
+            if src is None or dst is None:
+                return False
+            coords = np.argwhere(diff_mask)
+            return any(
+                int(context.prev_grid[r, c]) == src and int(context.curr_grid[r, c]) == dst
+                for r, c in coords
+            )
+        if self.effect_operator == "translate_entity":
+            feat = self.effect_params.get("feature")
+            delta = self.effect_params.get("delta")
+            if feat is None or not isinstance(delta, tuple) or len(delta) != 2:
+                return False
+            dr, dc = int(delta[0]), int(delta[1])
+            H, W = context.curr_grid.shape
+            for r, c in np.argwhere(diff_mask):
+                if int(context.prev_grid[r, c]) == feat and int(context.curr_grid[r, c]) != feat:
+                    nr, nc = int(r) + dr, int(c) + dc
+                    if 0 <= nr < H and 0 <= nc < W and int(context.curr_grid[nr, nc]) == feat:
+                        return True
+            return False
+        if self.effect_operator == "spawn_feature":
+            dst = self.effect_params.get("dst_feature")
+            if dst is None:
+                return False
+            return bool(np.any(context.curr_grid[diff_mask] == dst))
+        return False
+
+
+class RulePCFGPrior:
+    """Learned Dirichlet-Laplace production prior over open-ended transition rule ASTs."""
+
+    def __init__(self, complexity_penalty: float = 0.25, alpha: float = 1.0) -> None:
+        self.complexity_penalty = complexity_penalty
+        self.alpha = alpha
+        self.production_counts: dict[str, float] = {
+            "precondition:AND": 2.0,
+            "precondition:OR": 1.0,
+            "precondition:NOT": 1.0,
+            "precondition:contact_feature": 3.0,
+            "precondition:adjacent_features": 2.0,
+            "precondition:action_id": 2.0,
+            "precondition:avatar_moved": 1.5,
+            "effect:transform_feature": 2.0,
+            "effect:clear_distal_feature": 2.0,
+            "effect:translate_entity": 2.0,
+            "effect:spawn_feature": 1.5,
+            "effect:modulate_terminal": 1.5,
+        }
+
+    def prior_probability(self, ast: SynthesizedRuleAST) -> float:
+        """Compute MDL-regularized PCFG prior probability P(AST) in (0, 1]."""
+        prods = ast.productions_used or (
+            "precondition:contact_feature",
+            f"effect:{ast.effect_operator}",
+        )
+        vocab_size = max(1, len(self.production_counts))
+        total = sum(self.production_counts.values()) + self.alpha * vocab_size
+        log_p = -self.complexity_penalty * max(0, ast.ast_depth - 1)
+        for p in prods:
+            count = self.production_counts.get(p, 0.5)
+            prob = (count + self.alpha) / max(1e-9, total)
+            log_p += math.log(max(1e-9, prob))
+        return float(min(1.0, math.exp(max(-30.0, log_p))))
+
+    def update_from_outcome(self, ast: SynthesizedRuleAST, confirmed: bool) -> None:
+        """Update production weights via Bayesian reinforcement or falsification decay."""
+        prods = ast.productions_used or (
+            "precondition:contact_feature",
+            f"effect:{ast.effect_operator}",
+        )
+        for p in prods:
+            cur = self.production_counts.get(p, 1.0)
+            if confirmed:
+                self.production_counts[p] = min(1000.0, cur + 1.0)
+            else:
+                self.production_counts[p] = max(0.1, cur * 0.85)
+
+    def sample_or_rank_proposals(
+        self,
+        candidates: Sequence[SynthesizedRuleAST],
+    ) -> list[tuple[SynthesizedRuleAST, float]]:
+        """Rank candidate AST programs by PCFG prior * structural simplicity."""
+        scored = [(cand, self.prior_probability(cand)) for cand in candidates]
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return scored
+
+
+class CompositionalProgramObserver(HypothesisObserver):
+    """Synthesizes open-ended compositional AST transition rules ranked by a learned PCFG prior."""
+
+    def __init__(self, pcfg_prior: RulePCFGPrior | None = None) -> None:
+        self.pcfg_prior = pcfg_prior or RulePCFGPrior()
+
+    def observe(
+        self,
+        context: TransitionObservationContext,
+        hypotheses: dict[str, RelationalRuleHypothesis],
+        min_support_to_confirm: int,
+    ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
+        if context.changed_count == 0 and not context.is_dead and not context.is_won:
+            return []
+
+        feats = SynthesizedRuleAST.extract_transition_features(context)
+        candidates: list[SynthesizedRuleAST] = []
+        bg = context.background_feature
+        contact_f = feats.get("contact_feature")
+        adj_feats: list[int] = list(feats.get("adjacent_features", []))
+
+        # Candidate ASTs for entity translation (e.g., pushing cargo along movement delta)
+        if (
+            context.changed_count > 0
+            and context.changed_count <= 8
+            and context.prev_avatar_pos is not None
+            and context.curr_avatar_pos is not None
+        ):
+            dr = int(context.curr_avatar_pos[0] - context.prev_avatar_pos[0])
+            dc = int(context.curr_avatar_pos[1] - context.prev_avatar_pos[1])
+            if (dr != 0 or dc != 0) and (abs(dr) + abs(dc) <= 2):
+                H, W = context.curr_grid.shape
+                diff_coords = np.argwhere(context.diff_mask)[:16]
+                for r, c in diff_coords:
+                    ir, ic = int(r), int(c)
+                    old_f = int(context.prev_grid[ir, ic])
+                    new_f = int(context.curr_grid[ir, ic])
+                    if old_f != bg and new_f != old_f and (ir, ic) != context.prev_avatar_pos:
+                        nr, nc = ir + dr, ic + dc
+                        if (
+                            0 <= nr < H
+                            and 0 <= nc < W
+                            and int(context.curr_grid[nr, nc]) == old_f
+                            and int(context.prev_grid[nr, nc]) != old_f
+                        ):
+                            pre = CausalPredicate(
+                                logic_op=LogicOperator.AND,
+                                children=[
+                                    CausalPredicate(
+                                        variable="action_id",
+                                        operator="==",
+                                        value=context.action,
+                                    ),
+                                    CausalPredicate(
+                                        variable="contact_feature",
+                                        operator="==",
+                                        value=old_f,
+                                    ),
+                                ],
+                            )
+                            candidates.append(
+                                SynthesizedRuleAST(
+                                    precondition=pre,
+                                    effect_operator="translate_entity",
+                                    effect_params={"feature": old_f, "delta": (dr, dc)},
+                                    ast_depth=2,
+                                    productions_used=(
+                                        "precondition:AND",
+                                        "precondition:action_id",
+                                        "precondition:contact_feature",
+                                        "effect:translate_entity",
+                                    ),
+                                )
+                            )
+                            break
+
+        # Candidate AST for distal clearing / feature transform
+        if (
+            not context.is_dead
+            and 1 <= context.changed_count <= 16
+            and (contact_f is not None and contact_f != bg or adj_feats)
+        ):
+            premise_var = (
+                "contact_feature"
+                if (contact_f is not None and contact_f != bg)
+                else "adjacent_features"
+            )
+            premise_val: Any = contact_f if premise_var == "contact_feature" else adj_feats[0]
+            op_name = "==" if premise_var == "contact_feature" else "contains"
+            diff_coords = np.argwhere(context.diff_mask)[:16]
+            for r, c in diff_coords:
+                ir, ic = int(r), int(c)
+                if context.prev_avatar_pos == (ir, ic) or context.curr_avatar_pos == (ir, ic):
+                    continue
+                old_f = int(context.prev_grid[ir, ic])
+                new_f = int(context.curr_grid[ir, ic])
+                if old_f != bg and new_f == bg and old_f != premise_val:
+                    pre = CausalPredicate(
+                        logic_op=LogicOperator.AND,
+                        children=[
+                            CausalPredicate(
+                                variable=premise_var,
+                                operator=op_name,
+                                value=premise_val,
+                            ),
+                            CausalPredicate(
+                                variable="action_id",
+                                operator="==",
+                                value=context.action,
+                            ),
+                        ],
+                    )
+                    candidates.append(
+                        SynthesizedRuleAST(
+                            precondition=pre,
+                            effect_operator="clear_distal_feature",
+                            effect_params={"premise_feature": premise_val, "target_feature": old_f},
+                            ast_depth=2,
+                            productions_used=(
+                                "precondition:AND",
+                                f"precondition:{premise_var}",
+                                "precondition:action_id",
+                                "effect:clear_distal_feature",
+                            ),
+                        )
+                    )
+                    break
+                if old_f != new_f:
+                    pre = CausalPredicate(
+                        variable="action_id",
+                        operator="==",
+                        value=context.action,
+                    )
+                    candidates.append(
+                        SynthesizedRuleAST(
+                            precondition=pre,
+                            effect_operator="transform_feature",
+                            effect_params={"src_feature": old_f, "dst_feature": new_f},
+                            ast_depth=1,
+                            productions_used=("precondition:action_id", "effect:transform_feature"),
+                        )
+                    )
+                    break
+
+        if not candidates:
+            return []
+
+        ranked = self.pcfg_prior.sample_or_rank_proposals(candidates)
+        best_ast, prior_score = ranked[0]
+        eff_params = best_ast.effect_params
+        prem_f = (
+            eff_params.get("premise_feature")
+            or eff_params.get("feature")
+            or eff_params.get("src_feature")
+        )
+        tgt_f = eff_params.get("target_feature")
+        res_f = eff_params.get("dst_feature")
+        hid = f"prog_{best_ast.effect_operator}_{prem_f}_{tgt_f or res_f}_{context.action}"
+        results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
+        if hid in hypotheses:
+            hyp = hypotheses[hid]
+            hyp.metadata["prior_score"] = prior_score
+            event = hyp.record_support(min_support=min_support_to_confirm)
+            if hyp.status == HypothesisStatus.CONFIRMED:
+                self.pcfg_prior.update_from_outcome(best_ast, confirmed=True)
+            results.append((hyp, event))
+        else:
+            hyp = RelationalRuleHypothesis(
+                rule_id=hid,
+                rule_type=HypothesisType.COMPOSITIONAL_PROGRAM,
+                premise_feature=int(prem_f) if isinstance(prem_f, int) else None,
+                target_feature=int(tgt_f) if isinstance(tgt_f, int) else None,
+                result_feature=int(res_f) if isinstance(res_f, int) else None,
+                action_id=context.action,
+                positive_support=1,
+                confidence=round(min(0.85, 0.45 + 0.4 * prior_score), 4),
+                description=f"Synthesized AST: IF {best_ast.precondition.describe()} THEN {best_ast.effect_operator}({eff_params})",
+                metadata={"ast": best_ast, "prior_score": prior_score},
+            )
+            event = HypothesisTransitionEvent(
+                event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                rule_id=hid,
+                rule_type=hyp.rule_type,
+                timestamp=time.time(),
+                confidence_before=0.0,
+                confidence_after=hyp.confidence,
+                reason=f"Synthesized open-ended AST under PCFG prior={prior_score:.4f}",
+            )
+            results.append((hyp, event))
+        return results
+
+
 class PopperianFalsifier:
     """Evaluates active hypotheses against counterexamples to immediately falsify refutations."""
 
@@ -402,6 +876,7 @@ class PopperianFalsifier:
     def falsify(
         context: TransitionObservationContext,
         hypotheses: dict[str, RelationalRuleHypothesis],
+        pcfg_prior: RulePCFGPrior | None = None,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
         if context.curr_avatar_pos is None or context.is_dead:
             return []
@@ -424,6 +899,16 @@ class PopperianFalsifier:
                         if curr_target_count >= prev_target_count:
                             event = hyp.record_counterexample()
                             falsified.append((hyp, event))
+            elif hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+                ast_obj = hyp.metadata.get("ast")
+                if isinstance(ast_obj, SynthesizedRuleAST):
+                    if ast_obj.evaluate_precondition(context) and not ast_obj.evaluate_effect(
+                        context
+                    ):
+                        event = hyp.record_counterexample()
+                        if pcfg_prior is not None:
+                            pcfg_prior.update_from_outcome(ast_obj, confirmed=False)
+                        falsified.append((hyp, event))
 
         return falsified
 
@@ -435,8 +920,10 @@ class InductiveHypothesisEngine:
         self,
         min_support_to_confirm: int = 2,
         observers: list[HypothesisObserver] | None = None,
+        pcfg_prior: RulePCFGPrior | None = None,
     ) -> None:
         self.min_support_to_confirm = min_support_to_confirm
+        self.pcfg_prior: RulePCFGPrior = pcfg_prior or RulePCFGPrior()
         self.hypotheses: dict[str, RelationalRuleHypothesis] = {}
         self.event_log: list[HypothesisTransitionEvent] = []
         self.observers: list[HypothesisObserver] = (
@@ -446,6 +933,8 @@ class InductiveHypothesisEngine:
                 HazardContactObserver(),
                 RemoteMechanismObserver(),
                 ActionMutationObserver(),
+                RelationalCueObserver(),
+                CompositionalProgramObserver(self.pcfg_prior),
             ]
         )
         self.falsifier: PopperianFalsifier = PopperianFalsifier()
@@ -525,10 +1014,21 @@ class InductiveHypothesisEngine:
         falsified_results = self.falsifier.falsify(
             context=context,
             hypotheses=self.hypotheses,
+            pcfg_prior=self.pcfg_prior,
         )
         for hyp, event in falsified_results:
             self.event_log.append(event)
             updated_rules.append(hyp)
+
+        # 3. Solved solution induction: rules active during winning trajectories are confirmed
+        if context.is_won:
+            for h in self.hypotheses.values():
+                if h.positive_support >= 1 and h.counterexamples == 0:
+                    if h.status != HypothesisStatus.CONFIRMED:
+                        h.status = HypothesisStatus.CONFIRMED
+                        ast_obj = h.metadata.get("ast")
+                        if isinstance(ast_obj, SynthesizedRuleAST):
+                            self.pcfg_prior.update_from_outcome(ast_obj, confirmed=True)
 
         return updated_rules
 
@@ -537,7 +1037,15 @@ class InductiveHypothesisEngine:
         return [
             h
             for h in self.hypotheses.values()
-            if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+            if (
+                h.status == HypothesisStatus.CONFIRMED
+                or (
+                    h.positive_support >= 1
+                    and h.counterexamples == 0
+                    and h.rule_type == HypothesisType.REMOTE_MECHANISM
+                )
+            )
+            and h.is_valid
         ]
 
     def get_rule_for_barrier(self, barrier_feat: int) -> RelationalRuleHypothesis | None:
@@ -562,12 +1070,43 @@ class InductiveHypothesisEngine:
 
     def export_to_world_theory(self, theory: HCIRSymbolicWorldTheory) -> None:
         """Ground confirmed inductive rules into first-order HCIR CausalPredicates."""
-        for hyp in self.get_confirmed_rules():
+        av_feats = getattr(theory, "avatar_features", set())
+        confirmed = sorted(
+            self.get_confirmed_rules(),
+            key=lambda h: (
+                h.status == HypothesisStatus.CONFIRMED,
+                h.positive_support,
+                h.confidence,
+            ),
+        )
+        for hyp in confirmed:
             pred = hyp.to_causal_predicate()
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
-                if hyp.target_feature is not None:
-                    theory.induce_barrier(hyp.target_feature)
+                if (
+                    hyp.target_feature is not None
+                    and hyp.premise_feature is not None
+                    and hyp.premise_feature != hyp.target_feature
+                    and hyp.premise_feature not in av_feats
+                    and hyp.target_feature not in av_feats
+                    and self.get_hazard_rule(hyp.premise_feature) is None
+                ):
+                    is_rel_cue = hyp.rule_id.startswith("relational_cue_")
+                    theory.induce_conditional_affordance(
+                        feature=hyp.target_feature,
+                        condition=CausalPredicate(
+                            variable="relational_cue" if is_rel_cue else "inventory",
+                            operator="==" if is_rel_cue else "contains",
+                            value=hyp.premise_feature,
+                            relation="cue_actuator_resonance" if is_rel_cue else "",
+                        ),
+                        evidence=(
+                            f"relational_cue:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                            if is_rel_cue
+                            else f"remote_mech:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                        ),
+                        prerequisite_feature=hyp.premise_feature,
+                    )
                     theory.barrier_predicates.append(
                         CausalPredicate(
                             variable="feature_id",
@@ -577,20 +1116,49 @@ class InductiveHypothesisEngine:
                             target_entity=str(hyp.premise_feature),
                         )
                     )
+                    theory.induce_barrier(hyp.target_feature, evidence="remote_mechanism")
                 if (
                     hyp.premise_feature is not None
-                    and hyp.premise_feature not in getattr(theory, "avatar_features", set())
+                    and hyp.premise_feature not in av_feats
                     and hyp.premise_feature not in getattr(theory, "walkable_features", set())
+                    and self.get_hazard_rule(hyp.premise_feature) is None
                 ):
-                    theory.actuator_features.add(hyp.premise_feature)
+                    theory.induce_actuator(hyp.premise_feature, evidence="remote_mechanism")
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                 theory.barrier_predicates.append(pred)
                 if hyp.premise_feature is not None:
-                    theory.induce_barrier(hyp.premise_feature)
+                    theory.induce_barrier(hyp.premise_feature, evidence="hazard_contact")
             elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
                 # Direct action mutations represent in-place terrain/entity transformations,
                 # NOT distal actuators (switches/buttons). The causal predicate already records this.
                 pass
+            elif hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+                ast_obj = hyp.metadata.get("ast")
+                if isinstance(ast_obj, SynthesizedRuleAST):
+                    if (
+                        ast_obj.effect_operator == "clear_distal_feature"
+                        and hyp.premise_feature is not None
+                        and hyp.target_feature is not None
+                        and hyp.premise_feature != hyp.target_feature
+                        and hyp.premise_feature not in av_feats
+                        and hyp.target_feature not in av_feats
+                        and self.get_hazard_rule(hyp.premise_feature) is None
+                    ):
+                        theory.induce_conditional_affordance(
+                            feature=hyp.target_feature,
+                            condition=ast_obj.precondition,
+                            evidence=f"program:{hyp.rule_id}",
+                            prerequisite_feature=hyp.premise_feature,
+                        )
+                        if hyp.premise_feature not in getattr(theory, "walkable_features", set()):
+                            theory.induce_actuator(hyp.premise_feature, evidence="program")
+                    elif (
+                        ast_obj.effect_operator == "translate_entity"
+                        and hyp.premise_feature is not None
+                        and hyp.premise_feature not in av_feats
+                        and hasattr(theory, "induce_cargo")
+                    ):
+                        theory.induce_cargo(hyp.premise_feature, evidence="program_translate")
 
     def retract_refuted_rules(self, theory: HCIRSymbolicWorldTheory) -> list[str]:
         """Remove refuted hypotheses from active symbolic world theory predicates."""
@@ -600,19 +1168,31 @@ class InductiveHypothesisEngine:
                 retracted_ids.append(hyp.rule_id)
                 if hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                     if hyp.premise_feature is not None:
-                        theory.barrier_features.discard(hyp.premise_feature)
+                        theory.retract_barrier(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
+                        theory.retract_conditional_affordance(
+                            hyp.target_feature, reason="refuted_rule"
+                        )
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
-                elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
-                    pass
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
+                elif hyp.rule_type in (
+                    HypothesisType.ACTION_MUTATION,
+                    HypothesisType.COMPOSITIONAL_PROGRAM,
+                ):
+                    if (
+                        hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM
+                        and hyp.target_feature is not None
+                    ):
+                        theory.retract_conditional_affordance(
+                            hyp.target_feature, reason="refuted_rule"
+                        )
                 else:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 theory.domain_predicates = [
                     p
                     for p in theory.domain_predicates
@@ -643,7 +1223,8 @@ class InductiveHypothesisEngine:
             self.hypotheses = {
                 k: h
                 for k, h in self.hypotheses.items()
-                if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+                if (h.status == HypothesisStatus.CONFIRMED or h.positive_support >= 1)
+                and h.is_valid
             }
         else:
             self.hypotheses.clear()

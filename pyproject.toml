@@ -159,6 +159,8 @@ known-first-party = ["hbllm"]
 "plugins/**/*.py" = ["N999"]
 
 [tool.pytest.ini_options]
+minversion = "7.0"
+required_plugins = ["pytest-asyncio", "pytest-timeout", "pytest-xdist"]
 testpaths = ["tests", "plugins"]
 pythonpath = ["."]
 asyncio_mode = "auto"

@@ -50,6 +50,27 @@ class DeviceInfo:
         """Device is considered stale after 5 minutes without heartbeat."""
         return self.age_seconds > 300
 
+    @property
+    def modalities(self) -> list[str]:
+        """Infers sensory modality capabilities for SGE grounding."""
+        mods: list[str] = []
+        caps = {c.lower() for c in self.capabilities}
+        if "audio" in caps or "microphone" in caps or self.device_type == "speaker":
+            mods.append("audio")
+        if "display" in caps or "camera" in caps:
+            mods.append("vision")
+        if (
+            "keyboard" in caps
+            or "text" in caps
+            or self.device_type in ("desktop", "mobile", "browser")
+        ):
+            mods.append("text")
+        if "kinesthetic" in caps or "imu" in caps or "touch" in caps:
+            mods.append("kinesthetic")
+        if not mods:
+            mods.append("environmental_sensor")
+        return mods
+
 
 @dataclass
 class SessionHandoff:
@@ -247,6 +268,13 @@ class DeviceBridge:
             for did in device_ids
             if did in self._devices and self._devices[did].is_active
         ]
+
+    def get_device_modalities(self, device_id: str) -> list[str]:
+        """Retrieve inferred sensory modalities for a device for SGE grounding."""
+        device = self._devices.get(device_id)
+        if not device:
+            return []
+        return device.modalities
 
     # ── Bus Event Handlers ───────────────────────────────────────────────
 

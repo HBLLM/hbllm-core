@@ -1,0 +1,339 @@
+{
+  "git_sha": "1ba1f412a4967c474c26befab259c8243ce9858b",
+  "config_hash": "18edb01752900fdc",
+  "timestamp": "20261110_142352",
+  "split": "heldout",
+  "tasks": [
+    {
+      "task_id": "grid_nav_heldout_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 26,
+      "max_budget": 100,
+      "steps_to_first_success": 24,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 22.74,
+      "p95_latency_ms": 36.76,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        24,
+        26,
+        26,
+        26,
+        26
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 24
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          24,
+          26,
+          26,
+          26,
+          26
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 21,
+        "oracle_success": true,
+        "oracle_steps": 18
+      }
+    },
+    {
+      "task_id": "grid_push_heldout_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 100,
+      "max_budget": 100,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 20.64,
+      "p95_latency_ms": 30.78,
+      "errors": [],
+      "episode_successes": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "episode_steps": [
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 100
+      },
+      "lifelong": {
+        "success": false,
+        "episodes": 5,
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          100,
+          100,
+          100,
+          100,
+          100
+        ],
+        "steps_to_stable_policy": null
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 100,
+        "oracle_success": true,
+        "oracle_steps": 6
+      }
+    },
+    {
+      "task_id": "continuous_reach_heldout_system_handcrafted",
+      "family": "continuous",
+      "split": "heldout",
+      "steps": 60,
+      "max_budget": 60,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 19.96,
+      "p95_latency_ms": 29.66,
+      "errors": [],
+      "episode_successes": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "episode_steps": [
+        60,
+        60,
+        60,
+        60,
+        60
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 60
+      },
+      "lifelong": {
+        "success": false,
+        "episodes": 5,
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          60,
+          60,
+          60,
+          60,
+          60
+        ],
+        "steps_to_stable_policy": null
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 60,
+        "oracle_success": true,
+        "oracle_steps": 24
+      }
+    },
+    {
+      "task_id": "symbolic_rules_heldout_system_handcrafted",
+      "family": "symbolic",
+      "split": "heldout",
+      "steps": 68,
+      "max_budget": 80,
+      "steps_to_first_success": 22,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 28.65,
+      "p95_latency_ms": 39.68,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        false,
+        false,
+        false
+      ],
+      "episode_steps": [
+        80,
+        22,
+        80,
+        80,
+        80
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 80
+      },
+      "lifelong": {
+        "success": false,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          80,
+          22,
+          80,
+          80,
+          80
+        ],
+        "steps_to_stable_policy": null
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 80,
+        "oracle_success": true,
+        "oracle_steps": 12
+      }
+    }
+  ],
+  "family_scores": {
+    "grid": 0.62,
+    "continuous": 0.0,
+    "symbolic": 0.0
+  },
+  "generality_score": 0.2067,
+  "mean_p50_latency_ms": 23.0,
+  "mean_p95_latency_ms": 34.22,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.0,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": null
+    },
+    "oracle": {
+      "generality_score": 0.8883,
+      "family_scores": {
+        "grid": 0.94,
+        "continuous": 0.8,
+        "symbolic": 0.925
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "no_grounding": {
+      "generality_score": 0.2067,
+      "family_scores": {
+        "grid": 0.62,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.25,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "demonstration": {
+      "generality_score": 0.2067,
+      "family_scores": {
+        "grid": 0.62,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.25,
+      "lifelong_curve": [
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    }
+  },
+  "env_hash": "88b8bea0d5cc4bc9",
+  "zero_shot": {
+    "generality_score": 0.21,
+    "family_scores": {
+      "grid": 0.63,
+      "continuous": 0.0,
+      "symbolic": 0.0
+    },
+    "solve_rate": 0.25
+  },
+  "lifelong": {
+    "generality_score": 0.2067,
+    "family_scores": {
+      "grid": 0.62,
+      "continuous": 0.0,
+      "symbolic": 0.0
+    },
+    "solve_rate": 0.25,
+    "mean_steps_to_stable_policy": 0.0
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.215,
+    "family_scores": {
+      "grid": 0.645,
+      "continuous": 0.0,
+      "symbolic": 0.0
+    },
+    "solve_rate": 0.25
+  }
+}

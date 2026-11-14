@@ -96,11 +96,11 @@ def test_friston_expected_free_energy_curiosity() -> None:
         engine.action_dynamics[a] = MockDyn()
 
     # Candidate A: feature 2 is already known as walkable floor
-    engine.symbolic_theory.walkable_features.add(2)
+    engine.symbolic_theory.induce_walkable(2, evidence="traversal")
     grid[4, 5] = 2
 
     # Candidate B: feature 3 is completely unknown and candidate goal
-    engine.symbolic_theory.candidate_goal_features.add(3)
+    engine.symbolic_theory.induce_candidate_goal(3, evidence="candidate")
     grid[6, 5] = 3
 
     # Both entities are equidistant (distance 1)

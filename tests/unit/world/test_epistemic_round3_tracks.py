@@ -22,13 +22,13 @@ from hbllm.hcir.world.cortex_hypothesis import (
 )
 from hbllm.hcir.world.elastic_particle_induction import DeflectionMode
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.thalamocortical_binding import ThalamocorticalBindingEngine
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
     SubgoalType,
 )
 from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-from hbllm.hcir.world.thalamocortical_binding import ThalamocorticalBindingEngine
 
 
 class TestTrack1ThalamocorticalBinding:
@@ -70,7 +70,7 @@ class TestTrack1ThalamocorticalBinding:
         # Create a cluster of feature 3 cells (goal)
         grid[2, 2] = 3
         grid[2, 3] = 3
-        ep_engine.symbolic_theory.goal_features.add(3)
+        ep_engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
         ep_engine.avatar_pos = (0, 0)
         ep_engine.avatar_feature = 1
 
@@ -180,7 +180,7 @@ class TestTrack3BallisticParticleKinematics:
         ep_engine = AutonomousEpistemicEngine()
         grid = np.zeros((12, 12), dtype=int)
         grid[5, :] = 2  # Horizontal wall
-        ep_engine.symbolic_theory.barrier_features.add(2)
+        ep_engine.symbolic_theory.induce_barrier(2, evidence="collision")
 
         particles = [
             {"pos": (2, 2), "velocity": (1, 0), "feature_id": 7, "entity_id": "ballistic_rock"}

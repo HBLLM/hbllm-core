@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, GoalNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
@@ -91,13 +92,13 @@ class TestTrack1NativeGraphTopologicalQueries:
         assert reach == {"subgoal_1", "subgoal_2", "subgoal_3"}
 
         # topological_sort
-        order = graph.topological_sort()
+        order = algorithms.topological_sort(graph)
         assert order == ["subgoal_1", "subgoal_2", "subgoal_3"]
 
         # Disjoint node
         n4 = GoalNode(id="subgoal_isolated", description="Isolated")
         graph.add_node(n4)
-        comps = graph.connected_components()
+        comps = algorithms.connected_components(graph)
         assert len(comps) == 2
 
 

@@ -629,6 +629,36 @@ class CognitiveBlackbox:
 
         # Autonomous epistemic world discovery and mental simulation engines
         self._epistemic_engines: dict[str, AutonomousEpistemicEngine] = {}
+        self._cognitive_systems: dict[str, Any] = {}
+        self._observation_adapter: Any | None = None
+
+    @property
+    def epistemic_engine(self) -> AutonomousEpistemicEngine:
+        """Return the default AutonomousEpistemicEngine bound to this blackbox."""
+        return self.get_epistemic_engine("default")
+
+    def get_cognitive_system(self, source_id: str = "default") -> Any:
+        """Get or initialize the canonical CognitiveSystem for a specific source/domain."""
+        if source_id not in self._cognitive_systems:
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+            system = build_cognitive_system(
+                CognitiveSystemConfig(world_id=source_id, memory_dir=None)
+            )
+            self._cognitive_systems[source_id] = system
+            self._epistemic_engines[source_id] = system.engine
+        return self._cognitive_systems[source_id]
+
+    @property
+    def observation_adapter(self) -> Any:
+        """SGE CompositeObservationAdapter for adapting DriverInput into ObservationEnvelopes."""
+        if self._observation_adapter is None:
+            from hbllm.hcir.grounding.features.composite_observation_adapter import (
+                CompositeObservationAdapter,
+            )
+
+            self._observation_adapter = CompositeObservationAdapter()
+        return self._observation_adapter
 
     def get_knowledge_graph(self, source_id: str = "default") -> KnowledgeGraph:
         """Get or initialize the core KnowledgeGraph for a specific source/domain."""
@@ -639,7 +669,7 @@ class CognitiveBlackbox:
     def get_epistemic_engine(self, source_id: str = "default") -> AutonomousEpistemicEngine:
         """Get or initialize the AutonomousEpistemicEngine for active curiosity and mental simulation."""
         if source_id not in self._epistemic_engines:
-            self._epistemic_engines[source_id] = AutonomousEpistemicEngine()
+            self.get_cognitive_system(source_id)
         return self._epistemic_engines[source_id]
 
     # ── Driver, Lifter & Resolver Registration ────────────────────────────
@@ -798,6 +828,20 @@ class CognitiveBlackbox:
         # Delivered positions
         self._upsert_var("var_delivered_positions", [list(p) for p in state.delivered_positions])
 
+        # Sync with epistemic engine symbolic world theory (single source of truth)
+        if source_id in self._epistemic_engines:
+            ee = self._epistemic_engines[source_id]
+            if hasattr(ee, "symbolic_theory"):
+                state.learned_target_features.update(ee.symbolic_theory.target_features)
+                state.learned_obstacle_features.update(ee.symbolic_theory.barrier_features)
+                state.learned_traversable_features.update(ee.symbolic_theory.walkable_features)
+                for tg in state.learned_target_features:
+                    ee.symbolic_theory.induce_candidate_goal(tg, evidence="blackbox_state")
+                for ob in state.learned_obstacle_features:
+                    ee.symbolic_theory.induce_barrier(ob, evidence="blackbox_state")
+                for tr in state.learned_traversable_features:
+                    ee.symbolic_theory.induce_walkable(tr, evidence="blackbox_state")
+
         # Learned target features
         if state.learned_target_features:
             self._upsert_var("var_target_features", list(state.learned_target_features))
@@ -954,17 +998,38 @@ class CognitiveBlackbox:
 
         if perception_data is not None:
             self._source_perception_data[source_id] = perception_data
-        else:
-            return None
 
         # Use registered lifter to convert raw data → internal entities
+        entities: list[SpatialEntity] | list[Any] = []
+        barriers: list[tuple[int, int]] = []
         lifter = self._lifters.get(source_id)
-        if lifter is None:
+        if lifter is None and driver_input.modality is not None:
             # Try modality-based fallback
             lifter = self._lifters.get(driver_input.modality.value)
 
-        if lifter is not None:
+        if lifter is not None and perception_data is not None:
             entities, barriers = lifter(perception_data, state)
+        if not entities:
+            # SGE Grounding fallback via CompositeObservationAdapter
+            try:
+                envelope, _ = self.observation_adapter.adapt_driver_input(driver_input)
+                entities = envelope.metadata.get("entities", [])
+            except Exception as exc:
+                logger.debug("CompositeObservationAdapter fallback error: %s", exc)
+
+        # Route perception through SGE CorticalGroundingBridge
+        if entities:
+            try:
+                epistemic_engine = self.get_epistemic_engine(source_id)
+                if epistemic_engine.grounding_bridge is not None:
+                    epistemic_engine.grounding_bridge.process_perception(
+                        ctx=None,
+                        extracted_entities=entities,
+                    )
+            except Exception as exc:
+                logger.debug("SGE grounding_bridge.process_perception error: %s", exc)
+
+        if lifter is not None and perception_data is not None:
             grid_shape = driver_input.metadata.get("grid_shape", (64, 64))
             raw_step_size = driver_input.metadata.get("step_size", state.step_size)
             if state.step_size <= 1:
@@ -995,9 +1060,37 @@ class CognitiveBlackbox:
             if hasattr(self.spatial_planner, "step_size"):
                 self.spatial_planner.step_size = effective_step_size
 
+            # Ensure all entities are SpatialEntity instances for topological entity graph
+            spatial_entities: list[SpatialEntity] = []
+            for ent in entities:
+                if isinstance(ent, SpatialEntity):
+                    spatial_entities.append(ent)
+                elif isinstance(ent, dict):
+                    pos = ent.get("position", (0, 0))
+                    grid_pos = (int(pos[0]), int(pos[1])) if len(pos) >= 2 else (0, 0)
+                    role_val = ent.get("role", EntityRole.UNKNOWN)
+                    if isinstance(role_val, str):
+                        try:
+                            role = EntityRole(role_val.lower())
+                        except Exception:
+                            role = EntityRole.UNKNOWN
+                    elif isinstance(role_val, EntityRole):
+                        role = role_val
+                    else:
+                        role = EntityRole.UNKNOWN
+                    spatial_entities.append(
+                        SpatialEntity(
+                            id=str(ent.get("id", f"ent_{len(spatial_entities)}")),
+                            role=role,
+                            grid_pos=grid_pos,
+                            centroid=(float(grid_pos[0]), float(grid_pos[1])),
+                            color=int(ent.get("color", 1)),
+                        )
+                    )
+
             eg = self.spatial_planner.construct_entity_graph(
-                entities=entities,
-                barriers=barriers,
+                entities=spatial_entities,
+                barriers=set(barriers),
                 grid_shape=grid_shape,
                 step_size=effective_step_size,
             )
@@ -1057,6 +1150,29 @@ class CognitiveBlackbox:
     # ── Decision (Output) ─────────────────────────────────────────────────
 
     def decide(
+        self,
+        available_actions: list[DriverAction],
+        source_id: str = "default",
+        entity_graph: EntityGraph | None = None,
+    ) -> DriverAction:
+        """Plan next action from internal state and validate through SGE motor gateway."""
+        chosen = self._decide_internal(
+            available_actions, source_id=source_id, entity_graph=entity_graph
+        )
+        try:
+            epistemic_engine = self.get_epistemic_engine(source_id)
+            bridge = epistemic_engine.grounding_bridge
+            if bridge is not None:
+                bridge.process_motor(
+                    ctx=None,
+                    proposed_action=chosen.action_id,
+                    action_data=chosen.parameters,
+                )
+        except Exception as exc:
+            logger.debug("SGE grounding_bridge.process_motor error: %s", exc)
+        return chosen
+
+    def _decide_internal(
         self,
         available_actions: list[DriverAction],
         source_id: str = "default",
@@ -2066,6 +2182,19 @@ class CognitiveBlackbox:
         """
         state = self.get_state(source_id)
         state.total_reward += feedback.reward
+
+        # Report execution outcome to SGE grounding bridge
+        try:
+            epistemic_engine = self.get_epistemic_engine(source_id)
+            bridge = epistemic_engine.grounding_bridge
+            if bridge is not None and bridge.state.last_execution_record is not None:
+                reported = bridge.gateway.report_execution(
+                    bridge.state.last_execution_record,
+                    success=feedback.success,
+                )
+                bridge.state.last_execution_record = reported
+        except Exception as exc:
+            logger.debug("SGE gateway report_execution error: %s", exc)
 
         # Empirical trial-and-error learning from feedback info
         info = feedback.info or {}

@@ -1,10 +1,10 @@
-VENV := venv
+VENV ?= $(shell if [ -d ".venv" ]; then echo ".venv"; else echo "venv"; fi)
 PYTHON := $(VENV)/bin/python
 PIP := $(PYTHON) -m pip
 PYTEST := $(PYTHON) -m pytest
 
 .PHONY: test test-v test-fast test-unit test-integration lint format typecheck install clean \
-       rust-test rust-clippy rust-build test-all pre-commit install-hooks \
+       rust rust-test rust-clippy rust-build test-all pre-commit install-hooks \
        db-migrate db-upgrade db-downgrade db-history \
        docker-build docker-up docker-down
 
@@ -86,6 +86,8 @@ rust-test: ## Run all Rust unit tests
 
 rust-clippy: ## Run clippy with deny warnings across all crates
 	cargo clippy --workspace --lib -- -D warnings
+
+rust: rust-build ## Alias for rust-build
 
 rust-build: ## Build all Rust crates as Python modules (requires maturin)
 	@for dir in rust/*/; do \

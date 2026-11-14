@@ -459,6 +459,7 @@ class HippocampalEpisodicCortex:
         # Multi-episode history archives
         self.past_episodes: list[list[EpisodicTransition]] = []
         self.successful_trajectories: list[list[EpisodicTransition]] = []
+        self.consolidated_trajectory_count: int = 0
         self.failed_trajectories: list[list[EpisodicTransition]] = []
         self.catastrophic_replays: list[ReplayCreditAssignment] = []
 
@@ -486,6 +487,16 @@ class HippocampalEpisodicCortex:
         )
         self.attractor_network: HippocampalAttractorNetwork = HippocampalAttractorNetwork()
         self.distilled_relational_rules: list[Any] = []
+
+    def replay_forward_and_reverse(
+        self,
+        trajectory: list[EpisodicTransition],
+        terminal_reward: float = 1.0,
+    ) -> dict[str, Any]:
+        """Perform forward and reverse replay through the hippocampal replay consolidator."""
+        return self.replay_consolidator.replay_forward_and_reverse(
+            trajectory, terminal_reward=terminal_reward
+        )
 
     def consolidate_sleep_replay(self, terminal_reward: float = 1.0) -> dict[str, Any]:
         """Perform Hippocampal Sharp-Wave Ripple (SWR) replay and cross-episode schema distillation."""
@@ -917,6 +928,7 @@ class HippocampalEpisodicCortex:
         self.current_episode.clear()
         self.past_episodes.clear()
         self.successful_trajectories.clear()
+        self.consolidated_trajectory_count = 0
         self.catastrophic_replays.clear()
         self.grounded_lethal_transitions.clear()
         self.discovered_lethal_features.clear()
@@ -937,6 +949,7 @@ class HippocampalEpisodicCortex:
         top_k: int = 3,
         min_confidence: float = 0.3,
         entities: Sequence[Any] | None = None,
+        min_match_score: float = 0.0,
     ) -> list[ProceduralMacro]:
         """Retrieve ranked procedural macros applicable to the current observation.
 
@@ -948,7 +961,7 @@ class HippocampalEpisodicCortex:
             if macro.confidence < min_confidence:
                 continue
             score = macro.match_score(grid, available_actions, entities=entities)
-            if score > 0.0:
+            if score > 0.0 and score >= min_match_score:
                 candidates.append((score, macro))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
@@ -1167,8 +1180,13 @@ class HippocampalEpisodicCortex:
         view.working_memory.reset_salience_baseline()
         delta.set("current_simulated_goal", None)
         delta.set("_feedback_assimilated", False)
+        view.symbolic_theory.clear_explored_positions(
+            clear_features=(is_new_level or not retain_dynamics)
+        )
         if is_new_level or not retain_dynamics:
-            view.symbolic_theory.candidate_goal_features.clear()
+            view.symbolic_theory.clear_candidate_goals()
+            if is_new_level:
+                view.symbolic_theory.clear_barriers()
 
         _lvl = 0 if level is None else level
         if not retain_dynamics:
@@ -1259,11 +1277,16 @@ class HippocampalEpisodicCortex:
             view.bilateral_integrator.active_bilateral_state = None
 
             view.entity_visit_counts.clear()
+            view.position_visit_counts.clear()
             view.probed_entity_ids.clear()
             view.quiescent_actuation_targets.clear()
             view.effective_actuation_targets.clear()
             view.actuation_affordances.clear()
             view.quiescent_features.clear()
+            if hasattr(view.working_memory, "remote_causal"):
+                # Coordinate-keyed distal links are layout-specific; the feature-level
+                # law survives in symbolic_theory.conditional_affordances.
+                view.working_memory.remote_causal.reset_episode(retain_long_term=False)
             if hasattr(view, "feature_quiescent_counts"):
                 view.feature_quiescent_counts.clear()
             if hasattr(view, "_feature_quiescent_counts"):
@@ -1280,8 +1303,7 @@ class HippocampalEpisodicCortex:
             # Physical terrain affordances (e.g. tracks, bridges, road surfaces) persist across
             # rooms of the same environment unless counterfactual evidence invalidates them.
             # Local coordinate barriers reset, but empirical walkable affordances are retained.
-            view.symbolic_theory.barrier_features.clear()
-            view.symbolic_theory.barrier_predicates.clear()
+            view.learned_barriers.clear()
             for f in view.symbolic_theory.walkable_features:
                 if not any(p.value == f for p in view.symbolic_theory.walkable_predicates):
                     view.symbolic_theory.walkable_predicates.append(
@@ -1302,7 +1324,6 @@ class HippocampalEpisodicCortex:
             view.avatar_features.clear()
             delta.set("prior_avatar_feature", None)
             view._avatar_controllability_evidence.clear()
-            view.verified_safe_features.clear()
             delta.set("avatar_pos", None)
             view.action_dynamics.clear()
             view.action_affordances.clear()
@@ -1950,6 +1971,30 @@ class PatternSeparationResult:
     orthogonal_distance: float
 
 
+def _project_vector_to_dim(vector: np.ndarray, target_dim: int) -> np.ndarray:
+    """Project arbitrary sensory or memory vector to target dimension preserving full profile (WP-C6)."""
+    flat = vector.flatten().astype(np.float32)
+    if len(flat) == target_dim:
+        return flat
+    if len(flat) == 0:
+        return np.zeros(target_dim, dtype=np.float32)
+    if len(flat) > target_dim:
+        # 1D adaptive average pooling across sensory profile
+        indices = np.linspace(0, len(flat), target_dim + 1, dtype=int)
+        pooled = np.array(
+            [
+                float(np.mean(flat[indices[i] : max(indices[i] + 1, indices[i + 1])]))
+                for i in range(target_dim)
+            ],
+            dtype=np.float32,
+        )
+        return pooled
+    # Linear interpolation to expand lower-dimensional profile
+    x_old = np.linspace(0.0, 1.0, len(flat))
+    x_new = np.linspace(0.0, 1.0, target_dim)
+    return np.interp(x_new, x_old, flat).astype(np.float32)
+
+
 class DentateGyrusPatternSeparator:
     """Hippocampal Dentate Gyrus (DG) sparse expansion and pattern separator."""
 
@@ -1964,11 +2009,7 @@ class DentateGyrusPatternSeparator:
 
     def separate_pattern(self, sensory_vector: np.ndarray) -> PatternSeparationResult:
         """Project input vector into high-dimensional sparse orthogonal representation."""
-        flat = sensory_vector.flatten().astype(np.float32)
-        if len(flat) < self.input_dim:
-            flat = np.pad(flat, (0, self.input_dim - len(flat)))
-        elif len(flat) > self.input_dim:
-            flat = flat[: self.input_dim]
+        flat = _project_vector_to_dim(sensory_vector, self.input_dim)
 
         proj = np.dot(self.weights, flat)
         top_k_indices = np.argsort(proj)[-self.k_active :]
@@ -2010,12 +2051,7 @@ class CA3RecurrentPatternCompleter:
         self, memory_id: str, pattern: np.ndarray, plan: list[Any] | None = None
     ) -> None:
         """Store an episodic attractor pattern with associated winning plan."""
-        pat = pattern.flatten().astype(np.float32)
-        if len(pat) != self.feature_dim:
-            if len(pat) < self.feature_dim:
-                pat = np.pad(pat, (0, self.feature_dim - len(pat)))
-            else:
-                pat = pat[: self.feature_dim]
+        pat = _project_vector_to_dim(pattern, self.feature_dim)
         norm = float(np.linalg.norm(pat))
         if norm > 1e-6:
             pat /= norm
@@ -2037,11 +2073,7 @@ class CA3RecurrentPatternCompleter:
                 iterations=0,
             )
 
-        cue = partial_cue.flatten().astype(np.float32)
-        if len(cue) < self.feature_dim:
-            cue = np.pad(cue, (0, self.feature_dim - len(cue)))
-        elif len(cue) > self.feature_dim:
-            cue = cue[: self.feature_dim]
+        cue = _project_vector_to_dim(partial_cue, self.feature_dim)
         cue_norm = float(np.linalg.norm(cue))
         if cue_norm > 1e-6:
             cue /= cue_norm
@@ -2149,6 +2181,9 @@ class EpisodicStage:
     """
 
     name: str = "episodic_stage"
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
         ops: list[TransactionOperation] = []

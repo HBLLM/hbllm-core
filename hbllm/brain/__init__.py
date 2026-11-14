@@ -50,6 +50,21 @@ def __dir__() -> list[str]:
     return sorted(list(globals().keys()) + list(_EXPORTS.keys()))
 
 
+def _register_language_lexicons() -> None:
+    try:
+        from hbllm.brain.language.sinhala.lexicon import SinhalaLexicon
+        from hbllm.brain.language.tamil.lexicon import TamilLexicon
+        from hbllm.hcir.kernel.governance.governance_engine import register_lexicon_provider
+
+        register_lexicon_provider("si", SinhalaLexicon)
+        register_lexicon_provider("ta", TamilLexicon)
+    except Exception:
+        pass
+
+
+_register_language_lexicons()
+
+
 __all__ = [
     "BrainFactory",
     "BrainConfig",

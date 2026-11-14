@@ -1,0 +1,275 @@
+{
+  "git_sha": "ace2232bdcdc94579ce533ae3ce5ac5b47d28d2c",
+  "config_hash": "633c7583e7b02077",
+  "timestamp": "20261110_212456",
+  "split": "dev",
+  "tasks": [
+    {
+      "task_id": "grid_nav_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 20,
+      "max_budget": 100,
+      "steps_to_first_success": 25,
+      "steps_to_stable_policy": 1,
+      "success_at_budget": true,
+      "p50_latency_ms": 27.27,
+      "p95_latency_ms": 37.28,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        9,
+        25,
+        20,
+        20,
+        20
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 9
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          9,
+          25,
+          20,
+          20,
+          20
+        ],
+        "steps_to_stable_policy": 1
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 28,
+        "oracle_success": true,
+        "oracle_steps": 18
+      }
+    },
+    {
+      "task_id": "grid_push_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 6,
+      "max_budget": 100,
+      "steps_to_first_success": 32,
+      "steps_to_stable_policy": 1,
+      "success_at_budget": true,
+      "p50_latency_ms": 43.49,
+      "p95_latency_ms": 229.15,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        100,
+        32,
+        6,
+        6,
+        6
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 100
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          100,
+          32,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 1
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 100,
+        "oracle_success": true,
+        "oracle_steps": 6
+      }
+    },
+    {
+      "task_id": "continuous_reach_dev_system_handcrafted",
+      "family": "continuous",
+      "split": "dev",
+      "steps": 25,
+      "max_budget": 60,
+      "steps_to_first_success": 33,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 18.99,
+      "p95_latency_ms": 23.36,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        33,
+        25,
+        25,
+        25,
+        25
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 33
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          33,
+          25,
+          25,
+          25,
+          25
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 48,
+        "oracle_success": true,
+        "oracle_steps": 25
+      }
+    }
+  ],
+  "family_scores": {
+    "grid": 0.935,
+    "continuous": 0.7917
+  },
+  "generality_score": 0.8634,
+  "mean_p50_latency_ms": 29.92,
+  "mean_p95_latency_ms": 96.6,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0
+      },
+      "solve_rate": 0.0,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": null
+    },
+    "oracle": {
+      "generality_score": 0.8659,
+      "family_scores": {
+        "grid": 0.94,
+        "continuous": 0.7917
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "no_grounding": {
+      "generality_score": 0.8634,
+      "family_scores": {
+        "grid": 0.935,
+        "continuous": 0.7917
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.67
+    },
+    "demonstration": {
+      "generality_score": 0.8634,
+      "family_scores": {
+        "grid": 0.935,
+        "continuous": 0.7917
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        false,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 1.33
+    }
+  },
+  "env_hash": "88b8bea0d5cc4bc9",
+  "zero_shot": {
+    "generality_score": 0.3625,
+    "family_scores": {
+      "grid": 0.0,
+      "continuous": 0.725
+    },
+    "solve_rate": 0.3333
+  },
+  "lifelong": {
+    "generality_score": 0.8634,
+    "family_scores": {
+      "grid": 0.935,
+      "continuous": 0.7917
+    },
+    "solve_rate": 1.0,
+    "mean_steps_to_stable_policy": 0.67
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.3,
+    "family_scores": {
+      "grid": 0.0,
+      "continuous": 0.6
+    },
+    "solve_rate": 0.3333
+  }
+}

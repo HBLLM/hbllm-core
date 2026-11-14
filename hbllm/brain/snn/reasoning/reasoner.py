@@ -12,10 +12,8 @@ This is the bridge between the passive causal storage layer
 Usage::
 
     from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
-    from hbllm.brain.causality.causal_graph import CausalGraph
 
-    graph = CausalGraph(data_dir="data")
-    reasoner = CausalReasoner(graph)
+    reasoner = CausalReasoner(causal_graph=None)
 
     chains = reasoner.reason(["concept_1", "concept_2"])
     for chain in chains:
@@ -27,14 +25,47 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.causality.causal_graph import CausalGraph, CausalLink
 from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CausalLink:
+    """A probabilistic causal relationship between two nodes."""
+
+    link_id: str = field(default_factory=lambda: f"causal_{uuid.uuid4().hex[:12]}")
+    source_id: str = ""
+    target_id: str = ""
+    probability: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "link_id": self.link_id,
+            "source_id": self.source_id,
+            "target_id": self.target_id,
+            "probability": self.probability,
+            "created_at": self.created_at,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CausalLink:
+        return cls(
+            link_id=d.get("link_id", ""),
+            source_id=d.get("source_id", ""),
+            target_id=d.get("target_id", ""),
+            probability=float(d.get("probability", 0.0)),
+            created_at=float(d.get("created_at", time.time())),
+            metadata=d.get("metadata", {}),
+        )
 
 
 @dataclass
@@ -95,7 +126,7 @@ class CausalReasoner:
 
     def __init__(
         self,
-        causal_graph: CausalGraph,
+        causal_graph: Any,
         reasoning_network: ReasoningNetwork | None = None,
         max_depth: int = 3,
         min_probability: float = 0.3,
@@ -314,8 +345,8 @@ class CausalReasoner:
         }
 
     @property
-    def graph(self) -> CausalGraph:
-        """Access the underlying CausalGraph."""
+    def graph(self) -> Any:
+        """Access the underlying causal graph."""
         return self._graph
 
     @property

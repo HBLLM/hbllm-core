@@ -14,9 +14,20 @@ import time
 import numpy as np
 import pytest
 
-from hbllm.brain.causality.causal_graph import CausalGraph, CausalLink
-from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
+from hbllm.brain.snn.reasoning.reasoner import CausalLink, CausalReasoner
 from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
+
+
+class MockCausalGraph:
+    def __init__(self, data_dir: str | None = None) -> None:
+        self._links: list[CausalLink] = []
+
+    def _insert(self, link: CausalLink) -> None:
+        self._links.append(link)
+
+    def get_effects(self, source_id: str) -> list[CausalLink]:
+        return [l for l in self._links if l.source_id == source_id]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ReasoningNetwork Tests
@@ -104,7 +115,7 @@ class TestCausalReasoner:
     @pytest.fixture
     def graph(self, tmp_path):
         """Create a CausalGraph with test data."""
-        g = CausalGraph(data_dir=str(tmp_path / "causal"))
+        g = MockCausalGraph(data_dir=str(tmp_path / "causal"))
 
         # Build a chain: A → B → C → D
         now = time.time()
@@ -248,10 +259,17 @@ class TestStreamCausalIntegration:
     """Test ComprehensionStream with CausalReasoner wired in."""
 
     @pytest.fixture
-    def causal_graph(self, tmp_path):
-        g = CausalGraph(data_dir=str(tmp_path / "causal"))
+    def causal_graph(self):
+        class MockCausalGraph:
+            def __init__(self):
+                self.links = []
+
+            def get_effects(self, source_id):
+                return [l for l in self.links if l.source_id == source_id]
+
+        g = MockCausalGraph()
         now = time.time()
-        g._insert(
+        g.links.append(
             CausalLink(
                 link_id="link_1",
                 source_id="test concept",

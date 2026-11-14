@@ -91,10 +91,12 @@ class ACCConflictMonitor:
         self.history_window = history_window
         self.oscillation_threshold = oscillation_threshold
         self.action_history: deque[Any] = deque(maxlen=history_window)
-        self.position_history: deque[tuple[int, int]] = deque(maxlen=history_window)
+        self.position_history: deque[Any] = deque(maxlen=history_window)
         self.conflict_records: list[ACCConflictRecord] = []
 
-    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+    def record_step(
+        self, action: Any, avatar_pos: tuple[float, float] | tuple[int, int] | None
+    ) -> None:
         """Record an executed action and resulting position."""
         self.action_history.append(action)
         if avatar_pos is not None:
@@ -379,6 +381,12 @@ class EpistemicCuriosityExplorer:
             action_data = None
             if engine.is_spatial_effector(chosen):
                 action_data = engine.ground_effector_action(curr_grid, chosen)
+                if action_data is None:
+                    non_effs = [a for a in untested_at_pos if not engine.is_spatial_effector(a)]
+                    if non_effs:
+                        chosen = non_effs[0]
+                    else:
+                        return None
             return EpistemicProbeProposal(
                 action=chosen,
                 action_data=action_data,
@@ -503,13 +511,19 @@ class EpistemicCuriosityExplorer:
             a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
         ]
         if untested_here:
-            act = untested_here[0]
-            return EpistemicProbeProposal(
-                action=act,
-                clear_active_probe=True,
-                tested_action_position=(act, engine.avatar_pos),
-                exploration_mode="attractor_loop_untested",
-            )
+            for act in untested_here:
+                act_data = None
+                if engine.is_spatial_effector(act):
+                    act_data = engine.ground_effector_action(curr_grid, act)
+                    if act_data is None:
+                        continue
+                return EpistemicProbeProposal(
+                    action=act,
+                    action_data=act_data,
+                    clear_active_probe=True,
+                    tested_action_position=(act, engine.avatar_pos),
+                    exploration_mode="attractor_loop_untested",
+                )
 
         if discrete_transform_actions and (is_stuck or is_oscillating):
             disc_act = discrete_transform_actions[
@@ -558,12 +572,14 @@ class EpistemicCuriosityExplorer:
 
         if spatial_effector_actions and min_visits == float("inf"):
             chosen_eff = spatial_effector_actions[0]
-            return EpistemicProbeProposal(
-                action=chosen_eff,
-                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
-                clear_active_probe=True,
-                exploration_mode="attractor_loop_effector",
-            )
+            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if eff_data is not None:
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=eff_data,
+                    clear_active_probe=True,
+                    exploration_mode="attractor_loop_effector",
+                )
 
         undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
         if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
@@ -573,16 +589,24 @@ class EpistemicCuriosityExplorer:
         uninhibited_available = [
             a
             for a in available_actions
-            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+            if engine.inhibited_actions.get(a, 0) == 0
+            and a not in undo_acts
+            and not engine.is_spatial_effector(a)
         ]
-        non_undo_available = [a for a in available_actions if a not in undo_acts]
+        non_undo_available = [
+            a for a in available_actions if a not in undo_acts and not engine.is_spatial_effector(a)
+        ]
         fallback_action = (
             uninhibited_available[0]
             if uninhibited_available
             else (non_undo_available[0] if non_undo_available else available_actions[0])
         )
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_action):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_action)
         return EpistemicProbeProposal(
             action=fallback_action,
+            action_data=fallback_data,
             clear_active_probe=True,
             exploration_mode="attractor_loop_fallback",
         )
@@ -1119,18 +1143,24 @@ class EpistemicCuriosityExplorer:
                 a for a in uncal if (a, engine.avatar_pos) not in engine.tested_action_positions
             ]
             if untested_here:
-                act = untested_here[0]
-                return EpistemicProbeProposal(
-                    action=act,
-                    clear_active_probe=clear_active_probe,
-                    new_probe_target=new_probe_target,
-                    new_probe_id=new_probe_id,
-                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                    tested_action_position=(act, engine.avatar_pos),
-                    topological_doorway=doorway_reg,
-                    exploration_mode="untested_non_displacement",
-                )
+                for act in untested_here:
+                    act_data = None
+                    if engine.is_spatial_effector(act):
+                        act_data = engine.ground_effector_action(curr_grid, act)
+                        if act_data is None:
+                            continue
+                    return EpistemicProbeProposal(
+                        action=act,
+                        action_data=act_data,
+                        clear_active_probe=clear_active_probe,
+                        new_probe_target=new_probe_target,
+                        new_probe_id=new_probe_id,
+                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        tested_action_position=(act, engine.avatar_pos),
+                        topological_doorway=doorway_reg,
+                        exploration_mode="untested_non_displacement",
+                    )
 
             uninhibited_acts = [
                 a
@@ -1267,8 +1297,17 @@ class EpistemicCuriosityExplorer:
             cand.sort(key=_global_key)
             fallback_global = cand[0] if cand else available_actions[0]
 
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_global):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_global)
+            if fallback_data is None:
+                non_effs = [a for a in available_actions if not engine.is_spatial_effector(a)]
+                if non_effs:
+                    fallback_global = non_effs[0]
+
         return EpistemicProbeProposal(
             action=fallback_global,
+            action_data=fallback_data,
             exploration_mode="global_fallback",
         )
 
@@ -1620,12 +1659,12 @@ class MotorCortexEffector:
         if r == 0 or r == H - 1 or c == 0 or c == W - 1:
             return True
 
-        # 2. Universal Top HUD / Status Banner Detection:
-        # A top HUD banner is a multi-row band across the top (r <= 16, H >= 24)
-        # separated from the gameplay grid by a distinct divider line or having a distinct
-        # banner background color different from the main gameplay field.
-        if r <= 16 and H >= 24:
-            for div_r in range(min(16, H // 3), 2, -1):
+        # 2. Scale-Invariant Top Peripheral Partition Detection:
+        # A top peripheral partition is a band across the top (r <= H // 4, H >= 24)
+        # separated from the main field by a distinct divider line or homogeneous background.
+        band_depth = H // 4
+        if r <= band_depth and H >= 24:
+            for div_r in range(band_depth, 2, -1):
                 line = grid[div_r, :]
                 line_vals, line_counts = np.unique(line, return_counts=True)
                 if len(line_counts) > 0:
@@ -1651,9 +1690,9 @@ class MotorCortexEffector:
                                     return True
                                 break
 
-        # 3. Bottom HUD / Status Banner Detection
-        if r >= H - 16 and H >= 24:
-            for div_r in range(H - 4, max(H - 18, H - H // 3), -1):
+        # 3. Scale-Invariant Bottom Peripheral Partition Detection
+        if r >= H - band_depth and H >= 24:
+            for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
                 line = grid[div_r, :]
                 line_vals_bot, line_counts_bot = np.unique(line, return_counts=True)
                 if len(line_counts_bot) > 0:
@@ -2002,13 +2041,18 @@ class MotorCortexEffector:
         return coords_fallback
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export motor cortex effector capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export motor cortex effector capability and runtime DOFs as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "allocentric_spatial_grounding"
+        if view is not None:
+            dofs = len(getattr(view, "action_dynamics", {}) or {})
+            rel = f"allocentric_spatial_grounding:dofs:{dofs}"
         return CausalPredicate(
             variable="motor_cortex_effector",
             operator="==",
-            value="ACTIVE",
-            relation="allocentric_spatial_grounding",
+            value=val,
+            relation=rel,
             target_entity="cortex_motor",
         )
 
@@ -2198,9 +2242,14 @@ class MotorStage:
     """
 
     name: str = "motor_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: real motor dispatch — finalise DeliberationStage's
             # ActionProposal through _finalize_step (grid already normalized).
@@ -2208,10 +2257,13 @@ class MotorStage:
             if proposal is None or not hasattr(proposal, "action"):
                 return StageResult(author=self.name)
             if getattr(proposal, "finalized", False):
+                meta = dict(getattr(proposal, "meta", {}))
+                meta["chosen_action"] = proposal.action
+                meta["action_data"] = proposal.action_data
                 return StageResult(
                     author=self.name,
-                    signals={"branch": proposal.branch},
-                    proposed_action=(proposal.action, proposal.action_data),
+                    signals={"branch": proposal.branch, "meta": meta},
+                    proposed_action=(proposal.action, meta),
                 )
             from hbllm.hcir.world.engine_state import (
                 FacultyWriteJournal,
@@ -2219,28 +2271,61 @@ class MotorStage:
             )
 
             journal = FacultyWriteJournal(author="motor_stage")
-            act, data = engine.deliberation_engine._finalize_step(
-                JournaledEngineView(engine, journal),
-                proposal.grid,
-                proposal.action,
-                proposal.action_data,
-                predicted_pos=proposal.predicted_pos,
-            )
+            self._current_journal = journal
+            try:
+                act, data = engine.deliberation_engine._finalize_step(
+                    JournaledEngineView(engine, journal),
+                    proposal.grid,
+                    proposal.action,
+                    proposal.action_data,
+                    predicted_pos=proposal.predicted_pos,
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
+            meta = dict(getattr(proposal, "meta", {}))
+            meta["chosen_action"] = act
+            meta["action_data"] = data
             return StageResult(
                 author=self.name,
                 journal=journal,
-                signals={"branch": proposal.branch},
-                proposed_action=(act, data),
+                signals={"branch": proposal.branch, "meta": meta},
+                proposed_action=(act, meta),
             )
         proposed_action = ctx.signals.get("proposed_action")
         ops: list[TransactionOperation] = []
         signals: dict[str, Any] = {}
         if proposed_action is None:
-            actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
-            proposed_action = actions[0] if actions else 1
+            actions = (
+                list(ctx.action_dynamics.keys())
+                or list(ctx.signals.get("available_actions", []))
+                or [1, 2, 3, 4]
+            )
+            proposed_action = actions[0] if actions else None
+        meta = dict(ctx.signals.get("meta", {}))
+        meta.setdefault("chosen_action", proposed_action)
+        meta.setdefault("goal_target", None)
+        meta.setdefault("goal_source", "none")
+        meta.setdefault("subgoal_stack", [])
+        meta.setdefault("plan", None)
+        meta.setdefault("plan_source", "arbitration")
+        meta.setdefault(
+            "candidates",
+            {
+                int(a): (1.0 if a == proposed_action else 0.0)
+                for a in (actions if proposed_action is not None else [1, 2, 3, 4])
+            },
+        )
+        meta.setdefault("veto_reasons", [])
+        meta.setdefault("phase", "unknown")
+        meta.setdefault("branch", "fallback")
+        meta.setdefault("action_data", None)
+        signals["meta"] = meta
         return StageResult(
             author=self.name,
             operations=ops,
             signals=signals,
-            proposed_action=proposed_action,
+            proposed_action=(proposed_action, meta),
         )

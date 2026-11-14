@@ -3,6 +3,12 @@
 > **Primary Directive for AI Agents:**  
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
+> [!WARNING]
+> **Current project phase: Phase 2 — Move the held-out number (gate verified 2026-11-10, SHA `aa0bca54`).**  
+> Phase 1 is closed: LOC 249,301 (≤250k), full suite green, single composition root with unified tiered workspace, persistence on by default, event-driven runtime, closed-loop procedural harness whose oracle/random/stub baselines discriminate. The first honest held-out result is committed: **system 0.0000 on every family, oracle 0.8938** (`reports/heldout/aa0bca54…json`).
+>
+> **Phase 2 is not "resume adding modules."** The held-out score is the compass; a change is admissible only with before/after **dev** JSON attached, `heldout.yaml` seeds are never edited or tuned against, and held-out is run only after dev is nonzero. Current state (`bd076556`): harness is reward-complete; the engine now acquires correct ontology (goal cell, door, barriers, walkable) from one observed episode **and still fails the same layout 100/100** — the bottleneck is the goal→plan→motor chain, and `engine.step()` returns `meta=None` so no decision can be explained. Read `reports/audit/2026-11-10_phase2_navigation_diagnosis.md` and work its items in order: P2-1 decision provenance → P2-2 single governed ontology-mutation path → P2-3 make exploitation use known goals → P2-4 conditional affordances (key→door as a theory construct, not a skill) → P2-5 lifelong metric → P2-6 faculty ablation on the real harness. A score of zero is a result, not a pass.
+
 ---
 
 ## 1. Project Vision & Core Invariants
@@ -21,7 +27,8 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 3. **Zero LLM Dependency in Cognitive Core:**
    > The core reasoning runtime (`hbllm.brain.reasoning`, `hbllm.hcir.world`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.  
+   *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**
    > Every state mutation passes through `ConstitutionalVerifier` before commit. Violations (e.g., budget breach, policy failure, safety conflict) trigger compensating rollbacks.
@@ -136,8 +143,9 @@ async with tx_mgr.begin_transaction() as tx:
 
 # ✅ ALSO CORRECT: subsystems holding only a workspace reference (adapters, tier
 # promotion, world kernel) use the workspace's attached commit authority
-workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)],
-                            author="memory_adapter")
+workspace.commit_operations(
+    [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)], author="memory_adapter"
+)
 
 # ❌ FORBIDDEN: the raw primitives `workspace.add_node/upsert_node/remove_node/add_edge/
 # remove_edge` are kernel-internal (used only by TransactionManager._apply_one).
@@ -157,12 +165,10 @@ def solve_puzzle(grid, actions):
         return [1, 1, 3]
     ...
 
+
 # ✅ CORRECT: Declarative Neuro-Symbolic Skill with composable predicates
 class KeyDoorSkill(DeclarativeNeuroSymbolicSkill):
-    signature = (
-        ActionAffordancePredicate(required={1, 2, 3, 4})
-        & CutSetPredicate(min_partitions=2)
-    )
+    signature = ActionAffordancePredicate(required={1, 2, 3, 4}) & CutSetPredicate(min_partitions=2)
     program = SubgoalSequence(
         SymbolicSubgoal(
             intent=SpatialActionIntent.NAVIGATE_TO,
@@ -200,7 +206,9 @@ theory.actuator_features.add(hyp.premise_feature)
 # Only verified remote switches/buttons belong in actuator_features; in-place mutations
 # are recorded strictly as CausalPredicate state transforms.
 if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
-    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(hyp.premise_feature):
+    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(
+        hyp.premise_feature
+    ):
         theory.actuator_features.add(hyp.premise_feature)
 ```
 
@@ -210,12 +218,12 @@ if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
 # ❌ FORBIDDEN: Executing untrusted code in-process or blocking parent pipe writers
 proc.start()
 result = await _await_child(proc, parent_conn, timeout)
-child_conn.close() # Bug: writer open in parent leads to EOF hang
+child_conn.close()  # Bug: writer open in parent leads to EOF hang
 
 # ✅ CORRECT: Two-tier isolation with immediate parent write-end cleanup and responsive polling
 proc.start()
 try:
-    child_conn.close() # Close write-end immediately in parent so pipe EOF signals properly
+    child_conn.close()  # Close write-end immediately in parent so pipe EOF signals properly
 except Exception:
     pass
 result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn, timeout))
@@ -333,10 +341,15 @@ pytest core/tests/unit/ -k "epistemic or cortex or hcir" -q
 pytest core/tests/unit/ -k "<relevant_component>" -q
 
 # Full system runtime diagnostics
-python -m hbllm.cli.diagnostics
+python -m hbllm diagnostics
 
-# ARC / 25 Games evaluation benchmark
-python core/plugins/arc_agi_adapter/run_local_suite.py
+# Benchmark evaluation harness
+python -m hbllm bench dev
+python -m hbllm bench local-suite
+
+# Kernel status and cognitive mind single step
+python -m hbllm kernel status
+python -m hbllm mind step --obs tests/fixtures/obs_minimal.json
 ```
 
 ### Ecosystem Context

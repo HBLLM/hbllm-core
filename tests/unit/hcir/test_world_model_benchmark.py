@@ -18,6 +18,7 @@ from hbllm.hcir.world.capability_evidence import (
     IntegrationStatus,
     UnitTestStatus,
 )
+from hbllm.hcir.world.experimental.relational_graph_matcher import RelationalGraphMatcher
 from hbllm.hcir.world.grid_operator import (
     AffineOperator,
     ContainmentOperator,
@@ -29,7 +30,6 @@ from hbllm.hcir.world.grid_operator import (
     TransformationProgramSearch,
     TranslationOperator,
 )
-from hbllm.hcir.world.relational_graph_matcher import RelationalGraphMatcher
 
 # =====================================================================
 # LAYER 1: Operator Correctness

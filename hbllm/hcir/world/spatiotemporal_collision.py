@@ -27,6 +27,11 @@ from hbllm.hcir.world.elastic_particle_induction import (
     ParticleKinematicsSimulator,
 )
 
+try:
+    import hbllm_hcir_graph as _rust_graph  # type: ignore[import-not-found]
+except ImportError:
+    _rust_graph = None
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -91,6 +96,15 @@ class SpatiotemporalCollisionCones:
         self.persistent_velocities.clear()
         self.occluded_trackers.clear()
 
+    def clear_feature(self, feature_id: int) -> None:
+        """Purge all projected/occluded collision state for a feature (e.g. inert cargo)."""
+        self.persistent_velocities.pop(feature_id, None)
+        self.occluded_trackers.pop(feature_id, None)
+        self.step_occupied_by_feat.pop(feature_id, None)
+        self.projected_trajectories = [
+            p for p in self.projected_trajectories if p.feature_id != feature_id
+        ]
+
     def update_trajectories(
         self,
         kinetic_entities: list[KineticEntity],
@@ -100,6 +114,7 @@ class SpatiotemporalCollisionCones:
         oriented_threats: Sequence[Any] | None = None,
         mobile_threat_features: set[int] | None = None,
         stride: int = 1,
+        ignored_features: set[int] | None = None,
     ) -> None:
         """Extrapolate forward space-time trajectories for all moving entities.
 
@@ -114,12 +129,19 @@ class SpatiotemporalCollisionCones:
         self.step_occupied_cells.clear()
         self.step_occupied_by_feat.clear()
 
+        if ignored_features:
+            for ig in ignored_features:
+                self.persistent_velocities.pop(ig, None)
+                self.occluded_trackers.pop(ig, None)
+
         for t in range(1, T + 1):
             self.step_occupied_cells[t] = set()
 
         # Update persistent velocities from kinetic entities
         for entity in kinetic_entities:
             feat_id = next(iter(entity.features)) if entity.features else 0
+            if ignored_features and feat_id in ignored_features:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
             if vr != 0 or vc != 0:
@@ -130,6 +152,8 @@ class SpatiotemporalCollisionCones:
 
         for idx, entity in enumerate(kinetic_entities):
             feat_id = next(iter(entity.features)) if entity.features else 0
+            if ignored_features and feat_id in ignored_features:
+                continue
             vr = int(round(entity.velocity[0]))
             vc = int(round(entity.velocity[1]))
 
@@ -503,6 +527,33 @@ class SpatiotemporalCollisionCones:
         clearance: int = 0,
     ) -> int | None:
         """Find the earliest step index when a projected hazard occupies target_pos."""
+        if (
+            _rust_graph is not None
+            and hasattr(_rust_graph, "fast_collision_cone_sweep")
+            and self.projected_trajectories
+        ):
+            try:
+                trajectories = [
+                    (
+                        int(proj.initial_pos[0]),
+                        int(proj.initial_pos[1]),
+                        int(proj.velocity[0]),
+                        int(proj.velocity[1]),
+                        len(proj.positions),
+                    )
+                    for proj in self.projected_trajectories
+                ]
+                res = _rust_graph.fast_collision_cone_sweep(
+                    trajectories,
+                    (int(target_pos[0]), int(target_pos[1])),
+                    int(max_horizon),
+                    int(clearance),
+                )
+                if res is not None:
+                    return res
+            except Exception:
+                pass
+
         for step in range(1, max_horizon + 1):
             if self.is_collision_hazard(
                 target_pos[0], target_pos[1], time_step=step, clearance=clearance

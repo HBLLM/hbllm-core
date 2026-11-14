@@ -159,7 +159,6 @@ except ImportError:
 logging.getLogger("hbllm").setLevel(logging.ERROR)
 logging.getLogger("arc_agi").setLevel(logging.ERROR)
 
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_perception import SensoryThalamus
 
 try:
@@ -240,7 +239,19 @@ class MyAgent(Agent):
         self.disable_archetypes = disable_archetypes
         self.instructions = instructions
         self._seed = kwargs.get("seed")
-        self.internal_engine = AutonomousEpistemicEngine(instructions=instructions, seed=self._seed)
+        self.enable_grounding: bool = kwargs.get("enable_grounding", True)
+        from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+        self.system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id=game_id or "default",
+                seed=self._seed,
+                instructions=instructions,
+                enable_grounding=self.enable_grounding,
+            )
+        )
+        self.internal_engine = self.system.engine
+        self.services = self.system.services
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine
         self.last_grid: np.ndarray | None = None
@@ -317,6 +328,11 @@ class MyAgent(Agent):
                     flush=True,
                 )
                 traceback.print_exc(file=sys.stderr)
+
+    @property
+    def grounding_bridge(self) -> Any | None:
+        """SGE CorticalGroundingBridge attached to internal epistemic engine."""
+        return getattr(self.internal_engine, "grounding_bridge", None)
 
     def load_instructions(self, instructions: Any) -> None:
         """Load executive cognitive directives into the agent's internal epistemic engine."""
@@ -557,9 +573,17 @@ class MyAgent(Agent):
                 self.level_action_counter = 0
                 self._stagnation_grid_hash = None
                 self._stagnation_steps = 0
-                self.internal_engine = AutonomousEpistemicEngine(
-                    instructions=self.instructions, seed=self._seed
+                from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+                sys = build_cognitive_system(
+                    CognitiveSystemConfig(
+                        world_id=f"arc_{base_gid}",
+                        instructions=self.instructions,
+                        seed=self._seed,
+                        enable_grounding=self.enable_grounding,
+                    )
                 )
+                self.internal_engine = sys.engine
                 self.internal_agent = self.internal_engine
                 self.last_grid = None
 
@@ -801,6 +825,20 @@ class MyAgent(Agent):
                     self._last_violation = "pipeline_rejected"
                     action_id = sorted(available_actions)[0] if available_actions else 0
                     action_data = None
+                elif action_id == 6 and (
+                    action_data is None
+                    or not isinstance(action_data, dict)
+                    or "x" not in action_data
+                    or "y" not in action_data
+                ):
+                    H, W = int(grid.shape[0]), int(grid.shape[1])
+                    fallback_x, fallback_y = W // 2, H // 2
+                    if _objects:
+                        for obj in _objects:
+                            if getattr(obj, "role", None) in ("switch", "actuator"):
+                                fallback_x, fallback_y = int(obj.grid_pos[1]), int(obj.grid_pos[0])
+                                break
+                    action_data = {"x": fallback_x, "y": fallback_y}
                 # C3: validate chosen action; repair to nearest legal on violation
                 _res = ActionContract.validate_or_repair(
                     int(action_id),
@@ -853,6 +891,7 @@ class MyAgent(Agent):
             raise
 
         # Parameterized / complex action coordinate attachment
+        coords: dict[str, int] | None = None
         if (hasattr(act_enum, "is_complex") and act_enum.is_complex()) or (
             action_data
             and isinstance(action_data, dict)

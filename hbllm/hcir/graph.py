@@ -388,6 +388,16 @@ class CognitiveGraph:
     def node_count(self) -> int:
         return len(self._nodes)
 
+    @property
+    def nodes(self) -> dict[str, HCIRNode]:
+        """Dictionary access to nodes."""
+        return self._nodes
+
+    @property
+    def edges(self) -> dict[str, HCIREdge]:
+        """Dictionary access to edges."""
+        return self._edges
+
     def all_nodes(self) -> Iterator[HCIRNode]:
         """Iterate over all nodes."""
         yield from self._nodes.values()
@@ -432,6 +442,12 @@ class CognitiveGraph:
                 raise SubstrateDivergenceError(
                     f"Native substrate diverged on add_edge for {edge.id}: {e}"
                 ) from e
+
+    def upsert_edge(self, edge: HCIREdge) -> None:
+        """Add an edge or update it if an edge with the same ID exists."""
+        if edge.id in self._edges:
+            self.remove_edge(edge.id)
+        self.add_edge(edge)
 
     def remove_edge(self, edge_id: str) -> HCIREdge | None:
         """Remove an edge by ID."""

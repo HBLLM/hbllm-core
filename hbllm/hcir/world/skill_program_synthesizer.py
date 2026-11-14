@@ -26,8 +26,9 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from hbllm.hcir.graph import HCIRNodeType
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     DeclarativeNeuroSymbolicSkill,
@@ -38,6 +39,9 @@ from hbllm.hcir.skills.declarative import (
 from hbllm.hcir.spatial_planner import SpatialActionIntent
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
+
+if TYPE_CHECKING:
+    from hbllm.hcir.workspace_tiers import TieredWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +163,7 @@ class SkillProgramSynthesizer:
         self,
         pattern: tuple[SpatialActionIntent, ...],
         skill_name: str | None = None,
-        required_actions: set[int] | None = None,
+        required_actions: set[Any] | None = None,
     ) -> DeclarativeNeuroSymbolicSkill:
         """Induce a first-class DeclarativeNeuroSymbolicSkill from a frequent pattern."""
         name = skill_name or f"synthesized_skill_{'_'.join(i.value.lower() for i in pattern)}"
@@ -174,7 +178,7 @@ class SkillProgramSynthesizer:
         if required_actions:
             sig_pred = ActionAffordancePredicate(required=required_actions)
         else:
-            sig_pred = ActionAffordancePredicate(required={1, 2, 3, 4})
+            sig_pred = ActionAffordancePredicate(required=set())
 
         # Dynamically define new DeclarativeNeuroSymbolicSkill subclass
         class InducedSkill(DeclarativeNeuroSymbolicSkill):
@@ -216,3 +220,191 @@ class SkillProgramSynthesizer:
         for meta in self.synthesized_metadata.values():
             predicates.append(meta.to_causal_predicate())
         return predicates
+
+    def serialize_skill(
+        self,
+        skill: DeclarativeNeuroSymbolicSkill,
+        metadata: SynthesizedSkillMetadata | None = None,
+    ) -> dict[str, Any]:
+        """Serialize a declarative skill and its subgoals into a JSON-compatible dictionary."""
+        subgoals_data: list[dict[str, Any]] = []
+        prog = getattr(skill, "program", None)
+        if prog is not None and hasattr(prog, "subgoals"):
+            for sg in prog.subgoals:
+                intent_val = sg.intent.value if hasattr(sg.intent, "value") else str(sg.intent)
+                subgoals_data.append(
+                    {
+                        "intent": intent_val,
+                        "target_query": dict(sg.target_query),
+                        "parameters": dict(sg.parameters),
+                        "timeout_steps": int(sg.timeout_steps),
+                    }
+                )
+
+        sig = getattr(skill, "signature", None)
+        req_actions: list[Any] = []
+        if sig is not None and hasattr(sig, "required"):
+            req_actions = sorted(list(sig.required))
+
+        meta_dict: dict[str, Any] = {}
+        meta = metadata or self.synthesized_metadata.get(skill.skill_name)
+        if meta:
+            meta_dict = {
+                "skill_id": meta.skill_id,
+                "skill_name": meta.skill_name,
+                "pattern_length": meta.pattern_length,
+                "compression_ratio": float(meta.compression_ratio),
+                "support_trace_count": meta.support_trace_count,
+                "subgoal_count": meta.subgoal_count,
+                "timestamp": meta.timestamp,
+            }
+
+        return {
+            "skill_name": skill.skill_name,
+            "description": getattr(skill, "description", ""),
+            "required_actions": req_actions,
+            "subgoals": subgoals_data,
+            "metadata": meta_dict,
+        }
+
+    def deserialize_skill(self, data: dict[str, Any]) -> DeclarativeNeuroSymbolicSkill:
+        """Reconstruct a DeclarativeNeuroSymbolicSkill instance from serialized data."""
+        name = str(data.get("skill_name", "restored_skill"))
+        req_actions = set(data.get("required_actions", []))
+        subgoals: list[SymbolicSubgoal] = []
+        for sg in data.get("subgoals", []):
+            intent_raw = sg.get("intent", "NAVIGATE")
+            try:
+                intent = SpatialActionIntent(intent_raw)
+            except Exception:
+                intent = SpatialActionIntent.NAVIGATE_TO
+            subgoals.append(
+                SymbolicSubgoal(
+                    intent=intent,
+                    target_query=dict(sg.get("target_query", {})),
+                    parameters=dict(sg.get("parameters", {})),
+                    timeout_steps=int(sg.get("timeout_steps", 50)),
+                )
+            )
+
+        subgoal_seq = SubgoalSequence(*subgoals)
+        sig_pred: SymbolicPredicate
+        if req_actions:
+            sig_pred = ActionAffordancePredicate(required=req_actions)
+        else:
+            sig_pred = ActionAffordancePredicate(required=set())
+
+        class RestoredSkill(DeclarativeNeuroSymbolicSkill):
+            skill_name = name
+            signature = sig_pred
+            program = subgoal_seq
+
+        inst = RestoredSkill()
+        self.synthesized_skills[name] = inst
+
+        meta_dict = data.get("metadata", {})
+        if meta_dict:
+            self.synthesized_metadata[name] = SynthesizedSkillMetadata(
+                skill_id=str(meta_dict.get("skill_id", f"skill_{uuid.uuid4().hex[:8]}")),
+                skill_name=name,
+                pattern_length=int(meta_dict.get("pattern_length", len(subgoals))),
+                compression_ratio=float(meta_dict.get("compression_ratio", 1.0)),
+                support_trace_count=int(meta_dict.get("support_trace_count", 1)),
+                subgoal_count=int(meta_dict.get("subgoal_count", len(subgoals))),
+                timestamp=float(meta_dict.get("timestamp", time.time())),
+            )
+        return inst
+
+    def persist_to_workspace(
+        self,
+        workspace: TieredWorkspace,
+        tenant_id: str = "default",
+    ) -> list[str]:
+        """Commit all synthesized declarative skills to workspace.persistent as formal SkillNodes."""
+        from hbllm.hcir.nodes import SkillNode
+
+        persisted_ids: list[str] = []
+        ops: list[TransactionOperation] = []
+
+        for name, skill in self.synthesized_skills.items():
+            meta = self.synthesized_metadata.get(name)
+            serialized = self.serialize_skill(skill, meta)
+            node_id = f"skill_{name}"
+            skill_node = SkillNode(
+                id=node_id,
+                name=name,
+                skill_name=name,
+                description=getattr(
+                    skill, "description", f"Declarative neuro-symbolic skill {name}"
+                ),
+                preconditions=[str(skill.signature)],
+                success_rate=0.9,
+                properties={
+                    "serialized_skill": serialized,
+                    "tenant_id": tenant_id,
+                    "timestamp": time.time(),
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=skill_node.id,
+                    node_data=skill_node.model_dump(),
+                    node=skill_node,
+                )
+            )
+            persisted_ids.append(node_id)
+
+        if ops:
+            grant = getattr(workspace, "_system_grant", None)
+            workspace.persistent.commit_operations(
+                ops,
+                author="SkillProgramSynthesizer",
+                grant=grant,
+            )
+            logger.info("Persisted %d synthesized skills to workspace.persistent", len(ops))
+
+        return persisted_ids
+
+    def load_from_workspace(
+        self,
+        workspace: TieredWorkspace,
+        tenant_id: str = "default",
+    ) -> int:
+        """Restore persisted skills from workspace.persistent into synthesized skill library."""
+        from hbllm.hcir.nodes import SkillNode
+
+        loaded_count = 0
+        for node in workspace.persistent.graph.nodes.values():
+            if (
+                isinstance(node, SkillNode)
+                or getattr(node, "node_type", None) == HCIRNodeType.SKILL
+            ):
+                props = getattr(node, "properties", {})
+                if props and "serialized_skill" in props:
+                    serialized = props["serialized_skill"]
+                    if isinstance(serialized, dict):
+                        self.deserialize_skill(serialized)
+                        loaded_count += 1
+
+        if loaded_count > 0:
+            logger.info("Restored %d procedural skills from persistent tier", loaded_count)
+        return loaded_count
+
+    def synthesize_and_persist(
+        self,
+        pattern: tuple[SpatialActionIntent, ...],
+        workspace: TieredWorkspace | None = None,
+        skill_name: str | None = None,
+        required_actions: set[Any] | None = None,
+        tenant_id: str = "default",
+    ) -> DeclarativeNeuroSymbolicSkill:
+        """Synthesize a skill from an intent pattern and immediately persist it to TieredWorkspace."""
+        skill = self.synthesize_skill_from_pattern(
+            pattern=pattern,
+            skill_name=skill_name,
+            required_actions=required_actions,
+        )
+        if workspace is not None:
+            self.persist_to_workspace(workspace, tenant_id=tenant_id)
+        return skill

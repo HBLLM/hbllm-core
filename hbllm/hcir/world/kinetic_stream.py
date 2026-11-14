@@ -237,6 +237,106 @@ class DorsalKineticStream:
             min_c, max_c = int(np.min(cluster_coords[:, 1])), int(np.max(cluster_coords[:, 1]))
             bbox = (min_r, max_r, min_c, max_c)
 
+            prev_feats = {
+                int(prev_grid[r, c]) for r, c in cells if prev_grid[r, c] != background_feature
+            }
+            curr_feats = {
+                int(curr_grid[r, c]) for r, c in cells if curr_grid[r, c] != background_feature
+            }
+            common_feats = prev_feats & curr_feats
+
+            if len(common_feats) > 1 or (
+                len(common_feats) >= 1
+                and (len(prev_feats) > len(common_feats) or len(curr_feats) > len(common_feats))
+            ):
+                # Multi-feature interactive contact/displacement decomposition
+                consumed_cells: set[tuple[int, int]] = set()
+
+                for f in common_feats:
+                    p_cells = [(r, c) for r, c in cells if prev_grid[r, c] == f]
+                    c_cells = [(r, c) for r, c in cells if curr_grid[r, c] == f]
+                    if p_cells and c_cells:
+                        c_p = (
+                            float(np.mean([r for r, _ in p_cells])),
+                            float(np.mean([c for _, c in p_cells])),
+                        )
+                        c_c = (
+                            float(np.mean([r for r, _ in c_cells])),
+                            float(np.mean([c for _, c in c_cells])),
+                        )
+                        vel = (c_c[0] - c_p[0], c_c[1] - c_p[1])
+                        min_rf = min(r for r, _ in c_cells)
+                        max_rf = max(r for r, _ in c_cells)
+                        min_cf = min(c for _, c in c_cells)
+                        max_cf = max(c for _, c in c_cells)
+                        cand = KineticEntity(
+                            centroid=c_c,
+                            velocity=vel,
+                            cells=c_cells,
+                            bounding_box=(min_rf, max_rf, min_cf, max_cf),
+                            area=len(c_cells),
+                            features={f},
+                        )
+                        candidates.append(cand)
+                        consumed_cells.update(p_cells)
+                        consumed_cells.update(c_cells)
+
+                for f in prev_feats - curr_feats:
+                    p_cells = [
+                        (r, c)
+                        for r, c in cells
+                        if prev_grid[r, c] == f and (r, c) not in consumed_cells
+                    ]
+                    if p_cells:
+                        c_p = (
+                            float(np.mean([r for r, _ in p_cells])),
+                            float(np.mean([c for _, c in p_cells])),
+                        )
+                        min_rf = min(r for r, _ in p_cells)
+                        max_rf = max(r for r, _ in p_cells)
+                        min_cf = min(c for _, c in p_cells)
+                        max_cf = max(c for _, c in p_cells)
+                        vacated_clusters.append(
+                            {
+                                "id": feat_id,
+                                "centroid": c_p,
+                                "cells": p_cells,
+                                "bbox": (min_rf, max_rf, min_cf, max_cf),
+                                "area": len(p_cells),
+                                "features": {f},
+                                "substrate": {int(curr_grid[r, c]) for r, c in p_cells},
+                            }
+                        )
+
+                for f in curr_feats - prev_feats:
+                    c_cells = [
+                        (r, c)
+                        for r, c in cells
+                        if curr_grid[r, c] == f and (r, c) not in consumed_cells
+                    ]
+                    if c_cells:
+                        c_c = (
+                            float(np.mean([r for r, _ in c_cells])),
+                            float(np.mean([c for _, c in c_cells])),
+                        )
+                        min_rf = min(r for r, _ in c_cells)
+                        max_rf = max(r for r, _ in c_cells)
+                        min_cf = min(c for _, c in c_cells)
+                        max_cf = max(c for _, c in c_cells)
+                        occupied_clusters.append(
+                            {
+                                "id": feat_id,
+                                "centroid": c_c,
+                                "cells": c_cells,
+                                "bbox": (min_rf, max_rf, min_cf, max_cf),
+                                "area": len(c_cells),
+                                "features": {f},
+                                "substrate": {int(prev_grid[r, c]) for r, c in c_cells},
+                            }
+                        )
+
+                continue
+
             # Separate vacated (disappeared from prev) vs occupied (appeared in curr)
             vacated = [
                 (r, c)

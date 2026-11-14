@@ -5,6 +5,15 @@ standardized tasks (E1-E7), metrics calculator, independent oracle, leakage audi
 and master report generators.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
+# Extend package search path to include experiments/hbllm_experiment
+_exp_path = Path(__file__).resolve().parents[2] / "experiments" / "hbllm_experiment"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
+
 from hbllm.experiment.ast_audit import ASTLeakageAuditor, ASTViolation
 from hbllm.experiment.cohorts import (
     AblatedHBLLMCohort,

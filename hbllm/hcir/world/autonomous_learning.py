@@ -142,7 +142,9 @@ class CausalTheoryPlanner:
                     elif sg.get("position") and sg["position"] != engine.avatar_pos:
                         goal_positions.add(sg["position"])
                     if sg.get("feature") is not None:
-                        theory.candidate_goal_features.add(int(sg["feature"]))
+                        theory.induce_candidate_goal(
+                            int(sg["feature"]), evidence="structural_goal_detector"
+                        )
             except Exception:
                 pass
 

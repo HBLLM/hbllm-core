@@ -98,16 +98,12 @@ def wire_comprehension_stream(
         # Try to create CausalReasoner for multi-hop causal reasoning
         causal_reasoner = None
         try:
-            from hbllm.brain.causality.causal_graph import CausalGraph
             from hbllm.brain.snn.reasoning.reasoner import CausalReasoner
             from hbllm.brain.snn.reasoning.reasoning_network import ReasoningNetwork
 
-            # Use data_dir from router_node if available, else default
-            data_dir = getattr(router_node, "data_dir", "data")
-            causal_graph = CausalGraph(data_dir=data_dir)
             reasoning_net = ReasoningNetwork(stdp_rule=assoc_stdp if assoc_stdp else None)
             causal_reasoner = CausalReasoner(
-                causal_graph=causal_graph,
+                causal_graph=None,
                 reasoning_network=reasoning_net,
                 max_depth=3,
                 min_probability=0.3,

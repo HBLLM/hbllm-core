@@ -33,6 +33,7 @@ from hbllm.hcir.transactions import TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.engine_state import CognitiveContext, get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
+from hbllm.hcir.world.percept import TerminalSignal
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
 if TYPE_CHECKING:
@@ -1254,9 +1255,7 @@ def attribute_macro_action_outcome(
             if feat is not None and feat != 0:
                 step_cnt = get_engine_state_attr(engine, "step_count", 0)
                 engine.working_memory.body_schema.acquire_tool(feat, step=step_cnt, role="key")
-                engine.symbolic_theory.cargo_features.add(feat)
-                if hasattr(engine, "learned_cargo_features"):
-                    engine.learned_cargo_features.add(feat)
+                engine.symbolic_theory.induce_cargo(feat, evidence="macro_acquire_tool")
                 logger.info(
                     "ExtendedBodySchema: Acquired tool/cargo feature %d into body schema at %s",
                     feat,
@@ -1390,8 +1389,9 @@ def attribute_macro_action_outcome(
                     dest_feat = int(curr_grid[r, c])
                     bg = engine.estimate_background(curr_grid)
                     if dest_feat != bg:
-                        engine.symbolic_theory.goal_features.add(dest_feat)
-                        engine.learned_goal_features.add(dest_feat)
+                        engine.symbolic_theory.induce_candidate_goal(
+                            dest_feat, evidence="macro_navigate_to"
+                        )
             if engine.subgoal_stack.has_pending_goals:
                 cur_sg = engine.subgoal_stack.current_subgoal
                 if cur_sg and cur_sg.target_destination == macro_action.destination:
@@ -1437,7 +1437,9 @@ def attribute_macro_action_outcome(
                             and feat not in engine.symbolic_theory.goal_features
                             and feat not in engine.symbolic_theory.candidate_goal_features
                         ):
-                            engine.symbolic_theory.induce_barrier(feat)
+                            engine.symbolic_theory.induce_barrier(
+                                feat, evidence="macro_navigate_failure"
+                            )
             if engine.avatar_pos is not None and action_used is not None:
                 engine.failed_transitions.add((engine.avatar_pos, action_used))
 
@@ -1579,8 +1581,137 @@ class MacroActionPlan:
     ) -> MacroActionPlan | None:
         """Compile a MacroActionPlan directly from a declarative skill."""
         if hasattr(skill, "compile_to_macro_plan"):
-            return skill.compile_to_macro_plan(engine, curr_grid, available_actions)
-        return None
+            plan = skill.compile_to_macro_plan(engine, curr_grid, available_actions)
+            if plan is not None and not plan.is_empty():
+                return plan
+
+        program = getattr(skill, "program", None)
+        subgoals = getattr(program, "subgoals", None)
+        if not subgoals:
+            return None
+
+        cursor_pos = getattr(engine, "avatar_pos", None)
+        if cursor_pos is None:
+            return None
+
+        bg = engine.estimate_background(curr_grid)
+        entities = engine.extract_entities(curr_grid, bg)
+        theory = getattr(engine, "symbolic_theory", None)
+        H, W = curr_grid.shape
+
+        def _find_target(
+            intent_str: str, tq: dict[str, Any], cur_p: tuple[int, int]
+        ) -> tuple[tuple[int, int] | None, int | None]:
+            pos_q = tq.get("pos") or tq.get("position")
+            if isinstance(pos_q, (tuple, list)) and len(pos_q) == 2:
+                rr, cc = int(pos_q[0]), int(pos_q[1])
+                if 0 <= rr < H and 0 <= cc < W:
+                    return (rr, cc), int(curr_grid[rr, cc])
+
+            req_feat = tq.get("feature", tq.get("feature_id"))
+            role_q = str(tq.get("role", "")).lower()
+            cand_feats: set[int] = set()
+            if req_feat is not None:
+                cand_feats.add(int(req_feat))
+            elif theory is not None:
+                if (
+                    "pickup" in intent_str
+                    or "cargo" in role_q
+                    or "key" in role_q
+                    or "resource" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "cargo_features", set()))
+                elif (
+                    "interact" in intent_str
+                    or "actuate" in intent_str
+                    or "switch" in role_q
+                    or "actuator" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "actuator_features", set()))
+                elif (
+                    "drop" in intent_str
+                    or "barrier" in role_q
+                    or "door" in role_q
+                    or "portal" in role_q
+                ):
+                    cand_feats.update(getattr(theory, "conditional_affordances", {}).keys())
+                elif "nav" in intent_str or "goal" in role_q:
+                    for gp in getattr(engine, "learned_goal_positions", ()):
+                        if 0 <= gp[0] < H and 0 <= gp[1] < W:
+                            return gp, int(curr_grid[gp[0], gp[1]])
+                    cand_feats.update(getattr(theory, "goal_features", set()))
+
+            best_coord: tuple[int, int] | None = None
+            best_feat: int | None = None
+            best_dist = 10**9
+            for ent in entities:
+                ent_role = str(getattr(ent.role, "value", ent.role)).lower()
+                feat_match = bool(cand_feats and ent.feature_id in cand_feats)
+                role_match = bool(role_q and role_q in ent_role)
+                if not feat_match and not role_match:
+                    continue
+                ent_cells = (
+                    ent.properties.get("cells")
+                    if isinstance(getattr(ent, "properties", None), dict)
+                    else None
+                ) or ([ent.grid_pos] if getattr(ent, "grid_pos", None) is not None else [])
+                for pt in ent_cells:
+                    r_p, c_p = int(pt[0]), int(pt[1])
+                    if (r_p, c_p) == cur_p:
+                        continue
+                    d = abs(r_p - cur_p[0]) + abs(c_p - cur_p[1])
+                    if d < best_dist:
+                        best_dist = d
+                        best_coord = (r_p, c_p)
+                        best_feat = int(ent.feature_id)
+            return best_coord, best_feat
+
+        plan = cls()
+        for sg in subgoals:
+            intent_raw = getattr(sg, "intent", "")
+            intent_val = str(getattr(intent_raw, "value", intent_raw)).upper()
+            tq = dict(getattr(sg, "target_query", {}) or {})
+            target_pos, target_feat = _find_target(intent_val.lower(), tq, cursor_pos)
+            if target_pos is None:
+                return None
+
+            if "PICKUP" in intent_val and target_feat is not None:
+                plan.append(
+                    PickUpCargo(
+                        cargo_pos=target_pos,
+                        cargo_feature=target_feat,
+                        description=f"Skill subgoal PICKUP at {target_pos}",
+                    )
+                )
+            elif "INTERACT" in intent_val or "ACTUATE" in intent_val or "ACTIVATE" in intent_val:
+                plan.append(
+                    InteractWith(
+                        target_coord=target_pos,
+                        description=f"Skill subgoal INTERACT at {target_pos}",
+                    )
+                )
+            elif "DROP" in intent_val:
+                held = getattr(engine.working_memory.body_schema, "held_tools", ())
+                tool_f = held[0].feature_id if held else (target_feat or 0)
+                plan.append(
+                    UseToolOnBarrier(
+                        barrier_pos=target_pos,
+                        tool_feature=tool_f,
+                        description=f"Skill subgoal DROP/USE at {target_pos}",
+                    )
+                )
+            elif "NAV" in intent_val:
+                plan.append(
+                    NavigateTo(
+                        destination=target_pos,
+                        description=f"Skill subgoal NAVIGATE to {target_pos}",
+                    )
+                )
+            else:
+                return None
+            cursor_pos = target_pos
+
+        return plan if not plan.is_empty() else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1745,22 +1876,26 @@ class MacroPlanSynthesizer:
                             and (not feat or feat not in av_f)
                         ):
                             is_confirmed = bool(props.get("confirmed", False))
-                            if is_confirmed:
+                            has_reward = props.get("has_terminal_reward") is True or props.get(
+                                "provenance"
+                            ) in ("terminal_reward", str(TerminalSignal.SUCCESS))
+                            if is_confirmed and has_reward:
                                 engine.learned_goal_positions.add(pos)
                                 if hasattr(engine, "goals") and pos not in engine.goals:
                                     engine.goals.append(pos)
                                 if feat:
-                                    engine.symbolic_theory.goal_features.add(feat)
-                                    engine.learned_goal_features.add(feat)
-                                    engine.symbolic_theory.barrier_features.discard(feat)
+                                    engine.symbolic_theory.induce_goal(
+                                        feat, evidence="sync_known_objects:confirmed_terminal"
+                                    )
                                 engine.learned_barriers.discard(pos)
                             else:
                                 if feat:
-                                    engine.symbolic_theory.candidate_goal_features.add(feat)
+                                    engine.symbolic_theory.induce_candidate_goal(
+                                        feat, evidence="sync_known_objects:candidate"
+                                    )
                     elif "cargo" in role or "key" in role or "box" in role or "manipulable" in role:
                         if feat:
-                            engine.symbolic_theory.cargo_features.add(feat)
-                            engine.learned_cargo_features.add(feat)
+                            engine.symbolic_theory.induce_cargo(feat, evidence="sync_known_objects")
                     elif (
                         "receptacle" in role
                         or "door" in role
@@ -1769,7 +1904,9 @@ class MacroPlanSynthesizer:
                     ):
                         engine.learned_receptacle_positions.add(pos)
                         if feat:
-                            engine.symbolic_theory.receptacle_features.add(feat)
+                            engine.symbolic_theory.induce_receptacle(
+                                feat, evidence="sync_known_objects"
+                            )
                     elif (
                         "barrier" in role
                         or "wall" in role
@@ -1783,7 +1920,9 @@ class MacroPlanSynthesizer:
                         ):
                             engine.learned_barriers.add(pos)
                             if feat:
-                                engine.symbolic_theory.induce_barrier(feat)
+                                engine.symbolic_theory.induce_barrier(
+                                    feat, evidence="sync_known_objects:solid"
+                                )
                     elif "switch" in role or "actuator" in role or "button" in role:
                         if (
                             feat
@@ -1794,7 +1933,9 @@ class MacroPlanSynthesizer:
                             not in getattr(engine.symbolic_theory, "walkable_features", set())
                             and feat not in getattr(engine, "verified_safe_features", set())
                         ):
-                            engine.symbolic_theory.actuator_features.add(feat)
+                            engine.symbolic_theory.induce_actuator(
+                                feat, evidence="sync_known_objects"
+                            )
 
     @classmethod
     def synthesize_plan(
@@ -1826,10 +1967,38 @@ class MacroPlanSynthesizer:
                 if skill_plan is not None and not skill_plan.is_empty():
                     return skill_plan
 
+        # 0B-2. Query abstracted LibraryLearner & transferable macro skills
+        if getattr(engine, "library_learner", None) and hasattr(
+            engine, "query_transferable_skills"
+        ):
+            ll_ctx = {
+                "has_goal": bool(
+                    getattr(engine, "learned_goal_positions", None)
+                    or getattr(getattr(engine, "symbolic_theory", None), "goal_features", None)
+                ),
+                "has_cargo": bool(
+                    getattr(getattr(engine, "symbolic_theory", None), "cargo_features", None)
+                ),
+                "has_switches": bool(
+                    getattr(
+                        getattr(engine, "symbolic_theory", None), "conditional_affordances", None
+                    )
+                ),
+                "n_actions": len(available_actions),
+            }
+            for t_skill, _score, _src in engine.query_transferable_skills(
+                curr_grid, list(available_actions), metadata=ll_ctx, min_confidence=0.45
+            ):
+                skill_plan = MacroActionPlan.from_skill(
+                    t_skill, engine, curr_grid, available_actions
+                )
+                if skill_plan is not None and not skill_plan.is_empty():
+                    return skill_plan
+
         # Embodied Grounding Invariant:
         # If the domain possesses physical displacement capabilities, an embodied agent
         # cannot plan macroscopic bodily actions (navigating to switches, moving cargo, reaching goals)
-        # before discovering and localizing its avatar body via motor calibration.
+        # before discovering its avatar body.
         if engine.has_displacement_capabilities(available_actions) and engine.avatar_pos is None:
             return None
 
@@ -1898,32 +2067,84 @@ class MacroPlanSynthesizer:
         if engine.avatar_feature is not None:
             av_feats.add(engine.avatar_feature)
 
-        goals: list[tuple[int, int]] = []
+        # Collect confirmed goals and candidate goals separately
+        confirmed_goals: list[tuple[int, int]] = []
+        candidate_goals: list[tuple[int, int]] = []
+        cand_feature_map: dict[tuple[int, int], int] = {}
+        cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
+
         for obj in known_objs:
-            if "goal" in obj.role or "exit" in obj.role:
-                if (
-                    obj.pos not in goals
-                    and obj.pos != av_pos
-                    and obj.pos not in recent_pos
-                    and obj.feature_id not in av_feats
-                ):
-                    goals.append(obj.pos)
+            if (
+                obj.pos == av_pos
+                or obj.pos in recent_pos
+                or obj.feature_id in av_feats
+                or obj.feature_id in cargo_feats
+            ):
+                continue
+            is_conf = (
+                bool(obj.properties.get("confirmed", False))
+                or obj.role in ("goal", "exit")
+                or "exit" in obj.role
+            )
+            if is_conf and obj.role != "candidate_goal":
+                if obj.pos not in confirmed_goals:
+                    confirmed_goals.append(obj.pos)
+            elif obj.role == "candidate_goal" or "goal" in obj.role:
+                if obj.pos not in candidate_goals:
+                    candidate_goals.append(obj.pos)
+                    cand_feature_map[obj.pos] = obj.feature_id
+
         for e in entities:
+            if (
+                e.grid_pos == av_pos
+                or e.grid_pos in recent_pos
+                or e.feature_id in av_feats
+                or e.feature_id in cargo_feats
+            ):
+                continue
             if (
                 e.role == EntityRole.GOAL
                 or e.feature_id in engine.learned_goal_features
                 or e.grid_pos in engine.learned_goal_positions
             ):
-                if (
-                    e.grid_pos not in goals
-                    and e.grid_pos != av_pos
-                    and e.grid_pos not in recent_pos
-                    and e.feature_id not in av_feats
-                ):
-                    goals.append(e.grid_pos)
+                if e.grid_pos not in confirmed_goals:
+                    confirmed_goals.append(e.grid_pos)
+            elif (
+                bool(engine.symbolic_theory)
+                and e.feature_id in engine.symbolic_theory.candidate_goal_features
+            ):
+                if e.grid_pos not in candidate_goals:
+                    candidate_goals.append(e.grid_pos)
+                    cand_feature_map[e.grid_pos] = e.feature_id
+
         for g_pos in engine.learned_goal_positions:
-            if g_pos not in goals and g_pos != av_pos and g_pos not in recent_pos:
-                goals.append(g_pos)
+            if g_pos not in confirmed_goals and g_pos != av_pos and g_pos not in recent_pos:
+                confirmed_goals.append(g_pos)
+
+        if confirmed_goals:
+            goals = confirmed_goals
+        else:
+            # When only candidate goals exist:
+            # Check how many distinct non-background, non-avatar candidate goal features exist.
+            cand_feats = (
+                {
+                    cand_feature_map.get(pos, int(curr_grid[pos[0], pos[1]]))
+                    for pos in candidate_goals
+                    if 0 <= pos[0] < curr_grid.shape[0] and 0 <= pos[1] < curr_grid.shape[1]
+                }
+                - {0, bg}
+                - av_feats
+            )
+            if len(cand_feats) <= 1:
+                # Unambiguous: exactly one candidate goal feature exists (e.g. death_reset, stride2, blocked_first)
+                goals = candidate_goals
+            else:
+                # Ambiguous: multiple candidate features (e.g. push block vs target in push_block).
+                # Defer terminal navigation to mental simulation / epistemic probing to avoid
+                # prematurely walking to the target and bypassing intermediate object manipulation.
+                goals = []
 
         # Multi-Agent focus switch verification
         has_multi_agent = (
@@ -2394,7 +2615,14 @@ class MacroActionStage:
 
     name: str = "macro_action_planner"
 
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
+
     def observe(self, ctx: CognitiveContext) -> StageResult:
         grid = ctx.prev_grid if ctx.prev_grid is not None else np.zeros((1, 1), dtype=np.int32)
-        actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
+        actions = (
+            list(ctx.action_dynamics.keys())
+            or list(ctx.signals.get("available_actions", []))
+            or [1, 2, 3, 4]
+        )
         return MacroPlanSynthesizer.synthesize_stage_result(ctx, grid, actions)

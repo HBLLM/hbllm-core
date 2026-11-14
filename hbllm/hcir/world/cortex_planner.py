@@ -22,6 +22,7 @@ def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
 
 import heapq
 import logging
+import math
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -30,10 +31,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import OrientedThreat, PerceptionEngine
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
@@ -103,6 +105,8 @@ class EpistemicGoalProposal:
     new_candidate_features: set[int] = field(default_factory=set)
     subgoal_to_pop: bool = False
     clear_exhausted_goals: bool = False
+    satisfied_when: dict[tuple[int, int], dict[str, Any]] = field(default_factory=dict)
+    transient_blocked_cells: set[tuple[int, int]] = field(default_factory=set)
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export goal proposal as a declarative causal predicate."""
@@ -140,6 +144,350 @@ class EpistemicGoalScheduler:
     4. Exploratory Entities (unverified candidate attractors).
     """
 
+    @staticmethod
+    @staticmethod
+    def compute_reversible_approach_stances(
+        engine: Any,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
+        bg: int,
+        avatar_pos: tuple[int, int] | None,
+        entity_pos: tuple[int, int],
+        feature_id: int,
+        entity_area: int,
+        has_cargo_context: bool,
+    ) -> list[tuple[int, int]] | None:
+        """Return safe open-push-through approach stances if some approach sides would pin an unverified interior entity."""
+        th = engine.symbolic_theory
+        er, ec = entity_pos
+        should_check_reversible = (
+            not has_cargo_context
+            and avatar_pos is not None
+            and int(curr_grid[er, ec]) == int(feature_id)
+            and not th.is_walkable(feature_id)
+            and feature_id not in th.goal_features
+            and entity_pos not in engine.learned_goal_positions
+            and not th.is_barrier(feature_id)
+            and 1 <= entity_area <= 4
+            and 0 < er < H - 1
+            and 0 < ec < W - 1
+        )
+        if not should_check_reversible or avatar_pos is None:
+            return None
+        goal_like = th.goal_features | th.candidate_goal_features | th.receptacle_features
+        safe_stances: list[tuple[int, int]] = []
+        unsafe_stances: list[tuple[int, int]] = []
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            ap = (er + dr, ec + dc)
+            if not (0 <= ap[0] < H and 0 <= ap[1] < W):
+                continue
+            if ap in engine.learned_barriers or ap in engine.current_level_lethal_positions:
+                continue
+            ap_feat = int(curr_grid[ap[0], ap[1]])
+            if not (ap_feat == bg or th.is_walkable(ap_feat) or ap == avatar_pos):
+                continue
+            b1 = (er - dr, ec - dc)
+            b2 = (er - 2 * dr, ec - 2 * dc)
+            b1_open = False
+            b2_open = False
+            if 0 <= b1[0] < H and 0 <= b1[1] < W:
+                f1 = int(curr_grid[b1[0], b1[1]])
+                b1_open = (
+                    b1 not in engine.learned_barriers
+                    and b1 not in engine.current_level_lethal_positions
+                    and not th.is_barrier(f1)
+                    and (
+                        f1 == bg
+                        or b1 == avatar_pos
+                        or th.is_avatar_feature(f1)
+                        or th.is_walkable(f1)
+                        or f1 in goal_like
+                    )
+                )
+            if 0 <= b2[0] < H and 0 <= b2[1] < W:
+                f2 = int(curr_grid[b2[0], b2[1]])
+                b2_open = (
+                    b2 not in engine.learned_barriers
+                    and not th.is_barrier(f2)
+                    and (
+                        f2 == bg
+                        or b2 == avatar_pos
+                        or th.is_avatar_feature(f2)
+                        or th.is_walkable(f2)
+                        or f2 in goal_like
+                    )
+                )
+            if b1_open and b2_open:
+                safe_stances.append(ap)
+            else:
+                unsafe_stances.append(ap)
+        if safe_stances and unsafe_stances and avatar_pos not in safe_stances:
+            return safe_stances
+        return None
+
+    @staticmethod
+    def _enqueue_walkable_or_reversible_approach(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
+        bg: int,
+        avatar_pos: tuple[int, int] | None,
+        entity_pos: tuple[int, int],
+        feature_id: int,
+        entity_area: int,
+        has_cargo_context: bool,
+        target_goals: list[tuple[int, int]],
+        satisfied_when: dict[tuple[int, int], dict[str, Any]],
+        *,
+        set_contact_meta: bool = False,
+        transient_blocked: set[tuple[int, int]] | None = None,
+    ) -> None:
+        """Approach unverified small interior entities from an open push-through side when possible."""
+        th = engine.symbolic_theory
+        safe_stances = EpistemicGoalScheduler.compute_reversible_approach_stances(
+            engine=engine,
+            curr_grid=curr_grid,
+            H=H,
+            W=W,
+            bg=bg,
+            avatar_pos=avatar_pos,
+            entity_pos=entity_pos,
+            feature_id=feature_id,
+            entity_area=entity_area,
+            has_cargo_context=has_cargo_context,
+        )
+        if safe_stances is not None:
+            unexplored_safe = [
+                ap
+                for ap in safe_stances
+                if ap not in engine.exhausted_candidate_goals and not th.is_position_explored(ap)
+            ]
+            if unexplored_safe:
+                for ap in unexplored_safe:
+                    if ap not in target_goals:
+                        target_goals.append(ap)
+                        satisfied_when[ap] = {"max_visits": 1, "target_feature": feature_id}
+                if transient_blocked is not None:
+                    transient_blocked.add(entity_pos)
+                return
+        if entity_pos not in target_goals:
+            target_goals.append(entity_pos)
+            if set_contact_meta:
+                satisfied_when[entity_pos] = {"feature": feature_id, "max_visits": 2}
+
+    @staticmethod
+    def _enqueue_adjacent_or_contact(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
+        bg: int,
+        avatar_pos: tuple[int, int] | None,
+        entity_pos: tuple[int, int],
+        feature_id: int,
+        target_goals: list[tuple[int, int]],
+        satisfied_when: dict[tuple[int, int], dict[str, Any]],
+        *,
+        set_contact_meta: bool = False,
+        transient_blocked: set[tuple[int, int]] | None = None,
+    ) -> None:
+        """Queue unprobed adjacent stances first; escalate to contact only once all fail."""
+        adj_walkable = [
+            (entity_pos[0] + dr, entity_pos[1] + dc)
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            if 0 <= entity_pos[0] + dr < H
+            and 0 <= entity_pos[1] + dc < W
+            and (
+                curr_grid[entity_pos[0] + dr, entity_pos[1] + dc] == bg
+                or engine.symbolic_theory.is_walkable(
+                    int(curr_grid[entity_pos[0] + dr, entity_pos[1] + dc])
+                )
+                or (entity_pos[0] + dr, entity_pos[1] + dc) == avatar_pos
+            )
+        ]
+        last_act = getattr(engine, "last_action", None)
+        acc = getattr(engine, "acc_conflict_monitor", None)
+        osc = getattr(acc, "_motor_oscillation_monitor", acc) if acc is not None else None
+        acc_pos_hist = getattr(osc, "position_history", None) if osc is not None else None
+        just_probed_here = (
+            avatar_pos is not None
+            and last_act is not None
+            and not engine.is_displacement_action(last_act)
+            and not engine.is_spatial_effector(last_act)
+            and bool(acc_pos_hist)
+            and acc_pos_hist[-1] == avatar_pos
+        )
+        added_adj = 0
+        for ap in adj_walkable:
+            if ap == avatar_pos and just_probed_here:
+                engine.symbolic_theory.mark_position_explored(ap, reason="actuator_probed")
+                engine.exhausted_candidate_goals.add(ap)
+                continue
+            if ap in engine.exhausted_candidate_goals or (
+                engine.symbolic_theory.is_position_explored(ap) and ap != avatar_pos
+            ):
+                continue
+            added_adj += 1
+            if ap not in target_goals:
+                target_goals.append(ap)
+                satisfied_when[ap] = {
+                    "feature": feature_id,
+                    "entity_pos": entity_pos,
+                    "max_visits": 2,
+                }
+        any_adj_probed = any(
+            engine.symbolic_theory.is_position_actuator_probed(ap) for ap in adj_walkable
+        )
+        is_singleton = int(np.count_nonzero(curr_grid == feature_id)) == 1
+        allow_contact_escalation = added_adj == 0 or (
+            any_adj_probed and (is_singleton or feature_id in engine.symbolic_theory.goal_features)
+        )
+        if (
+            allow_contact_escalation
+            and adj_walkable
+            and entity_pos not in engine.exhausted_candidate_goals
+            and not engine.symbolic_theory.is_position_explored(entity_pos)
+            and entity_pos not in engine.learned_barriers
+            and entity_pos not in engine.current_level_lethal_positions
+            and not engine.symbolic_theory.is_barrier(feature_id)
+        ):
+            if entity_pos not in target_goals:
+                target_goals.append(entity_pos)
+                if set_contact_meta or (any_adj_probed and is_singleton):
+                    satisfied_when[entity_pos] = {"feature": feature_id, "max_visits": 2}
+
+    @staticmethod
+    def _filter_reachable_and_unlocked(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
+        bg: int,
+        av_feats: set[int],
+        avatar_pos: tuple[int, int],
+        goals: list[tuple[int, int]],
+    ) -> tuple[list[tuple[int, int]], set[tuple[int, int]]]:
+        """Filter candidate goals to currently reachable stances and detect newly unlocked compartments."""
+        th = engine.symbolic_theory
+        hz = getattr(engine, "hazard_tracker", None)
+        lethal_feats = set(getattr(th, "lethal_features", frozenset()) or ())
+        if hz is not None:
+            lethal_feats.update(getattr(hz, "known_lethal_features", ()) or ())
+        opened_portals: set[tuple[int, int]] = set()
+        for mut in getattr(engine, "state_mutations", ()):
+            mut_meta = getattr(mut, "metadata", None) or {}
+            for mr, mc in mut_meta.get("mutated_positions", ()):
+                if 0 <= mr < H and 0 <= mc < W:
+                    mv = int(curr_grid[mr, mc])
+                    if mv == bg or th.is_walkable(mv):
+                        opened_portals.add((mr, mc))
+
+        if len(goals) <= 1 and not opened_portals:
+            return goals, set()
+
+        static_lethal = getattr(
+            getattr(engine, "hazard_tracker", None), "static_lethal_positions", set()
+        )
+        hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
+        unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
+        non_bg_rs, non_bg_cs = np.nonzero(curr_grid != bg)
+        for r_np, c_np in zip(non_bg_rs.tolist(), non_bg_cs.tolist(), strict=False):
+            if (r_np, c_np) == avatar_pos:
+                continue
+            val = int(curr_grid[r_np, c_np])
+            if val in av_feats:
+                continue
+            if th.is_barrier(val) or val in lethal_feats:
+                hard_blocked.add((r_np, c_np))
+                unverified_blocked.add((r_np, c_np))
+            elif not th.is_walkable(val) and val not in th.goal_features:
+                unverified_blocked.add((r_np, c_np))
+
+        opened_portals.difference_update(unverified_blocked)
+        reachable_comp = TopologicalCutSetAnalyzer.get_reachable_component(
+            avatar_pos, unverified_blocked, (H, W)
+        )
+        newly_unlocked: set[tuple[int, int]] = set()
+        if opened_portals:
+            comp_before_unlock = TopologicalCutSetAnalyzer.get_reachable_component(
+                avatar_pos, unverified_blocked | opened_portals, (H, W)
+            )
+            newly_unlocked = reachable_comp - comp_before_unlock
+
+        if len(goals) > 1:
+            reachable_goals = [
+                g
+                for g in goals
+                if g in reachable_comp
+                or (
+                    g not in hard_blocked
+                    and any(
+                        (g[0] + dr, g[1] + dc) in reachable_comp
+                        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    )
+                )
+            ]
+            if reachable_goals:
+                goals = reachable_goals
+
+        return goals, newly_unlocked
+
+    @staticmethod
+    def _role_scores_from_priors(
+        role_priors: dict[int, dict[str, float]],
+        feat_id: int,
+        has_cargo_ctx: bool,
+    ) -> tuple[float, float, float]:
+        """Return (preferred_role_score, barrier_score, hazard_score) in [0, 1]."""
+        priors = role_priors.get(feat_id)
+        if not priors:
+            return (0.0, 0.0, 0.0)
+        barrier_score = float(priors.get("barrier", 0.0))
+        hazard_score = float(priors.get("hazard", 0.0))
+        goal_score = max(
+            float(priors.get("goal", 0.0)),
+            float(priors.get("receptacle", 0.0)),
+        )
+        cargo_score = float(priors.get("cargo", 0.0))
+        pref_score = goal_score if has_cargo_ctx else max(goal_score, cargo_score)
+        return (pref_score, barrier_score, hazard_score)
+
+    @classmethod
+    def _is_prior_hazard_feat(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        feat_id: int,
+    ) -> bool:
+        """Return True if unverified perceptual role priors classify ``feat_id`` as hazardous."""
+        th = engine.symbolic_theory
+        if feat_id in th.goal_features or feat_id in th.cargo_features or th.is_walkable(feat_id):
+            return False
+        wm_priors: dict[int, dict[str, float]] = (
+            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+        )
+        has_cargo_ctx = bool(th.cargo_features or engine.learned_cargo_features)
+        pref_s, _, haz_s = cls._role_scores_from_priors(wm_priors, int(feat_id), has_cargo_ctx)
+        return haz_s >= 0.65 and pref_s < 0.45
+
+    @classmethod
+    def _high_confidence_prior_hazards(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        bg: int,
+        av_feats: set[int],
+    ) -> set[int]:
+        """Return unverified feature IDs whose perceptual priors strongly indicate hazard."""
+        wm_priors: dict[int, dict[str, float]] = (
+            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+        )
+        return {
+            int(f)
+            for f in wm_priors
+            if int(f) != bg and int(f) not in av_feats and cls._is_prior_hazard_feat(engine, int(f))
+        }
+
     @classmethod
     def schedule_goals(
         cls,
@@ -157,15 +505,24 @@ class EpistemicGoalScheduler:
         new_candidate_feats: set[int] = set()
         subgoal_to_pop = False
         clear_exhausted = False
+        satisfied_when: dict[tuple[int, int], dict[str, Any]] = {}
+        transient_blocked: set[tuple[int, int]] = set()
 
         # 1. Confirmed goals — causal evidence from past wins
         confirmed_goals: list[tuple[int, int]] = []
+        has_cargo_context = bool(
+            engine.symbolic_theory.cargo_features or engine.learned_cargo_features
+        )
         for e in entities:
-            if avatar_pos is not None and e.grid_pos == avatar_pos:
+            if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                 continue
             if e.feature_id == bg:
                 continue
-            if e.role == EntityRole.OBSTACLE or engine.symbolic_theory.is_barrier(e.feature_id):
+            if (
+                e.role == EntityRole.OBSTACLE
+                or engine.symbolic_theory.is_barrier(e.feature_id)
+                or e.grid_pos in engine.learned_barriers
+            ):
                 continue
             if (
                 e.feature_id in engine.mobile_threat_features
@@ -190,16 +547,20 @@ class EpistemicGoalScheduler:
                 e.feature_id in engine.symbolic_theory.walkable_features
             ) and (feat_instance_count > 2 or feat_total_cells > max_entity_area)
             if is_pervasive_substrate:
-                engine.symbolic_theory.goal_features.discard(e.feature_id)
+                engine.symbolic_theory.retract_goal(e.feature_id, reason="pervasive_substrate")
                 continue
 
+            has_discrete_interact_cg = any(
+                not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                for a in available_actions
+            )
             is_goal_candidate = (
                 e.feature_id in engine.symbolic_theory.goal_features
                 and (
                     1 <= e.area <= max_entity_area
                     or not engine.symbolic_theory.is_walkable(e.feature_id)
                 )
-            ) or e.role == EntityRole.GOAL
+            ) or (e.role == EntityRole.GOAL and not has_discrete_interact_cg)
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
@@ -208,15 +569,479 @@ class EpistemicGoalScheduler:
 
         # Object Permanence: Retain known goal positions if currently occluded by mobile entities
         for gp in engine.learned_goal_positions:
-            if 0 <= gp[0] < H and 0 <= gp[1] < W and gp != avatar_pos:
-                if av_feats and int(curr_grid[gp[0], gp[1]]) in av_feats:
+            if (
+                0 <= gp[0] < H
+                and 0 <= gp[1] < W
+                and gp not in engine.learned_barriers
+                and (gp != avatar_pos or has_cargo_context)
+            ):
+                if av_feats and int(curr_grid[gp[0], gp[1]]) in av_feats and not has_cargo_context:
                     continue
                 if gp not in confirmed_goals:
                     confirmed_goals.append(gp)
 
+        # Goal Arbiter active goal integration (confirmed extrinsic targets, or live valid
+        # epistemic targets when not yet in block-delivery mode)
+        arbitrated = getattr(engine, "active_arbitrated_goal", None)
+        if (
+            arbitrated is not None
+            and isinstance(arbitrated.target, tuple)
+            and len(arbitrated.target) == 2
+        ):
+            target_coord = (int(arbitrated.target[0]), int(arbitrated.target[1]))
+            if (
+                0 <= target_coord[0] < H
+                and 0 <= target_coord[1] < W
+                and target_coord != avatar_pos
+                and target_coord not in engine.learned_barriers
+                and not engine.symbolic_theory.is_position_explored(target_coord)
+            ):
+                tc_feat = int(curr_grid[target_coord[0], target_coord[1]])
+                arb_meta = getattr(arbitrated, "metadata", None) or {}
+                exp_feat = arb_meta.get("feature_id")
+                arb_type = getattr(arbitrated, "goal_type", "")
+                # Discard stale epistemic targets whose object moved, vanished into bg,
+                # or turned out to be cargo / barrier rather than a goal.
+                is_stale_epistemic = arb_type == "epistemic_exploration" and (
+                    (exp_feat is not None and tc_feat != int(exp_feat))
+                    or tc_feat == bg
+                    or tc_feat in engine.symbolic_theory.cargo_features
+                    or engine.symbolic_theory.is_cargo(tc_feat)
+                    or engine.symbolic_theory.is_feature_explored(tc_feat)
+                )
+                is_tc_barrier = (
+                    engine.symbolic_theory.is_barrier(tc_feat) or tc_feat in engine.learned_barriers
+                )
+                has_discrete_interact = any(
+                    not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                    for a in available_actions
+                )
+                is_extrinsic_arb = (
+                    tc_feat in engine.symbolic_theory.goal_features
+                    or target_coord in engine.learned_goal_positions
+                    or arb_type in ("confirmed_extrinsic", "social_instruction")
+                    or (
+                        not has_discrete_interact
+                        and arb_type != "epistemic_exploration"
+                        and not has_cargo_context
+                    )
+                )
+                if not is_stale_epistemic and is_extrinsic_arb:
+                    if not is_tc_barrier and not (
+                        has_discrete_interact and not engine.symbolic_theory.is_walkable(tc_feat)
+                    ):
+                        target_area = next(
+                            (e.area for e in entities if e.grid_pos == target_coord),
+                            1,
+                        )
+                        cls._enqueue_walkable_or_reversible_approach(
+                            engine,
+                            curr_grid,
+                            H,
+                            W,
+                            bg,
+                            avatar_pos,
+                            target_coord,
+                            tc_feat,
+                            target_area,
+                            has_cargo_context,
+                            confirmed_goals,
+                            satisfied_when,
+                            set_contact_meta=False,
+                            transient_blocked=transient_blocked,
+                        )
+                        if target_coord in confirmed_goals:
+                            confirmed_goals.remove(target_coord)
+                            confirmed_goals.insert(0, target_coord)
+                    else:
+                        # Unwalkable arbitrated target: target closest adjacent walkable stance
+                        adj_walkable = [
+                            (target_coord[0] + dr, target_coord[1] + dc)
+                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            if 0 <= target_coord[0] + dr < H
+                            and 0 <= target_coord[1] + dc < W
+                            and (
+                                not engine.symbolic_theory.is_position_explored(
+                                    (target_coord[0] + dr, target_coord[1] + dc)
+                                )
+                                or (target_coord[0] + dr, target_coord[1] + dc) == avatar_pos
+                            )
+                            and (
+                                curr_grid[target_coord[0] + dr, target_coord[1] + dc] == bg
+                                or engine.symbolic_theory.is_walkable(
+                                    int(curr_grid[target_coord[0] + dr, target_coord[1] + dc])
+                                )
+                                or (target_coord[0] + dr, target_coord[1] + dc) == avatar_pos
+                            )
+                        ]
+                        if adj_walkable:
+                            if avatar_pos is not None:
+                                adj_walkable.sort(
+                                    key=lambda p: (
+                                        abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                                    )
+                                )
+                            chosen_stance = adj_walkable[0]
+                            if chosen_stance in confirmed_goals:
+                                confirmed_goals.remove(chosen_stance)
+                            confirmed_goals.insert(0, chosen_stance)
+                            satisfied_when[chosen_stance] = {
+                                "feature": tc_feat,
+                                "entity_pos": target_coord,
+                                "max_visits": 2,
+                            }
+
         goals: list[tuple[int, int]] = []
         if confirmed_goals:
             goals = list(confirmed_goals)
+
+        # Causal Prerequisite Subgoal Scheduling via Conditional Affordances (BA10 / OFC)
+        if (
+            goals
+            and avatar_pos is not None
+            and engine.symbolic_theory.conditional_affordances
+            and not engine.subgoal_stack.has_pending_goals
+        ):
+            cond_affs = engine.symbolic_theory.conditional_affordances
+            held_ids = getattr(engine.working_memory, "held_feature_ids", set())
+            hz = getattr(engine, "hazard_tracker", None)
+            lethal_cond_feats = set(getattr(hz, "known_lethal_features", ()) or ()) if hz else set()
+            unfulfilled = [
+                aff
+                for aff in cond_affs.values()
+                if aff.prerequisite_feature is not None
+                and aff.prerequisite_feature != aff.feature
+                and aff.prerequisite_feature != bg
+                and aff.prerequisite_feature not in av_feats
+                and aff.prerequisite_feature not in lethal_cond_feats
+                and aff.prerequisite_feature not in held_ids
+                and np.any(curr_grid == aff.feature)
+            ]
+            if unfulfilled:
+                aff_features = {a.feature for a in unfulfilled}
+                primary_target = goals[0]
+                q_decomp: deque[tuple[int, int]] = deque([avatar_pos])
+                visited_decomp: set[tuple[int, int]] = {avatar_pos}
+                parent_decomp: dict[tuple[int, int], tuple[int, int]] = {}
+                reached_target = False
+                while q_decomp:
+                    cp = q_decomp.popleft()
+                    if cp == primary_target:
+                        reached_target = True
+                        break
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = cp[0] + dr, cp[1] + dc
+                        if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited_decomp:
+                            cell_v = int(curr_grid[nr, nc])
+                            if (
+                                cell_v != bg
+                                and engine.symbolic_theory.is_barrier(cell_v)
+                                and cell_v not in aff_features
+                            ):
+                                continue
+                            visited_decomp.add((nr, nc))
+                            parent_decomp[(nr, nc)] = cp
+                            q_decomp.append((nr, nc))
+
+                if reached_target:
+                    curr_track = primary_target
+                    path_to_tgt: list[tuple[int, int]] = []
+                    while curr_track in parent_decomp:
+                        path_to_tgt.append(curr_track)
+                        curr_track = parent_decomp[curr_track]
+                    path_to_tgt.reverse()
+
+                    blocking_aff: Any | None = None
+                    barrier_pos_in_path: tuple[int, int] | None = None
+                    for cell in path_to_tgt:
+                        cv = int(curr_grid[cell[0], cell[1]])
+                        if cv in aff_features:
+                            blocking_aff = next((a for a in unfulfilled if a.feature == cv), None)
+                            barrier_pos_in_path = cell
+                            break
+
+                    guarded_barrier_pos: tuple[int, int] | None = barrier_pos_in_path
+                    known_trigger_pos: tuple[int, int] | None = None
+                    if (
+                        barrier_pos_in_path is not None
+                        and hasattr(engine, "remote_causal")
+                        and blocking_aff is not None
+                    ):
+                        r_affs = engine.remote_causal.remote_actuators.get(barrier_pos_in_path, [])
+                        for ra in r_affs:
+                            if ra.trigger_feature == blocking_aff.prerequisite_feature:
+                                if (
+                                    0 <= ra.trigger_pos[0] < H
+                                    and 0 <= ra.trigger_pos[1] < W
+                                    and int(curr_grid[ra.trigger_pos[0], ra.trigger_pos[1]])
+                                    == ra.trigger_feature
+                                ):
+                                    known_trigger_pos = ra.trigger_pos
+                                    break
+                    # Distal Causal Gatekeeper: Check if primary_target is guarded by an unactivated remote barrier
+                    if blocking_aff is None and hasattr(engine, "remote_causal"):
+                        for rem_pos, aff_list in engine.remote_causal.remote_actuators.items():
+                            if (
+                                abs(rem_pos[0] - primary_target[0])
+                                + abs(rem_pos[1] - primary_target[1])
+                                <= 1
+                            ):
+                                if 0 <= rem_pos[0] < H and 0 <= rem_pos[1] < W:
+                                    cur_rf = int(curr_grid[rem_pos[0], rem_pos[1]])
+                                    unfulfilled_prereqs = {
+                                        a.prerequisite_feature
+                                        for a in unfulfilled
+                                        if a.prerequisite_feature is not None
+                                    }
+                                    ordered_affs = sorted(
+                                        aff_list,
+                                        key=lambda ra: (
+                                            0 if ra.trigger_feature in unfulfilled_prereqs else 1,
+                                            -getattr(ra, "confidence", 0.0),
+                                        ),
+                                    )
+                                    for r_aff in ordered_affs:
+                                        # Reject stale links whose trigger cell no longer
+                                        # holds the trigger feature on this lattice.
+                                        if not (
+                                            0 <= r_aff.trigger_pos[0] < H
+                                            and 0 <= r_aff.trigger_pos[1] < W
+                                            and int(
+                                                curr_grid[
+                                                    r_aff.trigger_pos[0], r_aff.trigger_pos[1]
+                                                ]
+                                            )
+                                            == r_aff.trigger_feature
+                                        ):
+                                            continue
+                                        if (
+                                            cur_rf == r_aff.original_remote_feature
+                                            and r_aff.trigger_feature is not None
+                                        ):
+                                            # Skip avatar's own feature
+                                            if (
+                                                engine.avatar_feature is not None
+                                                and r_aff.trigger_feature == engine.avatar_feature
+                                            ):
+                                                continue
+                                            blocking_aff = next(
+                                                (
+                                                    a
+                                                    for a in unfulfilled
+                                                    if a.prerequisite_feature
+                                                    == r_aff.trigger_feature
+                                                ),
+                                                None,
+                                            )
+                                            if blocking_aff is None:
+                                                from hbllm.hcir.world.causal_discovery import (
+                                                    CausalPredicate,
+                                                )
+                                                from hbllm.hcir.world.cortex_causal import (
+                                                    ConditionalAffordance,
+                                                )
+
+                                                blocking_aff = ConditionalAffordance(
+                                                    feature=r_aff.original_remote_feature,
+                                                    condition=CausalPredicate(
+                                                        variable="trigger",
+                                                        operator="==",
+                                                        value=r_aff.trigger_feature,
+                                                    ),
+                                                    prerequisite_feature=r_aff.trigger_feature,
+                                                )
+                                            guarded_barrier_pos = rem_pos
+                                            if (
+                                                0 <= r_aff.trigger_pos[0] < H
+                                                and 0 <= r_aff.trigger_pos[1] < W
+                                                and int(
+                                                    curr_grid[
+                                                        r_aff.trigger_pos[0], r_aff.trigger_pos[1]
+                                                    ]
+                                                )
+                                                == r_aff.trigger_feature
+                                            ):
+                                                known_trigger_pos = r_aff.trigger_pos
+                                            break
+                                if blocking_aff is not None:
+                                    break
+
+                    # Also check interior cells adjacent to primary_target for unfulfilled conditional affordances
+                    if blocking_aff is None and unfulfilled:
+                        for dr_g, dc_g in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr_g, nc_g = primary_target[0] + dr_g, primary_target[1] + dc_g
+                            if 1 <= nr_g < H - 1 and 1 <= nc_g < W - 1:
+                                cv_g = int(curr_grid[nr_g, nc_g])
+                                if cv_g in aff_features:
+                                    blocking_aff = next(
+                                        (a for a in unfulfilled if a.feature == cv_g), None
+                                    )
+                                    guarded_barrier_pos = (nr_g, nc_g)
+                                    break
+
+                    if blocking_aff is not None and blocking_aff.prerequisite_feature is not None:
+                        prereq_feat = blocking_aff.prerequisite_feature
+
+                        def _walkable_neighbors(coord: tuple[int, int]) -> int:
+                            return sum(
+                                1
+                                for dr_w, dc_w in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                                if 0 <= coord[0] + dr_w < H
+                                and 0 <= coord[1] + dc_w < W
+                                and (
+                                    int(curr_grid[coord[0] + dr_w, coord[1] + dc_w]) == bg
+                                    or engine.symbolic_theory.is_walkable(
+                                        int(curr_grid[coord[0] + dr_w, coord[1] + dc_w])
+                                    )
+                                    or (coord[0] + dr_w, coord[1] + dc_w) == avatar_pos
+                                )
+                            )
+
+                        # Relational Cue Resonance: If the conditional affordance was induced from a
+                        # relational cue pair (count == 2) and prereq_feat no longer has count == 2
+                        # on this lattice, bind prereq_feat to the current cue-matched interior actuator.
+                        is_rel_aff = (
+                            str(getattr(blocking_aff, "evidence", "")).startswith("relational_cue:")
+                            or getattr(blocking_aff.condition, "relation", "")
+                            == "cue_actuator_resonance"
+                        )
+                        if not is_rel_aff and hasattr(engine, "working_memory"):
+                            hyp_eng = getattr(engine.working_memory, "hypothesis_engine", None)
+                            if hyp_eng is not None:
+                                is_rel_aff = any(
+                                    h.target_feature == blocking_aff.feature
+                                    and h.rule_id.startswith("relational_cue_")
+                                    for h in hyp_eng.hypotheses.values()
+                                )
+                        if is_rel_aff and int(np.count_nonzero(curr_grid == prereq_feat)) != 2:
+                            for e_cand in entities:
+                                cf = e_cand.feature_id
+                                if (
+                                    cf != bg
+                                    and cf not in av_feats
+                                    and cf != blocking_aff.feature
+                                    and not engine.symbolic_theory.is_barrier(cf)
+                                    and e_cand.grid_pos not in engine.quiescent_actuation_targets
+                                    and int(np.count_nonzero(curr_grid == cf)) == 2
+                                    and _walkable_neighbors(e_cand.grid_pos) == 4
+                                ):
+                                    prereq_feat = cf
+                                    known_trigger_pos = None
+                                    break
+
+                        best_prereq_pos = known_trigger_pos
+                        if best_prereq_pos is None:
+                            prereq_coords = [
+                                e.grid_pos
+                                for e in entities
+                                if e.feature_id == prereq_feat
+                                and e.grid_pos not in engine.quiescent_actuation_targets
+                            ]
+                            if not prereq_coords:
+                                y_idxs, x_idxs = np.where(curr_grid == prereq_feat)
+                                prereq_coords = [
+                                    (int(y), int(x))
+                                    for y, x in zip(y_idxs, x_idxs)
+                                    if (int(y), int(x)) not in engine.quiescent_actuation_targets
+                                ]
+
+                            if prereq_coords:
+                                prereq_coords.sort(
+                                    key=lambda c: (
+                                        -_walkable_neighbors(c),
+                                        abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1]),
+                                    )
+                                )
+                                best_prereq_pos = prereq_coords[0]
+
+                        if best_prereq_pos is not None:
+                            has_discrete_interact = any(
+                                not engine.is_displacement_action(a)
+                                and not engine.is_spatial_effector(a)
+                                for a in available_actions
+                            )
+                            is_prereq_walkable = engine.symbolic_theory.is_walkable(prereq_feat)
+                            is_adjacent_actuator = has_discrete_interact and not is_prereq_walkable
+                            nav_target_pos = best_prereq_pos
+                            if is_adjacent_actuator:
+                                # Find closest walkable adjacent cell to the actuator/switch
+                                adj_candidates: list[tuple[int, int]] = []
+                                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                    ar, ac = best_prereq_pos[0] + dr, best_prereq_pos[1] + dc
+                                    if 0 <= ar < H and 0 <= ac < W:
+                                        af = int(curr_grid[ar, ac])
+                                        if (
+                                            af == bg
+                                            or engine.symbolic_theory.is_walkable(af)
+                                            or (ar, ac) == avatar_pos
+                                        ):
+                                            adj_candidates.append((ar, ac))
+                                if adj_candidates:
+
+                                    def _other_adj_entities(stance: tuple[int, int]) -> int:
+                                        cnt = 0
+                                        for dr2, dc2 in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                            nr2, nc2 = stance[0] + dr2, stance[1] + dc2
+                                            if (
+                                                0 <= nr2 < H
+                                                and 0 <= nc2 < W
+                                                and (nr2, nc2) != best_prereq_pos
+                                            ):
+                                                nf = int(curr_grid[nr2, nc2])
+                                                if (
+                                                    nf != bg
+                                                    and nf not in av_feats
+                                                    and not engine.symbolic_theory.is_walkable(nf)
+                                                    and not engine.symbolic_theory.is_barrier(nf)
+                                                ):
+                                                    cnt += 1
+                                        return cnt
+
+                                    adj_candidates.sort(
+                                        key=lambda c: (
+                                            _other_adj_entities(c),
+                                            abs(c[0] - avatar_pos[0]) + abs(c[1] - avatar_pos[1]),
+                                        )
+                                    )
+                                    nav_target_pos = adj_candidates[0]
+
+                            sg_type = (
+                                SubgoalType.UNLOCK_REMOTE_MECHANISM
+                                if is_adjacent_actuator
+                                else SubgoalType.NAVIGATE_TO
+                            )
+                            engine.schedule_causal_subgoal_chain(
+                                target_destination=primary_target,
+                                target_type=SubgoalType.DELIVER_TO_GOAL,
+                                causal_prerequisites=[
+                                    (
+                                        f"ACTUATE_{prereq_feat}"
+                                        if is_adjacent_actuator
+                                        else f"NAVIGATE_TO_{prereq_feat}",
+                                        nav_target_pos,
+                                        sg_type,
+                                        prereq_feat,
+                                    )
+                                ],
+                                target_id=f"target_goal_{primary_target[0]}_{primary_target[1]}",
+                            )
+                            if engine.subgoal_stack.has_pending_goals:
+                                cur_sg = engine.subgoal_stack.current_subgoal
+                                if cur_sg is not None:
+                                    cur_sg.target_entity_pos = best_prereq_pos
+                                    if guarded_barrier_pos is not None:
+                                        cur_sg.metadata["barrier_pos"] = guarded_barrier_pos
+                                        cur_sg.metadata["barrier_feat"] = blocking_aff.feature
+
+                            if is_adjacent_actuator:
+                                satisfied_when[nav_target_pos] = {
+                                    "feature": prereq_feat,
+                                    "entity_pos": best_prereq_pos,
+                                    "max_visits": 5,
+                                    "role": "actuator",
+                                }
+
+                            goals = [nav_target_pos]
 
         # Faculty: Prefrontal Working Memory Active Schema & Procedural Skill Prioritization (dlPFC / Habitual Replay)
         wm = get_engine_state_attr(engine, "working_memory", None)
@@ -265,20 +1090,50 @@ class EpistemicGoalScheduler:
         # Faculty: Brodmann Area 10 (aPFC) Frontopolar Subgoal Prioritization
         if engine.subgoal_stack.has_pending_goals:
             cur_sg = engine.subgoal_stack.current_subgoal
-            if (
-                cur_sg is not None
-                and cur_sg.target_destination != avatar_pos
-                and not engine.subgoal_stack.is_subgoal_satisfied(
-                    cur_sg, set(), avatar_pos=avatar_pos
+            held_ids = getattr(engine.working_memory, "held_feature_ids", set())
+            is_sg_sat = (
+                engine.subgoal_stack.is_subgoal_satisfied(
+                    cur_sg,
+                    set(),
+                    avatar_pos=avatar_pos,
+                    held_features=held_ids,
+                    grid=curr_grid,
+                    background_feature=bg,
                 )
-            ):
+                if cur_sg is not None
+                else False
+            )
+            if cur_sg is not None and cur_sg.target_destination != avatar_pos and not is_sg_sat:
                 sg_dest = cur_sg.target_destination
                 if 0 <= sg_dest[0] < H and 0 <= sg_dest[1] < W:
-                    if sg_dest in goals:
-                        goals.remove(sg_dest)
-                    goals.insert(0, sg_dest)
-            elif cur_sg is not None and cur_sg.target_destination == avatar_pos:
+                    goals = [sg_dest]
+                    if (
+                        cur_sg.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM
+                        and cur_sg.target_entity_pos is not None
+                    ):
+                        satisfied_when[sg_dest] = {
+                            "feature": cur_sg.required_feature,
+                            "entity_pos": cur_sg.target_entity_pos,
+                            "max_visits": 2,
+                            "role": "actuator",
+                        }
+            elif cur_sg is not None and (
+                is_sg_sat
+                or (
+                    cur_sg.target_destination == avatar_pos
+                    and cur_sg.subgoal_type != SubgoalType.UNLOCK_REMOTE_MECHANISM
+                )
+            ):
                 subgoal_to_pop = True
+                if len(engine.subgoal_stack.stack) > 1:
+                    next_sg_dest = engine.subgoal_stack.stack[-2].target_destination
+                    if 0 <= next_sg_dest[0] < H and 0 <= next_sg_dest[1] < W:
+                        if next_sg_dest in goals:
+                            goals.remove(next_sg_dest)
+                        goals.insert(0, next_sg_dest)
+            elif cur_sg is not None and cur_sg.target_destination == avatar_pos:
+                # Avatar is at stance waiting for unlock actuation
+                goals = [avatar_pos]
 
         # Panel coordinates filter
         panel_coords: set[tuple[int, int]] = set()
@@ -295,15 +1150,41 @@ class EpistemicGoalScheduler:
         if not goals:
             hypothesized_goals: list[tuple[int, int]] = []
             for e in entities:
-                if avatar_pos is not None and e.grid_pos == avatar_pos:
+                if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                     continue
                 if e.feature_id == bg:
                     continue
-                if engine.symbolic_theory.is_barrier(e.feature_id) or e.role == EntityRole.OBSTACLE:
+                if e.grid_pos in engine.learned_barriers and (
+                    e.feature_id in engine.symbolic_theory.goal_features
+                    or e.grid_pos in engine.learned_goal_positions
+                ):
+                    continue
+                if (
+                    engine.symbolic_theory.is_barrier(e.feature_id)
+                    and e.feature_id not in engine.symbolic_theory.candidate_goal_features
+                    and e.feature_id not in engine.symbolic_theory.goal_features
+                ) or (
+                    e.role == EntityRole.OBSTACLE
+                    and e.feature_id not in engine.symbolic_theory.candidate_goal_features
+                    and e.feature_id not in engine.symbolic_theory.goal_features
+                ):
+                    continue
+                is_cargo_entity = (
+                    e.feature_id in engine.symbolic_theory.cargo_features
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                if engine.symbolic_theory.is_position_explored(e.grid_pos) and (
+                    not has_cargo_context or is_cargo_entity
+                ):
+                    continue
+                if e.grid_pos in engine.exhausted_candidate_goals and (
+                    not has_cargo_context or is_cargo_entity
+                ):
                     continue
                 if (
                     e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
+                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
                 ):
                     continue
                 if avatar_pos is not None and e.feature_id in av_feats:
@@ -330,20 +1211,323 @@ class EpistemicGoalScheduler:
                         or not engine.symbolic_theory.is_walkable(e.feature_id)
                     )
                 ):
-                    if e.grid_pos not in hypothesized_goals:
-                        hypothesized_goals.append(e.grid_pos)
+                    has_discrete_interact = any(
+                        not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                        for a in available_actions
+                    )
+                    is_walk = (
+                        engine.symbolic_theory.is_walkable(e.feature_id)
+                        or (
+                            not has_discrete_interact
+                            and not engine.symbolic_theory.is_barrier(e.feature_id)
+                        )
+                        or e.feature_id in engine.symbolic_theory.goal_features
+                        or e.grid_pos in engine.learned_goal_positions
+                    ) and e.grid_pos not in engine.learned_barriers
+                    if is_walk:
+                        cls._enqueue_walkable_or_reversible_approach(
+                            engine,
+                            curr_grid,
+                            H,
+                            W,
+                            bg,
+                            avatar_pos,
+                            e.grid_pos,
+                            e.feature_id,
+                            e.area,
+                            has_cargo_context,
+                            hypothesized_goals,
+                            satisfied_when,
+                            set_contact_meta=False,
+                            transient_blocked=transient_blocked,
+                        )
+                    else:
+                        cls._enqueue_adjacent_or_contact(
+                            engine,
+                            curr_grid,
+                            H,
+                            W,
+                            bg,
+                            avatar_pos,
+                            e.grid_pos,
+                            e.feature_id,
+                            hypothesized_goals,
+                            satisfied_when,
+                        )
                 elif (
                     e.role == target_role
                     or e.feature_id in engine.learned_receptacle_features
                     or e.grid_pos in engine.learned_goal_positions
                     or e.grid_pos in engine.learned_receptacle_positions
                 ):
-                    if e.grid_pos not in hypothesized_goals:
-                        hypothesized_goals.append(e.grid_pos)
+                    has_discrete_interact = any(
+                        not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+                        for a in available_actions
+                    )
+                    is_walk = (
+                        engine.symbolic_theory.is_walkable(e.feature_id)
+                        or (
+                            not has_discrete_interact
+                            and not engine.symbolic_theory.is_barrier(e.feature_id)
+                        )
+                        or e.feature_id in engine.symbolic_theory.goal_features
+                        or e.grid_pos in engine.learned_goal_positions
+                    ) and e.grid_pos not in engine.learned_barriers
+                    if is_walk:
+                        cls._enqueue_walkable_or_reversible_approach(
+                            engine,
+                            curr_grid,
+                            H,
+                            W,
+                            bg,
+                            avatar_pos,
+                            e.grid_pos,
+                            e.feature_id,
+                            e.area,
+                            has_cargo_context,
+                            hypothesized_goals,
+                            satisfied_when,
+                            set_contact_meta=False,
+                            transient_blocked=transient_blocked,
+                        )
+                    else:
+                        cls._enqueue_adjacent_or_contact(
+                            engine,
+                            curr_grid,
+                            H,
+                            W,
+                            bg,
+                            avatar_pos,
+                            e.grid_pos,
+                            e.feature_id,
+                            hypothesized_goals,
+                            satisfied_when,
+                        )
             if hypothesized_goals:
                 goals = hypothesized_goals
 
-        # (c) Structural inference: geometric patterns suggesting goals
+        # (c) Real Unvisited Novel / Interactive Entities on the Grid (Epistemic Curiosity)
+        has_discrete_interact = any(
+            not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            for a in available_actions
+        )
+        if not goals:
+            novel_entity_goals: list[tuple[int, int]] = []
+            for e in entities:
+                if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
+                    continue
+                if e.feature_id == bg:
+                    continue
+                if e.feature_id in av_feats:
+                    continue
+                if e.grid_pos in panel_coords:
+                    continue
+                is_isolated_interior = (
+                    1 <= e.area <= 2
+                    and 1 <= e.grid_pos[0] < H - 1
+                    and 1 <= e.grid_pos[1] < W - 1
+                    and has_discrete_interact
+                    and not engine.symbolic_theory.is_position_explored(e.grid_pos)
+                    and e.feature_id not in engine.symbolic_theory.goal_features
+                )
+                if (
+                    (engine.symbolic_theory.is_barrier(e.feature_id) and not is_isolated_interior)
+                    or (e.role == EntityRole.OBSTACLE and not is_isolated_interior)
+                    or e.feature_id in engine.hazard_tracker.known_lethal_features
+                    or e.feature_id in engine.mobile_threat_features
+                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
+                ):
+                    continue
+                is_cargo_entity = (
+                    e.feature_id in engine.symbolic_theory.cargo_features
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                is_potential_cargo_receptor = (
+                    has_cargo_context
+                    and not is_cargo_entity
+                    and (
+                        e.feature_id in engine.symbolic_theory.goal_features
+                        or e.feature_id in engine.symbolic_theory.candidate_goal_features
+                        or e.feature_id in engine.symbolic_theory.receptacle_features
+                        or (
+                            engine.symbolic_theory.is_walkable(e.feature_id)
+                            and int(np.count_nonzero(curr_grid == e.feature_id)) <= 4
+                        )
+                    )
+                    and e.grid_pos not in engine.learned_barriers
+                    and e.grid_pos not in engine.current_level_lethal_positions
+                )
+                if (
+                    engine.symbolic_theory.is_feature_explored(e.feature_id)
+                    and not is_isolated_interior
+                    and not is_potential_cargo_receptor
+                ):
+                    continue
+                if engine.symbolic_theory.is_position_explored(e.grid_pos) and (
+                    not has_cargo_context or is_cargo_entity
+                ):
+                    continue
+                if e.grid_pos in engine.exhausted_candidate_goals and (
+                    not has_cargo_context or is_cargo_entity
+                ):
+                    continue
+                if not (1 <= e.area <= 64):
+                    continue
+                is_walkable = (
+                    engine.symbolic_theory.is_walkable(e.feature_id)
+                    or (
+                        not has_discrete_interact
+                        and not engine.symbolic_theory.is_barrier(e.feature_id)
+                    )
+                    or e.feature_id == bg
+                )
+                if is_walkable:
+                    cls._enqueue_walkable_or_reversible_approach(
+                        engine,
+                        curr_grid,
+                        H,
+                        W,
+                        bg,
+                        avatar_pos,
+                        e.grid_pos,
+                        e.feature_id,
+                        e.area,
+                        has_cargo_context,
+                        novel_entity_goals,
+                        satisfied_when,
+                        set_contact_meta=True,
+                        transient_blocked=transient_blocked,
+                    )
+                else:
+                    # Non-walkable interactive entity: probe adjacent stances, then contact if exhausted
+                    cls._enqueue_adjacent_or_contact(
+                        engine,
+                        curr_grid,
+                        H,
+                        W,
+                        bg,
+                        avatar_pos,
+                        e.grid_pos,
+                        e.feature_id,
+                        novel_entity_goals,
+                        satisfied_when,
+                        set_contact_meta=True,
+                        transient_blocked=transient_blocked,
+                    )
+                if is_walkable:
+                    new_candidate_feats.add(e.feature_id)
+
+            if novel_entity_goals:
+                goals = novel_entity_goals
+
+        if avatar_pos is not None and goals and satisfied_when:
+            th = engine.symbolic_theory
+            role_priors: dict[int, dict[str, float]] = (
+                getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+            )
+            has_cargo_ctx = bool(th.cargo_features or engine.learned_cargo_features)
+            goals, newly_unlocked = cls._filter_reachable_and_unlocked(
+                engine, curr_grid, H, W, bg, av_feats, avatar_pos, goals
+            )
+
+            def _role_score_for_feature(feat_id: int) -> tuple[float, float, float]:
+                """Return (preferred_role_score, barrier_score, hazard_score) in [0, 1]."""
+                return cls._role_scores_from_priors(role_priors, feat_id, has_cargo_ctx)
+
+            def _stance_priority(p: tuple[int, int]) -> tuple[int, float, int]:
+                dist = abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                if p == avatar_pos and p in satisfied_when and "entity_pos" in satisfied_when[p]:
+                    return (0, 0.0, 0)
+                if newly_unlocked and (
+                    p in newly_unlocked
+                    or any(
+                        (p[0] + dr, p[1] + dc) in newly_unlocked
+                        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    )
+                ):
+                    return (1, 0.0, dist)
+                meta = satisfied_when.get(p)
+                if meta and "entity_pos" in meta:
+                    ep = meta["entity_pos"]
+                    raw_ef = meta.get("feature")
+                    ef = int(raw_ef) if raw_ef is not None else -1
+                    pref_score, barrier_score, hazard_score = (
+                        _role_score_for_feature(ef) if ef >= 0 else (0.0, 0.0, 0.0)
+                    )
+                    if ef >= 0:
+                        if hazard_score >= 0.65 and pref_score < 0.45:
+                            return (8, hazard_score, dist)
+                        if barrier_score >= 0.72 and pref_score < 0.40:
+                            return (7, barrier_score, dist)
+                        walk_n = sum(
+                            1
+                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            if 0 <= ep[0] + dr < H
+                            and 0 <= ep[1] + dc < W
+                            and (
+                                curr_grid[ep[0] + dr, ep[1] + dc] == bg
+                                or th.is_walkable(int(curr_grid[ep[0] + dr, ep[1] + dc]))
+                                or (ep[0] + dr, ep[1] + dc) == avatar_pos
+                            )
+                        )
+                        is_interior_switch = walk_n == 4
+                        cnt = int(np.count_nonzero(curr_grid == ef))
+                        if cnt == 2 and is_interior_switch:
+                            locs = [
+                                (int(r), int(c))
+                                for r, c in zip(*np.where(curr_grid == ef), strict=False)
+                            ]
+                            if hasattr(th, "induce_relational_cue_pair"):
+                                th.induce_relational_cue_pair(ef, locs)
+                            return (2, -round(pref_score, 3), dist)
+                        if is_interior_switch:
+                            return (3, -round(pref_score, 3), dist)
+                        if pref_score >= 0.55:
+                            return (4, -round(pref_score, 3), dist)
+                        return (5 if cnt == 1 else 6, -round(pref_score, 3), dist)
+                p_feat = int(curr_grid[p[0], p[1]])
+                target_feat = (
+                    int(meta["target_feature"]) if (meta and "target_feature" in meta) else p_feat
+                )
+                pref_score, barrier_score, hazard_score = (
+                    _role_score_for_feature(target_feat) if target_feat != bg else (0.0, 0.0, 0.0)
+                )
+                if (
+                    hazard_score >= 0.65
+                    and pref_score < 0.45
+                    and target_feat not in th.goal_features
+                ):
+                    return (8, hazard_score, dist)
+                if (
+                    barrier_score >= 0.72
+                    and pref_score < 0.40
+                    and target_feat not in th.goal_features
+                ):
+                    return (7, barrier_score, dist)
+                p_cnt = int(np.count_nonzero(curr_grid == p_feat)) if p_feat != bg else 0
+                if (
+                    p_feat != bg
+                    and not th.is_barrier(p_feat)
+                    and (p_cnt == 1 or p_feat in th.goal_features)
+                    and any(
+                        0 <= p[0] + dr < H
+                        and 0 <= p[1] + dc < W
+                        and th.is_position_actuator_probed((p[0] + dr, p[1] + dc))
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                    )
+                ):
+                    return (1, -round(pref_score, 3), dist)
+                if pref_score >= 0.55:
+                    return (4, -round(pref_score, 3), dist)
+                return (5 if p_cnt == 1 else 6, -round(pref_score, 3), dist)
+
+            priorities = {g: _stance_priority(g) for g in goals}
+            min_tier = min(pr[0] for pr in priorities.values())
+            if min_tier <= 3:
+                goals = [g for g in goals if priorities[g][0] == min_tier]
+            goals.sort(key=lambda g: priorities[g])
+
+        # (d) Structural inference: geometric patterns suggesting goals
         if not goals and engine.learned_goal_positions:
             goals = [
                 g
@@ -360,6 +1544,12 @@ class EpistemicGoalScheduler:
                 )
             ]
         if not goals:
+            wm_priors_d: dict[int, dict[str, float]] = (
+                getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+            )
+            has_cargo_d = bool(
+                engine.symbolic_theory.cargo_features or engine.learned_cargo_features
+            )
             structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
             primary_sgs = [
                 sg
@@ -375,6 +1565,13 @@ class EpistemicGoalScheduler:
                 )
             ]
             cand_sgs = primary_sgs if primary_sgs else structural_goals
+
+            def _is_prior_blocked_feat(feat_val: int) -> bool:
+                if feat_val in engine.symbolic_theory.goal_features:
+                    return False
+                p_s, b_s, h_s = cls._role_scores_from_priors(wm_priors_d, feat_val, has_cargo_d)
+                return (h_s >= 0.65 and p_s < 0.45) or (b_s >= 0.72 and p_s < 0.40)
+
             for sg in cand_sgs:
                 feat = sg.get("feature")
                 if sg.get("is_midpoint") or sg.get("type") == "relational_alignment":
@@ -387,9 +1584,15 @@ class EpistemicGoalScheduler:
                         and feat not in engine.symbolic_theory.goal_features
                         and feat not in engine.symbolic_theory.candidate_goal_features
                     )
+                    or _is_prior_blocked_feat(int(feat))
                 ):
                     continue
-                if feat is not None and feat != bg and feat not in av_feats:
+                if (
+                    feat is not None
+                    and feat != bg
+                    and feat not in av_feats
+                    and (engine.symbolic_theory.is_walkable(feat) or not has_discrete_interact)
+                ):
                     new_candidate_feats.add(feat)
                 is_high_conf = sg.get("confidence", 0.0) >= 0.7 and (
                     avatar_pos is not None or bool(av_feats)
@@ -402,10 +1605,19 @@ class EpistemicGoalScheduler:
                             and 0 <= cp[1] < W
                             and cp != avatar_pos
                             and cp not in panel_coords
+                            and int(curr_grid[cp[0], cp[1]]) != bg
                         ):
+                            cp_feat = int(curr_grid[cp[0], cp[1]])
+                            if (
+                                cp_feat in engine.hazard_tracker.known_lethal_features
+                                or _is_prior_blocked_feat(cp_feat)
+                            ):
+                                continue
                             if cp not in goals:
                                 goals.append(cp)
-                            if is_high_conf:
+                            if is_high_conf and (
+                                feat is not None and feat in engine.symbolic_theory.goal_features
+                            ):
                                 new_learned_positions.add(cp)
                 else:
                     pos = sg.get("position")
@@ -415,63 +1627,157 @@ class EpistemicGoalScheduler:
                         and 0 <= pos[1] < W
                         and pos != avatar_pos
                         and pos not in panel_coords
+                        and int(curr_grid[pos[0], pos[1]]) != bg
                     ):
+                        pos_feat = int(curr_grid[pos[0], pos[1]])
+                        if (
+                            pos_feat in engine.hazard_tracker.known_lethal_features
+                            or _is_prior_blocked_feat(pos_feat)
+                        ):
+                            continue
                         if pos not in goals:
                             goals.append(pos)
-                        if is_high_conf:
+                        if is_high_conf and (
+                            feat is not None and feat in engine.symbolic_theory.goal_features
+                        ):
                             new_learned_positions.add(pos)
 
-        # (d) Exploratory guesses: unknown entities
-        if not goals:
-            exploratory_goals = [
-                e.grid_pos
-                for e in entities
-                if e.grid_pos not in panel_coords
-                and e.role
-                in (
-                    EntityRole.UNKNOWN,
-                    EntityRole.AGENT,
-                    EntityRole.ACTUATOR,
-                    EntityRole.MANIPULABLE,
-                    EntityRole.RESOURCE,
-                )
-                and 1 <= e.area <= 64
-                and e.feature_id != bg
-                and not engine.symbolic_theory.is_walkable(e.feature_id)
-                and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                and not engine.symbolic_theory.is_barrier(e.feature_id)
-                and (
-                    e.feature_id not in av_feats
-                    or (
-                        avatar_pos is not None
-                        and (
-                            abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1])
-                        )
-                        > 4
+            if len(goals) > 1 and avatar_pos is not None:
+
+                def _structural_priority(g: tuple[int, int]) -> tuple[int, float, int]:
+                    gf = int(curr_grid[g[0], g[1]])
+                    pref_g, bar_g, haz_g = (
+                        cls._role_scores_from_priors(wm_priors_d, gf, has_cargo_d)
+                        if gf != bg
+                        else (0.0, 0.0, 0.0)
                     )
+                    dist_g = abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
+                    if gf in engine.symbolic_theory.goal_features:
+                        return (0, -round(pref_g, 3), dist_g)
+                    if haz_g >= 0.65 and pref_g < 0.45:
+                        return (8, haz_g, dist_g)
+                    if bar_g >= 0.72 and pref_g < 0.40:
+                        return (7, bar_g, dist_g)
+                    if pref_g >= 0.55:
+                        return (1, -round(pref_g, 3), dist_g)
+                    if pref_g >= 0.35:
+                        return (2, -round(pref_g, 3), dist_g)
+                    cnt_g = int(np.count_nonzero(curr_grid == gf)) if gf != bg else 0
+                    return (3 if cnt_g == 1 else 4, -round(pref_g, 3), dist_g)
+
+                goals.sort(key=_structural_priority)
+
+        delayed_mod = getattr(engine, "delayed_effect_modeler", None)
+        if delayed_mod and getattr(engine, "symbolic_theory", None) is not None:
+            for d_rec in getattr(delayed_mod, "discovered_delayed_effects", ()):
+                if (
+                    getattr(d_rec, "observed_lag_steps", 0) > 0
+                    and getattr(d_rec, "support_count", 0) >= 1
+                    and hasattr(d_rec, "to_causal_predicate")
+                ):
+                    engine.symbolic_theory.record_causal_predicate(d_rec.to_causal_predicate())
+
+        # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
+        prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
+        if not goals:
+            visited = set(getattr(engine.working_memory, "visited_cells", set()))
+            if avatar_pos is not None:
+                visited.add(avatar_pos)
+
+            reachable_passable: set[tuple[int, int]] = set()
+            if avatar_pos is not None:
+                q_frontier: deque[tuple[int, int]] = deque([avatar_pos])
+                reachable_passable.add(avatar_pos)
+                while q_frontier:
+                    curr_cell = q_frontier.popleft()
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = curr_cell[0] + dr, curr_cell[1] + dc
+                        if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reachable_passable:
+                            c_val = int(curr_grid[nr, nc])
+                            if (
+                                (c_val == bg or engine.symbolic_theory.is_walkable(c_val))
+                                and not engine.symbolic_theory.is_barrier(c_val)
+                                and c_val not in engine.hazard_tracker.known_lethal_features
+                                and c_val not in prior_hazard_feats
+                            ):
+                                reachable_passable.add((nr, nc))
+                                q_frontier.append((nr, nc))
+
+            frontier_candidates = [
+                cp
+                for cp in reachable_passable
+                if cp not in visited
+                and cp not in panel_coords
+                and any(
+                    (cp[0] + dr, cp[1] + dc) in visited
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                 )
             ]
-            if exploratory_goals:
-                goals = exploratory_goals
-                for e in entities:
-                    if (
-                        e.grid_pos in goals
-                        and e.feature_id != bg
-                        and e.feature_id not in av_feats
-                        and e.grid_pos not in panel_coords
-                        and e.feature_id not in engine.mobile_threat_features
-                        and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                    ):
-                        new_candidate_feats.add(e.feature_id)
+            if not frontier_candidates:
+                frontier_candidates = [
+                    cp for cp in reachable_passable if cp not in visited and cp not in panel_coords
+                ]
+
+            opt_eng = getattr(engine, "option_discovery", None)
+            if opt_eng and avatar_pos is not None:
+                opt_bottlenecks = {
+                    opt.bottleneck_state
+                    for opt in getattr(opt_eng, "discovered_options", {}).values()
+                    if getattr(opt, "bottleneck_state", None) is not None
+                }
+                bottleneck_frontiers = [
+                    cp
+                    for cp in reachable_passable
+                    if cp in opt_bottlenecks and cp not in visited and cp not in panel_coords
+                ]
+                if bottleneck_frontiers:
+                    bottleneck_frontiers.sort(
+                        key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                    )
+                    frontier_candidates = bottleneck_frontiers
+
+            if frontier_candidates and avatar_pos is not None:
+                frontier_candidates.sort(
+                    key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                )
+                nearest_frontier = frontier_candidates[0]
+                goals.append(nearest_frontier)
+                satisfied_when[nearest_frontier] = {"max_visits": 1}
 
         if avatar_pos is not None:
             goals = [
                 g
                 for g in goals
-                if g != avatar_pos and (g in confirmed_goals or g not in panel_coords)
+                if (
+                    (g != avatar_pos or (g in satisfied_when and "entity_pos" in satisfied_when[g]))
+                    and (g in confirmed_goals or g not in panel_coords)
+                )
             ]
 
-        unexhausted_goals = [g for g in goals if g not in engine.exhausted_candidate_goals]
+        all_cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
+        unexhausted_goals = [
+            g
+            for g in goals
+            if (
+                (
+                    g not in engine.exhausted_candidate_goals
+                    or (has_cargo_context and int(curr_grid[g[0], g[1]]) not in all_cargo_feats)
+                )
+                and (
+                    not engine.symbolic_theory.is_position_explored(g)
+                    or has_cargo_context
+                    or g in confirmed_goals
+                )
+            )
+            or (
+                g in satisfied_when
+                and "entity_pos" in satisfied_when[g]
+                and not engine.symbolic_theory.is_position_explored(satisfied_when[g]["entity_pos"])
+                and (not engine.symbolic_theory.is_position_explored(g) or g == avatar_pos)
+            )
+        ]
         if unexhausted_goals:
             goals = unexhausted_goals
         elif goals:
@@ -494,7 +1800,7 @@ class EpistemicGoalScheduler:
                 lb_idx = np.array([(r, c) for r, c in learned_b if 0 <= r < H and 0 <= c < W])
                 if lb_idx.size:
                     blocked[lb_idx[:, 0], lb_idx[:, 1]] = True
-            bad_feats = set(barrier_feats) | set(lethal_feats)
+            bad_feats = set(barrier_feats) | set(lethal_feats) | prior_hazard_feats
             if bad_feats:
                 blocked |= np.isin(curr_grid, list(bad_feats))
             passable = ~blocked
@@ -528,8 +1834,52 @@ class EpistemicGoalScheduler:
             if reachable_goals:
                 goals = reachable_goals
 
-        # Extended avatar projection
-        goals = cls._project_extended_avatar_goals(curr_grid, engine, goals, H, W)
+        # DreamCoder LibraryLearner proposal prior guidance over unconfirmed exploratory goals
+        if (
+            len(goals) > 1
+            and not confirmed_goals
+            and getattr(engine, "library_learner", None)
+            and getattr(engine.library_learner, "proposal_distribution", None) is not None
+        ):
+            ll_ctx = {
+                "has_goal": bool(engine.symbolic_theory.goal_features),
+                "has_cargo": bool(engine.symbolic_theory.cargo_features),
+                "has_switches": bool(
+                    engine.symbolic_theory.conditional_affordances
+                    or getattr(getattr(engine, "remote_causal", None), "remote_actuators", None)
+                ),
+                "has_threats": bool(getattr(engine.hazard_tracker, "known_lethal_features", None)),
+                "n_actions": len(available_actions),
+            }
+            ll_proposals = engine.library_learner.sample_proposals(ll_ctx, top_k=5)
+            if len(ll_proposals) >= 2 and ll_proposals[0][1] > ll_proposals[1][1] + 0.01:
+                top_intent = ll_proposals[0][0].upper()
+                actuator_feats = getattr(engine.symbolic_theory, "actuator_features", set())
+                cargo_feats = getattr(engine.symbolic_theory, "cargo_features", set())
+                goal_feats = (
+                    engine.symbolic_theory.goal_features
+                    | engine.symbolic_theory.candidate_goal_features
+                )
+
+                def _ll_priority(g: tuple[int, int]) -> tuple[int, int]:
+                    feat = int(curr_grid[g[0], g[1]])
+                    sw_feat = satisfied_when.get(g, {}).get("feature")
+                    dist = (
+                        abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
+                        if avatar_pos is not None
+                        else 0
+                    )
+                    if "INTERACT" in top_intent or "ACTIVATE" in top_intent:
+                        tier = 0 if (feat in actuator_feats or sw_feat in actuator_feats) else 1
+                    elif "PICKUP" in top_intent:
+                        tier = 0 if feat in cargo_feats else 1
+                    elif "NAV" in top_intent:
+                        tier = 0 if feat in goal_feats else 1
+                    else:
+                        tier = 0
+                    return (tier, dist)
+
+                goals.sort(key=_ll_priority)
 
         return EpistemicGoalProposal(
             goals=goals,
@@ -538,54 +1888,24 @@ class EpistemicGoalScheduler:
             new_candidate_features=new_candidate_feats,
             subgoal_to_pop=subgoal_to_pop,
             clear_exhausted_goals=clear_exhausted,
+            satisfied_when=satisfied_when,
+            transient_blocked_cells=transient_blocked,
         )
 
     @classmethod
-    def _project_extended_avatar_goals(
-        cls,
-        curr_grid: np.ndarray,
-        engine: AutonomousEpistemicEngine,
-        goals: list[tuple[int, int]],
-        H: int,
-        W: int,
-    ) -> list[tuple[int, int]]:
-        if not goals or engine.avatar_pos is None or engine.avatar_feature is None:
-            return goals
-        av_pts = np.argwhere(curr_grid == engine.avatar_feature)
-        if len(av_pts) < 15:
-            return goals
-        min_ar, min_ac = av_pts.min(axis=0)
-        max_ar, max_ac = av_pts.max(axis=0)
-        h_span = max_ar - min_ar + 1
-        w_span = max_ac - min_ac + 1
-        is_extended_vert = (h_span >= 20) and (w_span <= 5)
-        is_extended_horiz = (w_span >= 20) and (h_span <= 5)
-        if is_extended_vert:
-            vert_goals = []
-            for g in goals:
-                proj = (engine.avatar_pos[0], g[1])
-                if proj != engine.avatar_pos and 0 <= proj[1] < W and proj not in vert_goals:
-                    vert_goals.append(proj)
-            if vert_goals:
-                return vert_goals
-        elif is_extended_horiz:
-            horiz_goals = []
-            for g in goals:
-                proj = (g[0], engine.avatar_pos[1])
-                if proj != engine.avatar_pos and 0 <= proj[0] < H and proj not in horiz_goals:
-                    horiz_goals.append(proj)
-            if horiz_goals:
-                return horiz_goals
-        return goals
-
-    @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export goal scheduler capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export goal scheduler capability and runtime subgoal stack state as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "ofc_ba10_prioritization"
+        if view is not None:
+            sgs = len(getattr(view, "subgoal_stack", []) or [])
+            goals = len(getattr(view, "learned_goal_positions", set()) or set())
+            rel = f"ofc_ba10_prioritization:goals:{goals}:subgoals:{sgs}"
         return CausalPredicate(
             variable="epistemic_goal_scheduler",
             operator="==",
-            value="ACTIVE",
-            relation="ofc_ba10_prioritization",
+            value=val,
+            relation=rel,
             target_entity="cortex_planner",
         )
 
@@ -604,17 +1924,129 @@ class EpistemicGoalScheduler:
         ]
 
 
+class ContinuousKinematicPlanner:
+    """Metric continuous trajectory planner over ReferenceFrame coordinates (WP-C1)."""
+
+    @staticmethod
+    def plan_continuous_trajectory(
+        engine: AutonomousEpistemicEngine,
+        available_actions: Sequence[Any],
+        curr_grid: np.ndarray | None = None,
+        goal_radius: float = 0.55,
+        max_expansions: int = 512,
+    ) -> list[MentalSimulationStep] | None:
+        """Plan a multi-step kinematic trajectory in continuous metric space using grounded velocity vectors."""
+        wm = getattr(engine, "working_memory", None)
+        if wm is None:
+            return None
+        c_pos = getattr(wm, "continuous_agent_pos", None)
+        c_goal = getattr(wm, "continuous_goal_pos", None)
+        rf = getattr(wm, "reference_frame", None)
+        if c_pos is None or len(c_pos) < 2:
+            return None
+
+        # Gather grounded continuous velocity vectors
+        vel_map: dict[Any, tuple[float, float]] = {}
+        for act in available_actions:
+            dyn = engine.action_dynamics.get(act) if hasattr(engine, "action_dynamics") else None
+            if dyn is not None and hasattr(dyn, "get_continuous_velocity"):
+                vx, vy = dyn.get_continuous_velocity()
+                if (vx * vx + vy * vy) > 1e-6:
+                    vel_map[act] = (float(vx), float(vy))
+
+        if not vel_map or c_goal is None or len(c_goal) < 2:
+            return None
+
+        bounds = getattr(rf, "bounds", ((0.0, 10.0), (0.0, 10.0)))
+        x_min, x_max = (
+            (float(bounds[0][0]), float(bounds[0][1])) if len(bounds) >= 1 else (0.0, 10.0)
+        )
+        y_min, y_max = (
+            (float(bounds[1][0]), float(bounds[1][1])) if len(bounds) >= 2 else (0.0, 10.0)
+        )
+        origin_desc = (
+            getattr(rf, "origin_description", "bottom_left_metric") if rf else "bottom_left_metric"
+        )
+
+        gx, gy = float(c_goal[0]), float(c_goal[1])
+        sx, sy = float(c_pos[0]), float(c_pos[1])
+
+        def _to_lattice(x: float, y: float) -> tuple[int, int]:
+            if curr_grid is None or curr_grid.ndim < 2:
+                return (0, 0)
+            H, W = curr_grid.shape
+            c_idx = int(np.clip(round((x - x_min) / max(1e-6, x_max - x_min) * W - 0.5), 0, W - 1))
+            if "bottom_left" in origin_desc:
+                r_idx = int(
+                    np.clip(round((y_max - y) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            else:
+                r_idx = int(
+                    np.clip(round((y - y_min) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            return (r_idx, c_idx)
+
+        def _is_blocked(x: float, y: float) -> bool:
+            if not (x_min + 0.4 <= x <= x_max - 0.4 and y_min + 0.4 <= y <= y_max - 0.4):
+                return True
+            if curr_grid is not None and curr_grid.ndim >= 2:
+                lr, lc = _to_lattice(x, y)
+                feat = int(curr_grid[lr, lc])
+                if engine.symbolic_theory.is_barrier(feat) or (lr, lc) in engine.learned_barriers:
+                    return True
+            return False
+
+        # Continuous A* with 0.25m spatial hashing
+        start_key = (round(sx * 4), round(sy * 4))
+        pq: list[tuple[float, int, float, float, list[MentalSimulationStep]]] = [
+            (math.hypot(gx - sx, gy - sy), 0, sx, sy, [])
+        ]
+        visited: dict[tuple[int, int], int] = {start_key: 0}
+        expansions = 0
+
+        while pq and expansions < max_expansions:
+            _, cost, cx, cy, path = heapq.heappop(pq)
+            expansions += 1
+            if math.hypot(gx - cx, gy - cy) <= goal_radius and path:
+                return path
+
+            for act, (vx, vy) in vel_map.items():
+                nx, ny = cx + vx, cy + vy
+                if _is_blocked(nx, ny):
+                    continue
+                nkey = (round(nx * 4), round(ny * 4))
+                ncost = cost + 1
+                if nkey in visited and visited[nkey] <= ncost:
+                    continue
+                visited[nkey] = ncost
+                lat_p = _to_lattice(nx, ny)
+                step_obj = MentalSimulationStep(
+                    action=int(act) if isinstance(act, (int, np.integer)) else act,
+                    predicted_avatar_pos=lat_p,
+                    expected_mutation="continuous_kinematic_step",
+                )
+                h = math.hypot(gx - nx, gy - ny) / max(0.25, math.hypot(vx, vy))
+                heapq.heappush(pq, (ncost + h, ncost, nx, ny, [*path, step_obj]))
+
+        return None
+
+
 class MentalSimulationPlanner:
     """Simulates candidate action sequences internally in imagination using learned world theory."""
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export mental simulation planner capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export mental simulation planner capability and active plan horizon as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "internal_counterfactual_rollout"
+        if view is not None:
+            plen = len(getattr(view, "mental_plan", []) or [])
+            rel = f"internal_counterfactual_rollout:plan_len:{plen}"
         return CausalPredicate(
             variable="mental_simulation_planner",
             operator="==",
-            value="ACTIVE",
-            relation="internal_counterfactual_rollout",
+            value=val,
+            relation=rel,
             target_entity="cortex_planner",
         )
 
@@ -678,10 +2110,34 @@ class MentalSimulationPlanner:
         av_feats: set[int],
         goals: Sequence[tuple[int, int]],
         blocked_cells: set[tuple[int, int]] | None = None,
+        entities: Sequence[Any] | None = None,
     ) -> tuple[set[tuple[int, int]], bool]:
         """Compute static physical barriers and void background boundaries."""
         H, W = curr_grid.shape
         static_barriers: set[tuple[int, int]] = set()
+
+        has_discrete_interact_sb = any(
+            not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            for a in (getattr(engine, "action_dynamics", None) or {})
+        )
+        if entities:
+            for e in entities:
+                if (
+                    (
+                        e.role == EntityRole.OBSTACLE
+                        or (
+                            has_discrete_interact_sb
+                            and e.feature_id not in engine.symbolic_theory.goal_features
+                            and not engine.symbolic_theory.is_cargo(e)
+                        )
+                    )
+                    and e.feature_id != bg
+                    and e.feature_id not in av_feats
+                    and not engine.symbolic_theory.is_walkable(e.feature_id)
+                ):
+                    for cr, cc in e.properties.get("cells", [e.grid_pos]):
+                        if (int(cr), int(cc)) not in goals:
+                            static_barriers.add((int(cr), int(cc)))
 
         for r, c in engine.learned_barriers:
             if 0 <= r < H and 0 <= c < W:
@@ -691,12 +2147,20 @@ class MentalSimulationPlanner:
                 ):
                     static_barriers.add((r, c))
 
+        agent_state = {"inventory": getattr(engine.working_memory, "held_feature_ids", set())}
+        prior_hazard_feats = EpistemicGoalScheduler._high_confidence_prior_hazards(
+            engine, bg, av_feats
+        )
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
-                if engine.symbolic_theory.is_barrier(val) or (
-                    val in engine.hazard_tracker.known_lethal_features
-                    and val not in engine.mobile_threat_features
+                if (
+                    engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                    or (
+                        val in engine.hazard_tracker.known_lethal_features
+                        and val not in engine.mobile_threat_features
+                    )
+                    or (val in prior_hazard_feats and (r, c) not in engine.learned_goal_positions)
                 ):
                     static_barriers.add((r, c))
 
@@ -718,16 +2182,24 @@ class MentalSimulationPlanner:
 
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
         all_lethals = engine.current_level_lethal_positions
-        safe_goals = set(goals) - all_lethals
+        safe_goals = {
+            g
+            for g in goals
+            if g not in all_lethals and int(curr_grid[g[0], g[1]]) not in prior_hazard_feats
+        }
         static_barriers.difference_update(safe_goals)
-        goal_features = (
-            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
+        goal_features = engine.symbolic_theory.goal_features | (
+            engine.symbolic_theory.candidate_goal_features - prior_hazard_feats
         )
         for gf in goal_features:
             if gf != bg and gf not in av_feats:
                 g_pts = np.argwhere(curr_grid == gf)
                 for gr_idx, gc_idx in g_pts:
-                    static_barriers.discard((int(gr_idx), int(gc_idx)))
+                    pt = (int(gr_idx), int(gc_idx))
+                    if pt in safe_goals or (
+                        pt not in engine.learned_barriers and not has_discrete_interact_sb
+                    ):
+                        static_barriers.discard(pt)
         if engine.avatar_pos is not None:
             ar, ac = engine.avatar_pos
             av_footprint = set()
@@ -838,6 +2310,160 @@ class MentalSimulationPlanner:
         return penalties
 
     @staticmethod
+    def _select_stance_actuation(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        available_actions: Sequence[int],
+        satisfied_when: dict[tuple[int, int], dict[str, Any]],
+        H: int,
+        W: int,
+        check_start_explored: bool = False,
+        mark_probed_pos: bool = True,
+    ) -> list[MentalSimulationStep] | None:
+        """Select a stationary actuation if standing adjacent to a pending probe/actuator target."""
+        start_pos = engine.avatar_pos
+        if start_pos is None:
+            return None
+
+        cur_sg = (
+            engine.subgoal_stack.current_subgoal if engine.subgoal_stack.has_pending_goals else None
+        )
+        probe_target_pos: tuple[int, int] | None = None
+        if start_pos in satisfied_when and "entity_pos" in satisfied_when[start_pos]:
+            probe_target_pos = satisfied_when[start_pos]["entity_pos"]
+        elif cur_sg is not None and cur_sg.target_entity_pos is not None:
+            probe_target_pos = cur_sg.target_entity_pos
+
+        if probe_target_pos is None:
+            return None
+
+        if not engine.subgoal_stack.has_pending_goals and (
+            start_pos in engine.exhausted_candidate_goals
+            or (
+                (not check_start_explored or start_pos not in satisfied_when)
+                and (
+                    (
+                        check_start_explored
+                        and engine.symbolic_theory.is_position_explored(start_pos)
+                    )
+                    or engine.symbolic_theory.is_position_explored(probe_target_pos)
+                )
+            )
+        ):
+            return None
+
+        te_pos = probe_target_pos
+        te_feat = (
+            int(curr_grid[te_pos[0], te_pos[1]])
+            if (0 <= te_pos[0] < H and 0 <= te_pos[1] < W)
+            else None
+        )
+        if not (
+            te_feat is not None
+            and not engine.symbolic_theory.is_walkable(te_feat)
+            and abs(start_pos[0] - te_pos[0]) + abs(start_pos[1] - te_pos[1]) <= 1
+        ):
+            return None
+
+        is_unlock_sg = (
+            cur_sg is not None and cur_sg.subgoal_type == SubgoalType.UNLOCK_REMOTE_MECHANISM
+        )
+        act_id: int | None = None
+        confirmed_stationary = False
+        for m in engine.state_mutations:
+            if m.trigger_pos == te_pos or (
+                m.trigger_feature is not None and te_feat == m.trigger_feature
+            ):
+                if m.trigger_type == "ACTION":
+                    aid = m.metadata.get("action_id")
+                    if aid is not None and aid in available_actions:
+                        act_id = int(aid)
+                        confirmed_stationary = True
+                        break
+
+        if act_id is None:
+            discrete_acts = [
+                a
+                for a in available_actions
+                if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            ]
+            tried = (
+                cur_sg.metadata.get("tried_actions", set())
+                if is_unlock_sg and cur_sg is not None
+                else set()
+            )
+            candidates = (
+                [a for a in discrete_acts if a not in tried] if is_unlock_sg else discrete_acts
+            )
+            if not candidates:
+                if is_unlock_sg and cur_sg is not None:
+                    engine.symbolic_theory.mark_position_explored(
+                        te_pos, reason="actuator_exhausted"
+                    )
+                    engine.exhausted_candidate_goals.add(start_pos)
+                    cur_sg.metadata["triggered"] = True
+                return None
+
+            dynamics = getattr(engine, "action_dynamics", {})
+            candidates.sort(
+                key=lambda a: (
+                    0 if engine.inhibited_actions.get(a, 0) == 0 else 1,
+                    0
+                    if (
+                        a in dynamics
+                        and float(getattr(dynamics[a], "delta_r", 0)) == 0.0
+                        and float(getattr(dynamics[a], "delta_c", 0)) == 0.0
+                    )
+                    else 1,
+                )
+            )
+            act_id = int(candidates[0])
+            confirmed_stationary = (
+                act_id in dynamics
+                and float(getattr(dynamics[act_id], "delta_r", 0)) == 0.0
+                and float(getattr(dynamics[act_id], "delta_c", 0)) == 0.0
+            )
+
+        if act_id is None:
+            return None
+
+        if is_unlock_sg and cur_sg is not None:
+            cur_sg.metadata.setdefault("tried_actions", set()).add(act_id)
+            if not confirmed_stationary:
+                # Defer "triggered" confirmation until AssimilationStage verifies
+                # whether the candidate action actually triggered or merely displaced the avatar.
+                logger.info(
+                    "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Probing candidate action %d.",
+                    te_pos,
+                    act_id,
+                )
+                return [
+                    MentalSimulationStep(
+                        action=act_id,
+                        predicted_avatar_pos=start_pos,
+                        expected_mutation="ACTION_TRIGGER",
+                    )
+                ]
+
+        if mark_probed_pos:
+            engine.symbolic_theory.mark_position_explored(start_pos, reason="actuator_probed")
+            engine.exhausted_candidate_goals.add(start_pos)
+        if cur_sg is not None:
+            cur_sg.metadata["triggered"] = True
+        logger.info(
+            "AutonomousEpistemicEngine: Stance adjacent to actuator %s reached. Triggering action %d.",
+            te_pos,
+            act_id,
+        )
+        return [
+            MentalSimulationStep(
+                action=act_id,
+                predicted_avatar_pos=start_pos,
+                expected_mutation="ACTION_TRIGGER",
+            )
+        ]
+
+    @staticmethod
     def simulate_in_mind(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
@@ -896,15 +2522,34 @@ class MentalSimulationPlanner:
         for gp in proposal.new_learned_goal_positions:
             engine.record_learned_goal(gp)
         for feat in proposal.new_candidate_features:
-            engine.symbolic_theory.candidate_goal_features.add(feat)
+            engine.symbolic_theory.induce_candidate_goal(feat, evidence="planner:proposal")
         if proposal.subgoal_to_pop:
             engine.subgoal_stack.pop_subgoal()
         if proposal.clear_exhausted_goals:
             engine.exhausted_candidate_goals.clear()
-        engine.symbolic_theory.goal_features.difference_update(av_feats)
-        engine.symbolic_theory.candidate_goal_features.difference_update(av_feats)
+        for av_f in av_feats:
+            engine.symbolic_theory.retract_goal(av_f, reason="avatar_feature")
+            engine.symbolic_theory.retract_candidate_goal(av_f, reason="avatar_feature")
+        if proposal.satisfied_when:
+            engine.working_memory.active_epistemic_conditions.update(proposal.satisfied_when)
 
         goals = proposal.goals
+        satisfied_when = proposal.satisfied_when
+
+        # Immediate Actuator Stance Execution (if already adjacent to interactive target entity)
+        start_pos = engine.avatar_pos
+        imm_stance_plan = MentalSimulationPlanner._select_stance_actuation(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            satisfied_when=satisfied_when,
+            H=H,
+            W=W,
+            check_start_explored=False,
+            mark_probed_pos=True,
+        )
+        if imm_stance_plan is not None:
+            return imm_stance_plan
 
         # Faculty D: Bilateral Convergent Coordinate Frames
         if engine.bilateral_state is not None and len(engine.action_dynamics) >= 2:
@@ -947,16 +2592,13 @@ class MentalSimulationPlanner:
                     )
                 return steps
 
-        if not goals:
-            return None
-
         # 2. Identify candidate pushable blocks / cargo
         pushable_blocks: list[tuple[int, int]] = [
             e.grid_pos
             for e in entities
             if e.feature_id not in av_feats
             and e.feature_id != bg
-            and e.grid_pos not in goals
+            and (e.grid_pos not in proposal.confirmed_goals)
             and (
                 engine.symbolic_theory.is_cargo(e)
                 or e.feature_id in engine.learned_cargo_features
@@ -970,14 +2612,83 @@ class MentalSimulationPlanner:
             and not engine.symbolic_theory.is_barrier(e.feature_id)
         ]
 
+        if engine.symbolic_theory.cargo_features or engine.learned_cargo_features:
+            delivery_goals = [g for g in goals if g not in pushable_blocks]
+            if delivery_goals:
+                goals = delivery_goals
+            else:
+                cargo_set = set(engine.symbolic_theory.cargo_features) | set(
+                    engine.learned_cargo_features
+                )
+                receptor_set = (
+                    set(engine.symbolic_theory.goal_features)
+                    | set(engine.symbolic_theory.candidate_goal_features)
+                    | set(engine.symbolic_theory.receptacle_features)
+                )
+                cand_receptors = [
+                    e.grid_pos
+                    for e in entities
+                    if e.feature_id in receptor_set
+                    and e.feature_id not in cargo_set
+                    and e.grid_pos not in pushable_blocks
+                    and e.grid_pos not in engine.learned_barriers
+                    and e.grid_pos not in engine.current_level_lethal_positions
+                ]
+                if not cand_receptors:
+                    cand_receptors = [
+                        e.grid_pos
+                        for e in entities
+                        if e.feature_id != bg
+                        and e.feature_id not in av_feats
+                        and e.feature_id not in cargo_set
+                        and not engine.symbolic_theory.is_barrier(e.feature_id)
+                        and engine.symbolic_theory.is_walkable(e.feature_id)
+                        and int(np.count_nonzero(curr_grid == e.feature_id)) <= 4
+                        and e.grid_pos not in pushable_blocks
+                        and e.grid_pos not in engine.learned_barriers
+                        and e.grid_pos not in engine.current_level_lethal_positions
+                    ]
+                if cand_receptors:
+                    wm_priors: dict[int, dict[str, float]] = (
+                        getattr(
+                            getattr(engine, "working_memory", None), "concept_role_priors", None
+                        )
+                        or {}
+                    )
+                    if wm_priors:
+                        cand_receptors.sort(
+                            key=lambda pos: (
+                                -max(
+                                    float(
+                                        wm_priors.get(int(curr_grid[pos[0], pos[1]]), {}).get(
+                                            "receptacle", 0.0
+                                        )
+                                    ),
+                                    float(
+                                        wm_priors.get(int(curr_grid[pos[0], pos[1]]), {}).get(
+                                            "goal", 0.0
+                                        )
+                                    ),
+                                )
+                            )
+                        )
+                    goals = cand_receptors
+
+        if not goals:
+            return None
+
         # 3. Static barriers & corridor continuity
+        effective_blocked = (set(blocked_cells) if blocked_cells else set()) | (
+            proposal.transient_blocked_cells - set(goals)
+        )
         static_barriers, bg_is_impassable_void = MentalSimulationPlanner._compute_static_barriers(
             engine=engine,
             curr_grid=curr_grid,
             bg=bg,
             av_feats=av_feats,
             goals=goals,
-            blocked_cells=blocked_cells,
+            blocked_cells=effective_blocked or None,
+            entities=entities,
         )
 
         # 4. State mutation triggers
@@ -1014,7 +2725,7 @@ class MentalSimulationPlanner:
                 e.feature_id != bg
                 and e.feature_id not in av_feats
                 and not engine.symbolic_theory.is_walkable(e.feature_id)
-                and not engine.symbolic_theory.is_goal(e)
+                and e.feature_id not in engine.symbolic_theory.goal_features
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and not engine.symbolic_theory.is_cargo(e)
                 and e.feature_id not in engine.learned_cargo_features
@@ -1032,7 +2743,7 @@ class MentalSimulationPlanner:
                 step_size = dist
 
         # Oriented threats
-        cargos_known = engine.symbolic_theory.cargo_features | engine.learned_cargo_features
+        cargos_known = set(engine.symbolic_theory.cargo_features | engine.learned_cargo_features)
         oriented_threats = PerceptionEngine.detect_oriented_threats(
             curr_grid,
             entities,
@@ -1110,6 +2821,8 @@ class MentalSimulationPlanner:
             and t.feature_id not in trajectory_features
         }
         for proj in engine.collision_cones.projected_trajectories:
+            if proj.feature_id in cargos_known:
+                continue
             if (
                 proj.feature_id in engine.mobile_threat_features
                 or proj.feature_id in engine.hazard_tracker.known_lethal_features
@@ -1164,7 +2877,8 @@ class MentalSimulationPlanner:
         init_chasers: frozenset[tuple[int, int]] = frozenset(
             e.grid_pos
             for e in entities
-            if (
+            if not engine.symbolic_theory.is_cargo(e.feature_id)
+            and (
                 e.feature_id in engine.mobile_threat_features
                 or (
                     e.role == EntityRole.AGENT
@@ -1276,9 +2990,20 @@ class MentalSimulationPlanner:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    if (
-                        (curr_p, act) in engine.failed_transitions
-                        or engine.working_memory.habenular_ior.is_action_inhibited(curr_p, act)
+                    next_is_open = (
+                        0 <= next_p[0] < H
+                        and 0 <= next_p[1] < W
+                        and (
+                            int(curr_grid[next_p[0], next_p[1]]) == bg
+                            or engine.symbolic_theory.is_walkable(
+                                int(curr_grid[next_p[0], next_p[1]])
+                            )
+                            or next_p in goals
+                        )
+                    )
+                    is_failed = (curr_p, act) in engine.failed_transitions and not next_is_open
+                    if is_failed or engine.working_memory.habenular_ior.is_action_inhibited(
+                        curr_p, act
                     ):
                         plan_valid = False
                         break
@@ -1327,20 +3052,16 @@ class MentalSimulationPlanner:
                 grid_shape=(H, W),
                 traversable=traversable_cells,
             )
-        # Gather all physical cells of confirmed goal entities
+        # Gather all physical cells of current target goal entities
         all_goal_cells: set[tuple[int, int]] = set(goals)
         known_goal_features: set[int] = (
             engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
         )
         for e in entities:
-            if (
-                e.grid_pos in goals
-                or engine.symbolic_theory.is_goal(e)
-                or e.role == EntityRole.GOAL
-                or e.feature_id in known_goal_features
-            ):
+            if e.grid_pos in goals:
                 for cr, cc in e.properties.get("cells", [e.grid_pos]):
-                    all_goal_cells.add((int(cr), int(cc)))
+                    if (int(cr), int(cc)) not in engine.learned_barriers:
+                        all_goal_cells.add((int(cr), int(cc)))
         if not all_goal_cells:
             for gf in known_goal_features:
                 if gf != bg and gf not in av_feats:
@@ -1382,9 +3103,12 @@ class MentalSimulationPlanner:
         def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
             if is_block_delivery and blocks:
                 b_list = list(blocks)
-                goal_dist = 0.0
-                for g in goals:
-                    goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
+                if len(goals) == 1:
+                    goal_dist = float(min(grid_dist_field[b[0], b[1]] for b in b_list))
+                else:
+                    goal_dist = 0.0
+                    for g in goals:
+                        goal_dist += min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for b in b_list)
                 avatar_to_b = min(abs(pos[0] - b[0]) + abs(pos[1] - b[1]) for b in b_list)
                 base_h = float(goal_dist * 2.0 + avatar_to_b)
             elif goals:
@@ -1513,6 +3237,7 @@ class MentalSimulationPlanner:
             # WP0: budget-aware search — scale expansions from remaining work
             # units, charge 1 unit ("cheap" class) per rollout expansion, and
             # return best-so-far if the budget cuts the loop.
+            best_g: dict[tuple[Any, ...], float] = {}
             max_expansions = max_expansions_budget
             if _budget is not None:
                 max_expansions = min(max_expansions, _budget.remaining_units)
@@ -1522,12 +3247,6 @@ class MentalSimulationPlanner:
             had_relaxable_block = False
 
             while open_set and max_expansions > 0:
-                if _budget is not None and not _budget.allows("cheap"):
-                    budget_cutoff = True
-                    break
-                if _budget is not None:
-                    _budget.charge(1)
-                max_expansions -= 1
                 (
                     f_score,
                     g_cost,
@@ -1554,30 +3273,91 @@ class MentalSimulationPlanner:
                     cur_chasers,
                     time_mod,
                 )
+                if state_key in visited_states:
+                    continue
+                if _budget is not None and not _budget.allows("cheap"):
+                    budget_cutoff = True
+                    break
+                if _budget is not None:
+                    _budget.charge(1)
+                max_expansions -= 1
                 if f_score < best_f:
                     best_f = f_score
                     best_node_id = node_id
-                if state_key in visited_states:
-                    continue
                 visited_states.add(state_key)
 
-                if (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
+                if is_block_delivery:
+                    if all(g in cur_blocks for g in goals) and path_len > 0:
+                        path = _reconstruct_path(node_id)
+                        logger.info(
+                            "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
+                            len(path),
+                        )
+                        engine.state.current_simulated_goal = list(goals)[0] if goals else None
+                        return path, had_relaxable_block
+                elif (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
                     path = _reconstruct_path(node_id)
+                    # Check if cur_pos is an adjacent interaction stance for an actuator subgoal or probe entity
+                    probe_target_pos: tuple[int, int] | None = None
+                    if cur_pos in satisfied_when and "entity_pos" in satisfied_when[cur_pos]:
+                        probe_target_pos = satisfied_when[cur_pos]["entity_pos"]
+                    elif engine.subgoal_stack.has_pending_goals:
+                        cur_sg = engine.subgoal_stack.current_subgoal
+                        if cur_sg is not None and cur_sg.target_entity_pos is not None:
+                            probe_target_pos = cur_sg.target_entity_pos
+
+                    if probe_target_pos is not None:
+                        te_pos = probe_target_pos
+                        te_feat = (
+                            int(curr_grid[te_pos[0], te_pos[1]])
+                            if (0 <= te_pos[0] < H and 0 <= te_pos[1] < W)
+                            else None
+                        )
+                        if (
+                            te_feat is not None
+                            and not engine.symbolic_theory.is_walkable(te_feat)
+                            and abs(cur_pos[0] - te_pos[0]) + abs(cur_pos[1] - te_pos[1]) <= 1
+                        ):
+                            act_id_term: int | None = None
+                            for m in engine.state_mutations:
+                                if m.trigger_pos == te_pos or (
+                                    m.trigger_feature is not None and te_feat == m.trigger_feature
+                                ):
+                                    if m.trigger_type == "ACTION":
+                                        aid = m.metadata.get("action_id")
+                                        if aid is not None and aid in available_actions:
+                                            act_id_term = int(aid)
+                                            break
+                            if act_id_term is None:
+                                discrete_acts = [
+                                    a
+                                    for a in available_actions
+                                    if not engine.is_displacement_action(a)
+                                    and not engine.is_spatial_effector(a)
+                                ]
+                                if discrete_acts:
+                                    uninhib = [
+                                        a
+                                        for a in discrete_acts
+                                        if engine.inhibited_actions.get(a, 0) == 0
+                                    ]
+                                    act_id_term = (
+                                        int(uninhib[0]) if uninhib else int(discrete_acts[0])
+                                    )
+                            if act_id_term is not None:
+                                path.append(
+                                    MentalSimulationStep(
+                                        action=act_id_term,
+                                        predicted_avatar_pos=cur_pos,
+                                        expected_mutation="ACTION_TRIGGER",
+                                    )
+                                )
                     logger.info(
                         "AutonomousEpistemicEngine: Mental Simulation SUCCEEDED! Synthesized %d-step path to goal %s.",
                         len(path),
                         cur_pos,
                     )
                     engine.state.current_simulated_goal = cur_pos
-                    return path, had_relaxable_block
-
-                if is_block_delivery and all(g in cur_blocks for g in goals) and path_len > 0:
-                    path = _reconstruct_path(node_id)
-                    logger.info(
-                        "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
-                        len(path),
-                    )
-                    engine.state.current_simulated_goal = list(goals)[0] if goals else None
                     return path, had_relaxable_block
 
                 candidate_actions: list[tuple[Any, int, int]] = list(movable_actions)
@@ -1685,7 +3465,7 @@ class MentalSimulationPlanner:
                         if sim_step > rem_budget + 8:
                             continue
 
-                    walkable_feats = engine.symbolic_theory.walkable_features
+                    walkable_feats = set(engine.symbolic_theory.walkable_features)
                     if engine.hazard_tracker.is_hazard_at(
                         nr,
                         nc,
@@ -1870,14 +3650,14 @@ class MentalSimulationPlanner:
                                 pushed_r,
                                 pushed_c,
                                 curr_grid,
-                                engine.symbolic_theory.barrier_features,
+                                set(engine.symbolic_theory.barrier_features),
                                 static_barriers,
                             ):
                                 land_b, _, is_b_lethal = engine.physics_engine.project_fall(
                                     pushed_r,
                                     pushed_c,
                                     curr_grid,
-                                    engine.symbolic_theory.barrier_features,
+                                    set(engine.symbolic_theory.barrier_features),
                                     static_barriers,
                                 )
                                 if is_b_lethal:
@@ -1939,6 +3719,23 @@ class MentalSimulationPlanner:
                         + habenular_penalty
                     )
                     new_g = g_cost + step_cost
+                    new_time_mod = (
+                        (path_len + 1) % engine.hazard_tracker.environmental_period
+                        if has_periodic
+                        else 0
+                    )
+                    new_key = (
+                        new_pos,
+                        new_blocks,
+                        new_open,
+                        new_threats,
+                        new_patrols,
+                        new_chasers,
+                        new_time_mod,
+                    )
+                    if new_key in visited_states or new_g >= best_g.get(new_key, float("inf")):
+                        continue
+                    best_g[new_key] = new_g
                     new_h = heuristic(new_pos, new_blocks)
                     new_step = MentalSimulationStep(action=real_act, predicted_avatar_pos=new_pos)
                     counter += 1
@@ -1965,6 +3762,20 @@ class MentalSimulationPlanner:
                 return _reconstruct_path(best_node_id), had_relaxable_block
             return None, had_relaxable_block
 
+        # Stance Check: If already standing adjacent to an unfulfilled actuator or probe entity, execute interaction immediately
+        post_stance_plan = MentalSimulationPlanner._select_stance_actuation(
+            engine=engine,
+            curr_grid=curr_grid,
+            available_actions=available_actions,
+            satisfied_when=satisfied_when,
+            H=H,
+            W=W,
+            check_start_explored=True,
+            mark_probed_pos=False,
+        )
+        if post_stance_plan is not None:
+            return post_stance_plan
+
         # Run primary safety-first A* pass
         plan, had_relaxable_block = _search_spacetime_astar(_relaxed_safety=False)
         if plan is not None:
@@ -1981,7 +3792,7 @@ class MentalSimulationPlanner:
                 return relaxed_plan
 
         # Hierarchical Subgoal Decomposition Fallback
-        if mutation_triggers or goals:
+        if (not is_block_delivery or bool(mutation_triggers)) and (mutation_triggers or goals):
             subgoal_plan = MentalSimulationPlanner._plan_hierarchical_subgoals(
                 engine,
                 curr_grid,
@@ -2007,7 +3818,7 @@ class MentalSimulationPlanner:
                     return subgoal_plan
 
         # Teleological Backward Cut-Set Decomposition Fallback (Human BA10 Reasoning)
-        if goals and start_pos is not None:
+        if (not is_block_delivery or bool(mutation_triggers)) and goals and start_pos is not None:
             teleo_plan = MentalSimulationPlanner._plan_teleological_cutset_subgoals(
                 engine,
                 curr_grid,
@@ -2245,7 +4056,34 @@ class MentalSimulationPlanner:
                 unopened = (opened_set & effective_barriers) - open_barriers
                 if not unopened:
                     continue
-                tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
+
+                tr_feat = (
+                    int(curr_grid[tr_pos[0], tr_pos[1]])
+                    if (0 <= tr_pos[0] < H and 0 <= tr_pos[1] < W)
+                    else None
+                )
+                is_standable = (
+                    tr_feat is not None
+                    and engine.symbolic_theory.is_walkable(tr_feat)
+                    and tr_pos not in effective_barriers
+                )
+                if is_standable:
+                    tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
+                else:
+                    adj_cells = {
+                        (tr_pos[0] + dr, tr_pos[1] + dc)
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        if 0 <= tr_pos[0] + dr < H
+                        and 0 <= tr_pos[1] + dc < W
+                        and (tr_pos[0] + dr, tr_pos[1] + dc) not in effective_barriers
+                    }
+                    if cur_pos in adj_cells:
+                        tr_path = []
+                    elif adj_cells:
+                        tr_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                    else:
+                        tr_path = None
+
                 if tr_path is not None:
                     candidate_triggers.append((tr_pos, tr_path, len(unopened) * 10, unopened))
 
@@ -2281,12 +4119,49 @@ class MentalSimulationPlanner:
                     and e.feature_id not in av_feats
                     and e.grid_pos not in goals
                     and e.grid_pos != cur_pos
-                    and e.grid_pos in reachable_cells
+                    and (
+                        e.grid_pos in reachable_cells
+                        or any(
+                            (e.grid_pos[0] + dr, e.grid_pos[1] + dc) in reachable_cells
+                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        )
+                    )
                 ]
                 for t_pos in candidate_tools:
-                    t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
-                    if t_path is not None and len(t_path) > 0:
-                        candidate_triggers.append((t_pos, t_path, 1, set()))
+                    t_feat = (
+                        int(curr_grid[t_pos[0], t_pos[1]])
+                        if 0 <= t_pos[0] < H and 0 <= t_pos[1] < W
+                        else None
+                    )
+                    t_standable = (
+                        t_feat is not None
+                        and engine.symbolic_theory.is_walkable(t_feat)
+                        and t_pos not in effective_barriers
+                    )
+                    if t_standable:
+                        t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
+                    else:
+                        adj_cells = {
+                            (t_pos[0] + dr, t_pos[1] + dc)
+                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            if 0 <= t_pos[0] + dr < H
+                            and 0 <= t_pos[1] + dc < W
+                            and (t_pos[0] + dr, t_pos[1] + dc) in reachable_cells
+                        }
+                        if cur_pos in adj_cells:
+                            t_path = []
+                        elif adj_cells:
+                            t_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                        else:
+                            t_path = None
+
+                    if t_path is not None:
+                        score = 1
+                        if t_feat is not None:
+                            # Relational salience: boost if matching a singleton cue
+                            if int(np.sum(curr_grid == t_feat)) == 2:
+                                score = 5
+                        candidate_triggers.append((t_pos, t_path, score, set()))
 
             if not candidate_triggers:
                 break
@@ -2359,7 +4234,8 @@ class MentalSimulationPlanner:
             buffered_subgoals.append(new_sg)
 
             accumulated_plan.extend(switch_path)
-            cur_pos = chosen_pos
+            if switch_path:
+                cur_pos = switch_path[-1].predicted_avatar_pos
             open_barriers.update(opened_cells)
             open_barriers.update(mutation_triggers.get(chosen_pos, set()))
 
@@ -2384,6 +4260,27 @@ class MentalSimulationPlanner:
                             expected_mutation="ACTION_TRIGGER",
                         )
                     )
+            else:
+                ch_feat = (
+                    int(curr_grid[chosen_pos[0], chosen_pos[1]])
+                    if 0 <= chosen_pos[0] < H and 0 <= chosen_pos[1] < W
+                    else None
+                )
+                if ch_feat is not None and not engine.symbolic_theory.is_walkable(ch_feat):
+                    discrete_acts = [
+                        a
+                        for a in available_actions
+                        if not engine.is_displacement_action(a)
+                        and not engine.is_spatial_effector(a)
+                    ]
+                    if discrete_acts:
+                        accumulated_plan.append(
+                            MentalSimulationStep(
+                                action=discrete_acts[0],
+                                predicted_avatar_pos=cur_pos,
+                                expected_mutation="INTERACT_TRIGGER",
+                            )
+                        )
 
         return None
 
@@ -2547,8 +4444,16 @@ class MentalSimulationPlanner:
             tuple[tuple[int, int], float, str, list[MentalSimulationStep]]
         ] = []
 
+        discrete_acts_teleo = [
+            a
+            for a in engine.action_dynamics
+            if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+        ]
+
         for e in entities:
             if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
+                continue
+            if engine.symbolic_theory.is_position_explored(e.grid_pos):
                 continue
             if e.grid_pos in goals:
                 continue
@@ -2561,19 +4466,29 @@ class MentalSimulationPlanner:
 
             # Determine path to candidate entity
             target_path: list[MentalSimulationStep] | None = None
-            if e.grid_pos in reachable_cells:
+            if e.grid_pos in reachable_cells and engine.symbolic_theory.is_walkable(e.feature_id):
                 target_path = reconstruct_path(e.grid_pos)
             else:
-                # Entity pos might be tentatively marked as barrier; check if approachable from adjacent manifold
+                # Entity pos might be tentatively marked as barrier or non-walkable actuator; check if approachable from adjacent manifold
                 best_adj_p: list[MentalSimulationStep] | None = None
                 for act, dr, dc in movable_actions:
                     adj_p = (e.grid_pos[0] - dr, e.grid_pos[1] - dc)
                     if adj_p in reachable_cells:
                         p_to_adj = reconstruct_path(adj_p)
-                        step_into = MentalSimulationStep(
-                            action=act, predicted_avatar_pos=e.grid_pos
-                        )
-                        full_p = p_to_adj + [step_into]
+                        if discrete_acts_teleo and not engine.symbolic_theory.is_walkable(
+                            e.feature_id
+                        ):
+                            interact_step = MentalSimulationStep(
+                                action=int(discrete_acts_teleo[0]),
+                                predicted_avatar_pos=adj_p,
+                                expected_mutation="INTERACT_TRIGGER",
+                            )
+                            full_p = p_to_adj + [interact_step]
+                        else:
+                            step_into = MentalSimulationStep(
+                                action=act, predicted_avatar_pos=e.grid_pos
+                            )
+                            full_p = p_to_adj + [step_into]
                         if best_adj_p is None or len(full_p) < len(best_adj_p):
                             best_adj_p = full_p
                 target_path = best_adj_p
@@ -2796,13 +4711,18 @@ class DynamicReplanner:
         )
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export dynamic replanner capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export dynamic replanner capability and runtime divergence count as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "divergence_rerouting"
+        if view is not None:
+            fails = getattr(view, "consecutive_plan_failures", 0)
+            rel = f"divergence_rerouting:plan_failures:{fails}"
         return CausalPredicate(
             variable="dynamic_replanner",
             operator="==",
-            value="ACTIVE",
-            relation="divergence_rerouting",
+            value=val,
+            relation=rel,
             target_entity="cortex_planner",
         )
 
@@ -3133,18 +5053,37 @@ class FrontopolarSubgoalMCTSPlanner:
 
 
 @dataclass
-class SimulationStage(CorticalStage):
+class SimulationStage:
     """Cortical Stage 3: Counterfactual Simulation & Subgoal Scheduling.
 
     OFC mental simulation rollouts; dead-end pruning; BA10 recursive subgoal decomposition.
     """
 
     name: str = "simulation_stage"
+    engine: Any | None = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        if ctx.signals.get("_engine") is not None:
-            # folded into DeliberationStage (WP1)
-            return StageResult(author=self.name)
+        engine = getattr(self, "engine", None)
+        if engine is not None or ctx.signals.get("_unified_deliberation"):
+            plan_len = len(getattr(engine, "mental_plan", ctx.mental_plan) or ())
+            sg_obj = getattr(engine, "subgoal_stack", None) or ctx.subgoal_stack
+            sg_depth = len(getattr(sg_obj, "stack", ()) or ())
+            active_goals = len(
+                getattr(engine, "learned_goal_positions", ctx.learned_goal_positions) or ()
+            )
+            return StageResult(
+                author=self.name,
+                signals={
+                    "simulation_summary": {
+                        "plan_len": plan_len,
+                        "subgoal_stack_depth": sg_depth,
+                        "active_goals": active_goals,
+                    }
+                },
+            )
         proposed = None
         if ctx.mental_plan:
             first_step = ctx.mental_plan[0]

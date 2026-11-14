@@ -97,7 +97,9 @@ class AnteriorCingulateConflictMonitor:
 
         self._motor_oscillation_monitor = MotorACC()
 
-    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+    def record_step(
+        self, action: Any, avatar_pos: tuple[float, float] | tuple[int, int] | None
+    ) -> None:
         """Record step in the motor oscillation detector."""
         self._motor_oscillation_monitor.record_step(action, avatar_pos)
 
@@ -125,6 +127,8 @@ class AnteriorCingulateConflictMonitor:
         """Episode lifecycle boundary handler (WP0.5). Delegates to the
         deprecated reset_episode for backward-compatible semantics."""
         self.reset_episode()
+        if hasattr(self, "_motor_oscillation_monitor"):
+            self._motor_oscillation_monitor.reset()
 
     @property
     def boundary_retention(self):

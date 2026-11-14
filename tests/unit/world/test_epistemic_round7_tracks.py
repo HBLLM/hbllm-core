@@ -1,194 +1,30 @@
 from __future__ import annotations
 
-"""Comprehensive Unit Tests for Round 7 Cognitive Architecture Enhancements:
+"""Unit Tests for Round 7 Surviving Cognitive Architecture Enhancements:
 
-Track 1: Anterior Insula Interoceptive Allostasis & Energy Budgeting
-Track 2: Claustrum Multimodal Salience Conductor & Perceptual Binding
 Track 3: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret-Driven Backtracking
 Track 4: Native Fast 2D Euclidean Distance Transform (EDT) & Obstacle Margins
 """
-
 
 import math
 
 import pytest
 
-from hbllm.hcir.spatial_planner import (
-    EntityRole,
-    SpatialEntity,
-)
 from hbllm.hcir.world import (
-    AllostaticRegime,
     AutonomousEpistemicEngine,
     EuclideanDistanceTransformResult,
     RecursiveSubgoalTree,
     SubgoalNodeType,
     SubgoalTreeStatus,
-    UnifiedPerceptualGestalt,
-)
-from hbllm.hcir.world.experimental import (
-    ClaustrumSalienceConductor,
-    InteroceptiveAllostasisCortex,
-    SpatialDistanceTransformEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.experimental.spatial_distance_transform import (
+    SpatialDistanceTransformEngine,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Track 1: Anterior Insula Interoceptive Allostasis & Energy Budgeting
+# Track 3: Frontopolar BA10 Recursive And-Or Subgoal Tree
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_allostasis_initial_optimal_state() -> None:
-    """Anterior insula initializes in OPTIMAL regime with full energy and permits deliberation."""
-    cortex = InteroceptiveAllostasisCortex(max_energy=100.0, initial_energy=100.0)
-    state = cortex.get_state()
-
-    assert state.energy_level == 100.0
-    assert state.regime == AllostaticRegime.OPTIMAL
-    assert state.is_exhausted is False
-    assert state.fatigue_index == 0.0
-    assert state.deliberation_multiplier == 1.0
-
-    permitted, reason = cortex.should_permit_deliberation(estimated_cost=5.0)
-    assert permitted is True
-    assert "permitted" in reason.lower()
-
-    pred = state.to_causal_predicate()
-    assert pred.variable == "allostasis:interoceptive_state"
-    assert pred.value == "OPTIMAL"
-
-    ops = state.to_transaction_operations()
-    assert len(ops) == 1
-    assert ops[0].node_id == "interoceptive_state"
-
-
-def test_allostasis_fatigue_and_exhaustion_transitions() -> None:
-    """Energy consumption induces regime shifts from OPTIMAL to FATIGUED to EXHAUSTED."""
-    cortex = InteroceptiveAllostasisCortex(
-        max_energy=100.0,
-        initial_energy=100.0,
-        exhaustion_threshold=30.0,
-    )
-
-    # Consume energy down to FATIGUED (e.g., 50.0)
-    cortex.consume_energy("mental_simulation", scale=9.0)  # ~45 cost + basal
-    state = cortex.get_state()
-    assert state.regime == AllostaticRegime.FATIGUED
-    assert state.is_exhausted is False
-    assert 30.0 <= state.energy_level < 60.0
-
-    # Deliberation still permitted if budget allows
-    permitted, _ = cortex.should_permit_deliberation(estimated_cost=5.0)
-    assert permitted is True
-
-    # Consume energy further to EXHAUSTED (< 30.0)
-    cortex.consume_energy("mental_simulation", scale=6.0)
-    exhausted_state = cortex.get_state()
-    assert exhausted_state.regime == AllostaticRegime.EXHAUSTED
-    assert exhausted_state.is_exhausted is True
-    assert exhausted_state.energy_level < 30.0
-
-    # Forward deliberation is now actively inhibited by insula
-    permitted_now, reason = cortex.should_permit_deliberation(estimated_cost=5.0)
-    assert permitted_now is False
-    assert "insular inhibition" in reason.lower()
-
-    # Utility penalty scales down expensive actions under exhaustion
-    utilities = {"deep_rollout": 10.0, "quick_macro": 4.0}
-    adjusted = cortex.apply_allostatic_cost_penalty(utilities, is_deliberative_action=True)
-    assert adjusted["deep_rollout"] < 10.0
-    assert adjusted["deep_rollout"] == pytest.approx(10.0 * exhausted_state.deliberation_multiplier)
-
-
-def test_allostasis_replenishment_and_engine_integration() -> None:
-    """Engine correctly updates allostasis and replenishes energetic reserves."""
-    engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
-    assert hasattr(engine, "allostasis_cortex")
-
-    # Consume energy via engine delegate
-    state_after = engine.consume_allostatic_energy("counterfactual_rollout", scale=2.0)
-    assert state_after.energy_level < 100.0
-    assert engine.symbolic_theory is not None
-    assert any(
-        "allostasis:interoceptive_state" in p.variable
-        for p in engine.symbolic_theory.causal_predicates
-    )
-
-    # Replenish energy
-    replenished = engine.allostasis_cortex.replenish_energy(50.0)
-    assert replenished.energy_level == 100.0
-    assert replenished.regime == AllostaticRegime.OPTIMAL
-
-
-def test_claustrum_multimodal_binding_and_salience_peak() -> None:
-    """Claustrum fuses visual, hazard, and goal streams into unified spatial salience."""
-    conductor = ClaustrumSalienceConductor(
-        visual_weight=0.2,
-        hazard_weight=0.5,
-        goal_weight=0.3,
-    )
-
-    entities = [
-        SpatialEntity(
-            id="box_1",
-            role=EntityRole.MANIPULABLE,
-            grid_pos=(2, 2),
-            color=3,
-        )
-    ]
-    hazards = {(8, 8): 1.0, (8, 7): 0.8}
-    goals = [(2, 2)]
-
-    gestalt = conductor.bind_modalities(
-        grid_shape=(10, 10),
-        visual_entities=entities,
-        hazard_map=hazards,
-        goal_coords=goals,
-    )
-
-    assert isinstance(gestalt, UnifiedPerceptualGestalt)
-    assert gestalt.grid_shape == (10, 10)
-    assert (8, 8) in gestalt.salience_map
-    assert (2, 2) in gestalt.salience_map
-
-    # Hazard at (8, 8) has high weight (0.5 * 1.0 = 0.5)
-    # Goal at (2, 2) has (0.2 * 0.8) + (0.3 * 1.0) = 0.46
-    assert gestalt.focal_salience_peak == (8, 8)
-    assert gestalt.dominant_modality == "threat_avoidance"
-
-    # Transaction & Causal Predicate Serialization
-    pred = gestalt.to_causal_predicate()
-    assert pred.variable == "claustrum:gestalt_bound"
-    assert "synchrony" in pred.value
-
-    ops = gestalt.to_transaction_operations()
-    assert len(ops) == 1
-    assert ops[0].node_id == "unified_perceptual_gestalt"
-    assert ops[0].node_data["dominant_modality"] == "threat_avoidance"
-
-
-def test_claustrum_goal_dominance_and_engine_binding() -> None:
-    """Engine integrates claustrum multimodal binding and detects goal-directed dominance."""
-    engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
-    assert hasattr(engine, "claustrum_conductor")
-
-    # Only goals present
-    goals = [(3, 4)]
-    gestalt = engine.bind_multimodal_percept(
-        grid_shape=(10, 10),
-        visual_entities=[],
-        hazard_map={},
-        goal_coords=goals,
-    )
-
-    assert gestalt.dominant_modality == "goal_directed"
-    assert gestalt.focal_salience_peak == (3, 4)
-    assert gestalt.salience_map[(3, 4)] > 0.0
-    assert any(
-        "claustrum:gestalt_bound" in p.variable for p in engine.symbolic_theory.causal_predicates
-    )
 
 
 def test_subgoal_tree_and_satisfaction_propagation() -> None:
@@ -311,6 +147,11 @@ def test_subgoal_tree_lcva_regret_backtracking() -> None:
 
     ops = tree.to_transaction_operations()
     assert len(ops) >= 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Track 4: Native Fast 2D Euclidean Distance Transform (EDT)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_spatial_distance_transform_exact_distances() -> None:

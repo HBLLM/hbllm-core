@@ -14,19 +14,20 @@ import math
 import numpy as np
 import pytest
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.frontopolar_exploration_horizon import (
+from hbllm.hcir.world.experimental.frontopolar_exploration_horizon import (
     FrontopolarExplorationHorizonEngine,
 )
-from hbllm.hcir.world.hippocampal_phase_precession import (
+from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
     HippocampalPhasePrecessionEngine,
 )
-from hbllm.hcir.world.superior_colliculus_arbiter import (
+from hbllm.hcir.world.experimental.superior_colliculus_arbiter import (
     MultisensoryPriorityMap,
     SaccadeTarget,
     SuperiorColliculusTargetArbiter,
@@ -246,11 +247,11 @@ def test_cognitive_graph_biconnectivity_parity() -> None:
     graph.add_edge(HCIREdge(id="e1", edge_type=HCIREdgeType.CAUSES, sources=["A"], targets=["B"]))
     graph.add_edge(HCIREdge(id="e2", edge_type=HCIREdgeType.CAUSES, sources=["B"], targets=["C"]))
 
-    art_points, bridges = graph.find_articulation_points_and_bridges()
+    art_points, bridges = algorithms.articulation_points_and_bridges(graph)
 
     assert art_points == {"B"}
     assert len(bridges) == 2
-    assert graph.is_biconnected() is False
+    assert algorithms.is_biconnected(graph) is False
 
 
 # ============================================================================

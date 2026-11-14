@@ -26,6 +26,8 @@ import json
 import logging
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -148,9 +150,12 @@ class SQLiteEventStore(IEventStore):
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._last_hash: str = ""
         self._sequence: int = 0
+        self._batch_depth: int = 0
+        self._batch_saved_state: tuple[str, int] | None = None
         self._initialize()
 
     def _initialize(self) -> None:
@@ -172,6 +177,28 @@ class SQLiteEventStore(IEventStore):
             self._last_hash = row["content_hash"]
 
     # ── IEventStore interface ────────────────────────────────────────
+
+    @contextmanager
+    def batch(self) -> Iterator[None]:
+        """Coalesce all appends/updates inside a block into one SQLite commit."""
+        if self._batch_depth == 0:
+            self._batch_saved_state = (self._last_hash, self._sequence)
+        self._batch_depth += 1
+        try:
+            yield
+        except Exception:
+            if self._batch_depth == 1:
+                self._conn.rollback()
+                if self._batch_saved_state is not None:
+                    self._last_hash, self._sequence = self._batch_saved_state
+                self._batch_saved_state = None
+            raise
+        else:
+            if self._batch_depth == 1:
+                self._conn.commit()
+                self._batch_saved_state = None
+        finally:
+            self._batch_depth -= 1
 
     def append(self, event: GraphEvent) -> None:
         """Append an event with hash chaining."""
@@ -197,7 +224,8 @@ class SQLiteEventStore(IEventStore):
                 self._last_hash,
             ),
         )
-        self._conn.commit()
+        if self._batch_depth == 0:
+            self._conn.commit()
         self._last_hash = content_hash
         self._sequence = max(self._sequence, event.sequence)
 
@@ -268,7 +296,8 @@ class SQLiteEventStore(IEventStore):
             """,
             (version, self._sequence, time.time(), node_count, edge_count, self._last_hash),
         )
-        self._conn.commit()
+        if self._batch_depth == 0:
+            self._conn.commit()
 
     def get_latest_snapshot_version(self) -> int:
         """Return the latest snapshot version, or 0 if none."""
@@ -306,11 +335,13 @@ class SQLiteEventStore(IEventStore):
                 json.dumps(data or {}, default=str),
             ),
         )
-        self._conn.commit()
+        if self._batch_depth == 0:
+            self._conn.commit()
 
     def remove_node_index(self, node_id: str) -> None:
         self._conn.execute("DELETE FROM hcir_nodes_index WHERE node_id = ?", (node_id,))
-        self._conn.commit()
+        if self._batch_depth == 0:
+            self._conn.commit()
 
     def index_edge(
         self,

@@ -10,6 +10,15 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class WorkingMemoryDelta:
+    """Explicit declarative delta operation for working memory mutations (Invariant 2 & 8, WP4)."""
+
+    field: str
+    value: Any
+    op: str = "set"
+
+
+@dataclass(frozen=True)
 class StageResult:
     """Pure result emitted by a CorticalStage during active inference.
 
@@ -24,6 +33,8 @@ class StageResult:
     annotations: dict[str, Any] = field(default_factory=dict)
     # WP1: the stage's journaled faculty writes (committed by the pipeline)
     journal: Any = None
+    # WP4: structured WorkingMemoryDelta operations
+    wm_deltas: list[WorkingMemoryDelta] = field(default_factory=list)
 
 
 @runtime_checkable
@@ -41,3 +52,7 @@ class CorticalStage(Protocol):
     def observe(self, ctx: CognitiveContext) -> StageResult:
         """Observe immutable context and emit state mutation intent & signals."""
         ...
+
+    def bind_engine(self, engine: Any) -> None:
+        """Bind underlying engine execution context."""
+        return None

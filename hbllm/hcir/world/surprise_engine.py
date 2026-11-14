@@ -74,6 +74,52 @@ class SurpriseEngine:
         else:
             self._surprise_ledger.clear()
 
+    def ingest_external_prediction_error(
+        self,
+        score: float,
+        source: str = "grounding",
+        is_surprising: bool | None = None,
+        context_signature: str = "",
+    ) -> SurpriseEvaluation:
+        """Ingest prediction error from external cortical streams (e.g. symbol grounding)."""
+        surprising = (
+            is_surprising if is_surprising is not None else (score >= self.surprise_threshold)
+        )
+        context_key = context_signature or source
+        history = self._surprise_ledger.setdefault(context_key, [])
+        history.append(score)
+
+        is_persistent = len(history) >= self.persistent_surprise_threshold
+        salience_boost = 0.35 if surprising else 0.0
+
+        eval_result = SurpriseEvaluation(
+            surprise_score=score,
+            is_surprising=surprising,
+            salience_boost=salience_boost,
+            is_persistent=is_persistent,
+        )
+        if surprising:
+            logger.info(
+                "SurpriseEngine ingested surprise from %s: score=%.4f (persistent=%s)",
+                context_key,
+                score,
+                is_persistent,
+            )
+        return eval_result
+
+    def record_surprise(
+        self,
+        surprise_score: float,
+        is_surprising: bool | None = None,
+        source: str = "grounding",
+    ) -> None:
+        """Backward-compatible hook for cortical callers recording surprise."""
+        self.ingest_external_prediction_error(
+            score=surprise_score,
+            source=source,
+            is_surprising=is_surprising,
+        )
+
     def evaluate_surprise(
         self,
         prediction_id: str,

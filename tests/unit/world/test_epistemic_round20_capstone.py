@@ -7,12 +7,13 @@
 
 from __future__ import annotations
 
+from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, FactNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
 )
-from hbllm.hcir.world.global_workspace_ignition import (
+from hbllm.hcir.world.experimental.global_workspace_ignition import (
     CandidateIgnitionSignal,
     GlobalWorkspaceIgnitionEngine,
 )
@@ -103,14 +104,14 @@ def test_graph_all_pairs_shortest_paths_radius_diameter_and_betweenness() -> Non
         HCIREdge(sources=["B"], targets=["C"], edge_type=HCIREdgeType.DEPENDS_ON, weight=1.0)
     )
 
-    graph_sp, _ = graph.all_pairs_shortest_paths()
+    graph_sp, _ = algorithms.all_pairs_shortest_paths(graph)
     assert graph_sp[("A", "C")] == 2.0
 
-    graph_rad, graph_diam = graph.graph_radius_and_diameter()
+    graph_rad, graph_diam = algorithms.graph_radius_and_diameter(graph)
     assert graph_rad == 1.0
     assert graph_diam == 2.0
 
-    graph_cb = graph.betweenness_centrality(normalized=True, directed=False)
+    graph_cb = algorithms.betweenness_centrality(graph, normalized=True, directed=False)
     assert graph_cb["B"] == 1.0
 
 
