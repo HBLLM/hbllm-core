@@ -118,9 +118,6 @@ class ContinuousReachEnvironment(BenchmarkEnvironment):
             metadata={
                 "reference_frame": self.reference_frame,
                 "agent_pos": self.agent_pos.copy(),
-                "goal_pos": self.goal_pos.copy(),
-                "obstacle_center": self.obstacle_center.copy(),
-                "obstacle_radius": self.obstacle_radius,
             },
         )
 

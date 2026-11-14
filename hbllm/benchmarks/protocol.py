@@ -54,7 +54,8 @@ class EvaluationReport:
     split: str
     tasks: list[TaskResult] = field(default_factory=list)
     family_scores: dict[str, float] = field(default_factory=dict)
-    generality_score: float = 0.0
+    generality_score: float = 0.0  # Zero-shot (Episode 1) generality — the headline metric
+    lifelong_generality_score: float = 0.0  # After N episodes with shared memory
     mean_p50_latency_ms: float = 0.0
     mean_p95_latency_ms: float = 0.0
     baselines: dict[str, Any] = field(default_factory=dict)
@@ -297,7 +298,7 @@ class EvaluationProtocol:
                 ) / len(solved)
                 family_scores[fam] = round(0.5 * success_rate + 0.5 * step_efficiency, 4)
 
-        generality_score = (
+        lifelong_generality_score = (
             round(sum(family_scores.values()) / len(family_scores), 4) if family_scores else 0.0
         )
 
@@ -425,7 +426,8 @@ class EvaluationProtocol:
             split=split,
             tasks=tasks,
             family_scores=family_scores,
-            generality_score=generality_score,
+            generality_score=zs_gen,  # Headline = zero-shot (Episode 1 only)
+            lifelong_generality_score=lifelong_generality_score,
             mean_p50_latency_ms=mean_p50,
             mean_p95_latency_ms=mean_p95,
             baselines=baselines or {},

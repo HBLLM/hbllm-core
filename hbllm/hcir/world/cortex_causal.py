@@ -206,6 +206,14 @@ class HCIRSymbolicWorldTheory:
 
     Maintains intensional causal rules and first-order predicates across level transitions,
     eliminating fragile procedural heuristics.
+
+    Semantic Role Abstraction: Knowledge is stored at two levels:
+    1. Feature-level sets (_goal_features, _walkable_features, etc.) — layout-specific bindings
+       that map raw perceptual feature IDs to ontological roles.
+    2. Role-level sets (_semantic_roles) — abstract role descriptions that survive across
+       level transitions where feature IDs may change. When transitioning to a new level,
+       feature-level bindings are cleared but role knowledge is retained as priors for
+       re-grounding in the new layout.
     """
 
     goal_predicates: list[CausalPredicate] = field(default_factory=list)
@@ -256,6 +264,18 @@ class HCIRSymbolicWorldTheory:
     distal_actuations: list[dict[str, Any]] = field(default_factory=list)
     relational_confidence_map: dict[str, float] = field(default_factory=dict)
 
+    # ── Semantic Role Abstraction (Feature→Role Transfer Layer) ──────────
+    # Bidirectional mapping between raw perceptual feature IDs and abstract semantic roles.
+    # Roles (e.g. "goal", "key", "door", "hazard", "floor") survive across level transitions
+    # where feature IDs may be relabeled; feature bindings are layout-specific.
+    _feature_to_role: dict[Any, str] = field(default_factory=dict)
+    _role_to_features: dict[str, set[Any]] = field(default_factory=dict)
+    # Structural role priors: count how many times each role was observed across episodes.
+    # On new level, these priors guide re-grounding of unknown features.
+    _role_priors: dict[str, int] = field(default_factory=dict)
+    # Conditional affordance templates (role-level, survive relabeling)
+    _role_conditional_templates: list[dict[str, Any]] = field(default_factory=list)
+
     @property
     def goal_features(self) -> frozenset[Any]:
         """Empirically verified confirmed goal features (read-only)."""
@@ -275,6 +295,136 @@ class HCIRSymbolicWorldTheory:
     def explored_positions(self) -> frozenset[tuple[int, int]]:
         """Coordinates that have been visited or epistemically satisfied (read-only)."""
         return frozenset(self._explored_positions)
+
+    # ── Semantic Role Abstraction API ────────────────────────────────────
+
+    def bind_feature_to_role(self, feature_id: Any, role: str) -> None:
+        """Bind a raw perceptual feature ID to an abstract semantic role.
+
+        If the feature was already bound to a different role, the old binding is replaced.
+        Roles: 'goal', 'barrier', 'walkable', 'key', 'door', 'hazard', 'floor', 'cargo',
+               'receptacle', 'actuator', 'avatar'.
+        """
+        old_role = self._feature_to_role.get(feature_id)
+        if old_role == role:
+            return
+        if old_role is not None:
+            self._role_to_features.get(old_role, set()).discard(feature_id)
+        self._feature_to_role[feature_id] = role
+        self._role_to_features.setdefault(role, set()).add(feature_id)
+        self._role_priors[role] = self._role_priors.get(role, 0) + 1
+
+    def get_role(self, feature_id: Any) -> str | None:
+        """Return the semantic role bound to a feature ID, or None if unbound."""
+        return self._feature_to_role.get(feature_id)
+
+    def get_features_for_role(self, role: str) -> frozenset[Any]:
+        """Return all feature IDs currently bound to the given role."""
+        return frozenset(self._role_to_features.get(role, set()))
+
+    @property
+    def role_priors(self) -> dict[str, int]:
+        """Read-only view of accumulated role observation counts."""
+        return dict(self._role_priors)
+
+    @property
+    def known_role_count(self) -> int:
+        """Number of distinct semantic roles observed across all episodes."""
+        return len(self._role_priors)
+
+    def has_role_prior(self, role: str) -> bool:
+        """Whether the given role has ever been observed in any prior episode."""
+        return self._role_priors.get(role, 0) > 0
+
+    def snapshot_conditional_affordance_templates(self) -> None:
+        """Snapshot current conditional affordances as role-level templates for cross-level transfer.
+
+        Called before level transition so that feature-specific affordances (e.g., feature 3
+        unlocks feature 2) are lifted to role-level templates (e.g., 'key' unlocks 'door').
+        """
+        self._role_conditional_templates.clear()
+        for feat, aff in self._conditional_affordances.items():
+            feat_role = self._feature_to_role.get(feat)
+            prereq_role = (
+                self._feature_to_role.get(aff.prerequisite_feature)
+                if aff.prerequisite_feature is not None
+                else None
+            )
+            if feat_role is not None:
+                self._role_conditional_templates.append(
+                    {
+                        "feature_role": feat_role,
+                        "prerequisite_role": prereq_role,
+                        "target_action": aff.target_action,
+                        "evidence": f"role_template:{aff.evidence}",
+                    }
+                )
+
+    def apply_role_priors_to_new_features(self, feature_id: Any, bg_feature: Any = 0) -> str | None:
+        """Attempt to assign a role to an unknown feature using structural role priors.
+
+        Called during perception when a feature is first encountered in a new level.
+        Returns the assigned role if a prior match is found, else None.
+        """
+        if feature_id in self._feature_to_role or feature_id == bg_feature:
+            return self._feature_to_role.get(feature_id)
+        # Unknown feature — cannot assign role from prior without evidence
+        return None
+
+    def rebind_role_from_evidence(self, feature_id: Any, role: str, evidence: str = "") -> None:
+        """Re-bind a feature to a role when empirical evidence confirms the mapping.
+
+        This is the primary mechanism for cross-level transfer: when the engine discovers
+        that feature 7 behaves like a 'key' (e.g., it unlocks a barrier), it binds
+        feature 7 to role 'key'. Any conditional affordance templates involving role 'key'
+        are then instantiated with feature 7.
+        """
+        self.bind_feature_to_role(feature_id, role)
+        # Re-instantiate conditional affordance templates that reference this role
+        for tmpl in self._role_conditional_templates:
+            if tmpl["feature_role"] == role:
+                # This feature matches the template's target role — look for prerequisite
+                prereq_role = tmpl.get("prerequisite_role")
+                prereq_feats = (
+                    self._role_to_features.get(prereq_role, set()) if prereq_role else set()
+                )
+                for pf in prereq_feats:
+                    if feature_id not in self._conditional_affordances:
+                        self.induce_conditional_affordance(
+                            feature=feature_id,
+                            condition=CausalPredicate(
+                                variable="inventory",
+                                operator="contains",
+                                value=pf,
+                            ),
+                            evidence=tmpl.get("evidence", "role_template"),
+                            prerequisite_feature=pf,
+                        )
+            elif tmpl.get("prerequisite_role") == role:
+                # This feature matches the template's prerequisite role — look for target
+                target_role = tmpl["feature_role"]
+                target_feats = self._role_to_features.get(target_role, set())
+                for tf in target_feats:
+                    if tf not in self._conditional_affordances:
+                        self.induce_conditional_affordance(
+                            feature=tf,
+                            condition=CausalPredicate(
+                                variable="inventory",
+                                operator="contains",
+                                value=feature_id,
+                            ),
+                            evidence=tmpl.get("evidence", "role_template"),
+                            prerequisite_feature=feature_id,
+                        )
+
+    def clear_feature_bindings(self) -> None:
+        """Clear all feature→role bindings without clearing role priors or templates.
+
+        Called on level transition (is_new_level=True) to reset layout-specific
+        feature IDs while preserving abstract role knowledge for re-grounding.
+        """
+        self._feature_to_role.clear()
+        self._role_to_features.clear()
 
     def mark_feature_explored(self, feature: Any, reason: str = "") -> None:
         """Mark a feature as epistemically explored so curiosity does not re-target it."""
@@ -685,6 +835,7 @@ class HCIRSymbolicWorldTheory:
             self._goal_features.add(feature_id)
             self._candidate_goal_features.add(feature_id)
             self._feature_evidence[("goal", feature_id)] = (rank, ev_str)
+            self.bind_feature_to_role(feature_id, "goal")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -700,6 +851,9 @@ class HCIRSymbolicWorldTheory:
             )
         self._walkable_features.add(feature_id)
         self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
+        # Note: do NOT bind_feature_to_role("walkable") here — the primary role is "goal".
+        # The feature is added to _walkable_features for functional walkability queries,
+        # but its semantic role for cross-level transfer remains "goal".
         return True
 
     def induce_candidate_goal(self, feature_id: Any, evidence: Any = None) -> bool:
@@ -776,6 +930,7 @@ class HCIRSymbolicWorldTheory:
         if feature_id not in self._barrier_features:
             self._barrier_features.add(feature_id)
             self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
+            self.bind_feature_to_role(feature_id, "barrier")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -822,6 +977,10 @@ class HCIRSymbolicWorldTheory:
         if feature_id not in self._walkable_features:
             self._walkable_features.add(feature_id)
             self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
+            # Only bind to "walkable" role if no more specific role is already assigned
+            # (goal, cargo, receptacle, actuator take priority over walkable).
+            if self.get_role(feature_id) is None:
+                self.bind_feature_to_role(feature_id, "walkable")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -857,6 +1016,7 @@ class HCIRSymbolicWorldTheory:
         if feature_id not in self._cargo_features:
             self._cargo_features.add(feature_id)
             self._feature_evidence[("cargo", feature_id)] = (rank, ev_str)
+            self.bind_feature_to_role(feature_id, "cargo")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -873,6 +1033,7 @@ class HCIRSymbolicWorldTheory:
         if feature_id not in self._receptacle_features:
             self._receptacle_features.add(feature_id)
             self._feature_evidence[("receptacle", feature_id)] = (rank, ev_str)
+            self.bind_feature_to_role(feature_id, "receptacle")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -889,6 +1050,7 @@ class HCIRSymbolicWorldTheory:
         if feature_id not in self._actuator_features:
             self._actuator_features.add(feature_id)
             self._feature_evidence[("actuator", feature_id)] = (rank, ev_str)
+            self.bind_feature_to_role(feature_id, "actuator")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
@@ -904,6 +1066,7 @@ class HCIRSymbolicWorldTheory:
         rank, ev_str = parse_evidence(evidence or "motor_grounding")
         self._avatar_features.add(feature_id)
         self._feature_evidence[("avatar", feature_id)] = (rank, ev_str)
+        self.bind_feature_to_role(feature_id, "avatar")
         self._goal_features.discard(feature_id)
         self._candidate_goal_features.discard(feature_id)
         self._barrier_features.discard(feature_id)
@@ -1541,6 +1704,11 @@ class HCIRSymbolicWorldTheory:
         self.spelke_axioms.clear()
         self.telic_goal_type = ""
         self.telic_target_feature = None
+        # Full clear: reset all role abstraction state (including priors and templates)
+        self._feature_to_role.clear()
+        self._role_to_features.clear()
+        self._role_priors.clear()
+        self._role_conditional_templates.clear()
 
 
 class CausalInductionCortex:

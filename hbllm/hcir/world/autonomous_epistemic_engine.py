@@ -4154,7 +4154,7 @@ class AutonomousEpistemicEngine:
                         logger.debug("Library sleep consolidation failed: %s", exc)
             self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
-            self.reset_episode(retain_dynamics=True, is_new_level=False)
+            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         else:
             self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
         # Fan out to every faculty exposing a boundary handler (WP0.5).
@@ -5572,10 +5572,43 @@ class AutonomousEpistemicEngine:
                     self.working_memory.last_continuous_moved = False
                     self.working_memory.continuous_delta = (0.0, 0.0)
                 self.working_memory.continuous_agent_pos = curr_cont.copy()
-            if "goal_pos" in obs.metadata:
-                self.working_memory.continuous_goal_pos = np.asarray(
-                    obs.metadata["goal_pos"], dtype=float
-                )
+
+        # Derive continuous goal position from lattice goal feature when reference frame is available
+        # (no privileged oracle metadata — discover goal from the rendered sensory lattice)
+        if (
+            self.working_memory.reference_frame is not None
+            and self.working_memory.continuous_agent_pos is not None
+            and obs.lattice is not None
+        ):
+            rf = self.working_memory.reference_frame
+            goal_feats = self.symbolic_theory.goal_features
+            if goal_feats:
+                # Find goal cell in the lattice
+                grid = obs.lattice
+                for gf in goal_feats:
+                    coords = np.argwhere(grid == gf)
+                    if len(coords) > 0:
+                        gr, gc = int(coords[0][0]), int(coords[0][1])
+                        H, W = grid.shape
+                        origin_desc = (
+                            getattr(rf, "origin_description", "bottom_left_metric")
+                            if rf
+                            else "bottom_left_metric"
+                        )
+                        y_max = (
+                            float(rf.bounds[1][1])
+                            if (rf and hasattr(rf, "bounds") and rf.bounds and len(rf.bounds) >= 2)
+                            else float(H)
+                        )
+                        if "bottom_left" in origin_desc:
+                            cont_y = y_max - 0.5 - float(gr)
+                        else:
+                            cont_y = float(gr) + 0.5
+                        cont_x = float(gc) + 0.5
+                        self.working_memory.continuous_goal_pos = np.array(
+                            [cont_x, cont_y], dtype=float
+                        )
+                        break
 
         return self.decide(
             curr_grid=obs.lattice,

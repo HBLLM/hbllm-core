@@ -561,7 +561,10 @@ def run_suite(
         )
     for fam, score in report.family_scores.items():
         print(f"  Family [{fam}]: {score:.4f}")
-    print(f"Generality Score: {report.generality_score:.4f}")
+    print(f"Zero-Shot Generality Score: {report.generality_score:.4f} (Episode 1, no prior memory)")
+    print(
+        f"Lifelong Generality Score:  {report.lifelong_generality_score:.4f} (After {episodes_per_task} episodes with shared memory)"
+    )
     print(
         f"Mean Latency: p50={report.mean_p50_latency_ms:.2f}ms | p95={report.mean_p95_latency_ms:.2f}ms"
     )

@@ -51,11 +51,11 @@ from hbllm.hcir.world.cortex_episodic import (
 )
 from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
-from hbllm.hcir.world.grid_operator import (
-    TransformationProgramSearch,
-)
 from hbllm.hcir.world.experimental.relational_graph_matcher import (
     RelationalGraphMatcher as SceneGraphMatcher,
+)
+from hbllm.hcir.world.grid_operator import (
+    TransformationProgramSearch,
 )
 from hbllm.hcir.world.representation_expansion import (
     RepresentationExpansionEngine,
