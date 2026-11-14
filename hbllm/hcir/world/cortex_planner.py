@@ -1667,6 +1667,16 @@ class EpistemicGoalScheduler:
 
                 goals.sort(key=_structural_priority)
 
+        delayed_mod = getattr(engine, "delayed_effect_modeler", None)
+        if delayed_mod and getattr(engine, "symbolic_theory", None) is not None:
+            for d_rec in getattr(delayed_mod, "discovered_delayed_effects", ()):
+                if (
+                    getattr(d_rec, "observed_lag_steps", 0) > 0
+                    and getattr(d_rec, "support_count", 0) >= 1
+                    and hasattr(d_rec, "to_causal_predicate")
+                ):
+                    engine.symbolic_theory.record_causal_predicate(d_rec.to_causal_predicate())
+
         # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
         if not goals:
@@ -1707,6 +1717,24 @@ class EpistemicGoalScheduler:
                 frontier_candidates = [
                     cp for cp in reachable_passable if cp not in visited and cp not in panel_coords
                 ]
+
+            opt_eng = getattr(engine, "option_discovery", None)
+            if opt_eng and avatar_pos is not None:
+                opt_bottlenecks = {
+                    opt.bottleneck_state
+                    for opt in getattr(opt_eng, "discovered_options", {}).values()
+                    if getattr(opt, "bottleneck_state", None) is not None
+                }
+                bottleneck_frontiers = [
+                    cp
+                    for cp in reachable_passable
+                    if cp in opt_bottlenecks and cp not in visited and cp not in panel_coords
+                ]
+                if bottleneck_frontiers:
+                    bottleneck_frontiers.sort(
+                        key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+                    )
+                    frontier_candidates = bottleneck_frontiers
 
             if frontier_candidates and avatar_pos is not None:
                 frontier_candidates.sort(

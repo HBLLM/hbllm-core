@@ -333,6 +333,67 @@ class LearnedProposalDistribution:
         sorted_candidates = sorted(dist.items(), key=lambda item: item[1], reverse=True)
         return sorted_candidates[:top_k]
 
+    def propose_open_ended_intents(
+        self,
+        context_key: tuple[int, ...] | dict[str, Any],
+        macro_skills: dict[str, Any] | None = None,
+        hypotheses: dict[str, Any] | Sequence[Any] | None = None,
+        top_k: int = 5,
+    ) -> list[tuple[str, float]]:
+        """Rank primitives, synthesized macro-skills, and epistemic hypothesis probes via MDL+Dirichlet posterior."""
+        if isinstance(context_key, dict):
+            ctx_features = dict(context_key)
+        else:
+            ctx_features = {f"ctx_{idx}": int(val) for idx, val in enumerate(context_key)}
+
+        pool: list[str] = ["NAVIGATE_TO", "INTERACT", "PICKUP", "PUSH_OBJECT", "EXPLORE"]
+        for k in self.global_intent_counts:
+            if k not in pool:
+                pool.append(k)
+
+        dl_lengths: dict[str, float] = {name: 1.0 for name in pool}
+        probe_bonuses: dict[str, float] = {}
+
+        if macro_skills:
+            for skill_name, skill_obj in macro_skills.items():
+                label = (
+                    skill_name if str(skill_name).startswith("macro:") else f"macro:{skill_name}"
+                )
+                if label not in pool:
+                    pool.append(label)
+                prog = getattr(skill_obj, "program", None)
+                subgoals = getattr(prog, "subgoals", ()) if prog is not None else ()
+                dl_lengths[label] = max(1.0, float(len(subgoals)) * 0.5)
+
+        if hypotheses is not None:
+            hyp_iter = hypotheses.values() if isinstance(hypotheses, dict) else hypotheses
+            for hyp in hyp_iter:
+                rid = getattr(hyp, "rule_id", None)
+                status = str(getattr(hyp, "status", ""))
+                conf = float(getattr(hyp, "confidence", 0.5))
+                if rid and ("TENTATIVE" in status or conf < 0.85):
+                    label = f"probe_hypothesis:{rid}"
+                    if label not in pool:
+                        pool.append(label)
+                    ast_obj = (getattr(hyp, "metadata", None) or {}).get("ast")
+                    dl_lengths[label] = float(getattr(ast_obj, "ast_depth", 2))
+                    probe_bonuses[label] = max(0.05, 1.0 - conf) * 0.35
+
+        base_dist = self.compute_distribution(ctx_features, candidate_pool=pool)
+        weighted: dict[str, float] = {}
+        for cand, p in base_dist.items():
+            dl = dl_lengths.get(cand, 1.0)
+            mdl_prior = math.exp(-0.08 * max(0.0, dl - 1.0))
+            weighted[cand] = max(1e-9, p * mdl_prior + probe_bonuses.get(cand, 0.0))
+
+        total = sum(weighted.values())
+        if total > 0:
+            normalized = [(c, round(v / total, 6)) for c, v in weighted.items()]
+        else:
+            normalized = [(c, 1.0 / max(1, len(weighted))) for c in weighted]
+        normalized.sort(key=lambda item: item[1], reverse=True)
+        return normalized[:top_k]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "prior_pseudocount": self.prior_pseudocount,
@@ -600,4 +661,18 @@ class LibraryLearner:
             context_features=context_features,
             top_k=top_k,
             candidate_pool=candidate_pool,
+        )
+
+    def sample_open_ended_proposals(
+        self,
+        context_key: tuple[int, ...] | dict[str, Any],
+        hypotheses: dict[str, Any] | Sequence[Any] | None = None,
+        top_k: int = 5,
+    ) -> list[tuple[str, float]]:
+        """Rank primitives, consolidated macro skills, and active hypothesis-probing intents."""
+        return self.proposal_distribution.propose_open_ended_intents(
+            context_key=context_key,
+            macro_skills=self.macro_skills,
+            hypotheses=hypotheses,
+            top_k=top_k,
         )

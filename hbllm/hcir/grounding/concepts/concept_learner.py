@@ -285,7 +285,10 @@ class ConceptLearner:
         if not clean_role or not exemplar_entity_id:
             return None
         for concept in self._store.get_all_concepts():
-            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
                 continue
             if exemplar_entity_id in concept.exemplar_entity_ids:
                 if self._roles_conflict(self._concept_roles(concept), {clean_role}):
@@ -331,7 +334,10 @@ class ConceptLearner:
         best_pure: GroundedConcept | None = None
         best_dist = float("inf")
         for concept in self._store.get_all_concepts():
-            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
                 continue
             existing = self._concept_roles(concept)
             if clean_role not in existing or self._roles_conflict(existing, {clean_role}):
@@ -372,6 +378,152 @@ class ConceptLearner:
         self._store.register_concept(pure_concept)
         return pure_concept
 
+    def induce_composite_concept(
+        self,
+        parts: dict[str, str],
+        relation_name: str,
+        composite_role: str,
+        confidence: float = 0.9,
+    ) -> GroundedConcept | None:
+        """Induce or reinforce a composite part-whole relational concept across constituent roles."""
+        if len(parts) < 2:
+            return None
+        for cid in parts.values():
+            c = self._store.get_concept(cid)
+            if c is None or c.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                return None
+
+        role_tag = f"composite:{composite_role.strip().lower()}"
+        for existing in self._store.get_all_concepts():
+            if existing.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                continue
+            if not existing.is_composite:
+                continue
+            if existing.parts == dict(parts) and any(
+                h.get("relation") == relation_name for h in existing.higher_order_relations
+            ):
+                for hor in existing.higher_order_relations:
+                    if hor.get("relation") == relation_name:
+                        hor["confidence"] = min(
+                            1.0, max(float(hor.get("confidence", 0.0)), confidence)
+                        )
+                q = existing.grounding_quality
+                existing.update_grounding_quality(
+                    GroundingQuality(
+                        perceptual_stability=q.perceptual_stability,
+                        temporal_persistence=min(1.0, q.temporal_persistence + 0.05),
+                        relational_consistency=min(1.0, max(q.relational_consistency, confidence)),
+                        cross_modal_support=q.cross_modal_support,
+                        predictive_utility=max(q.predictive_utility, 0.7),
+                        interaction_support=max(q.interaction_support, 0.8),
+                        boundary_stability=q.boundary_stability,
+                    )
+                )
+                return existing
+
+        comp_ref = GroundedConceptRef(id=_gen_concept_id())
+        comp = GroundedConcept(
+            concept_ref=comp_ref,
+            lifecycle_state=ConceptLifecycle.PROVISIONAL,
+            grounding_quality=GroundingQuality.with_untested(
+                perceptual_stability=0.7,
+                temporal_persistence=0.5,
+                relational_consistency=confidence,
+                cross_modal_support=0.0,
+                predictive_utility=0.75,
+                interaction_support=0.8,
+                boundary_stability=0.7,
+                untested_dimensions={"cross_modal_support"},
+            ),
+        )
+        for role_key, cid in parts.items():
+            comp.add_part(role_key, cid)
+            comp.bind_role(role_key, cid)
+        ordered_ids = [parts[k] for k in sorted(parts.keys())]
+        src_id = ordered_ids[0]
+        for tgt_id in ordered_ids[1:]:
+            comp.add_higher_order_relation(
+                relation=relation_name,
+                source=src_id,
+                target=tgt_id,
+                confidence=confidence,
+                metadata={"composite_role": composite_role, "parts": dict(parts)},
+            )
+        comp.set_relational_graph(
+            {
+                "parts": dict(parts),
+                "relation": relation_name,
+                "composite_role": composite_role,
+            }
+        )
+        comp.affordances.add(role_tag)
+        comp.relational_patterns.append(f"{relation_name}({','.join(sorted(parts.keys()))})")
+        self._store.register_concept(comp)
+        return comp
+
+    def infer_composite_role_priors(
+        self,
+        feature_vectors: dict[int, PerceptualFeatureVector],
+        max_distance: float = 0.70,
+    ) -> list[dict[str, Any]]:
+        """Match composite relational schemas against scene features for structural transfer."""
+        if not feature_vectors:
+            return []
+        feat_dicts: dict[int, dict[str, Any]] = {
+            rc: self._embedding_to_dict(fv) for rc, fv in feature_vectors.items()
+        }
+        matches: list[dict[str, Any]] = []
+        for comp in self._store.get_all_concepts():
+            if comp.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                continue
+            if not comp.is_composite or not comp.parts:
+                continue
+            part_bindings: dict[str, int] = {}
+            part_scores: dict[str, float] = {}
+            used_feats: set[int] = set()
+            all_matched = True
+            for part_role, part_cid in comp.parts.items():
+                part_concept = self._store.get_concept(part_cid)
+                if part_concept is None or not part_concept.feature_distributions:
+                    all_matched = False
+                    break
+                best_rc: int | None = None
+                best_d = float("inf")
+                for rc, fdict in feat_dicts.items():
+                    if rc in used_feats:
+                        continue
+                    d = self._mahalanobis_distance(fdict, part_concept, ignore_color_labels=True)
+                    if d <= max_distance and d < best_d:
+                        best_d = d
+                        best_rc = rc
+                if best_rc is None:
+                    all_matched = False
+                    break
+                used_feats.add(best_rc)
+                part_bindings[part_role] = best_rc
+                rel_conf = (
+                    float(comp.higher_order_relations[0].get("confidence", 0.85))
+                    if comp.higher_order_relations
+                    else 0.85
+                )
+                sim = math.exp(-((best_d / max(max_distance, 1e-6)) ** 2))
+                part_scores[part_role] = round(min(0.99, 0.55 * sim + 0.40 * rel_conf), 4)
+            if all_matched and len(part_bindings) == len(comp.parts):
+                rel_name = (
+                    str(comp.higher_order_relations[0].get("relation", "composite"))
+                    if comp.higher_order_relations
+                    else "composite"
+                )
+                matches.append(
+                    {
+                        "composite_concept_id": comp.concept_ref.id,
+                        "relation": rel_name,
+                        "part_feature_bindings": part_bindings,
+                        "part_role_scores": part_scores,
+                    }
+                )
+        return matches
+
     def infer_role_priors(
         self,
         feature: PerceptualFeatureVector,
@@ -388,7 +540,10 @@ class ConceptLearner:
         scale = max(distance_scale, 1e-6)
         role_scores: dict[str, float] = {}
         for concept in self._store.get_all_concepts():
-            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
                 continue
             roles = [
                 aff.removeprefix("role:") for aff in concept.affordances if aff.startswith("role:")
@@ -418,7 +573,10 @@ class ConceptLearner:
         best_dist = float("inf")
 
         for concept in self._store.get_all_concepts():
-            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
                 continue
             dist = self._mahalanobis_distance(features, concept)
             if dist < best_dist:

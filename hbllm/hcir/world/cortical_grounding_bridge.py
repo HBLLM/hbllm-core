@@ -489,6 +489,23 @@ class CorticalGroundingBridge:
         self.state.last_feature_vectors = feature_vectors
         self.state.last_concept_assignments = concept_assignments
         self.state.last_feature_concept_ids = feature_concept_ids
+
+        has_composite = any(c.is_composite for c in self.concept_store.get_all_concepts())
+        composite_matches: list[dict[str, Any]] = []
+        if (infer_priors or has_composite) and self.state.episode_feature_memory:
+            composite_matches = self.concept_learner.infer_composite_role_priors(
+                self.state.episode_feature_memory
+            )
+            for match in composite_matches:
+                bindings = match.get("part_feature_bindings", {})
+                scores = match.get("part_role_scores", {})
+                for part_role, rc_feat in bindings.items():
+                    boost = float(scores.get(part_role, 0.0))
+                    if boost > 0.0:
+                        existing_rp = role_priors.setdefault(int(rc_feat), {})
+                        if boost > existing_rp.get(part_role, 0.0):
+                            existing_rp[part_role] = boost
+
         self.state.last_role_priors = role_priors
 
         # 7. Post-Action Outcome Verification (from previous cycle)
@@ -510,6 +527,7 @@ class CorticalGroundingBridge:
             "sge_committed_claims_count": len(committed_claims),
             "sge_feature_vectors_count": len(feature_vectors),
             "sge_role_priors": role_priors,
+            "sge_composite_matches": composite_matches,
             "sge_concept_assignments": [
                 {
                     "concept_id": a.concept_ref.id,
@@ -552,6 +570,21 @@ class CorticalGroundingBridge:
 
         bound = 0
         seen_pairs: set[tuple[int, str]] = set()
+        role_to_concept_id: dict[str, str] = {}
+        actuator_feats: set[int] = set()
+        affinity_barriers: set[int] = set()
+        if theory is not None:
+            actuator_feats = {
+                int(f)
+                for f in (getattr(theory, "actuator_features", ()) or ())
+                if isinstance(f, int)
+            } | {
+                int(f)
+                for f in (getattr(theory, "tool_barrier_affinities", {}) or {}).keys()
+                if isinstance(f, int)
+            }
+            for b_set in (getattr(theory, "tool_barrier_affinities", {}) or {}).values():
+                affinity_barriers |= {int(b) for b in b_set if isinstance(b, int)}
         for fv in candidate_fvs:
             entity_id = fv.feature_metadata.get("entity_id")
             raw_color = fv.feature_metadata.get("raw_color")
@@ -569,7 +602,9 @@ class CorticalGroundingBridge:
                     roles.append("goal")
                 if feat in theory.receptacle_features:
                     roles.append("receptacle")
-                if theory.is_barrier(feat) and feat not in haz_set:
+                if feat in actuator_feats:
+                    roles.append("actuator")
+                if (theory.is_barrier(feat) or feat in affinity_barriers) and feat not in haz_set:
                     roles.append("barrier")
                 if theory.is_avatar_feature(feat):
                     roles.append("avatar")
@@ -612,11 +647,33 @@ class CorticalGroundingBridge:
                 if pure_concept is not None:
                     self.state.last_feature_concept_ids[feat] = pure_concept.concept_ref.id
                     cid = pure_concept.concept_ref.id
+                    role_to_concept_id[r_name] = cid
                     bound += 1
-                elif entity_id and self.concept_learner.bind_role_to_exemplar(
-                    str(entity_id), r_name
-                ):
-                    bound += 1
+                elif entity_id:
+                    bound_concept = self.concept_learner.bind_role_to_exemplar(
+                        str(entity_id), r_name
+                    )
+                    if bound_concept is not None:
+                        role_to_concept_id[r_name] = bound_concept.concept_ref.id
+                        bound += 1
+        if "cargo" in role_to_concept_id and "receptacle" in role_to_concept_id:
+            self.concept_learner.induce_composite_concept(
+                parts={
+                    "cargo": role_to_concept_id["cargo"],
+                    "receptacle": role_to_concept_id["receptacle"],
+                },
+                relation_name="docks_into",
+                composite_role="push_docking_system",
+            )
+        if "actuator" in role_to_concept_id and "barrier" in role_to_concept_id:
+            self.concept_learner.induce_composite_concept(
+                parts={
+                    "actuator": role_to_concept_id["actuator"],
+                    "barrier": role_to_concept_id["barrier"],
+                },
+                relation_name="unlocks_barrier",
+                composite_role="lock_mechanism_system",
+            )
         return bound
 
     # ─────────────────────────────────────────────────────────────────────────

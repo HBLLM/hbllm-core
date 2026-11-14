@@ -23,7 +23,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -124,6 +124,13 @@ class OptionDiscoveryEngine:
         self.discovered_options: dict[str, DiscoveredOption] = {}
         self.total_episode_steps: int = 0
         self.option_executed_steps: int = 0
+        self.last_scanned_grid_sig: tuple[int, int, bytes] | None = None
+
+    def on_boundary(self, boundary: Any) -> None:
+        """Reset layout-local bottleneck cache on cross-layout episode boundaries."""
+        if not getattr(boundary, "same_level", False):
+            self.discovered_options.clear()
+            self.last_scanned_grid_sig = None
 
     def find_articulation_points(
         self,

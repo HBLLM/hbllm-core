@@ -600,6 +600,7 @@ class PrefrontalWorkingMemory:
         self.last_continuous_moved: bool = False
         self.reference_frame: Any | None = None
         self.last_observation_metadata: dict[str, Any] = {}
+        self.compiled_linguistic_hints: set[str] = set()
         self.active_plan_step: Any | None = None
 
         # Exploration & Curiosity Tracking (Single Source of Truth)
@@ -821,6 +822,7 @@ class PrefrontalWorkingMemory:
         self.active_plan_step = None
         self.reference_frame = None
         self.last_observation_metadata.clear()
+        self.compiled_linguistic_hints.clear()
         self.recent_positions.clear()
         self.recent_actions.clear()
         self.visited_cells.clear()
