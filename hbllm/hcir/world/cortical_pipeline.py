@@ -131,7 +131,16 @@ class CorticalPipeline:
                         and getattr(self.engine, "symbolic_theory", None) is not None
                         and hasattr(self.grounding_bridge, "sync_theory_roles")
                     ):
-                        self.grounding_bridge.sync_theory_roles(self.engine.symbolic_theory)
+                        hz = getattr(self.engine, "hazard_tracker", None)
+                        hz_feats = (
+                            set(getattr(hz, "known_lethal_features", ()) or ())
+                            if hz is not None
+                            else set()
+                        )
+                        self.grounding_bridge.sync_theory_roles(
+                            self.engine.symbolic_theory,
+                            hazard_features=hz_feats,
+                        )
 
                 # Goal Arbitration Hook: Selects active TaskFrame using Expected Free Energy
                 if self.engine is not None and getattr(self.engine, "goal_arbiter", None):

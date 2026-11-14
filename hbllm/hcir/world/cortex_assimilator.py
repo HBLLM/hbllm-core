@@ -158,6 +158,7 @@ class EpistemicFeedbackAssimilator:
         H: int,
         W: int,
         calibrate_dynamics: bool = True,
+        is_failure: bool = False,
     ) -> None:
         """Commit an avatar identity from entity pairs sharing a displacement delta.
 
@@ -199,8 +200,9 @@ class EpistemicFeedbackAssimilator:
             )
             view.state.avatar_h = max(c[0] for c in all_cells) - min(c[0] for c in all_cells) + 1
             view.state.avatar_w = max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
-        # Features the avatar just traversed are verified safe
-        EpistemicFeedbackAssimilator._record_safe_traversal(view, all_cells, delta, H, W)
+        # Features the avatar just traversed are verified safe (only on non-fatal steps)
+        if not is_failure:
+            EpistemicFeedbackAssimilator._record_safe_traversal(view, all_cells, delta, H, W)
         view.entity_action_failed_positions.clear()
         view.immobile_entity_actions.clear()
 
@@ -1172,6 +1174,7 @@ class EpistemicFeedbackAssimilator:
                         H,
                         W,
                         calibrate_dynamics=True,
+                        is_failure=is_failure,
                     )
                 else:
                     # ── Controllability Test (retained dynamics) ───────────────
@@ -1244,6 +1247,7 @@ class EpistemicFeedbackAssimilator:
                                 H,
                                 W,
                                 calibrate_dynamics=False,  # keep retained dynamics
+                                is_failure=is_failure,
                             )
                             view._avatar_controllability_evidence.clear()
                             logger.info(
@@ -1368,9 +1372,10 @@ class EpistemicFeedbackAssimilator:
                         dr = 0
                     elif abs(dr) >= 2 * abs(dc):
                         dc = 0
-                    EpistemicFeedbackAssimilator._record_safe_traversal(
-                        view, kinetic_res.self_avatar.cells, (dr, dc), H, W
-                    )
+                    if not is_success and not is_failure:
+                        EpistemicFeedbackAssimilator._record_safe_traversal(
+                            view, kinetic_res.self_avatar.cells, (dr, dc), H, W
+                        )
                     if (
                         action not in view.action_dynamics
                         or not view.action_dynamics[action].is_displacement_action()
@@ -1497,7 +1502,7 @@ class EpistemicFeedbackAssimilator:
                     view.state.avatar_w = (
                         max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
                     )
-                if not is_success:
+                if not is_success and not is_failure:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         view, all_cells, (dr, dc), H, W
                     )

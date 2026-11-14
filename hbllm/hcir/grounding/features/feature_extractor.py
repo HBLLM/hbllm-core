@@ -9,6 +9,18 @@ from typing import Any, Protocol, runtime_checkable
 
 from hbllm.hcir.grounding.contracts.enums import ModalitySource
 from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+from hbllm.hcir.grounding.features.calibrated_weights import (
+    INIT_B1,
+    INIT_B2,
+    INIT_CONV_B,
+    INIT_CONV_W,
+    INIT_SYN_BIAS,
+    INIT_SYN_DELTA,
+    INIT_SYN_KIN,
+    INIT_SYN_PATCH,
+    INIT_W1,
+    INIT_W2,
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +111,15 @@ COLOR_NAMES: dict[int, str] = {
     9: "brown",
 }
 
+_COMPATIBLE_PRIMARY_ROLES: frozenset[str] = frozenset({"goal", "receptacle"})
+
+
+def _roles_conflict_pair(role_a: str, role_b: str) -> bool:
+    """Return True if two physical affordance roles should separate in representation space."""
+    if role_a == role_b:
+        return False
+    return not (role_a in _COMPATIBLE_PRIMARY_ROLES and role_b in _COMPATIBLE_PRIMARY_ROLES)
+
 
 def _extract_palette_scale(envelope: ObservationEnvelope, entities: list[dict[str, Any]]) -> float:
     """Extracts normalization scale for color features from envelope or reference frame metadata.
@@ -178,7 +199,7 @@ def _compute_entity_morphology_and_topology(
     bg_feature: int = 0,
     feature_counts: dict[int, int] | None = None,
 ) -> tuple[tuple[float, float, float, float], tuple[float, ...], tuple[float, ...], int]:
-    """Compute morphology (4D), local structural-topological + kinematic (14D), and spatial extent."""
+    """Compute handcrafted morphology (4D), topological invariants (14D), and spatial extent."""
     pos = ent.get("position", (0.0, 0.0))
     color = float(ent.get("color", 0))
     raw_color = int(color)
@@ -195,7 +216,6 @@ def _compute_entity_morphology_and_topology(
     norm_size = math.log1p(size)
     base_4 = (aspect_ratio, fill_density, norm_color, norm_size)
 
-    # Local 3x3 topological-affordance invariants (color-permutation invariant)
     open_deg4 = 1.0
     same_feat_deg4 = 0.0
     opposite_open_axes = 1.0
@@ -228,22 +248,18 @@ def _compute_entity_morphology_and_topology(
         n_open = 0
         n_same = 0
         n_hf = 0
-        blocked_dirs: list[bool] = []
         for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
             nr, nc = r + dr, c + dc
             if 0 <= nr < H and 0 <= nc < W:
                 nv = int(grid[nr][nc])
                 if nv == bg_feature:
                     n_open += 1
-                    blocked_dirs.append(False)
                 else:
-                    blocked_dirs.append(True)
                     if nv == raw_color:
                         n_same += 1
                     if counts_map.get(nv, 1) >= high_thresh:
                         n_hf += 1
             else:
-                blocked_dirs.append(True)
                 n_hf += 1
 
         open_deg4 = n_open / 4.0
@@ -252,7 +268,6 @@ def _compute_entity_morphology_and_topology(
         v_open = _is_open(r - 1, c) and _is_open(r + 1, c)
         h_open = _is_open(r, c - 1) and _is_open(r, c + 1)
         opposite_open_axes = (int(v_open) + int(h_open)) / 2.0
-        # Perpendicular wall/barrier confinement (corner risk)
         if (_is_barrier_like(r - 1, c) or _is_barrier_like(r + 1, c)) and (
             _is_barrier_like(r, c - 1) or _is_barrier_like(r, c + 1)
         ):
@@ -292,28 +307,126 @@ def _compute_entity_morphology_and_topology(
     return base_4, full_14, spatial, raw_color
 
 
-class SpatialGridFeatureExtractor:
-    """Extracts normalised feature vectors from 2-D grid spatial observations.
+def _extract_raw_patch_and_scalars(
+    ent: dict[str, Any],
+    grid: Any | None = None,
+    bg_feature: int = 0,
+    feature_counts: dict[int, int] | None = None,
+    prev_grid: list[list[int]] | None = None,
+) -> tuple[
+    list[list[int]],
+    list[list[float]],
+    tuple[float, float, float, float, float],
+    tuple[float, ...],
+    int,
+]:
+    """Extract a palette-invariant 5x5x4 raw sensory patch (channel index 0..3),
+    a 5x5 temporal change map, and 5 raw physical/census/kinematic scalars.
 
-    Operates deterministically on grid metadata (cell values, positions, bounding
-    boxes) embedded in ``envelope.metadata``.  Produces one feature vector per
-    detected spatial entity segment.
-
-    Expected ``metadata`` layout:
-        {
-            "grid": list[list[int]],          # optional raw grid
-            "entities": [                      # pre-segmented entity list
-                {
-                    "id": str,
-                    "position": (row, col),
-                    "color": int,
-                    "size": int,
-                    "bbox": (x, y, w, h),     # optional
-                },
-                ...
-            ],
-        }
+    Channel map at each cell of the 5x5 receptive field:
+    - ``0``: background
+    - ``1``: same symbol as target entity
+    - ``2``: foreign non-background symbol
+    - ``3``: out-of-bounds image border
     """
+    pos = ent.get("position", (0.0, 0.0))
+    sample_pos = ent.get("sample_pos") or pos
+    raw_color = int(float(ent.get("color", 0)))
+    size = max(1.0, float(ent.get("size", 1)))
+    bbox = ent.get("bbox")
+    h = float(bbox[2]) if bbox and len(bbox) == 4 and float(bbox[2]) > 0 else 1.0
+    w = float(bbox[3]) if bbox and len(bbox) == 4 and float(bbox[3]) > 0 else 1.0
+
+    patch_ch: list[list[int]] = [[0] * 5 for _ in range(5)]
+    delta_patch: list[list[float]] = [[0.0] * 5 for _ in range(5)]
+
+    if grid is not None and len(grid) > 0 and len(grid[0]) > 0:
+        H = len(grid)
+        W = len(grid[0])
+        r0 = max(0, min(H - 1, int(round(float(sample_pos[0])))))
+        c0 = max(0, min(W - 1, int(round(float(sample_pos[1])))))
+        has_prev = prev_grid is not None and len(prev_grid) == H and len(prev_grid[0]) == W
+
+        for py, dy in enumerate(range(-2, 3)):
+            rr = r0 + dy
+            row_ch = patch_ch[py]
+            row_dp = delta_patch[py]
+            if 0 <= rr < H:
+                grid_row = grid[rr]
+                prev_row = prev_grid[rr] if has_prev and prev_grid is not None else None
+                for px, dx in enumerate(range(-2, 3)):
+                    cc = c0 + dx
+                    if 0 <= cc < W:
+                        v = int(grid_row[cc])
+                        if v == bg_feature:
+                            row_ch[px] = 0
+                        elif v == raw_color:
+                            row_ch[px] = 1
+                        else:
+                            row_ch[px] = 2
+                        if prev_row is not None and int(prev_row[cc]) != v:
+                            row_dp[px] = 1.0
+                    else:
+                        row_ch[px] = 3
+            else:
+                for px in range(5):
+                    row_ch[px] = 3
+
+        same_count = (feature_counts or {}).get(raw_color, int(size))
+        grid_area = max(1, H * W)
+    else:
+        patch_ch[2][2] = 1
+        same_count = int(size)
+        grid_area = max(16, int(size) * 4)
+
+    vel = ent.get("velocity", (0.0, 0.0))
+    speed = math.hypot(float(vel[0]), float(vel[1])) if vel and len(vel) >= 2 else 0.0
+    norm_speed = min(1.0, speed / 2.0)
+    moved_flag = 1.0 if (speed > 1e-6 or bool(ent.get("moved", False))) else 0.0
+    if moved_flag > 0.0 and prev_grid is None:
+        delta_patch[2][2] = 1.0
+
+    scalars5 = (
+        math.tanh(math.log1p(size) / 3.0),
+        math.tanh((w - h) / max(1.0, w + h)),
+        math.tanh(math.log1p(same_count) / max(1.0, math.log1p(grid_area))),
+        norm_speed,
+        moved_flag,
+    )
+    spatial = tuple(float(x) for x in bbox) if bbox else (float(pos[0]), float(pos[1]))
+    return patch_ch, delta_patch, scalars5, spatial, raw_color
+
+
+def _encode_text_ngrams(text: str, dim: int = 8) -> tuple[float, ...]:
+    """Deterministic L2-normalized subword character n-gram projection (zero-LLM)."""
+    clean = " ".join(text.lower().split())
+    if not clean:
+        val = 1.0 / math.sqrt(float(dim))
+        return tuple(val for _ in range(dim))
+
+    padded = f"<{clean}>"
+    grams: list[str] = [clean]
+    for n in (1, 2, 3):
+        if len(padded) >= n:
+            grams.extend(padded[i : i + n] for i in range(len(padded) - n + 1))
+
+    acc = [0.0] * dim
+    for g in grams:
+        digest = hashlib.blake2b(g.encode("utf-8"), digest_size=4).digest()
+        h_int = int.from_bytes(digest, "little")
+        bin_idx = h_int % dim
+        sign = 1.0 if ((h_int >> 8) & 1) == 0 else -1.0
+        acc[bin_idx] += sign
+
+    norm = math.sqrt(sum(v * v for v in acc))
+    if norm <= 1e-8:
+        val = 1.0 / math.sqrt(float(dim))
+        return tuple(val for _ in range(dim))
+    return tuple(v / norm for v in acc)
+
+
+class SpatialGridFeatureExtractor:
+    """Extracts normalised handcrafted feature vectors from 2-D grid spatial observations."""
 
     @property
     def extractor_name(self) -> str:
@@ -364,21 +477,7 @@ class SpatialGridFeatureExtractor:
 
 
 class KinematicFeatureExtractor:
-    """Extracts normalised feature vectors from proprioceptive / kinesthetic streams.
-
-    Expected ``metadata`` layout:
-        {
-            "entities": [
-                {
-                    "id": str,
-                    "position": (x, y) | (x, y, z),
-                    "velocity": (vx, vy) | (vx, vy, vz),
-                    "mass": float,         # optional
-                },
-                ...
-            ],
-        }
-    """
+    """Extracts normalised feature vectors from proprioceptive / kinesthetic streams."""
 
     @property
     def extractor_name(self) -> str:
@@ -405,7 +504,6 @@ class KinematicFeatureExtractor:
             mass = float(ent.get("mass", 1.0))
 
             speed = math.sqrt(sum(v * v for v in vel))
-
             embedding = pos + vel + (speed, math.log1p(mass))
 
             features.append(
@@ -426,24 +524,7 @@ class KinematicFeatureExtractor:
 
 
 class SemanticTextFeatureExtractor:
-    """Extracts feature vectors from text / dialogue observation metadata.
-
-    This extractor operates on pre-tokenised or pre-embedded text
-    representations stored in ``envelope.metadata``.  It does **not**
-    invoke an LLM — any neural encoding must have already been applied
-    by the perception adapter before the observation reached SGE.
-
-    Expected ``metadata`` layout:
-        {
-            "tokens": list[str],                   # optional raw tokens
-            "token_embeddings": list[list[float]],  # optional pre-computed
-            "sentence_embedding": list[float],      # optional aggregate
-            "named_entities": [                     # optional NER output
-                {"text": str, "type": str, "confidence": float},
-                ...
-            ],
-        }
-    """
+    """Extracts feature vectors from text / dialogue observation metadata."""
 
     @property
     def extractor_name(self) -> str:
@@ -487,9 +568,7 @@ class SemanticTextFeatureExtractor:
                 text = str(ne.get("text", ""))
                 ne_type = str(ne.get("type", "UNKNOWN"))
                 conf = float(ne.get("confidence", 1.0))
-
-                # Simple bag-of-characters hash for a deterministic embedding stub
-                char_hash = tuple(float(ord(c) % 100) / 100.0 for c in text[:8].ljust(8))
+                ngram_emb = _encode_text_ngrams(text)
 
                 features.append(
                     PerceptualFeatureVector(
@@ -497,7 +576,7 @@ class SemanticTextFeatureExtractor:
                         observation_id=envelope.observation_id,
                         modality=envelope.source_modality,
                         channel_id=envelope.source_channel_id,
-                        embedding=char_hash,
+                        embedding=ngram_emb,
                         semantic_labels={ne_type: conf},
                         feature_metadata={"text": text, "ne_type": ne_type},
                         provenance_hash=envelope.payload_hash,
@@ -511,14 +590,14 @@ class SemanticTextFeatureExtractor:
                 if w.strip(".,!?:;\"'()[]{}")
             ]
             for token in tokens:
-                char_hash = tuple(float(ord(c) % 100) / 100.0 for c in token[:8].ljust(8))
+                ngram_emb = _encode_text_ngrams(str(token))
                 features.append(
                     PerceptualFeatureVector(
                         feature_id=_gen_id("feat_txt_tok"),
                         observation_id=envelope.observation_id,
                         modality=envelope.source_modality,
                         channel_id=envelope.source_channel_id,
-                        embedding=char_hash,
+                        embedding=ngram_emb,
                         semantic_labels={token: 1.0},
                         feature_metadata={"text": token, "type": "token"},
                         provenance_hash=envelope.payload_hash,
@@ -530,44 +609,47 @@ class SemanticTextFeatureExtractor:
 
 
 # ---------------------------------------------------------------------------
-#  Neural / Spiking extractors (Invariant 3 compliant: offline, zero-LLM)
+#  Neural / Spiking raw-patch extractors (Invariant 3 compliant: offline, zero-LLM)
 # ---------------------------------------------------------------------------
 
 
 class SNNPerceptualFeatureExtractor:
-    """Extracts normalised feature vectors via a stateful Leaky Integrate-and-Fire (LIF) layer.
+    """Spatiotemporal Leaky Integrate-and-Fire (LIF) encoder over raw 5x5x4 visual patches.
 
-    Projects 14-D structural, topological, and kinematic entity descriptors through a
-    deterministic 8x14 synaptic matrix across multiple leaky membrane integration steps,
-    persisting entity membrane traces across consecutive observations.
-
-    Complies with Invariant 3 (Zero LLM Dependency):
-    - Sub-millisecond feedforward execution
-    - Deterministic, frozen synaptic projection matrix
-    - Zero external network or API calls
+    Operates directly on raw 5x5 local occupancy/self/foreign/oob patches, 5x5
+    frame-difference temporal maps, and 5 raw physical/kinematic scalars through
+    an 8-neuron spiking receptive field with persistent membrane traces and online
+    three-factor role-modulated Hebbian synaptic plasticity.
     """
 
-    # 8x14 offline-calibrated synaptic receptive fields over 14-D morphology+topology+kinematics:
-    # dims [0..6] focus on color-invariant structure/mobility; dim [7] preserves chromatic tuning.
-    _SNN_WEIGHTS: tuple[tuple[float, ...], ...] = (
-        (0.25, 0.25, 0.0, -0.75, 0.85, -0.90, 0.95, -0.80, -0.70, 0.65, 0.70, 0.15, -0.25, -0.35),
-        (-0.20, -0.20, 0.0, 0.85, -0.90, 0.95, -0.85, 0.55, 0.85, -0.70, -0.85, 0.10, -0.30, -0.40),
-        (0.10, 0.10, 0.0, -0.20, 0.35, -0.30, 0.25, -0.20, -0.15, 0.35, 0.45, 0.40, 1.15, 1.25),
-        (0.15, 0.20, 0.0, 0.10, -0.35, -0.10, -0.75, 1.10, 0.85, -0.45, 0.30, 0.35, -0.15, -0.20),
-        (0.45, -0.40, 0.0, 0.55, 0.30, -0.25, 0.40, -0.30, -0.25, 0.50, 0.55, -0.35, 0.40, 0.35),
-        (-0.35, 0.45, 0.0, -0.40, -0.45, 0.65, -0.35, 0.35, 0.45, -0.40, -0.50, 0.55, 0.25, 0.40),
-        (0.20, 0.15, 0.0, -0.30, 0.60, -0.45, 0.70, -0.60, -0.50, 0.75, 0.50, -0.20, -0.45, -0.50),
-        (0.0, 0.0, 1.35, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-    )
-
-    def __init__(self, membrane_decay: float = 0.55, num_steps: int = 5) -> None:
+    def __init__(self, membrane_decay: float = 0.65, num_steps: int = 4) -> None:
         self._decay = membrane_decay
         self._num_steps = num_steps
+        self._syn_patch: list[list[list[list[float]]]] = [
+            [[[float(c) for c in row] for row in mat] for mat in neuron]
+            for neuron in INIT_SYN_PATCH
+        ]
+        self._syn_delta: list[list[list[float]]] = [
+            [[float(c) for c in row] for row in neuron] for neuron in INIT_SYN_DELTA
+        ]
+        self._syn_kin: list[list[float]] = [[float(c) for c in row] for row in INIT_SYN_KIN]
+        self._syn_bias: list[float] = [float(b) for b in INIT_SYN_BIAS]
+
         self._membrane_traces: dict[str, list[float]] = {}
+        self._prev_grid: list[list[int]] | None = None
+        self._raw_input_cache: dict[
+            str, tuple[list[list[int]], list[list[float]], tuple[float, ...]]
+        ] = {}
+        self._role_targets: dict[str, list[float]] = {}
 
     def reset_traces(self) -> None:
-        """Clear persistent entity membrane traces on episode reset."""
+        """Clear persistent traces and short-term frame buffer on episode reset.
+
+        Retains online-adapted synaptic weights and role attractors across episodes.
+        """
         self._membrane_traces.clear()
+        self._prev_grid = None
+        self._raw_input_cache.clear()
 
     @property
     def extractor_name(self) -> str:
@@ -579,54 +661,95 @@ class SNNPerceptualFeatureExtractor:
             ModalitySource.ENVIRONMENTAL_SENSOR,
         ) and ("entities" in envelope.metadata or "grid" in envelope.metadata)
 
+    def _forward_snn(
+        self,
+        patch_ch: list[list[int]],
+        delta_patch: list[list[float]],
+        scalars5: tuple[float, ...],
+        init_v: list[float] | None = None,
+    ) -> tuple[tuple[float, ...], list[float]]:
+        m_dim = len(self._syn_bias)
+        currents = [0.0] * m_dim
+        for m in range(m_dim):
+            sp_m = self._syn_patch[m]
+            sd_m = self._syn_delta[m]
+            sk_m = self._syn_kin[m]
+            acc = self._syn_bias[m]
+            for py in range(5):
+                sp_row = sp_m[py]
+                sd_row = sd_m[py]
+                ch_row = patch_ch[py]
+                dp_row = delta_patch[py]
+                for px in range(5):
+                    acc += sp_row[px][ch_row[px]]
+                    d_val = dp_row[px]
+                    if d_val != 0.0:
+                        acc += sd_row[px] * d_val
+            for idx, s_val in enumerate(scalars5):
+                acc += sk_m[idx] * s_val
+            currents[m] = acc
+
+        v = list(init_v) if init_v is not None else [0.0] * m_dim
+        rate = [0.0] * m_dim
+        threshold = 0.85
+        step_inv = 1.0 / max(1, self._num_steps)
+        for _ in range(self._num_steps):
+            for m in range(m_dim):
+                v[m] = self._decay * v[m] + 0.35 * currents[m]
+                if v[m] >= threshold:
+                    rate[m] += step_inv
+                    v[m] -= threshold
+
+        raw = [0.6 * rate[m] + 0.4 * math.tanh(v[m]) for m in range(m_dim)]
+        mean = sum(raw) / m_dim
+        var = sum((r - mean) ** 2 for r in raw) / m_dim
+        std = math.sqrt(var + 1e-5)
+        normed = tuple(math.tanh((r - mean) / std) for r in raw)
+        return normed, v
+
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
-        palette_scale = _extract_palette_scale(envelope, entities)
         grid, bg_feature, feature_counts = _extract_grid_context(envelope)
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("snn_seg")))
-            _, x14, spatial, raw_color = _compute_entity_morphology_and_topology(
+            patch_ch, delta_patch, scalars5, spatial, raw_color = _extract_raw_patch_and_scalars(
                 ent,
-                palette_scale=palette_scale,
                 grid=grid,
                 bg_feature=bg_feature,
                 feature_counts=feature_counts,
+                prev_grid=self._prev_grid,
             )
 
-            # Stateful LIF integration across temporal sub-steps with persistent membrane decay
-            currents = [
-                sum(w_val * x_val for w_val, x_val in zip(row, x14)) for row in self._SNN_WEIGHTS
-            ]
-            v = list(self._membrane_traces.get(ent_id, [0.0] * len(self._SNN_WEIGHTS)))
-            spike_acc = [0.0] * len(v)
-            threshold = 0.45
-            for _ in range(self._num_steps):
-                for j in range(len(v)):
-                    v[j] = self._decay * v[j] + currents[j]
-                    if abs(v[j]) >= threshold:
-                        spike_acc[j] += 1.0 if v[j] > 0.0 else -1.0
-                        v[j] *= 0.25  # soft reset
-                    spike_acc[j] += 0.35 * math.tanh(v[j])
-            if len(self._membrane_traces) > 256:
-                self._membrane_traces.pop(next(iter(self._membrane_traces)))
-            self._membrane_traces[ent_id] = v
+            has_motion = scalars5[3] > 1e-6 or scalars5[4] > 0.5
+            prev_trace = self._membrane_traces.get(ent_id) if has_motion else None
+            init_v = [0.35 * val for val in prev_trace] if prev_trace is not None else None
+            normed, final_v = self._forward_snn(patch_ch, delta_patch, scalars5, init_v=init_v)
 
-            norm = math.sqrt(sum(s * s for s in spike_acc))
-            embedding = tuple(s / norm for s in spike_acc) if norm > 1e-6 else tuple(spike_acc)
+            if has_motion:
+                if len(self._membrane_traces) >= 256:
+                    self._membrane_traces.pop(next(iter(self._membrane_traces)))
+                self._membrane_traces[ent_id] = final_v
+            else:
+                self._membrane_traces.pop(ent_id, None)
 
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
 
+            feat_id = _gen_id("feat_snn")
+            if len(self._raw_input_cache) >= 128:
+                self._raw_input_cache.pop(next(iter(self._raw_input_cache)))
+            self._raw_input_cache[feat_id] = (patch_ch, delta_patch, scalars5)
+
             features.append(
                 PerceptualFeatureVector(
-                    feature_id=_gen_id("feat_snn"),
+                    feature_id=feat_id,
                     observation_id=envelope.observation_id,
                     modality=envelope.source_modality,
                     channel_id=envelope.source_channel_id,
-                    embedding=embedding,
+                    embedding=normed,
                     spatial_extent=spatial,
                     semantic_labels=labels,
                     feature_metadata={
@@ -639,399 +762,99 @@ class SNNPerceptualFeatureExtractor:
                 )
             )
 
+        if grid is not None and len(grid) > 0 and len(grid[0]) > 0:
+            self._prev_grid = [[int(val) for val in row] for row in grid]
+
         return features
+
+    def adapt_role(
+        self,
+        feature_id: str,
+        role_name: str,
+        lr: float = 0.04,
+    ) -> tuple[float, ...] | None:
+        """Apply online three-factor Hebbian plasticity from empirical role confirmation."""
+        cached = self._raw_input_cache.get(feature_id)
+        if cached is None:
+            return None
+        patch_ch, delta_patch, scalars5 = cached
+        z, _ = self._forward_snn(patch_ch, delta_patch, scalars5, init_v=None)
+        m_dim = len(z)
+
+        clean_role = role_name.strip().lower()
+        mu_pos = self._role_targets.get(clean_role)
+        if mu_pos is None:
+            self._role_targets[clean_role] = list(z)
+            mu_pos = self._role_targets[clean_role]
+        else:
+            for m in range(m_dim):
+                mu_pos[m] = 0.8 * mu_pos[m] + 0.2 * z[m]
+
+        mod = [0.0] * m_dim
+        has_conflict = False
+        margin = 0.65
+        for other_role, mu_neg in self._role_targets.items():
+            if not _roles_conflict_pair(clean_role, other_role):
+                continue
+            d_neg = math.sqrt(sum((z[m] - mu_neg[m]) ** 2 for m in range(m_dim)) / m_dim)
+            if d_neg < margin:
+                has_conflict = True
+                inv_d = 1.0 / max(d_neg, 1e-3)
+                weight = (margin - d_neg) * inv_d * 0.75
+                for m in range(m_dim):
+                    mod[m] += weight * (z[m] - mu_neg[m])
+
+        d_pos = math.sqrt(sum((z[m] - mu_pos[m]) ** 2 for m in range(m_dim)) / m_dim)
+        if has_conflict or d_pos > 0.35:
+            pull_w = 0.5 if d_pos > 0.08 else 0.0
+            for m in range(m_dim):
+                mod[m] += pull_w * (mu_pos[m] - z[m])
+
+        if max(abs(val) for val in mod) < 1e-5:
+            return z
+
+        eff_lr = min(lr, 0.02)
+        for m in range(m_dim):
+            delta_m = max(-0.15, min(0.15, eff_lr * mod[m]))
+            self._syn_bias[m] = max(-2.5, min(2.5, self._syn_bias[m] + 0.25 * delta_m))
+            sp_m = self._syn_patch[m]
+            sd_m = self._syn_delta[m]
+            sk_m = self._syn_kin[m]
+            for py in range(5):
+                for px in range(5):
+                    ch = patch_ch[py][px]
+                    sp_m[py][px][ch] = max(-2.5, min(2.5, sp_m[py][px][ch] + delta_m * 0.12))
+                    d_val = delta_patch[py][px]
+                    if d_val != 0.0:
+                        sd_m[py][px] = max(-2.5, min(2.5, sd_m[py][px] + delta_m * 0.15 * d_val))
+            for idx, s_val in enumerate(scalars5):
+                sk_m[idx] = max(-2.5, min(2.5, sk_m[idx] + delta_m * 0.35 * s_val))
+
+        updated, _ = self._forward_snn(patch_ch, delta_patch, scalars5, init_v=None)
+        return updated
 
 
 class LearnedPerceptualFeatureExtractor:
-    """Extracts normalised feature vectors via an offline-trained 2-layer contrastive MLP.
+    """2D Spatial Conv + Contrastive MLP encoder over raw 5x5x4 visual patches.
 
-    Encodes 14-D morphology, local 3x3 topological affordance invariants, and kinematic
-    descriptors through frozen offline-trained ``14 -> 16 (tanh) -> 8`` MLP weights with
-    LayerNorm + ``tanh``, separating barriers, open-interior objects, edge-pinned states,
-    and mobile agents invariantly across arbitrary integer feature ID permutations.
-
-    Complies with Invariant 3 (Zero LLM Dependency):
-    - Sub-millisecond feedforward execution
-    - Deterministic, frozen model weights
-    - Zero external network or API calls
+    Convolves 6 learned 3x3x4 receptive fields over raw 5x5 local occupancy/self/foreign/oob
+    patches with global average + max pooling, concatenates 5 raw physical/kinematic
+    scalars (17-D), and projects through a trainable ``17 -> 16 (tanh) -> 8`` MLP head
+    with online supervised contrastive backpropagation on causal role binding.
     """
 
-    _MLP_W1: tuple[tuple[float, ...], ...] = (
-        (
-            -0.3787,
-            0.4214,
-            0.0,
-            -0.5318,
-            0.1878,
-            -0.6419,
-            0.0671,
-            -0.8377,
-            -0.4728,
-            0.0702,
-            0.144,
-            0.2681,
-            -0.3158,
-            -0.9416,
-        ),
-        (
-            -0.3143,
-            -0.5487,
-            0.0,
-            -0.174,
-            -0.7233,
-            -0.1412,
-            -0.2654,
-            0.3982,
-            -0.5225,
-            -0.434,
-            0.2853,
-            0.3882,
-            -0.2375,
-            -0.2198,
-        ),
-        (
-            0.226,
-            -0.657,
-            0.0,
-            0.444,
-            0.2887,
-            0.0461,
-            -0.0348,
-            0.5213,
-            0.735,
-            -0.04,
-            -0.0833,
-            0.5453,
-            -0.2875,
-            0.6437,
-        ),
-        (
-            -0.3829,
-            -0.0467,
-            0.0,
-            -0.2854,
-            -0.2123,
-            0.0935,
-            0.3288,
-            -0.2013,
-            -0.1476,
-            0.0263,
-            -0.3233,
-            0.1895,
-            0.1931,
-            0.9459,
-        ),
-        (
-            -0.0417,
-            -0.0663,
-            0.0,
-            0.763,
-            -0.1757,
-            0.1368,
-            0.1356,
-            -0.4653,
-            -0.0018,
-            -0.0501,
-            0.1571,
-            -0.1952,
-            -0.6251,
-            -0.894,
-        ),
-        (
-            -0.4294,
-            -0.4455,
-            0.0,
-            -0.4926,
-            -0.1609,
-            -0.2649,
-            -0.0893,
-            0.4355,
-            0.1812,
-            0.0303,
-            -0.1439,
-            -0.1175,
-            0.0676,
-            0.1276,
-        ),
-        (
-            -0.1581,
-            0.1251,
-            0.0,
-            -0.6426,
-            0.6523,
-            -0.4032,
-            0.9646,
-            -1.228,
-            -0.4766,
-            0.2682,
-            0.2238,
-            -0.093,
-            0.1456,
-            0.4045,
-        ),
-        (
-            0.2597,
-            -0.1543,
-            0.0,
-            -1.1179,
-            0.0973,
-            -0.5627,
-            0.2532,
-            1.1365,
-            -0.1385,
-            -0.3631,
-            -0.0542,
-            0.3705,
-            0.201,
-            0.2015,
-        ),
-        (
-            0.2861,
-            0.1289,
-            0.0,
-            -0.1854,
-            0.5368,
-            -0.1876,
-            0.3707,
-            0.0333,
-            -0.28,
-            0.4969,
-            0.2559,
-            0.2662,
-            0.0614,
-            -0.1684,
-        ),
-        (
-            -0.0373,
-            0.3902,
-            0.0,
-            -0.9664,
-            -0.1584,
-            0.2725,
-            -0.0902,
-            -0.2638,
-            0.4424,
-            0.1779,
-            0.1254,
-            -0.0905,
-            0.6305,
-            0.518,
-        ),
-        (
-            0.3387,
-            0.1569,
-            0.0,
-            0.4443,
-            -0.1484,
-            0.479,
-            -0.2875,
-            -0.6169,
-            0.0919,
-            0.1529,
-            0.0301,
-            0.0804,
-            -0.031,
-            0.3255,
-        ),
-        (
-            -0.1278,
-            -0.2602,
-            0.0,
-            0.7676,
-            -0.5642,
-            0.2819,
-            -0.5628,
-            0.1733,
-            0.0255,
-            -0.7077,
-            -0.0185,
-            -0.116,
-            -0.7229,
-            0.1215,
-        ),
-        (
-            0.1768,
-            0.1934,
-            0.0,
-            0.7973,
-            0.1508,
-            0.8767,
-            0.1682,
-            -0.6367,
-            -0.1008,
-            -0.0962,
-            -0.8928,
-            0.0463,
-            0.7781,
-            0.4554,
-        ),
-        (
-            0.3712,
-            -0.0159,
-            0.0,
-            0.5802,
-            -0.4347,
-            -0.0778,
-            0.1074,
-            0.6776,
-            -0.052,
-            0.276,
-            -0.1896,
-            0.0995,
-            -0.0263,
-            0.1327,
-        ),
-        (0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        (0.0, 0.0, -1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-    )
-    _MLP_B1: tuple[float, ...] = (
-        0.2096,
-        -0.0545,
-        0.0411,
-        -0.0774,
-        0.0712,
-        -0.0515,
-        0.1142,
-        -0.1536,
-        -0.0165,
-        -0.0406,
-        -0.0057,
-        -0.1141,
-        -0.2537,
-        -0.0708,
-        0.0,
-        0.0,
-    )
-    _MLP_W2: tuple[tuple[float, ...], ...] = (
-        (
-            -0.5533,
-            0.1243,
-            -0.0586,
-            0.2694,
-            0.1775,
-            0.6904,
-            -0.612,
-            -0.6721,
-            0.1089,
-            -0.3151,
-            -0.2266,
-            0.6836,
-            0.553,
-            0.1316,
-            0.0,
-            0.0,
-        ),
-        (
-            0.4866,
-            -0.3537,
-            -0.3049,
-            0.1065,
-            0.3523,
-            0.2681,
-            0.685,
-            -0.2023,
-            0.3564,
-            0.032,
-            0.2869,
-            -0.643,
-            -0.1178,
-            -0.3913,
-            0.0,
-            0.0,
-        ),
-        (
-            0.9353,
-            -0.0296,
-            -0.228,
-            0.365,
-            0.2985,
-            -0.577,
-            0.7394,
-            -0.7834,
-            -0.0296,
-            -0.3016,
-            0.0991,
-            -0.3052,
-            -0.0168,
-            -0.2636,
-            0.0,
-            0.0,
-        ),
-        (
-            -0.5245,
-            -0.4585,
-            0.3241,
-            0.3536,
-            -0.8439,
-            0.0308,
-            -0.2822,
-            0.6694,
-            0.1122,
-            0.5709,
-            -0.2848,
-            0.0029,
-            -0.4317,
-            0.4771,
-            0.0,
-            0.0,
-        ),
-        (
-            -0.8615,
-            0.2769,
-            0.428,
-            0.2384,
-            0.078,
-            -0.0782,
-            -0.9148,
-            0.0971,
-            -0.6462,
-            -0.2113,
-            0.332,
-            -0.0653,
-            -0.1841,
-            -0.1852,
-            0.0,
-            0.0,
-        ),
-        (
-            0.4288,
-            0.1636,
-            0.0341,
-            0.2456,
-            -0.0374,
-            -0.442,
-            0.6453,
-            -0.4765,
-            0.2322,
-            0.3662,
-            0.2476,
-            -0.2173,
-            0.5171,
-            -0.6964,
-            0.0,
-            0.0,
-        ),
-        (
-            0.2969,
-            0.1822,
-            -0.0293,
-            -0.8364,
-            0.1927,
-            0.1145,
-            0.0683,
-            0.5628,
-            0.5056,
-            -0.1877,
-            -0.2634,
-            -0.162,
-            -1.3362,
-            0.0181,
-            0.0,
-            0.0,
-        ),
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.9, -0.9),
-    )
-    _MLP_B2: tuple[float, ...] = (-0.45, 0.0499, -0.1904, 0.1716, -0.1535, 0.1598, 0.1023, 0.0)
+    def __init__(self) -> None:
+        self._conv_w: list[list[list[list[float]]]] = [
+            [[[float(c) for c in px] for px in row] for row in filt] for filt in INIT_CONV_W
+        ]
+        self._conv_b: list[float] = [float(b) for b in INIT_CONV_B]
+        self._w1: list[list[float]] = [[float(v) for v in row] for row in INIT_W1]
+        self._b1: list[float] = [float(b) for b in INIT_B1]
+        self._w2: list[list[float]] = [[float(v) for v in row] for row in INIT_W2]
+        self._b2: list[float] = [float(b) for b in INIT_B2]
+
+        self._raw_input_cache: dict[str, tuple[list[list[int]], tuple[float, ...]]] = {}
+        self._role_centroids: dict[str, list[float]] = {}
 
     @property
     def extractor_name(self) -> str:
@@ -1043,44 +866,97 @@ class LearnedPerceptualFeatureExtractor:
             ModalitySource.ENVIRONMENTAL_SENSOR,
         ) and ("entities" in envelope.metadata or "grid" in envelope.metadata)
 
+    def _forward_with_cache(
+        self,
+        patch_ch: list[list[int]],
+        scalars5: tuple[float, ...],
+    ) -> tuple[
+        tuple[float, ...],
+        list[float],
+        float,
+        list[float],
+        list[float],
+        list[list[list[float]]],
+        list[tuple[int, int]],
+    ]:
+        num_filters = len(self._conv_b)
+        feat_map: list[list[list[float]]] = [
+            [[0.0] * num_filters for _ in range(3)] for _ in range(3)
+        ]
+        for k in range(num_filters):
+            cw_k = self._conv_w[k]
+            cb_k = self._conv_b[k]
+            for oy in range(3):
+                for ox in range(3):
+                    acc = cb_k
+                    for ky in range(3):
+                        ch_row = patch_ch[oy + ky]
+                        w_row = cw_k[ky]
+                        for kx in range(3):
+                            acc += w_row[kx][ch_row[ox + kx]]
+                    feat_map[oy][ox][k] = math.tanh(acc)
+
+        avg_p = [0.0] * num_filters
+        max_p = [-2.0] * num_filters
+        max_coords: list[tuple[int, int]] = [(0, 0)] * num_filters
+        for k in range(num_filters):
+            s_k = 0.0
+            best_v = -2.0
+            best_coord = (0, 0)
+            for oy in range(3):
+                for ox in range(3):
+                    val = feat_map[oy][ox][k]
+                    s_k += val
+                    if val > best_v:
+                        best_v = val
+                        best_coord = (oy, ox)
+            avg_p[k] = s_k / 9.0
+            max_p[k] = best_v
+            max_coords[k] = best_coord
+
+        x17 = avg_p + max_p + list(scalars5)
+        h = [
+            math.tanh(b + sum(w_val * x_val for w_val, x_val in zip(row, x17)))
+            for row, b in zip(self._w1, self._b1)
+        ]
+        proj = [
+            b + sum(w_val * h_val for w_val, h_val in zip(row, h))
+            for row, b in zip(self._w2, self._b2)
+        ]
+        mean = sum(proj) / len(proj)
+        var = sum((p - mean) ** 2 for p in proj) / len(proj)
+        std = math.sqrt(var + 1e-5)
+        u = [(p - mean) / std for p in proj]
+        normed = tuple(math.tanh(val) for val in u)
+        return normed, u, std, x17, h, feat_map, max_coords
+
     def extract(self, envelope: ObservationEnvelope) -> list[PerceptualFeatureVector]:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
-        palette_scale = _extract_palette_scale(envelope, entities)
         grid, bg_feature, feature_counts = _extract_grid_context(envelope)
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("lrn_seg")))
-            _, x14, spatial, raw_color = _compute_entity_morphology_and_topology(
+            patch_ch, _, scalars5, spatial, raw_color = _extract_raw_patch_and_scalars(
                 ent,
-                palette_scale=palette_scale,
                 grid=grid,
                 bg_feature=bg_feature,
                 feature_counts=feature_counts,
             )
-
-            # Hidden layer (14 -> 16) with tanh activation
-            hidden = [
-                math.tanh(b + sum(w_val * x_val for w_val, x_val in zip(row, x14)))
-                for row, b in zip(self._MLP_W1, self._MLP_B1)
-            ]
-            # Output projection (16 -> 8) with LayerNorm + tanh
-            proj = [
-                b + sum(w_val * h_val for w_val, h_val in zip(row, hidden))
-                for row, b in zip(self._MLP_W2, self._MLP_B2)
-            ]
-            mean = sum(proj) / len(proj)
-            var = sum((p - mean) ** 2 for p in proj) / len(proj)
-            std = math.sqrt(var + 1e-5)
-            normed = tuple(math.tanh((p - mean) / std) for p in proj)
+            normed, _, _, _, _, _, _ = self._forward_with_cache(patch_ch, scalars5)
 
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
 
+            feat_id = _gen_id("feat_learned")
+            if len(self._raw_input_cache) >= 128:
+                self._raw_input_cache.pop(next(iter(self._raw_input_cache)))
+            self._raw_input_cache[feat_id] = (patch_ch, scalars5)
+
             features.append(
                 PerceptualFeatureVector(
-                    feature_id=_gen_id("feat_learned"),
+                    feature_id=feat_id,
                     observation_id=envelope.observation_id,
                     modality=envelope.source_modality,
                     channel_id=envelope.source_channel_id,
@@ -1098,6 +974,112 @@ class LearnedPerceptualFeatureExtractor:
             )
 
         return features
+
+    def adapt_role(
+        self,
+        feature_id: str,
+        role_name: str,
+        lr: float = 0.04,
+    ) -> tuple[float, ...] | None:
+        """Apply online supervised contrastive backpropagation from empirical role binding."""
+        cached = self._raw_input_cache.get(feature_id)
+        if cached is None:
+            return None
+        patch_ch, scalars5 = cached
+        z, u, std, x17, h, feat_map, max_coords = self._forward_with_cache(patch_ch, scalars5)
+        out_dim = len(z)
+
+        clean_role = role_name.strip().lower()
+        mu_pos = self._role_centroids.get(clean_role)
+        if mu_pos is None:
+            self._role_centroids[clean_role] = list(z)
+            mu_pos = self._role_centroids[clean_role]
+        else:
+            for j in range(out_dim):
+                mu_pos[j] = 0.8 * mu_pos[j] + 0.2 * z[j]
+
+        dz = [0.0] * out_dim
+        has_conflict = False
+        margin = 0.65
+        for other_role, mu_neg in self._role_centroids.items():
+            if not _roles_conflict_pair(clean_role, other_role):
+                continue
+            d_neg = math.sqrt(sum((z[j] - mu_neg[j]) ** 2 for j in range(out_dim)) / out_dim)
+            if d_neg < margin:
+                has_conflict = True
+                inv_d = 1.0 / max(d_neg, 1e-3)
+                coeff = -1.6 * (margin - d_neg) * inv_d
+                for j in range(out_dim):
+                    dz[j] += coeff * (z[j] - mu_neg[j])
+
+        d_pos = math.sqrt(sum((z[j] - mu_pos[j]) ** 2 for j in range(out_dim)) / out_dim)
+        if has_conflict or d_pos > 0.35:
+            pull_w = 0.6 if d_pos > 0.08 else 0.0
+            for j in range(out_dim):
+                dz[j] += pull_w * (z[j] - mu_pos[j])
+
+        if max(abs(val) for val in dz) < 1e-5:
+            return z
+
+        lr = min(lr, 0.015)
+
+        # Backprop through z = tanh(u) and LayerNorm
+        du = [dz[j] * (1.0 - z[j] * z[j]) for j in range(out_dim)]
+        du_mean = sum(du) / out_dim
+        du_u_mean = sum(du[j] * u[j] for j in range(out_dim)) / out_dim
+        d_proj = [(du[j] - du_mean - u[j] * du_u_mean) / std for j in range(out_dim)]
+
+        def _clip(g: float) -> float:
+            return max(-0.5, min(0.5, g))
+
+        # Backprop into W2, b2, and hidden activation h
+        hid_dim = len(h)
+        dh = [0.0] * hid_dim
+        for j in range(out_dim):
+            dp_j = d_proj[j]
+            self._b2[j] -= lr * _clip(dp_j)
+            row_w2 = self._w2[j]
+            for i in range(hid_dim):
+                dh[i] += dp_j * row_w2[i]
+                row_w2[i] = row_w2[i] * (1.0 - 1e-4) - lr * _clip(dp_j * h[i])
+
+        # Backprop into W1, b1, and pooled conv input x17
+        in_dim = len(x17)
+        dx17 = [0.0] * in_dim
+        for i in range(hid_dim):
+            d_pre1 = dh[i] * (1.0 - h[i] * h[i])
+            self._b1[i] -= lr * _clip(d_pre1)
+            row_w1 = self._w1[i]
+            for k in range(in_dim):
+                dx17[k] += d_pre1 * row_w1[k]
+                row_w1[k] = row_w1[k] * (1.0 - 1e-4) - lr * _clip(d_pre1 * x17[k])
+
+        # Backprop into 2D Spatial Conv stem (6x3x3x4), normalized over 3x3 positions
+        stem_lr = lr * 0.2 / 9.0
+        num_filters = len(self._conv_b)
+        for k in range(num_filters):
+            d_avg_k = dx17[k] / 9.0
+            d_max_k = dx17[num_filters + k]
+            max_oy, max_ox = max_coords[k]
+            cw_k = self._conv_w[k]
+            db_acc = 0.0
+            for oy in range(3):
+                for ox in range(3):
+                    d_fm = d_avg_k + (d_max_k if (oy == max_oy and ox == max_ox) else 0.0)
+                    f_val = feat_map[oy][ox][k]
+                    d_pre_conv = d_fm * (1.0 - f_val * f_val)
+                    db_acc += d_pre_conv
+                    g_clip = _clip(d_pre_conv)
+                    for ky in range(3):
+                        ch_row = patch_ch[oy + ky]
+                        w_row = cw_k[ky]
+                        for kx in range(3):
+                            ch_idx = ch_row[ox + kx]
+                            w_row[kx][ch_idx] -= stem_lr * g_clip
+            self._conv_b[k] -= stem_lr * _clip(db_acc)
+
+        updated, _, _, _, _, _, _ = self._forward_with_cache(patch_ch, scalars5)
+        return updated
 
 
 class FeatureExtractorRegistry:

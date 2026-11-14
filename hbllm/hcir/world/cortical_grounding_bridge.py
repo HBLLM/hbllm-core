@@ -91,6 +91,8 @@ class CorticalGroundingState:
     last_concept_assignments: list[ConceptAssignment] = field(default_factory=list)
     last_feature_concept_ids: dict[int, str] = field(default_factory=dict)
     last_role_priors: dict[int, dict[str, float]] = field(default_factory=dict)
+    episode_feature_memory: dict[int, PerceptualFeatureVector] = field(default_factory=dict)
+    adapted_role_pairs: set[tuple[int, str]] = field(default_factory=set)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0
 
@@ -150,12 +152,13 @@ class CorticalGroundingBridge:
         self.tracker = ThreeTierEntityTracker(spatial_distance_threshold=1.5)
         self.concept_store = WorkingConceptStore()
         if perception_mode in ("learned", "snn"):
-            # Bounded neural embeddings (LayerNorm+tanh) operate on tight [0.0..0.8] RMS scale
+            # Bounded neural embeddings (LayerNorm+tanh) accommodate minor neighbor jitter
+            # around moving objects while keeping distinct structural archetypes separated.
             self.concept_learner = ConceptLearner(
                 concept_store=self.concept_store,
-                assignment_threshold=0.18,
-                split_dispersion_threshold=0.35,
-                merge_distance_threshold=0.10,
+                assignment_threshold=0.30,
+                split_dispersion_threshold=0.48,
+                merge_distance_threshold=0.14,
             )
         else:
             self.concept_learner = ConceptLearner(concept_store=self.concept_store)
@@ -179,6 +182,8 @@ class CorticalGroundingBridge:
         """Apply boundary retention to grounding state on episode transitions."""
         apply_boundary_retention(self.state, boundary)
         self.state.last_role_priors.clear()
+        self.state.episode_feature_memory.clear()
+        self.state.adapted_role_pairs.clear()
         for ext in self.feature_registry.extractors:
             if hasattr(ext, "reset_traces"):
                 ext.reset_traces()
@@ -234,8 +239,20 @@ class CorticalGroundingBridge:
             elif hasattr(ent, "entity_id"):
                 ent_id = str(ent.entity_id)
 
+            sample_pos: tuple[float, ...] | None = None
             if hasattr(ent, "centroid") and ent.centroid is not None:
                 pos = tuple(float(x) for x in ent.centroid)
+                if hasattr(ent, "properties") and isinstance(ent.properties, dict):
+                    cells = ent.properties.get("cells")
+                    if isinstance(cells, (list, tuple)) and cells:
+                        r_rnd = int(round(pos[0]))
+                        c_rnd = int(round(pos[1]))
+                        if (r_rnd, c_rnd) not in cells:
+                            best_cell = min(
+                                cells,
+                                key=lambda pt: (pt[0] - pos[0]) ** 2 + (pt[1] - pos[1]) ** 2,
+                            )
+                            sample_pos = (float(best_cell[0]), float(best_cell[1]))
                 if hasattr(ent, "bounding_box") and ent.bounding_box is not None:
                     bb = ent.bounding_box
                     if len(bb) == 4:
@@ -350,6 +367,7 @@ class CorticalGroundingBridge:
             moved = bool(prev_coords is not None and (vel[0] != 0.0 or vel[1] != 0.0))
             entity_states[cand.id] = {
                 "position": pos,
+                "sample_pos": sample_pos or pos,
                 "bbox": bbox,
                 "color": color,
                 "size": ent_size,
@@ -423,7 +441,7 @@ class CorticalGroundingBridge:
                     entity_id = active_cands[0].candidate_ref.id
                 if infer_priors and "raw_color" in fv.feature_metadata:
                     priors = self.concept_learner.infer_role_priors(
-                        fv, max_distance=0.45, distance_scale=0.25
+                        fv, max_distance=0.65, distance_scale=0.42
                     )
                     if priors:
                         rc = int(fv.feature_metadata["raw_color"])
@@ -434,9 +452,9 @@ class CorticalGroundingBridge:
                 assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
                 concept_assignments.append(assignment)
                 if "raw_color" in fv.feature_metadata:
-                    feature_concept_ids[int(fv.feature_metadata["raw_color"])] = (
-                        assignment.concept_ref.id
-                    )
+                    rc_feat = int(fv.feature_metadata["raw_color"])
+                    feature_concept_ids[rc_feat] = assignment.concept_ref.id
+                    self.state.episode_feature_memory[rc_feat] = fv
             except Exception as exc:
                 logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
 
@@ -505,40 +523,99 @@ class CorticalGroundingBridge:
             "sge_outcome_verified": outcome_verified,
         }
 
-    def sync_theory_roles(self, theory: Any) -> int:
-        """Bind empirically discovered symbolic roles onto matching GroundedConcepts."""
-        if theory is None or not self.state.last_feature_vectors:
+    def sync_theory_roles(
+        self,
+        theory: Any,
+        hazard_features: set[int] | frozenset[int] | None = None,
+    ) -> int:
+        """Bind empirically discovered causal roles onto pure GroundedConcepts and adapt weights."""
+        if theory is None and not hazard_features:
             return 0
+        haz_set = set(hazard_features or ())
+        if theory is not None:
+            th_lethal = getattr(theory, "lethal_features", None)
+            if th_lethal:
+                haz_set |= set(th_lethal)
+
+        candidate_fvs: list[PerceptualFeatureVector] = list(self.state.last_feature_vectors)
+        seen_raw_feats = {
+            int(fv.feature_metadata["raw_color"])
+            for fv in candidate_fvs
+            if "raw_color" in fv.feature_metadata
+        }
+        for rc, mem_fv in self.state.episode_feature_memory.items():
+            if rc not in seen_raw_feats:
+                candidate_fvs.append(mem_fv)
+
+        if not candidate_fvs:
+            return 0
+
         bound = 0
         seen_pairs: set[tuple[int, str]] = set()
-        for fv in self.state.last_feature_vectors:
+        for fv in candidate_fvs:
             entity_id = fv.feature_metadata.get("entity_id")
             raw_color = fv.feature_metadata.get("raw_color")
-            if not entity_id or raw_color is None:
+            if raw_color is None:
                 continue
             feat = int(raw_color)
             cid = self.state.last_feature_concept_ids.get(feat)
-            target_concept = self.concept_store.get_concept(cid) if cid else None
             roles: list[str] = []
-            if theory.is_cargo(feat):
-                roles.append("cargo")
-            if feat in theory.goal_features:
-                roles.append("goal")
-            if feat in theory.receptacle_features:
-                roles.append("receptacle")
-            if theory.is_barrier(feat):
-                roles.append("barrier")
-            if theory.is_avatar_feature(feat):
-                roles.append("avatar")
+            if feat in haz_set:
+                roles.append("hazard")
+            if theory is not None:
+                if theory.is_cargo(feat):
+                    roles.append("cargo")
+                if feat in theory.goal_features:
+                    roles.append("goal")
+                if feat in theory.receptacle_features:
+                    roles.append("receptacle")
+                if theory.is_barrier(feat) and feat not in haz_set:
+                    roles.append("barrier")
+                if theory.is_avatar_feature(feat):
+                    roles.append("avatar")
             for r_name in roles:
                 if (feat, r_name) in seen_pairs:
                     continue
                 seen_pairs.add((feat, r_name))
-                if target_concept is not None:
-                    target_concept.bind_role(f"empirical_role:{r_name}", "1.000")
-                    target_concept.affordances.add(f"role:{r_name}")
+                refreshed_fv = fv
+                pair_key = (feat, r_name)
+                if (
+                    self.perception_mode in ("learned", "snn")
+                    and pair_key not in self.state.adapted_role_pairs
+                ):
+                    self.state.adapted_role_pairs.add(pair_key)
+                    for ext in self.feature_registry.extractors:
+                        adapt_fn = getattr(ext, "adapt_role", None)
+                        if callable(adapt_fn):
+                            adapted = adapt_fn(fv.feature_id, r_name)
+                            if isinstance(adapted, tuple) and adapted:
+                                refreshed_fv = PerceptualFeatureVector(
+                                    feature_id=fv.feature_id,
+                                    observation_id=fv.observation_id,
+                                    modality=fv.modality,
+                                    channel_id=fv.channel_id,
+                                    embedding=adapted,
+                                    spatial_extent=fv.spatial_extent,
+                                    semantic_labels=fv.semantic_labels,
+                                    feature_metadata=fv.feature_metadata,
+                                    provenance_hash=fv.provenance_hash,
+                                    timestamp=fv.timestamp,
+                                )
+                                break
+                pure_concept = self.concept_learner.bind_role_pure(
+                    cid,
+                    refreshed_fv,
+                    r_name,
+                    exemplar_entity_id=str(entity_id) if entity_id else None,
+                    confidence=1.0,
+                )
+                if pure_concept is not None:
+                    self.state.last_feature_concept_ids[feat] = pure_concept.concept_ref.id
+                    cid = pure_concept.concept_ref.id
                     bound += 1
-                elif self.concept_learner.bind_role_to_exemplar(str(entity_id), r_name):
+                elif entity_id and self.concept_learner.bind_role_to_exemplar(
+                    str(entity_id), r_name
+                ):
                     bound += 1
         return bound
 

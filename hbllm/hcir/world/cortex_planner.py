@@ -434,6 +434,60 @@ class EpistemicGoalScheduler:
 
         return goals, newly_unlocked
 
+    @staticmethod
+    def _role_scores_from_priors(
+        role_priors: dict[int, dict[str, float]],
+        feat_id: int,
+        has_cargo_ctx: bool,
+    ) -> tuple[float, float, float]:
+        """Return (preferred_role_score, barrier_score, hazard_score) in [0, 1]."""
+        priors = role_priors.get(feat_id)
+        if not priors:
+            return (0.0, 0.0, 0.0)
+        barrier_score = float(priors.get("barrier", 0.0))
+        hazard_score = float(priors.get("hazard", 0.0))
+        goal_score = max(
+            float(priors.get("goal", 0.0)),
+            float(priors.get("receptacle", 0.0)),
+        )
+        cargo_score = float(priors.get("cargo", 0.0))
+        pref_score = goal_score if has_cargo_ctx else max(goal_score, cargo_score)
+        return (pref_score, barrier_score, hazard_score)
+
+    @classmethod
+    def _is_prior_hazard_feat(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        feat_id: int,
+    ) -> bool:
+        """Return True if unverified perceptual role priors classify ``feat_id`` as hazardous."""
+        th = engine.symbolic_theory
+        if feat_id in th.goal_features or feat_id in th.cargo_features or th.is_walkable(feat_id):
+            return False
+        wm_priors: dict[int, dict[str, float]] = (
+            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+        )
+        has_cargo_ctx = bool(th.cargo_features or engine.learned_cargo_features)
+        pref_s, _, haz_s = cls._role_scores_from_priors(wm_priors, int(feat_id), has_cargo_ctx)
+        return haz_s >= 0.65 and pref_s < 0.45
+
+    @classmethod
+    def _high_confidence_prior_hazards(
+        cls,
+        engine: AutonomousEpistemicEngine,
+        bg: int,
+        av_feats: set[int],
+    ) -> set[int]:
+        """Return unverified feature IDs whose perceptual priors strongly indicate hazard."""
+        wm_priors: dict[int, dict[str, float]] = (
+            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+        )
+        return {
+            int(f)
+            for f in wm_priors
+            if int(f) != bg and int(f) not in av_feats and cls._is_prior_hazard_feat(engine, int(f))
+        }
+
     @classmethod
     def schedule_goals(
         cls,
@@ -1130,6 +1184,7 @@ class EpistemicGoalScheduler:
                 if (
                     e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
+                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
                 ):
                     continue
                 if avatar_pos is not None and e.feature_id in av_feats:
@@ -1280,6 +1335,7 @@ class EpistemicGoalScheduler:
                     or (e.role == EntityRole.OBSTACLE and not is_isolated_interior)
                     or e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
+                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
                 ):
                     continue
                 is_cargo_entity = (
@@ -1374,19 +1430,9 @@ class EpistemicGoalScheduler:
                 engine, curr_grid, H, W, bg, av_feats, avatar_pos, goals
             )
 
-            def _role_score_for_feature(feat_id: int) -> tuple[float, float]:
-                """Return (preferred_role_score, barrier_score) in [0, 1] from grounded priors."""
-                priors = role_priors.get(feat_id)
-                if not priors:
-                    return (0.0, 0.0)
-                barrier_score = float(priors.get("barrier", 0.0))
-                goal_score = max(
-                    float(priors.get("goal", 0.0)),
-                    float(priors.get("receptacle", 0.0)),
-                )
-                cargo_score = float(priors.get("cargo", 0.0))
-                pref_score = goal_score if has_cargo_ctx else max(goal_score, cargo_score)
-                return (pref_score, barrier_score)
+            def _role_score_for_feature(feat_id: int) -> tuple[float, float, float]:
+                """Return (preferred_role_score, barrier_score, hazard_score) in [0, 1]."""
+                return cls._role_scores_from_priors(role_priors, feat_id, has_cargo_ctx)
 
             def _stance_priority(p: tuple[int, int]) -> tuple[int, float, int]:
                 dist = abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
@@ -1405,10 +1451,14 @@ class EpistemicGoalScheduler:
                     ep = meta["entity_pos"]
                     raw_ef = meta.get("feature")
                     ef = int(raw_ef) if raw_ef is not None else -1
-                    pref_score, barrier_score = (
-                        _role_score_for_feature(ef) if ef >= 0 else (0.0, 0.0)
+                    pref_score, barrier_score, hazard_score = (
+                        _role_score_for_feature(ef) if ef >= 0 else (0.0, 0.0, 0.0)
                     )
                     if ef >= 0:
+                        if hazard_score >= 0.65 and pref_score < 0.45:
+                            return (8, hazard_score, dist)
+                        if barrier_score >= 0.72 and pref_score < 0.40:
+                            return (7, barrier_score, dist)
                         walk_n = sum(
                             1
                             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
@@ -1432,8 +1482,6 @@ class EpistemicGoalScheduler:
                             return (2, -round(pref_score, 3), dist)
                         if is_interior_switch:
                             return (3, -round(pref_score, 3), dist)
-                        if barrier_score >= 0.7 and pref_score < 0.4:
-                            return (7, 0.0, dist)
                         if pref_score >= 0.55:
                             return (4, -round(pref_score, 3), dist)
                         return (5 if cnt == 1 else 6, -round(pref_score, 3), dist)
@@ -1441,9 +1489,21 @@ class EpistemicGoalScheduler:
                 target_feat = (
                     int(meta["target_feature"]) if (meta and "target_feature" in meta) else p_feat
                 )
-                pref_score, barrier_score = (
-                    _role_score_for_feature(target_feat) if target_feat != bg else (0.0, 0.0)
+                pref_score, barrier_score, hazard_score = (
+                    _role_score_for_feature(target_feat) if target_feat != bg else (0.0, 0.0, 0.0)
                 )
+                if (
+                    hazard_score >= 0.65
+                    and pref_score < 0.45
+                    and target_feat not in th.goal_features
+                ):
+                    return (8, hazard_score, dist)
+                if (
+                    barrier_score >= 0.72
+                    and pref_score < 0.40
+                    and target_feat not in th.goal_features
+                ):
+                    return (7, barrier_score, dist)
                 p_cnt = int(np.count_nonzero(curr_grid == p_feat)) if p_feat != bg else 0
                 if (
                     p_feat != bg
@@ -1457,8 +1517,6 @@ class EpistemicGoalScheduler:
                     )
                 ):
                     return (1, -round(pref_score, 3), dist)
-                if barrier_score >= 0.7 and pref_score < 0.4:
-                    return (7, 0.0, dist)
                 if pref_score >= 0.55:
                     return (4, -round(pref_score, 3), dist)
                 return (5 if p_cnt == 1 else 6, -round(pref_score, 3), dist)
@@ -1486,6 +1544,12 @@ class EpistemicGoalScheduler:
                 )
             ]
         if not goals:
+            wm_priors_d: dict[int, dict[str, float]] = (
+                getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
+            )
+            has_cargo_d = bool(
+                engine.symbolic_theory.cargo_features or engine.learned_cargo_features
+            )
             structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
             primary_sgs = [
                 sg
@@ -1501,6 +1565,13 @@ class EpistemicGoalScheduler:
                 )
             ]
             cand_sgs = primary_sgs if primary_sgs else structural_goals
+
+            def _is_prior_blocked_feat(feat_val: int) -> bool:
+                if feat_val in engine.symbolic_theory.goal_features:
+                    return False
+                p_s, b_s, h_s = cls._role_scores_from_priors(wm_priors_d, feat_val, has_cargo_d)
+                return (h_s >= 0.65 and p_s < 0.45) or (b_s >= 0.72 and p_s < 0.40)
+
             for sg in cand_sgs:
                 feat = sg.get("feature")
                 if sg.get("is_midpoint") or sg.get("type") == "relational_alignment":
@@ -1513,6 +1584,7 @@ class EpistemicGoalScheduler:
                         and feat not in engine.symbolic_theory.goal_features
                         and feat not in engine.symbolic_theory.candidate_goal_features
                     )
+                    or _is_prior_blocked_feat(int(feat))
                 ):
                     continue
                 if (
@@ -1535,6 +1607,12 @@ class EpistemicGoalScheduler:
                             and cp not in panel_coords
                             and int(curr_grid[cp[0], cp[1]]) != bg
                         ):
+                            cp_feat = int(curr_grid[cp[0], cp[1]])
+                            if (
+                                cp_feat in engine.hazard_tracker.known_lethal_features
+                                or _is_prior_blocked_feat(cp_feat)
+                            ):
+                                continue
                             if cp not in goals:
                                 goals.append(cp)
                             if is_high_conf and (
@@ -1551,6 +1629,12 @@ class EpistemicGoalScheduler:
                         and pos not in panel_coords
                         and int(curr_grid[pos[0], pos[1]]) != bg
                     ):
+                        pos_feat = int(curr_grid[pos[0], pos[1]])
+                        if (
+                            pos_feat in engine.hazard_tracker.known_lethal_features
+                            or _is_prior_blocked_feat(pos_feat)
+                        ):
+                            continue
                         if pos not in goals:
                             goals.append(pos)
                         if is_high_conf and (
@@ -1558,7 +1642,33 @@ class EpistemicGoalScheduler:
                         ):
                             new_learned_positions.add(pos)
 
+            if len(goals) > 1 and avatar_pos is not None:
+
+                def _structural_priority(g: tuple[int, int]) -> tuple[int, float, int]:
+                    gf = int(curr_grid[g[0], g[1]])
+                    pref_g, bar_g, haz_g = (
+                        cls._role_scores_from_priors(wm_priors_d, gf, has_cargo_d)
+                        if gf != bg
+                        else (0.0, 0.0, 0.0)
+                    )
+                    dist_g = abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
+                    if gf in engine.symbolic_theory.goal_features:
+                        return (0, -round(pref_g, 3), dist_g)
+                    if haz_g >= 0.65 and pref_g < 0.45:
+                        return (8, haz_g, dist_g)
+                    if bar_g >= 0.72 and pref_g < 0.40:
+                        return (7, bar_g, dist_g)
+                    if pref_g >= 0.55:
+                        return (1, -round(pref_g, 3), dist_g)
+                    if pref_g >= 0.35:
+                        return (2, -round(pref_g, 3), dist_g)
+                    cnt_g = int(np.count_nonzero(curr_grid == gf)) if gf != bg else 0
+                    return (3 if cnt_g == 1 else 4, -round(pref_g, 3), dist_g)
+
+                goals.sort(key=_structural_priority)
+
         # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
+        prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
         if not goals:
             visited = set(getattr(engine.working_memory, "visited_cells", set()))
             if avatar_pos is not None:
@@ -1578,6 +1688,7 @@ class EpistemicGoalScheduler:
                                 (c_val == bg or engine.symbolic_theory.is_walkable(c_val))
                                 and not engine.symbolic_theory.is_barrier(c_val)
                                 and c_val not in engine.hazard_tracker.known_lethal_features
+                                and c_val not in prior_hazard_feats
                             ):
                                 reachable_passable.add((nr, nc))
                                 q_frontier.append((nr, nc))
@@ -1661,7 +1772,7 @@ class EpistemicGoalScheduler:
                 lb_idx = np.array([(r, c) for r, c in learned_b if 0 <= r < H and 0 <= c < W])
                 if lb_idx.size:
                     blocked[lb_idx[:, 0], lb_idx[:, 1]] = True
-            bad_feats = set(barrier_feats) | set(lethal_feats)
+            bad_feats = set(barrier_feats) | set(lethal_feats) | prior_hazard_feats
             if bad_feats:
                 blocked |= np.isin(curr_grid, list(bad_feats))
             passable = ~blocked
@@ -2009,12 +2120,19 @@ class MentalSimulationPlanner:
                     static_barriers.add((r, c))
 
         agent_state = {"inventory": getattr(engine.working_memory, "held_feature_ids", set())}
+        prior_hazard_feats = EpistemicGoalScheduler._high_confidence_prior_hazards(
+            engine, bg, av_feats
+        )
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
-                if engine.symbolic_theory.is_barrier(val, agent_state=agent_state) or (
-                    val in engine.hazard_tracker.known_lethal_features
-                    and val not in engine.mobile_threat_features
+                if (
+                    engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                    or (
+                        val in engine.hazard_tracker.known_lethal_features
+                        and val not in engine.mobile_threat_features
+                    )
+                    or (val in prior_hazard_feats and (r, c) not in engine.learned_goal_positions)
                 ):
                     static_barriers.add((r, c))
 
@@ -2036,10 +2154,14 @@ class MentalSimulationPlanner:
 
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
         all_lethals = engine.current_level_lethal_positions
-        safe_goals = set(goals) - all_lethals
+        safe_goals = {
+            g
+            for g in goals
+            if g not in all_lethals and int(curr_grid[g[0], g[1]]) not in prior_hazard_feats
+        }
         static_barriers.difference_update(safe_goals)
-        goal_features = (
-            engine.symbolic_theory.goal_features | engine.symbolic_theory.candidate_goal_features
+        goal_features = engine.symbolic_theory.goal_features | (
+            engine.symbolic_theory.candidate_goal_features - prior_hazard_feats
         )
         for gf in goal_features:
             if gf != bg and gf not in av_feats:

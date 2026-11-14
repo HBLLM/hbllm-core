@@ -1323,3 +1323,21 @@ def test_grid_push_seed_110_and_grid_nav_seed_200_zero_shot() -> None:
             obs, _, done, info = env_nav.step(act)
             steps += 1
         assert info.get("success") is True
+
+
+def test_visual_morphology_zero_shot_transfer_learned_and_snn() -> None:
+    """Both learned and SNN extractors transfer hazard/goal morphology zero-shot to unseen palettes."""
+    from benchmarks.perception_ablation import run_transfer_trial
+
+    for seed in (1, 3):
+        baseline_hc = run_transfer_trial("handcrafted", seed=seed)
+        res_learned = run_transfer_trial("learned", seed=seed)
+        res_snn = run_transfer_trial("snn", seed=seed)
+
+        assert baseline_hc.ep2_hazard_contact is True
+        assert res_learned.ep1_learned_hazard is True
+        assert res_learned.ep1_learned_goal is True
+        assert res_learned.ep2_solved is True
+        assert res_snn.ep1_learned_hazard is True
+        assert res_snn.ep1_learned_goal is True
+        assert res_snn.ep2_solved is True

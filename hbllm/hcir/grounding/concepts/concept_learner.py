@@ -259,6 +259,21 @@ class ConceptLearner:
     def total_assignments(self) -> int:
         return self._total_assignments
 
+    @staticmethod
+    def _concept_roles(concept: GroundedConcept) -> set[str]:
+        return {aff.removeprefix("role:") for aff in concept.affordances if aff.startswith("role:")}
+
+    @staticmethod
+    def _roles_conflict(roles_a: set[str], roles_b: set[str]) -> bool:
+        if not roles_a or not roles_b:
+            return False
+        compatible = {"goal", "receptacle"}
+        for ra in roles_a:
+            for rb in roles_b:
+                if ra != rb and not (ra in compatible and rb in compatible):
+                    return True
+        return False
+
     def bind_role_to_exemplar(
         self,
         exemplar_entity_id: str,
@@ -273,10 +288,89 @@ class ConceptLearner:
             if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
                 continue
             if exemplar_entity_id in concept.exemplar_entity_ids:
+                if self._roles_conflict(self._concept_roles(concept), {clean_role}):
+                    continue
                 concept.role_bindings[f"empirical_role:{clean_role}"] = f"{confidence:.3f}"
                 concept.affordances.add(f"role:{clean_role}")
                 return concept
         return None
+
+    def bind_role_pure(
+        self,
+        concept_id: str | None,
+        feature: PerceptualFeatureVector,
+        role_name: str,
+        *,
+        exemplar_entity_id: str | None = None,
+        confidence: float = 1.0,
+    ) -> GroundedConcept | None:
+        """Bind a causal role without collapsing conflicting roles onto one concept cluster."""
+        clean_role = role_name.strip().lower()
+        if not clean_role:
+            return None
+
+        feat_dict = self._embedding_to_dict(feature)
+        target = self._store.get_concept(concept_id) if concept_id else None
+        if (
+            target is not None
+            and target.lifecycle_state != ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+            and not self._roles_conflict(self._concept_roles(target), {clean_role})
+        ):
+            target.bind_role(f"empirical_role:{clean_role}", f"{confidence:.3f}")
+            target.affordances.add(f"role:{clean_role}")
+            target.add_prototype(feat_dict)
+            if exemplar_entity_id:
+                target.add_exemplar(exemplar_entity_id)
+            return target
+
+        # If target holds a conflicting role (e.g., barrier vs cargo), detach exemplar
+        # and assign to the nearest compatible pure concept or spawn a new pure cluster.
+        if target is not None and exemplar_entity_id:
+            target.exemplar_entity_ids.discard(exemplar_entity_id)
+
+        best_pure: GroundedConcept | None = None
+        best_dist = float("inf")
+        for concept in self._store.get_all_concepts():
+            if concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED:
+                continue
+            existing = self._concept_roles(concept)
+            if clean_role not in existing or self._roles_conflict(existing, {clean_role}):
+                continue
+            dist = self._mahalanobis_distance(feat_dict, concept, ignore_color_labels=True)
+            if dist <= 0.55 and dist < best_dist:
+                best_dist = dist
+                best_pure = concept
+
+        if best_pure is not None:
+            best_pure.bind_role(f"empirical_role:{clean_role}", f"{confidence:.3f}")
+            best_pure.affordances.add(f"role:{clean_role}")
+            best_pure.add_prototype(feat_dict)
+            if exemplar_entity_id:
+                best_pure.add_exemplar(exemplar_entity_id)
+            return best_pure
+
+        new_ref = GroundedConceptRef(id=_gen_concept_id())
+        pure_concept = GroundedConcept(
+            concept_ref=new_ref,
+            lifecycle_state=ConceptLifecycle.EMERGING,
+            grounding_quality=GroundingQuality.with_untested(
+                perceptual_stability=0.5,
+                temporal_persistence=0.2,
+                relational_consistency=0.0,
+                cross_modal_support=0.0,
+                predictive_utility=0.3,
+                interaction_support=0.5,
+                boundary_stability=0.4,
+                untested_dimensions={"cross_modal_support"},
+            ),
+        )
+        pure_concept.add_prototype(feat_dict)
+        if exemplar_entity_id:
+            pure_concept.add_exemplar(exemplar_entity_id)
+        pure_concept.bind_role(f"empirical_role:{clean_role}", f"{confidence:.3f}")
+        pure_concept.affordances.add(f"role:{clean_role}")
+        self._store.register_concept(pure_concept)
+        return pure_concept
 
     def infer_role_priors(
         self,
@@ -564,6 +658,11 @@ class ConceptLearner:
                 if concepts[j].concept_ref.id in merged_ids:
                     continue
 
+                if self._roles_conflict(
+                    self._concept_roles(concepts[i]),
+                    self._concept_roles(concepts[j]),
+                ):
+                    continue
                 dist = self._centroid_distance(concepts[i], concepts[j])
                 if dist <= self._merge_distance_threshold:
                     merged = self._merge_concepts(concepts[i], concepts[j])
