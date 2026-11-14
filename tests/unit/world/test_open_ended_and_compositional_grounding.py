@@ -9,7 +9,9 @@ import numpy as np
 
 from benchmarks.envs.external_benchmarks import (
     GymFrozenLakeBenchmarkEnv,
+    MiniGridDoorKeyBenchmarkEnv,
     MiniGridEmptyBenchmarkEnv,
+    MiniGridLavaGapBenchmarkEnv,
 )
 from benchmarks.envs.protocol import BenchmarkEnvironment
 from benchmarks.suites.runner import run_closed_loop_episode
@@ -332,20 +334,30 @@ def test_open_ended_pcfg_hypothesis_synthesis_falsification_and_proposals() -> N
 
 def test_independent_external_benchmarks_frozenlake_and_minigrid() -> None:
     """Verify third-party Gymnasium FrozenLake & MiniGrid environments work end-to-end with zero leakage."""
-    for env_cls, seed_base in (
-        (GymFrozenLakeBenchmarkEnv, 500),
-        (MiniGridEmptyBenchmarkEnv, 510),
+    for env_cls, seed_base, budget in (
+        (GymFrozenLakeBenchmarkEnv, 500, 60),
+        (MiniGridEmptyBenchmarkEnv, 510, 60),
+        (MiniGridLavaGapBenchmarkEnv, 520, 60),
+        (MiniGridDoorKeyBenchmarkEnv, 530, 80),
     ):
-        env = env_cls(max_steps=60)
+        # Default domain-consistent scrambled ontology keeps non-standard IDs (>= 10)
+        env = env_cls(max_steps=budget)
         assert isinstance(env, BenchmarkEnvironment)
 
-        obs_a = env.reset(seed=seed_base)
-        obs_b = env.reset(seed=seed_base + 1)
+        obs_default = env.reset(seed=seed_base)
+        assert obs_default.lattice is not None and obs_default.lattice.ndim == 2
+        assert len(obs_default.entities) == 0
+        non_zero_feats = {int(v) for v in np.unique(obs_default.lattice) if int(v) != 0}
+        assert non_zero_feats and all(f >= 10 for f in non_zero_feats)
+
+        # Opt-in per-seed ontology scrambling varies feature IDs across seeds
+        env_scrambled = env_cls(max_steps=budget, scramble_per_seed=True)
+        obs_a = env_scrambled.reset(seed=seed_base)
+        obs_b = env_scrambled.reset(seed=seed_base + 1)
         assert obs_a.lattice is not None and obs_a.lattice.ndim == 2
         assert obs_b.lattice is not None and obs_b.lattice.ndim == 2
         assert len(obs_a.entities) == 0
         assert len(obs_b.entities) == 0
-        # Seed-scrambled non-zero feature IDs differ across seeds
         assert set(np.unique(obs_a.lattice).tolist()) != set(np.unique(obs_b.lattice).tolist())
 
         # Oracle solves 100% across 3 independent seeds
@@ -353,7 +365,7 @@ def test_independent_external_benchmarks_frozenlake_and_minigrid() -> None:
             succ_o, steps_o, _, errs_o = run_closed_loop_episode(
                 env=env,
                 seed=s,
-                max_budget=60,
+                max_budget=budget,
                 baseline="oracle",
             )
             assert errs_o == []

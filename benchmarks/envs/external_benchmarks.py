@@ -61,11 +61,15 @@ class GymFrozenLakeBenchmarkEnv(BenchmarkEnvironment):
         p_frozen: float = 0.82,
         max_steps: int = 60,
         is_slippery: bool = False,
+        ontology_seed: int = 404,
+        scramble_per_seed: bool = False,
     ) -> None:
         self.size = size
         self.p_frozen = p_frozen
         self.max_steps = max_steps
         self.is_slippery = is_slippery
+        self.ontology_seed = ontology_seed
+        self.scramble_per_seed = scramble_per_seed
         self._env: gym.Env[Any, Any] | None = None
         self._desc: np.ndarray = np.empty((size, size), dtype="S1")
         self._state: int = 0
@@ -94,7 +98,7 @@ class GymFrozenLakeBenchmarkEnv(BenchmarkEnvironment):
         self.steps = 0
         self.done = False
 
-        rng = random.Random(self.current_seed)
+        rng = random.Random(self.current_seed if self.scramble_per_seed else self.ontology_seed)
         agent_id, goal_id, hole_id, wall_id = rng.sample(range(10, 95), 4)
         self._feature_map = {
             "empty": 0,
@@ -233,16 +237,22 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
     _MG_LEFT = 0
     _MG_RIGHT = 1
     _MG_FORWARD = 2
+    _MG_PICKUP = 3
+    _MG_TOGGLE = 5
 
     def __init__(
         self,
         env_id: str = "MiniGrid-Empty-6x6-v0",
         max_steps: int = 60,
         cardinal_mode: bool = True,
+        ontology_seed: int = 505,
+        scramble_per_seed: bool = False,
     ) -> None:
         self.env_id = env_id
         self.max_steps = max_steps
         self.cardinal_mode = cardinal_mode
+        self.ontology_seed = ontology_seed
+        self.scramble_per_seed = scramble_per_seed
         self._env: gym.Env[Any, Any] | None = None
         self._feature_map: dict[int, int] = {}
         self._agent_id: int = 10
@@ -261,7 +271,7 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
         self.steps = 0
         self.done = False
 
-        rng = random.Random(self.current_seed)
+        rng = random.Random(self.current_seed if self.scramble_per_seed else self.ontology_seed)
         non_empty_names = ("wall", "door", "key", "ball", "box", "goal", "lava", "floor")
         sampled = rng.sample(range(10, 95), len(non_empty_names) + 1)
         self._agent_id = sampled[0]
@@ -297,12 +307,24 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
         lattice[ay, ax] = self._agent_id
         return lattice
 
+    _MINIGRID_DIR_TO_DXDY: dict[int, tuple[int, int]] = {
+        0: (1, 0),
+        1: (0, 1),
+        2: (-1, 0),
+        3: (0, -1),
+    }
+
     def _make_observation(self, terminal: TerminalSignal | None) -> EmbodiedObservation:
         avail: tuple[int, ...] = (
             (ACTION_UP, ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT)
             if self.cardinal_mode
             else (self._MG_LEFT, self._MG_RIGHT, self._MG_FORWARD)
         )
+        metadata: dict[str, Any] = {}
+        if self._env is not None:
+            mission = getattr(self._env.unwrapped, "mission", None)
+            if isinstance(mission, str) and mission.strip():
+                metadata["mission"] = mission.strip()
         return EmbodiedObservation(
             lattice=self._render_lattice(),
             available_actions=avail,
@@ -310,12 +332,44 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
             context_id=f"minigrid_{self.env_id}_{self.current_seed}",
             episode_id=str(self.current_seed),
             entities=(),
+            metadata=metadata,
         )
 
     def _step_raw_minigrid(self, mg_action: int) -> tuple[float, bool, bool]:
         assert self._env is not None
         _, reward, terminated, truncated, _ = self._env.step(mg_action)
         return float(reward), bool(terminated), bool(truncated)
+
+    def _orient_toward_cardinal(self, act_id: int | None) -> tuple[float, bool, bool, bool]:
+        """Turn agent toward cardinal direction; returns ``(reward, terminated, truncated, valid)``."""
+        target_dir = self._CARDINAL_TO_MINIGRID_DIR.get(act_id) if act_id is not None else None
+        if target_dir is None or self._env is None:
+            return 0.0, False, False, False
+        unwrapped: Any = self._env.unwrapped
+        cur_dir = int(unwrapped.agent_dir)
+        diff = (target_dir - cur_dir) % 4
+        turn_seq: tuple[int, ...] = (
+            (self._MG_RIGHT,)
+            if diff == 1
+            else (self._MG_RIGHT, self._MG_RIGHT)
+            if diff == 2
+            else (self._MG_LEFT,)
+            if diff == 3
+            else ()
+        )
+        reward_f, terminated, truncated = 0.0, False, False
+        for turn_act in turn_seq:
+            reward_f, terminated, truncated = self._step_raw_minigrid(turn_act)
+            if terminated or truncated:
+                break
+        return reward_f, terminated, truncated, True
+
+    def _execute_cardinal_move(self, act_id: int | None) -> tuple[float, bool, bool]:
+        """Orient toward cardinal ``act_id`` and move forward one cell."""
+        reward_f, terminated, truncated, valid = self._orient_toward_cardinal(act_id)
+        if valid and not terminated and not truncated:
+            reward_f, terminated, truncated = self._step_raw_minigrid(self._MG_FORWARD)
+        return reward_f, terminated, truncated
 
     def step(self, action: Any) -> tuple[EmbodiedObservation, float, bool, dict[str, Any]]:
         """Execute one step against the unmodified MiniGrid environment."""
@@ -337,26 +391,7 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
         truncated = False
 
         if self.cardinal_mode:
-            target_dir = self._CARDINAL_TO_MINIGRID_DIR.get(act_id) if act_id is not None else None
-            if target_dir is not None:
-                unwrapped: Any = self._env.unwrapped
-                cur_dir = int(unwrapped.agent_dir)
-                diff = (target_dir - cur_dir) % 4
-                turn_seq: tuple[int, ...] = (
-                    (self._MG_RIGHT,)
-                    if diff == 1
-                    else (self._MG_RIGHT, self._MG_RIGHT)
-                    if diff == 2
-                    else (self._MG_LEFT,)
-                    if diff == 3
-                    else ()
-                )
-                for turn_act in turn_seq:
-                    reward_f, terminated, truncated = self._step_raw_minigrid(turn_act)
-                    if terminated or truncated:
-                        break
-                if not terminated and not truncated:
-                    reward_f, terminated, truncated = self._step_raw_minigrid(self._MG_FORWARD)
+            reward_f, terminated, truncated = self._execute_cardinal_move(act_id)
         elif act_id in (self._MG_LEFT, self._MG_RIGHT, self._MG_FORWARD):
             reward_f, terminated, truncated = self._step_raw_minigrid(int(act_id))
 
@@ -394,41 +429,185 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
             {"success": False, "steps": self.steps},
         )
 
-    def get_oracle_action(self) -> int:
-        """Compute optimal step toward MiniGrid goal cell via BFS."""
-        if self._env is None:
-            raise RuntimeError("Environment must be reset() before querying oracle.")
-
-        raw = self._raw_object_lattice()
+    def _bfs_first_cardinal(
+        self,
+        start: tuple[int, int],
+        raw: np.ndarray,
+        target_idx: int,
+        blocked: set[int],
+    ) -> int | None:
+        """Return first cardinal move on shortest BFS path to ``target_idx``, or ``None``."""
         height, width = raw.shape
-        unwrapped: Any = self._env.unwrapped
-        start = (int(unwrapped.agent_pos[1]), int(unwrapped.agent_pos[0]))
-        cur_dir = int(unwrapped.agent_dir)
-
-        blocked = {OBJECT_TO_IDX["wall"], OBJECT_TO_IDX["lava"]}
-        goal_idx = OBJECT_TO_IDX["goal"]
-
         queue: deque[tuple[tuple[int, int], int | None]] = deque([(start, None)])
         visited: set[tuple[int, int]] = {start}
-        best_cardinal: int | None = None
-
         while queue:
             (r, c), first_act = queue.popleft()
-            if int(raw[r, c]) == goal_idx:
-                best_cardinal = first_act
-                break
-
+            if int(raw[r, c]) == target_idx:
+                return first_act
             for act_id, dr, dc in _CARDINAL_DELTAS:
                 nr, nc = r + dr, c + dc
                 if 0 <= nr < height and 0 <= nc < width and (nr, nc) not in visited:
                     if int(raw[nr, nc]) not in blocked:
                         visited.add((nr, nc))
                         queue.append(((nr, nc), first_act if first_act is not None else act_id))
+        return None
+
+    def get_oracle_action(self) -> int:
+        """Compute optimal step toward MiniGrid goal cell via BFS."""
+        if self._env is None:
+            raise RuntimeError("Environment must be reset() before querying oracle.")
+
+        raw = self._raw_object_lattice()
+        unwrapped: Any = self._env.unwrapped
+        start = (int(unwrapped.agent_pos[1]), int(unwrapped.agent_pos[0]))
+        cur_dir = int(unwrapped.agent_dir)
+
+        blocked = {OBJECT_TO_IDX["wall"], OBJECT_TO_IDX["lava"]}
+        best_cardinal = self._bfs_first_cardinal(start, raw, OBJECT_TO_IDX["goal"], blocked)
 
         target_cardinal = best_cardinal if best_cardinal is not None else ACTION_RIGHT
         if self.cardinal_mode:
             return target_cardinal
 
+        target_dir = self._CARDINAL_TO_MINIGRID_DIR[target_cardinal]
+        if cur_dir == target_dir:
+            return self._MG_FORWARD
+        diff = (target_dir - cur_dir) % 4
+        return self._MG_LEFT if diff == 3 else self._MG_RIGHT
+
+
+class MiniGridLavaGapBenchmarkEnv(MiniGridEmptyBenchmarkEnv):
+    """Benchmark adapter for unmodified ``MiniGrid-LavaGapS6-v0`` (bottleneck + hazard)."""
+
+    def __init__(
+        self,
+        env_id: str = "MiniGrid-LavaGapS6-v0",
+        max_steps: int = 60,
+        cardinal_mode: bool = True,
+        ontology_seed: int = 606,
+        scramble_per_seed: bool = False,
+    ) -> None:
+        super().__init__(
+            env_id=env_id,
+            max_steps=max_steps,
+            cardinal_mode=cardinal_mode,
+            ontology_seed=ontology_seed,
+            scramble_per_seed=scramble_per_seed,
+        )
+
+
+class MiniGridDoorKeyBenchmarkEnv(MiniGridEmptyBenchmarkEnv):
+    """Benchmark adapter for unmodified ``MiniGrid-DoorKey-6x6-v0`` (key -> door -> goal)."""
+
+    def __init__(
+        self,
+        env_id: str = "MiniGrid-DoorKey-6x6-v0",
+        max_steps: int = 80,
+        cardinal_mode: bool = True,
+        ontology_seed: int = 707,
+        scramble_per_seed: bool = False,
+    ) -> None:
+        super().__init__(
+            env_id=env_id,
+            max_steps=max_steps,
+            cardinal_mode=cardinal_mode,
+            ontology_seed=ontology_seed,
+            scramble_per_seed=scramble_per_seed,
+        )
+
+    def _render_lattice(self) -> np.ndarray:
+        """Render MiniGrid world, treating opened doors as walkable empty tiles (``0``)."""
+        lattice = super()._render_lattice()
+        if self._env is None:
+            return lattice
+        unwrapped: Any = self._env.unwrapped
+        ax, ay = int(unwrapped.agent_pos[0]), int(unwrapped.agent_pos[1])
+        grid = unwrapped.grid
+        for x in range(int(grid.width)):
+            for y in range(int(grid.height)):
+                if (x, y) == (ax, ay):
+                    continue
+                cell = grid.get(x, y)
+                if cell is not None and cell.type == "door" and getattr(cell, "is_open", False):
+                    lattice[y, x] = 0
+        return lattice
+
+    def _execute_cardinal_move(self, act_id: int | None) -> tuple[float, bool, bool]:
+        """Orient toward cardinal ``act_id``, pick up keys / toggle unlocked doors, and step forward."""
+        reward_f, terminated, truncated, valid = self._orient_toward_cardinal(act_id)
+        if not valid or terminated or truncated or self._env is None:
+            return reward_f, terminated, truncated
+
+        unwrapped: Any = self._env.unwrapped
+        cur_dir = int(unwrapped.agent_dir)
+        dx, dy = self._MINIGRID_DIR_TO_DXDY.get(cur_dir, (0, 0))
+        fw_x = int(unwrapped.agent_pos[0]) + dx
+        fw_y = int(unwrapped.agent_pos[1]) + dy
+        cell = None
+        if 0 <= fw_x < int(unwrapped.grid.width) and 0 <= fw_y < int(unwrapped.grid.height):
+            cell = unwrapped.grid.get(fw_x, fw_y)
+
+        if cell is not None and cell.type == "key" and unwrapped.carrying is None:
+            reward_f, terminated, truncated = self._step_raw_minigrid(self._MG_PICKUP)
+        elif (
+            cell is not None
+            and cell.type == "door"
+            and not getattr(cell, "is_open", False)
+            and unwrapped.carrying is not None
+        ):
+            reward_f, terminated, truncated = self._step_raw_minigrid(self._MG_TOGGLE)
+
+        if not terminated and not truncated:
+            reward_f, terminated, truncated = self._step_raw_minigrid(self._MG_FORWARD)
+        return reward_f, terminated, truncated
+
+    def get_oracle_action(self) -> int:
+        """Two-phase BFS oracle: collect key first if door is closed, then navigate to goal."""
+        if self._env is None:
+            raise RuntimeError("Environment must be reset() before querying oracle.")
+
+        raw = self._raw_object_lattice()
+        unwrapped: Any = self._env.unwrapped
+        start = (int(unwrapped.agent_pos[1]), int(unwrapped.agent_pos[0]))
+
+        door_open = True
+        grid = unwrapped.grid
+        for x in range(int(grid.width)):
+            for y in range(int(grid.height)):
+                cell = grid.get(x, y)
+                if cell is not None and cell.type == "door" and not getattr(cell, "is_open", False):
+                    door_open = False
+                    break
+            if not door_open:
+                break
+
+        base_blocked = {OBJECT_TO_IDX["wall"], OBJECT_TO_IDX["lava"]}
+        best_cardinal: int | None = None
+        if unwrapped.carrying is None and not door_open and np.any(raw == OBJECT_TO_IDX["key"]):
+            best_cardinal = self._bfs_first_cardinal(
+                start,
+                raw,
+                OBJECT_TO_IDX["key"],
+                base_blocked | {OBJECT_TO_IDX["door"]},
+            )
+        if best_cardinal is None:
+            blocked = (
+                base_blocked
+                if (door_open or unwrapped.carrying is not None)
+                else (base_blocked | {OBJECT_TO_IDX["door"]})
+            )
+            best_cardinal = self._bfs_first_cardinal(
+                start,
+                raw,
+                OBJECT_TO_IDX["goal"],
+                blocked,
+            )
+
+        target_cardinal = best_cardinal if best_cardinal is not None else ACTION_RIGHT
+        if self.cardinal_mode:
+            return target_cardinal
+
+        cur_dir = int(unwrapped.agent_dir)
         target_dir = self._CARDINAL_TO_MINIGRID_DIR[target_cardinal]
         if cur_dir == target_dir:
             return self._MG_FORWARD

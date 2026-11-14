@@ -14,3 +14,14 @@ tasks:
     seeds: [510, 511, 512, 513, 514, 515, 516, 517, 518, 519]
     max_budget: 60
 
+  - id: minigrid_lavagap_independent
+    family: external_minigrid
+    env_class: benchmarks.envs.external_benchmarks.MiniGridLavaGapBenchmarkEnv
+    seeds: [520, 521, 522, 523, 524, 525, 526, 527, 528, 529]
+    max_budget: 60
+
+  - id: minigrid_doorkey_independent
+    family: external_minigrid
+    env_class: benchmarks.envs.external_benchmarks.MiniGridDoorKeyBenchmarkEnv
+    seeds: [530, 531, 532, 533, 534, 535, 536, 537, 538, 539]
+    max_budget: 80
