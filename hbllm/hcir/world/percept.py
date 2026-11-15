@@ -85,8 +85,9 @@ class EpisodeBoundaryKind(StrEnum):
 class RetentionPolicy(StrEnum):
     """What state a faculty retains across a boundary kind (WP0.5)."""
 
-    LEVEL_LOCAL = "level_local"  # cleared on LEVEL_COMPLETE and DEATH
-    CONTEXT_LOCAL = "context_local"  # retained across DEATH and LEVEL_COMPLETE
+    EPISODE_LOCAL = "episode_local"  # cleared on episode transitions (goal/death)
+    LEVEL_LOCAL = "episode_local"  # deprecated alias -> EPISODE_LOCAL
+    CONTEXT_LOCAL = "context_local"  # retained across episode resets within context
     LIFELONG = "lifelong"  # never cleared by boundaries
 
 
@@ -94,8 +95,8 @@ def apply_boundary_retention(owner: Any, boundary: Any) -> None:
     """Generic per-field retention for faculties (WP0.5/F1).
 
     Reads ``owner.FIELD_RETENTION`` — a class-level mapping of field name to
-    ``RetentionPolicy`` — and clears every field declared ``LEVEL_LOCAL`` on
-    LEVEL_COMPLETE / DEATH boundaries (fresh empty default by current type),
+    ``RetentionPolicy`` — and clears every field declared ``EPISODE_LOCAL`` on
+    episode transitions (fresh empty default by current type),
     leaving ``CONTEXT_LOCAL``/``LIFELONG`` fields untouched.
     """
     retention: dict[str, RetentionPolicy] = getattr(owner, "FIELD_RETENTION", {}) or {}
@@ -111,7 +112,7 @@ def apply_boundary_retention(owner: Any, boundary: Any) -> None:
         "death",
     ):
         for field_name, policy in retention.items():
-            if policy != RetentionPolicy.LEVEL_LOCAL or not hasattr(owner, field_name):
+            if policy != RetentionPolicy.EPISODE_LOCAL or not hasattr(owner, field_name):
                 continue
             cur = getattr(owner, field_name)
             if isinstance(cur, (set, dict, list)):
@@ -133,6 +134,18 @@ class EpisodeBoundary:
     )
     retain_dynamics: bool = True
     same_level: bool = False
+    same_context: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.same_context is not None:
+            object.__setattr__(self, "same_level", bool(self.same_context))
+        else:
+            object.__setattr__(self, "same_context", bool(self.same_level))
+
+    @property
+    def is_same_context(self) -> bool:
+        """True when episode resets within the exact same spatial/situational context."""
+        return bool(self.same_context if self.same_context is not None else self.same_level)
 
 
 @dataclass
@@ -389,3 +402,248 @@ class PerceptionRegistry:
         """Reset the registry to default."""
         cls._adapters.clear()
         cls._default_adapter = DefaultPerceptionAdapter()
+
+
+PlaceLocus = tuple[int | float, ...] | str
+
+
+def format_locus(locus: PlaceLocus | None) -> str:
+    """Render any coordinate tuple or symbolic PlaceLocus as a canonical display string."""
+    if locus is None:
+        return "none"
+    if isinstance(locus, tuple):
+        return "(" + ",".join(str(x) for x in locus) + ")"
+    return str(locus)
+
+
+def locus_token(locus: PlaceLocus | None) -> str:
+    """Render any coordinate tuple or symbolic PlaceLocus as an identifier-safe token."""
+    if locus is None:
+        return "none"
+    if isinstance(locus, tuple):
+        return "_".join(str(x) for x in locus)
+    return str(locus)
+
+
+@dataclass
+class ExogenousSignalTracker:
+    """Empirically isolates exogenous / uncontrollable signals from controllable dynamics.
+
+    Biological motivation (reafference cancellation / agency attribution):
+    - Signals whose mutations are statistically independent of executed actions
+      (mutating across multiple distinct non-local actions, I(Delta S; A) ~ 0) are
+      promoted into ``exogenous_loci``.
+    - External sensory adapters (e.g. plugin perception filters) may also supply explicit
+      exogenous masks for non-interactive status readouts or disconnected partitions.
+    """
+
+    FIELD_RETENTION = {
+        "exogenous_loci": RetentionPolicy.EPISODE_LOCAL,
+        "_untargeted_actions": RetentionPolicy.EPISODE_LOCAL,
+        "_untargeted_counts": RetentionPolicy.EPISODE_LOCAL,
+    }
+
+    exogenous_loci: set[PlaceLocus] = field(default_factory=set)
+    _untargeted_actions: dict[PlaceLocus, set[Any]] = field(default_factory=dict, repr=False)
+    _untargeted_counts: dict[PlaceLocus, int] = field(default_factory=dict, repr=False)
+    _cached_partition_key: tuple[Any, ...] | None = field(default=None, init=False, repr=False)
+    _cached_partition_rows: Any | None = field(default=None, init=False, repr=False)
+
+    def reset_episode(self, *, retain_long_term: bool = True) -> None:
+        """Reset transient empirical exogeneity statistics on episode boundary."""
+        self._cached_partition_key = None
+        self._cached_partition_rows = None
+        if not retain_long_term:
+            self.exogenous_loci.clear()
+            self._untargeted_actions.clear()
+            self._untargeted_counts.clear()
+
+    def mark_exogenous(self, loci: Any) -> None:
+        """Register externally supplied exogenous / non-interactive loci."""
+        for loc in loci:
+            self.exogenous_loci.add(loc)
+
+    def observe_transition(
+        self,
+        mutated_loci: list[PlaceLocus] | set[PlaceLocus],
+        action: Any,
+        *,
+        avatar_locus: PlaceLocus | None = None,
+        target_locus: PlaceLocus | None = None,
+        local_radius: float = 2.5,
+    ) -> None:
+        """Record non-local mutations to empirically discover exogenous ticking signals."""
+        if not mutated_loci:
+            return
+
+        def _is_near(a: PlaceLocus, b: PlaceLocus | None) -> bool:
+            if b is None or not isinstance(a, tuple) or not isinstance(b, tuple):
+                return a == b
+            if len(a) != len(b):
+                return False
+            return all(abs(float(x) - float(y)) <= local_radius for x, y in zip(a, b, strict=True))
+
+        for loc in mutated_loci:
+            if _is_near(loc, avatar_locus) or _is_near(loc, target_locus):
+                # Re-grounded by local motor or effector proximity
+                continue
+            cnt = self._untargeted_counts.get(loc, 0) + 1
+            self._untargeted_counts[loc] = cnt
+            acts = self._untargeted_actions.setdefault(loc, set())
+            if action is not None:
+                acts.add(action)
+            if len(acts) >= 2 or cnt >= 3:
+                self.exogenous_loci.add(loc)
+
+    def _compute_partitioned_rows(self, lattice: Any, bg: Any = 0) -> Any:
+        """Identify rows residing in topologically separated peripheral divider bands."""
+        import numpy as np
+
+        arr = np.asarray(lattice)
+        if arr.ndim != 2 or arr.shape[0] < 24 or arr.shape[1] == 0:
+            return None
+        H, W = arr.shape
+        try:
+            bg_val = int(bg)
+        except (TypeError, ValueError):
+            bg_val = 0
+
+        cache_sig = (
+            H,
+            W,
+            bg_val,
+            arr.tobytes() if arr.size <= 16384 else id(lattice),
+        )
+        if self._cached_partition_key == cache_sig and self._cached_partition_rows is not None:
+            return self._cached_partition_rows
+
+        flags = np.zeros(H, dtype=bool)
+        if arr.min() >= 0:
+            n_vals = int(arr.max()) + 1
+            counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in arr])
+            dom_vals = np.argmax(counts, axis=1)
+            dom_counts = counts[np.arange(H), dom_vals]
+            div_rows = (dom_vals != bg_val) & (dom_counts >= int(W * 0.85))
+        else:
+            div_rows = np.zeros(H, dtype=bool)
+            for rr in range(H):
+                vals, cnts = np.unique(arr[rr, :], return_counts=True)
+                idx = int(np.argmax(cnts))
+                if int(vals[idx]) != bg_val and int(cnts[idx]) >= int(W * 0.85):
+                    div_rows[rr] = True
+
+        band_depth = H // 4
+        if div_rows[: band_depth + 1].any():
+            for rr in range(min(band_depth + 1, H)):
+                if div_rows[rr + 1 : min(band_depth + 1, H)].any():
+                    flags[rr] = True
+        for div_r in range(band_depth, 2, -1):
+            line = arr[div_r, :]
+            vals, cnts = np.unique(line, return_counts=True)
+            if len(cnts) > 0:
+                idx = int(np.argmax(cnts))
+                if int(cnts[idx]) >= int(W * 0.85):
+                    line_color = int(vals[idx])
+                    banner_region = arr[:div_r, :]
+                    field_region = arr[div_r + 1 :, :]
+                    b_vals, b_cnts = np.unique(banner_region, return_counts=True)
+                    f_vals, f_cnts = np.unique(field_region, return_counts=True)
+                    if len(b_cnts) > 0 and len(f_cnts) > 0:
+                        b_max = int(np.argmax(b_cnts))
+                        banner_dom = int(b_vals[b_max])
+                        field_dom = int(f_vals[int(np.argmax(f_cnts))])
+                        has_distinct_bg = (banner_dom != field_dom) and (
+                            (b_cnts[b_max] / banner_region.size) >= 0.85
+                        )
+                        has_divider_line = (line_color != field_dom) and (
+                            int(cnts[idx]) >= int(W * 0.85)
+                        )
+                        if has_distinct_bg or has_divider_line:
+                            flags[: div_r + 1] = True
+                            break
+
+        bot_start = max(0, H - 1 - band_depth)
+        if div_rows[bot_start:].any():
+            for rr in range(bot_start, H):
+                if not flags[rr] and div_rows[bot_start:rr].any():
+                    flags[rr] = True
+        for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
+            if not (0 <= div_r < H):
+                continue
+            line = arr[div_r, :]
+            vals, cnts = np.unique(line, return_counts=True)
+            if len(cnts) > 0:
+                idx = int(np.argmax(cnts))
+                if int(cnts[idx]) >= int(W * 0.85):
+                    line_color = int(vals[idx])
+                    banner_region = arr[div_r + 1 :, :]
+                    field_region = arr[:div_r, :]
+                    b_vals, b_cnts = np.unique(banner_region, return_counts=True)
+                    f_vals, f_cnts = np.unique(field_region, return_counts=True)
+                    if len(b_cnts) > 0 and len(f_cnts) > 0:
+                        b_max = int(np.argmax(b_cnts))
+                        banner_dom = int(b_vals[b_max])
+                        field_dom = int(f_vals[int(np.argmax(f_cnts))])
+                        has_distinct_bg = (banner_dom != field_dom) and (
+                            (b_cnts[b_max] / banner_region.size) >= 0.85
+                        )
+                        has_divider_line = (line_color != field_dom) and (
+                            int(cnts[idx]) >= int(W * 0.85)
+                        )
+                        if has_distinct_bg or has_divider_line:
+                            flags[div_r:] = True
+                            break
+
+        self._cached_partition_key = cache_sig
+        self._cached_partition_rows = flags
+        return flags
+
+    @classmethod
+    def is_partitioned_or_enclosing(
+        cls,
+        locus: PlaceLocus,
+        lattice: Any = None,
+        bg: Any = 0,
+        *,
+        include_outer_edge: bool = False,
+        tracker: ExogenousSignalTracker | None = None,
+    ) -> bool:
+        """True when ``locus`` lies in an enclosing structural boundary or partitioned sideband."""
+        if not isinstance(locus, tuple) or len(locus) < 2 or lattice is None:
+            return False
+        import numpy as np
+
+        arr = np.asarray(lattice)
+        if arr.ndim != 2:
+            return False
+        H, W = arr.shape
+        r, c = int(locus[0]), int(locus[1])
+        if include_outer_edge and (r == 0 or r == H - 1 or c == 0 or c == W - 1):
+            return True
+        if not (0 <= r < H and 0 <= c < W):
+            return include_outer_edge
+        if H < 24 or (not include_outer_edge and W < 24):
+            return False
+
+        t = tracker if tracker is not None else cls()
+        flags = t._compute_partitioned_rows(arr, bg=bg)
+        return bool(flags[r]) if flags is not None else False
+
+    def is_exogenous(
+        self,
+        locus: PlaceLocus,
+        *,
+        lattice: Any = None,
+        bg: Any = 0,
+        include_outer_edge: bool = False,
+    ) -> bool:
+        """Return True if ``locus`` is empirically exogenous or topologically partitioned."""
+        if locus in self.exogenous_loci:
+            return True
+        return self.is_partitioned_or_enclosing(
+            locus,
+            lattice=lattice,
+            bg=bg,
+            include_outer_edge=include_outer_edge,
+            tracker=self,
+        )

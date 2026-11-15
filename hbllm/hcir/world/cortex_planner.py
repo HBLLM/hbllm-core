@@ -39,6 +39,7 @@ from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
+from hbllm.hcir.world.percept import PlaceLocus, format_locus, locus_token
 from hbllm.hcir.world.prefrontal_working_memory import HeldItem
 from hbllm.hcir.world.topological_graph_induction import GeodesicManifoldRouter
 
@@ -55,7 +56,7 @@ class MentalSimulationStep:
 
     action: Any
     action_data: dict[str, Any] | None = None
-    predicted_avatar_pos: tuple[int, int] = (0, 0)
+    predicted_avatar_pos: PlaceLocus = (0, 0)
     expected_mutation: str | None = None
     is_deterministic_geodesic: bool = False
 
@@ -64,16 +65,14 @@ class MentalSimulationStep:
         return CausalPredicate(
             variable=f"simulation_step:{self.action}",
             operator="==",
-            value=f"({self.predicted_avatar_pos[0]},{self.predicted_avatar_pos[1]})",
+            value=format_locus(self.predicted_avatar_pos),
             relation=f"geodesic:{self.is_deterministic_geodesic}",
             target_entity=str(self.action),
         )
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Propose atomic HCIR transaction recording simulation step."""
-        node_id = (
-            f"sim_step_{self.action}_{self.predicted_avatar_pos[0]}_{self.predicted_avatar_pos[1]}"
-        )
+        node_id = f"sim_step_{self.action}_{locus_token(self.predicted_avatar_pos)}"
         return [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
@@ -127,7 +126,10 @@ class EpistemicGoalProposal:
                 node_data={
                     "goals_count": len(self.goals),
                     "confirmed_count": len(self.confirmed_goals),
-                    "new_learned_positions": [list(p) for p in self.new_learned_goal_positions],
+                    "new_learned_positions": [
+                        list(p) if isinstance(p, tuple) else p
+                        for p in self.new_learned_goal_positions
+                    ],
                     "new_candidate_features": sorted(self.new_candidate_features),
                 },
             )
@@ -182,7 +184,7 @@ class EpistemicGoalScheduler:
             ap = (er + dr, ec + dc)
             if not (0 <= ap[0] < H and 0 <= ap[1] < W):
                 continue
-            if ap in engine.learned_barriers or ap in engine.current_level_lethal_positions:
+            if ap in engine.learned_barriers or ap in engine.current_context_hazards:
                 continue
             ap_feat = int(curr_grid[ap[0], ap[1]])
             if not (ap_feat == bg or th.is_walkable(ap_feat) or ap == avatar_pos):
@@ -195,7 +197,7 @@ class EpistemicGoalScheduler:
                 f1 = int(curr_grid[b1[0], b1[1]])
                 b1_open = (
                     b1 not in engine.learned_barriers
-                    and b1 not in engine.current_level_lethal_positions
+                    and b1 not in engine.current_context_hazards
                     and not th.is_barrier(f1)
                     and (
                         f1 == bg
@@ -262,7 +264,7 @@ class EpistemicGoalScheduler:
             unexplored_safe = [
                 ap
                 for ap in safe_stances
-                if ap not in engine.exhausted_candidate_goals and not th.is_position_explored(ap)
+                if ap not in engine.exhausted_candidate_goals and not th.is_locus_explored(ap)
             ]
             if unexplored_safe:
                 for ap in unexplored_safe:
@@ -322,11 +324,11 @@ class EpistemicGoalScheduler:
         added_adj = 0
         for ap in adj_walkable:
             if ap == avatar_pos and just_probed_here:
-                engine.symbolic_theory.mark_position_explored(ap, reason="actuator_probed")
+                engine.symbolic_theory.mark_locus_explored(ap, reason="actuator_probed")
                 engine.exhausted_candidate_goals.add(ap)
                 continue
             if ap in engine.exhausted_candidate_goals or (
-                engine.symbolic_theory.is_position_explored(ap) and ap != avatar_pos
+                engine.symbolic_theory.is_locus_explored(ap) and ap != avatar_pos
             ):
                 continue
             added_adj += 1
@@ -338,7 +340,7 @@ class EpistemicGoalScheduler:
                     "max_visits": 2,
                 }
         any_adj_probed = any(
-            engine.symbolic_theory.is_position_actuator_probed(ap) for ap in adj_walkable
+            engine.symbolic_theory.is_locus_actuator_probed(ap) for ap in adj_walkable
         )
         is_singleton = int(np.count_nonzero(curr_grid == feature_id)) == 1
         allow_contact_escalation = added_adj == 0 or (
@@ -348,9 +350,9 @@ class EpistemicGoalScheduler:
             allow_contact_escalation
             and adj_walkable
             and entity_pos not in engine.exhausted_candidate_goals
-            and not engine.symbolic_theory.is_position_explored(entity_pos)
+            and not engine.symbolic_theory.is_locus_explored(entity_pos)
             and entity_pos not in engine.learned_barriers
-            and entity_pos not in engine.current_level_lethal_positions
+            and entity_pos not in engine.current_context_hazards
             and not engine.symbolic_theory.is_barrier(feature_id)
         ):
             if entity_pos not in target_goals:
@@ -594,7 +596,7 @@ class EpistemicGoalScheduler:
                 and 0 <= target_coord[1] < W
                 and target_coord != avatar_pos
                 and target_coord not in engine.learned_barriers
-                and not engine.symbolic_theory.is_position_explored(target_coord)
+                and not engine.symbolic_theory.is_locus_explored(target_coord)
             ):
                 tc_feat = int(curr_grid[target_coord[0], target_coord[1]])
                 arb_meta = getattr(arbitrated, "metadata", None) or {}
@@ -661,7 +663,7 @@ class EpistemicGoalScheduler:
                             if 0 <= target_coord[0] + dr < H
                             and 0 <= target_coord[1] + dc < W
                             and (
-                                not engine.symbolic_theory.is_position_explored(
+                                not engine.symbolic_theory.is_locus_explored(
                                     (target_coord[0] + dr, target_coord[1] + dc)
                                 )
                                 or (target_coord[0] + dr, target_coord[1] + dc) == avatar_pos
@@ -1064,7 +1066,7 @@ class EpistemicGoalScheduler:
             elif wm.active_schema is None and wm.procedural_library:
                 matched = wm.find_matching_skill(
                     available_actions=available_actions,
-                    context={"current_level": get_engine_state_attr(engine, "current_level", 0)},
+                    context={"context_epoch": get_engine_state_attr(engine, "context_epoch", 0)},
                 )
                 if matched is not None:
                     skill_name, _ = matched
@@ -1135,18 +1137,18 @@ class EpistemicGoalScheduler:
                 # Avatar is at stance waiting for unlock actuation
                 goals = [avatar_pos]
 
-        # Panel coordinates filter
-        panel_coords: set[tuple[int, int]] = set()
+        # Non-navigation interactive control clusters filter
+        interactive_cluster_loci: set[tuple[int, int]] = set()
         if any(engine.is_spatial_effector(a) for a in available_actions):
-            panels = PerceptionEngine.detect_affordance_panels(entities, curr_grid, bg=bg)
-            for p in panels:
+            clusters = PerceptionEngine.detect_affordance_clusters(entities, curr_grid, bg=bg)
+            for p in clusters:
                 for item in p["items"]:
                     r0, r1, c0, c1 = item.bounding_box
                     for rr in range(max(0, r0 - 2), min(H, r1 + 3)):
                         for cc in range(max(0, c0 - 2), min(W, c1 + 3)):
-                            panel_coords.add((rr, cc))
+                            interactive_cluster_loci.add((rr, cc))
 
-        # (b) Hypothesized goals from previous level knowledge or role inference
+        # (b) Hypothesized goals from prior context knowledge or role inference
         if not goals:
             hypothesized_goals: list[tuple[int, int]] = []
             for e in entities:
@@ -1173,7 +1175,7 @@ class EpistemicGoalScheduler:
                     e.feature_id in engine.symbolic_theory.cargo_features
                     or e.feature_id in engine.learned_cargo_features
                 )
-                if engine.symbolic_theory.is_position_explored(e.grid_pos) and (
+                if engine.symbolic_theory.is_locus_explored(e.grid_pos) and (
                     not has_cargo_context or is_cargo_entity
                 ):
                     continue
@@ -1195,7 +1197,7 @@ class EpistemicGoalScheduler:
                         continue
                 elif e.feature_id in av_feats:
                     continue
-                if e.grid_pos in panel_coords:
+                if e.grid_pos in interactive_cluster_loci:
                     continue
                 max_entity_area = max(64, int(H * W * 0.15))
                 if (
@@ -1320,14 +1322,14 @@ class EpistemicGoalScheduler:
                     continue
                 if e.feature_id in av_feats:
                     continue
-                if e.grid_pos in panel_coords:
+                if e.grid_pos in interactive_cluster_loci:
                     continue
                 is_isolated_interior = (
                     1 <= e.area <= 2
                     and 1 <= e.grid_pos[0] < H - 1
                     and 1 <= e.grid_pos[1] < W - 1
                     and has_discrete_interact
-                    and not engine.symbolic_theory.is_position_explored(e.grid_pos)
+                    and not engine.symbolic_theory.is_locus_explored(e.grid_pos)
                     and e.feature_id not in engine.symbolic_theory.goal_features
                 )
                 if (
@@ -1355,7 +1357,7 @@ class EpistemicGoalScheduler:
                         )
                     )
                     and e.grid_pos not in engine.learned_barriers
-                    and e.grid_pos not in engine.current_level_lethal_positions
+                    and e.grid_pos not in engine.current_context_hazards
                 )
                 if (
                     engine.symbolic_theory.is_feature_explored(e.feature_id)
@@ -1363,7 +1365,7 @@ class EpistemicGoalScheduler:
                     and not is_potential_cargo_receptor
                 ):
                     continue
-                if engine.symbolic_theory.is_position_explored(e.grid_pos) and (
+                if engine.symbolic_theory.is_locus_explored(e.grid_pos) and (
                     not has_cargo_context or is_cargo_entity
                 ):
                     continue
@@ -1512,7 +1514,7 @@ class EpistemicGoalScheduler:
                     and any(
                         0 <= p[0] + dr < H
                         and 0 <= p[1] + dc < W
-                        and th.is_position_actuator_probed((p[0] + dr, p[1] + dc))
+                        and th.is_locus_actuator_probed((p[0] + dr, p[1] + dc))
                         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
                     )
                 ):
@@ -1534,7 +1536,7 @@ class EpistemicGoalScheduler:
                 for g in engine.learned_goal_positions
                 if 0 <= g[0] < H
                 and 0 <= g[1] < W
-                and g not in panel_coords
+                and g not in interactive_cluster_loci
                 and (
                     avatar_pos is None
                     or (
@@ -1604,7 +1606,7 @@ class EpistemicGoalScheduler:
                             0 <= cp[0] < H
                             and 0 <= cp[1] < W
                             and cp != avatar_pos
-                            and cp not in panel_coords
+                            and cp not in interactive_cluster_loci
                             and int(curr_grid[cp[0], cp[1]]) != bg
                         ):
                             cp_feat = int(curr_grid[cp[0], cp[1]])
@@ -1626,7 +1628,7 @@ class EpistemicGoalScheduler:
                         and 0 <= pos[0] < H
                         and 0 <= pos[1] < W
                         and pos != avatar_pos
-                        and pos not in panel_coords
+                        and pos not in interactive_cluster_loci
                         and int(curr_grid[pos[0], pos[1]]) != bg
                     ):
                         pos_feat = int(curr_grid[pos[0], pos[1]])
@@ -1707,7 +1709,7 @@ class EpistemicGoalScheduler:
                 cp
                 for cp in reachable_passable
                 if cp not in visited
-                and cp not in panel_coords
+                and cp not in interactive_cluster_loci
                 and any(
                     (cp[0] + dr, cp[1] + dc) in visited
                     for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
@@ -1715,7 +1717,9 @@ class EpistemicGoalScheduler:
             ]
             if not frontier_candidates:
                 frontier_candidates = [
-                    cp for cp in reachable_passable if cp not in visited and cp not in panel_coords
+                    cp
+                    for cp in reachable_passable
+                    if cp not in visited and cp not in interactive_cluster_loci
                 ]
 
             opt_eng = getattr(engine, "option_discovery", None)
@@ -1728,7 +1732,9 @@ class EpistemicGoalScheduler:
                 bottleneck_frontiers = [
                     cp
                     for cp in reachable_passable
-                    if cp in opt_bottlenecks and cp not in visited and cp not in panel_coords
+                    if cp in opt_bottlenecks
+                    and cp not in visited
+                    and cp not in interactive_cluster_loci
                 ]
                 if bottleneck_frontiers:
                     bottleneck_frontiers.sort(
@@ -1745,18 +1751,18 @@ class EpistemicGoalScheduler:
                 satisfied_when[nearest_frontier] = {"max_visits": 1}
 
         # Frontier Exhaustion Epistemic Contradiction:
-        # If no reachable targets remain while unverified prior-level blacklists
+        # If no reachable targets remain while unverified prior-context blacklists
         # (known_lethal_features from earlier levels) hide interior entities on the grid,
         # invalidate the stale prior labels so exploration can proceed.
         if (
             not goals
             and avatar_pos is not None
-            and engine.symbolic_theory.has_prior_level_transition
+            and engine.symbolic_theory.has_prior_context_transition
             and not engine.symbolic_theory.labels_non_stationary
             and not getattr(getattr(engine, "working_memory", None), "concept_role_priors", None)
         ):
             th = engine.symbolic_theory
-            verified_lethal = th.current_level_verified_features("lethal")
+            verified_lethal = th.context_verified_features("lethal")
             unverified_lethals = (
                 set(getattr(engine.hazard_tracker, "known_lethal_features", ())) - verified_lethal
             )
@@ -1766,16 +1772,16 @@ class EpistemicGoalScheduler:
                 for c in range(W)
                 if (r, c) != avatar_pos
             ):
-                from hbllm.hcir.world.cortex_causal import invalidate_stale_cross_level_ontology
+                from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
-                invalidate_stale_cross_level_ontology(
+                invalidate_stale_context_ontology(
                     th,
                     hazard_tracker=engine.hazard_tracker,
                     episodic_cortex=getattr(engine, "episodic_cortex", None),
                     working_memory=engine.working_memory,
                     engine_or_view=engine,
                     bg_feature=bg,
-                    preserve_current_level=True,
+                    preserve_current_context=True,
                     reason="frontier_exhausted_over_prior_blacklist",
                 )
                 for e_blk in entities:
@@ -1785,7 +1791,7 @@ class EpistemicGoalScheduler:
                         and e_blk.grid_pos != avatar_pos
                         and not th.is_barrier(e_blk.feature_id)
                         and e_blk.grid_pos not in engine.learned_barriers
-                        and e_blk.grid_pos not in engine.current_level_lethal_positions
+                        and e_blk.grid_pos not in engine.current_context_hazards
                     ):
                         goals.append(e_blk.grid_pos)
                         satisfied_when[e_blk.grid_pos] = {"max_visits": 2}
@@ -1796,7 +1802,7 @@ class EpistemicGoalScheduler:
                 for g in goals
                 if (
                     (g != avatar_pos or (g in satisfied_when and "entity_pos" in satisfied_when[g]))
-                    and (g in confirmed_goals or g not in panel_coords)
+                    and (g in confirmed_goals or g not in interactive_cluster_loci)
                 )
             ]
 
@@ -1812,7 +1818,7 @@ class EpistemicGoalScheduler:
                     or (has_cargo_context and int(curr_grid[g[0], g[1]]) not in all_cargo_feats)
                 )
                 and (
-                    not engine.symbolic_theory.is_position_explored(g)
+                    not engine.symbolic_theory.is_locus_explored(g)
                     or has_cargo_context
                     or g in confirmed_goals
                 )
@@ -1820,8 +1826,8 @@ class EpistemicGoalScheduler:
             or (
                 g in satisfied_when
                 and "entity_pos" in satisfied_when[g]
-                and not engine.symbolic_theory.is_position_explored(satisfied_when[g]["entity_pos"])
-                and (not engine.symbolic_theory.is_position_explored(g) or g == avatar_pos)
+                and not engine.symbolic_theory.is_locus_explored(satisfied_when[g]["entity_pos"])
+                and (not engine.symbolic_theory.is_locus_explored(g) or g == avatar_pos)
             )
         ]
         if unexhausted_goals:
@@ -1830,7 +1836,7 @@ class EpistemicGoalScheduler:
             clear_exhausted = True
 
         # Exclude all known static lethal coordinates from candidate attractors
-        all_lethals = engine.current_level_lethal_positions
+        all_lethals = engine.current_context_hazards
         goals = [g for g in goals if g not in all_lethals]
 
         # Reachability Gating: Discard goals physically disconnected from avatar
@@ -2210,8 +2216,8 @@ class MentalSimulationPlanner:
                 ):
                     static_barriers.add((r, c))
 
-        # Explicitly ground all static lethal positions from hazard tracker and level memory
-        for r, c in engine.current_level_lethal_positions:
+        # Explicitly ground all static hazards from hazard tracker and context memory
+        for r, c in engine.current_context_hazards:
             if 0 <= r < H and 0 <= c < W:
                 static_barriers.add((r, c))
 
@@ -2227,7 +2233,7 @@ class MentalSimulationPlanner:
                         static_barriers.add((r, c))
 
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
-        all_lethals = engine.current_level_lethal_positions
+        all_lethals = engine.current_context_hazards
         safe_goals = {
             g
             for g in goals
@@ -2388,11 +2394,8 @@ class MentalSimulationPlanner:
             or (
                 (not check_start_explored or start_pos not in satisfied_when)
                 and (
-                    (
-                        check_start_explored
-                        and engine.symbolic_theory.is_position_explored(start_pos)
-                    )
-                    or engine.symbolic_theory.is_position_explored(probe_target_pos)
+                    (check_start_explored and engine.symbolic_theory.is_locus_explored(start_pos))
+                    or engine.symbolic_theory.is_locus_explored(probe_target_pos)
                 )
             )
         ):
@@ -2443,9 +2446,7 @@ class MentalSimulationPlanner:
             )
             if not candidates:
                 if is_unlock_sg and cur_sg is not None:
-                    engine.symbolic_theory.mark_position_explored(
-                        te_pos, reason="actuator_exhausted"
-                    )
+                    engine.symbolic_theory.mark_locus_explored(te_pos, reason="actuator_exhausted")
                     engine.exhausted_candidate_goals.add(start_pos)
                     cur_sg.metadata["triggered"] = True
                 return None
@@ -2492,7 +2493,7 @@ class MentalSimulationPlanner:
                 ]
 
         if mark_probed_pos:
-            engine.symbolic_theory.mark_position_explored(start_pos, reason="actuator_probed")
+            engine.symbolic_theory.mark_locus_explored(start_pos, reason="actuator_probed")
             engine.exhausted_candidate_goals.add(start_pos)
         if cur_sg is not None:
             cur_sg.metadata["triggered"] = True
@@ -2678,7 +2679,7 @@ class MentalSimulationPlanner:
                     and e.feature_id not in cargo_set
                     and e.grid_pos not in pushable_blocks
                     and e.grid_pos not in engine.learned_barriers
-                    and e.grid_pos not in engine.current_level_lethal_positions
+                    and e.grid_pos not in engine.current_context_hazards
                 ]
                 if not cand_receptors:
                     cand_receptors = [
@@ -2692,7 +2693,7 @@ class MentalSimulationPlanner:
                         and int(np.count_nonzero(curr_grid == e.feature_id)) <= 4
                         and e.grid_pos not in pushable_blocks
                         and e.grid_pos not in engine.learned_barriers
-                        and e.grid_pos not in engine.current_level_lethal_positions
+                        and e.grid_pos not in engine.current_context_hazards
                     ]
                 if cand_receptors:
                     wm_priors: dict[int, dict[str, float]] = (
@@ -3852,8 +3853,14 @@ class MentalSimulationPlanner:
             if subgoal_plan:
                 # Prefrontal Safety Gate: Validate first step does not step into a collision hazard
                 first_pos = subgoal_plan[0].predicted_avatar_pos
-                if first_pos is not None and engine.collision_cones.is_collision_hazard(
-                    first_pos[0], first_pos[1], 1
+                if (
+                    isinstance(first_pos, tuple)
+                    and len(first_pos) >= 2
+                    and isinstance(first_pos[0], (int, float))
+                    and isinstance(first_pos[1], (int, float))
+                    and engine.collision_cones.is_collision_hazard(
+                        int(first_pos[0]), int(first_pos[1]), 1
+                    )
                 ):
                     logger.info(
                         "MentalSimulationPlanner: Hierarchical static plan rejected - first step collides with dynamic hazard at %s",
@@ -3877,8 +3884,14 @@ class MentalSimulationPlanner:
             )
             if teleo_plan:
                 first_pos = teleo_plan[0].predicted_avatar_pos
-                if first_pos is not None and engine.collision_cones.is_collision_hazard(
-                    first_pos[0], first_pos[1], 1
+                if (
+                    isinstance(first_pos, tuple)
+                    and len(first_pos) >= 2
+                    and isinstance(first_pos[0], (int, float))
+                    and isinstance(first_pos[1], (int, float))
+                    and engine.collision_cones.is_collision_hazard(
+                        int(first_pos[0]), int(first_pos[1]), 1
+                    )
                 ):
                     logger.info(
                         "MentalSimulationPlanner: Teleological static plan rejected - first step collides with dynamic hazard at %s",
@@ -3941,7 +3954,7 @@ class MentalSimulationPlanner:
                         if (kr, kc) in active_barriers or (
                             kr,
                             kc,
-                        ) in engine.current_level_lethal_positions:
+                        ) in engine.current_context_hazards:
                             ray_blocked = True
                             break
                         if bg_is_impassable_void and 0 <= kr < H and 0 <= kc < W:
@@ -4250,7 +4263,7 @@ class MentalSimulationPlanner:
                     barriers=effective_barriers,
                     grid_bounds=(H, W),
                     held_items=held_set,
-                    lethal_positions=engine.current_level_lethal_positions,
+                    lethal_positions=engine.current_context_hazards,
                     max_iterations=32,
                     body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
                     tool_barrier_affinities=getattr(
@@ -4353,7 +4366,7 @@ class MentalSimulationPlanner:
         """
         H, W = curr_grid.shape
         bg = engine.estimate_background(curr_grid)
-        lethal_positions = engine.current_level_lethal_positions
+        lethal_positions = engine.current_context_hazards
         lethal_features = engine.hazard_tracker.known_lethal_features
 
         # Living sentry sightlines and physical threat footprints are never relaxable
@@ -4514,7 +4527,7 @@ class MentalSimulationPlanner:
         for e in entities:
             if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
                 continue
-            if engine.symbolic_theory.is_position_explored(e.grid_pos):
+            if engine.symbolic_theory.is_locus_explored(e.grid_pos):
                 continue
             if e.grid_pos in goals:
                 continue
@@ -4632,7 +4645,7 @@ class MentalSimulationPlanner:
                 barriers=static_barriers,
                 grid_bounds=(H, W),
                 held_items=held_set,
-                lethal_positions=engine.current_level_lethal_positions,
+                lethal_positions=engine.current_context_hazards,
                 max_iterations=32,
                 body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
                 tool_barrier_affinities=getattr(

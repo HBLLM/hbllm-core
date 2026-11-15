@@ -81,22 +81,22 @@ class EpistemicFeedbackAssimilator:
                 wf = int(view.prev_grid[r, c])
                 if wf in av:
                     continue
-                # Detect cross-level label contradiction when safely traversing prior beliefs
-                if th.has_prior_level_transition and not has_sge_priors and wf != bg_val:
-                    prior_lethal_falsified = wf in lethal and not th.is_verified_in_current_level(
+                # Detect cross-context label contradiction when safely traversing prior beliefs
+                if th.has_prior_context_transition and not has_sge_priors and wf != bg_val:
+                    prior_lethal_falsified = wf in lethal and not th.is_verified_in_context(
                         "lethal", wf
                     )
                     prior_goal_falsified = (
                         not is_success
                         and wf in th.goal_features
-                        and not th.is_verified_in_current_level("goal", wf)
+                        and not th.is_verified_in_context("goal", wf)
                         and not th.cargo_features
                         and not th.receptacle_features
                         and not getattr(view, "learned_cargo_features", None)
                     )
                     if prior_lethal_falsified or prior_goal_falsified:
                         from hbllm.hcir.world.cortex_causal import (
-                            invalidate_stale_cross_level_ontology,
+                            invalidate_stale_context_ontology,
                         )
 
                         reason = (
@@ -104,14 +104,14 @@ class EpistemicFeedbackAssimilator:
                             if prior_lethal_falsified
                             else f"non_terminal_traversal_over_prior_goal:{wf}"
                         )
-                        invalidate_stale_cross_level_ontology(
+                        invalidate_stale_context_ontology(
                             th,
                             hazard_tracker=view.hazard_tracker,
                             episodic_cortex=getattr(view, "episodic_cortex", None),
                             working_memory=wm,
                             engine_or_view=view,
                             bg_feature=bg_val,
-                            preserve_current_level=True,
+                            preserve_current_context=True,
                             reason=reason,
                         )
                         lethal = view.hazard_tracker.known_lethal_features
@@ -316,7 +316,7 @@ class EpistemicFeedbackAssimilator:
 
         curr_grid = view.normalize_sensory_input(curr_grid)
         if view.prev_grid is not None and view.prev_grid.shape != curr_grid.shape:
-            # Lattice extent changed (new level/episode): prior-lattice
+            # Lattice extent changed (new context/episode): prior-lattice
             # diffs are incomparable — start the episode's diff chain fresh.
             view.apply_wm_delta(WorkingMemoryDelta("prev_grid", None))
             return
@@ -365,9 +365,7 @@ class EpistemicFeedbackAssimilator:
                     view.symbolic_theory.mark_feature_explored(
                         expected_feat, reason="target_absent_or_consumed"
                     )
-                    view.symbolic_theory.mark_position_explored(
-                        target_pos, reason="feature_consumed"
-                    )
+                    view.symbolic_theory.mark_locus_explored(target_pos, reason="feature_consumed")
                     goals_to_retire.add(target_pos)
                     logger.info(
                         "AutonomousEpistemicEngine: Epistemic goal satisfied — feature %s absent at %s (now %s)",
@@ -389,7 +387,7 @@ class EpistemicFeedbackAssimilator:
                         view.symbolic_theory.mark_feature_explored(
                             expected_feat, reason="visited_without_surprise"
                         )
-                    view.symbolic_theory.mark_position_explored(target_pos, reason="visited_target")
+                    view.symbolic_theory.mark_locus_explored(target_pos, reason="visited_target")
                     if is_adjacent_stance:
                         view.exhausted_candidate_goals.add(target_pos)
                     goals_to_retire.add(target_pos)
@@ -800,7 +798,7 @@ class EpistemicFeedbackAssimilator:
                                         view.symbolic_theory.retract_barrier(
                                             nf_u, reason="unlocked_by_remote_door"
                                         )
-                                        view.symbolic_theory.unmark_position_explored((nr_u, nc_u))
+                                        view.symbolic_theory.unmark_locus_explored((nr_u, nc_u))
                                         view.exhausted_candidate_goals.discard((nr_u, nc_u))
                                         view.record_learned_goal((nr_u, nc_u))
                                         view.symbolic_theory.induce_candidate_goal(
@@ -1213,7 +1211,7 @@ class EpistemicFeedbackAssimilator:
                     # ── Fresh start (no prior knowledge) ──────────────────────
                     # No dynamics to cross-reference. Use the original heuristic:
                     # the largest group of entities sharing the same displacement
-                    # is most likely the avatar (first level, typically no enemies).
+                    # is most likely the avatar (initial context, typically no enemies).
                     best_delta, pairs = max(delta_groups.items(), key=lambda item: len(item[1]))
                     EpistemicFeedbackAssimilator._commit_avatar_identity(
                         view,
@@ -1780,11 +1778,9 @@ class EpistemicFeedbackAssimilator:
                             )
                             if not is_avatar and is_confirmed_goal:
                                 if (
-                                    view.symbolic_theory.has_prior_level_transition
+                                    view.symbolic_theory.has_prior_context_transition
                                     and val in view.symbolic_theory.goal_features
-                                    and not view.symbolic_theory.is_verified_in_current_level(
-                                        "goal", val
-                                    )
+                                    and not view.symbolic_theory.is_verified_in_context("goal", val)
                                     and not view.symbolic_theory.cargo_features
                                     and not getattr(
                                         getattr(view, "working_memory", None),
@@ -1793,17 +1789,17 @@ class EpistemicFeedbackAssimilator:
                                     )
                                 ):
                                     from hbllm.hcir.world.cortex_causal import (
-                                        invalidate_stale_cross_level_ontology,
+                                        invalidate_stale_context_ontology,
                                     )
 
-                                    invalidate_stale_cross_level_ontology(
+                                    invalidate_stale_context_ontology(
                                         view.symbolic_theory,
                                         hazard_tracker=view.hazard_tracker,
                                         episodic_cortex=getattr(view, "episodic_cortex", None),
                                         working_memory=getattr(view, "working_memory", None),
                                         engine_or_view=view,
                                         bg_feature=getattr(view, "bg_feature", 0),
-                                        preserve_current_level=True,
+                                        preserve_current_context=True,
                                         reason=f"prior_goal_blocked_on_collision:{val}",
                                     )
                                     view.symbolic_theory.induce_barrier(val, evidence="collision")
@@ -2082,54 +2078,29 @@ class EpistemicFeedbackAssimilator:
         if _hazard_tracker is not None and hasattr(_hazard_tracker, "mobile_threat_features"):
             movable_features.update(_hazard_tracker.mobile_threat_features)
 
-        # Divider-line scan is invariant for the whole assimilate call:
-        # compute each row's dominant value/count once (lazily), then reuse.
-        _divider_rows: np.ndarray | None = None
+        _wm_exog = getattr(view, "working_memory", None)
+        _eff_target = (
+            (int(action_data["y"]), int(action_data["x"]))
+            if isinstance(action_data, dict) and "x" in action_data and "y" in action_data
+            else None
+        )
+        if _wm_exog is not None and hasattr(_wm_exog, "exogenous_tracker") and diff.mutated_pixels:
+            _wm_exog.exogenous_tracker.observe_transition(
+                [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
+                action,
+                avatar_locus=_avatar_pos_now,
+                target_locus=_eff_target,
+            )
 
-        def _hud_dividers() -> np.ndarray:
-            nonlocal _divider_rows
-            rows = _prev_grid
-            n_vals = int(rows.max()) + 1
-            counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in rows])
-            dom_vals = np.argmax(counts, axis=1)
-            dom_counts = counts[np.arange(rows.shape[0]), dom_vals]
-            _divider_rows = (dom_vals != bg) & (dom_counts >= int(rows.shape[1] * 0.85))
-            return _divider_rows
-
-        # The HUD predicate depends only on the mutated row: the divider-slice
-        # test is precomputed once per row instead of per mutated pixel.
-        _hud_row_flags: np.ndarray | None = None
-
-        def _hud_flags() -> np.ndarray:
-            nonlocal _hud_row_flags
-            pH, _ = _prev_grid.shape
-            max_hud_depth = pH // 4
-            div_rows = _divider_rows if _divider_rows is not None else _hud_dividers()
-            flags = np.zeros(pH, dtype=bool)
-            # Top peripheral band partitioned by a solid non-background divider
-            # line spanning >= 85% width.
-            for r in range(min(max_hud_depth + 1, pH)):
-                if div_rows[r + 1 : min(max_hud_depth + 1, pH)].any():
-                    flags[r] = True
-            # Bottom peripheral band, symmetric to the top band.
-            for r in range(max(0, pH - 1 - max_hud_depth), pH):
-                if not flags[r] and div_rows[max(0, pH - 1 - max_hud_depth) : r].any():
-                    flags[r] = True
-            _hud_row_flags = flags
-            return flags
-
-        def is_hud_mutation(r: int, c: int) -> bool:
-            """Exogenous / peripheral status region isolation: detects uncontrollable or partitioned peripheral mutations."""
-            exog = getattr(getattr(view, "working_memory", None), "exogenous_uncontrollable", None)
-            if exog and (r, c) in exog:
-                return True
-            if _prev_grid is None:
-                return False
-            pH, pW = _prev_grid.shape
-            if pH < 24 or pW < 24:
-                return False
-            flags = _hud_row_flags if _hud_row_flags is not None else _hud_flags()
-            return bool(flags[r])
+        def is_exogenous_mutation(r: int, c: int) -> bool:
+            """Isolate uncontrollable exogenous / topologically partitioned mutations (I(DeltaS; A) ~ 0)."""
+            if _wm_exog is not None and hasattr(_wm_exog, "is_exogenous_locus"):
+                return bool(
+                    _wm_exog.is_exogenous_locus(
+                        (r, c), lattice=_prev_grid, bg=bg, include_outer_edge=False
+                    )
+                )
+            return False
 
         av_radius = max(2, int(round(math.sqrt(max(1, view.avatar_size)))))
 
@@ -2148,7 +2119,7 @@ class EpistemicFeedbackAssimilator:
         lost_counts: dict[int, int] = {}
         gained_counts: dict[int, int] = {}
         for r, c, old_v, new_v in diff.mutated_pixels:
-            if not is_hud_mutation(r, c) and not is_local_to_avatar(r, c):
+            if not is_exogenous_mutation(r, c) and not is_local_to_avatar(r, c):
                 if old_v != bg and old_v != _bg_feature:
                     lost_counts[old_v] = lost_counts.get(old_v, 0) + 1
                 if new_v != bg and new_v != _bg_feature:
@@ -2170,7 +2141,7 @@ class EpistemicFeedbackAssimilator:
             for r, c, old_v, new_v in diff.mutated_pixels
             if old_v not in movable_features
             and new_v not in movable_features
-            and not is_hud_mutation(r, c)
+            and not is_exogenous_mutation(r, c)
             and not is_local_to_avatar(r, c)
         ]
 
@@ -2277,7 +2248,7 @@ class EpistemicFeedbackAssimilator:
                     if view.avatar_pos is not None:
                         satisfied_when_map.pop(view.avatar_pos, None)
                     if trigger_pos is not None:
-                        view.symbolic_theory.mark_position_explored(
+                        view.symbolic_theory.mark_locus_explored(
                             trigger_pos, reason="remote_mutation_triggered"
                         )
                     view.mental_plan.clear()
@@ -2338,7 +2309,7 @@ class EpistemicFeedbackAssimilator:
                 if receptacle_feat is not None:
                     _sym_theory.induce_receptacle(receptacle_feat, evidence="cargo_delivery_win")
                     _sym_theory.induce_goal(receptacle_feat, evidence=TerminalSignal.SUCCESS)
-                    _sym_theory.mark_verified_in_current_level("goal", receptacle_feat)
+                    _sym_theory.mark_verified_in_context("goal", receptacle_feat)
                     if hasattr(view, "learned_receptacle_positions"):
                         view.learned_receptacle_positions.add(cargo_win_target)
             elif view.avatar_pos is not None and (
@@ -2423,7 +2394,7 @@ class EpistemicFeedbackAssimilator:
                         and not is_substrate
                     ):
                         _sym_theory.induce_goal(goal_feat, evidence=TerminalSignal.SUCCESS)
-                        _sym_theory.mark_verified_in_current_level("goal", goal_feat)
+                        _sym_theory.mark_verified_in_context("goal", goal_feat)
                         view.learned_barriers.discard(win_target)
                         logger.info(
                             "AutonomousEpistemicEngine: Grounded invariant WIN GOAL FEATURE %d at %s",
@@ -2447,7 +2418,7 @@ class EpistemicFeedbackAssimilator:
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
                             _sym_theory.induce_goal(pe.feature_id, evidence=TerminalSignal.SUCCESS)
-                            _sym_theory.mark_verified_in_current_level("goal", pe.feature_id)
+                            _sym_theory.mark_verified_in_context("goal", pe.feature_id)
                             view.learned_barriers.discard(win_target)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded invariant WIN GOAL ENTITY feature %d (area=%d)",
@@ -2470,7 +2441,7 @@ class EpistemicFeedbackAssimilator:
                         )
                     ):
                         _sym_theory.induce_goal(sim_feat, evidence=TerminalSignal.SUCCESS)
-                        _sym_theory.mark_verified_in_current_level("goal", sim_feat)
+                        _sym_theory.mark_verified_in_context("goal", sim_feat)
 
             if view.active_hypothesis:
                 view.active_hypothesis.confirmed = True
@@ -2492,9 +2463,11 @@ class EpistemicFeedbackAssimilator:
                 grid_snapshot=curr_grid,
             )
 
-            # Level transition: cleanly reset episodic spatial memory for the next level
+            # Context transition: cleanly reset episodic spatial memory for the next context
             view.reset_episode(
-                retain_dynamics=True, is_new_level=True, level=view.current_level + 1
+                retain_dynamics=True,
+                is_new_context=True,
+                context_epoch=view.context_epoch + 1,
             )
             return
         elif view.avatar_pos is not None and not is_failure:
@@ -2602,10 +2575,10 @@ class EpistemicFeedbackAssimilator:
                             and not _sym_theory.is_walkable(cand_feat_int)
                             and feat_count <= max(64, int(total_cells * 0.40))
                         ):
-                            was_prior_safe = _sym_theory.has_prior_level_transition and (
+                            was_prior_safe = _sym_theory.has_prior_context_transition and (
                                 (
                                     cand_feat_int in _sym_theory.goal_features
-                                    and not _sym_theory.is_verified_in_current_level(
+                                    and not _sym_theory.is_verified_in_context(
                                         "goal", cand_feat_int
                                     )
                                 )
@@ -2613,19 +2586,19 @@ class EpistemicFeedbackAssimilator:
                                     cand_feat_int != bg
                                     and cand_feat_int != _bg_feature
                                     and cand_feat_int in _sym_theory.walkable_features
-                                    and not _sym_theory.is_verified_in_current_level(
+                                    and not _sym_theory.is_verified_in_context(
                                         "walkable", cand_feat_int
                                     )
                                 )
                                 or (
                                     cand_feat_int in _sym_theory.cargo_features
-                                    and not _sym_theory.is_verified_in_current_level(
+                                    and not _sym_theory.is_verified_in_context(
                                         "cargo", cand_feat_int
                                     )
                                 )
                             )
                             _hazard_tracker.register_lethal_feature(cand_feat_int)
-                            _sym_theory.mark_verified_in_current_level("lethal", cand_feat_int)
+                            _sym_theory.mark_verified_in_context("lethal", cand_feat_int)
                             _sym_theory.retract_cargo(cand_feat_int, reason="lethal_hazard")
                             _sym_theory.retract_goal(cand_feat_int, reason="lethal_hazard")
                             _sym_theory.retract_walkable(cand_feat_int, reason="lethal_hazard")
@@ -2639,17 +2612,17 @@ class EpistemicFeedbackAssimilator:
                                 None,
                             ):
                                 from hbllm.hcir.world.cortex_causal import (
-                                    invalidate_stale_cross_level_ontology,
+                                    invalidate_stale_context_ontology,
                                 )
 
-                                invalidate_stale_cross_level_ontology(
+                                invalidate_stale_context_ontology(
                                     _sym_theory,
                                     hazard_tracker=_hazard_tracker,
                                     episodic_cortex=getattr(view, "episodic_cortex", None),
                                     working_memory=getattr(view, "working_memory", None),
                                     engine_or_view=view,
                                     bg_feature=_bg_feature,
-                                    preserve_current_level=True,
+                                    preserve_current_context=True,
                                     reason=f"prior_safe_became_lethal:{cand_feat_int}",
                                 )
                             logger.info(
@@ -2659,18 +2632,14 @@ class EpistemicFeedbackAssimilator:
                             )
                     view.exhausted_candidate_goals.add(target_pos)
 
-                    # Trajectory-level aversive conditioning:
+                    # Trajectory-scale aversive conditioning:
                     # The destination cell target_pos resulted in catastrophic loss/death.
                     # Ground it as a static lethal position and barrier so neither mental simulation
                     # nor exploratory probes step into this coordinate again!
                     _hazard_tracker.register_lethal_position(target_pos)
                     view.record_learned_barrier(target_pos)
-                    view.level_learned_barriers.setdefault(view.current_level, set()).add(
-                        target_pos
-                    )
-                    view.level_lethal_positions.setdefault(view.current_level, set()).add(
-                        target_pos
-                    )
+                    view.context_barriers.setdefault(view.context_epoch, set()).add(target_pos)
+                    view.context_hazards.setdefault(view.context_epoch, set()).add(target_pos)
 
                     # Blacklist all cardinal incoming moves into target_pos from immediate neighbors
                     for m_dr, m_dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:

@@ -15,7 +15,7 @@ and ACC conflict monitoring:
 3. ACC Conflict Monitor & Limit-Cycle Breaker:
    - Detects motor deadlocks (e.g. 2-cycle or 3-cycle oscillations) and forces orthogonal exploration.
 4. Epistemic Curiosity Explorer:
-   - Systematically probes uncalibrated actions, unvisited spatial frontiers, and affordance panels.
+   - Systematically probes uncalibrated actions, unvisited spatial frontiers, and interactive control clusters.
    - Emits pure EpistemicProbeProposals to maintain HCIR Reasoning and State Ownership Invariants.
 """
 
@@ -41,6 +41,7 @@ from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDet
 from hbllm.hcir.world.engine_state import CognitiveContext
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.parietal_coordinate_transform import HeadingOrientation
+from hbllm.hcir.world.percept import ExogenousSignalTracker
 from hbllm.hcir.world.spatial_containment import RoomDoor
 
 if TYPE_CHECKING:
@@ -403,7 +404,7 @@ class EpistemicCuriosityExplorer:
     ) -> EpistemicProbeProposal | None:
         """Motor babbling for self-identification and agency discovery."""
         if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
-            babble_idx = engine.level_epistemic_probes % len(displacement_actions)
+            babble_idx = engine.context_epistemic_probes % len(displacement_actions)
             return EpistemicProbeProposal(
                 action=displacement_actions[babble_idx],
                 exploration_mode="motor_babbling",
@@ -443,7 +444,7 @@ class EpistemicCuriosityExplorer:
             and engine.entity_visit_counts.get(f"actuate_{p[0]}_{p[1]}", 0) < 3
             for p in engine.effective_actuation_targets
         )
-        interleaved_reach = engine.level_epistemic_probes % 6 == 0
+        interleaved_reach = engine.context_epistemic_probes % 6 == 0
 
         should_probe = (
             not displacement_actions
@@ -458,7 +459,7 @@ class EpistemicCuriosityExplorer:
             )
             or (
                 engine.avatar_pos is None
-                and engine.level_epistemic_probes > 4
+                and engine.context_epistemic_probes > 4
                 and not any(a for a in displacement_actions if not engine.is_action_calibrated(a))
             )
         )
@@ -527,7 +528,7 @@ class EpistemicCuriosityExplorer:
 
         if discrete_transform_actions and (is_stuck or is_oscillating):
             disc_act = discrete_transform_actions[
-                engine.level_epistemic_probes % len(discrete_transform_actions)
+                engine.context_epistemic_probes % len(discrete_transform_actions)
             ]
             return EpistemicProbeProposal(
                 action=disc_act,
@@ -1360,7 +1361,7 @@ class EpistemicCuriosityExplorer:
         proposal: EpistemicProbeProposal,
     ) -> None:
         """Atomically commit EpistemicProbeProposal mutations via StateDelta (WP1)."""
-        delta.set("level_epistemic_probes", view.level_epistemic_probes + 1)
+        delta.set("context_epistemic_probes", view.context_epistemic_probes + 1)
         delta.set("total_epistemic_probes", view.total_epistemic_probes + 1)
 
         if view.avatar_pos is not None:
@@ -1653,72 +1654,18 @@ class MotorCortexEffector:
         return step
 
     @staticmethod
-    def is_peripheral_frame_cell(r: int, c: int, H: int, W: int, grid: np.ndarray) -> bool:
-        """True if (r, c) is on an outer grid frame, border line, or peripheral HUD status banner."""
-        # 1. Outer 1-pixel perimeter boundary checks
-        if r == 0 or r == H - 1 or c == 0 or c == W - 1:
-            return True
-
-        # 2. Scale-Invariant Top Peripheral Partition Detection:
-        # A top peripheral partition is a band across the top (r <= H // 4, H >= 24)
-        # separated from the main field by a distinct divider line or homogeneous background.
-        band_depth = H // 4
-        if r <= band_depth and H >= 24:
-            for div_r in range(band_depth, 2, -1):
-                line = grid[div_r, :]
-                line_vals, line_counts = np.unique(line, return_counts=True)
-                if len(line_counts) > 0:
-                    max_idx = int(np.argmax(line_counts))
-                    if line_counts[max_idx] >= int(W * 0.85):
-                        line_color = int(line_vals[max_idx])
-                        banner_region = grid[:div_r, :]
-                        field_region = grid[div_r + 1 :, :]
-                        b_vals, b_counts = np.unique(banner_region, return_counts=True)
-                        f_vals, f_counts = np.unique(field_region, return_counts=True)
-                        if len(b_counts) > 0 and len(f_counts) > 0:
-                            banner_dom = int(b_vals[np.argmax(b_counts)])
-                            field_dom = int(f_vals[np.argmax(f_counts)])
-                            banner_dom_count = b_counts[np.argmax(b_counts)]
-                            has_distinct_bg = (banner_dom != field_dom) and (
-                                (banner_dom_count / banner_region.size) >= 0.85
-                            )
-                            has_divider_line = (line_color != field_dom) and (
-                                line_counts[max_idx] >= int(W * 0.85)
-                            )
-                            if has_distinct_bg or has_divider_line:
-                                if r <= div_r:
-                                    return True
-                                break
-
-        # 3. Scale-Invariant Bottom Peripheral Partition Detection
-        if r >= H - band_depth and H >= 24:
-            for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
-                line = grid[div_r, :]
-                line_vals_bot, line_counts_bot = np.unique(line, return_counts=True)
-                if len(line_counts_bot) > 0:
-                    max_idx_bot = int(np.argmax(line_counts_bot))
-                    if line_counts_bot[max_idx_bot] >= int(W * 0.85):
-                        line_color = int(line_vals_bot[max_idx_bot])
-                        banner_region = grid[div_r + 1 :, :]
-                        field_region = grid[:div_r, :]
-                        b_vals_bot, b_counts_bot = np.unique(banner_region, return_counts=True)
-                        f_vals_bot, f_counts_bot = np.unique(field_region, return_counts=True)
-                        if len(b_counts_bot) > 0 and len(f_counts_bot) > 0:
-                            banner_dom = int(b_vals_bot[np.argmax(b_counts_bot)])
-                            field_dom = int(f_vals_bot[np.argmax(f_counts_bot)])
-                            banner_dom_count = b_counts_bot[np.argmax(b_counts_bot)]
-                            has_distinct_bg = (banner_dom != field_dom) and (
-                                (banner_dom_count / banner_region.size) >= 0.85
-                            )
-                            has_divider_line = (line_color != field_dom) and (
-                                line_counts_bot[max_idx_bot] >= int(W * 0.85)
-                            )
-                            if has_distinct_bg or has_divider_line:
-                                if r >= div_r:
-                                    return True
-                                break
-
-        return False
+    def _is_exogenous_or_boundary(
+        engine: Any, r: int, c: int, lattice: np.ndarray, bg: Any = 0
+    ) -> bool:
+        """True when ``(r, c)`` lies in an enclosing border, partitioned band, or exogenous locus."""
+        wm = getattr(engine, "working_memory", None)
+        if wm is not None and hasattr(wm, "is_exogenous_locus"):
+            return bool(
+                wm.is_exogenous_locus((r, c), lattice=lattice, bg=bg, include_outer_edge=True)
+            )
+        return ExogenousSignalTracker.is_partitioned_or_enclosing(
+            (r, c), lattice=lattice, bg=bg, include_outer_edge=True
+        )
 
     @classmethod
     def ground_effector_action(
@@ -1777,7 +1724,7 @@ class MotorCortexEffector:
                 if (
                     (sr, sc) not in engine.quiescent_actuation_targets
                     and feat not in engine.quiescent_features
-                    and not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid)
+                    and not cls._is_exogenous_or_boundary(engine, sr, sc, curr_grid, bg)
                 ):
                     vis = engine.entity_visit_counts.get(f"actuate_{sr}_{sc}", 0)
                     actuation_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
@@ -1813,7 +1760,7 @@ class MotorCortexEffector:
                         cc,
                     )
                     in engine.quiescent_actuation_targets
-                    or MotorCortexEffector.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or MotorCortexEffector._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -1863,7 +1810,7 @@ class MotorCortexEffector:
                     or (ar, ac) == engine.avatar_pos
                     or int(curr_grid[ar, ac]) in av_feats
                     or int(curr_grid[ar, ac]) in engine.quiescent_features
-                    or cls.is_peripheral_frame_cell(ar, ac, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, ar, ac, curr_grid, bg)
                 ):
                     continue
                 actuation_candidates.append((ar, ac, score))
@@ -1885,7 +1832,7 @@ class MotorCortexEffector:
                     or feat in av_feats
                     or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
-                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -1933,7 +1880,7 @@ class MotorCortexEffector:
                     or feat == engine.bg_feature
                     or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
-                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -2016,7 +1963,7 @@ class MotorCortexEffector:
         step_stride = max(1, min(H, W) // 16)
         for r in range(1, H - 1, step_stride):
             for c in range(1, W - 1, step_stride):
-                if cls.is_peripheral_frame_cell(r, c, H, W, curr_grid):
+                if cls._is_exogenous_or_boundary(engine, r, c, curr_grid, bg):
                     continue
                 v = engine.entity_visit_counts.get(f"actuate_{r}_{c}", 0)
                 feat = int(curr_grid[r, c])

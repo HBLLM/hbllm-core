@@ -108,18 +108,36 @@ class HabenularEpisodicIOR:
         # Limit cycle detector (recent action history)
         self.recent_actions: deque[Any] = deque(maxlen=16)
 
-        # Negative transition archives (Preserved per-level across attempts)
-        self.current_level: int = 0
-        self.level_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
+        # Negative transition archives (Preserved per-context across attempts)
+        self.context_epoch: int = 0
+        self.context_failed_transitions: dict[int, set[tuple[tuple[int, int], int]]] = {}
+
+    @property
+    def current_level(self) -> int:
+        """Deprecated alias for ``context_epoch``."""
+        return self.context_epoch
+
+    @current_level.setter
+    def current_level(self, val: int) -> None:
+        self.context_epoch = val
+
+    @property
+    def level_failed_transitions(self) -> dict[int, set[tuple[tuple[int, int], int]]]:
+        """Deprecated alias for ``context_failed_transitions``."""
+        return self.context_failed_transitions
+
+    @level_failed_transitions.setter
+    def level_failed_transitions(self, val: dict[int, set[tuple[tuple[int, int], int]]]) -> None:
+        self.context_failed_transitions = val
 
     @property
     def failed_transitions(self) -> set[tuple[tuple[int, int], int]]:
-        """Failed (state, action) transitions recorded on current level."""
-        return self.level_failed_transitions.setdefault(self.current_level, set())
+        """Failed (state, action) transitions recorded in current context epoch."""
+        return self.context_failed_transitions.setdefault(self.context_epoch, set())
 
     @failed_transitions.setter
     def failed_transitions(self, val: set[tuple[tuple[int, int], int]]) -> None:
-        self.level_failed_transitions[self.current_level] = val
+        self.context_failed_transitions[self.context_epoch] = val
 
     @staticmethod
     def _make_action_token(action: Any, action_data: dict[str, Any] | None = None) -> Any:
@@ -508,7 +526,7 @@ class HabenularEpisodicIOR:
         if not retain_long_term:
             self.repulsion_table.clear()
             self.fatal_prefixes.clear()
-            self.level_failed_transitions.clear()
+            self.context_failed_transitions.clear()
 
     def reset(self) -> None:
         """Full reset of Habenular episodic memory and inhibition state."""

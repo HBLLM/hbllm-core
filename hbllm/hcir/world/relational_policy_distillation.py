@@ -180,10 +180,17 @@ class RelationalPolicyDistiller:
                 entity_role_map.append((role, c))
 
         for t in trajectory:
-            if t.avatar_pos is None or t.action_id is None:
+            raw_pos = t.avatar_pos
+            if (
+                not isinstance(raw_pos, tuple)
+                or len(raw_pos) < 2
+                or not isinstance(raw_pos[0], (int, float))
+                or not isinstance(raw_pos[1], (int, float))
+                or t.action_id is None
+            ):
                 continue
 
-            ar, ac = t.avatar_pos
+            ar, ac = int(raw_pos[0]), int(raw_pos[1])
             is_fatal = getattr(t, "is_fatal", getattr(t, "is_terminal_failure", False))
 
             # Find active relational premises with surrounding entities

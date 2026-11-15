@@ -45,7 +45,7 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.macro_actions import MacroActionPlan
-from hbllm.hcir.world.percept import EpistemicPhase
+from hbllm.hcir.world.percept import EpistemicPhase, ExogenousSignalTracker, PlaceLocus
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
@@ -587,6 +587,7 @@ class PrefrontalWorkingMemory:
         )
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
         self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
+        self.exogenous_tracker: ExogenousSignalTracker = ExogenousSignalTracker()
         self.hypothesis_engine: InductiveHypothesisEngine = InductiveHypothesisEngine()
         self.morphology: MorphologicalSaliencyEngine = MorphologicalSaliencyEngine()
         self._salience_baseline: WorkingMemorySalienceState = WorkingMemorySalienceState()
@@ -650,7 +651,7 @@ class PrefrontalWorkingMemory:
         self.last_effector_target_coord: tuple[int, int] | None = None
         self.last_effector_target_entity_id: str | None = None
         self.last_non_displacement_action: Any | None = None
-        self.level_epistemic_probes: int = 0
+        self.context_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
 
         # Object Knowledge Base and Atomic Macro-Task Stores (Rule 1.8)
@@ -658,6 +659,40 @@ class PrefrontalWorkingMemory:
         self.object_macro_tasks: dict[str, list[Any]] = {}
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
+
+    @property
+    def level_epistemic_probes(self) -> int:
+        """Deprecated alias for ``context_epistemic_probes``."""
+        return self.context_epistemic_probes
+
+    @level_epistemic_probes.setter
+    def level_epistemic_probes(self, val: int) -> None:
+        self.context_epistemic_probes = val
+
+    @property
+    def exogenous_uncontrollable(self) -> set[PlaceLocus]:
+        """Loci empirically identified as uncontrollable/exogenous (I(DeltaS; A) ~ 0)."""
+        return self.exogenous_tracker.exogenous_loci
+
+    @exogenous_uncontrollable.setter
+    def exogenous_uncontrollable(self, val: set[PlaceLocus]) -> None:
+        self.exogenous_tracker.exogenous_loci = set(val)
+
+    def is_exogenous_locus(
+        self,
+        locus: PlaceLocus,
+        *,
+        lattice: Any = None,
+        bg: Any = 0,
+        include_outer_edge: bool = False,
+    ) -> bool:
+        """True if locus is empirically uncontrollable or topologically partitioned."""
+        return self.exogenous_tracker.is_exogenous(
+            locus,
+            lattice=lattice,
+            bg=bg,
+            include_outer_edge=include_outer_edge,
+        )
 
     def inhibit_action(self, action: Any, duration: int = 4) -> None:
         """Apply bounded, decaying inhibition to an action (Rule 1.8 & P2-7)."""
@@ -810,6 +845,7 @@ class PrefrontalWorkingMemory:
         self.macro_plan.clear()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
+        self.exogenous_tracker.reset_episode(retain_long_term=retain_long_term)
         self.hypothesis_engine.reset_episode(retain_confirmed=retain_long_term)
         self.active_probe_target = None
         self.active_probe_id = None
@@ -831,7 +867,7 @@ class PrefrontalWorkingMemory:
         self.consecutive_goal_converging_actuations = 0
         self.active_causal_actuator_coord = None
         self.consecutive_causal_probes = 0
-        self.level_epistemic_probes = 0
+        self.context_epistemic_probes = 0
         self.dial_mutation_streak = 0
         self.last_effector_target_coord = None
         self.last_effector_target_entity_id = None
@@ -1154,15 +1190,18 @@ class PrefrontalWorkingMemory:
         context: Any = None,
     ) -> tuple[str, DeclarativeNeuroSymbolicSkill] | None:
         """Match stored procedural skills against available actions and context signature."""
-        curr_lvl = (
-            context.get("current_level")
+        curr_epoch = (
+            context.get("context_epoch", context.get("current_level"))
             if isinstance(context, dict)
-            else getattr(context, "current_level", None)
+            else getattr(context, "context_epoch", getattr(context, "current_level", None))
         )
         for name, skill in self.procedural_library.items():
             proc_macro = getattr(skill, "_procedural_macro", None)
-            if proc_macro is not None and curr_lvl is not None:
-                if proc_macro.level != curr_lvl:
+            if proc_macro is not None and curr_epoch is not None:
+                macro_epoch = getattr(
+                    proc_macro, "context_epoch", getattr(proc_macro, "level", None)
+                )
+                if macro_epoch != curr_epoch:
                     continue
             sig = getattr(skill, "signature", None)
             if sig is None:

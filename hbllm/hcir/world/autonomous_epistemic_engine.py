@@ -790,11 +790,11 @@ class AutonomousEpistemicEngine:
         # State Mutation Models (Switches, buttons, door toggles)
         self.state_mutations: list[StateMutationModel] = []
 
-        # Episodic Ground Facts (Layout coordinates, preserved per-context across attempts)
+        # Episodic Ground Facts (Context-partitioned spatial memory across attempts)
         self._current_context_id: str = "default"
-        self._current_level: int = 0
-        self.working_memory.visuospatial.current_level = 0
-        self.habenular_ior.current_level = 0
+        self._context_epoch: int = 0
+        self.working_memory.visuospatial.context_epoch = 0
+        self.habenular_ior.context_epoch = 0
 
         # Theory of Mind: creature kinds observed to patrol autonomously
         self.mobile_threat_features: set[int] = set()
@@ -1139,13 +1139,21 @@ class AutonomousEpistemicEngine:
         self.working_memory.consecutive_stuck_steps = val
 
     @property
+    def context_barriers(self) -> dict[int, set[tuple[int, int]]]:
+        """Spatial barrier coordinates mapped per context epoch in visuospatial working memory."""
+        return self.working_memory.visuospatial.context_barriers
+
+    @context_barriers.setter
+    def context_barriers(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.working_memory.visuospatial.context_barriers = val
+
+    @property
     def level_learned_barriers(self) -> dict[int, set[tuple[int, int]]]:
-        """Spatial barrier coordinates mapped per level in visuospatial working memory."""
-        return self.working_memory.visuospatial.level_learned_barriers
+        return self.context_barriers
 
     @level_learned_barriers.setter
     def level_learned_barriers(self, val: dict[int, set[tuple[int, int]]]) -> None:
-        self.working_memory.visuospatial.level_learned_barriers = val
+        self.context_barriers = val
 
     @property
     def learned_barriers(self) -> set[tuple[int, int]]:
@@ -1157,13 +1165,21 @@ class AutonomousEpistemicEngine:
         self.working_memory.visuospatial.learned_barriers = val
 
     @property
+    def context_hazards(self) -> dict[int, set[tuple[int, int]]]:
+        """Static hazard loci mapped per context epoch in visuospatial working memory."""
+        return self.working_memory.visuospatial.context_hazards
+
+    @context_hazards.setter
+    def context_hazards(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.working_memory.visuospatial.context_hazards = val
+
+    @property
     def level_lethal_positions(self) -> dict[int, set[tuple[int, int]]]:
-        """Lethal obstacle coordinates mapped per level in visuospatial working memory."""
-        return self.working_memory.visuospatial.level_lethal_positions
+        return self.context_hazards
 
     @level_lethal_positions.setter
     def level_lethal_positions(self, val: dict[int, set[tuple[int, int]]]) -> None:
-        self.working_memory.visuospatial.level_lethal_positions = val
+        self.context_hazards = val
 
     @property
     def learned_goal_positions(self) -> set[tuple[int, int]]:
@@ -1211,13 +1227,21 @@ class AutonomousEpistemicEngine:
             self._state.learned_receptacle_positions = set(val)
 
     @property
+    def context_failed_transitions(self) -> dict[int, set[tuple[tuple[int, int], int]]]:
+        """Negative state-action transitions archived per context epoch in Habenular memory."""
+        return self.habenular_ior.context_failed_transitions
+
+    @context_failed_transitions.setter
+    def context_failed_transitions(self, val: dict[int, set[tuple[tuple[int, int], int]]]) -> None:
+        self.habenular_ior.context_failed_transitions = val
+
+    @property
     def level_failed_transitions(self) -> dict[int, set[tuple[tuple[int, int], int]]]:
-        """Negative state-action transitions archived in Habenular episodic memory."""
-        return self.habenular_ior.level_failed_transitions
+        return self.context_failed_transitions
 
     @level_failed_transitions.setter
     def level_failed_transitions(self, val: dict[int, set[tuple[tuple[int, int], int]]]) -> None:
-        self.habenular_ior.level_failed_transitions = val
+        self.context_failed_transitions = val
 
     @property
     def failed_transitions(self) -> set[tuple[tuple[int, int], int]]:
@@ -1570,12 +1594,20 @@ class AutonomousEpistemicEngine:
         self.working_memory.last_non_displacement_action = val
 
     @property
+    def context_epistemic_probes(self) -> int:
+        return self.working_memory.context_epistemic_probes
+
+    @context_epistemic_probes.setter
+    def context_epistemic_probes(self, val: int) -> None:
+        self.working_memory.context_epistemic_probes = val
+
+    @property
     def level_epistemic_probes(self) -> int:
-        return self.working_memory.level_epistemic_probes
+        return self.context_epistemic_probes
 
     @level_epistemic_probes.setter
     def level_epistemic_probes(self, val: int) -> None:
-        self.working_memory.level_epistemic_probes = val
+        self.context_epistemic_probes = val
 
     @property
     def total_epistemic_probes(self) -> int:
@@ -2343,8 +2375,8 @@ class AutonomousEpistemicEngine:
 
         barriers: set[tuple[int, int]] = set(self.learned_barriers)
         lethals: set[tuple[int, int]] = set()
-        if hasattr(self, "level_lethal_positions") and self.current_level is not None:
-            lethals = self.level_lethal_positions.get(self.current_level, set())
+        if hasattr(self, "context_hazards") and self.context_epoch is not None:
+            lethals = self.context_hazards.get(self.context_epoch, set())
 
         return self.counterfactual_regret.evaluate_counterfactuals(
             actual_action=actual_action,
@@ -2546,8 +2578,8 @@ class AutonomousEpistemicEngine:
     ) -> PlanAttributionReport:
         """Perform Pearl-Halpern counterfactual blame attribution across executed subgoals."""
         hazards = set()
-        if hasattr(self, "level_lethal_positions") and self.current_level is not None:
-            hazards = self.level_lethal_positions.get(self.current_level, set())
+        if hasattr(self, "context_hazards") and self.context_epoch is not None:
+            hazards = self.context_hazards.get(self.context_epoch, set())
         barriers = set(self.learned_barriers) if hasattr(self, "learned_barriers") else set()
         report = self.blame_attributor.attribute_plan_failure(
             subgoal_trace=subgoal_trace,
@@ -3826,12 +3858,16 @@ class AutonomousEpistemicEngine:
         return None
 
     @property
-    def current_level_lethal_positions(self) -> set[tuple[int, int]]:
-        """Lethal positions grounded for the current active level."""
+    def current_context_hazards(self) -> set[tuple[int, int]]:
+        """Hazard loci grounded for the current context epoch."""
         return (
-            self.level_lethal_positions.get(self.current_level, set())
+            self.context_hazards.get(self.context_epoch, set())
             | self.hazard_tracker.static_lethal_positions
         )
+
+    @property
+    def current_level_lethal_positions(self) -> set[tuple[int, int]]:
+        return self.current_context_hazards
 
     @property
     def learned_goal_features(self) -> GovernedSetView:
@@ -3947,32 +3983,43 @@ class AutonomousEpistemicEngine:
 
     @property
     def current_context_id(self) -> str:
-        return getattr(self, "_current_context_id", str(self._current_level))
+        return getattr(self, "_current_context_id", str(self._context_epoch))
 
     @current_context_id.setter
     def current_context_id(self, val: str) -> None:
         self._current_context_id = str(val)
         try:
-            self.set_current_level(int(val))
+            self.set_context_epoch(int(val))
         except (ValueError, TypeError):
             pass
 
     @property
+    def context_epoch(self) -> int:
+        return self._context_epoch
+
+    @context_epoch.setter
+    def context_epoch(self, epoch: int) -> None:
+        self.set_context_epoch(epoch)
+
+    @property
     def current_level(self) -> int:
-        return self._current_level
+        return self.context_epoch
 
     @current_level.setter
     def current_level(self, level: int) -> None:
-        self.set_current_level(level)
+        self.set_context_epoch(level)
+
+    def set_context_epoch(self, epoch: int) -> None:
+        if self._context_epoch != epoch:
+            self._context_epoch = epoch
+            self.working_memory.visuospatial.context_epoch = epoch
+            self.habenular_ior.context_epoch = epoch
+            self.hazard_tracker.static_lethal_positions = self.context_hazards.setdefault(
+                epoch, set()
+            )
 
     def set_current_level(self, level: int) -> None:
-        if self._current_level != level:
-            self._current_level = level
-            self.working_memory.visuospatial.current_level = level
-            self.habenular_ior.current_level = level
-            self.hazard_tracker.static_lethal_positions = self.level_lethal_positions.setdefault(
-                level, set()
-            )
+        self.set_context_epoch(level)
 
     # ── Episodic State Management ─────────────────────────────────────────────
 
@@ -3988,7 +4035,9 @@ class AutonomousEpistemicEngine:
         from hbllm.hcir.world.percept import EpisodeBoundaryKind
 
         kind = getattr(boundary, "kind", boundary)
-        same_level = getattr(boundary, "same_level", False)
+        is_same_context = getattr(
+            boundary, "is_same_context", getattr(boundary, "same_level", False)
+        )
         if kind in (
             EpisodeBoundaryKind.GOAL_REACHED,
             EpisodeBoundaryKind.LEVEL_COMPLETE,
@@ -4016,11 +4065,11 @@ class AutonomousEpistemicEngine:
                         )
                     except Exception as exc:
                         logger.debug("Library sleep consolidation failed: %s", exc)
-            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
+            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
-            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
+            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         else:
-            self.reset_episode(retain_dynamics=True, is_new_level=not same_level)
+            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         # Fan out to every faculty exposing a boundary handler (WP0.5).
         for attr in vars(self).values():
             handler = getattr(attr, "on_boundary", None)
@@ -4033,14 +4082,23 @@ class AutonomousEpistemicEngine:
     def reset_episode(
         self,
         retain_dynamics: bool = True,
-        is_new_level: bool = False,
+        is_new_context: bool | None = None,
+        context_epoch: int | None = None,
+        *,
+        is_new_level: bool | None = None,
         level: int | None = None,
     ) -> None:
-        """Reset episodic state upon level transition or death.
+        """Reset episodic state upon context transition or catastrophe.
         Delegated to HippocampalEpisodicCortex for schema consolidation.
 
         Deprecated: prefer on_boundary(EpisodeBoundary) (WP0.5).
         """
+        new_context = (
+            is_new_context
+            if is_new_context is not None
+            else (is_new_level if is_new_level is not None else False)
+        )
+        target_epoch = context_epoch if context_epoch is not None else level
         from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
 
         delta = StateDelta()
@@ -4048,14 +4106,14 @@ class AutonomousEpistemicEngine:
             ReadOnlyEngineView(self),
             delta,
             retain_dynamics=retain_dynamics,
-            is_new_level=is_new_level,
-            level=level,
+            is_new_context=new_context,
+            context_epoch=target_epoch,
         )
         self.apply_delta(delta, author="episodic_cortex")
         self.step_counter = 0
         if hasattr(self, "entropy_monitor") and self.entropy_monitor:
             self.entropy_monitor.reset_for_level()
-        if is_new_level:
+        if new_context:
             self.environmental_step_limit = None
             self.budget_governor.reset(max_budget=self.exploration_budget)
             self.dual_memory.reset_episodic_memory()
@@ -4972,7 +5030,7 @@ class AutonomousEpistemicEngine:
                         )
 
                 all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
-                for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+                for g_set in self.working_memory.visuospatial.context_goals.values():
                     all_goals.update(g_set)
                 for goal_pos in all_goals:
                     node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
@@ -5259,12 +5317,12 @@ class AutonomousEpistemicEngine:
                     coords = np.argwhere(labeled == comp_lbl)
                     min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
                     min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
-                    is_edge_hud = (
+                    is_enclosing_frame = (
                         min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
                     ) or (
                         min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4)
                     )
-                    if not is_edge_hud:
+                    if not is_enclosing_frame:
                         comp_area = len(coords)
                         if self.avatar_size == 0 or (
                             0.25 * self.avatar_size <= comp_area <= 2.5 * self.avatar_size
@@ -5280,11 +5338,11 @@ class AutonomousEpistemicEngine:
             if 1 <= area <= max(49, int(H * W * 0.15)):
                 min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
                 min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
-                # Filter out peripheral border lines / HUD gauges
-                is_edge_hud = (
+                # Filter out enclosing outer boundary stripes / structural frames
+                is_enclosing_frame = (
                     min_c == max_c and (min_c == 0 or min_c == W - 1) and (max_r - min_r >= 4)
                 ) or (min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4))
-                if is_edge_hud:
+                if is_enclosing_frame:
                     continue
 
                 centroid = (
@@ -5666,9 +5724,9 @@ class AutonomousEpistemicEngine:
 
     def record_learned_goal(self, goal_pos: tuple[int, int]) -> None:
         """Record learned goal locally and propose atomic state transaction."""
-        self.working_memory.visuospatial.level_learned_goals.setdefault(
-            self.current_level, set()
-        ).add(goal_pos)
+        self.working_memory.visuospatial.context_goals.setdefault(self.context_epoch, set()).add(
+            goal_pos
+        )
         if goal_pos not in self.learned_goal_positions:
             self.learned_goal_positions.add(goal_pos)
             if hasattr(self.state, "learned_goal_positions"):
@@ -5739,7 +5797,7 @@ class AutonomousEpistemicEngine:
         ops.extend(self.symbolic_theory.to_transaction_operations())
         ops.extend(self.working_memory.to_transaction_operations())
         all_goal_positions = set(self.learned_goal_positions)
-        for g_set in self.working_memory.visuospatial.level_learned_goals.values():
+        for g_set in self.working_memory.visuospatial.context_goals.values():
             all_goal_positions.update(g_set)
         for goal_pos in all_goal_positions:
             gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"

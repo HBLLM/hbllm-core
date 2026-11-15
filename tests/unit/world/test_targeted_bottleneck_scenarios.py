@@ -478,28 +478,37 @@ def test_click_effector_lattice_quantization() -> None:
     )
 
 
-def test_hud_status_banner_masking() -> None:
-    """Verify is_peripheral_frame_cell identifies multi-row top HUD banners and divider lines."""
-    # 64x64 grid mimicking su15:
-    # Rows 0..9 background color 4 with text digits of color 15 at rows 4..6
+def test_exogenous_partition_masking() -> None:
+    """Verify ExogenousSignalTracker isolates partitioned peripheral bands and empirical uncoupled ticks."""
+    from hbllm.hcir.world.percept import ExogenousSignalTracker
+
+    # 64x64 grid:
+    # Rows 0..9 background color 4 with isolated ticks of color 15 at rows 4..6
     # Row 10 is divider line of color 5
-    # Rows 11..63 is main playing field with background 5 and 9
+    # Rows 11..63 is main interior workspace with background 5 and features 9
     grid = np.full((64, 64), 5, dtype=int)
     grid[:10, :] = 4
     grid[4:7, 30:33] = 15  # Isolated digit
     grid[10, :] = 5  # Divider line
     grid[63, :] = 0  # Bottom border
 
-    # Cells in rows 0..10 must be flagged as peripheral HUD banner
+    # Cells in rows 0..10 must be flagged as topologically partitioned outer band
     for r in [0, 2, 5, 8, 10]:
-        assert MotorCortexEffector.is_peripheral_frame_cell(r, 32, 64, 64, grid), (
-            f"Row {r} in HUD banner must be recognized as peripheral!"
-        )
+        assert ExogenousSignalTracker.is_partitioned_or_enclosing(
+            (r, 32), lattice=grid, include_outer_edge=True
+        ), f"Row {r} in partitioned peripheral band must be recognized as boundary!"
 
-    # Playing field cells (e.g. row 20, col 20) must NOT be peripheral
-    assert not MotorCortexEffector.is_peripheral_frame_cell(20, 20, 64, 64, grid), (
-        "Main playing arena must not be flagged as peripheral!"
-    )
+    # Playing field cells (e.g. row 20, col 20) must NOT be exogenous/boundary
+    assert not ExogenousSignalTracker.is_partitioned_or_enclosing(
+        (20, 20), lattice=grid, include_outer_edge=True
+    ), "Main interior workspace must not be flagged as peripheral!"
+
+    # Empirical uncoupling I(DeltaS; A) ~ 0: locus ticking across >= 2 distinct non-local actions
+    tracker = ExogenousSignalTracker()
+    tracker.observe_transition([(30, 30)], action=1, avatar_locus=(15, 15))
+    assert not tracker.is_exogenous((30, 30))
+    tracker.observe_transition([(30, 30)], action=2, avatar_locus=(15, 16))
+    assert tracker.is_exogenous((30, 30))
 
 
 def test_effector_valid_targets_snapping() -> None:

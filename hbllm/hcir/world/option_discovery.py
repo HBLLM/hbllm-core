@@ -127,8 +127,8 @@ class OptionDiscoveryEngine:
         self.last_scanned_grid_sig: tuple[int, int, bytes] | None = None
 
     def on_boundary(self, boundary: Any) -> None:
-        """Reset layout-local bottleneck cache on cross-layout episode boundaries."""
-        if not getattr(boundary, "same_level", False):
+        """Reset layout-local bottleneck cache on cross-context episode boundaries."""
+        if not getattr(boundary, "is_same_context", getattr(boundary, "same_level", False)):
             self.discovered_options.clear()
             self.last_scanned_grid_sig = None
 

@@ -76,9 +76,9 @@ class CorticalGroundingState:
     """Working state maintained by the CorticalGroundingBridge across cognitive cycles."""
 
     FIELD_RETENTION = {
-        "active_predictions": RetentionPolicy.LEVEL_LOCAL,
-        "last_surprise_alerts": RetentionPolicy.LEVEL_LOCAL,
-        "pending_epistemic_goals": RetentionPolicy.LEVEL_LOCAL,
+        "active_predictions": RetentionPolicy.EPISODE_LOCAL,
+        "last_surprise_alerts": RetentionPolicy.EPISODE_LOCAL,
+        "pending_epistemic_goals": RetentionPolicy.EPISODE_LOCAL,
     }
 
     step_counter: int = 0
@@ -120,9 +120,9 @@ class CorticalGroundingBridge:
     """
 
     FIELD_RETENTION = {
-        "active_predictions": RetentionPolicy.LEVEL_LOCAL,
-        "last_surprise_alerts": RetentionPolicy.LEVEL_LOCAL,
-        "pending_epistemic_goals": RetentionPolicy.LEVEL_LOCAL,
+        "active_predictions": RetentionPolicy.EPISODE_LOCAL,
+        "last_surprise_alerts": RetentionPolicy.EPISODE_LOCAL,
+        "pending_epistemic_goals": RetentionPolicy.EPISODE_LOCAL,
     }
 
     def __init__(

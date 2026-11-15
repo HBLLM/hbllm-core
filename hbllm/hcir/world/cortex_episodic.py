@@ -34,7 +34,7 @@ from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.engine_state import CognitiveContext, get_engine_state_attr
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
-from hbllm.hcir.world.percept import TerminalSignal
+from hbllm.hcir.world.percept import PlaceLocus, TerminalSignal, format_locus, locus_token
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.cortex_perception import SpatialEntity
@@ -51,10 +51,10 @@ class ProceduralMacro:
     the deliberation engine for future levels with similar structure.
 
     The macro captures:
-    - The exact action sequence that won the level
+    - The exact action sequence that solved the episode
     - The grid signature at episode start (for similarity matching)
     - The available action space (for compatibility checking)
-    - Success metadata (steps taken, level, game context)
+    - Success metadata (steps taken, context epoch, environment context)
     """
 
     macro_id: str
@@ -63,7 +63,7 @@ class ProceduralMacro:
     initial_grid_hash: int = 0  # Hash of grid at episode start
     initial_grid_shape: tuple[int, int] = (0, 0)
     available_actions: set[int] = field(default_factory=set)
-    level: int = 0
+    context_epoch: int = 0
     context_id: str = ""
     num_steps: int = 0
     confidence: float = 1.0  # Starts at 1.0 (proven), decays on replay failure
@@ -81,7 +81,8 @@ class ProceduralMacro:
         initial_grid_hash: int = 0,
         initial_grid_shape: tuple[int, int] = (0, 0),
         available_actions: set[int] | None = None,
-        level: int = 0,
+        context_epoch: int = 0,
+        level: int | None = None,
         context_id: str = "",
         num_steps: int = 0,
         confidence: float = 1.0,
@@ -97,7 +98,8 @@ class ProceduralMacro:
         self.initial_grid_hash = initial_grid_hash
         self.initial_grid_shape = initial_grid_shape
         self.available_actions = available_actions if available_actions is not None else set()
-        self.level = level
+        resolved_epoch = level if level is not None else context_epoch
+        self.context_epoch = resolved_epoch
         self.context_id = context_id
         self.num_steps = num_steps
         self.confidence = confidence
@@ -182,7 +184,7 @@ class ProceduralMacro:
             variable=f"procedural_macro:{self.macro_id}",
             operator="==",
             value=f"actions:{len(self.action_sequence)}:conf:{self.confidence:.2f}",
-            relation=f"episode:{self.level}:context:{self.context_id}",
+            relation=f"episode:{self.context_epoch}:context:{self.context_id}",
             target_entity=self.macro_id,
         )
 
@@ -227,7 +229,7 @@ class ProceduralMacro:
         skill = DeclarativeNeuroSymbolicSkill()
         skill.skill_name = self.macro_id
         skill.description = (
-            f"Auto-consolidated procedural skill '{self.macro_id}' from level {self.level} "
+            f"Auto-consolidated procedural skill '{self.macro_id}' from context {self.context_epoch} "
             f"({len(self.action_sequence)} actions, conf={self.confidence:.2f})"
         )
         skill.signature = signature
@@ -235,13 +237,22 @@ class ProceduralMacro:
         setattr(skill, "_procedural_macro", self)
         return skill
 
+    @property
+    def level(self) -> int:
+        """Compatibility alias for ``context_epoch``."""
+        return self.context_epoch
+
+    @level.setter
+    def level(self, value: int) -> None:
+        self.context_epoch = value
+
 
 @dataclass
 class EpisodicTransition:
     """A rich episodic transition record stored in the Hippocampal buffer."""
 
     step: int = 0
-    avatar_pos: tuple[int, int] | None = None
+    avatar_pos: PlaceLocus | None = None
     action_id: Any = None
     action_data: dict[str, Any] | None = None
     observation_diff: EpistemicObservationDiff | None = None
@@ -257,7 +268,7 @@ class EpisodicTransition:
     def __init__(
         self,
         step: int = 0,
-        avatar_pos: tuple[int, int] | None = None,
+        avatar_pos: PlaceLocus | None = None,
         action_id: Any = None,
         action_data: dict[str, Any] | None = None,
         observation_diff: EpistemicObservationDiff | None = None,
@@ -289,7 +300,7 @@ class EpisodicTransition:
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export episodic transition as a formal Pearl do(a) causal predicate."""
-        pos_str = f"({self.avatar_pos[0]},{self.avatar_pos[1]})" if self.avatar_pos else "none"
+        pos_str = format_locus(self.avatar_pos)
         outcome = "SUCCESS" if self.is_success else ("FAILURE" if self.is_failure else "ACTIVE")
         return CausalPredicate(
             variable=f"episodic_transition:step_{self.step}",
@@ -309,7 +320,11 @@ class EpisodicTransition:
                 node_id=node_id,
                 node_data={
                     "step": self.step,
-                    "avatar_pos": list(self.avatar_pos) if self.avatar_pos else None,
+                    "avatar_pos": (
+                        list(self.avatar_pos)
+                        if isinstance(self.avatar_pos, tuple)
+                        else self.avatar_pos
+                    ),
                     "action_id": str(self.action_id),
                     "action_data": self.action_data or {},
                     "reward": self.reward,
@@ -330,8 +345,8 @@ class ReplayCreditAssignment:
 
     fatal_step: int
     fatal_action: Any
-    fatal_pos: tuple[int, int] | None
-    inhibited_transitions: list[tuple[tuple[int, int] | None, Any]] = field(default_factory=list)
+    fatal_pos: PlaceLocus | None
+    inhibited_transitions: list[tuple[PlaceLocus | None, Any]] = field(default_factory=list)
     suspected_lethal_features: set[int] = field(default_factory=set)
     confidence: float = 1.0
     root_causal_step: int | None = None
@@ -376,7 +391,7 @@ def compress_action_trajectory(
     """Cortico-Striatal Trajectory Compression:
     Optimizes a winning raw episodic trajectory by:
     1. Pruning zero-mutation topological cyclic loops (where the agent wandered back to an earlier cell
-       without causing any environmental changes or winning the level).
+       without causing any environmental changes or solving the episode).
     2. Canceling immediate ping-pong oscillatory reversals that did not modify the state.
     Returns:
         (compressed_actions, compressed_action_data)
@@ -464,7 +479,7 @@ class HippocampalEpisodicCortex:
         self.catastrophic_replays: list[ReplayCreditAssignment] = []
 
         # Grounded lethal transitions: set of (avatar_pos, action)
-        self.grounded_lethal_transitions: set[tuple[tuple[int, int], Any]] = set()
+        self.grounded_lethal_transitions: set[tuple[PlaceLocus, Any]] = set()
 
         # Lethal candidate features identified across trials
         self.discovered_lethal_features: set[int] = set()
@@ -478,7 +493,7 @@ class HippocampalEpisodicCortex:
 
         # ── Procedural Consolidation Store ──────────────────────────────────
         # Winning trajectories compiled into replayable action macros.
-        # Key: (context_id, level) or auto-generated signature.
+        # Key: (context_id, context_epoch) or auto-generated signature.
         # Value: ProceduralMacro containing proven action sequence + context.
         self.consolidated_macros: dict[str, ProceduralMacro] = {}
         self.relational_macros: dict[str, Any] = {}
@@ -669,9 +684,15 @@ class HippocampalEpisodicCortex:
 
         # 3. Analyze spatial hazards & cardinal lines-of-sight
         suspected_hazards: set[int] = set()
-        if prev_grid is not None and fatal_pos is not None:
+        if (
+            prev_grid is not None
+            and isinstance(fatal_pos, tuple)
+            and len(fatal_pos) >= 2
+            and isinstance(fatal_pos[0], (int, float))
+            and isinstance(fatal_pos[1], (int, float))
+        ):
             H, W = prev_grid.shape
-            pr, pc = fatal_pos
+            pr, pc = int(fatal_pos[0]), int(fatal_pos[1])
 
             # Inspect surrounding 5x5 spatial vicinity
             r0, r1 = max(0, pr - 2), min(H, pr + 3)
@@ -714,7 +735,7 @@ class HippocampalEpisodicCortex:
             learned_goals=getattr(self, "learned_goals", set()),
             learned_barriers=getattr(self, "learned_barriers", set()),
         )
-        inhibited: list[tuple[tuple[int, int] | None, Any]] = []
+        inhibited: list[tuple[PlaceLocus | None, Any]] = []
         if shapley_res.root_fatal_pos is not None and shapley_res.root_fatal_action is not None:
             inhibited.append((shapley_res.root_fatal_pos, shapley_res.root_fatal_action))
             self.grounded_lethal_transitions.add(
@@ -804,8 +825,8 @@ class HippocampalEpisodicCortex:
         for ep in candidate_episodes:
             for i, trans in enumerate(ep):
                 s = trans.state_signature or (
-                    f"pos_{trans.avatar_pos[0]}_{trans.avatar_pos[1]}"
-                    if trans.avatar_pos
+                    f"pos_{locus_token(trans.avatar_pos)}"
+                    if trans.avatar_pos is not None
                     else f"step_{trans.step}"
                 )
                 a = trans.action_id
@@ -818,8 +839,8 @@ class HippocampalEpisodicCortex:
                 if i + 1 < len(ep) and not trans.is_terminal:
                     next_trans = ep[i + 1]
                     s_prime = next_trans.state_signature or (
-                        f"pos_{next_trans.avatar_pos[0]}_{next_trans.avatar_pos[1]}"
-                        if next_trans.avatar_pos
+                        f"pos_{locus_token(next_trans.avatar_pos)}"
+                        if next_trans.avatar_pos is not None
                         else f"step_{next_trans.step}"
                     )
                     is_term = False
@@ -907,10 +928,10 @@ class HippocampalEpisodicCortex:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_dynamics: bool = True, retain_inhibitions: bool = False) -> None:
         """Reset transient episode buffer while optionally preserving long-term episodic traces."""
@@ -934,7 +955,7 @@ class HippocampalEpisodicCortex:
         self.discovered_lethal_features.clear()
         self.habenular_ior.reset()
         # NOTE: consolidated_macros are intentionally NOT cleared here.
-        # Learned procedural knowledge persists across levels within a game.
+        # Learned procedural knowledge persists across contexts within an environment.
         # Call reset_consolidated_macros() explicitly for cross-game isolation.
 
     def reset_consolidated_macros(self) -> None:
@@ -991,15 +1012,24 @@ class HippocampalEpisodicCortex:
         view: Any,
         delta: Any,
         retain_dynamics: bool = True,
-        is_new_level: bool = False,
+        is_new_context: bool | None = None,
+        context_epoch: int | None = None,
+        *,
+        is_new_level: bool | None = None,
         level: int | None = None,
     ) -> None:
         """Consolidate episodic schemas and coordinate multi-faculty memory reset.
         Handles three distinct cognitive transitions:
-        1. Same-level retry on death (retain dynamics, barriers, lethal features).
-        2. Cross-stage level progression (transfer semantic & motor priors, point to new level map).
-        3. Cross-game environment reset (strict zero-leakage cognitive isolation).
+        1. Same-context retry on catastrophe (retain dynamics, barriers, lethal features).
+        2. Cross-context transition (transfer semantic & motor priors, point to new context map).
+        3. Cross-environment reset (strict zero-leakage cognitive isolation).
         """
+        new_context = (
+            is_new_context
+            if is_new_context is not None
+            else (is_new_level if is_new_level is not None else False)
+        )
+        target_epoch = context_epoch if context_epoch is not None else level
         # 1. Offline Hippocampal TD Experience Replay & Q-value consolidation
         if self.current_episode:
             td_summary = self.consolidate_episodic_replay_td(
@@ -1045,8 +1075,8 @@ class HippocampalEpisodicCortex:
                     or get_engine_state_attr(view, "current_context_id", "")
                     or ""
                 )
-                current_level = get_engine_state_attr(view, "current_level", level or 0)
-                macro_id = f"macro_{context_id}_lvl{current_level}_{len(action_seq)}steps"
+                current_epoch = get_engine_state_attr(view, "context_epoch", target_epoch or 0)
+                macro_id = f"macro_{context_id}_ctx{current_epoch}_{len(action_seq)}steps"
 
                 # Extract relational waypoints for coordinate-invariant lifting
                 from hbllm.hcir.world.autonomous_learning import (
@@ -1057,8 +1087,14 @@ class HippocampalEpisodicCortex:
                 extracted_waypoints: list[RelationalWaypoint] = []
                 seen_features: set[int] = set()
                 for idx, step_t in enumerate(winning_trajectory):
-                    if step_t.grid_snapshot is not None and step_t.avatar_pos is not None:
-                        ar, ac = step_t.avatar_pos
+                    if (
+                        step_t.grid_snapshot is not None
+                        and isinstance(step_t.avatar_pos, tuple)
+                        and len(step_t.avatar_pos) >= 2
+                        and isinstance(step_t.avatar_pos[0], (int, float))
+                        and isinstance(step_t.avatar_pos[1], (int, float))
+                    ):
+                        ar, ac = int(step_t.avatar_pos[0]), int(step_t.avatar_pos[1])
                         H_s, W_s = step_t.grid_snapshot.shape[:2]
                         if 0 <= ar < H_s and 0 <= ac < W_s:
                             f_val = int(step_t.grid_snapshot[ar, ac])
@@ -1084,7 +1120,7 @@ class HippocampalEpisodicCortex:
                     initial_grid_hash=init_hash,
                     initial_grid_shape=init_shape,
                     available_actions=avail_actions,
-                    level=current_level,
+                    context_epoch=current_epoch,
                     context_id=context_id,
                     num_steps=len(comp_actions) if comp_actions else len(action_seq),
                     waypoints=extracted_waypoints,
@@ -1097,7 +1133,7 @@ class HippocampalEpisodicCortex:
                         macro_id=rel_macro_id,
                         waypoints=extracted_waypoints,
                         action_space=frozenset(avail_actions),
-                        source_level=current_level,
+                        source_context_epoch=current_epoch,
                     )
 
                 logger.info(
@@ -1119,8 +1155,8 @@ class HippocampalEpisodicCortex:
             self.failed_trajectories.append(list(self.current_episode))
         self.current_episode.clear()
 
-        if level is not None:
-            delta.set("_current_level", level)
+        if target_epoch is not None:
+            delta.set("_context_epoch", target_epoch)
         delta.set("prev_grid", None)
         delta.set("_prev_oriented_threats", [])
         delta.set("avatar_pos", None)
@@ -1133,11 +1169,11 @@ class HippocampalEpisodicCortex:
         delta.set("consecutive_quiescent_actions", 0)
 
         delta.set("consecutive_stuck_steps", 0)
-        if is_new_level or not retain_dynamics:
+        if new_context or not retain_dynamics:
             delta.set("entity_action_failed_positions", {})
             delta.set("immobile_entity_actions", set())
         else:
-            # On same-level retry after death: preserve learned spatial negative affordances,
+            # On same-context retry after catastrophe: preserve learned spatial negative affordances,
             # barriers, and quiescent inert coordinates so inert scenery/borders are not re-tested,
             # while decaying entity visit counts so interactive objects can be re-sampled with fresh hypotheses.
             _evc = delta.mutate("entity_visit_counts", view.entity_visit_counts)
@@ -1152,9 +1188,9 @@ class HippocampalEpisodicCortex:
         delta.set("probe_target_steps", 0)
         delta.mutate("recent_positions", view.recent_positions).clear()
         delta.mutate("recent_actions", view.recent_actions).clear()
-        delta.set("level_epistemic_probes", 0)
-        is_same_level_retry = not is_new_level and retain_dynamics
-        if is_same_level_retry:
+        delta.set("context_epistemic_probes", 0)
+        is_same_context_retry = not new_context and retain_dynamics
+        if is_same_context_retry:
             # Same level retry on death: trigger Habenular catastrophe backpropagation FIRST
             # before transient episode buffers are reset
             if hasattr(view, "working_memory") and hasattr(view.working_memory, "habenular_ior"):
@@ -1170,7 +1206,7 @@ class HippocampalEpisodicCortex:
 
         view.working_memory.reset_episode(
             retain_long_term=retain_dynamics,
-            retain_inhibitions=is_same_level_retry,
+            retain_inhibitions=is_same_context_retry,
         )
         view.collision_cones.reset_episode()
         delta.set("consecutive_plan_failures", 0)
@@ -1180,24 +1216,24 @@ class HippocampalEpisodicCortex:
         view.working_memory.reset_salience_baseline()
         delta.set("current_simulated_goal", None)
         delta.set("_feedback_assimilated", False)
-        view.symbolic_theory.clear_explored_positions(
-            clear_features=(is_new_level or not retain_dynamics)
+        view.symbolic_theory.clear_explored_loci(
+            clear_features=(new_context or not retain_dynamics)
         )
-        if is_new_level or not retain_dynamics:
+        if new_context or not retain_dynamics:
             view.symbolic_theory.clear_candidate_goals()
-            if is_new_level:
+            if new_context:
                 view.symbolic_theory.clear_barriers()
 
-        _lvl = 0 if level is None else level
+        _epoch = 0 if target_epoch is None else target_epoch
         if not retain_dynamics:
-            delta.mutate("level_failed_transitions", view.level_failed_transitions).clear()
-            delta.mutate("level_learned_barriers", view.level_learned_barriers).clear()
-            delta.mutate("level_lethal_positions", view.level_lethal_positions).clear()
-            delta.set("_current_level", _lvl)
-            _lft = delta.mutate("level_failed_transitions", view.level_failed_transitions)
-            delta.set("failed_transitions", _lft.setdefault(_lvl, set()))
-            _llb = delta.mutate("level_learned_barriers", view.level_learned_barriers)
-            delta.set("learned_barriers", _llb.setdefault(_lvl, set()))
+            delta.mutate("context_failed_transitions", view.context_failed_transitions).clear()
+            delta.mutate("context_barriers", view.context_barriers).clear()
+            delta.mutate("context_hazards", view.context_hazards).clear()
+            delta.set("_context_epoch", _epoch)
+            _lft = delta.mutate("context_failed_transitions", view.context_failed_transitions)
+            delta.set("failed_transitions", _lft.setdefault(_epoch, set()))
+            _llb = delta.mutate("context_barriers", view.context_barriers)
+            delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
             view.hazard_tracker.clear_lethal_positions()
             view.hazard_tracker.reset_episode()
             view.physics_engine.reset_episode()
@@ -1212,14 +1248,14 @@ class HippocampalEpisodicCortex:
             view.surprise_engine.reset_ledger()
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
-        elif is_new_level:
+        elif new_context:
             # Level transition: point episodic spatial memory to the target level
-            _lft = delta.mutate("level_failed_transitions", view.level_failed_transitions)
-            delta.set("failed_transitions", _lft.setdefault(_lvl, set()))
-            _llb = delta.mutate("level_learned_barriers", view.level_learned_barriers)
-            delta.set("learned_barriers", _llb.setdefault(_lvl, set()))
-            view.hazard_tracker.static_lethal_positions = view.level_lethal_positions.setdefault(
-                view._current_level, set()
+            _lft = delta.mutate("context_failed_transitions", view.context_failed_transitions)
+            delta.set("failed_transitions", _lft.setdefault(_epoch, set()))
+            _llb = delta.mutate("context_barriers", view.context_barriers)
+            delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
+            view.hazard_tracker.static_lethal_positions = view.context_hazards.setdefault(
+                view.context_epoch, set()
             )
             view.hazard_tracker.reset_episode()
             view.physics_engine.reset_episode()
@@ -1264,7 +1300,7 @@ class HippocampalEpisodicCortex:
             if hasattr(view, "acc_conflict_monitor"):
                 view.acc_conflict_monitor.reset()
 
-        if is_new_level and retain_dynamics:
+        if new_context and retain_dynamics:
             # ── Role Abstraction Transfer ────────────────────────────────────
             # Snapshot feature-level conditional affordances as role-level templates
             # before clearing layout-specific bindings.  Role priors and templates
@@ -1273,23 +1309,23 @@ class HippocampalEpisodicCortex:
             # re-instantiates any matching templates (e.g. key→door).
             view.symbolic_theory.snapshot_conditional_affordance_templates()
             view.symbolic_theory.clear_feature_bindings()
-            view.symbolic_theory.begin_new_level_epoch()
+            view.symbolic_theory.begin_context_epoch()
             acc_mon = getattr(view.working_memory, "acc_conflict", None)
             if acc_mon is not None and hasattr(acc_mon, "reset_episode"):
                 acc_mon.reset_episode(retain_long_term=False)
             if view.symbolic_theory.labels_non_stationary and not getattr(
                 view.working_memory, "concept_role_priors", None
             ):
-                from hbllm.hcir.world.cortex_causal import invalidate_stale_cross_level_ontology
+                from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
-                invalidate_stale_cross_level_ontology(
+                invalidate_stale_context_ontology(
                     view.symbolic_theory,
                     hazard_tracker=view.hazard_tracker,
                     episodic_cortex=self,
                     working_memory=view.working_memory,
                     engine_or_view=view,
                     bg_feature=getattr(view, "bg_feature", 0),
-                    preserve_current_level=False,
+                    preserve_current_context=False,
                     reason="non_stationary_new_level",
                 )
                 delta.mutate("mobile_threat_features", view.mobile_threat_features).clear()
@@ -1343,7 +1379,7 @@ class HippocampalEpisodicCortex:
                 EpistemicPhase.MENTAL_SIMULATION
                 if view.is_motor_grounded()
                 else EpistemicPhase.MOTOR_GROUNDING,
-                reason="episode_reset_level_transition",
+                reason="episode_reset_context_transition",
             )
 
         elif not retain_dynamics:
@@ -1398,7 +1434,7 @@ class HippocampalEpisodicCortex:
                 reason="episode_reset_retained_dynamics",
             )
 
-        view.object_planner.reset_episode(is_new_level=is_new_level)
+        view.object_planner.reset_episode(is_new_context=new_context)
         view.subgoal_stack.reset_episode()
 
         # Cortical faculties reset
@@ -1407,7 +1443,7 @@ class HippocampalEpisodicCortex:
         else:
             self.reset_episode(
                 retain_dynamics=True,
-                retain_inhibitions=is_same_level_retry,
+                retain_inhibitions=is_same_context_retry,
             )
 
         view.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)

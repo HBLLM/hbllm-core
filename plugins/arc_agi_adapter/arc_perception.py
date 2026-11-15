@@ -178,7 +178,11 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             or kwargs.get("learned_goal_positions", set())
         )
         known_lethals = set(
-            getattr(context, "current_level_lethal_positions", set())
+            getattr(
+                context,
+                "current_context_hazards",
+                getattr(context, "current_level_lethal_positions", set()),
+            )
             or kwargs.get("lethal_cells", set())
         )
         if hasattr(context, "hazard_tracker") and hasattr(

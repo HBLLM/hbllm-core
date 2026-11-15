@@ -132,10 +132,10 @@ class AnteriorCingulateConflictMonitor:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient conflict state, optionally preserving long-term failure clusters."""

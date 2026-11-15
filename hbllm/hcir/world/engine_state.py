@@ -11,11 +11,20 @@ _CTX_ENTITY_CACHE: OrderedDict[tuple[Any, ...], list[Any]] = OrderedDict()
 _CTX_ENTITY_CACHE_MAX: int = 64
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
 from hbllm.hcir.world.percept import EpistemicPhase
+
+_LEGACY_ENGINE_STATE_FIELDS: dict[str, str] = {
+    "level_epistemic_probes": "context_epistemic_probes",
+    "level_learned_barriers": "context_barriers",
+    "level_failed_transitions": "context_failed_transitions",
+    "level_lethal_positions": "context_hazards",
+    "current_level": "context_epoch",
+    "_current_level": "context_epoch",
+}
 
 
 def get_engine_state_attr(target: Any, attr: str, default: Any = None) -> Any:
@@ -150,7 +159,7 @@ class CognitiveContext:
     active_probe_target: tuple[int, int] | None = None
     probe_target_steps: int = 0
     total_epistemic_probes: int = 0
-    level_epistemic_probes: int = 0
+    context_epistemic_probes: int = 0
     last_predicted_pos: tuple[int, int] | None = None
     last_non_displacement_action: int | None = None
     last_effective_actuation_coord: tuple[int, int] | None = None
@@ -162,7 +171,7 @@ class CognitiveContext:
 
     # Learned World Theory Fields
     learned_barriers: frozenset[tuple[int, int]] = frozenset()
-    level_learned_barriers: MappingProxyType[int, frozenset[tuple[int, int]]] = field(
+    context_barriers: MappingProxyType[int, frozenset[tuple[int, int]]] = field(
         default_factory=lambda: MappingProxyType({})
     )
     learned_goal_positions: frozenset[tuple[int, int]] = frozenset()
@@ -176,12 +185,12 @@ class CognitiveContext:
     tested_action_positions: frozenset[tuple[int, tuple[int, int] | None]] = frozenset()
     state_mutations: tuple[Any, ...] = ()
     failed_transitions: tuple[Any, ...] = ()
-    level_failed_transitions: MappingProxyType[int, tuple[Any, ...]] = field(
+    context_failed_transitions: MappingProxyType[int, tuple[Any, ...]] = field(
         default_factory=lambda: MappingProxyType({})
     )
     verified_safe_features: frozenset[int] = frozenset()
     mobile_threat_features: frozenset[int] = frozenset()
-    level_lethal_positions: MappingProxyType[int, frozenset[tuple[int, int]]] = field(
+    context_hazards: MappingProxyType[int, frozenset[tuple[int, int]]] = field(
         default_factory=lambda: MappingProxyType({})
     )
     prev_oriented_threats: tuple[Any, ...] = ()
@@ -237,12 +246,40 @@ class CognitiveContext:
         default_factory=lambda: MappingProxyType({})
     )
     current_room_id: int | None = None
-    current_level: int = 0
+    context_epoch: int = 0
     current_context_id: str = "default"
     world_id: str = "default"
     bilateral_state: Any | None = None
     entropy_monitor: Any | None = None
     goals: tuple[Any, ...] = ()
+
+    @property
+    def level_epistemic_probes(self) -> int:
+        return self.context_epistemic_probes
+
+    @property
+    def level_learned_barriers(self) -> MappingProxyType[int, frozenset[tuple[int, int]]]:
+        return self.context_barriers
+
+    @property
+    def level_failed_transitions(self) -> MappingProxyType[int, tuple[Any, ...]]:
+        return self.context_failed_transitions
+
+    @property
+    def level_lethal_positions(self) -> MappingProxyType[int, frozenset[tuple[int, int]]]:
+        return self.context_hazards
+
+    @property
+    def current_level(self) -> int:
+        return self.context_epoch
+
+    @property
+    def current_context_hazards(self) -> frozenset[tuple[int, int]]:
+        return self.context_hazards.get(self.context_epoch, frozenset())
+
+    @property
+    def current_level_lethal_positions(self) -> frozenset[tuple[int, int]]:
+        return self.current_context_hazards
 
     # Memory Stores & Hierarchical Faculties
     symbolic_theory: FrozenSymbolicTheory = field(default_factory=FrozenSymbolicTheory)
@@ -348,8 +385,9 @@ class CognitiveContext:
             merged.update(kwargs)
         updates: dict[str, Any] = {"signals": MappingProxyType(merged)}
         for k, v in kwargs.items():
-            if hasattr(self, k):
-                updates[k] = v
+            canonical = _LEGACY_ENGINE_STATE_FIELDS.get(k, k)
+            if canonical in self.__dataclass_fields__:
+                updates[canonical] = v
         from dataclasses import replace
 
         return replace(self, **updates)
@@ -435,7 +473,7 @@ class EngineState(BaseModel):
     active_probe_target: tuple[int, int] | None = None
     probe_target_steps: int = 0
     total_epistemic_probes: int = 0
-    level_epistemic_probes: int = 0
+    context_epistemic_probes: int = 0
     last_predicted_pos: tuple[int, int] | None = None
     last_non_displacement_action: int | None = None
     last_effective_actuation_coord: tuple[int, int] | None = None
@@ -450,7 +488,7 @@ class EngineState(BaseModel):
 
     # 2. Learned World Theory State
     learned_barriers: set[tuple[int, int]] = Field(default_factory=set)
-    level_learned_barriers: dict[int, set[tuple[int, int]]] = Field(default_factory=dict)
+    context_barriers: dict[int, set[tuple[int, int]]] = Field(default_factory=dict)
     learned_goal_positions: set[tuple[int, int]] = Field(default_factory=set)
     learned_goal_features: set[int] = Field(default_factory=set)
     learned_receptacle_positions: set[tuple[int, int]] = Field(default_factory=set)
@@ -460,10 +498,10 @@ class EngineState(BaseModel):
     tested_action_positions: set[tuple[int, tuple[int, int] | None]] = Field(default_factory=set)
     state_mutations: list[Any] = Field(default_factory=list)
     failed_transitions: set[tuple[tuple[int, int], int]] | list[Any] = Field(default_factory=set)
-    level_failed_transitions: dict[int, set[Any]] = Field(default_factory=dict)
+    context_failed_transitions: dict[int, set[Any]] = Field(default_factory=dict)
     verified_safe_features: set[int] = Field(default_factory=set)
     mobile_threat_features: set[int] = Field(default_factory=set)
-    level_lethal_positions: dict[int, set[tuple[int, int]]] = Field(default_factory=dict)
+    context_hazards: dict[int, set[tuple[int, int]]] = Field(default_factory=dict)
     prev_oriented_threats: list[Any] = Field(default_factory=list, alias="_prev_oriented_threats")
     quiescent_features: set[int] = Field(default_factory=set)
     effective_features: set[int] = Field(default_factory=set)
@@ -499,23 +537,86 @@ class EngineState(BaseModel):
     active_hypothesis: Any | None = None
     inhibited_actions: dict[Any, int] | set[int] = Field(default_factory=dict)
     current_room_id: int | None = None
-    current_level: int = Field(default=0, alias="_current_level")
+    context_epoch: int = Field(default=0, alias="_context_epoch")
     current_context_id: str = "default"
     world_id: str = "default"
     bilateral_state: Any | None = None
     entropy_monitor: Any | None = None
     goals: list[Any] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _remap_legacy_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            remapped = dict(data)
+            for legacy_name, canonical_name in _LEGACY_ENGINE_STATE_FIELDS.items():
+                if legacy_name in remapped and canonical_name not in remapped:
+                    remapped[canonical_name] = remapped.pop(legacy_name)
+            return remapped
+        return data
+
     def __getattr__(self, name: str) -> Any:
+        if name in _LEGACY_ENGINE_STATE_FIELDS:
+            return getattr(self, _LEGACY_ENGINE_STATE_FIELDS[name])
         if name.startswith("_") and hasattr(self, name[1:]):
             return getattr(self, name[1:])
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if name.startswith("_") and name[1:] in type(self).model_fields:
+        if name in _LEGACY_ENGINE_STATE_FIELDS:
+            super().__setattr__(_LEGACY_ENGINE_STATE_FIELDS[name], value)
+        elif name.startswith("_") and name[1:] in type(self).model_fields:
             super().__setattr__(name[1:], value)
         else:
             super().__setattr__(name, value)
+
+    @property
+    def level_epistemic_probes(self) -> int:
+        return self.context_epistemic_probes
+
+    @level_epistemic_probes.setter
+    def level_epistemic_probes(self, value: int) -> None:
+        self.context_epistemic_probes = value
+
+    @property
+    def level_learned_barriers(self) -> dict[int, set[tuple[int, int]]]:
+        return self.context_barriers
+
+    @level_learned_barriers.setter
+    def level_learned_barriers(self, value: dict[int, set[tuple[int, int]]]) -> None:
+        self.context_barriers = value
+
+    @property
+    def level_failed_transitions(self) -> dict[int, set[Any]]:
+        return self.context_failed_transitions
+
+    @level_failed_transitions.setter
+    def level_failed_transitions(self, value: dict[int, set[Any]]) -> None:
+        self.context_failed_transitions = value
+
+    @property
+    def level_lethal_positions(self) -> dict[int, set[tuple[int, int]]]:
+        return self.context_hazards
+
+    @level_lethal_positions.setter
+    def level_lethal_positions(self, value: dict[int, set[tuple[int, int]]]) -> None:
+        self.context_hazards = value
+
+    @property
+    def current_level(self) -> int:
+        return self.context_epoch
+
+    @current_level.setter
+    def current_level(self, value: int) -> None:
+        self.context_epoch = value
+
+    @property
+    def current_context_hazards(self) -> set[tuple[int, int]]:
+        return self.context_hazards.get(self.context_epoch, set())
+
+    @property
+    def current_level_lethal_positions(self) -> set[tuple[int, int]]:
+        return self.current_context_hazards
 
     @classmethod
     def from_engine(cls, source: Any) -> EngineState:
@@ -590,7 +691,7 @@ class EngineState(BaseModel):
             active_probe_target=self.active_probe_target,
             probe_target_steps=self.probe_target_steps,
             total_epistemic_probes=self.total_epistemic_probes,
-            level_epistemic_probes=self.level_epistemic_probes,
+            context_epistemic_probes=self.context_epistemic_probes,
             last_predicted_pos=self.last_predicted_pos,
             last_non_displacement_action=self.last_non_displacement_action,
             last_effective_actuation_coord=self.last_effective_actuation_coord,
@@ -600,8 +701,8 @@ class EngineState(BaseModel):
             feedback_assimilated=self.feedback_assimilated,
             current_actor_pos=self.current_actor_pos,
             learned_barriers=frozenset(self.learned_barriers),
-            level_learned_barriers=MappingProxyType(
-                {k: frozenset(v) for k, v in self.level_learned_barriers.items()}
+            context_barriers=MappingProxyType(
+                {k: frozenset(v) for k, v in self.context_barriers.items()}
             ),
             learned_goal_positions=frozenset(self.learned_goal_positions),
             learned_goal_features=frozenset(self.learned_goal_features),
@@ -612,13 +713,13 @@ class EngineState(BaseModel):
             tested_action_positions=frozenset(self.tested_action_positions),
             state_mutations=tuple(self.state_mutations),
             failed_transitions=tuple(self.failed_transitions),
-            level_failed_transitions=MappingProxyType(
-                {k: tuple(v) for k, v in self.level_failed_transitions.items()}
+            context_failed_transitions=MappingProxyType(
+                {k: tuple(v) for k, v in self.context_failed_transitions.items()}
             ),
             verified_safe_features=frozenset(self.verified_safe_features),
             mobile_threat_features=frozenset(self.mobile_threat_features),
-            level_lethal_positions=MappingProxyType(
-                {k: frozenset(v) for k, v in self.level_lethal_positions.items()}
+            context_hazards=MappingProxyType(
+                {k: frozenset(v) for k, v in self.context_hazards.items()}
             ),
             prev_oriented_threats=tuple(self.prev_oriented_threats),
             quiescent_features=frozenset(self.quiescent_features),
@@ -659,7 +760,7 @@ class EngineState(BaseModel):
                 else frozenset(self.inhibited_actions)
             ),
             current_room_id=self.current_room_id,
-            current_level=self.current_level,
+            context_epoch=self.context_epoch,
             current_context_id=self.current_context_id,
             world_id=self.world_id,
             bilateral_state=self.bilateral_state,

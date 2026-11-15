@@ -186,10 +186,10 @@ class SpatiotemporalHazardTracker:
 
             SpatiotemporalHazardTracker.FIELD_RETENTION.update(
                 {
-                    "grid_history": RetentionPolicy.LEVEL_LOCAL,
-                    "step_history": RetentionPolicy.LEVEL_LOCAL,
-                    "periodic_cells": RetentionPolicy.LEVEL_LOCAL,
-                    "environmental_period": RetentionPolicy.LEVEL_LOCAL,
+                    "grid_history": RetentionPolicy.EPISODE_LOCAL,
+                    "step_history": RetentionPolicy.EPISODE_LOCAL,
+                    "periodic_cells": RetentionPolicy.EPISODE_LOCAL,
+                    "environmental_period": RetentionPolicy.EPISODE_LOCAL,
                     "known_lethal_features": RetentionPolicy.CONTEXT_LOCAL,
                     "static_lethal_positions": RetentionPolicy.CONTEXT_LOCAL,
                 }
@@ -204,8 +204,8 @@ class SpatiotemporalHazardTracker:
         self.static_lethal_positions: set[tuple[int, int]] = set()
 
     # WP0.5/F1: per-field retention — temporal observation history is
-    # level-local; learned lethal features/positions are context-local theory
-    # (static_lethal_positions is rebind-shared with engine.level_lethal_positions).
+    # episode-local; learned lethal features/positions are context-local theory
+    # (static_lethal_positions is rebind-shared with engine.context_hazards).
     FIELD_RETENTION: dict[str, Any] = {}
 
     def on_boundary(self, boundary) -> None:
@@ -216,10 +216,10 @@ class SpatiotemporalHazardTracker:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self) -> None:
         """Reset temporal observation history while preserving learned lethal feature identities and static lethal positions."""

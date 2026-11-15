@@ -98,17 +98,17 @@ class CorticalPipeline:
                 )
                 if shifted and not getattr(wm, "concept_role_priors", None):
                     from hbllm.hcir.world.cortex_causal import (
-                        invalidate_stale_cross_level_ontology,
+                        invalidate_stale_context_ontology,
                     )
 
-                    invalidate_stale_cross_level_ontology(
+                    invalidate_stale_context_ontology(
                         theory,
                         hazard_tracker=getattr(self.engine, "hazard_tracker", None),
                         episodic_cortex=getattr(self.engine, "episodic_cortex", None),
                         working_memory=wm,
                         engine_or_view=self.engine,
                         bg_feature=bg_feat,
-                        preserve_current_level=False,
+                        preserve_current_context=False,
                         reason="structural_label_permutation",
                     )
 

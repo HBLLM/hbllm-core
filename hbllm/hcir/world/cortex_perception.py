@@ -8,7 +8,7 @@ Biological Modeling:
    - Figure-ground segregation and background estimation.
    - Connected-component morphological entity segmentation using native vectorized labeling.
    - Gestalt grouping and relational alignment affordances (symmetry, collinearity).
-   - Affordance panel array detection.
+   - Homogeneous interactive control cluster detection.
 3. Dorsal Visual Stream & Theory of Mind:
    - Gaze cone and directional orientation tracking of sentient creatures.
    - Frame difference mutation analysis (translation, index cycle, global transition).
@@ -651,7 +651,7 @@ class GestaltAffordanceDetector:
                     if 1 <= len(c_pts) <= 36:
                         min_cr, min_cc = c_pts.min(axis=0)
                         max_cr, max_cc = c_pts.max(axis=0)
-                        # Filter outer frame edges and HUD borders
+                        # Filter outer enclosing boundary edges
                         if min_cr <= 0 or max_cr >= H - 1 or min_cc <= 0 or max_cc >= W - 1:
                             continue
                         if (max_cr - min_cr >= H - 4) or (max_cc - min_cc >= W - 4):
@@ -720,11 +720,12 @@ class GestaltAffordanceDetector:
         return goals
 
     @staticmethod
-    def detect_affordance_panels(
+    def detect_affordance_clusters(
         entities: Sequence[SpatialEntity],
         grid: np.ndarray,
         bg: int = 0,
     ) -> list[dict[str, Any]]:
+        """Identify spatially grouped entities sharing bounding-box morphology (interactive arrays)."""
         by_dim: dict[tuple[int, int], list[SpatialEntity]] = defaultdict(list)
         for e in entities:
             if getattr(e, "role", None) in (EntityRole.OBSTACLE, EntityRole.AGENT):
@@ -733,7 +734,7 @@ class GestaltAffordanceDetector:
             h, w = r1 - r0 + 1, c1 - c0 + 1
             by_dim[(h, w)].append(e)
 
-        panels: list[dict[str, Any]] = []
+        clusters: list[dict[str, Any]] = []
         for (h, w), group in by_dim.items():
             if len(group) < 2 or len(group) > 16:
                 continue
@@ -744,7 +745,7 @@ class GestaltAffordanceDetector:
             majority_feat = max(feat_counts.keys(), key=lambda k: feat_counts[k])
             minority_items = [e for e in group if e.feature_id != majority_feat]
 
-            panels.append(
+            clusters.append(
                 {
                     "shape": (h, w),
                     "items": group,
@@ -753,7 +754,7 @@ class GestaltAffordanceDetector:
                     "item_coords": [e.grid_pos for e in group],
                 }
             )
-        return panels
+        return clusters
 
     _ORIENTED_THREAT_CACHE: OrderedDict[tuple[Any, ...], list[OrientedThreat]] = OrderedDict()
     _ORIENTED_THREAT_CACHE_MAX: int = 64
@@ -1200,12 +1201,12 @@ class PerceptionEngine:
         )
 
     @staticmethod
-    def detect_affordance_panels(
+    def detect_affordance_clusters(
         entities: Sequence[SpatialEntity],
         grid: np.ndarray,
         bg: int = 0,
     ) -> list[dict[str, Any]]:
-        return GestaltAffordanceDetector.detect_affordance_panels(
+        return GestaltAffordanceDetector.detect_affordance_clusters(
             entities=entities,
             grid=grid,
             bg=bg,

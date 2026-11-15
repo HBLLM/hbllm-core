@@ -269,7 +269,7 @@ class GoalArbiter:
                     cue_boost = 15.0 if len(coords) == 2 else 0.0
                     for r, c in coords[:3]:  # sample top candidate positions
                         coord = (int(r), int(c))
-                        if theory.is_position_explored(coord) or coord in exhausted:
+                        if theory.is_locus_explored(coord) or coord in exhausted:
                             continue
                         cost = 1.0
                         if avatar_pos is not None:

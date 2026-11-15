@@ -177,8 +177,8 @@ class ObjectStateLedger:
         self.object_causal_effects: dict[str, list[str]] = {}
         self.unlocked_by_object: dict[str, set[tuple[int, int]]] = {}
 
-    def reset_level(self) -> None:
-        """Reset transient level-specific interaction state."""
+    def reset_context_epoch(self) -> None:
+        """Reset transient context-specific interaction state."""
         self.interaction_counts.clear()
         self.interacted_positions.clear()
         self.interacted_features.clear()
@@ -186,6 +186,10 @@ class ObjectStateLedger:
         self.unlocked_barriers.clear()
         self.object_causal_effects.clear()
         self.unlocked_by_object.clear()
+
+    def reset_level(self) -> None:
+        """Deprecated alias for ``reset_context_epoch``."""
+        self.reset_context_epoch()
 
     def record_interaction(
         self,
@@ -258,17 +262,24 @@ class ObjectStateGraphPlanner:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
-    def reset_episode(self, is_new_level: bool = False) -> None:
-        """Reset planner state for a new level or trial."""
-        if is_new_level:
-            self.ledger.reset_level()
+    def reset_episode(
+        self, is_new_context: bool | None = None, *, is_new_level: bool | None = None
+    ) -> None:
+        """Reset planner state for a new context or trial."""
+        new_ctx = (
+            is_new_context
+            if is_new_context is not None
+            else (is_new_level if is_new_level is not None else False)
+        )
+        if new_ctx:
+            self.ledger.reset_context_epoch()
         else:
-            # On same-level retry: decay interaction counts so heavily-probed objects
+            # On same-context retry: decay interaction counts so heavily-probed objects
             # have their IOR decayed, but unprobed candidates take priority over repeating initial failures.
             for obj_id in list(self.ledger.interaction_counts.keys()):
                 self.ledger.interaction_counts[obj_id] = self.ledger.interaction_counts[obj_id] // 2
@@ -1109,7 +1120,7 @@ class ObjectStateGraphPlanner:
                         ]
 
             # DIRECTIVE 5 for effectors: Probe highest-saliency object with unprobed cell selection & quiescence avoidance
-            from hbllm.hcir.world.cortex_motor import MotorCortexEffector
+            from hbllm.hcir.world.percept import ExogenousSignalTracker
 
             actuatable_candidates: list[
                 tuple[SalientObject, tuple[int, int], dict[str, Any], float]
@@ -1118,13 +1129,15 @@ class ObjectStateGraphPlanner:
                 unprobed_cells = [c for c in obj.cells if c not in quiescent_coords]
                 if not unprobed_cells:
                     continue
-                # Prioritize non-frame unprobed cells if available
+                # Prioritize interior non-boundary unprobed cells if available
                 non_frame_unprobed = [
                     c
                     for c in unprobed_cells
                     if not (
                         grid_arr is not None
-                        and MotorCortexEffector.is_peripheral_frame_cell(c[0], c[1], H, W, grid_arr)
+                        and ExogenousSignalTracker.is_partitioned_or_enclosing(
+                            c, lattice=grid_arr, include_outer_edge=True
+                        )
                     )
                 ]
                 target_cell = (
@@ -1154,7 +1167,9 @@ class ObjectStateGraphPlanner:
                 quiescent_pen = 80.0 if obj.feature_id in quiescent_feats else 0.0
                 inert_pen = 100.0 if self.ledger.is_inert(obj.object_id) else 0.0
                 is_frame_cell = (
-                    MotorCortexEffector.is_peripheral_frame_cell(target_r, target_c, H, W, grid_arr)
+                    ExogenousSignalTracker.is_partitioned_or_enclosing(
+                        (target_r, target_c), lattice=grid_arr, include_outer_edge=True
+                    )
                     if grid_arr is not None
                     else False
                 )

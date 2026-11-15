@@ -83,9 +83,16 @@ class RelationalSubgoalMacro:
     waypoints: list[RelationalWaypoint]
     action_space: frozenset[int]
     confidence: float = 1.0
-    source_level: int = 0
+    source_context_epoch: int = 0
+    source_level: int | None = None
     replay_successes: int = 0
     replay_failures: int = 0
+
+    def __post_init__(self) -> None:
+        if self.source_level is None:
+            self.source_level = self.source_context_epoch
+        elif self.source_context_epoch == 0 and self.source_level != 0:
+            self.source_context_epoch = self.source_level
 
     def matches_grid_features(self, grid: np.ndarray) -> bool:
         """Check if all required waypoint features are present in the target grid."""

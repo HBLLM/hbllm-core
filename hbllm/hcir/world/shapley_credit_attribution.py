@@ -146,28 +146,51 @@ class CounterfactualShapleyCreditAttributor:
             if raw_barriers:
                 static_barriers.update(raw_barriers)
 
-        valid_transitions = [t for t in trajectory if t.avatar_pos is not None]
+        valid_transitions = [
+            t
+            for t in trajectory
+            if isinstance(t.avatar_pos, tuple)
+            and len(t.avatar_pos) >= 2
+            and isinstance(t.avatar_pos[0], (int, float))
+            and isinstance(t.avatar_pos[1], (int, float))
+        ]
         if not valid_transitions:
             last_t = trajectory[-1]
+            raw_last = last_t.avatar_pos
+            fallback_pos: tuple[int, int] | None = (
+                (int(raw_last[0]), int(raw_last[1]))
+                if isinstance(raw_last, tuple)
+                and len(raw_last) >= 2
+                and isinstance(raw_last[0], (int, float))
+                and isinstance(raw_last[1], (int, float))
+                else None
+            )
             return ShapleyCreditResult(
                 root_causal_step=last_t.step,
-                root_fatal_pos=last_t.avatar_pos,
+                root_fatal_pos=fallback_pos,
                 root_fatal_action=last_t.action_id,
                 max_blame_score=1.0,
                 causal_explanation="Final action blame fallback",
             )
 
         step_blame: dict[int, float] = {}
+        step_positions: dict[int, tuple[int, int]] = {}
         explanations: dict[int, str] = {}
         prev_reachability: int | None = None
 
         for idx, t in enumerate(valid_transitions):
             step_idx = t.step
-            pos = t.avatar_pos
-            if pos is None:
+            raw_pos = t.avatar_pos
+            if (
+                not isinstance(raw_pos, tuple)
+                or len(raw_pos) < 2
+                or not isinstance(raw_pos[0], (int, float))
+                or not isinstance(raw_pos[1], (int, float))
+            ):
                 continue
 
-            r, c = pos
+            r, c = int(raw_pos[0]), int(raw_pos[1])
+            pos = (r, c)
             grid = t.grid_snapshot if t.grid_snapshot is not None else np.zeros((32, 32), dtype=int)
             H, W = grid.shape
 
@@ -179,8 +202,8 @@ class CounterfactualShapleyCreditAttributor:
             explanation = "temporal_proximity"
 
             # 2. Irreversible corner deadlock detection
-            if (r, c) not in goals and CounterfactualDeadlockDetector.is_corner_deadlock(
-                (r, c), goals, static_barriers, (H, W)
+            if pos not in goals and CounterfactualDeadlockDetector.is_corner_deadlock(
+                pos, goals, static_barriers, (H, W)
             ):
                 blame += 50.0
                 explanation = f"irreversible_corner_deadlock_at_({r},{c})"
@@ -200,6 +223,7 @@ class CounterfactualShapleyCreditAttributor:
 
             prev_reachability = cur_reach
             step_blame[step_idx] = blame
+            step_positions[step_idx] = pos
             explanations[step_idx] = explanation
 
         # Identify root causal step with highest blame
@@ -208,7 +232,7 @@ class CounterfactualShapleyCreditAttributor:
 
         return ShapleyCreditResult(
             root_causal_step=best_step,
-            root_fatal_pos=target_trans.avatar_pos,
+            root_fatal_pos=step_positions[best_step],
             root_fatal_action=target_trans.action_id,
             max_blame_score=step_blame[best_step],
             step_blame_scores=step_blame,

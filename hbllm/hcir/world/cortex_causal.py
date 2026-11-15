@@ -31,7 +31,7 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import EpistemicObservationDiff
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
-from hbllm.hcir.world.percept import TerminalSignal
+from hbllm.hcir.world.percept import PlaceLocus, TerminalSignal
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
@@ -207,27 +207,31 @@ class ConditionalAffordance:
 class HCIRSymbolicWorldTheory:
     """Neuro-symbolic domain-agnostic world theory grounded in HCIR CausalPredicates.
 
-    Maintains intensional causal rules and first-order predicates across level transitions,
+    Maintains intensional causal rules and first-order predicates across context transitions,
     eliminating fragile procedural heuristics.
 
     Semantic Role Abstraction: Knowledge is stored at two levels:
     1. Feature-level sets (_goal_features, _walkable_features, etc.) — layout-specific bindings
        that map raw perceptual feature IDs to ontological roles.
     2. Role-level sets (_semantic_roles) — abstract role descriptions that survive across
-       level transitions where feature IDs may change. When transitioning to a new level,
+       context transitions where feature IDs may change. When transitioning to a new context,
        feature-level bindings are cleared but role knowledge is retained as priors for
        re-grounding in the new layout.
     """
 
     goal_predicates: list[CausalPredicate] = field(default_factory=list)
     barrier_predicates: list[CausalPredicate] = field(default_factory=list)
-    _level_epoch: int = 0
-    _has_prior_level_transition: bool = False
-    _awaiting_level_revalidation: bool = False
+    _context_epoch: int = 0
+    _has_prior_context_transition: bool = False
+    _awaiting_context_revalidation: bool = False
     _labels_non_stationary: bool = False
-    _current_level_verified: set[tuple[str, Any]] = field(default_factory=set)
-    _current_grid_structural_stats: dict[Any, tuple[int, float, int]] = field(default_factory=dict)
-    _prior_grid_structural_stats: dict[Any, tuple[int, float, int]] = field(default_factory=dict)
+    _current_context_verified: set[tuple[str, Any]] = field(default_factory=set)
+    _current_entity_distribution_stats: dict[Any, tuple[int, float, int]] = field(
+        default_factory=dict
+    )
+    _prior_entity_distribution_stats: dict[Any, tuple[int, float, int]] = field(
+        default_factory=dict
+    )
     walkable_predicates: list[CausalPredicate] = field(default_factory=list)
     cargo_predicates: list[CausalPredicate] = field(default_factory=list)
     receptacle_predicates: list[CausalPredicate] = field(default_factory=list)
@@ -239,8 +243,8 @@ class HCIRSymbolicWorldTheory:
     _goal_features: set[Any] = field(default_factory=set)
     _candidate_goal_features: set[Any] = field(default_factory=set)
     _explored_features: set[Any] = field(default_factory=set)
-    _explored_positions: set[tuple[int, int]] = field(default_factory=set)
-    _probed_actuator_positions: set[tuple[int, int]] = field(default_factory=set)
+    _explored_loci: set[PlaceLocus] = field(default_factory=set)
+    _probed_actuator_loci: set[PlaceLocus] = field(default_factory=set)
     _barrier_features: set[Any] = field(default_factory=set)
     _walkable_features: set[Any] = field(default_factory=set)
     _cargo_features: set[Any] = field(default_factory=set)
@@ -276,12 +280,12 @@ class HCIRSymbolicWorldTheory:
 
     # ── Semantic Role Abstraction (Feature→Role Transfer Layer) ──────────
     # Bidirectional mapping between raw perceptual feature IDs and abstract semantic roles.
-    # Roles (e.g. "goal", "key", "door", "hazard", "floor") survive across level transitions
+    # Roles (e.g. "goal", "key", "door", "hazard", "floor") survive across context transitions
     # where feature IDs may be relabeled; feature bindings are layout-specific.
     _feature_to_role: dict[Any, str] = field(default_factory=dict)
     _role_to_features: dict[str, set[Any]] = field(default_factory=dict)
     # Structural role priors: count how many times each role was observed across episodes.
-    # On new level, these priors guide re-grounding of unknown features.
+    # In a new context, these priors guide re-grounding of unknown features.
     _role_priors: dict[str, int] = field(default_factory=dict)
     # Conditional affordance templates (role-level, survive relabeling)
     _role_conditional_templates: list[dict[str, Any]] = field(default_factory=list)
@@ -302,9 +306,14 @@ class HCIRSymbolicWorldTheory:
         return frozenset(self._explored_features)
 
     @property
-    def explored_positions(self) -> frozenset[tuple[int, int]]:
-        """Coordinates that have been visited or epistemically satisfied (read-only)."""
-        return frozenset(self._explored_positions)
+    def explored_loci(self) -> frozenset[PlaceLocus]:
+        """Loci that have been visited or epistemically satisfied (read-only)."""
+        return frozenset(self._explored_loci)
+
+    @property
+    def explored_positions(self) -> frozenset[PlaceLocus]:
+        """Backward-compatible alias for explored_loci."""
+        return frozenset(self._explored_loci)
 
     # ── Semantic Role Abstraction API ────────────────────────────────────
 
@@ -315,10 +324,10 @@ class HCIRSymbolicWorldTheory:
         Roles: 'goal', 'barrier', 'walkable', 'key', 'door', 'hazard', 'floor', 'cargo',
                'receptacle', 'actuator', 'avatar'.
 
-        When role-level conditional affordance templates exist (from a previous level's
+        When role-level conditional affordance templates exist (from a prior context's
         ``snapshot_conditional_affordance_templates``), this method lazily re-instantiates
         any template whose *both* sides (feature role + prerequisite role) are now bound,
-        providing automatic cross-level transfer of key→door style affordances.
+        providing automatic cross-context transfer of key→door style affordances.
         """
         old_role = self._feature_to_role.get(feature_id)
         if old_role == role:
@@ -330,7 +339,7 @@ class HCIRSymbolicWorldTheory:
         self._role_priors[role] = self._role_priors.get(role, 0) + 1
 
         # Lazy conditional affordance re-instantiation from role-level templates.
-        # Only fires when templates were snapshotted at a prior level boundary.
+        # Only fires when templates were snapshotted at a prior context boundary.
         if self._role_conditional_templates:
             self._try_instantiate_templates_for_role(role, feature_id)
 
@@ -338,7 +347,7 @@ class HCIRSymbolicWorldTheory:
         """Instantiate any conditional affordance templates whose *both* sides are now bound.
 
         Called internally by ``bind_feature_to_role`` to lazily re-create conditional
-        affordances (e.g. key→door) when a new level assigns different feature IDs to
+        affordances (e.g. key→door) when a new context assigns different feature IDs to
         the same semantic roles.
         """
         for tmpl in self._role_conditional_templates:
@@ -400,9 +409,9 @@ class HCIRSymbolicWorldTheory:
         return self._role_priors.get(role, 0) > 0
 
     def snapshot_conditional_affordance_templates(self) -> None:
-        """Snapshot current conditional affordances as role-level templates for cross-level transfer.
+        """Snapshot current conditional affordances as role-level templates for cross-context transfer.
 
-        Called before level transition so that feature-specific affordances (e.g., feature 3
+        Called before a context transition so that feature-specific affordances (e.g., feature 3
         unlocks feature 2) are lifted to role-level templates (e.g., 'key' unlocks 'door').
         """
         self._role_conditional_templates.clear()
@@ -426,7 +435,7 @@ class HCIRSymbolicWorldTheory:
     def apply_role_priors_to_new_features(self, feature_id: Any, bg_feature: Any = 0) -> str | None:
         """Attempt to assign a role to an unknown feature using structural role priors.
 
-        Called during perception when a feature is first encountered in a new level.
+        Called during perception when a feature is first encountered in a new context.
         Returns the assigned role if a prior match is found, else None.
         """
         if feature_id in self._feature_to_role or feature_id == bg_feature:
@@ -437,7 +446,7 @@ class HCIRSymbolicWorldTheory:
     def rebind_role_from_evidence(self, feature_id: Any, role: str, evidence: str = "") -> None:
         """Re-bind a feature to a role when empirical evidence confirms the mapping.
 
-        This is the primary mechanism for cross-level transfer: when the engine discovers
+        This is the primary mechanism for cross-context transfer: when the engine discovers
         that feature 7 behaves like a 'key' (e.g., it unlocks a barrier), it binds
         feature 7 to role 'key'. Any conditional affordance templates involving role 'key'
         are then instantiated with feature 7.
@@ -483,7 +492,7 @@ class HCIRSymbolicWorldTheory:
     def clear_feature_bindings(self) -> None:
         """Clear all feature→role bindings without clearing role priors or templates.
 
-        Called on level transition (is_new_level=True) to reset layout-specific
+        Called on context transition (is_new_context=True) to reset layout-specific
         feature IDs while preserving abstract role knowledge for re-grounding.
         """
         self._feature_to_role.clear()
@@ -495,39 +504,39 @@ class HCIRSymbolicWorldTheory:
         return self._labels_non_stationary
 
     @property
-    def has_prior_level_transition(self) -> bool:
-        """True once at least one is_new_level transition has occurred."""
-        return self._has_prior_level_transition
+    def has_prior_context_transition(self) -> bool:
+        """True once at least one context transition has occurred."""
+        return self._has_prior_context_transition
 
-    def mark_verified_in_current_level(self, kind: str, feature_id: Any) -> None:
-        """Record that ``(kind, feature_id)`` was empirically observed in the current level."""
-        self._current_level_verified.add((kind, feature_id))
+    def mark_verified_in_context(self, kind: str, feature_id: Any) -> None:
+        """Record that ``(kind, feature_id)`` was empirically observed in the current context."""
+        self._current_context_verified.add((kind, feature_id))
 
-    def is_verified_in_current_level(self, kind: str, feature_id: Any) -> bool:
-        """Return True if ``(kind, feature_id)`` was observed in the current level."""
-        return (kind, feature_id) in self._current_level_verified
+    def is_verified_in_context(self, kind: str, feature_id: Any) -> bool:
+        """Return True if ``(kind, feature_id)`` was observed in the current context."""
+        return (kind, feature_id) in self._current_context_verified
 
-    def current_level_verified_features(self, kind: str) -> set[Any]:
-        """Return feature IDs verified for ``kind`` in the current level."""
-        return {feat for k, feat in self._current_level_verified if k == kind}
+    def context_verified_features(self, kind: str) -> set[Any]:
+        """Return feature IDs verified for ``kind`` in the current context."""
+        return {feat for k, feat in self._current_context_verified if k == kind}
 
-    def mark_cross_level_label_shift(self, reason: str = "") -> None:
-        """Record empirical falsification of cross-level raw label invariance."""
+    def mark_cross_context_label_shift(self, reason: str = "") -> None:
+        """Record empirical falsification of cross-context raw label invariance."""
         if not self._labels_non_stationary:
             logger.warning(
-                "HCIRSymbolicWorldTheory: Cross-level raw label stationarity falsified (%s)",
+                "HCIRSymbolicWorldTheory: Cross-context raw label stationarity falsified (%s)",
                 reason or "contradiction",
             )
         self._labels_non_stationary = True
 
-    def begin_new_level_epoch(self) -> None:
-        """Advance level epoch on an is_new_level boundary and mark prior labels unverified."""
-        self._level_epoch += 1
-        self._has_prior_level_transition = True
-        self._awaiting_level_revalidation = True
-        self._prior_grid_structural_stats = dict(self._current_grid_structural_stats)
-        self._current_grid_structural_stats.clear()
-        self._current_level_verified.clear()
+    def begin_context_epoch(self) -> None:
+        """Advance context epoch on a context boundary and mark prior labels unverified."""
+        self._context_epoch += 1
+        self._has_prior_context_transition = True
+        self._awaiting_context_revalidation = True
+        self._prior_entity_distribution_stats = dict(self._current_entity_distribution_stats)
+        self._current_entity_distribution_stats.clear()
+        self._current_context_verified.clear()
 
     @staticmethod
     def _compute_grid_structural_stats(
@@ -555,25 +564,21 @@ class HCIRSymbolicWorldTheory:
             stats[int(v_np)] = (int(cnt_np), border_cnt / max(1, int(cnt_np)), total_cells)
         return stats
 
-    def observe_grid_structure(
+    def observe_entity_distribution(
         self,
-        grid: np.ndarray,
-        bg_feature: Any = 0,
-        avatar_features: set[Any] | None = None,
+        stats: dict[Any, tuple[int, float, int]],
     ) -> bool:
-        """Record structural feature distributions; return True if label permutation detected.
+        """Record domain-agnostic entity distribution stats; return True on role inversion.
 
-        Checks only features actively present (count >= 1) in ``grid`` so disjoint
-        out-of-vocabulary palette shifts (e.g. grounded VisualTransfer) do not false-trigger.
+        Expects ``stats`` mapping ``feature_id -> (count, boundary_fraction, total_sites)``.
+        Checks only features actively present (count >= 1) so disjoint out-of-vocabulary
+        feature sets (e.g. visual transfer) do not false-trigger.
         """
-        cur_stats = self._compute_grid_structural_stats(
-            grid, bg_feature=bg_feature, avatar_features=avatar_features
-        )
-        self._current_grid_structural_stats = cur_stats
-        if not self._awaiting_level_revalidation:
+        self._current_entity_distribution_stats = dict(stats)
+        if not self._awaiting_context_revalidation:
             return False
-        self._awaiting_level_revalidation = False
-        if not self._prior_grid_structural_stats or not cur_stats:
+        self._awaiting_context_revalidation = False
+        if not self._prior_entity_distribution_stats or not stats:
             return False
 
         def _is_structural_boundary(cnt: int, bfrac: float, tot: int) -> bool:
@@ -582,8 +587,8 @@ class HCIRSymbolicWorldTheory:
         def _is_sparse_interior(cnt: int, bfrac: float, _tot: int) -> bool:
             return 1 <= cnt <= 4 and bfrac < 0.25
 
-        for feat, (cur_cnt, cur_bfrac, cur_tot) in cur_stats.items():
-            prior = self._prior_grid_structural_stats.get(feat)
+        for feat, (cur_cnt, cur_bfrac, cur_tot) in stats.items():
+            prior = self._prior_entity_distribution_stats.get(feat)
             if prior is None:
                 continue
             p_cnt, p_bfrac, p_tot = prior
@@ -598,31 +603,35 @@ class HCIRSymbolicWorldTheory:
                 return True
         return False
 
-    def clear_level_feature_ontology(
-        self, bg_feature: Any = 0, preserve_current_level: bool = False
+    def observe_grid_structure(
+        self,
+        grid: np.ndarray,
+        bg_feature: Any = 0,
+        avatar_features: set[Any] | None = None,
+    ) -> bool:
+        """Lattice convenience wrapper delegating to ``observe_entity_distribution``."""
+        cur_stats = self._compute_grid_structural_stats(
+            grid, bg_feature=bg_feature, avatar_features=avatar_features
+        )
+        return self.observe_entity_distribution(cur_stats)
+
+    def clear_context_feature_ontology(
+        self, bg_feature: Any = 0, preserve_current_context: bool = False
     ) -> None:
         """Reset layout/label-bound feature ontology while preserving abstract role knowledge."""
-        keep_goal = (
-            self.current_level_verified_features("goal") if preserve_current_level else set()
-        )
-        keep_bar = (
-            self.current_level_verified_features("barrier") if preserve_current_level else set()
-        )
+        keep_goal = self.context_verified_features("goal") if preserve_current_context else set()
+        keep_bar = self.context_verified_features("barrier") if preserve_current_context else set()
         keep_walk = (
-            self.current_level_verified_features("walkable") if preserve_current_level else set()
+            self.context_verified_features("walkable") if preserve_current_context else set()
         )
         keep_walk.add(bg_feature)
-        keep_cargo = (
-            self.current_level_verified_features("cargo") if preserve_current_level else set()
-        )
+        keep_cargo = self.context_verified_features("cargo") if preserve_current_context else set()
         keep_rec = (
-            self.current_level_verified_features("receptacle") if preserve_current_level else set()
+            self.context_verified_features("receptacle") if preserve_current_context else set()
         )
-        keep_act = (
-            self.current_level_verified_features("actuator") if preserve_current_level else set()
-        )
+        keep_act = self.context_verified_features("actuator") if preserve_current_context else set()
         keep_cond = (
-            self.current_level_verified_features("conditional") if preserve_current_level else set()
+            self.context_verified_features("conditional") if preserve_current_context else set()
         )
 
         def _keep_preds(
@@ -673,8 +682,8 @@ class HCIRSymbolicWorldTheory:
             if k in keep_ev_map and f in keep_ev_map[k]
         }
 
-        if preserve_current_level:
-            verified_feats = {f for _, f in self._current_level_verified}
+        if preserve_current_context:
+            verified_feats = {f for _, f in self._current_context_verified}
             stale_feats = [f for f in self._feature_to_role if f not in verified_feats]
             for f in stale_feats:
                 old_r = self._feature_to_role.pop(f, None)
@@ -693,21 +702,27 @@ class HCIRSymbolicWorldTheory:
     def is_feature_explored(self, feature: Any) -> bool:
         return feature in self._explored_features
 
-    def mark_position_explored(self, pos: tuple[int, int], reason: str = "") -> None:
-        """Mark a coordinate as epistemically explored."""
-        self._explored_positions.add(pos)
+    def mark_locus_explored(self, locus: PlaceLocus, reason: str = "") -> None:
+        """Mark a spatial or symbolic locus as epistemically explored."""
+        self._explored_loci.add(locus)
         if reason == "actuator_probed":
-            self._probed_actuator_positions.add(pos)
-        logger.info("HCIRSymbolicWorldTheory: Marked position %s explored (reason=%s)", pos, reason)
+            self._probed_actuator_loci.add(locus)
+        logger.info("HCIRSymbolicWorldTheory: Marked locus %s explored (reason=%s)", locus, reason)
 
-    def unmark_position_explored(self, pos: tuple[int, int]) -> None:
-        """Unmark a coordinate from explored positions when world state unlocks it."""
-        self._explored_positions.discard(pos)
-        self._probed_actuator_positions.discard(pos)
+    def mark_position_explored(self, pos: PlaceLocus, reason: str = "") -> None:
+        """Backward-compatible alias for mark_locus_explored."""
+        self.mark_locus_explored(pos, reason=reason)
 
-    def induce_relational_cue_pair(
-        self, feature_id: Any, locations: Sequence[tuple[int, int]]
-    ) -> None:
+    def unmark_locus_explored(self, locus: PlaceLocus) -> None:
+        """Unmark a locus from explored markers when world state unlocks it."""
+        self._explored_loci.discard(locus)
+        self._probed_actuator_loci.discard(locus)
+
+    def unmark_position_explored(self, pos: PlaceLocus) -> None:
+        """Backward-compatible alias for unmark_locus_explored."""
+        self.unmark_locus_explored(pos)
+
+    def induce_relational_cue_pair(self, feature_id: Any, locations: Sequence[PlaceLocus]) -> None:
         """Record a relational co-occurrence pair linking an indicator cue and an actuator (WP-C2)."""
         self.record_causal_predicate(
             CausalPredicate(
@@ -720,12 +735,21 @@ class HCIRSymbolicWorldTheory:
             )
         )
 
-    def is_position_explored(self, pos: tuple[int, int]) -> bool:
-        return pos in self._explored_positions
+    def is_locus_explored(self, locus: PlaceLocus) -> bool:
+        """Return True if a locus has been marked as explored."""
+        return locus in self._explored_loci
 
-    def is_position_actuator_probed(self, pos: tuple[int, int]) -> bool:
-        """Return True when an adjacent interact/actuator action failed at pos."""
-        return pos in self._probed_actuator_positions
+    def is_position_explored(self, pos: PlaceLocus) -> bool:
+        """Backward-compatible alias for is_locus_explored."""
+        return self.is_locus_explored(pos)
+
+    def is_locus_actuator_probed(self, locus: PlaceLocus) -> bool:
+        """Return True when an adjacent interact/actuator action failed at locus."""
+        return locus in self._probed_actuator_loci
+
+    def is_position_actuator_probed(self, pos: PlaceLocus) -> bool:
+        """Backward-compatible alias for is_locus_actuator_probed."""
+        return self.is_locus_actuator_probed(pos)
 
     @property
     def barrier_features(self) -> frozenset[Any]:
@@ -806,7 +830,7 @@ class HCIRSymbolicWorldTheory:
                 self.bind_feature_to_role(feature, "barrier")
         ev_str = str(evidence).lower()
         if "template" not in ev_str and "hydration" not in ev_str:
-            self.mark_verified_in_current_level("conditional", feature)
+            self.mark_verified_in_context("conditional", feature)
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
 
@@ -1119,7 +1143,7 @@ class HCIRSymbolicWorldTheory:
         self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
         # Note: do NOT bind_feature_to_role("walkable") here — the primary role is "goal".
         # The feature is added to _walkable_features for functional walkability queries,
-        # but its semantic role for cross-level transfer remains "goal".
+        # but its semantic role for cross-context transfer remains "goal".
         return True
 
     def induce_candidate_goal(self, feature_id: Any, evidence: Any = None) -> bool:
@@ -1195,7 +1219,7 @@ class HCIRSymbolicWorldTheory:
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
-            self.mark_verified_in_current_level("barrier", feature_id)
+            self.mark_verified_in_context("barrier", feature_id)
         if feature_id not in self._barrier_features:
             self._barrier_features.add(feature_id)
             self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
@@ -1244,7 +1268,7 @@ class HCIRSymbolicWorldTheory:
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
-            self.mark_verified_in_current_level("walkable", feature_id)
+            self.mark_verified_in_context("walkable", feature_id)
         if feature_id not in self._walkable_features:
             self._walkable_features.add(feature_id)
             self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
@@ -1285,7 +1309,7 @@ class HCIRSymbolicWorldTheory:
         self._goal_features.discard(feature_id)
         self._candidate_goal_features.discard(feature_id)
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
-            self.mark_verified_in_current_level("cargo", feature_id)
+            self.mark_verified_in_context("cargo", feature_id)
         if feature_id not in self._cargo_features:
             self._cargo_features.add(feature_id)
             self._feature_evidence[("cargo", feature_id)] = (rank, ev_str)
@@ -1304,7 +1328,7 @@ class HCIRSymbolicWorldTheory:
         """Induce universal receptacle predicate."""
         rank, ev_str = parse_evidence(evidence or "receptacle")
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
-            self.mark_verified_in_current_level("receptacle", feature_id)
+            self.mark_verified_in_context("receptacle", feature_id)
         if feature_id not in self._receptacle_features:
             self._receptacle_features.add(feature_id)
             self._feature_evidence[("receptacle", feature_id)] = (rank, ev_str)
@@ -1323,7 +1347,7 @@ class HCIRSymbolicWorldTheory:
         """Induce distal actuator / switch affordance."""
         rank, ev_str = parse_evidence(evidence or "actuator")
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
-            self.mark_verified_in_current_level("actuator", feature_id)
+            self.mark_verified_in_context("actuator", feature_id)
         if feature_id not in self._actuator_features:
             self._actuator_features.add(feature_id)
             self._feature_evidence[("actuator", feature_id)] = (rank, ev_str)
@@ -1436,12 +1460,16 @@ class HCIRSymbolicWorldTheory:
         for k in to_pop:
             self._feature_evidence.pop(k, None)
 
-    def clear_explored_positions(self, clear_features: bool = False) -> None:
-        """Clear episode-local explored coordinate markers (and optionally explored features on level change)."""
-        self._explored_positions.clear()
-        self._probed_actuator_positions.clear()
+    def clear_explored_loci(self, clear_features: bool = False) -> None:
+        """Clear episode-local explored locus markers (and optionally explored features on context change)."""
+        self._explored_loci.clear()
+        self._probed_actuator_loci.clear()
         if clear_features:
             self._explored_features.clear()
+
+    def clear_explored_positions(self, clear_features: bool = False) -> None:
+        """Backward-compatible alias for clear_explored_loci."""
+        self.clear_explored_loci(clear_features=clear_features)
 
     def clear_barriers(self) -> None:
         """Clear all barrier rules and cached features."""
@@ -1969,8 +1997,8 @@ class HCIRSymbolicWorldTheory:
         self._goal_features.clear()
         self._candidate_goal_features.clear()
         self._explored_features.clear()
-        self._explored_positions.clear()
-        self._probed_actuator_positions.clear()
+        self._explored_loci.clear()
+        self._probed_actuator_loci.clear()
         self._barrier_features.clear()
         self._walkable_features.clear()
         self._cargo_features.clear()
@@ -1987,13 +2015,13 @@ class HCIRSymbolicWorldTheory:
         self._role_to_features.clear()
         self._role_priors.clear()
         self._role_conditional_templates.clear()
-        self._level_epoch = 0
-        self._has_prior_level_transition = False
-        self._awaiting_level_revalidation = False
+        self._context_epoch = 0
+        self._has_prior_context_transition = False
+        self._awaiting_context_revalidation = False
         self._labels_non_stationary = False
-        self._current_level_verified.clear()
-        self._current_grid_structural_stats.clear()
-        self._prior_grid_structural_stats.clear()
+        self._current_context_verified.clear()
+        self._current_entity_distribution_stats.clear()
+        self._prior_entity_distribution_stats.clear()
 
 
 class CausalInductionCortex:
@@ -2121,10 +2149,10 @@ class CausalInductionCortex:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset episode state, optionally preserving discovered causal affordances."""
@@ -2224,7 +2252,11 @@ class EpistemicInterventionProposal:
                 node_id="active_epistemic_intervention",
                 node_data={
                     "action": self.action,
-                    "target_coord": list(self.target_coord) if self.target_coord else None,
+                    "target_coord": (
+                        list(self.target_coord)
+                        if isinstance(self.target_coord, tuple)
+                        else self.target_coord
+                    ),
                     "target_feature": self.target_feature,
                     "expected_information_gain": self.expected_information_gain,
                     "hypothesis": self.hypothesis,
@@ -2233,7 +2265,7 @@ class EpistemicInterventionProposal:
         ]
 
 
-def invalidate_stale_cross_level_ontology(
+def invalidate_stale_context_ontology(
     theory: HCIRSymbolicWorldTheory,
     *,
     hazard_tracker: Any = None,
@@ -2241,36 +2273,34 @@ def invalidate_stale_cross_level_ontology(
     working_memory: Any = None,
     engine_or_view: Any = None,
     bg_feature: Any = 0,
-    preserve_current_level: bool = False,
+    preserve_current_context: bool = False,
     reason: str = "",
 ) -> None:
-    """Purge stale cross-level raw-feature bindings upon label-invariance falsification.
+    """Purge stale cross-context raw-feature bindings upon label-invariance falsification.
 
     Preserves domain-general role priors, conditional affordance role templates,
     avatar/background identity, and motor dynamics while clearing feature-ID-keyed
-    caches that were not confirmed in the current level.
+    caches that were not confirmed in the current context.
     """
     if (
         getattr(working_memory, "concept_role_priors", None)
-        and not theory.has_prior_level_transition
+        and not theory.has_prior_context_transition
     ):
         return
 
-    theory.mark_cross_level_label_shift(reason=reason)
-    theory.clear_level_feature_ontology(
-        bg_feature=bg_feature, preserve_current_level=preserve_current_level
+    theory.mark_cross_context_label_shift(reason=reason)
+    theory.clear_context_feature_ontology(
+        bg_feature=bg_feature, preserve_current_context=preserve_current_context
     )
 
-    keep_lethal = (
-        theory.current_level_verified_features("lethal") if preserve_current_level else set()
-    )
+    keep_lethal = theory.context_verified_features("lethal") if preserve_current_context else set()
     if hazard_tracker is not None:
         known_lethal = getattr(hazard_tracker, "known_lethal_features", None)
         if isinstance(known_lethal, set):
             known_lethal.intersection_update(
                 keep_lethal
-            ) if preserve_current_level else known_lethal.clear()
-        if not preserve_current_level:
+            ) if preserve_current_context else known_lethal.clear()
+        if not preserve_current_context:
             static_pos = getattr(hazard_tracker, "static_lethal_positions", None)
             if isinstance(static_pos, set):
                 static_pos.clear()
@@ -2280,7 +2310,7 @@ def invalidate_stale_cross_level_ontology(
         if isinstance(disc_lethal, set):
             disc_lethal.intersection_update(
                 keep_lethal
-            ) if preserve_current_level else disc_lethal.clear()
+            ) if preserve_current_context else disc_lethal.clear()
 
     if working_memory is not None:
         hyp_engine = getattr(working_memory, "hypothesis_engine", None)
@@ -2302,13 +2332,13 @@ def invalidate_stale_cross_level_ontology(
         mobile = getattr(engine_or_view, "mobile_threat_features", None)
         if isinstance(mobile, set):
             mobile.clear()
-        if not preserve_current_level:
+        if not preserve_current_context:
             for attr in ("learned_barriers", "learned_goal_positions"):
                 coll = getattr(engine_or_view, attr, None)
                 if isinstance(coll, set):
                     coll.clear()
         else:
-            keep_goal = theory.current_level_verified_features("goal")
+            keep_goal = theory.context_verified_features("goal")
             if not keep_goal:
                 l_goals = getattr(engine_or_view, "learned_goal_positions", None)
                 if isinstance(l_goals, set):

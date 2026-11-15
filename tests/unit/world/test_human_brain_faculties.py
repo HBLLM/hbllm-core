@@ -983,6 +983,149 @@ class TestInductiveHypothesisEngine:
         assert 9 in theory.barrier_features
         assert len(theory.barrier_predicates) >= 1
 
+    def test_lifted_substrate_agnostic_hypothesis_and_locus_apis(self) -> None:
+        from hbllm.hcir.world.causal_discovery import CausalPredicate, LogicOperator
+        from hbllm.hcir.world.cortex_episodic import EpisodicTransition
+        from hbllm.hcir.world.cortex_hypothesis import (
+            EntityStateDelta,
+            HypothesisStatus,
+            HypothesisType,
+            SynthesizedRuleAST,
+            TransitionObservationContext,
+        )
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        # 1. Symbolic PlaceLocus remote mechanism (zero 2D lattice provided)
+        hyp_engine = InductiveHypothesisEngine(min_support_to_confirm=2)
+        for _ in range(2):
+            hyp_engine.observe_transition(
+                prev_grid=None,
+                action="activate",
+                curr_grid=None,
+                prev_avatar_pos="atrium",
+                curr_avatar_pos="pedestal_north",
+                contact_feature=2,
+                avatar_feature=1,
+                entity_deltas=[
+                    EntityStateDelta(
+                        locus="vault_gate",
+                        prev_feature=9,
+                        curr_feature=0,
+                    )
+                ],
+                prev_feature_counts={2: 1, 9: 1},
+                curr_feature_counts={2: 1, 9: 0},
+            )
+        remote_hyp = hyp_engine.hypotheses.get("remote_mech_2_clears_9")
+        assert remote_hyp is not None
+        assert remote_hyp.rule_type == HypothesisType.REMOTE_MECHANISM
+        assert remote_hyp.status == HypothesisStatus.CONFIRMED
+
+        # 2. 3D coordinate entity translation AST evaluation & HazardContact without grids
+        hyp_engine_3d = InductiveHypothesisEngine(min_support_to_confirm=1)
+        ctx_3d = TransitionObservationContext(
+            prev_grid=None,
+            action="push_east",
+            curr_grid=None,
+            prev_avatar_pos=(1, 1, 0),
+            curr_avatar_pos=(1, 2, 0),
+            contact_feature=6,
+            avatar_feature=1,
+            entity_deltas=(
+                EntityStateDelta(locus=(1, 2, 0), prev_feature=6, curr_feature=1),
+                EntityStateDelta(locus=(1, 3, 0), prev_feature=0, curr_feature=6),
+            ),
+        )
+        hyp_engine_3d.observe_transition(context=ctx_3d)
+        translate_ast = SynthesizedRuleAST(
+            precondition=CausalPredicate(
+                logic_op=LogicOperator.AND,
+                children=[
+                    CausalPredicate(variable="action_id", operator="==", value="push_east"),
+                    CausalPredicate(variable="contact_feature", operator="==", value=6),
+                ],
+            ),
+            effect_operator="translate_entity",
+            effect_params={"feature": 6, "delta": (0, 1, 0)},
+        )
+        assert translate_ast.evaluate_precondition(ctx_3d)
+        assert translate_ast.evaluate_effect(ctx_3d)
+
+        # Counterexample without 3D grid refutes failed translation
+        ctx_3d_fail = TransitionObservationContext(
+            prev_grid=None,
+            action="push_east",
+            curr_grid=None,
+            prev_avatar_pos=(1, 1, 0),
+            curr_avatar_pos=(1, 2, 0),
+            contact_feature=6,
+            avatar_feature=1,
+            entity_deltas=(),
+        )
+        assert translate_ast.evaluate_precondition(ctx_3d_fail)
+        assert not translate_ast.evaluate_effect(ctx_3d_fail)
+
+        # Mortality correlation near symbolic hazard without grids
+        hyp_engine_3d.observe_transition(
+            prev_grid=None,
+            action="step_forward",
+            curr_grid=None,
+            prev_avatar_pos="bridge_edge",
+            curr_avatar_pos="lava_pit",
+            avatar_feature=1,
+            prev_adjacent_features=(7,),
+            is_dead=True,
+        )
+        assert "hazard_contact_7" in hyp_engine_3d.hypotheses
+
+        # 3. Domain-agnostic HCIRSymbolicWorldTheory explored loci & entity distribution
+        theory = HCIRSymbolicWorldTheory()
+        theory.mark_locus_explored("pedestal_north", reason="actuator_probed")
+        assert theory.is_locus_explored("pedestal_north")
+        assert theory.is_locus_actuator_probed("pedestal_north")
+        assert "pedestal_north" in theory.explored_loci
+
+        assert not theory.observe_entity_distribution({9: (2, 0.0, 100)})
+        theory.begin_context_epoch()
+        assert theory.observe_entity_distribution({9: (25, 0.8, 100)})
+
+        # ActionMutation & RelationalCue without grids
+        hyp_engine_lifted = InductiveHypothesisEngine(min_support_to_confirm=1)
+        hyp_engine_lifted.observe_transition(
+            prev_grid=None,
+            action="toggle",
+            curr_grid=None,
+            prev_avatar_pos="node_a",
+            curr_avatar_pos="node_a",
+            avatar_feature=1,
+            curr_adjacent_features=(8,),
+            paired_features=frozenset({8}),
+            entity_deltas=[
+                EntityStateDelta(
+                    locus="distant_gate",
+                    prev_feature=5,
+                    curr_feature=0,
+                )
+            ],
+        )
+        assert "relational_cue_8_clears_5" in hyp_engine_lifted.hypotheses
+        assert "action_toggle_mutates_5_to_0" in hyp_engine_lifted.hypotheses
+
+        # 4. Symbolic PlaceLocus in MentalSimulationStep & EpisodicTransition
+        sim_step = MentalSimulationStep(
+            action="move_corridor",
+            predicted_avatar_pos="corridor_3",
+            is_deterministic_geodesic=True,
+        )
+        assert sim_step.to_causal_predicate().value == "corridor_3"
+        sim_ops = sim_step.to_transaction_operations()
+        assert sim_ops[0].node_id == "sim_step_move_corridor_corridor_3"
+
+        ep_trans = EpisodicTransition(step=4, avatar_pos="corridor_3", action_id="inspect")
+        assert ep_trans.to_causal_predicate().relation == "pos:corridor_3"
+        ep_ops = ep_trans.to_transaction_operations()
+        assert ep_ops[0].node_data["avatar_pos"] == "corridor_3"
+
     def test_frontopolar_spawn_causal_unlock(self) -> None:
         stack = FrontopolarSubgoalStack()
         subgoal = stack.spawn_causal_unlock_subgoal(

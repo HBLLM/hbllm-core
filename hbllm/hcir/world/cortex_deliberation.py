@@ -16,8 +16,8 @@ and striatal gating:
      dynamic patroller forward trajectories, and Habenular episodic action inhibition.
 2. Cerebellar Phase-Locked Motor Gating:
    - Synchronizes kinetic movements to rhythmic oscillation windows.
-3. Affordance Panel & Optical Symmetry Arbitration:
-   - Directs spatial effectors toward interactive control panels and relational reflection midpoints.
+3. Interactive Cluster & Optical Symmetry Arbitration:
+   - Directs spatial effectors toward interactive control clusters and relational reflection midpoints.
 4. Deliberate-to-Habitual Search Backoff (Daw, Niv, & Dayan; Dolan & Dayan):
    - Transitions between deliberate forward mental simulation and habitual macro-action exploration.
 """
@@ -118,9 +118,15 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
     ) -> SafetyGateResult:
         H, W = curr_grid.shape
         for future_step in future_steps:
-            if future_step.predicted_avatar_pos is None:
+            pos = future_step.predicted_avatar_pos
+            if (
+                not isinstance(pos, tuple)
+                or len(pos) < 2
+                or not isinstance(pos[0], (int, float))
+                or not isinstance(pos[1], (int, float))
+            ):
                 continue
-            fr, fc = future_step.predicted_avatar_pos
+            fr, fc = int(pos[0]), int(pos[1])
             if 0 <= fr < H and 0 <= fc < W:
                 feat = int(curr_grid[fr, fc])
                 if feat in view.mobile_threat_features:
@@ -155,8 +161,16 @@ class SpatiotemporalCollisionConePredicate(PlanSafetyPredicate):
                 return SafetyGateResult(
                     is_safe=False, reason="Stationary avatar in looming collision cone"
                 )
-        elif next_step.predicted_avatar_pos is not None:
-            nr, nc = next_step.predicted_avatar_pos
+        elif (
+            isinstance(next_step.predicted_avatar_pos, tuple)
+            and len(next_step.predicted_avatar_pos) >= 2
+            and isinstance(next_step.predicted_avatar_pos[0], (int, float))
+            and isinstance(next_step.predicted_avatar_pos[1], (int, float))
+        ):
+            nr, nc = (
+                int(next_step.predicted_avatar_pos[0]),
+                int(next_step.predicted_avatar_pos[1]),
+            )
             if view.collision_cones.is_collision_hazard(nr, nc, 1):
                 # Check if temporal wait clears the corridor
                 acc_mon = get_sub_attr(view.working_memory, "acc_conflict", None)
@@ -483,8 +497,8 @@ class OFCCounterfactualMentalSimulationPredicate(PlanSafetyPredicate):
         H, W = curr_grid.shape
         goals = set(get_engine_state_attr(view, "learned_goal_positions", set()))
         static_barriers = set(get_engine_state_attr(view, "learned_barriers", set()))
-        if hasattr(view, "current_level_lethal_positions"):
-            static_barriers.update(view.current_level_lethal_positions)
+        if hasattr(view, "current_context_hazards"):
+            static_barriers.update(view.current_context_hazards)
 
         sim_steps: list[MentalSimulationStep] = []
         if next_step is not None:
@@ -495,9 +509,14 @@ class OFCCounterfactualMentalSimulationPredicate(PlanSafetyPredicate):
 
         for step_idx, step in enumerate(sim_steps):
             pos = step.predicted_avatar_pos
-            if pos is None:
+            if (
+                not isinstance(pos, tuple)
+                or len(pos) < 2
+                or not isinstance(pos[0], (int, float))
+                or not isinstance(pos[1], (int, float))
+            ):
                 continue
-            r, c = pos
+            r, c = int(pos[0]), int(pos[1])
             if not (0 <= r < H and 0 <= c < W):
                 return SafetyGateResult(
                     is_safe=False,
@@ -1025,7 +1044,7 @@ class PrefrontalDeliberationEngine:
         available_actions: Sequence[Any],
         known_av_feats: set[int],
     ) -> tuple[Any, dict[str, Any] | None] | None:
-        """Arbitrate control panel affordances and interactive targets via registered policies or generic fallbacks."""
+        """Arbitrate interactive control clusters and target affordances via policies or fallbacks."""
         # 1. Query external registered deliberation policies first
         for policy in get_engine_state_attr(view, "deliberation_policies", []):
             if hasattr(policy, "arbitrate_affordances"):
@@ -1113,7 +1132,7 @@ class PrefrontalDeliberationEngine:
 
         if not has_displacement_actions or is_stuck_or_looping:
             if spatial_effector_actions:
-                # When spatial effectors are present and no panel exists,
+                # When spatial effectors are present without an interactive control target,
                 # arbitrate_affordances must return None instead of blind discrete execution
                 return None
 
@@ -1234,7 +1253,7 @@ class PrefrontalDeliberationEngine:
                 if (nr, nc) in view.learned_barriers or (
                     nr,
                     nc,
-                ) in view.current_level_lethal_positions:
+                ) in view.current_context_hazards:
                     continue
                 val = int(curr_grid[nr, nc])
                 if (
@@ -1900,12 +1919,12 @@ class PrefrontalDeliberationEngine:
                                     cell_f = int(curr_grid[lr, lc])
                                     if cell_f in view.symbolic_theory.goal_features:
                                         from hbllm.hcir.world.cortex_causal import (
-                                            invalidate_stale_cross_level_ontology,
+                                            invalidate_stale_context_ontology,
                                         )
 
                                         was_unverified_prior = (
-                                            view.symbolic_theory.has_prior_level_transition
-                                            and not view.symbolic_theory.is_verified_in_current_level(
+                                            view.symbolic_theory.has_prior_context_transition
+                                            and not view.symbolic_theory.is_verified_in_context(
                                                 "goal", cell_f
                                             )
                                         )
@@ -1921,14 +1940,14 @@ class PrefrontalDeliberationEngine:
                                         view.symbolic_theory.induce_barrier(
                                             cell_f, evidence="death_cluster"
                                         )
-                                        view.symbolic_theory.mark_verified_in_current_level(
+                                        view.symbolic_theory.mark_verified_in_context(
                                             "lethal", cell_f
                                         )
                                         view.hazard_tracker.known_lethal_features.add(cell_f)
                                         if was_unverified_prior and not getattr(
                                             view.working_memory, "concept_role_priors", None
                                         ):
-                                            invalidate_stale_cross_level_ontology(
+                                            invalidate_stale_context_ontology(
                                                 view.symbolic_theory,
                                                 hazard_tracker=view.hazard_tracker,
                                                 episodic_cortex=getattr(
@@ -1937,7 +1956,7 @@ class PrefrontalDeliberationEngine:
                                                 working_memory=view.working_memory,
                                                 engine_or_view=view,
                                                 bg_feature=getattr(view, "bg_feature", 0),
-                                                preserve_current_level=True,
+                                                preserve_current_context=True,
                                                 reason=f"acc_goal_to_lethal:{cell_f}",
                                             )
                                         logger.warning(
