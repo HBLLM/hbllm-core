@@ -108,6 +108,15 @@ class CorticalGroundingBridge:
     3. Cortical Motor -> ActionValidationGateway: Intercepts all proposed actions, enforces
        precondition & safety authorization, dispatches, and verifies real environmental outcomes.
     4. General Intelligence: Task-agnostic, LLM-independent, and transactionally governed.
+
+    Note on handcrafted mode identity:
+        In ``handcrafted`` perception mode, the bridge is a parallel observer — not in
+        the engine's decision loop. The engine's ``PerceptionStage`` performs its own
+        entity lifting from the raw integer lattice (0=floor, 1=avatar, 2=door, 3=key,
+        etc.), making SGE outputs redundant: handcrafted feature IDs *are* the ground
+        truth the bridge would compute. This means **SGE changes nothing in handcrafted
+        mode by design**. The bridge matters for ``learned`` and ``snn`` perception
+        modes, where raw pixels must be grounded into entity concepts.
     """
 
     FIELD_RETENTION = {

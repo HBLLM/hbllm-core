@@ -1326,7 +1326,13 @@ def test_grid_push_seed_110_and_grid_nav_seed_200_zero_shot() -> None:
 
 
 def test_visual_morphology_zero_shot_transfer_learned_and_snn() -> None:
-    """Both learned and SNN extractors transfer hazard/goal morphology zero-shot to unseen palettes."""
+    """Both learned and SNN extractors transfer hazard/goal morphology zero-shot to unseen palettes.
+
+    Note: In handcrafted mode, the SGE/CorticalGroundingBridge is identity (no-op) by design.
+    The engine's PerceptionStage lifts ground-truth integer feature IDs directly from the
+    lattice, so the bridge has nothing to add. The SGE matters only for learned/SNN modes
+    where raw perception must be grounded into semantic entity concepts.
+    """
     from benchmarks.perception_ablation import run_transfer_trial
 
     for seed in (1, 3):
