@@ -251,6 +251,11 @@ class MyAgent(Agent):
             )
         )
         self.internal_engine = self.system.engine
+        try:
+            from plugins.arc_agi_adapter.arc_perception import ARCPerceptionAdapter
+        except ImportError:
+            from arc_perception import ARCPerceptionAdapter  # type: ignore[no-redef]
+        self.internal_engine.perception_adapter = ARCPerceptionAdapter()
         self.services = self.system.services
         self.internal_agent = self.internal_engine
         self.engine = self.internal_engine

@@ -1899,10 +1899,47 @@ class PrefrontalDeliberationEngine:
                                     view.hazard_tracker.static_lethal_positions.add((lr, lc))
                                     cell_f = int(curr_grid[lr, lc])
                                     if cell_f in view.symbolic_theory.goal_features:
+                                        from hbllm.hcir.world.cortex_causal import (
+                                            invalidate_stale_cross_level_ontology,
+                                        )
+
+                                        was_unverified_prior = (
+                                            view.symbolic_theory.has_prior_level_transition
+                                            and not view.symbolic_theory.is_verified_in_current_level(
+                                                "goal", cell_f
+                                            )
+                                        )
                                         view.symbolic_theory.retract_goal(
                                             cell_f, reason="death_cluster"
                                         )
+                                        view.symbolic_theory.retract_walkable(
+                                            cell_f, reason="death_cluster"
+                                        )
+                                        view.symbolic_theory.retract_conditional_affordance(
+                                            cell_f, reason="death_cluster"
+                                        )
+                                        view.symbolic_theory.induce_barrier(
+                                            cell_f, evidence="death_cluster"
+                                        )
+                                        view.symbolic_theory.mark_verified_in_current_level(
+                                            "lethal", cell_f
+                                        )
                                         view.hazard_tracker.known_lethal_features.add(cell_f)
+                                        if was_unverified_prior and not getattr(
+                                            view.working_memory, "concept_role_priors", None
+                                        ):
+                                            invalidate_stale_cross_level_ontology(
+                                                view.symbolic_theory,
+                                                hazard_tracker=view.hazard_tracker,
+                                                episodic_cortex=getattr(
+                                                    view, "episodic_cortex", None
+                                                ),
+                                                working_memory=view.working_memory,
+                                                engine_or_view=view,
+                                                bg_feature=getattr(view, "bg_feature", 0),
+                                                preserve_current_level=True,
+                                                reason=f"acc_goal_to_lethal:{cell_f}",
+                                            )
                                         logger.warning(
                                             "ACC Metacognitive Shift: Inverted hypothesis for feature %d (GOAL -> LETHAL) due to death cluster at (%d, %d)",
                                             cell_f,

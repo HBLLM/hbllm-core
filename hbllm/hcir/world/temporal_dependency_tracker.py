@@ -66,6 +66,7 @@ class DelayedEffectModeler:
         self.max_lag = max_lag
         self.action_history: deque[tuple[int, Any, dict[str, Any]]] = deque(maxlen=64)
         self.discovered_delayed_effects: list[DelayedEffectRecord] = []
+        self._effect_index: dict[tuple[Any, str, int], DelayedEffectRecord] = {}
 
     def record_step(
         self,
@@ -81,6 +82,18 @@ class DelayedEffectModeler:
         if not observed_mutations or len(self.action_history) < 2:
             return newly_found
 
+        if len(self._effect_index) != len(self.discovered_delayed_effects):
+            self._effect_index = {
+                (
+                    r.trigger_action
+                    if isinstance(r.trigger_action, (int, str, float, bytes, tuple))
+                    else repr(r.trigger_action),
+                    r.consequence_key,
+                    r.observed_lag_steps,
+                ): r
+                for r in self.discovered_delayed_effects
+            }
+
         for mut_key in sorted(observed_mutations.keys()):
             # Check backwards across historical steps within max_lag
             for prior_step, prior_act, _ in reversed(self.action_history):
@@ -90,7 +103,20 @@ class DelayedEffectModeler:
                 if lag > self.max_lag:
                     break
 
-                # Found potential delayed effect
+                # Deduplicate by (trigger_action, consequence_key, lag) and accumulate support
+                act_key = (
+                    prior_act
+                    if isinstance(prior_act, (int, str, float, bytes, tuple))
+                    else repr(prior_act)
+                )
+                key = (act_key, mut_key, lag)
+                existing = self._effect_index.get(key)
+                if existing is not None:
+                    existing.support_count += 1
+                    existing.confidence = min(0.99, existing.confidence + 0.02)
+                    newly_found.append(existing)
+                    continue
+
                 rec = DelayedEffectRecord(
                     trigger_action=prior_act,
                     consequence_key=mut_key,
@@ -98,6 +124,7 @@ class DelayedEffectModeler:
                     confidence=0.75,
                     support_count=1,
                 )
+                self._effect_index[key] = rec
                 self.discovered_delayed_effects.append(rec)
                 newly_found.append(rec)
 

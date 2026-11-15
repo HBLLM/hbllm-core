@@ -297,3 +297,107 @@ class TestEpisodicBoundaryRoleTransfer:
         # On same-level retry, bindings should persist
         assert theory.get_role(3) == "key"
         assert theory.get_role(8) == "goal"
+
+    def test_induce_conditional_affordance_auto_binds_roles_for_template(self) -> None:
+        """induce_conditional_affordance binds default roles so template prerequisite_role is non-None."""
+        theory = HCIRSymbolicWorldTheory()
+        theory.induce_walkable(13, evidence="traversal")
+        theory.induce_conditional_affordance(
+            feature=12,
+            condition=CausalPredicate(variable="trigger", operator="==", value=13),
+            evidence="remote_mech:13_clears_12",
+            prerequisite_feature=13,
+        )
+        theory.snapshot_conditional_affordance_templates()
+        assert len(theory._role_conditional_templates) == 1
+        tmpl = theory._role_conditional_templates[0]
+        assert tmpl["prerequisite_role"] == "actuator"
+        assert tmpl["feature_role"] == "barrier"
+
+    def test_shared_engine_relabeled_grid_nav_recovers_without_label_poisoning(self) -> None:
+        """Shared engine detects relabeled palette shifts across levels and matches/beats fresh."""
+        import random
+
+        from benchmarks.envs.grid_nav import GridNavEnvironment
+        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+        from hbllm.hcir.world.percept import (
+            EmbodiedObservation,
+            EpisodeBoundary,
+            EpisodeBoundaryKind,
+        )
+
+        keys = [2, 3, 5, 8, 9]
+
+        def _make_relabeled_env(seed: int) -> tuple[GridNavEnvironment, dict[int, int]]:
+            env = GridNavEnvironment(max_steps=100)
+            rng = random.Random(1000 + seed)
+            perm = list(keys)
+            rng.shuffle(perm)
+            mapping = dict(zip(keys, perm, strict=True))
+            return env, mapping
+
+        def _remap(obs: EmbodiedObservation, mapping: dict[int, int]) -> EmbodiedObservation:
+            arr = obs.lattice.copy()
+            out = arr.copy()
+            for orig, dst in mapping.items():
+                out[arr == orig] = dst
+            return EmbodiedObservation(
+                lattice=out,
+                available_actions=list(obs.available_actions),
+                terminal=obs.terminal,
+                context_id=obs.context_id,
+                episode_id=obs.episode_id,
+                entities=obs.entities,
+                metadata=obs.metadata,
+            )
+
+        n_seeds = 10
+        shared_engine = AutonomousEpistemicEngine()
+        shared_wins = 0
+        shared_steps: list[int] = []
+        fresh_wins = 0
+
+        for ep in range(n_seeds):
+            env, mapping = _make_relabeled_env(ep)
+            obs = _remap(env.reset(seed=ep), mapping)
+            done, steps, info = False, 0, {}
+            while not done and steps < 100:
+                act, _ = shared_engine.step(obs)
+                raw_obs, _, done, info = env.step(act)
+                obs = _remap(raw_obs, mapping)
+                steps += 1
+            won = bool(info.get("success"))
+            if won:
+                shared_wins += 1
+            shared_steps.append(steps)
+            shared_engine.on_boundary(
+                EpisodeBoundary(
+                    kind=EpisodeBoundaryKind.GOAL_REACHED
+                    if won
+                    else EpisodeBoundaryKind.DEATH
+                    if info.get("dead")
+                    else EpisodeBoundaryKind.CONTEXT_RESET,
+                    retain_dynamics=True,
+                    same_level=False,
+                )
+            )
+
+            env_f, mapping_f = _make_relabeled_env(ep)
+            eng_f = AutonomousEpistemicEngine()
+            obs_f = _remap(env_f.reset(seed=ep), mapping_f)
+            done_f, steps_f, info_f = False, 0, {}
+            while not done_f and steps_f < 100:
+                act_f, _ = eng_f.step(obs_f)
+                raw_f, _, done_f, info_f = env_f.step(act_f)
+                obs_f = _remap(raw_f, mapping_f)
+                steps_f += 1
+            if info_f.get("success"):
+                fresh_wins += 1
+
+        assert shared_engine.symbolic_theory.labels_non_stationary is True
+        assert shared_wins >= fresh_wins, (
+            f"Shared engine collapsed under relabeling: shared={shared_wins}/{n_seeds} < fresh={fresh_wins}/{n_seeds}"
+        )
+        assert sum(1 for s in shared_steps[2:] if s == 100) <= 1, (
+            f"Shared engine timed out repeatedly after label shift detection: steps={shared_steps}"
+        )

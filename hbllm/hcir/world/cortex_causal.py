@@ -49,6 +49,7 @@ class OntologyEvidenceRank(IntEnum):
     TRAVERSAL = 60
     COLLISION = 80
     INTERACTION = 85
+    LETHAL = 95
     TERMINAL_REWARD = 100
 
 
@@ -73,6 +74,8 @@ def parse_evidence(evidence: Any) -> tuple[int, str]:
         return int(evidence), f"rank:{int(evidence)}"
     if isinstance(evidence, str):
         ev_lower = evidence.lower()
+        if any(tok in ev_lower for tok in ("lethal", "death", "fatal", "hazard")):
+            return OntologyEvidenceRank.LETHAL, evidence
         if "terminal" in ev_lower or "reward" in ev_lower or "success" in ev_lower:
             return OntologyEvidenceRank.TERMINAL_REWARD, evidence
         if (
@@ -218,6 +221,13 @@ class HCIRSymbolicWorldTheory:
 
     goal_predicates: list[CausalPredicate] = field(default_factory=list)
     barrier_predicates: list[CausalPredicate] = field(default_factory=list)
+    _level_epoch: int = 0
+    _has_prior_level_transition: bool = False
+    _awaiting_level_revalidation: bool = False
+    _labels_non_stationary: bool = False
+    _current_level_verified: set[tuple[str, Any]] = field(default_factory=set)
+    _current_grid_structural_stats: dict[Any, tuple[int, float, int]] = field(default_factory=dict)
+    _prior_grid_structural_stats: dict[Any, tuple[int, float, int]] = field(default_factory=dict)
     walkable_predicates: list[CausalPredicate] = field(default_factory=list)
     cargo_predicates: list[CausalPredicate] = field(default_factory=list)
     receptacle_predicates: list[CausalPredicate] = field(default_factory=list)
@@ -479,6 +489,200 @@ class HCIRSymbolicWorldTheory:
         self._feature_to_role.clear()
         self._role_to_features.clear()
 
+    @property
+    def labels_non_stationary(self) -> bool:
+        """True once empirical evidence proves raw feature labels permute across levels."""
+        return self._labels_non_stationary
+
+    @property
+    def has_prior_level_transition(self) -> bool:
+        """True once at least one is_new_level transition has occurred."""
+        return self._has_prior_level_transition
+
+    def mark_verified_in_current_level(self, kind: str, feature_id: Any) -> None:
+        """Record that ``(kind, feature_id)`` was empirically observed in the current level."""
+        self._current_level_verified.add((kind, feature_id))
+
+    def is_verified_in_current_level(self, kind: str, feature_id: Any) -> bool:
+        """Return True if ``(kind, feature_id)`` was observed in the current level."""
+        return (kind, feature_id) in self._current_level_verified
+
+    def current_level_verified_features(self, kind: str) -> set[Any]:
+        """Return feature IDs verified for ``kind`` in the current level."""
+        return {feat for k, feat in self._current_level_verified if k == kind}
+
+    def mark_cross_level_label_shift(self, reason: str = "") -> None:
+        """Record empirical falsification of cross-level raw label invariance."""
+        if not self._labels_non_stationary:
+            logger.warning(
+                "HCIRSymbolicWorldTheory: Cross-level raw label stationarity falsified (%s)",
+                reason or "contradiction",
+            )
+        self._labels_non_stationary = True
+
+    def begin_new_level_epoch(self) -> None:
+        """Advance level epoch on an is_new_level boundary and mark prior labels unverified."""
+        self._level_epoch += 1
+        self._has_prior_level_transition = True
+        self._awaiting_level_revalidation = True
+        self._prior_grid_structural_stats = dict(self._current_grid_structural_stats)
+        self._current_grid_structural_stats.clear()
+        self._current_level_verified.clear()
+
+    @staticmethod
+    def _compute_grid_structural_stats(
+        grid: np.ndarray,
+        bg_feature: Any = 0,
+        avatar_features: set[Any] | None = None,
+    ) -> dict[Any, tuple[int, float, int]]:
+        """Summarize per-feature count and boundary concentration for invariance checks."""
+        if not isinstance(grid, np.ndarray) or grid.ndim != 2 or grid.size == 0:
+            return {}
+        H, W = grid.shape
+        total_cells = H * W
+        av = avatar_features or set()
+        border_mask = np.zeros((H, W), dtype=bool)
+        border_mask[0, :] = True
+        border_mask[-1, :] = True
+        border_mask[:, 0] = True
+        border_mask[:, -1] = True
+        vals, counts = np.unique(grid, return_counts=True)
+        stats: dict[Any, tuple[int, float, int]] = {}
+        for v_np, cnt_np in zip(vals.tolist(), counts.tolist(), strict=False):
+            if v_np == bg_feature or v_np in av:
+                continue
+            border_cnt = int(np.count_nonzero((grid == v_np) & border_mask))
+            stats[int(v_np)] = (int(cnt_np), border_cnt / max(1, int(cnt_np)), total_cells)
+        return stats
+
+    def observe_grid_structure(
+        self,
+        grid: np.ndarray,
+        bg_feature: Any = 0,
+        avatar_features: set[Any] | None = None,
+    ) -> bool:
+        """Record structural feature distributions; return True if label permutation detected.
+
+        Checks only features actively present (count >= 1) in ``grid`` so disjoint
+        out-of-vocabulary palette shifts (e.g. grounded VisualTransfer) do not false-trigger.
+        """
+        cur_stats = self._compute_grid_structural_stats(
+            grid, bg_feature=bg_feature, avatar_features=avatar_features
+        )
+        self._current_grid_structural_stats = cur_stats
+        if not self._awaiting_level_revalidation:
+            return False
+        self._awaiting_level_revalidation = False
+        if not self._prior_grid_structural_stats or not cur_stats:
+            return False
+
+        def _is_structural_boundary(cnt: int, bfrac: float, tot: int) -> bool:
+            return cnt >= max(8, tot // 10) and bfrac >= 0.25
+
+        def _is_sparse_interior(cnt: int, bfrac: float, _tot: int) -> bool:
+            return 1 <= cnt <= 4 and bfrac < 0.25
+
+        for feat, (cur_cnt, cur_bfrac, cur_tot) in cur_stats.items():
+            prior = self._prior_grid_structural_stats.get(feat)
+            if prior is None:
+                continue
+            p_cnt, p_bfrac, p_tot = prior
+            # Sparse entity becoming perimeter/structural substrate (or vice-versa)
+            if _is_sparse_interior(p_cnt, p_bfrac, p_tot) and _is_structural_boundary(
+                cur_cnt, cur_bfrac, cur_tot
+            ):
+                return True
+            if _is_structural_boundary(p_cnt, p_bfrac, p_tot) and _is_sparse_interior(
+                cur_cnt, cur_bfrac, cur_tot
+            ):
+                return True
+        return False
+
+    def clear_level_feature_ontology(
+        self, bg_feature: Any = 0, preserve_current_level: bool = False
+    ) -> None:
+        """Reset layout/label-bound feature ontology while preserving abstract role knowledge."""
+        keep_goal = (
+            self.current_level_verified_features("goal") if preserve_current_level else set()
+        )
+        keep_bar = (
+            self.current_level_verified_features("barrier") if preserve_current_level else set()
+        )
+        keep_walk = (
+            self.current_level_verified_features("walkable") if preserve_current_level else set()
+        )
+        keep_walk.add(bg_feature)
+        keep_cargo = (
+            self.current_level_verified_features("cargo") if preserve_current_level else set()
+        )
+        keep_rec = (
+            self.current_level_verified_features("receptacle") if preserve_current_level else set()
+        )
+        keep_act = (
+            self.current_level_verified_features("actuator") if preserve_current_level else set()
+        )
+        keep_cond = (
+            self.current_level_verified_features("conditional") if preserve_current_level else set()
+        )
+
+        def _keep_preds(
+            preds: list[CausalPredicate], keep_feats: set[Any]
+        ) -> list[CausalPredicate]:
+            if not keep_feats:
+                return []
+            return [p for p in preds if p.variable == "feature_id" and p.value in keep_feats]
+
+        self._goal_features = set(keep_goal)
+        self._candidate_goal_features = set()
+        self.goal_predicates = _keep_preds(self.goal_predicates, keep_goal)
+
+        self._barrier_features = set(keep_bar)
+        self.barrier_predicates = _keep_preds(self.barrier_predicates, keep_bar)
+
+        self._walkable_features = set(keep_walk)
+        self.walkable_predicates = _keep_preds(self.walkable_predicates, keep_walk)
+
+        self._cargo_features = set(keep_cargo)
+        self.cargo_predicates = _keep_preds(self.cargo_predicates, keep_cargo)
+
+        self._receptacle_features = set(keep_rec)
+        self.receptacle_predicates = _keep_preds(self.receptacle_predicates, keep_rec)
+
+        self._actuator_features = set(keep_act)
+        self.actuator_predicates = _keep_preds(self.actuator_predicates, keep_act)
+
+        self._conditional_affordances = {
+            k: v for k, v in self._conditional_affordances.items() if k in keep_cond
+        }
+        self._explored_features.clear()
+        self._barrier_eval_cache.clear()
+        self._walkable_eval_cache.clear()
+
+        keep_ev_map = {
+            "goal": keep_goal,
+            "barrier": keep_bar,
+            "walkable": keep_walk,
+            "cargo": keep_cargo,
+            "receptacle": keep_rec,
+            "actuator": keep_act,
+            "avatar": self._avatar_features,
+        }
+        self._feature_evidence = {
+            (k, f): v
+            for (k, f), v in self._feature_evidence.items()
+            if k in keep_ev_map and f in keep_ev_map[k]
+        }
+
+        if preserve_current_level:
+            verified_feats = {f for _, f in self._current_level_verified}
+            stale_feats = [f for f in self._feature_to_role if f not in verified_feats]
+            for f in stale_feats:
+                old_r = self._feature_to_role.pop(f, None)
+                if old_r is not None and old_r in self._role_to_features:
+                    self._role_to_features[old_r].discard(f)
+        else:
+            self.clear_feature_bindings()
+
     def mark_feature_explored(self, feature: Any, reason: str = "") -> None:
         """Mark a feature as epistemically explored so curiosity does not re-target it."""
         self._explored_features.add(feature)
@@ -594,6 +798,15 @@ class HCIRSymbolicWorldTheory:
                 metadata={"evidence": evidence, "feature": feature},
             )
         )
+        if prereq is not None and prereq not in self._avatar_features:
+            if self.get_role(prereq) in (None, "walkable"):
+                self.bind_feature_to_role(prereq, "actuator")
+        if feature not in self._avatar_features and feature not in self._goal_features:
+            if self.get_role(feature) in (None, "walkable"):
+                self.bind_feature_to_role(feature, "barrier")
+        ev_str = str(evidence).lower()
+        if "template" not in ev_str and "hydration" not in ev_str:
+            self.mark_verified_in_current_level("conditional", feature)
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
 
@@ -936,7 +1149,7 @@ class HCIRSymbolicWorldTheory:
             goal_rank, g_ev = self._feature_evidence.get(
                 ("goal", feature_id), (OntologyEvidenceRank.TERMINAL_REWARD, "terminal_reward")
             )
-            if goal_rank >= rank:
+            if goal_rank >= rank and rank < OntologyEvidenceRank.LETHAL:
                 logger.info(
                     "HCIRSymbolicWorldTheory: Cannot induce barrier on confirmed goal %s (goal rank %d >= barrier rank %d)",
                     feature_id,
@@ -944,6 +1157,7 @@ class HCIRSymbolicWorldTheory:
                     rank,
                 )
                 return False
+            self.retract_goal(feature_id, reason=ev_str)
 
         if feature_id in self._cargo_features:
             cargo_rank, c_ev = self._feature_evidence.get(
@@ -980,6 +1194,8 @@ class HCIRSymbolicWorldTheory:
 
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
+        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+            self.mark_verified_in_current_level("barrier", feature_id)
         if feature_id not in self._barrier_features:
             self._barrier_features.add(feature_id)
             self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
@@ -1027,6 +1243,8 @@ class HCIRSymbolicWorldTheory:
 
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
+        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+            self.mark_verified_in_current_level("walkable", feature_id)
         if feature_id not in self._walkable_features:
             self._walkable_features.add(feature_id)
             self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
@@ -1066,6 +1284,8 @@ class HCIRSymbolicWorldTheory:
         self._walkable_features.discard(feature_id)
         self._goal_features.discard(feature_id)
         self._candidate_goal_features.discard(feature_id)
+        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+            self.mark_verified_in_current_level("cargo", feature_id)
         if feature_id not in self._cargo_features:
             self._cargo_features.add(feature_id)
             self._feature_evidence[("cargo", feature_id)] = (rank, ev_str)
@@ -1083,6 +1303,8 @@ class HCIRSymbolicWorldTheory:
     def induce_receptacle(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal receptacle predicate."""
         rank, ev_str = parse_evidence(evidence or "receptacle")
+        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+            self.mark_verified_in_current_level("receptacle", feature_id)
         if feature_id not in self._receptacle_features:
             self._receptacle_features.add(feature_id)
             self._feature_evidence[("receptacle", feature_id)] = (rank, ev_str)
@@ -1100,6 +1322,8 @@ class HCIRSymbolicWorldTheory:
     def induce_actuator(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce distal actuator / switch affordance."""
         rank, ev_str = parse_evidence(evidence or "actuator")
+        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+            self.mark_verified_in_current_level("actuator", feature_id)
         if feature_id not in self._actuator_features:
             self._actuator_features.add(feature_id)
             self._feature_evidence[("actuator", feature_id)] = (rank, ev_str)
@@ -1758,10 +1982,18 @@ class HCIRSymbolicWorldTheory:
         self.telic_goal_type = ""
         self.telic_target_feature = None
         # Full clear: reset all role abstraction state (including priors and templates)
+        self._conditional_affordances.clear()
         self._feature_to_role.clear()
         self._role_to_features.clear()
         self._role_priors.clear()
         self._role_conditional_templates.clear()
+        self._level_epoch = 0
+        self._has_prior_level_transition = False
+        self._awaiting_level_revalidation = False
+        self._labels_non_stationary = False
+        self._current_level_verified.clear()
+        self._current_grid_structural_stats.clear()
+        self._prior_grid_structural_stats.clear()
 
 
 class CausalInductionCortex:
@@ -1999,3 +2231,85 @@ class EpistemicInterventionProposal:
                 },
             )
         ]
+
+
+def invalidate_stale_cross_level_ontology(
+    theory: HCIRSymbolicWorldTheory,
+    *,
+    hazard_tracker: Any = None,
+    episodic_cortex: Any = None,
+    working_memory: Any = None,
+    engine_or_view: Any = None,
+    bg_feature: Any = 0,
+    preserve_current_level: bool = False,
+    reason: str = "",
+) -> None:
+    """Purge stale cross-level raw-feature bindings upon label-invariance falsification.
+
+    Preserves domain-general role priors, conditional affordance role templates,
+    avatar/background identity, and motor dynamics while clearing feature-ID-keyed
+    caches that were not confirmed in the current level.
+    """
+    if (
+        getattr(working_memory, "concept_role_priors", None)
+        and not theory.has_prior_level_transition
+    ):
+        return
+
+    theory.mark_cross_level_label_shift(reason=reason)
+    theory.clear_level_feature_ontology(
+        bg_feature=bg_feature, preserve_current_level=preserve_current_level
+    )
+
+    keep_lethal = (
+        theory.current_level_verified_features("lethal") if preserve_current_level else set()
+    )
+    if hazard_tracker is not None:
+        known_lethal = getattr(hazard_tracker, "known_lethal_features", None)
+        if isinstance(known_lethal, set):
+            known_lethal.intersection_update(
+                keep_lethal
+            ) if preserve_current_level else known_lethal.clear()
+        if not preserve_current_level:
+            static_pos = getattr(hazard_tracker, "static_lethal_positions", None)
+            if isinstance(static_pos, set):
+                static_pos.clear()
+
+    if episodic_cortex is not None:
+        disc_lethal = getattr(episodic_cortex, "discovered_lethal_features", None)
+        if isinstance(disc_lethal, set):
+            disc_lethal.intersection_update(
+                keep_lethal
+            ) if preserve_current_level else disc_lethal.clear()
+
+    if working_memory is not None:
+        hyp_engine = getattr(working_memory, "hypothesis_engine", None)
+        if hyp_engine is not None and hasattr(hyp_engine, "reset_episode"):
+            hyp_engine.reset_episode(retain_confirmed=False)
+        remote_causal = getattr(working_memory, "remote_causal", None)
+        if remote_causal is not None and hasattr(remote_causal, "reset_episode"):
+            remote_causal.reset_episode(retain_long_term=False)
+        for wm_attr in (
+            "quiescent_features",
+            "effective_features",
+            "feature_quiescent_counts",
+        ):
+            coll = getattr(working_memory, wm_attr, None)
+            if hasattr(coll, "clear"):
+                coll.clear()
+
+    if engine_or_view is not None:
+        mobile = getattr(engine_or_view, "mobile_threat_features", None)
+        if isinstance(mobile, set):
+            mobile.clear()
+        if not preserve_current_level:
+            for attr in ("learned_barriers", "learned_goal_positions"):
+                coll = getattr(engine_or_view, attr, None)
+                if isinstance(coll, set):
+                    coll.clear()
+        else:
+            keep_goal = theory.current_level_verified_features("goal")
+            if not keep_goal:
+                l_goals = getattr(engine_or_view, "learned_goal_positions", None)
+                if isinstance(l_goals, set):
+                    l_goals.clear()

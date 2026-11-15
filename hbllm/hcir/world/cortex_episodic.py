@@ -1273,6 +1273,26 @@ class HippocampalEpisodicCortex:
             # re-instantiates any matching templates (e.g. key→door).
             view.symbolic_theory.snapshot_conditional_affordance_templates()
             view.symbolic_theory.clear_feature_bindings()
+            view.symbolic_theory.begin_new_level_epoch()
+            acc_mon = getattr(view.working_memory, "acc_conflict", None)
+            if acc_mon is not None and hasattr(acc_mon, "reset_episode"):
+                acc_mon.reset_episode(retain_long_term=False)
+            if view.symbolic_theory.labels_non_stationary and not getattr(
+                view.working_memory, "concept_role_priors", None
+            ):
+                from hbllm.hcir.world.cortex_causal import invalidate_stale_cross_level_ontology
+
+                invalidate_stale_cross_level_ontology(
+                    view.symbolic_theory,
+                    hazard_tracker=view.hazard_tracker,
+                    episodic_cortex=self,
+                    working_memory=view.working_memory,
+                    engine_or_view=view,
+                    bg_feature=getattr(view, "bg_feature", 0),
+                    preserve_current_level=False,
+                    reason="non_stationary_new_level",
+                )
+                delta.mutate("mobile_threat_features", view.mobile_threat_features).clear()
 
             # Carry forward hypotheses & semantics as priors
             if view.avatar_feature is not None:

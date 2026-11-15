@@ -252,11 +252,18 @@ register("WallpaperTilingInducer", "hbllm.hcir.world.experimental.morphology_arc
 
 def restore(obj, name: str) -> bool:
     """Test helper: replace an ablated faculty attr with a fresh real instance."""
-    cur = getattr(obj, name, None)
+    ablated_map = getattr(type(obj), "_ABLATED_FACULTIES", None)
+    if isinstance(ablated_map, dict) and name in ablated_map and name not in vars(obj):
+        cur: Any = ablated(name, ablated_map[name])
+    else:
+        cur = getattr(obj, name, None)
     if isinstance(cur, AblatedFaculty):
         cls = cur._get_cls()
         if cls is not None:
             setattr(obj, name, cls())
+            cache = vars(obj).get("_ablated_cache")
+            if isinstance(cache, dict):
+                cache.pop(name, None)
             return True
     return False
 
@@ -266,7 +273,13 @@ def restore_all(engine) -> list[str]:
     restored = []
     import inspect as _i
 
-    for name, val in list(vars(engine).items()):
+    candidates = dict(vars(engine))
+    ablated_map = getattr(type(engine), "_ABLATED_FACULTIES", None)
+    if isinstance(ablated_map, dict):
+        for aname, acls in ablated_map.items():
+            if aname not in candidates:
+                candidates[aname] = ablated(aname, acls)
+    for name, val in list(candidates.items()):
         if isinstance(val, AblatedFaculty):
             cls = val._get_cls()
             if cls is None:

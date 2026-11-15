@@ -509,17 +509,44 @@ def run_suite(
             b_fams: dict[str, list[TaskResult]] = {}
             for bt in b_tasks:
                 b_fams.setdefault(bt.family, []).append(bt)
-            b_fam_scores: dict[str, float] = {}
-            for f_name, f_list in b_fams.items():
-                solved = [x for x in f_list if x.success_at_budget]
-                if not solved:
-                    b_fam_scores[f_name] = 0.0
-                else:
-                    sr = len(solved) / len(f_list)
-                    eff = sum(
-                        max(0.0, 1.0 - (x.steps / max(1, x.max_budget))) for x in solved
-                    ) / len(solved)
-                    b_fam_scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
+
+            def _compute_baseline_family_scores(use_zero_shot: bool) -> dict[str, float]:
+                scores: dict[str, float] = {}
+                for f_name, f_list in b_fams.items():
+                    if use_zero_shot:
+                        solved = [
+                            x for x in f_list if x.zero_shot.get("success", x.success_at_budget)
+                        ]
+                    else:
+                        solved = [x for x in f_list if x.success_at_budget]
+                    if not solved:
+                        scores[f_name] = 0.0
+                    else:
+                        sr = len(solved) / len(f_list)
+                        eff = sum(
+                            max(
+                                0.0,
+                                1.0
+                                - (
+                                    (
+                                        x.zero_shot.get("steps", x.steps)
+                                        if use_zero_shot
+                                        else x.steps
+                                    )
+                                    / max(1, x.max_budget)
+                                ),
+                            )
+                            for x in solved
+                        ) / len(solved)
+                        scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
+                return scores
+
+            zs_b_fam_scores = _compute_baseline_family_scores(use_zero_shot=True)
+            zs_b_gen = round(sum(zs_b_fam_scores.values()) / max(1, len(zs_b_fam_scores)), 4)
+            zs_tot_solved = sum(
+                1 for bt in b_tasks if bt.zero_shot.get("success", bt.success_at_budget)
+            )
+            b_fam_scores = _compute_baseline_family_scores(use_zero_shot=False)
             b_gen = round(sum(b_fam_scores.values()) / max(1, len(b_fam_scores)), 4)
             tot_solved = sum(1 for bt in b_tasks if bt.success_at_budget)
 
@@ -535,14 +562,19 @@ def run_suite(
             b_stable = round(sum(stable_list) / len(stable_list), 2) if stable_list else None
 
             baselines_dict[b_name] = {
-                "generality_score": b_gen,
-                "family_scores": b_fam_scores,
+                "generality_score": zs_b_gen,
+                "zero_shot_generality_score": zs_b_gen,
+                "zero_shot_family_scores": zs_b_fam_scores,
+                "zero_shot_solve_rate": round(zs_tot_solved / max(1, len(b_tasks)), 4),
+                "lifelong_generality_score": b_gen,
+                "lifelong_family_scores": b_fam_scores,
+                "family_scores": zs_b_fam_scores,
                 "solve_rate": round(tot_solved / max(1, len(b_tasks)), 4),
                 "lifelong_curve": avg_curve,
                 "mean_steps_to_stable_policy": b_stable,
             }
             print(
-                f"  Baseline [{b_name}]: generality={b_gen:.4f}, solve_rate={tot_solved}/{len(b_tasks)}, curve={avg_curve}, stable={b_stable}"
+                f"  Baseline [{b_name}]: zero_shot={zs_b_gen:.4f} ({zs_tot_solved}/{len(b_tasks)}), lifelong={b_gen:.4f} ({tot_solved}/{len(b_tasks)}), curve={avg_curve}, stable={b_stable}"
             )
 
     report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
@@ -560,7 +592,8 @@ def run_suite(
             f"Cross-seed: solve_rate={report.cross_seed_transfer.get('solve_rate', 0.0):.4f}, transfer_solve_rate={report.cross_seed_transfer.get('transfer_solve_rate', 0.0):.4f}, skills={report.cross_seed_transfer.get('skills_consolidated', 0)}"
         )
     for fam, score in report.family_scores.items():
-        print(f"  Family [{fam}]: {score:.4f}")
+        lf_score = report.lifelong.get("family_scores", {}).get(fam, score)
+        print(f"  Family [{fam}]: zero_shot={score:.4f}, lifelong={lf_score:.4f}")
     print(f"Zero-Shot Generality Score: {report.generality_score:.4f} (Episode 1, no prior memory)")
     print(
         f"Lifelong Generality Score:  {report.lifelong_generality_score:.4f} (After {episodes_per_task} episodes with shared memory)"

@@ -112,3 +112,38 @@ def test_heldout_anti_tamper_gate_refuses_rerun(tmp_path: Path):
     protocol_rerun = EvaluationProtocol(reports_dir=tmp_path, git_sha=git_sha)
     with pytest.raises(RuntimeError, match="Held-out evaluation already exists for git commit"):
         protocol_rerun.verify_heldout_gate()
+
+
+def test_family_scores_match_zero_shot_headline(tmp_path: Path):
+    """EvaluationReport.family_scores matches zero-shot headline while lifelong stays separate."""
+    protocol = EvaluationProtocol(reports_dir=tmp_path, git_sha="test_zs_lf_parity")
+    tasks = [
+        TaskResult(
+            task_id="grid_1",
+            family="grid",
+            split="dev",
+            steps=10,
+            max_budget=100,
+            success_at_budget=True,
+            zero_shot={"success": False, "steps": 100},
+            lifelong={"success": True, "steps": 10},
+        ),
+        TaskResult(
+            task_id="cont_1",
+            family="continuous",
+            split="dev",
+            steps=20,
+            max_budget=100,
+            success_at_budget=True,
+            zero_shot={"success": True, "steps": 20},
+            lifelong={"success": True, "steps": 20},
+        ),
+    ]
+    report = protocol.compute_report(split="dev", tasks=tasks)
+    assert report.family_scores == report.zero_shot["family_scores"]
+    assert report.family_scores["grid"] == 0.0
+    assert report.lifelong["family_scores"]["grid"] > 0.0
+    assert report.generality_score == pytest.approx(
+        sum(report.family_scores.values()) / len(report.family_scores), abs=1e-4
+    )
+    assert report.lifelong_generality_score > report.generality_score

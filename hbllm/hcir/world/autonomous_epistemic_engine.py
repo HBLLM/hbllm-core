@@ -544,6 +544,141 @@ class AutonomousEpistemicEngine:
     visual_symmetry: VisualSymmetryAnalyzer = _LazyFaculty(VisualSymmetryAnalyzer)
     whole_grid_predictor: WholeGridPredictor = _LazyFaculty(WholeGridPredictor)
 
+    # ── Ablated faculties (lazy no-op stubs; absent from vars(engine)) ──────
+    # Only active faculties live in vars(engine). Experimental/unused faculties
+    # from WP2/P2-6 resolve lazily via __getattr__ into _ablated_cache, while
+    # preserving static type annotations and experimental.restore()/restore_all().
+    allostasis_cortex: InteroceptiveAllostasisCortex | Any
+    affordance_extractor: GibsonianAffordanceExtractor | Any
+    amygdala_threat: AmygdalarThreatConditioningEngine | Any
+    analogy_engine: FalsifiableAnalogyEngine | Any
+    anterior_insula_timing: AnteriorInsularTimingEngine | Any
+    bilateral_integrator: BilateralCoordinateIntegrator | Any
+    blame_attributor: PrefrontalBlameAttributor | Any
+    boundary_grid_aligner: BoundaryGridPhaseAligner | Any
+    cerebellar_microzone: CerebellarMicrozoneAdaptor | Any
+    claustrum_conductor: ClaustrumSalienceConductor | Any
+    claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any
+    confidence_calibrator: ConfidenceCalibrator | Any
+    counterfactual_regret: CounterfactualRegretEvaluator | Any
+    distance_transform_engine: SpatialDistanceTransformEngine | Any
+    drift_diffusion: SubthalamicDriftDiffusionEngine | Any
+    efe_evaluator: ExpectedFreeEnergyEvaluator | Any
+    effort_allocator: AnteriorCingulateEffortAllocator | Any
+    entorhinal_border: EntorhinalBorderCellEngine | Any
+    entorhinal_grid_cortex: EntorhinalGridCortex | Any
+    entropy_monitor: Any
+    exploration_horizon: FrontopolarExplorationHorizonEngine | Any
+    foveated_attention: ParietalFoveatedAttentionEngine | Any
+    gnw: GlobalNeuronalWorkspace | Any
+    hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any
+    hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any
+    hippocampal_time: HippocampalTimeCellEngine | Any
+    locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any
+    ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any
+    optical_projector: OpticalRayProjector | Any
+    parahippocampal_context: ParahippocampalContextEngine | Any
+    phase_precession: HippocampalPhasePrecessionEngine | Any
+    point_actuation_learner: PointActuationAffordanceLearner | Any
+    potential_field_navigator: ParietalPotentialFieldNavigator | Any
+    ppn_locomotor: PedunculopontineLocomotorEngine | Any
+    premotor_resonator: VentralPremotorAffordanceResonator | Any
+    pulvinar_router: PulvinarAttentionRouter | Any
+    retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any
+    retrosplenial_heading: RetrosplenialHeadingEngine | Any
+    retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any
+    rule_abstraction: DorsolateralRuleAbstractionEngine | Any
+    shape_hasher: InferotemporalShapeHasher | Any
+    somatic_marker: VentromedialSomaticMarkerEngine | Any
+    somatosensory_haptic: SomatosensoryHapticEngine | Any
+    stn_escalator: SubthalamicThresholdEscalator | Any
+    subicular_bvc: SubicularBoundaryVectorEngine | Any
+    superior_colliculus: SuperiorColliculusTargetArbiter | Any
+    superposition_planner: SuperpositionPlanner | Any
+    task_switcher: LateralPrefrontalTaskSwitcher | Any
+    thalamocortical_binding: ThalamocorticalBindingEngine | Any
+    trn_gating: ThalamicReticularGatingEngine | Any
+    value_opponency: DualValueOpponencyCortex | Any
+    ventral_relational_matcher: VentralRelationalGraphMatcher | Any
+    vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any
+    vta_curiosity: VentralTegmentalCuriosityEngine | Any
+    workspace_ignition: GlobalWorkspaceIgnitionEngine | Any
+
+    _ABLATED_FACULTIES: dict[str, str] = {
+        "optical_projector": "OpticalRayProjector",
+        "bilateral_integrator": "BilateralCoordinateIntegrator",
+        "hierarchical_active_inference": "HierarchicalActiveInferenceEngine",
+        "efe_evaluator": "ExpectedFreeEnergyEvaluator",
+        "affordance_extractor": "GibsonianAffordanceExtractor",
+        "retrosplenial_transformer": "RetrosplenialCoordinateTransformer",
+        "analogy_engine": "FalsifiableAnalogyEngine",
+        "counterfactual_regret": "CounterfactualRegretEvaluator",
+        "gnw": "GlobalNeuronalWorkspace",
+        "thalamocortical_binding": "ThalamocorticalBindingEngine",
+        "superposition_planner": "SuperpositionPlanner",
+        "entorhinal_grid_cortex": "EntorhinalGridCortex",
+        "ventral_relational_matcher": "VentralRelationalGraphMatcher",
+        "allostasis_cortex": "InteroceptiveAllostasisCortex",
+        "claustrum_conductor": "ClaustrumSalienceConductor",
+        "distance_transform_engine": "SpatialDistanceTransformEngine",
+        "value_opponency": "DualValueOpponencyCortex",
+        "potential_field_navigator": "ParietalPotentialFieldNavigator",
+        "shape_hasher": "InferotemporalShapeHasher",
+        "drift_diffusion": "SubthalamicDriftDiffusionEngine",
+        "foveated_attention": "ParietalFoveatedAttentionEngine",
+        "blame_attributor": "PrefrontalBlameAttributor",
+        "hippocampal_replay": "HippocampalPrioritizedReplayBuffer",
+        "task_switcher": "LateralPrefrontalTaskSwitcher",
+        "retrosplenial_anchor": "RetrosplenialLandmarkAnchorEngine",
+        "phase_precession": "HippocampalPhasePrecessionEngine",
+        "exploration_horizon": "FrontopolarExplorationHorizonEngine",
+        "superior_colliculus": "SuperiorColliculusTargetArbiter",
+        "cerebellar_microzone": "CerebellarMicrozoneAdaptor",
+        "premotor_resonator": "VentralPremotorAffordanceResonator",
+        "effort_allocator": "AnteriorCingulateEffortAllocator",
+        "subicular_bvc": "SubicularBoundaryVectorEngine",
+        "somatic_marker": "VentromedialSomaticMarkerEngine",
+        "pulvinar_router": "PulvinarAttentionRouter",
+        "parahippocampal_context": "ParahippocampalContextEngine",
+        "locus_coeruleus": "LocusCoeruleusNoradrenalineEngine",
+        "somatosensory_haptic": "SomatosensoryHapticEngine",
+        "entorhinal_border": "EntorhinalBorderCellEngine",
+        "amygdala_threat": "AmygdalarThreatConditioningEngine",
+        "vta_curiosity": "VentralTegmentalCuriosityEngine",
+        "retrosplenial_heading": "RetrosplenialHeadingEngine",
+        "trn_gating": "ThalamicReticularGatingEngine",
+        "rule_abstraction": "DorsolateralRuleAbstractionEngine",
+        "hippocampal_time": "HippocampalTimeCellEngine",
+        "vl_motor_inhibition": "VentrolateralMotorInhibitionEngine",
+        "claustrum_interhemispheric": "ClaustrumInterhemisphericIntegrator",
+        "anterior_insula_timing": "AnteriorInsularTimingEngine",
+        "ofc_counterfactual": "OrbitofrontalCreditAssignmentEngine",
+        "ppn_locomotor": "PedunculopontineLocomotorEngine",
+        "boundary_grid_aligner": "BoundaryGridPhaseAligner",
+        "stn_escalator": "SubthalamicThresholdEscalator",
+        "workspace_ignition": "GlobalWorkspaceIgnitionEngine",
+        "confidence_calibrator": "ConfidenceCalibrator",
+        "point_actuation_learner": "PointActuationAffordanceLearner",
+        "entropy_monitor": "DeliberationEntropyMonitor",
+    }
+
+    if not TYPE_CHECKING:
+
+        def __getattr__(self, name: str) -> Any:
+            cls_name = type(self)._ABLATED_FACULTIES.get(name)
+            if cls_name is None:
+                raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+            try:
+                cache: dict[str, Any] = object.__getattribute__(self, "_ablated_cache")
+            except AttributeError:
+                cache = {}
+                object.__setattr__(self, "_ablated_cache", cache)
+            stub = cache.get(name)
+            if stub is None:
+                stub = _ablated(name, cls_name)
+                cache[name] = stub
+            return stub
+
     MIN_PROBES_PER_ACTION: int = 3
     consecutive_pacing_steps: int = 0
 
@@ -589,6 +724,7 @@ class AutonomousEpistemicEngine:
             services = KernelServices.create_default(HCIRWorkspaceState())
 
         self.exploration_budget = exploration_budget
+        self._ablated_cache: dict[str, Any] = {}
         # Deterministic decide-path RNG (WP0.1 replay determinism)
         self._rng = __import__("numpy").random.default_rng(seed)
         self.enable_logging = enable_logging
@@ -643,9 +779,6 @@ class AutonomousEpistemicEngine:
         self.body_schema: ExtendedBodySchema = self.working_memory.body_schema
         self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
-        self.optical_projector: OpticalRayProjector | Any = _ablated(
-            "optical_projector", "OpticalRayProjector"
-        )  # WP2 ablated
         self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
         self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
 
@@ -675,9 +808,6 @@ class AutonomousEpistemicEngine:
         self.dorsal_kinetic_stream: DorsalKineticStream = DorsalKineticStream()
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
-        self.bilateral_integrator: BilateralCoordinateIntegrator | Any = _ablated(
-            "bilateral_integrator", "BilateralCoordinateIntegrator"
-        )  # WP2 ablated
         self._bilateral_state: BilateralState | None = None
 
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
@@ -732,9 +862,6 @@ class AutonomousEpistemicEngine:
             w_risk=0.10,
             w_cost=0.10,
         )
-        self.hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any = _ablated(
-            "hierarchical_active_inference", "HierarchicalActiveInferenceEngine"
-        )  # WP2 ablated
         self.precision_controller: HierarchicalPrecisionController = (
             HierarchicalPrecisionController()
         )
@@ -742,12 +869,6 @@ class AutonomousEpistemicEngine:
 
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
-        self.efe_evaluator: ExpectedFreeEnergyEvaluator | Any = _ablated(
-            "efe_evaluator", "ExpectedFreeEnergyEvaluator"
-        )  # WP2 ablated
-        self.affordance_extractor: GibsonianAffordanceExtractor | Any = _ablated(
-            "affordance_extractor", "GibsonianAffordanceExtractor"
-        )  # WP2 ablated
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
         self.deformation_tracker: MorphologicalDeformationTracker = (
@@ -756,48 +877,13 @@ class AutonomousEpistemicEngine:
         self.latest_lifecycle_result: LifecycleTrackingResult | None = None
         self.entity_lineage_graph: dict[str, EntityLineageNode] = {}
 
-        # Faculty: Parietal Coordinate Transformer & Invariant Geometric Selector (W040)
-        self.retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any = _ablated(
-            "retrosplenial_transformer", "RetrosplenialCoordinateTransformer"
-        )  # WP2 ablated
-
-        # Faculty: Constraint-Aware Relational Graph Matcher (W038)
-
-        # Faculty: Falsifiable Cross-Task Analogy Engine (W148)
-        self.analogy_engine: FalsifiableAnalogyEngine | Any = _ablated(
-            "analogy_engine", "FalsifiableAnalogyEngine"
-        )  # WP2 ablated
-        self.counterfactual_regret: CounterfactualRegretEvaluator | Any = _ablated(
-            "counterfactual_regret", "CounterfactualRegretEvaluator"
-        )  # WP2 ablated
-
-        # Track 1: Global Neuronal Workspace (GNW) Ignition & Broadcast (Baars / Dehaene)
-        self.gnw: GlobalNeuronalWorkspace | Any = _ablated(
-            "gnw", "GlobalNeuronalWorkspace"
-        )  # WP2 ablated
-
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
         self.neuromodulatory_system: NeuromodulatorySystem = NeuromodulatorySystem()
-
-        # Track 3: Thalamocortical Gamma-Band Phase Synchronization & TRN Attentional Gating
-        self.thalamocortical_binding: ThalamocorticalBindingEngine | Any = _ablated(
-            "thalamocortical_binding", "ThalamocorticalBindingEngine"
-        )  # WP2 ablated
-
-        # Track 4: Superposition Counterfactual Tree Search Planner
-        self.superposition_planner: SuperpositionPlanner | Any = _ablated(
-            "superposition_planner", "SuperpositionPlanner"
-        )  # WP2 ablated
 
         # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
         self.predictive_coding_cortex: HierarchicalPredictiveCodingCortex = (
             HierarchicalPredictiveCodingCortex()
         )
-
-        # Faculty: Entorhinal Grid Cells & Hippocampal Path Integration (Moser & O'Keefe)
-        self.entorhinal_grid_cortex: EntorhinalGridCortex | Any = _ablated(
-            "entorhinal_grid_cortex", "EntorhinalGridCortex"
-        )  # WP2 ablated
 
         # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
         self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
@@ -853,217 +939,12 @@ class AutonomousEpistemicEngine:
         # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
         self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
 
-        # Faculty: Ventral Scene Graph & Structural Correspondence Matcher (W038)
-        self.ventral_relational_matcher: VentralRelationalGraphMatcher | Any = _ablated(
-            "ventral_relational_matcher", "VentralRelationalGraphMatcher"
-        )  # WP2 ablated
-
-        # Round 7 Faculty: Anterior Insula Interoceptive Allostasis & Energy Budgeting (Craig / Sterling / Barrett)
-        self.allostasis_cortex: InteroceptiveAllostasisCortex | Any = _ablated(
-            "allostasis_cortex", "InteroceptiveAllostasisCortex"
-        )  # WP2 ablated
-
-        # Round 7 Faculty: Claustrum Multimodal Salience Conductor & Perceptual Binding (Crick & Koch / Smith)
-        self.claustrum_conductor: ClaustrumSalienceConductor | Any = _ablated(
-            "claustrum_conductor", "ClaustrumSalienceConductor"
-        )  # WP2 ablated
-
-        # Round 7 Faculty: Frontopolar BA10 Recursive And-Or Subgoal Tree & Regret Backtracking (Koechlin / Daw)
-
-        # Round 7 Faculty: Spatial Euclidean Distance Transform (EDT) & Obstacle Clearance (Graziano / Felzenszwalb)
-        self.distance_transform_engine: SpatialDistanceTransformEngine | Any = _ablated(
-            "distance_transform_engine", "SpatialDistanceTransformEngine"
-        )  # WP2 ablated
-
-        # Round 8 Faculty: Ventral Striatum & Lateral Habenula Dual Value Opponency (Matsumoto & Hikosaka / Cools)
-        self.value_opponency: DualValueOpponencyCortex | Any = _ablated(
-            "value_opponency", "DualValueOpponencyCortex"
-        )  # WP2 ablated
-
-        # Round 8 Faculty: Posterior Parietal Cortex (PPC) Potential Field Navigation (Andersen & Buneo / Khatib)
-        self.potential_field_navigator: ParietalPotentialFieldNavigator | Any = _ablated(
-            "potential_field_navigator", "ParietalPotentialFieldNavigator"
-        )  # WP2 ablated
-
-        # Round 8 Faculty: Inferotemporal (IT) Viewpoint- & Scale-Invariant Shape Hasher (DiCarlo / Hu)
-        self.shape_hasher: InferotemporalShapeHasher | Any = _ablated(
-            "shape_hasher", "InferotemporalShapeHasher"
-        )  # WP2 ablated
-
-        # Round 9 Faculty: Subthalamic Nucleus (STN) Drift-Diffusion Threshold Modulation (Ratcliff / Frank)
-        self.drift_diffusion: SubthalamicDriftDiffusionEngine | Any = _ablated(
-            "drift_diffusion", "SubthalamicDriftDiffusionEngine"
-        )  # WP2 ablated
-
-        # Round 9 Faculty: Parietal Egocentric Multi-Scale Foveation (Itti & Koch / Schwartz)
-        self.foveated_attention: ParietalFoveatedAttentionEngine | Any = _ablated(
-            "foveated_attention", "ParietalFoveatedAttentionEngine"
-        )  # WP2 ablated
-
-        # Round 9 Faculty: Prefrontal Counterfactual Blame Attribution (Halpern & Pearl)
-        self.blame_attributor: PrefrontalBlameAttributor | Any = _ablated(
-            "blame_attributor", "PrefrontalBlameAttributor"
-        )  # WP2 ablated
-
-        # Round 10 Faculty: Hippocampal-Entorhinal Prioritized Experience Replay (Foster & Wilson / Schaul)
-        self.hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any = _ablated(
-            "hippocampal_replay", "HippocampalPrioritizedReplayBuffer"
-        )  # WP2 ablated
-
-        # Round 10 Faculty: Lateral Prefrontal Cortex (LPFC) Dual Task Switcher (Monsell / Koechlin)
-        self.task_switcher: LateralPrefrontalTaskSwitcher | Any = _ablated(
-            "task_switcher", "LateralPrefrontalTaskSwitcher"
-        )  # WP2 ablated
-
-        # Round 10 Faculty: Retrosplenial Path Integration Drift Recalibration (Jeffery / Burgess)
-        self.retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any = _ablated(
-            "retrosplenial_anchor", "RetrosplenialLandmarkAnchorEngine"
-        )  # WP2 ablated
-
-        # Round 11 Faculty: Hippocampal Theta-Gamma Phase Precession & Macro Chunking (O'Keefe / Lisman)
-        self.phase_precession: HippocampalPhasePrecessionEngine | Any = _ablated(
-            "phase_precession", "HippocampalPhasePrecessionEngine"
-        )  # WP2 ablated
-
-        # Round 11 Faculty: Frontopolar BA10 Counterfactual Exploration Horizon Engine (Koechlin / Rushworth)
-        self.exploration_horizon: FrontopolarExplorationHorizonEngine | Any = _ablated(
-            "exploration_horizon", "FrontopolarExplorationHorizonEngine"
-        )  # WP2 ablated
-
-        # Round 11 Faculty: Superior Colliculus Multisensory Alignment & Saccadic Arbiter (Stein & Meredith)
-        self.superior_colliculus: SuperiorColliculusTargetArbiter | Any = _ablated(
-            "superior_colliculus", "SuperiorColliculusTargetArbiter"
-        )  # WP2 ablated
-
-        # Round 12 Faculty: Cerebellar Microzone Granule-Purkinje Forward Adaptation (Marr-Albus-Ito)
-        self.cerebellar_microzone: CerebellarMicrozoneAdaptor | Any = _ablated(
-            "cerebellar_microzone", "CerebellarMicrozoneAdaptor"
-        )  # WP2 ablated
-
-        # Round 12 Faculty: Ventral Premotor (F5 / Mirror Neuron) Affordance Resonator (Rizzolatti)
-        self.premotor_resonator: VentralPremotorAffordanceResonator | Any = _ablated(
-            "premotor_resonator", "VentralPremotorAffordanceResonator"
-        )  # WP2 ablated
-
-        # Round 12 Faculty: Anterior Cingulate Cortex (ACC) Effort Allocator (Botvinick / Shenhav)
-        self.effort_allocator: AnteriorCingulateEffortAllocator | Any = _ablated(
-            "effort_allocator", "AnteriorCingulateEffortAllocator"
-        )  # WP2 ablated
-
-        # Round 13 Faculty: Subicular Egocentric-to-Allocentric Boundary Vector Cell (BVC) Map (Hartley-Burgess)
-        self.subicular_bvc: SubicularBoundaryVectorEngine | Any = _ablated(
-            "subicular_bvc", "SubicularBoundaryVectorEngine"
-        )  # WP2 ablated
-
-        # Round 13 Faculty: Ventromedial Prefrontal Cortex (vmPFC) Somatic Marker Engine (Damasio-Bechara)
-        self.somatic_marker: VentromedialSomaticMarkerEngine | Any = _ablated(
-            "somatic_marker", "VentromedialSomaticMarkerEngine"
-        )  # WP2 ablated
-
-        # Round 13 Faculty: Pulvinar Thalamic Transthalamic Routing & Attentional Gating (Saalmann-Kastner)
-        self.pulvinar_router: PulvinarAttentionRouter | Any = _ablated(
-            "pulvinar_router", "PulvinarAttentionRouter"
-        )  # WP2 ablated
-
-        # Round 14 Faculty: Parahippocampal Scene Schemas & Topological Recognition (Epstein / Bar)
-        self.parahippocampal_context: ParahippocampalContextEngine | Any = _ablated(
-            "parahippocampal_context", "ParahippocampalContextEngine"
-        )  # WP2 ablated
-
-        # Round 14 Faculty: Locus Coeruleus Noradrenergic Exploration-Exploitation Switch (Aston-Jones / Cohen)
-        self.locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any = _ablated(
-            "locus_coeruleus", "LocusCoeruleusNoradrenalineEngine"
-        )  # WP2 ablated
-
-        # Round 14 Faculty: Secondary Somatosensory Haptic Texture & Surface Friction Integration (Craig / Kaas)
-        self.somatosensory_haptic: SomatosensoryHapticEngine | Any = _ablated(
-            "somatosensory_haptic", "SomatosensoryHapticEngine"
-        )  # WP2 ablated
-
-        # Round 15 Faculty: Entorhinal Border Cells & Grid Module Rescaling (Solstad / Barry)
-        self.entorhinal_border: EntorhinalBorderCellEngine | Any = _ablated(
-            "entorhinal_border", "EntorhinalBorderCellEngine"
-        )  # WP2 ablated
-
-        # Round 15 Faculty: Amygdalar Pavlovian Threat Conditioning & Defensive Cascades (LeDoux / Phelps)
-        self.amygdala_threat: AmygdalarThreatConditioningEngine | Any = _ablated(
-            "amygdala_threat", "AmygdalarThreatConditioningEngine"
-        )  # WP2 ablated
-
-        # Round 15 Faculty: Ventral Tegmental Area (VTA) Dopaminergic Epistemic Curiosity Drive (Schultz / Friston)
-        self.vta_curiosity: VentralTegmentalCuriosityEngine | Any = _ablated(
-            "vta_curiosity", "VentralTegmentalCuriosityEngine"
-        )  # WP2 ablated
-
-        # Round 16 Faculty: Retrosplenial Heading Integration & Ring Attractors (Taube / Burgess)
-        self.retrosplenial_heading: RetrosplenialHeadingEngine | Any = _ablated(
-            "retrosplenial_heading", "RetrosplenialHeadingEngine"
-        )  # WP2 ablated
-
-        # Round 16 Faculty: Thalamic Reticular Nucleus (TRN) Sensory Gating & Shielding (Crick / Halassa)
-        self.trn_gating: ThalamicReticularGatingEngine | Any = _ablated(
-            "trn_gating", "ThalamicReticularGatingEngine"
-        )  # WP2 ablated
-
-        # Round 16 Faculty: Dorsolateral Prefrontal Cortex (dlPFC) Rule Abstraction & Schema Transfer (Badre / D'Esposito)
-        self.rule_abstraction: DorsolateralRuleAbstractionEngine | Any = _ablated(
-            "rule_abstraction", "DorsolateralRuleAbstractionEngine"
-        )  # WP2 ablated
-
-        # Round 17 Faculty: Hippocampal CA1 Temporal Distance Cells & Relative Interval Timing (MacDonald / Eichenbaum)
-        self.hippocampal_time: HippocampalTimeCellEngine | Any = _ablated(
-            "hippocampal_time", "HippocampalTimeCellEngine"
-        )  # WP2 ablated
-
-        # Round 17 Faculty: Ventrolateral Prefrontal Cortex (vlPFC / rIFG) Motor Rule Retrieval & Response Inhibition (Aron / Wiecki)
-        self.vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any = _ablated(
-            "vl_motor_inhibition", "VentrolateralMotorInhibitionEngine"
-        )  # WP2 ablated
-
-        # Round 17 Faculty: Claustrum Dynamic Inter-Hemispheric Synchrony & Cross-Modal Gestalt Binding (Crick & Koch / Smythies)
-        self.claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any = _ablated(
-            "claustrum_interhemispheric", "ClaustrumInterhemisphericIntegrator"
-        )  # WP2 ablated
-
-        # Round 18 Faculty: Anterior Insular Cortex (AIC) Subjective Time Dilation & Interoceptive Pacing (Craig / Wittmann)
-        self.anterior_insula_timing: AnteriorInsularTimingEngine | Any = _ablated(
-            "anterior_insula_timing", "AnteriorInsularTimingEngine"
-        )  # WP2 ablated
-
-        # Round 18 Faculty: Orbitofrontal Cortex (OFC) Counterfactual Credit Assignment & Contingent Updating (Walton / Rushworth)
-        self.ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any = _ablated(
-            "ofc_counterfactual", "OrbitofrontalCreditAssignmentEngine"
-        )  # WP2 ablated
-
-        # Round 18 Faculty: Pedunculopontine Nucleus (PPN / MLR) Locomotor Velocity Modulation (Garcia-Rill / Takakusaki)
-        self.ppn_locomotor: PedunculopontineLocomotorEngine | Any = _ablated(
-            "ppn_locomotor", "PedunculopontineLocomotorEngine"
-        )  # WP2 ablated
-
-        # Round 19 Faculty: Hippocampal-Entorhinal Boundary-to-Grid Phase Alignment (Bush / Giocomo)
-        self.boundary_grid_aligner: BoundaryGridPhaseAligner | Any = _ablated(
-            "boundary_grid_aligner", "BoundaryGridPhaseAligner"
-        )  # WP2 ablated
-
         # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
         from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
 
         self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine(
             match_threshold=0.35
         )
-
-        # Round 19 Faculty: Subthalamic Nucleus (STN) Decision Threshold Escalation & Conflict Braking (Frank)
-        self.stn_escalator: SubthalamicThresholdEscalator | Any = _ablated(
-            "stn_escalator", "SubthalamicThresholdEscalator"
-        )  # WP2 ablated
-
-        # Round 20 Capstone Faculty: Global Neuronal Workspace Non-Linear Ignition & Conscious Broadcast (Dehaene / Mashour)
-        self.workspace_ignition: GlobalWorkspaceIgnitionEngine | Any = _ablated(
-            "workspace_ignition", "GlobalWorkspaceIgnitionEngine"
-        )  # WP2 ablated
-
-        # Connect GNW conscious broadcast listener for executive arbitration
-        self.gnw.register_listener("executive_arbitration", self._on_conscious_ignition)
 
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
         self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
@@ -1076,15 +957,6 @@ class AutonomousEpistemicEngine:
         # Faculty: Rule Induction & Latent Structure Engine (W071-W080)
 
         # Faculty: Whole-Grid Outcome Predictor & Rollout Engine (W081-W089)
-
-        # Faculty: Predictive Confidence Calibrator (W090)
-        self.confidence_calibrator: ConfidenceCalibrator | Any = _ablated(
-            "confidence_calibrator", "ConfidenceCalibrator"
-        )  # WP2 ablated
-
-        # Faculty: Abstract Concept Formation & Compositional Engine (W091-W100)
-
-        # Faculty: Visual Symmetry & Mathematical Regularity Analyzer (W101-W110)
 
         # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
         # Delegated to formal internal memory stores (symbolic_theory and working_memory)
@@ -1134,14 +1006,6 @@ class AutonomousEpistemicEngine:
         self.active_task_frame: TaskFrame | None = None
         if self.tiered_workspace is not None:
             self.attach_tiered_workspace(self.tiered_workspace)
-
-        # ── Autonomous Learning Integration (Phases B, C, D, G, I) ─────────
-        self.point_actuation_learner: PointActuationAffordanceLearner | Any = _ablated(
-            "point_actuation_learner", "PointActuationAffordanceLearner"
-        )  # WP2 ablated
-        self.entropy_monitor: Any = _ablated(
-            "entropy_monitor", "DeliberationEntropyMonitor"
-        )  # P2-6 ablated (Δscore=-0.0202)
 
         # Canonical 5-Stage Active Inference Pipeline (AGENTS.md §2, WP1)
         from hbllm.hcir.world.cortical_pipeline import CorticalPipeline

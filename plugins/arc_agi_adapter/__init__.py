@@ -15,8 +15,8 @@ from .arc_perception import ARCPerceptionAdapter, extract_arc_objects
 from .constants import ARC_DEFAULT_ACTION_SCHEMAS
 from .my_agent import CognitiveAgentAdapter, MyAgent
 
-# Register plugin adapter into core registry
-PerceptionRegistry.register("arc_agi", ARCPerceptionAdapter(), set_default=True)
+# Register plugin adapter by name without overriding the domain-agnostic core default
+PerceptionRegistry.register("arc_agi", ARCPerceptionAdapter(), set_default=False)
 
 # Register ARC macro-actions and synthesis hooks
 register_arc_macro_actions()

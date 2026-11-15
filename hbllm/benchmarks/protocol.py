@@ -425,7 +425,7 @@ class EvaluationProtocol:
             timestamp=ts,
             split=split,
             tasks=tasks,
-            family_scores=family_scores,
+            family_scores=zs_fam_scores,
             generality_score=zs_gen,  # Headline = zero-shot (Episode 1 only)
             lifelong_generality_score=lifelong_generality_score,
             mean_p50_latency_ms=mean_p50,

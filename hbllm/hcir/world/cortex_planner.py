@@ -1744,6 +1744,52 @@ class EpistemicGoalScheduler:
                 goals.append(nearest_frontier)
                 satisfied_when[nearest_frontier] = {"max_visits": 1}
 
+        # Frontier Exhaustion Epistemic Contradiction:
+        # If no reachable targets remain while unverified prior-level blacklists
+        # (known_lethal_features from earlier levels) hide interior entities on the grid,
+        # invalidate the stale prior labels so exploration can proceed.
+        if (
+            not goals
+            and avatar_pos is not None
+            and engine.symbolic_theory.has_prior_level_transition
+            and not engine.symbolic_theory.labels_non_stationary
+            and not getattr(getattr(engine, "working_memory", None), "concept_role_priors", None)
+        ):
+            th = engine.symbolic_theory
+            verified_lethal = th.current_level_verified_features("lethal")
+            unverified_lethals = (
+                set(getattr(engine.hazard_tracker, "known_lethal_features", ())) - verified_lethal
+            )
+            if unverified_lethals and any(
+                int(curr_grid[r, c]) in unverified_lethals
+                for r in range(H)
+                for c in range(W)
+                if (r, c) != avatar_pos
+            ):
+                from hbllm.hcir.world.cortex_causal import invalidate_stale_cross_level_ontology
+
+                invalidate_stale_cross_level_ontology(
+                    th,
+                    hazard_tracker=engine.hazard_tracker,
+                    episodic_cortex=getattr(engine, "episodic_cortex", None),
+                    working_memory=engine.working_memory,
+                    engine_or_view=engine,
+                    bg_feature=bg,
+                    preserve_current_level=True,
+                    reason="frontier_exhausted_over_prior_blacklist",
+                )
+                for e_blk in entities:
+                    if (
+                        e_blk.feature_id != bg
+                        and e_blk.feature_id not in av_feats
+                        and e_blk.grid_pos != avatar_pos
+                        and not th.is_barrier(e_blk.feature_id)
+                        and e_blk.grid_pos not in engine.learned_barriers
+                        and e_blk.grid_pos not in engine.current_level_lethal_positions
+                    ):
+                        goals.append(e_blk.grid_pos)
+                        satisfied_when[e_blk.grid_pos] = {"max_visits": 2}
+
         if avatar_pos is not None:
             goals = [
                 g

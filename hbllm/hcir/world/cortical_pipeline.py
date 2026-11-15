@@ -85,6 +85,33 @@ class CorticalPipeline:
             if eng_bridge is not None:
                 bridge = eng_bridge
 
+        if self.engine is not None and current_ctx.curr_grid is not None:
+            theory = getattr(self.engine, "symbolic_theory", None)
+            wm = getattr(self.engine, "working_memory", None)
+            if theory is not None and hasattr(theory, "observe_grid_structure"):
+                bg_feat = getattr(self.engine, "bg_feature", 0)
+                av_feats = set(getattr(self.engine, "avatar_features", ()) or ())
+                if getattr(self.engine, "avatar_feature", None) is not None:
+                    av_feats.add(self.engine.avatar_feature)
+                shifted = theory.observe_grid_structure(
+                    current_ctx.curr_grid, bg_feature=bg_feat, avatar_features=av_feats
+                )
+                if shifted and not getattr(wm, "concept_role_priors", None):
+                    from hbllm.hcir.world.cortex_causal import (
+                        invalidate_stale_cross_level_ontology,
+                    )
+
+                    invalidate_stale_cross_level_ontology(
+                        theory,
+                        hazard_tracker=getattr(self.engine, "hazard_tracker", None),
+                        episodic_cortex=getattr(self.engine, "episodic_cortex", None),
+                        working_memory=wm,
+                        engine_or_view=self.engine,
+                        bg_feature=bg_feat,
+                        preserve_current_level=False,
+                        reason="structural_label_permutation",
+                    )
+
         for stage in self.stages:
             try:
                 result = stage.observe(current_ctx)

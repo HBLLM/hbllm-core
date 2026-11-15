@@ -50,6 +50,8 @@ class EpistemicFeedbackAssimilator:
         delta: tuple[int, int],
         H: int,
         W: int,
+        *,
+        is_success: bool = False,
     ) -> None:
         """Mark features on the swept trajectory of a survived displacement as safe.
 
@@ -66,6 +68,10 @@ class EpistemicFeedbackAssimilator:
         av = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
+        bg_val = getattr(view, "bg_feature", 0)
+        th = view.symbolic_theory
+        wm = getattr(view, "working_memory", None)
+        has_sge_priors = bool(getattr(wm, "concept_role_priors", None))
         lethal = view.hazard_tracker.known_lethal_features
         for cr, cc in landing_cells:
             for k in range(0, max(steps, 1)):
@@ -73,9 +79,45 @@ class EpistemicFeedbackAssimilator:
                 if not (0 <= r < H and 0 <= c < W):
                     continue
                 wf = int(view.prev_grid[r, c])
-                if wf in av or wf in lethal:
+                if wf in av:
                     continue
-                view.symbolic_theory.induce_walkable(wf, evidence="traversal")
+                # Detect cross-level label contradiction when safely traversing prior beliefs
+                if th.has_prior_level_transition and not has_sge_priors and wf != bg_val:
+                    prior_lethal_falsified = wf in lethal and not th.is_verified_in_current_level(
+                        "lethal", wf
+                    )
+                    prior_goal_falsified = (
+                        not is_success
+                        and wf in th.goal_features
+                        and not th.is_verified_in_current_level("goal", wf)
+                        and not th.cargo_features
+                        and not th.receptacle_features
+                        and not getattr(view, "learned_cargo_features", None)
+                    )
+                    if prior_lethal_falsified or prior_goal_falsified:
+                        from hbllm.hcir.world.cortex_causal import (
+                            invalidate_stale_cross_level_ontology,
+                        )
+
+                        reason = (
+                            f"safe_traversal_over_prior_lethal:{wf}"
+                            if prior_lethal_falsified
+                            else f"non_terminal_traversal_over_prior_goal:{wf}"
+                        )
+                        invalidate_stale_cross_level_ontology(
+                            th,
+                            hazard_tracker=view.hazard_tracker,
+                            episodic_cortex=getattr(view, "episodic_cortex", None),
+                            working_memory=wm,
+                            engine_or_view=view,
+                            bg_feature=bg_val,
+                            preserve_current_level=True,
+                            reason=reason,
+                        )
+                        lethal = view.hazard_tracker.known_lethal_features
+                if wf in lethal:
+                    continue
+                th.induce_walkable(wf, evidence="traversal")
 
     @staticmethod
     def _synchronize_lattice_stride(view: Any, stride: int) -> None:
@@ -159,6 +201,7 @@ class EpistemicFeedbackAssimilator:
         W: int,
         calibrate_dynamics: bool = True,
         is_failure: bool = False,
+        is_success: bool = False,
     ) -> None:
         """Commit an avatar identity from entity pairs sharing a displacement delta.
 
@@ -202,7 +245,9 @@ class EpistemicFeedbackAssimilator:
             view.state.avatar_w = max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
         # Features the avatar just traversed are verified safe (only on non-fatal steps)
         if not is_failure:
-            EpistemicFeedbackAssimilator._record_safe_traversal(view, all_cells, delta, H, W)
+            EpistemicFeedbackAssimilator._record_safe_traversal(
+                view, all_cells, delta, H, W, is_success=is_success
+            )
         view.entity_action_failed_positions.clear()
         view.immobile_entity_actions.clear()
 
@@ -1179,6 +1224,7 @@ class EpistemicFeedbackAssimilator:
                         W,
                         calibrate_dynamics=True,
                         is_failure=is_failure,
+                        is_success=is_success,
                     )
                 else:
                     # ── Controllability Test (retained dynamics) ───────────────
@@ -1252,6 +1298,7 @@ class EpistemicFeedbackAssimilator:
                                 W,
                                 calibrate_dynamics=False,  # keep retained dynamics
                                 is_failure=is_failure,
+                                is_success=is_success,
                             )
                             view._avatar_controllability_evidence.clear()
                             logger.info(
@@ -1732,6 +1779,34 @@ class EpistemicFeedbackAssimilator:
                                 or val == view.avatar_feature
                             )
                             if not is_avatar and is_confirmed_goal:
+                                if (
+                                    view.symbolic_theory.has_prior_level_transition
+                                    and val in view.symbolic_theory.goal_features
+                                    and not view.symbolic_theory.is_verified_in_current_level(
+                                        "goal", val
+                                    )
+                                    and not view.symbolic_theory.cargo_features
+                                    and not getattr(
+                                        getattr(view, "working_memory", None),
+                                        "concept_role_priors",
+                                        None,
+                                    )
+                                ):
+                                    from hbllm.hcir.world.cortex_causal import (
+                                        invalidate_stale_cross_level_ontology,
+                                    )
+
+                                    invalidate_stale_cross_level_ontology(
+                                        view.symbolic_theory,
+                                        hazard_tracker=view.hazard_tracker,
+                                        episodic_cortex=getattr(view, "episodic_cortex", None),
+                                        working_memory=getattr(view, "working_memory", None),
+                                        engine_or_view=view,
+                                        bg_feature=getattr(view, "bg_feature", 0),
+                                        preserve_current_level=True,
+                                        reason=f"prior_goal_blocked_on_collision:{val}",
+                                    )
+                                    view.symbolic_theory.induce_barrier(val, evidence="collision")
                                 view.record_learned_barrier((adj_r, adj_c))
                             elif (
                                 not is_avatar
@@ -2263,6 +2338,7 @@ class EpistemicFeedbackAssimilator:
                 if receptacle_feat is not None:
                     _sym_theory.induce_receptacle(receptacle_feat, evidence="cargo_delivery_win")
                     _sym_theory.induce_goal(receptacle_feat, evidence=TerminalSignal.SUCCESS)
+                    _sym_theory.mark_verified_in_current_level("goal", receptacle_feat)
                     if hasattr(view, "learned_receptacle_positions"):
                         view.learned_receptacle_positions.add(cargo_win_target)
             elif view.avatar_pos is not None and (
@@ -2347,6 +2423,7 @@ class EpistemicFeedbackAssimilator:
                         and not is_substrate
                     ):
                         _sym_theory.induce_goal(goal_feat, evidence=TerminalSignal.SUCCESS)
+                        _sym_theory.mark_verified_in_current_level("goal", goal_feat)
                         view.learned_barriers.discard(win_target)
                         logger.info(
                             "AutonomousEpistemicEngine: Grounded invariant WIN GOAL FEATURE %d at %s",
@@ -2370,6 +2447,7 @@ class EpistemicFeedbackAssimilator:
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
                             _sym_theory.induce_goal(pe.feature_id, evidence=TerminalSignal.SUCCESS)
+                            _sym_theory.mark_verified_in_current_level("goal", pe.feature_id)
                             view.learned_barriers.discard(win_target)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded invariant WIN GOAL ENTITY feature %d (area=%d)",
@@ -2392,6 +2470,7 @@ class EpistemicFeedbackAssimilator:
                         )
                     ):
                         _sym_theory.induce_goal(sim_feat, evidence=TerminalSignal.SUCCESS)
+                        _sym_theory.mark_verified_in_current_level("goal", sim_feat)
 
             if view.active_hypothesis:
                 view.active_hypothesis.confirmed = True
@@ -2523,10 +2602,56 @@ class EpistemicFeedbackAssimilator:
                             and not _sym_theory.is_walkable(cand_feat_int)
                             and feat_count <= max(64, int(total_cells * 0.40))
                         ):
+                            was_prior_safe = _sym_theory.has_prior_level_transition and (
+                                (
+                                    cand_feat_int in _sym_theory.goal_features
+                                    and not _sym_theory.is_verified_in_current_level(
+                                        "goal", cand_feat_int
+                                    )
+                                )
+                                or (
+                                    cand_feat_int != bg
+                                    and cand_feat_int != _bg_feature
+                                    and cand_feat_int in _sym_theory.walkable_features
+                                    and not _sym_theory.is_verified_in_current_level(
+                                        "walkable", cand_feat_int
+                                    )
+                                )
+                                or (
+                                    cand_feat_int in _sym_theory.cargo_features
+                                    and not _sym_theory.is_verified_in_current_level(
+                                        "cargo", cand_feat_int
+                                    )
+                                )
+                            )
                             _hazard_tracker.register_lethal_feature(cand_feat_int)
-                            _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
+                            _sym_theory.mark_verified_in_current_level("lethal", cand_feat_int)
                             _sym_theory.retract_cargo(cand_feat_int, reason="lethal_hazard")
                             _sym_theory.retract_goal(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_walkable(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_conditional_affordance(
+                                cand_feat_int, reason="lethal_hazard"
+                            )
+                            _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
+                            if was_prior_safe and not getattr(
+                                getattr(view, "working_memory", None),
+                                "concept_role_priors",
+                                None,
+                            ):
+                                from hbllm.hcir.world.cortex_causal import (
+                                    invalidate_stale_cross_level_ontology,
+                                )
+
+                                invalidate_stale_cross_level_ontology(
+                                    _sym_theory,
+                                    hazard_tracker=_hazard_tracker,
+                                    episodic_cortex=getattr(view, "episodic_cortex", None),
+                                    working_memory=getattr(view, "working_memory", None),
+                                    engine_or_view=view,
+                                    bg_feature=_bg_feature,
+                                    preserve_current_level=True,
+                                    reason=f"prior_safe_became_lethal:{cand_feat_int}",
+                                )
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded lethal feature %d at barrier %s",
                                 cand_feat_int,
