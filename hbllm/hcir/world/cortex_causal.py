@@ -304,6 +304,11 @@ class HCIRSymbolicWorldTheory:
         If the feature was already bound to a different role, the old binding is replaced.
         Roles: 'goal', 'barrier', 'walkable', 'key', 'door', 'hazard', 'floor', 'cargo',
                'receptacle', 'actuator', 'avatar'.
+
+        When role-level conditional affordance templates exist (from a previous level's
+        ``snapshot_conditional_affordance_templates``), this method lazily re-instantiates
+        any template whose *both* sides (feature role + prerequisite role) are now bound,
+        providing automatic cross-level transfer of key→door style affordances.
         """
         old_role = self._feature_to_role.get(feature_id)
         if old_role == role:
@@ -313,6 +318,54 @@ class HCIRSymbolicWorldTheory:
         self._feature_to_role[feature_id] = role
         self._role_to_features.setdefault(role, set()).add(feature_id)
         self._role_priors[role] = self._role_priors.get(role, 0) + 1
+
+        # Lazy conditional affordance re-instantiation from role-level templates.
+        # Only fires when templates were snapshotted at a prior level boundary.
+        if self._role_conditional_templates:
+            self._try_instantiate_templates_for_role(role, feature_id)
+
+    def _try_instantiate_templates_for_role(self, role: str, feature_id: Any) -> None:
+        """Instantiate any conditional affordance templates whose *both* sides are now bound.
+
+        Called internally by ``bind_feature_to_role`` to lazily re-create conditional
+        affordances (e.g. key→door) when a new level assigns different feature IDs to
+        the same semantic roles.
+        """
+        for tmpl in self._role_conditional_templates:
+            if tmpl["feature_role"] == role:
+                # This feature matches the template's target role — look for prerequisite
+                prereq_role = tmpl.get("prerequisite_role")
+                if prereq_role is None:
+                    continue
+                prereq_feats = self._role_to_features.get(prereq_role, set())
+                for pf in prereq_feats:
+                    if feature_id not in self._conditional_affordances:
+                        self.induce_conditional_affordance(
+                            feature=feature_id,
+                            condition=CausalPredicate(
+                                variable="inventory",
+                                operator="contains",
+                                value=pf,
+                            ),
+                            evidence=tmpl.get("evidence", "role_template_transfer"),
+                            prerequisite_feature=pf,
+                        )
+            elif tmpl.get("prerequisite_role") == role:
+                # This feature matches the template's prerequisite role — look for target
+                target_role = tmpl["feature_role"]
+                target_feats = self._role_to_features.get(target_role, set())
+                for tf in target_feats:
+                    if tf not in self._conditional_affordances:
+                        self.induce_conditional_affordance(
+                            feature=tf,
+                            condition=CausalPredicate(
+                                variable="inventory",
+                                operator="contains",
+                                value=feature_id,
+                            ),
+                            evidence=tmpl.get("evidence", "role_template_transfer"),
+                            prerequisite_feature=feature_id,
+                        )
 
     def get_role(self, feature_id: Any) -> str | None:
         """Return the semantic role bound to a feature ID, or None if unbound."""

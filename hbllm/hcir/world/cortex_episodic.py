@@ -1265,6 +1265,15 @@ class HippocampalEpisodicCortex:
                 view.acc_conflict_monitor.reset()
 
         if is_new_level and retain_dynamics:
+            # ── Role Abstraction Transfer ────────────────────────────────────
+            # Snapshot feature-level conditional affordances as role-level templates
+            # before clearing layout-specific bindings.  Role priors and templates
+            # survive the transition; when the new level's perception induces goals,
+            # barriers, etc. via ``induce_*``, ``bind_feature_to_role`` lazily
+            # re-instantiates any matching templates (e.g. key→door).
+            view.symbolic_theory.snapshot_conditional_affordance_templates()
+            view.symbolic_theory.clear_feature_bindings()
+
             # Carry forward hypotheses & semantics as priors
             if view.avatar_feature is not None:
                 delta.set("prior_avatar_feature", view.avatar_feature)
